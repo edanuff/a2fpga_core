@@ -106,6 +106,7 @@ module apple_memory #(
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
             a2mem_if.MONOCHROME_DHIRES_MODE <= 1'b0;
+            a2mem_if.LINEARIZE_MODE <= 1'b0;
             a2mem_if.SHRG_MODE <= 1'b0;
         end else if (write_strobe && (a2bus_if.addr == 16'hC029)) begin
             a2mem_if.MONOCHROME_DHIRES_MODE <= a2bus_if.data[5];
@@ -137,10 +138,9 @@ module apple_memory #(
     assign a2mem_if.keycode = keycode_r;
     assign a2mem_if.keypress_strobe = keypress_strobe_r;
 
-    reg aux_mem_r;
+    logic aux_mem_r;
     
-    always @(*)
-    begin: aux_ctrl
+    always_comb begin
         aux_mem_r = 1'b0;
         if (a2bus_if.addr[15:9] == 7'b0000000 | a2bus_if.addr[15:14] == 2'b11)		// Page 00,01,C0-FF
             aux_mem_r = a2mem_if.ALTZP;
@@ -256,6 +256,8 @@ module apple_memory #(
     localparam HIRES_AUX_ADDR_WIDTH = VGC_MEMORY? 13 : 12;
     wire write_aux_addr_valid = VGC_MEMORY ? bus_addr_2000_9FFF : bus_addr_2000_5FFF;
 
+    wire byte_enable_a = hires_write_offset[0] ? 2'b0 : 2'(1 << hires_write_offset[1]);
+
     sdpram16 #(
         .ADDR_WIDTH(HIRES_AUX_ADDR_WIDTH)
     ) hires_aux_bank_a (
@@ -263,14 +265,26 @@ module apple_memory #(
         .write_addr(hires_write_offset[HIRES_AUX_ADDR_WIDTH + 1:2]),
         .write_data(write_word),
         .write_enable(write_strobe && write_aux_addr_valid && E1),
-        .byte_enable(2'(1 << hires_write_offset[0])),
+        .byte_enable(byte_enable_a),
         .read_addr(hires_aux_read_offset[HIRES_AUX_ADDR_WIDTH - 1:0]),
         .read_enable(1'b1),
         .read_data({hires_data_aux[23:16], hires_data_aux[7:0]})
     );
 
-    wire [14:0] hires_write_offset_b = VGC_MEMORY && a2mem_if.LINEARIZE_MODE ? {~hires_write_offset[14], hires_write_offset[13:0]} :
-        hires_write_offset;
+    logic [14:0] hires_write_offset_b;
+    logic [12:0] hires_aux_read_offset_b;
+    
+    always_comb begin
+        if (VGC_MEMORY) begin
+            hires_write_offset_b = {hires_write_offset[14] ^ !a2mem_if.LINEARIZE_MODE, hires_write_offset[13:0]};
+            hires_aux_read_offset_b = {hires_aux_read_offset[12] ^ ! a2mem_if.LINEARIZE_MODE, hires_aux_read_offset[11:0]};
+        end else begin
+            hires_write_offset_b = hires_write_offset;
+            hires_aux_read_offset_b = hires_aux_read_offset;
+        end
+    end;
+
+    wire byte_enable_b = hires_write_offset[0] ? 2'(1 << hires_write_offset[1]) : 2'b0;
 
     sdpram16 #(
         .ADDR_WIDTH(HIRES_AUX_ADDR_WIDTH)
@@ -279,7 +293,7 @@ module apple_memory #(
         .write_addr(hires_write_offset_b[HIRES_AUX_ADDR_WIDTH + 1:2]),
         .write_data(write_word),
         .write_enable(write_strobe && write_aux_addr_valid && E1),
-        .byte_enable(2'(1 << hires_write_offset_b[1])),
+        .byte_enable(byte_enable_b),
         .read_addr(hires_aux_read_offset[HIRES_AUX_ADDR_WIDTH - 1:0]),
         .read_enable(1'b1),
         .read_data({hires_data_aux[31:24], hires_data_aux[15:8]})
