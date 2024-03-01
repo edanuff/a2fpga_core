@@ -256,14 +256,14 @@ module apple_memory #(
     localparam HIRES_AUX_ADDR_WIDTH = VGC_MEMORY? 13 : 12;
     wire write_aux_addr_valid = VGC_MEMORY ? bus_addr_2000_9FFF : bus_addr_2000_5FFF;
 
-    wire byte_enable_a = hires_write_offset[0] ? 2'b0 : 2'(1 << hires_write_offset[1]);
+    wire [1:0] byte_enable_a = hires_write_offset[0] ? 2'b0 : 2'(1 << hires_write_offset[1]);
 
     sdpram16 #(
         .ADDR_WIDTH(HIRES_AUX_ADDR_WIDTH)
     ) hires_aux_bank_a (
         .clk(a2bus_if.clk_logic),
         .write_addr(hires_write_offset[HIRES_AUX_ADDR_WIDTH + 1:2]),
-        .write_data(write_word),
+        .write_data(write_word[15:0]),
         .write_enable(write_strobe && write_aux_addr_valid && E1),
         .byte_enable(byte_enable_a),
         .read_addr(hires_aux_read_offset[HIRES_AUX_ADDR_WIDTH - 1:0]),
@@ -284,14 +284,14 @@ module apple_memory #(
         end
     end;
 
-    wire byte_enable_b = hires_write_offset[0] ? 2'(1 << hires_write_offset[1]) : 2'b0;
+    wire [1:0] byte_enable_b = hires_write_offset[0] ? 2'(1 << hires_write_offset[1]) : 2'b0;
 
     sdpram16 #(
         .ADDR_WIDTH(HIRES_AUX_ADDR_WIDTH)
     ) hires_aux_bank_b (
         .clk(a2bus_if.clk_logic),
         .write_addr(hires_write_offset_b[HIRES_AUX_ADDR_WIDTH + 1:2]),
-        .write_data(write_word),
+        .write_data(write_word[15:0]),
         .write_enable(write_strobe && write_aux_addr_valid && E1),
         .byte_enable(byte_enable_b),
         .read_addr(hires_aux_read_offset[HIRES_AUX_ADDR_WIDTH - 1:0]),
