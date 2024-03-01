@@ -277,7 +277,7 @@ module apple_memory #(
     always_comb begin
         if (VGC_MEMORY) begin
             hires_write_offset_b = {hires_write_offset[14] ^ !a2mem_if.LINEARIZE_MODE, hires_write_offset[13:0]};
-            hires_aux_read_offset_b = {hires_aux_read_offset[12] ^ ! a2mem_if.LINEARIZE_MODE, hires_aux_read_offset[11:0]};
+            hires_aux_read_offset_b = {hires_aux_read_offset[12] ^ !a2mem_if.LINEARIZE_MODE, hires_aux_read_offset[11:0]};
         end else begin
             hires_write_offset_b = hires_write_offset;
             hires_aux_read_offset_b = hires_aux_read_offset;
