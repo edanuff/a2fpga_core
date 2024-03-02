@@ -263,7 +263,7 @@ module apple_memory #(
 
     // Set up reads and combine ouputs for VGC
 
-    wire [11:0] hires_aux_read_offset;
+    logic [11:0] hires_aux_read_offset;
 
     always_comb begin
         if (VGC_MEMORY && vgc_active_i) begin
