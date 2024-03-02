@@ -175,6 +175,8 @@ module apple_memory #(
 
     wire E1 = aux_mem_r || a2bus_if.m2b0;
 
+    wire [31:0] write_word = {a2bus_if.data, a2bus_if.data, a2bus_if.data, a2bus_if.data};
+
     // Apple II bus address ranges
     wire bus_addr_0400_0BFF = a2bus_if.addr[15:10] inside {6'b000001, 3'b000010};
     wire bus_addr_2000_5FFF = a2bus_if.addr[15:13] inside {3'b001, 3'b010};
@@ -214,8 +216,6 @@ module apple_memory #(
         else video_data_w  = 32'b0;
     end
     assign video_data_o = video_data_w;
-
-    wire [31:0] write_word = {a2bus_if.data, a2bus_if.data, a2bus_if.data, a2bus_if.data};
 
     // Instantiate the video memory shadow copy in the BSRAM
 
