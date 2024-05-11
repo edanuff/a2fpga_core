@@ -121,7 +121,7 @@ module SuperSprite #(
     wire ssp_psg_sel_n = ~(a2bus_if.phi0 && ADDR_PSG && !a2bus_if.m2sel_n);
     wire ssp_psg_data_rd = ENABLE && a2bus_if.rw_n && !ssp_psg_sel_n && a2bus_if.addr[1];
     wire ssp_psg_data_wr = ENABLE && !a2bus_if.rw_n && !ssp_psg_sel_n && !a2bus_if.addr[1];
-    wire ssp_psg_address_wr = !a2bus_if.rw_n && !ssp_psg_sel_n && a2bus_if.addr[1];
+    wire ssp_psg_address_wr = ENABLE && !a2bus_if.rw_n && !ssp_psg_sel_n && a2bus_if.addr[1];
 
     wire vdp_csw;
     reg [3:0] vdp_csw_delay = 4'b0;

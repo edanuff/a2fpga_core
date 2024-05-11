@@ -26,7 +26,7 @@ module top #(
     parameter bit SCANLINES_ENABLE = 0,
     parameter bit APPLE_SPEAKER_ENABLE = 0,
 
-    parameter bit SUPERSPRITE_ENABLE = 1,
+    parameter bit SUPERSPRITE_ENABLE = 0,
     parameter SUPERSPRITE_SLOT = 7,
     parameter bit SUPERSPRITE_FORCE_VDP_OVERLAY = 0,
 
