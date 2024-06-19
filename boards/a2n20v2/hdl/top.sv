@@ -26,11 +26,11 @@ module top #(
     parameter bit SCANLINES_ENABLE = 0,
     parameter bit APPLE_SPEAKER_ENABLE = 0,
 
-    parameter bit SUPERSPRITE_ENABLE = 1,
+    parameter bit SUPERSPRITE_ENABLE = 0,
     parameter SUPERSPRITE_SLOT = 7,
     parameter bit SUPERSPRITE_FORCE_VDP_OVERLAY = 0,
 
-    parameter bit MOCKINGBOARD_ENABLE = 1,
+    parameter bit MOCKINGBOARD_ENABLE = 0,
     parameter MOCKINGBOARD_SLOT = 4,
 
     parameter bit SUPERSERIAL_ENABLE = 0,
@@ -38,8 +38,8 @@ module top #(
 
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 1,        // Sleep HDMI output on CPU stop
-    parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
-    parameter bit BUS_DATA_OUT_ENABLE = 1       // Allow driving data to Apple bus
+    parameter bit IRQ_OUT_ENABLE = 0,           // Allow driving IRQ to Apple bus
+    parameter bit BUS_DATA_OUT_ENABLE = 0       // Allow driving data to Apple bus
 
 ) (
     // fpga clocks
