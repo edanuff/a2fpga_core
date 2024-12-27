@@ -52,8 +52,15 @@ void die (		/* Stop with dying message */
 
 	reg_ws2812 = 0x00FF0000;
 
+
+    reg_a2fpga_cardrom_release = 1;
+
 	// idle forever on error
-	for (;;) ;
+	while (1) {
+        reg_a2fpga_cardrom_release = 0;
+        wait_for_a2reset();
+        reg_a2fpga_cardrom_release = 1;
+	}
 }
 
 void update_leds()

@@ -150,7 +150,18 @@ module top #(
 
     wire device_reset_n_w = rst_n & clk_logic_lock_w & clk_hdmi_lock_w;
 
-    wire system_reset_n_w = device_reset_n_w & a2_reset_n;
+    wire system_reset_n_w;
+    wire system_reset_w;
+    wire system_reset_posedge;
+    wire system_reset_negedge;
+    cdc cdc_reset (
+        .clk(clk_logic_w),
+        .i(device_reset_n_w & a2_reset_n),
+        .o(system_reset_n_w),
+        .o_n(system_reset_w),
+        .o_posedge(system_reset_posedge),
+        .o_negedge(system_reset_negedge)
+    );
 
     // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
     // delays Phi1 by 2 cycles = 40ns
@@ -271,6 +282,9 @@ module top #(
         .clk_logic(clk_logic_w),
         .clk_pixel(clk_pixel_w),
         .system_reset_n(system_reset_n_w),
+        .system_reset(system_reset_w),
+        .system_reset_posedge(system_reset_posedge),
+        .system_reset_negedge(system_reset_negedge),
         .device_reset_n(device_reset_n_w),
         .phi0(phi0),
         .phi1(phi1),
@@ -289,6 +303,8 @@ module top #(
     wire data_in_strobe_w;
 
     wire irq_n_w;
+
+    wire inh_n_w;
 
     wire data_out_en_w;
     wire [7:0] data_out_w;
@@ -331,6 +347,7 @@ module top #(
         .data_out_i(data_out_w),
 
         .irq_n_i(irq_n_w),
+        .inh_n_i(inh_n_w),
 
         .dip_switches_n_o(dip_switches_n_w),
 
@@ -385,6 +402,19 @@ module top #(
 
 `ifdef PICOSOC
 
+    wire cardrom_release_w;
+    wire [0:7] cardrom_d_w;
+    wire cardrom_rd;
+
+    CardROM cardrom (
+        .a2bus_if(a2bus_if),
+
+        .data_o(cardrom_d_w),
+        .rd_en_o(cardrom_rd),
+        .inh_n_o(inh_n_w),
+        .req_rom_release_i(cardrom_release_w)
+    );
+
     // PicoSOC
 
     wire picosoc_irq_n;
@@ -414,6 +444,8 @@ module top #(
         .data_o (picosoc_d_w),
         .rd_en_o(picosoc_rd_w),
         .irq_n_o(picosoc_irq_n),
+
+        .cardrom_release_o(cardrom_release_w),
 
         .uart_rx_i(picosoc_uart_rx_w),
         .uart_tx_o(picosoc_uart_tx_w),
@@ -521,6 +553,11 @@ module top #(
     wire diskii_rd = 1'b0;
 
     assign a2bus_control_if.ready = 1'b1;
+
+    wire [0:7] cardrom_d_w = 8'b0;
+    wire cardrom_rd = 1'b0;
+    assign inh_n_w = 1'b1;
+
 
 `endif
 
@@ -725,12 +762,13 @@ module top #(
 
     // Data output
 
-    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || diskii_rd;
+    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || diskii_rd || cardrom_rd;
 
     assign data_out_w = ssc_rd ? ssc_d_w :
         ssp_rd ? ssp_d_w : 
         mb_rd ? mb_d_w : 
         diskii_rd ? diskii_d_w :
+        cardrom_rd ? cardrom_d_w :
         a2bus_if.data;
 
     // Interrupts

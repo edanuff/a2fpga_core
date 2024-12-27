@@ -30,6 +30,7 @@
 
 module apple_bus #(
     parameter bit IRQ_OUT_ENABLE = 1,
+    parameter bit INH_OUT_ENABLE = 1,
     parameter bit BUS_DATA_OUT_ENABLE = 1,
     parameter int CLOCK_SPEED_HZ = 50_000_000,
     parameter int APPLE_HZ = 14_318_181,
@@ -56,6 +57,8 @@ module apple_bus #(
 
     input irq_n_i,
 
+    input inh_n_i,
+
     output reg [3:0] dip_switches_n_o,
 
     output sleep_o
@@ -78,6 +81,7 @@ module apple_bus #(
         if (!a2bus_if.device_reset_n) begin
             control_out_r <= 8'hFF;
         end else begin
+            control_out_r[1] <=  inh_n_i || !INH_OUT_ENABLE;
             control_out_r[2] <=  irq_n_i || !IRQ_OUT_ENABLE;
         end
     end
