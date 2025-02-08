@@ -34,6 +34,8 @@
 // interface for debugging and a simple timer interrupt for blinking the LEDs.
 //
 
+static const char *const FW_Date = __DATE__;
+static const char *const FW_Time = __TIME__;
 
 void die (		/* Stop with dying message */
 	FRESULT rc	/* FatFs return value */
@@ -183,7 +185,8 @@ void main() {
     screen_clear();
     xputs("        A2FPGA Firmware v1.0b1\n\n");
 
-    xputs("Slot scan:\n\n");
+	xprintf("Build: %s %s\n\n", FW_Date, FW_Time);
+
 	for (int i = 0; i < 8; i++)
 	{
 		uint8_t card = slots_get_card(i);
