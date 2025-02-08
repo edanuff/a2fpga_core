@@ -52,8 +52,15 @@ void die (		/* Stop with dying message */
 
 	reg_ws2812 = 0x00FF0000;
 
+
+    reg_a2fpga_cardrom_release = 1;
+
 	// idle forever on error
-	for (;;) ;
+	while (1) {
+        reg_a2fpga_cardrom_release = 0;
+        wait_for_a2reset();
+        reg_a2fpga_cardrom_release = 1;
+	}
 }
 
 void update_leds()
@@ -144,6 +151,7 @@ void debug_putchar(uint8_t c)
 soc_firmware_jump_table_t jump_table = {
 	.wait_for_cmd = wait_for_cmd,
 	.wait_for_char = wait_for_char,
+	.wait_for_a2reset = wait_for_a2reset
 };
 
 void main() {
@@ -175,9 +183,11 @@ void main() {
     screen_clear();
     xputs("        A2FPGA Firmware v1.0b1\n\n");
 
+    xputs("Slot scan:\n\n");
 	for (int i = 0; i < 8; i++)
 	{
-		xprintf("Slot: %u Card: %u\n", i, slots_get_card(i));
+		uint8_t card = slots_get_card(i);
+		xprintf("Slot: %u Card: %u\n", i, card);
 	}
 
 	FATFS fatfs;			/* File system object */

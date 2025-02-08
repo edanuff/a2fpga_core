@@ -24,6 +24,7 @@ void soc_wait(uint32_t ms);
 typedef struct soc_firmware_jump_table_t {
 	uint8_t (*wait_for_cmd)();
 	uint8_t (*wait_for_char)();
+    uint8_t (*wait_for_a2reset)();
 } soc_firmware_jump_table_t;
 
 

@@ -30,6 +30,7 @@
 
 module apple_bus #(
     parameter bit IRQ_OUT_ENABLE = 1,
+    parameter bit INH_OUT_ENABLE = 1,
     parameter bit BUS_DATA_OUT_ENABLE = 1,
     parameter int CLOCK_SPEED_HZ = 50_000_000,
     parameter int APPLE_HZ = 14_318_181,
@@ -56,6 +57,8 @@ module apple_bus #(
 
     input irq_n_i,
 
+    input inh_n_i,
+
     output reg [3:0] dip_switches_n_o,
 
     output sleep_o
@@ -78,6 +81,7 @@ module apple_bus #(
         if (!a2bus_if.device_reset_n) begin
             control_out_r <= 8'hFF;
         end else begin
+            control_out_r[1] <=  inh_n_i || !INH_OUT_ENABLE;
             control_out_r[2] <=  irq_n_i || !IRQ_OUT_ENABLE;
         end
     end
@@ -144,15 +148,16 @@ module apple_bus #(
         end else begin
             data_in_strobe_r <= 1'b0;
 
-            if (a2bus_if.phi1 && (phase_cycles_r == READ_COUNT)) begin
-                next_io_state <= IO_READ_ADDR;
-            end else if (a2bus_if.phi0 && (phase_cycles_r == WRITE_COUNT) && data_out_en_i) begin
-                next_io_state <= IO_WRITE_DATA;
-            end else if (a2bus_if.phi0 && (phase_cycles_r == READ_COUNT)) begin
-                next_io_state <= IO_READ_DATA;
-            end else if (!io_state_pending && (control_out_r != prev_control_out_r)) begin
-                next_io_state <= IO_WRITE_GPIO;
-                prev_control_out_r <= control_out_r;
+            if (io_state != IO_INIT) begin
+                if (a2bus_if.phi1 && (phase_cycles_r == READ_COUNT)) begin
+                    next_io_state <= IO_READ_ADDR;
+                end else if (a2bus_if.phi0 && (phase_cycles_r == WRITE_COUNT) && data_out_en_i) begin
+                    next_io_state <= IO_WRITE_DATA;
+                end else if (a2bus_if.phi0 && (phase_cycles_r == READ_COUNT)) begin
+                    next_io_state <= IO_READ_DATA;
+                end else if (!io_state_pending && (control_out_r != prev_control_out_r)) begin
+                    next_io_state <= IO_WRITE_GPIO;
+                end
             end
 
             case (io_state) 
@@ -163,7 +168,7 @@ module apple_bus #(
                             a2_bridge_sel_o <= 3'd0;
                             a2_bridge_rd_n_o <= 1'b1;
                             a2_bridge_wr_n_o <= 1'b1;
-                            a2_bridge_d_o <= 8'b11111111;
+                            a2_bridge_d_o <= 8'b11111101;
                             a2_bridge_d_oe_o <= 1'b1;
                         end else if (io_cycle == 3'd1) begin
                             a2_bridge_sel_o <= 3'd0;
@@ -264,6 +269,7 @@ module apple_bus #(
                         a2_bridge_wr_n_o <= 1'b1;
                         a2_bridge_d_o <= control_out_r;
                         a2_bridge_d_oe_o <= 1'b1;
+                        prev_control_out_r <= control_out_r;
                     end else if (io_cycle == 3'd1) begin
                         a2_bridge_sel_o <= 3'd0;
                         a2_bridge_rd_n_o <= 1'b1;

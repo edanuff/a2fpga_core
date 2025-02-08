@@ -21,3 +21,11 @@ void wait_for_countdown(uint32_t us)
 {
 	while (reg_a2fpga_countdown != 0) ;
 }
+
+uint8_t wait_for_a2reset()
+{
+	register uint8_t c;
+	while ((c = reg_a2fpga_reset) == 0) ;
+	reg_a2fpga_reset = 0;
+	return c;
+}

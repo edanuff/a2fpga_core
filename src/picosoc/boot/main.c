@@ -113,12 +113,12 @@ void main(soc_firmware_jump_table_t* firmware_jump_table) {
 
     xputs("\nDOS 3.3 loaded!\n");
 
-    reg_a2fpga_volume_0_ready = 1;
-    reg_a2fpga_volume_0_mounted = 1;
-    reg_a2fpga_volume_0_readonly = 1;
-    reg_a2fpga_volume_0_size = 0x40000;
-    reg_a2fpga_volume_0_blk_cnt = 0x80;
-    reg_a2fpga_volume_0_ack = 1;
+    reg_a2disk_volume_0_ready = 1;
+    reg_a2disk_volume_0_mounted = 1;
+    reg_a2disk_volume_0_readonly = 1;
+    reg_a2disk_volume_0_size = 0x40000;
+    reg_a2disk_volume_0_blk_cnt = 0x80;
+    reg_a2disk_volume_0_ack = 1;
 
     soc_wait(5000);
 
@@ -126,8 +126,8 @@ void main(soc_firmware_jump_table_t* firmware_jump_table) {
 
     while (1) {
 
-        firmware_jump_table->wait_for_cmd();
-        reg_a2fpga_a2_cmd = 0;
+        firmware_jump_table->wait_for_a2reset();
+        reg_a2fpga_cardrom_release = 0;
 
         reg_a2fpga_video_enable = 1;
 	    xputs("\nEntering co-processor...\n");
@@ -140,6 +140,8 @@ void main(soc_firmware_jump_table_t* firmware_jump_table) {
 	    xputs("\nExiting co-processor...\n");
 
         reg_a2fpga_video_enable = 0;
+
+        reg_a2fpga_cardrom_release = 1;
     }
 
     //printf("\nDone!\n");
