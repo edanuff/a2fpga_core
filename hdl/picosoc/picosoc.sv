@@ -291,7 +291,7 @@ module picosoc #(
         .COMPRESSED_ISA(0),
         .ENABLE_MUL(0),
         .ENABLE_DIV(0),
-        .ENABLE_FAST_MUL(1),
+        .ENABLE_FAST_MUL(0),
         .ENABLE_IRQ(1),
         .STACKADDR(STACKADDR)
     ) cpu (

@@ -5,34 +5,34 @@
 1. PnR Messages
 
   <Report Title>: PnR Report
-  <Design File>: C:\Users\ed\GitHub\a2fpga_core\boards\a2n20v2-Enhanced\impl\gwsynthesis\a2n20v2_enhanced.vg
-  <Physical Constraints File>: C:\Users\ed\GitHub\a2fpga_core\boards\a2n20v2-Enhanced\hdl\a2n20v2_enhanced.cst
-  <Timing Constraints File>: C:\Users\ed\GitHub\a2fpga_core\boards\a2n20v2-Enhanced\hdl\a2n20v2_enhanced.sdc
-  <Tool Version>: V1.9.10.03 Education (64-bit)
+  <Design File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2-Enhanced/impl/gwsynthesis/a2n20v2_enhanced.vg
+  <Physical Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.cst
+  <Timing Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.sdc
+  <Tool Version>: V1.9.10.03 Education
   <Part Number>: GW2AR-LV18QN88C8/I7
   <Device>: GW2AR-18
   <Device Version>: C
-  <Created Time>:Sat Feb  8 13:58:17 2025
+  <Created Time>:Sun Feb  9 13:39:38 2025
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-    Placement Phase 1: CPU time = 0h 0m 0.325s, Elapsed time = 0h 0m 0.326s
-    Placement Phase 2: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
-    Placement Phase 3: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
-    Total Placement: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 10s
+    Placement Phase 0: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    Placement Phase 1: CPU time = 0h 0m 0.23s, Elapsed time = 0h 0m 0.22s
+    Placement Phase 2: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+    Placement Phase 3: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
+    Total Placement: CPU time = 0h 0m 7s, Elapsed time = 0h 0m 7s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.006s, Elapsed time = 0h 0m 0.006s
-    Routing Phase 1: CPU time = 0h 0m 0.414s, Elapsed time = 0h 0m 0.414s
-    Routing Phase 2: CPU time = 0h 0m 15s, Elapsed time = 0h 0m 15s
+    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
+    Routing Phase 1: CPU time = 0h 0m 0.239s, Elapsed time = 0h 0m 0.236s
+    Routing Phase 2: CPU time = 0h 0m 9s, Elapsed time = 0h 0m 8s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 16s, Elapsed time = 0h 0m 16s
+    Total Routing: CPU time = 0h 0m 9s, Elapsed time = 0h 0m 9s
  Generate output files:
-    CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    CPU time = 0h 0m 0.967s, Elapsed time = 0h 0m 0.93s
 
- Total Time and Memory Usage: CPU time = 0h 0m 27s, Elapsed time = 0h 0m 27s, Peak memory usage = 649MB
+ Total Time and Memory Usage: CPU time = 0h 0m 17s, Elapsed time = 0h 0m 16s, Peak memory usage = 1232MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 11747/20736                         |  57%
-    --LUT,ALU,ROM16           | 10733(9050 LUT, 1683 ALU, 0 ROM16)  | -
+  Logic                       | 11797/20736                         |  57%
+    --LUT,ALU,ROM16           | 10783(9100 LUT, 1683 ALU, 0 ROM16)  | -
     --SSRAM(RAM16)            | 169                                 | -
-  Register                    | 5557/15915                          |  35%
+  Register                    | 5464/15915                          |  35%
     --Logic Register as Latch | 0/15552                             |  0%
-    --Logic Register as FF    | 5481/15552                          |  36%
+    --Logic Register as FF    | 5388/15552                          |  35%
     --I/O Register as Latch   | 0/363                               |  0%
     --I/O Register as FF      | 76/363                              |  21%
-  CLS                         | 7882/10368                          |  77%
+  CLS                         | 7875/10368                          |  76%
   I/O Port                    | 41/66                               |  63%
   I/O Buf                     | 36                                  | -
     --Input Buf               | 7                                   | -
@@ -62,10 +62,9 @@
     --DPB                     | 9
     --DPX9B                   | 2
     --pROM                    | 4
-  DSP                         | 18/24                               | 75%
+  DSP                         | 16/24                               | 67%
     --MULT9X9                 | 4
     --MULT18X18               | 4
-    --MULT36X36               | 1
     --MULTADDALU18X18         | 13
   ================================================================================
 
@@ -110,8 +109,8 @@
   clk_pixel_w    | PRIMARY        |  TR TL BR BL
   n3045_5        | LW             |  -
   n29_11         | LW             |  -
-  picosoc/gpio_peripheral/ws2812_inst/clk_count_31_10| LW             |  -
   picosoc/cpu/mem_xfer| LW             |  -
+  picosoc/cpu/n3614_3| LW             |  -
   supersprite/vdp/f18a_core/inst_cpu/n931_6| LW             |  -
   mockingboard/pb_l_o[2]| LW             |  -
   mockingboard/pb_r_o[2]| LW             |  -
