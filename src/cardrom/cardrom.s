@@ -11,33 +11,54 @@
 ; for the 6502 to resume the normal Apple II boot process.
 ; ******************************************************************************
 ;
-NMI      =        $FB03        ; NON-MASKABLE INTERRUPT VECTOR      
-RESET    =        $FA62        ; RESET VECTOR
-IRQ      =        $FA40        ; INTERRUPT REQUEST VECTOR
 KBD      =        $C000        ; APPLE KEYBOARD DATA
 KSTRB    =        $C010        ; KEYBOARD DATA CLEAR
 FPGADONE =        $F7FF        ; TBD - SOME MEMORY LOCATION
 RESETVEC =        $FFFC        ; JUMP TARGET
+SPKR     =        $C030        ; SPEAKER
 ;
 ; **************************  INITIALIZE ***************************************
 ;
         ORG $F800              ; PROGRAM START ADDRESS
 
-MAIN    
-        LDA KBD                ; TEST KEYBOARD
-                               ; TBD - MAYBE DO SOMETHING @ KEYPRESS
-        LDA FPGADONE           ; FETCH FPGADONE
-        BNE MAIN               ; CONTINUE TO LOOP IF FPGADONE IS NOT 0  
-        JMP (RESETVEC)        ; JUMP TO RESET VECTOR
+RESET   CLD
+        JSR     BELL            ; RING BELL
+        JSR     BELL            ; RING BELL
+        JSR     BELL            ; RING BELL
+        
+KBDLOOP LDA     KBD             ; TEST KEYBOARD
+                                ; TBD - MAYBE DO SOMETHING @ KEYPRESS
+        LDA     FPGADONE        ; FETCH FPGADONE
+        BNE     KBDLOOP         ; CONTINUE TO LOOP IF FPGADONE IS NOT 0  
+        JMP     (RESETVEC)      ; JUMP TO RESET VECTOR
 
-ISR     PHA
+IRQ     PHA
         TXA
         PHA
-                               ; TBD - Interrupt code goes here
+                                ; TBD - Interrupt code goes here
         PLA
         TAX
         PLA
         RTI
+
+BELL    LDA     #$40
+        JSR     WAIT
+        LDY     #$C0
+BELL2   LDA     #$0C
+        JSR     WAIT
+        LDA     SPKR
+        DEY
+        BNE     BELL2
+RTS2B   RTS
+
+WAIT    SEC
+WAIT2   PHA
+WAIT3   SBC     #$01
+        BNE     WAIT3
+        PLA
+        SBC     #$01
+        BNE     WAIT2
+        RTS
 
 ; Dynamically pad from current address up to $FFFA
         ORG *                  ; Ensure we are at the current location
@@ -46,9 +67,9 @@ PAD_SIZE = $FFFA - *           ; Calculate the number of bytes needed to reach $
         DS PAD_SIZE            ; Reserve the required number of padding bytes
 
         ORG $FFFA              ; Set up interrupt vectors at the exact memory location
-VECTORS DW ISR                 ; Set NMI vector
+VECTORS DW IRQ                 ; Set NMI vector
         DW RESET               ; Set RESET vector
-        DW ISR                 ; Set IRQ vector
+        DW IRQ                 ; Set IRQ vector
 ;
 ; <<EoF>>
 ;
