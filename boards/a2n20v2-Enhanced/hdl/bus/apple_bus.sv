@@ -157,6 +157,7 @@ module apple_bus #(
                     next_io_state <= IO_READ_DATA;
                 end else if (!io_state_pending && (control_out_r != prev_control_out_r)) begin
                     next_io_state <= IO_WRITE_GPIO;
+                    prev_control_out_r <= control_out_r;
                 end
             end
 
@@ -168,7 +169,7 @@ module apple_bus #(
                             a2_bridge_sel_o <= 3'd0;
                             a2_bridge_rd_n_o <= 1'b1;
                             a2_bridge_wr_n_o <= 1'b1;
-                            a2_bridge_d_o <= 8'b11111101;
+                            a2_bridge_d_o <= 8'b11111111;
                             a2_bridge_d_oe_o <= 1'b1;
                         end else if (io_cycle == 3'd1) begin
                             a2_bridge_sel_o <= 3'd0;
@@ -269,7 +270,6 @@ module apple_bus #(
                         a2_bridge_wr_n_o <= 1'b1;
                         a2_bridge_d_o <= control_out_r;
                         a2_bridge_d_oe_o <= 1'b1;
-                        prev_control_out_r <= control_out_r;
                     end else if (io_cycle == 3'd1) begin
                         a2_bridge_sel_o <= 3'd0;
                         a2_bridge_rd_n_o <= 1'b1;
