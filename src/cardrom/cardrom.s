@@ -12,7 +12,7 @@
 ; ******************************************************************************
 ;
 KBD      =        $C000        ; APPLE KEYBOARD DATA
-KSTRB    =        $C010        ; KEYBOARD DATA CLEAR
+KBDSTRB  =        $C010        ; KEYBOARD DATA CLEAR
 FPGADONE =        $F7FF        ; TBD - SOME MEMORY LOCATION
 RESETVEC =        $FFFC        ; JUMP TARGET
 SPKR     =        $C030        ; SPEAKER
@@ -27,9 +27,11 @@ RESET   CLD
         JSR     BELL            ; RING BELL
         
 KBDLOOP LDA     KBD             ; TEST KEYBOARD
-                                ; TBD - MAYBE DO SOMETHING @ KEYPRESS
-        LDA     FPGADONE        ; FETCH FPGADONE
-        BNE     KBDLOOP         ; CONTINUE TO LOOP IF FPGADONE IS NOT 0  
+        BPL     CHKDONE
+        BIT     KBDSTRB         ; CLEAR KEYBOARD DATA
+
+CHKDONE LDA     FPGADONE        ; FETCH FPGADONE
+        BEQ     KBDLOOP         ; CONTINUE TO LOOP IF FPGADONE IS 0  
         JMP     (RESETVEC)      ; JUMP TO RESET VECTOR
 
 IRQ     PHA
