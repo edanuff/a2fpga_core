@@ -11,9 +11,7 @@ module cdc_fifo
     reg [WIDTH-1:0] fifo[3] /*synthesis syn_keep=1*/;
 
     always @(posedge clk) begin
-        fifo[0] <= i;
-        fifo[1] <= fifo[0];
-        fifo[2] <= fifo[1];
+        fifo <= {fifo[1], fifo[0], i};
     end
 
     assign o   = fifo[2];

@@ -128,7 +128,7 @@ module top #(
     wire hdmi_rst_n_w;
     wire a2_2M;
 
-    // PLL - 100Mhz from 27
+    // PLL - 54hz from 27
     clk_logic clk_logic_inst (
         .clkout(clk_logic_w),  //output clkout
         .lock(clk_logic_lock_w),  //output lock
@@ -138,7 +138,7 @@ module top #(
         .clkin(clk)  //input clkin
     );
 
-    // PLL - 125Mhz from 25
+    // PLL - 135Mhz from 27
     clk_hdmi clk_hdmi_inst (
         .clkout(clk_hdmi_w),  //output clkout
         .lock(clk_hdmi_lock_w),  //output lock
@@ -150,7 +150,28 @@ module top #(
 
     wire device_reset_n_w = rst_n & clk_logic_lock_w & clk_hdmi_lock_w;
 
-    wire system_reset_n_w = device_reset_n_w & a2_reset_n;
+    /*
+    wire a2_reset_n_w;
+    cdc cdc_a2reset (
+        .clk(clk_logic_w),
+        .i(a2_reset_n),
+        .o(a2_reset_n_w),
+        .o_n(),
+        .o_posedge(),
+        .o_negedge()
+    );
+    */
+
+    wire a2_reset_cdc_w;
+    cdc_fifo #(
+        .WIDTH(1)
+    ) cdc_a2reset (
+        .clk(clk_logic_w),
+        .i(a2_reset_n),
+        .o(a2_reset_cdc_w)
+    );
+
+    wire system_reset_n_w = device_reset_n_w & a2_reset_cdc_w;
 
     // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
     // delays Phi1 by 2 cycles = 40ns
@@ -159,7 +180,7 @@ module top #(
     wire phi1_posedge;
     wire phi1_negedge;
     wire clk_2m_posedge_w = phi1_posedge | phi1_negedge;
-    cdc cdc_phi1 (
+    cdc_denoise cdc_phi1 (
         .clk(clk_logic_w),
         .i(a2_phi1),
         .o(phi1),
@@ -172,7 +193,7 @@ module top #(
     wire clk_7m_posedge_w;
     wire clk_7m_negedge_w;
     wire clk_14m_posedge_w = clk_7m_posedge_w | clk_7m_negedge_w;
-    cdc cdc_7m (
+    cdc_denoise cdc_7m (
         .clk(clk_logic_w),
         .i(a2_7M),
         .o(clk_7m_w),

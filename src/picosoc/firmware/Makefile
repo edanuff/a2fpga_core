@@ -28,6 +28,8 @@ C_FILES = \
 
 all: firmware.hex
 
+asm: firmware.asm
+
 firmware.elf: $(C_FILES) 
 	$(GCC) -march=rv32i -mabi=ilp32 -mno-div \
 		-nostartfiles \

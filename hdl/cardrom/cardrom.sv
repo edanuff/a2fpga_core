@@ -12,10 +12,6 @@ module CardROM #(
     wire cardrom_sel = ENABLE && a2bus_if.phi0 && (a2bus_if.addr[15:12] == 4'b1111) & !a2bus_if.m2sel_n;
     wire cardrom_f8_sel = cardrom_sel && a2bus_if.addr[11];
 
-    reg rom_release_prev_r;
-    wire rom_release_strobe_w = req_rom_release_i & !rom_release_prev_r;
-    always @(posedge a2bus_if.clk_logic) rom_release_prev_r <= req_rom_release_i;
-
     reg rom_inh_r;
     assign inh_n_o = ~(rom_inh_r && cardrom_sel);
     
@@ -26,9 +22,9 @@ module CardROM #(
             rom_inh_r <= 1'b1;
             fpga_done_r <= 1'b0;
         end else if (rom_inh_r) begin
-            if (rom_release_strobe_w) fpga_done_r <= 1'b1;
+            if (req_rom_release_i) fpga_done_r <= 1'b1;
             if (fpga_done_r & (a2bus_if.addr == 16'hFFFC)) begin
-                //rom_inh_r <= 1'b0;
+                rom_inh_r <= 1'b0;
             end
         end
     end

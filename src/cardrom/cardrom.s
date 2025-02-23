@@ -22,9 +22,9 @@ SPKR     =        $C030        ; SPEAKER
         ORG $F800              ; PROGRAM START ADDRESS
 
 RESET   CLD
-        JSR     BELL            ; RING BELL
-        JSR     BELL            ; RING BELL
-        JSR     BELL            ; RING BELL
+        ;JSR     BELL            ; RING BELL
+        ;JSR     BELL            ; RING BELL
+        ;JSR     BELL            ; RING BELL
         
 KBDLOOP LDA     KBD             ; TEST KEYBOARD
         BPL     CHKDONE
@@ -32,6 +32,7 @@ KBDLOOP LDA     KBD             ; TEST KEYBOARD
 
 CHKDONE LDA     FPGADONE        ; FETCH FPGADONE
         BEQ     KBDLOOP         ; CONTINUE TO LOOP IF FPGADONE IS 0  
+        BIT     KBDSTRB         ; CLEAR KEYBOARD DATA
         JMP     (RESETVEC)      ; JUMP TO RESET VECTOR
 
 IRQ     PHA
