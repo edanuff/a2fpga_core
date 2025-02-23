@@ -144,7 +144,7 @@ void menu_event_loop(bool skip_reset_wait) {
 
             for (int i = 0; i < 500; i++)
             {
-                uint8_t c = reg_a2fpga_keycode;
+                uint8_t c = reg_a2fpga_keycode & 0x1F;
                 if (c == HOT_KEY) {
                     hotkey_pressed = true;
                     break;
@@ -171,6 +171,34 @@ void menu_event_loop(bool skip_reset_wait) {
         reg_a2fpga_cardrom_release = 1;
     }
 
+}
+
+FRESULT load_dos() {
+
+    FIL fil;
+
+    xputs("\nOpening DOS 3.3...\n");
+    FRESULT res = f_open(&fil, "dos33.nib", FA_READ);
+    if (res) { 
+        put_rc(res); 
+        return res;
+    }
+
+    xputs("\nLoading DOS 3.3...\n");
+    UINT br;
+    res = f_read(&fil, (uint32_t *)0x04080000, 0x40000, &br);
+    if (res) { 
+        put_rc(res); 
+        return res;
+    }
+
+    f_close(&fil);
+
+    xprintf("\n%4u bytes read\n", br);
+
+    xputs("\nDOS 3.3 loaded!\n");
+
+    return FR_OK;
 }
 
 void main(soc_firmware_jump_table_t* firmware_jump_table) {
@@ -201,43 +229,27 @@ void main(soc_firmware_jump_table_t* firmware_jump_table) {
 
 	FRESULT res;
 
-
     res = f_mount(&FatFs, "", 0);
-    if (res) { 
+    if (res == FR_OK) {
+        res = load_dos();
+        if (res == FR_OK) {
+            reg_a2disk_volume_0_ready = 1;
+            reg_a2disk_volume_0_mounted = 1;
+            reg_a2disk_volume_0_readonly = 1;
+            reg_a2disk_volume_0_size = 0x40000;
+            reg_a2disk_volume_0_blk_cnt = 0x80;
+            reg_a2disk_volume_0_ack = 1;
+        }
+        else {
+            put_rc(res);
+            xputs("Unable to load Dos 3.3 (dos33.nib)\n");
+        }
+    } else {
         put_rc(res); 
-        die (); 
+        xputs("Unable to mount SD Card\n");
     }
    
     //dump_directory();
-
-	uint32_t *buff=(uint32_t *)0x04080000;
-	UINT br;
-
-    FIL fil;
-	xputs("\nOpening DOS 3.3...\n");
-	res = f_open(&fil, "dos33.nib", FA_READ);
-    if (res) { 
-        put_rc(res); 
-        die (); 
-    }
-    xputs("\nLoading DOS 3.3...\n");
-	res = f_read(&fil, buff, 0x40000, &br);
-    if (res) { 
-        put_rc(res); 
-        die (); 
-    }
-    f_close(&fil);
-
-    xprintf("\n%4u bytes read\n", br);
-
-    xputs("\nDOS 3.3 loaded!\n");
-
-    reg_a2disk_volume_0_ready = 1;
-    reg_a2disk_volume_0_mounted = 1;
-    reg_a2disk_volume_0_readonly = 1;
-    reg_a2disk_volume_0_size = 0x40000;
-    reg_a2disk_volume_0_blk_cnt = 0x80;
-    reg_a2disk_volume_0_ack = 1;
 
 	reg_a2fpga_reset = 0;
 

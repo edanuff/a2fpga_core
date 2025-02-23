@@ -169,18 +169,18 @@ void dump_slots()
 
 bool check_hotkey()
 {
-	bool esc_pressed = false;
+	bool hotkey_pressed = false;
 	for (int i = 0; i < 500; i++)
 	{
-		uint8_t c = reg_a2fpga_keycode;
+		uint8_t c = reg_a2fpga_keycode & 0x1F;
 		if (c == HOT_KEY) {
-			esc_pressed = true;
+			hotkey_pressed = true;
 			break;
 		}
 	}
 	reg_a2fpga_keycode = 0;
 
-	return esc_pressed;
+	return hotkey_pressed;
 }
 
 void main() {
