@@ -33,6 +33,7 @@ module picosoc_a2fpga #(parameter int CLOCK_SPEED_HZ = 54_000_000)
 	output reg iomem_ready,
 	input [31:0] iomem_wdata,
 
+    input cardrom_active_i,
     output cardrom_release_o,
 
     a2bus_if.slave a2bus_if,
@@ -63,13 +64,14 @@ module picosoc_a2fpga #(parameter int CLOCK_SPEED_HZ = 54_000_000)
     localparam ADDR_COUNTDOWN =                 8'h4C;      // 
     localparam ADDR_A2BUS_READY =               8'h50;      //
     localparam ADDR_CARDROM_RELEASE =           8'h54;      //
-    localparam ADDR_A2_RESET =                  8'h58;      //
-    localparam ADDR_A2BUS_INH_N =               8'h5C;      //
-    localparam ADDR_A2BUS_IRQ_N =               8'h60;      //
-    localparam ADDR_A2BUS_RDY_N =               8'h64;      //
-    localparam ADDR_A2BUS_DMA_N =               8'h68;      //
-    localparam ADDR_A2BUS_NMI_N =               8'h6C;      //
-    localparam ADDR_A2BUS_RESET_N =             8'h70;      //
+    localparam ADDR_CARDROM_ACTIVE =            8'h58;      //
+    localparam ADDR_A2_RESET =                  8'h5C;      //
+    localparam ADDR_A2BUS_INH_N =               8'h60;      //
+    localparam ADDR_A2BUS_IRQ_N =               8'h64;      //
+    localparam ADDR_A2BUS_RDY_N =               8'h68;      //
+    localparam ADDR_A2BUS_DMA_N =               8'h6C;      //
+    localparam ADDR_A2BUS_NMI_N =               8'h70;      //
+    localparam ADDR_A2BUS_RESET_N =             8'h74;      //
 
     reg [7:0] keycode_r;
 
@@ -229,6 +231,7 @@ module picosoc_a2fpga #(parameter int CLOCK_SPEED_HZ = 54_000_000)
                     ADDR_COUNTDOWN[7:2]: iomem_rdata <= countdown_w;
                     ADDR_A2BUS_READY[7:2]: iomem_rdata <= {31'b0, a2bus_ready_r};
                     ADDR_CARDROM_RELEASE[7:2]: iomem_rdata <= {31'b0, cardrom_release_r};
+                    ADDR_CARDROM_ACTIVE[7:2]: iomem_rdata <= {31'b0, cardrom_active_i};
                     ADDR_A2_RESET[7:2]: iomem_rdata <= {31'b0, a2_reset_r};
                     ADDR_A2BUS_INH_N[7:2]: iomem_rdata <= {31'b0, a2bus_if.control_inh_n};
                     ADDR_A2BUS_IRQ_N[7:2]: iomem_rdata <= {31'b0, a2bus_if.control_irq_n};

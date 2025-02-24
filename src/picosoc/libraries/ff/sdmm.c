@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include "ff.h"		/* Obtains integer types for FatFs */
 #include "diskio.h"	/* Common include file for FatFs and disk I/O layer */
+#include <a2fpga/a2fpga.h>
 
 
 /*-------------------------------------------------------------------------*/
@@ -39,6 +40,27 @@
 #define reg_sdcard_xfer (*(volatile uint32_t*)0x06000008)
 #define reg_sdcard_prescale (*(volatile uint32_t*)0x06000000)
 #define reg_sdcard_mode (*(volatile uint32_t*)0x0600000c)
+
+static inline void soc_sdcard_cs(uint32_t bitmask) {
+    *(volatile uint32_t*)(0x06000004) = bitmask;
+}
+
+static inline uint32_t soc_sdcard_getcs() {
+    return *(volatile uint32_t*)(0x06000004);
+}
+
+static inline uint8_t soc_sdcard_xfer(uint8_t value) {
+    *(volatile uint32_t*)(0x06000008) = value;
+    return *(volatile uint32_t*)(0x06000008);
+}
+
+static inline void soc_sdcard_prescale(uint32_t value) {
+    *(volatile uint32_t*)(0x06000000) = value;
+}
+
+static inline void soc_sdcard_mode(bool cpol, bool cpha) {
+    *(volatile uint32_t*)(0x0600000c) = (cpol ? 1 : 0) | (cpha ? 2 : 0);
+}
 
 static void sdcard_cs(bool enable)
 {
@@ -54,9 +76,7 @@ static uint8_t sdcard_xfer(uint8_t value)
 
 static void dly_us (UINT n)	/* Delay n microseconds (avr-gcc -Os) */
 {
-	do {
-		asm volatile (""); 
-	} while (--n);
+	wait_for_countdown(n);
 }
 
 
@@ -342,7 +362,11 @@ DSTATUS disk_initialize (
 
 	if (drv) return RES_NOTRDY;
 
+	reg_sdcard_prescale = 16;
+	reg_sdcard_mode = 0;
+
 	dly_us(10000);			/* 10ms */
+	
 	sdcard_cs(false);		/* Initialize port pin tied to CS */
 	sdcard_cs(true);		/* Initialize port pin tied to SCLK */
 

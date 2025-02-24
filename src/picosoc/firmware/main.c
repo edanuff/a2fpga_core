@@ -152,7 +152,12 @@ void debug_putchar(uint8_t c)
 	screen_putchar(c);
 }
 
-soc_firmware_jump_table_t jump_table = {
+boot_params_t boot_params = {
+	.version = 1,
+	.enter_menu = 0,
+	.FW_Date = __DATE__,
+	.FW_Time = __TIME__,
+	.irq_handler = irq_handler,
 	.wait_for_cmd = wait_for_cmd,
 	.wait_for_char = wait_for_char,
 	.wait_for_a2reset = wait_for_a2reset
@@ -223,11 +228,13 @@ void main() {
 	{
 		reg_a2fpga_video_enable = 1;
 		xputs("\n\nEscape pressed, entering menu...\n");
+		boot_params.enter_menu = 1;
 
 	}
 	else
 	{
 		reg_a2fpga_cardrom_release = 1;
+		boot_params.enter_menu = 0;
 	}
 
 	FATFS fatfs;			/* File system object */
@@ -258,9 +265,9 @@ void main() {
 
 	reg_ws2812 = 0x0000FF00;
 
-	void (*kernel_ptr)(soc_firmware_jump_table_t*) = (void *)0x04400000;
+	void (*kernel_ptr)(boot_params_t*) = (void *)0x04400000;
 
-	(*kernel_ptr)(&jump_table); 
+	(*kernel_ptr)(&boot_params); 
 
 	while (1) {
         wait_for_a2reset();

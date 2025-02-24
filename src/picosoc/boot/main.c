@@ -201,7 +201,7 @@ FRESULT load_dos() {
     return FR_OK;
 }
 
-void main(soc_firmware_jump_table_t* firmware_jump_table) {
+void main(boot_params_t* boot_params) {
 	soc_irq(0);
 
     reg_uart_clkdiv = 468; // 54000000 / 115200
@@ -211,7 +211,8 @@ void main(soc_firmware_jump_table_t* firmware_jump_table) {
     screen_clear();
     xputs("A2FPGA OS Loaded\n\n");
 
-	xprintf("Build: %s %s\n\n", FW_Date, FW_Time);
+	xprintf("Firmware Build: %s %s\n", boot_params->FW_Date, boot_params->FW_Time);
+	xprintf("Kernel Build: %s %s\n\n", FW_Date, FW_Time);
 
     reg_a2disk_volume_0_ready = 0;
     reg_a2disk_volume_0_mounted = 0;
@@ -253,9 +254,17 @@ void main(soc_firmware_jump_table_t* firmware_jump_table) {
 
 	reg_a2fpga_reset = 0;
 
-    bool skip_reset_wait = false;
-    if ((reg_a2fpga_a2bus_inh_n == 0) && reg_a2fpga_video_enable) {
-        skip_reset_wait = true;
+    if (reg_a2fpga_cardrom_active) {
+        xputs("\nA2FPGA Card Rom Active\n");
+    }
+
+    if (reg_a2fpga_video_enable) {
+        xputs("\nA2FPGA Video Enabled\n");
+    }
+
+    bool skip_reset_wait = boot_params->enter_menu;
+    if (skip_reset_wait) {
+        xputs("\nSkipping initial reset wait\n");
     }
 
     menu_event_loop(skip_reset_wait);

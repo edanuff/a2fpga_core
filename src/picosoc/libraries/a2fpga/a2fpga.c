@@ -19,6 +19,7 @@ uint8_t wait_for_char()
 
 void wait_for_countdown(uint32_t us)
 {
+	reg_a2fpga_countdown = us;
 	while (reg_a2fpga_countdown != 0) ;
 }
 

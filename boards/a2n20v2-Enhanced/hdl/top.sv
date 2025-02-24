@@ -452,6 +452,7 @@ module top #(
         .rd_en_o(picosoc_rd_w),
         .irq_n_o(picosoc_irq_n),
 
+        .cardrom_active_i(!inh_n_w),
         .cardrom_release_o(cardrom_release_w),
 
         .uart_rx_i(picosoc_uart_rx_w),

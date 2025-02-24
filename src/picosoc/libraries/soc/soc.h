@@ -21,11 +21,16 @@ static inline void soc_sbreak() {
 
 void soc_wait(uint32_t ms);
 
-typedef struct soc_firmware_jump_table_t {
+typedef struct boot_params_t {
+    uint32_t version;
+    uint8_t enter_menu;
+    char* FW_Date;
+    char* FW_Time;
+    void (*irq_handler)(uint32_t irq_mask, uint32_t *regs);
 	uint8_t (*wait_for_cmd)();
 	uint8_t (*wait_for_char)();
     uint8_t (*wait_for_a2reset)();
-} soc_firmware_jump_table_t;
+} boot_params_t;
 
 
 #endif
