@@ -24,9 +24,9 @@
 // Ensoniq, PicoSoC, and DiskII are included via defines in the top module
 // Disk II requires PicoSoC
 
-`undef ENSONIQ
-`define PICOSOC
-`define DISKII
+`define ENSONIQ
+`undef PICOSOC
+`undef DISKII
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -881,8 +881,8 @@ module top #(
     );
 
     always @(posedge clk_logic_w) begin 
-        if (!s2) led <= {3'b111, inh_n_w, !picosoc_led};
-        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
+        //if (!s2) led <= {3'b111, inh_n_w, !picosoc_led};
+        if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
         else led <= {!vdp_unlocked_w, ~vdp_gmode_w};

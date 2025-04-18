@@ -78,19 +78,26 @@ module doc5503_register_ram  #(
         end
     endgenerate
 
-    reg [DATA_WIDTH-1:0] data_r[31:0];
+    // Memory array - explicitly define as 32 entries for 5-bit address
+    reg [DATA_WIDTH-1:0] data_r[32];
 
+    // Priority write control logic
     reg priority_write_en_r;
     int priority_write_index;
     reg [ADDR_WIDTH-1:0] priority_write_addr_r;
 
     always @(*) begin: priority_write_ctrl
-        automatic reg found = 0;
+        reg found;
+        int i;  // Explicitly declare and initialize
+        
+        found = 0;
         priority_write_en_r = 0;
         priority_write_index = 0;
-        priority_write_addr_r = 0;
-        for (int i = 0; i < PRIORITY_WRITE_PORTS; i++) begin
-            automatic logic inhibit_en = LAST_PRIORITY_WRITE_PORT_INHIBITABLE && (i == (PRIORITY_WRITE_PORTS - 1)) ? inhibit_i : 0;
+        priority_write_addr_r = '0;
+        
+        for (i = 0; i < PRIORITY_WRITE_PORTS; i++) begin
+            logic inhibit_en;
+            inhibit_en = LAST_PRIORITY_WRITE_PORT_INHIBITABLE && (i == (PRIORITY_WRITE_PORTS - 1)) ? inhibit_i : 0;
             if (priority_write_w[i] && !found && !inhibit_en) begin
                 priority_write_en_r = 1;
                 priority_write_index = i;
@@ -100,16 +107,21 @@ module doc5503_register_ram  #(
         end
     end
 
+    // Priority read control logic
     reg priority_read_en_r;
     int priority_read_index;
     reg [ADDR_WIDTH-1:0] priority_read_addr_r;
 
     always @(*) begin: priority_read_ctrl
-        automatic reg found = 0;
+        reg found;
+        int i;  // Explicitly declare and initialize
+        
+        found = 0;
         priority_read_en_r = 0;
         priority_read_index = 0;
         priority_read_addr_r = addr_a_i;
-        for (int i = 0; i < PRIORITY_READ_PORTS; i++) begin
+        
+        for (i = 0; i < PRIORITY_READ_PORTS; i++) begin
             if (priority_read_w[i] && !found) begin
                 priority_read_en_r = 1;
                 priority_read_index = i;
@@ -124,23 +136,32 @@ module doc5503_register_ram  #(
     reg [DATA_WIDTH-1:0] data_a_r;
     assign data_a_o = PORT_A_ENABLE ? data_a_r : '0;
 
+    // Main memory access process
     always @(posedge clk_i) begin
+        // Clear acknowledgements by default
         for (int i = 0; i < PRIORITY_WRITE_PORTS; i++) priority_write_ack_r[i] <= 0;
         for (int i = 0; i < PRIORITY_READ_PORTS; i++) priority_read_ack_r[i] <= 0;
+        
+        // Write operation takes priority
         if (priority_write_en_r) begin
             data_r[priority_write_addr_r] <= priority_write_data_i[priority_write_index];
             priority_write_ack_r[priority_write_index] <= 1;
-        end else if (SP_READ_ENABLE) begin
-            automatic reg [DATA_WIDTH-1:0] data_r = data_r[priority_read_addr_r];
+        end 
+        // Read operations only if no write is active
+        else if (SP_READ_ENABLE) begin
+            logic [DATA_WIDTH-1:0] read_data;
+            read_data = data_r[priority_read_addr_r];
+            
             if (priority_read_en_r) begin
-                priority_read_data_r[priority_read_index] <= data_r;
+                priority_read_data_r[priority_read_index] <= read_data;
                 priority_read_ack_r[priority_read_index] <= 1;
             end else if (PORT_A_ENABLE) begin
-                data_a_r <= data_r;
+                data_a_r <= read_data;
             end
         end
     end
 
+    // Port B read-only access (independent of priority ports)
     reg [DATA_WIDTH-1:0] data_b_r;
     assign data_b_o = PORT_B_ENABLE ? data_b_r : '0;
 
@@ -149,8 +170,15 @@ module doc5503_register_ram  #(
             data_b_r <= data_r[addr_b_i];
         end
     end
+    
+    // Initialize all register values at start
+    initial begin
+        for (int i = 0; i < 32; i = i + 1) begin
+            data_r[i] = {DATA_WIDTH{1'b0}};
+        end
+    end
 
 endmodule
 
-
-
+// Note: The srff module is implemented in hdl/support/srff.v
+// No need to redefine it here

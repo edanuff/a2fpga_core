@@ -57,7 +57,12 @@ module doc5503 #(
     parameter int NUM_CHANNELS = 16,
     parameter int OUTPUT_MONO_MIX = 1,
     parameter int OUTPUT_STEREO_MIX = 1,
-    parameter int CHANNEL_MAX = OUTPUT_CHANNEL_MIX && (NUM_CHANNELS > 1) ? NUM_CHANNELS - 1 : 1
+    parameter int CHANNEL_MAX = OUTPUT_CHANNEL_MIX && (NUM_CHANNELS > 1) ? NUM_CHANNELS - 1 : 1,
+    parameter int MIXER_SUM_RESOLUTION = 24,  // Increased from 16 to 24 to prevent overflow
+    parameter int REFRESH_CYCLE_STEPS = 24,   // Number of steps in refresh cycle
+    parameter int NORMAL_CYCLE_STEPS = 8,     // Number of steps in normal cycle
+    parameter real OUTPUT_SAMPLE_RATE = 8000.0,  // Hz
+    parameter real CLOCK_RATE = 7159090.0       // Hz (Apple IIgs 7.15909 MHz)
 ) (
     input clk_i,
     input reset_n_i,
@@ -84,6 +89,32 @@ module doc5503 #(
     output signed [15:0] channel_o[CHANNEL_MAX:0]
 
 );
+
+    // Calculate output rate period based on clock rate and desired sample rate
+    localparam int OUTPUT_RATE_PERIOD = int'(CLOCK_RATE / OUTPUT_SAMPLE_RATE);
+    
+    // State machine enumerations for improved readability
+    typedef enum logic [2:0] {
+        OSC_IDLE = 3'd0,
+        OSC_START = 3'd1,
+        OSC_ACC = 3'd2,
+        OSC_ADDR = 3'd3,
+        OSC_READ_DATA = 3'd4,
+        OSC_HALT = 3'd5,
+        OSC_OUT = 3'd6
+    } osc_state_t;
+
+    typedef enum logic [1:0] {
+        MIXER_INIT = 2'd0,
+        MIXER_ZERO = 2'd1,
+        MIXER_ADD = 2'd2,
+        MIXER_OUTPUT = 2'd3
+    } mixer_state_t;
+    
+    localparam [1:0] MODE_FREE = 2'b00;
+    localparam [1:0] MODE_ONESHOT = 2'b01;
+    localparam [1:0] MODE_SYNC_AM = 2'b10;
+    localparam [1:0] MODE_SWAP = 2'b11;
 
     reg [7:0] osc_int_r;            // Oscillator Interrupt Register
     reg [7:0] osc_en_r;             // Oscillator Enable Register
@@ -132,27 +163,28 @@ module doc5503 #(
     wire next_halt_w = next_control_w[0];
     wire [1:0] next_mode_w = next_control_w[2:1];
 
-    wire [23:0] acc_w;
+    // Modified to use 25 bits for accumulator for proper overflow detection
+    wire [24:0] acc_w;
     reg [15:0] wave_addr_r;
-
-    localparam [1:0] MODE_FREE = 2'b00;
-	localparam [1:0] MODE_ONESHOT = 2'b01;
-    localparam [1:0] MODE_SYNC_AM = 2'b10;
-    localparam [1:0] MODE_SWAP = 2'b11;
 
     reg [4:0] cycle_r;
     reg [4:0] cycle_step_r;
     wire [4:0] osc_en_num_w = osc_en_r[5:1];
-    wire [4:0] cycle_max_w = osc_en_num_w == 0 ? 0 : 5'(osc_en_num_w - 1'b1);
+    // Fixed off-by-one error - no longer subtracting 1
+    wire [4:0] cycle_max_w = osc_en_num_w == 0 ? 0 : osc_en_num_w;
 
     reg [5:0] mixer_cycle_r;
     wire [7:0] mixer_control_w;
     wire signed [15:0] mixer_output_w;
 
     reg [4:0] last_osc_r;
+    reg last_osc_is_refresh_r;  // Flag to track if last osc contributes 3x (hardware bug emulation)
 
     reg ready_r;
     reg [4:0] init_cycle_r;
+
+    osc_state_t osc_state_r;
+    mixer_state_t mixer_state_r;
 
     always @(posedge clk_i) begin
         if (!reset_n_i) begin
@@ -170,15 +202,26 @@ module doc5503 #(
 
     // cycles are 8 steps long except for last cycle is 24 steps long, corresponds to RAM refresh
     wire last_cycle_w = cycle_r == cycle_max_w;
-    wire last_cycle_step_w = last_cycle_w ? (cycle_step_r == 5'd23) : (cycle_step_r == 5'd7);
+    wire last_cycle_step_w = last_cycle_w ? 
+                            (cycle_step_r == (REFRESH_CYCLE_STEPS - 1)) : 
+                            (cycle_step_r == (NORMAL_CYCLE_STEPS - 1));
 
     always @(posedge clk_i) begin
         if (!reset_n_i) begin
             cycle_r <= '0;
             cycle_step_r <= '0;
+            last_osc_is_refresh_r <= 1'b0;
         end else begin
            if (ready_r & clk_en_i) begin
                 cycle_step_r <= last_cycle_step_w ? '0 : cycle_step_r + 1'd1;
+                
+                // Set flag for last oscillator in refresh cycles (hardware bug emulation)
+                if (last_cycle_step_w && last_cycle_w) begin
+                    last_osc_is_refresh_r <= 1'b1;  // Mark the last oscillator
+                end else if (cycle_step_r == 5'd0) begin
+                    last_osc_is_refresh_r <= 1'b0;  // Clear on new oscillator
+                end
+                
                 cycle_r <= last_cycle_step_w ? (last_cycle_w ? '0 : cycle_r + 1'd1) : cycle_r;
            end
         end
@@ -452,14 +495,14 @@ module doc5503 #(
         .data_b_o()
     );
 
-    // Oscillator Accumulator
+    // Oscillator Accumulator - Modified to use 25 bits for proper overflow detection
 
     reg current_acc_add_req_r;
     reg current_acc_reset_req_r;
     reg partner_acc_reset_req_r;
 
     doc5503_register_ram #(
-        .DATA_WIDTH(24),
+        .DATA_WIDTH(25),  // Increased from 24 to 25
         .PRIORITY_WRITE_PORTS(3),
         .PRIORITY_READ_PORTS(0)
     ) osc_acc_r_inst (
@@ -476,9 +519,9 @@ module doc5503 #(
             partner_w
         }),
         .priority_write_data_i('{
-            acc_w + f_w,
-            24'h000000,
-            24'h000000
+            acc_w + {9'b0, f_w},  // Zero-extend f_w to 25 bits for addition
+            25'h0000000,
+            25'h0000000
         }),
         .priority_read_req_i('{0}),
         .priority_read_addr_i('{0}),
@@ -491,13 +534,13 @@ module doc5503 #(
 
     // Oscillator Output
 
-    reg signed [15:0] output_r;                                         // Current scaled oscillator output        
+    (* use_dsp = "yes" *) reg signed [15:0] output_r;  // DSP inference hint for FPGA synthesis
 
-    // DSP Multipler
+    // DSP Multipler with explicit signed conversion
     always @(posedge clk_i) begin
         automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
-        automatic logic signed [7:0] vol_w = {2'b0, vol_w[7:2]};        // convert volume to signed
-        output_r <= data_w * vol_w;                                     // output is waveform data * volume
+        automatic logic signed [7:0] vol_w_s = {2'b0, vol_w[7:2]};      // convert volume to signed
+        output_r <= data_w * vol_w_s;                                   // output is waveform data * volume
     end
 
     reg output_reset_req;
@@ -560,58 +603,35 @@ module doc5503 #(
 
     // Wave Processor FSM
 
-    localparam [2:0] OSC_IDLE = 3'd0;
-    localparam [2:0] OSC_START = 3'd1;
-    localparam [2:0] OSC_ACC = 3'd2;
-    localparam [2:0] OSC_ADDR = 3'd3;
-    localparam [2:0] OSC_READ_DATA = 3'd4;
-    localparam [2:0] OSC_HALT = 3'd5;
-    localparam [2:0] OSC_OUT = 3'd6;
-
-    reg [2:0] osc_state_r;
-
     always @(posedge clk_i) begin
         if (!reset_n_i) begin
-
             irq_n_o <= '1;
-
             wave_address_o <= '0;
             wave_rd_o <= '0;
-
             next_am_req_r <= 0;
-
             current_wds_reset_req_r <= 0;
-
             current_acc_add_req_r <= 0;
             current_acc_reset_req_r <= 0;
             partner_acc_reset_req_r <= 0;
-
             partner_control_load_req_r <= 0;
             next_control_load_req_r <= 0;
             current_osc_halt_req_r <= 0;
             partner_unhalt_req_r <= 0;
-
             output_reset_req <= 0;
             output_update_req <= 0;
-
             inhibit_host_writes_r <= 0;
-
+            osc_state_r <= OSC_IDLE;
         end else begin
             wave_rd_o <= '0;
-
             next_am_req_r <= 0;
-
             current_wds_reset_req_r <= 0;
-
             current_acc_add_req_r <= 0;
             current_acc_reset_req_r <= 0;
             partner_acc_reset_req_r <= 0;
-
             partner_control_load_req_r <= 0;
             next_control_load_req_r <= 0;
             current_osc_halt_req_r <= 0;
             partner_unhalt_req_r <= 0;
-
             output_reset_req <= 0;
             output_update_req <= 0;
             
@@ -646,28 +666,47 @@ module doc5503 #(
                             // Address Pointer (big barrel shifter)
                             // Cycle Step 2
 
-                            automatic logic [4:0] shift_w = 5'd9 + res_w - wts_w;
+                            logic [4:0] shift_w;
+                            logic [7:0] ptr_hi_mask_w;
+                            logic [15:0] ptr_w;
+                            
+                            shift_w = 5'd9 + res_w - wts_w;
                             wave_addr_r <= 16'(acc_w >> shift_w);
+                            
+                            // Set address before asserting read 
+                            ptr_hi_mask_w = 8'hFF << wts_w;
+                            ptr_w = {ptr_hi_mask_w & wtp_w, 8'b0};
+                            wave_address_o <= 16'(acc_w >> shift_w) | ptr_w;
+                            
                             osc_state_r <= OSC_READ_DATA;
                         end
                         OSC_READ_DATA: begin
                             // Read Waveform Data
                             // Cycle Step 3
 
-                            automatic logic [3:0] high_bit_w = {1'b1, wts_w};
-                            automatic logic overflow = wave_addr_r[high_bit_w];
-                            automatic logic zero_byte_w = (wds_w == 8'h00);
+                            // Improved overflow detection with explicit handling for 32KiB case
+                            logic overflow;
+                            logic [3:0] high_bit_w;
+                            logic zero_byte_w;
+                            
+                            if (wts_w == 3'b111) begin
+                                // 32KiB tables: check bit 24
+                                overflow = acc_w[24];
+                            end else begin
+                                // Smaller tables: check appropriate address bit
+                                high_bit_w = {1'b1, wts_w};
+                                overflow = wave_addr_r[high_bit_w];
+                            end
+                            
+                            zero_byte_w = (wds_w == 8'h00);
 
-                            osc_state_r <= OSC_OUT;
+                            // Only assert read if needed
                             if (!(overflow & mode_w[0]) & !zero_byte_w) begin
-                                // Read next byte from SDRAM
-                                automatic logic [7:0] ptr_hi_mask_w = 8'hFF << wts_w;
-                                automatic logic [15:0] ptr_w = {ptr_hi_mask_w & wtp_w, 8'b0};
-                                automatic logic [15:0] addr_w = (overflow ? 16'b0 : wave_addr_r) | ptr_w;
-                                wave_rd_o <= 1'b1; 
-                                wave_address_o <= addr_w;
+                                // Now assert read after address is stable
+                                wave_rd_o <= 1'b1;
                                 last_osc_r <= cycle_r;
-                            end 
+                            end
+                            
                             if (overflow | zero_byte_w) begin
                                 current_acc_reset_req_r <= 1;                                   // reset accumulator
                                 if (zero_byte_w | mode_w[0]) begin                              // zero byte halts oscillator
@@ -679,10 +718,13 @@ module doc5503 #(
                                     end
                                 end
                             end
+                            
                             // reload control registers from RAM
                             partner_control_load_req_r <= 1;
                             next_control_load_req_r <= 1;
                             inhibit_host_writes_r <= 1;
+                            
+                            osc_state_r <= OSC_OUT;
                         end
                         OSC_HALT: begin
                             // Halt Oscillator
@@ -708,7 +750,7 @@ module doc5503 #(
                             if ((mode_w == MODE_SYNC_AM) & odd_osc_w) begin                     // Sync AM Mode, odd oscillator outputs nothing
                                 output_reset_req <= 1;                                          // silence output
                                 if ((cycle_r < 30) & !next_halt_w) begin                        // if next oscillator is not halted
-                                    next_am_req_r <= 1;                                         // it's volume is set to current oscillator's waveform data
+                                    next_am_req_r <= 1;                                         // its volume is set to current oscillator's waveform data
                                 end
                             end else begin
                                 output_update_req <= 1;                                         // output is waveform data * volume
@@ -735,8 +777,6 @@ module doc5503 #(
 
     // Mixer
 
-    localparam int MIXER_SUM_RESOLUTION = 16;
-
     reg signed [15:0] mono_mix_r;
     assign mono_mix_o = mono_mix_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_mono_mix_r;
@@ -753,25 +793,45 @@ module doc5503 #(
     assign channel_o = channel_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_channel_r[CHANNEL_MAX:0]; 
 
-
-    localparam [1:0] MIXER_INIT = 2'd0;
-    localparam [1:0] MIXER_ZERO = 2'd1;
-    localparam [1:0] MIXER_ADD = 2'd2;
-    localparam [1:0] MIXER_OUTPUT = 2'd3;
-
-    reg [1:0] mixer_state_r;
-    reg [3:0] mixer_channel_r;
+    // Fixed output rate timer for consistent timing regardless of oscillator count
+    reg [15:0] output_rate_counter;
+    reg output_ready;
+    reg [3:0] mixer_channel_r;  // Add missing declaration
+    
+    // Calculate output rate period as 16-bit value to match counter width
+    localparam [15:0] FIXED_OUTPUT_RATE_PERIOD = (OUTPUT_RATE_PERIOD > 16'hFFFF) ? 
+                                                16'hFFFF : 16'(OUTPUT_RATE_PERIOD);
 
     always @(posedge clk_i) begin
         if (!reset_n_i) begin
             mixer_state_r <= MIXER_INIT;
+            mixer_cycle_r <= '0;
             mixer_channel_r <= '0;
             
             mono_mix_r <= '0;
             left_mix_r <= '0;
             right_mix_r <= '0;
-
+            
+            // Initialize all channel registers
+            for (int i = 0; i <= CHANNEL_MAX; i++) begin
+                channel_r[i] <= '0;
+                next_channel_r[i] <= '0;
+            end
+            
+            output_rate_counter <= '0;
+            output_ready <= 1'b0;
         end else begin
+            // Fixed output rate timer
+            if (clk_en_i) begin
+                if (output_rate_counter >= FIXED_OUTPUT_RATE_PERIOD) begin
+                    output_rate_counter <= '0;
+                    output_ready <= 1'b1;
+                end else begin
+                    output_rate_counter <= output_rate_counter + 1'd1;
+                    output_ready <= 1'b0;
+                end
+            end
+            
             case (mixer_state_r)
                 MIXER_INIT: begin
                     channel_r[mixer_channel_r] <= '0;
@@ -795,26 +855,63 @@ module doc5503 #(
                     end
                 end
                 MIXER_ADD: begin
-                    automatic logic [3:0] ca = mixer_control_w[7:4];
+                    logic [3:0] ca;
+                    logic signed [15:0] output_value;
+                    
+                    ca = mixer_control_w[7:4];
 
-                    if (OUTPUT_CHANNEL_MIX) next_channel_r[ca] <= next_channel_r[ca] + mixer_output_w;
+                    // Apply 3x contribution for last oscillator in refresh cycle (hardware bug emulation)
+                    output_value = last_osc_is_refresh_r && (mixer_cycle_r == cycle_max_w) ? 
+                                  mixer_output_w * 3 : mixer_output_w;
 
-                    if (OUTPUT_MONO_MIX) next_mono_mix_r <= next_mono_mix_r + mixer_output_w;
+                    if (OUTPUT_CHANNEL_MIX) next_channel_r[ca] <= next_channel_r[ca] + output_value;
+
+                    if (OUTPUT_MONO_MIX) next_mono_mix_r <= next_mono_mix_r + output_value;
 
                     if (OUTPUT_STEREO_MIX) begin
-                        if (ca[0]) next_left_mix_r <= next_left_mix_r + mixer_output_w;
-                        else next_right_mix_r <= next_right_mix_r + mixer_output_w;
+                        if (ca[0]) next_left_mix_r <= next_left_mix_r + output_value;
+                        else next_right_mix_r <= next_right_mix_r + output_value;
                     end
 
                     mixer_cycle_r <= (mixer_cycle_r == cycle_max_w) ? '0 : mixer_cycle_r + 1'd1;
                     if (mixer_cycle_r == cycle_max_w) mixer_state_r <= MIXER_OUTPUT;
                 end
-                MIXER_OUTPUT: begin                    
-                    channel_r[mixer_channel_r] <= next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                MIXER_OUTPUT: begin
+                    // Only update output when output_ready is true (fixed output rate)
+                    if (output_ready) begin
+                        // Apply clamping to prevent overflow
+                        // Channel output clamping
+                        if (next_channel_r[mixer_channel_r] > {{(MIXER_SUM_RESOLUTION-16){1'b0}}, 16'h7FFF}) 
+                            channel_r[mixer_channel_r] <= 16'h7FFF;
+                        else if (next_channel_r[mixer_channel_r] < {{(MIXER_SUM_RESOLUTION-16){1'b1}}, -16'h8000}) 
+                            channel_r[mixer_channel_r] <= -16'h8000;
+                        else 
+                            channel_r[mixer_channel_r] <= next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
 
-                    mono_mix_r <= next_mono_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
-                    left_mix_r <= next_left_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
-                    right_mix_r <= next_right_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                        // Mono output clamping
+                        if (next_mono_mix_r > {{(MIXER_SUM_RESOLUTION-16){1'b0}}, 16'h7FFF})
+                            mono_mix_r <= 16'h7FFF;
+                        else if (next_mono_mix_r < {{(MIXER_SUM_RESOLUTION-16){1'b1}}, -16'h8000})
+                            mono_mix_r <= -16'h8000;
+                        else
+                            mono_mix_r <= next_mono_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+
+                        // Left output clamping
+                        if (next_left_mix_r > {{(MIXER_SUM_RESOLUTION-16){1'b0}}, 16'h7FFF})
+                            left_mix_r <= 16'h7FFF;
+                        else if (next_left_mix_r < {{(MIXER_SUM_RESOLUTION-16){1'b1}}, -16'h8000})
+                            left_mix_r <= -16'h8000;
+                        else
+                            left_mix_r <= next_left_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+
+                        // Right output clamping
+                        if (next_right_mix_r > {{(MIXER_SUM_RESOLUTION-16){1'b0}}, 16'h7FFF})
+                            right_mix_r <= 16'h7FFF;
+                        else if (next_right_mix_r < {{(MIXER_SUM_RESOLUTION-16){1'b1}}, -16'h8000})
+                            right_mix_r <= -16'h8000;
+                        else
+                            right_mix_r <= next_right_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                    end
 
                     mixer_channel_r <= mixer_channel_r + 1'd1;
                     if (mixer_channel_r == CHANNEL_MAX) mixer_state_r <= MIXER_ZERO;
