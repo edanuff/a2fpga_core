@@ -50,27 +50,39 @@ module doc5503_register_ram  #(
         output wire [DATA_WIDTH-1:0] data_b_o
 );
 
-    wire priority_write_w[PRIORITY_WRITE_PORTS > 0 ? PRIORITY_WRITE_PORTS : 1];
-    reg priority_write_ack_r[PRIORITY_WRITE_PORTS > 0 ? PRIORITY_WRITE_PORTS : 1];
+    reg [(PRIORITY_WRITE_PORTS > 0 ? PRIORITY_WRITE_PORTS : 1)-1:0] priority_write_w;
+    reg [(PRIORITY_WRITE_PORTS > 0 ? PRIORITY_WRITE_PORTS : 1)-1:0] priority_write_ack_r;
 
     generate
         for (genvar i = 0; i < PRIORITY_WRITE_PORTS; i++) begin : priority_write_port_loop
             if (i == 0 && FIRST_PRIORITY_WRITE_PORT_LEVEL_TRIGGERED) begin
                 assign priority_write_w[i] = priority_write_req_i[i];
             end else begin
-                srff write_ff (.clk(clk_i), .s(priority_write_req_i[i]), .r(priority_write_ack_r[i]), .q(priority_write_w[i]));
+                // Directly handle edge detection in the main process
+                always @(posedge clk_i) begin
+                    if (priority_write_req_i[i] && !priority_write_ack_r[i])
+                        priority_write_w[i] <= 1'b1;
+                    else if (priority_write_ack_r[i])
+                        priority_write_w[i] <= 1'b0;
+                end
             end
         end
     endgenerate
 
-    wire priority_read_w[PRIORITY_READ_PORTS > 0 ? PRIORITY_READ_PORTS : 1];
-    reg priority_read_ack_r[PRIORITY_READ_PORTS > 0 ? PRIORITY_READ_PORTS : 1];
+    reg [(PRIORITY_READ_PORTS > 0 ? PRIORITY_READ_PORTS : 1)-1:0] priority_read_w;
+    reg [(PRIORITY_READ_PORTS > 0 ? PRIORITY_READ_PORTS : 1)-1:0] priority_read_ack_r;
     reg [DATA_WIDTH-1:0] priority_read_data_r[PRIORITY_READ_PORTS > 0 ? PRIORITY_READ_PORTS : 1];
 
     generate
         if (PRIORITY_READ_PORTS > 0) begin
             for (genvar i = 0; i < PRIORITY_READ_PORTS; i++) begin : priority_read_port_loop
-                srff read_ff (.clk(clk_i), .s(priority_read_req_i[i]), .r(priority_read_ack_r[i]), .q(priority_read_w[i]));
+                // Directly detect read request edges in the main process instead of using srff
+                always @(posedge clk_i) begin
+                    if (priority_read_req_i[i] && !priority_read_ack_r[i])
+                        priority_read_w[i] <= 1'b1;
+                    else if (priority_read_ack_r[i])
+                        priority_read_w[i] <= 1'b0;
+                end
                 assign priority_read_data_o[i] = priority_read_data_r[i];
             end
         end else begin
@@ -139,13 +151,17 @@ module doc5503_register_ram  #(
     // Main memory access process
     always @(posedge clk_i) begin
         // Clear acknowledgements by default
-        for (int i = 0; i < PRIORITY_WRITE_PORTS; i++) priority_write_ack_r[i] <= 0;
-        for (int i = 0; i < PRIORITY_READ_PORTS; i++) priority_read_ack_r[i] <= 0;
+        for (int i = 0; i < PRIORITY_WRITE_PORTS; i++) begin
+            priority_write_ack_r[i] <= 1'b0;
+        end
+        for (int i = 0; i < PRIORITY_READ_PORTS; i++) begin
+            priority_read_ack_r[i] <= 1'b0;
+        end
         
         // Write operation takes priority
         if (priority_write_en_r) begin
             data_r[priority_write_addr_r] <= priority_write_data_i[priority_write_index];
-            priority_write_ack_r[priority_write_index] <= 1;
+            priority_write_ack_r[priority_write_index] <= 1'b1;
         end 
         // Read operations only if no write is active
         else if (SP_READ_ENABLE) begin
@@ -154,7 +170,7 @@ module doc5503_register_ram  #(
             
             if (priority_read_en_r) begin
                 priority_read_data_r[priority_read_index] <= read_data;
-                priority_read_ack_r[priority_read_index] <= 1;
+                priority_read_ack_r[priority_read_index] <= 1'b1;
             end else if (PORT_A_ENABLE) begin
                 data_a_r <= read_data;
             end
@@ -173,7 +189,8 @@ module doc5503_register_ram  #(
     
     // Initialize all register values at start
     initial begin
-        for (int i = 0; i < 32; i = i + 1) begin
+        int i;
+        for (i = 0; i < 32; i = i + 1) begin
             data_r[i] = {DATA_WIDTH{1'b0}};
         end
     end

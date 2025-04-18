@@ -862,7 +862,7 @@ module doc5503 #(
 
                     // Apply 3x contribution for last oscillator in refresh cycle (hardware bug emulation)
                     output_value = last_osc_is_refresh_r && (mixer_cycle_r == cycle_max_w) ? 
-                                  mixer_output_w * 3 : mixer_output_w;
+                                  $signed(16'(($signed(mixer_output_w) * 16'sd3))) : mixer_output_w;
 
                     if (OUTPUT_CHANNEL_MIX) next_channel_r[ca] <= next_channel_r[ca] + output_value;
 
