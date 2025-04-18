@@ -522,9 +522,15 @@ module top #(
 
     // Stub out the external interfaces if not using PicoSOC
 
+    assign ws2812 = 1'b0;
+    assign sd_clk = 1'b0;
+    assign sd_cmd = 1'b0;
+    assign sd_dat3 = 1'b0;
+
     assign slotmaker_config_if.slot = 3'b0;
     assign slotmaker_config_if.wr = 1'b0;
     assign slotmaker_config_if.card_i = 8'b0;
+    assign slotmaker_config_if.reconfig = 1'b0;
 
     video_control_if video_control_if();
     assign video_control_if.enable = 1'b0;
@@ -824,8 +830,8 @@ module top #(
         .cy2(acy2),
 
         .is_signed(1'b0),
-        .core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
-        .core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
+        .core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0} + sg_audio_l),
+        .core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0} + sg_audio_r),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
