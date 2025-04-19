@@ -33,8 +33,14 @@ module sound_glu #(
     output [15:0] audio_r_o,
 
     sdram_port_if.client glu_mem_if,
-    sdram_port_if.client doc_mem_if
+    sdram_port_if.client doc_mem_if,
     
+    // Debug outputs
+    output wave_rd_o,
+    output wave_data_ready_o,
+    output cs_active_o,
+    output signed [15:0] left_mix_debug_o,
+    output signed [15:0] right_mix_debug_o
 );
 
     reg [7:0] sound_control_r;      // Sound Control Register
@@ -136,10 +142,32 @@ module sound_glu #(
 
     reg [7:0] wave_data_r;
     reg wave_data_ready_r;
+    
+    // Flag to detect if wave data is being read and is non-zero
+    reg wave_data_nonzero = 0;
+    // Counter to track number of doc_mem_rd_w assertions
+    reg [15:0] wave_read_counter = 0;
+    
     always_ff @(posedge a2bus_if.clk_logic) begin
         wave_data_ready_r <= 1'b0;
+        
+        // Count wave read requests
+        if (doc_mem_rd_w)
+            wave_read_counter <= wave_read_counter + 1;
+            
         if (doc_mem_if.ready) begin
-            wave_data_r <= doc_mem_if.q[8*doc_mem_offset_r +: 8];
+            // Extract byte from 32-bit word based on offset
+            case (doc_mem_offset_r)
+                2'b00: wave_data_r <= doc_mem_if.q[7:0];
+                2'b01: wave_data_r <= doc_mem_if.q[15:8];
+                2'b10: wave_data_r <= doc_mem_if.q[23:16];
+                2'b11: wave_data_r <= doc_mem_if.q[31:24];
+            endcase
+            
+            // Set flag if we ever read non-zero waveform data
+            if (doc_mem_if.q != 32'h0)
+                wave_data_nonzero <= 1'b1;
+                
             wave_data_ready_r <= 1'b1;
         end
     end
@@ -172,15 +200,56 @@ module sound_glu #(
         .mono_mix_o(),
         .channel_o()
     );
+    
+    // Monitor DOC register writes to help debug
+    reg [7:0] doc_reg_monitor[0:31];  // Store the last values written to DOC registers
+    always @(posedge a2bus_if.clk_logic) begin
+        if (!a2bus_if.system_reset_n) begin
+            for (int i = 0; i < 32; i++) begin
+                doc_reg_monitor[i] <= 8'h00;
+            end
+        end else if (sd_sel_w & access_doc_w & !a2bus_if.rw_n & a2bus_if.data_in_strobe) begin
+            // Log every write to the DOC
+            doc_reg_monitor[sound_ptr_lo_r[4:0]] <= a2bus_if.data;
+        end
+    end
 
     logic [3:0] volume_shift_w = volume_w ^ 4'hF;
-    //assign audio_l_o = left_mix_w >>> volume_shift_w[3:2];
-    //assign audio_r_o = right_mix_w >>> volume_shift_w[3:2];
+    
+    // Simple 440Hz tone generator for testing
+    reg [15:0] test_tone_counter = 0;
+    reg signed [15:0] test_tone = 0;
+    
+    // Division factor for different frequencies at 54MHz
+    // 440Hz: 54MHz / 440Hz / 2 = 61363
+    // (we divide by 2 because each toggle generates half a cycle)
+    localparam TEST_TONE_DIVISOR = 16'd61363;  // For 440Hz at 54MHz
+    
+    always @(posedge a2bus_if.clk_logic) begin
+        // Simple counter-based tone generator
+        test_tone_counter <= test_tone_counter + 1'd1;
+        if (test_tone_counter >= TEST_TONE_DIVISOR) begin
+            test_tone_counter <= 16'd0;
+            test_tone <= ~test_tone;  // Toggle between positive and negative
+        end
+    end
+    
+    // DOC is now producing audible output - disable test tone and reduce amplification
+    
+    // DOC output - direct connection with no additional amplification
+    // The DOC5503 module is already applying 64x amplification
     assign audio_l_o = left_mix_w;
     assign audio_r_o = right_mix_w;
-    //assign audio_l_o = channel_w[0] >>> (4'd15 - volume_w);
-    //assign audio_r_o = channel_w[0] >>> (4'd15 - volume_w);
-    //assign audio_l_o = channel_w[1] >>> (4'd15 - volume_w);
-    //assign audio_r_o = channel_w[2] >>> (4'd15 - volume_w);
+    
+    // Alternative audio paths with volume controls
+    //assign audio_l_o = left_mix_w >>> volume_shift_w[3:2];
+    //assign audio_r_o = right_mix_w >>> volume_shift_w[3:2];
+
+    // Connect debug outputs
+    assign wave_rd_o = doc_mem_rd_w;
+    assign wave_data_ready_o = wave_data_ready_r;
+    assign cs_active_o = (wave_read_counter > 0);  // Lights up if any wave reads have occurred
+    assign left_mix_debug_o = left_mix_w;
+    assign right_mix_debug_o = right_mix_w;
 
 endmodule

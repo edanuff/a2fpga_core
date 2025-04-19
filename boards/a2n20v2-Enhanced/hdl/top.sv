@@ -640,6 +640,13 @@ module top #(
 `ifdef ENSONIQ
     wire [7:0] sg_d_w;
     wire sg_rd_w;
+    
+    // Debug signals from sound_glu
+    wire doc_wave_rd_w;
+    wire doc_data_ready_w;
+    wire doc_cs_active_w;
+    wire signed [15:0] doc_left_mix_w;
+    wire signed [15:0] doc_right_mix_w;
 
     sound_glu #(
         .ENABLE(ENSONIQ_ENABLE)  
@@ -652,11 +659,24 @@ module top #(
         .audio_l_o(sg_audio_l),               
         .audio_r_o(sg_audio_r),
         .glu_mem_if(mem_ports[GLU_MEM_PORT]),
-        .doc_mem_if(mem_ports[DOC_MEM_PORT])
+        .doc_mem_if(mem_ports[DOC_MEM_PORT]),
+        
+        // Debug connections
+        .wave_rd_o(doc_wave_rd_w),
+        .wave_data_ready_o(doc_data_ready_w),
+        .cs_active_o(doc_cs_active_w),
+        .left_mix_debug_o(doc_left_mix_w),
+        .right_mix_debug_o(doc_right_mix_w)
     );
 `else
     assign sg_audio_l = 16'b0;
     assign sg_audio_r = 16'b0;
+    // Default values for debug signals when DOC disabled
+    wire doc_wave_rd_w = 0;
+    wire doc_data_ready_w = 0;
+    wire doc_cs_active_w = 0;
+    wire signed [15:0] doc_left_mix_w = 0;
+    wire signed [15:0] doc_right_mix_w = 0;
 `endif
 
     // SuperSprite
@@ -829,7 +849,10 @@ module top #(
         .cy1(acy1),
         .cy2(acy2),
 
-        .is_signed(1'b0),
+        // DOC is now amplified internally, so we can use normal settings
+        .is_signed(1'b1),  // Using signed audio as our DOC is producing signed output
+        
+        // Mix with other audio sources
         .core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0} + sg_audio_l),
         .core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0} + sg_audio_r),
 
@@ -886,14 +909,55 @@ module top #(
         .OEN(sleep_w && HDMI_SLEEP_ENABLE)
     );
 
-    always @(posedge clk_logic_w) begin 
-        //if (!s2) led <= {3'b111, inh_n_w, !picosoc_led};
-        if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
-        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
-        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
-        else led <= {!vdp_unlocked_w, ~vdp_gmode_w};
-        //else led <= {!vdp_unlocked_w, dip_switches_n_w};
+    // Debug flag registers for DOC audio path
+    reg doc_mem_rd_flag = 0;
+    reg doc_data_ready_flag = 0;
+    reg doc_audio_nonzero_flag = 0;
+    reg doc_write_flag = 0;
+    
+    // Audio level detection thresholds
+    localparam AUDIO_THRESHOLD_LOW = 16'sd100;    // Low level threshold
+    localparam AUDIO_THRESHOLD_MED = 16'sd1000;   // Medium level threshold
+    localparam AUDIO_THRESHOLD_HIGH = 16'sd8000;  // High level threshold
+
+    // S2 is active high (1 = pressed)
+    // Debug flag logic - S2 directly resets the flags
+    always @(posedge clk_logic_w) begin
+        if (s2) begin
+            // Directly reset all flags when S2 is pressed
+            doc_mem_rd_flag <= 0;
+            doc_data_ready_flag <= 0;
+            doc_audio_nonzero_flag <= 0;
+            doc_write_flag <= 0;
+        end else begin
+            // Check for DOC memory read
+            if (doc_wave_rd_w)
+                doc_mem_rd_flag <= 1;
+                
+            // Check for wave data ready
+            if (doc_data_ready_w)
+                doc_data_ready_flag <= 1;
+                
+            // Check for non-zero audio output with much lower threshold
+            // Use a very low threshold to detect any audio signal
+            if (($signed(doc_left_mix_w) > 16'sd10) || 
+                ($signed(doc_left_mix_w) < -16'sd10) ||
+                ($signed(doc_right_mix_w) > 16'sd10) || 
+                ($signed(doc_right_mix_w) < -16'sd10))
+                doc_audio_nonzero_flag <= 1;
+                
+            // Check for write to DOC
+            if (!doc_cs_active_w)
+                doc_write_flag <= 1;
+        end
     end
 
+    // LEDs are active low (0 = ON)
+    // LED output shows DOC debug flags
+    always @(posedge clk_logic_w) begin
+        led <= {!doc_mem_rd_flag, !doc_data_ready_flag, !doc_audio_nonzero_flag, !doc_write_flag, 1'b1};
+        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
+        //else led <= {!vdp_unlocked_w, ~vdp_gmode_w};
+    end
 
 endmodule

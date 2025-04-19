@@ -536,11 +536,18 @@ module doc5503 #(
 
     (* use_dsp = "yes" *) reg signed [15:0] output_r;  // DSP inference hint for FPGA synthesis
 
-    // DSP Multipler with explicit signed conversion
+    // Returning to proper DOC operation but with significant amplification
     always @(posedge clk_i) begin
-        automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
-        automatic logic signed [7:0] vol_w_s = {2'b0, vol_w[7:2]};      // convert volume to signed
-        output_r <= data_w * vol_w_s;                                   // output is waveform data * volume
+        // Convert waveform to signed using XOR with 0x80
+        automatic logic signed [7:0] data_w = wds_w ^ 8'h80;
+        
+        // Volume scaling - using complete volume register for better resolution
+        // No right-shift - gives us a 4x boost right away
+        automatic logic signed [7:0] vol_w_s = vol_w;
+        
+        // Apply multiplication with significant amplification (16x)
+        // Total amplification is 4x (from volume) * 16x = 64x
+        output_r <= (data_w * vol_w_s) <<< 4;
     end
 
     reg output_reset_req;
