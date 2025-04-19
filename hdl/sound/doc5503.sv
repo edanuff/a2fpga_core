@@ -186,6 +186,28 @@ module doc5503 #(
 
     reg inhibit_host_writes_r;
 
+    // FREQUENCY CONTROL LOW AND HIGH ($OO·$lF, $20·$3F)
+
+    // This group of registers form, in part the actual frequency in which
+    // the DOC steps through the waveform table. The FREQUENCY LOW and
+    // the FREQUENCY HIGH registers are concatenated to form a 16-bit
+    // incremental value for the 24 bit linear accumulator. Each time the
+    // oscillator is updated the value of the high/low FREQUENCY CONTROL
+    // REGISTER is added to the current value stored in the accumulator.
+    // The following equations can be used to determine the final output
+    // frequency.
+    // SR = CLK / ((OSC + 2) • 8)
+    // Fundamental Output Frequency = [ SR / 2^(17 + RES)] • FC
+    // Where: SR = sample rate, CLK = input clock, OSC = enabled
+    // oscillators, RES = Resolution register, FC is the Frequency high
+    // and Frequency Low registers concatenated, and the waveform
+    // fundamental frequency length is equal to one page of memory.
+    //
+    // For values stored in the Frequency Control registers, the
+    // effective output sample rate can be calculated as follows
+    // freqOffset = ((32 x Output sample rate in hertz)/1645) 
+
+
     // Oscillator Frequency Lo
 
     doc5503_register_ram #(
@@ -252,6 +274,13 @@ module doc5503 #(
 
     // Oscillator Volume
 
+    // This set of registers is used to control the
+    // volume level of the waveform data. The current value read by the
+    // associated oscillator from the waveform table is multiplied by the
+    // eight bit volume register to obtain the final output level for the
+    // oscillator. It should be noted that volume register is ignored when
+    // the associated oscillator is running in self enveloping mode.
+
     reg next_am_req_r;
 
     doc5503_register_ram #(
@@ -289,6 +318,10 @@ module doc5503 #(
     );
 
     // Oscillator Waveform Data Sample
+
+    // This set of read only registers contain
+    // last value read from the waveform table for the corresponding
+    // oscillator.
 
     reg current_wds_reset_req_r;
 
@@ -335,6 +368,15 @@ module doc5503 #(
 
     // Oscillator Waveform Table Pointer
 
+    // This set of registers contain the
+    // beginning page number of the waveform table address and are used
+    // to determine the final ram address. All waveform tables must begin
+    // at the first address of a page. Also, a waveform table cannot wrap
+    // around from upper to lower memory. For ex.ample, an 8k table
+    // cannot start at the highest page of memory and continue through
+    // lower memory. Therefore, the larger the table size, the fewer of the
+    // pointer bits are actually used. 
+
     doc5503_register_ram #(
         .PRIORITY_WRITE_PORTS(1),
         .PRIORITY_READ_PORTS(1)
@@ -366,6 +408,62 @@ module doc5503 #(
     );    
 
     // Oscillator Control
+
+    // The control register determines the channel assignment, oscillator
+    // mode, and the Halt bit. The following is the control register bit
+    // positions:
+    // | D7 | D6 | D5 | D4 | D3 | D2 | D1 | DO |
+    // | CA3| CA2| CA1| CA0| IE | M1 | MO | H  |
+    // CA3-CA0 = Channel Assignment bits, used to assign the oscillator
+    //           to a channel. The channel assignment bits are used to
+    //           determine which channel the oscillator output is sent to.
+    // IE = Interrupt Enable bit, used to enable the oscillator interrupt.
+    // M1 = Mode bit 1, used to determine the oscillator mode.
+    // M0 = Mode bit 0, used to determine the oscillator mode.
+    // H = Halt bit, used to halt the oscillator.
+    //
+    // The oscillator mode bits determine the oscillator's behavior when
+    // the oscillator is running. The following is the oscillator mode
+    // bit definitions:
+    // | M1 | M0 | Description |
+    // | 0  | 0  | Free Run    |
+    // | 0  | 1  | One Shot    |
+    // | 1  | 0  | Sync/AM     |
+    // | 1  | 1  | Swap        |
+    //
+    // Free Run Mode - In this mode the oscillator runs in a continuous
+    // loop, repeating the same waveform until it is halted by the
+    // controlling microprocessor, or encounters a zero in the waveform
+    // table.
+    //
+    // One-Shot Mode - In this mode the oscillator cycles through the
+    // waveform table once, halting at the end of the table.
+    // Sync/AM Mode This mode uses pairs of adjacent-numbered
+    // oscillators and depending on whether the lower oscillator is odd or
+    // even determines the mode. To select AM mode use an odd/even
+    // pair, to select sync mode use an even/odd pair.
+    //
+    // AM Mode - In this mode, the odd oscillator is used to amplitude
+    // modulate the even oscillator. When in this mode, the volume
+    // register is ignored for the pair of registers.
+    //
+    // Sync Mode - When in this mode the higher odd oscillator will sync
+    // on to the lower even oscillator. When the fIrst oscillator wraps
+    // around to the beginning of its table, the second oscillator is also reset
+    // to the beginning of its table.
+    //
+    // Swap Mode - This mode uses pairs of oscillators where the lower
+    // oscillator is even, the higher is odd. The oscillator runs in a one-shot
+    // mode, when it completes its cycle it resets its accumulator to zero
+    // and clears the halt bit of the next oscillator.
+    //
+    // H (Halt Bit) This bit indicates when an oscillator has been halted by
+    // either the DOC or the micro-processor. When MO - 1 III H - 1, the
+    // oscillators accumulator will be reset to zero. An oscillator will halt
+    // when a zero is encountered in its waveform table. Because some
+    // memory locations maybe skipped do to the frequency the oscillator
+    // is set to, eight consecutive zeros must be in memory to guarantee the
+    // oscillator will halt.
 
     reg current_osc_halt_req_r;
     reg partner_unhalt_req_r;
@@ -421,6 +519,50 @@ module doc5503 #(
     );
 
     // Oscillator Resolution Table Size
+
+    // This group of registers is used to control three oscillator functions.
+    // The following chart indicates the bit positions within the register:
+    // | D7 | D6 | D5 | D4 | D3 | D2 | D1 | DO |
+    // | X  | BS | T2 | T1 | T0 | R2 | R1 | RO |
+    //
+    // X - (Reserved) This bit is reserved and should be set to zero.
+    //
+    // BS- (Bank Select) This bit is used to extend the addressing range of
+    // the DOC. If BS - 0 then the DOC .address range is 0 to 64k, if BS = 1
+    // then the DOC address range is 65k to 128k.
+    //
+    // T2-TO (Table size) These bits are used to specify the size of the
+    // waveform table addressed by the oscillator and are used to
+    // determine the final ram address. The maximum addressable
+    // memory for an oscillator is 32k. The following table indicates there
+    // usage:
+    //
+    // | T2 | T1 | T0 | Table Size in bytes
+    // | 0  | 0  | 0  | 256
+    // | 0  | 0  | 1  | 512
+    // | 0  | 1  | 0  | 1024
+    // | 0  | 1  | 1  | 2048
+    // | 1  | 0  | 0  | 4096
+    // | 1  | 0  | 1  | 8192
+    // | 1  | 1  | 0  | 16384
+    // | 1  | 1  | 1  | 32768
+    //
+    // R2-RO (Resolution) These bits determine which16 of the 24-bits of
+    // the oscillator accumulator used to determine the final address into
+    // the waveform table. Typically the Resolution register would be
+    // loaded with the same value that is in the Table Size register
+    // otherwise the Resolution register affects the fundamental frequency
+    // by powers of 2.
+    //
+    // | R2 | R1 | R0 | Accumulator bits
+    // | 0  | 0  | 0  |  1 through 16
+    // | 0  | 0  | 1  |  2 through 17
+    // | 0  | 1  | 0  |  3 through 18
+    // | 0  | 1  | 1  |  4 through 19
+    // | 1  | 0  | 0  |  5 through 20
+    // | 1  | 0  | 1  |  6 through 21
+    // | 1  | 1  | 0  |  7 through 22
+    // | 1  | 1  | 1  |  8 through 23
 
     doc5503_register_ram #(
         .PRIORITY_WRITE_PORTS(1),
@@ -538,6 +680,19 @@ module doc5503 #(
     );
 
     // Host Interface
+
+    // Controls setting of registers $E0 and $E1
+    //
+    // $E0 - Oscillator Interrupt Register
+    // The OIR register is not used in this
+    // implementation, but is included for completeness.
+    //
+    // $E1 - Oscillator Enable Register
+    // This register controls the number of
+    // active oscillators in the DOC. A minimum of one oscillator is always
+    // selected, which is also the reset default. To enable oscillators
+    // multiply the desired number by 2, Le. ·to enable all 32 oscillators
+    // load the register with 64.
 
     reg prev_cs_n_r;
     wire req_cs_w = !cs_n_i & prev_cs_n_r;
