@@ -55,9 +55,9 @@ module doc5503_register_ram  #(
 
     generate
         for (genvar i = 0; i < PRIORITY_WRITE_PORTS; i++) begin : priority_write_port_loop
-            if (i == 0 && FIRST_PRIORITY_WRITE_PORT_LEVEL_TRIGGERED) begin
+            if (i == 0 && FIRST_PRIORITY_WRITE_PORT_LEVEL_TRIGGERED) begin : gen_level_triggered
                 assign priority_write_w[i] = priority_write_req_i[i];
-            end else begin
+            end else begin : gen_edge_triggered
                 srff write_ff (.clk(clk_i), .s(priority_write_req_i[i]), .r(priority_write_ack_r[i]), .q(priority_write_w[i]));
             end
         end
@@ -68,12 +68,12 @@ module doc5503_register_ram  #(
     reg [DATA_WIDTH-1:0] priority_read_data_r[PRIORITY_READ_PORTS > 0 ? PRIORITY_READ_PORTS : 1];
 
     generate
-        if (PRIORITY_READ_PORTS > 0) begin
+        if (PRIORITY_READ_PORTS > 0) begin : gen_read_ports
             for (genvar i = 0; i < PRIORITY_READ_PORTS; i++) begin : priority_read_port_loop
                 srff read_ff (.clk(clk_i), .s(priority_read_req_i[i]), .r(priority_read_ack_r[i]), .q(priority_read_w[i]));
                 assign priority_read_data_o[i] = priority_read_data_r[i];
             end
-        end else begin
+        end else begin : gen_no_read_ports
             assign priority_read_data_o[0] = '0;
         end
     endgenerate
@@ -155,5 +155,4 @@ module doc5503_register_ram  #(
 
 endmodule
 
-
-
+// Using srff module from hdl/support instead of local definition

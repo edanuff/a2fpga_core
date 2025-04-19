@@ -111,11 +111,11 @@ int main(int argc, char** argv) {
                 doc_harness->data_i = 0x00; // Start at page 0
             }
             else if (sim_time == 60) {
-                if (verbosity >= INFO) printf("Writing CTL=0x00 to oscillator 0\n");
+                if (verbosity >= INFO) printf("Writing CTL=0x10 to oscillator 0\n");
                 doc_harness->cs_n_i = 0;
                 doc_harness->we_n_i = 0;
                 doc_harness->addr_i = 0xA0; // Control for oscillator 0
-                doc_harness->data_i = 0x00; // Free running mode, no halt
+                doc_harness->data_i = 0x10; // Free running mode, no halt, channel 1 (left)
             }
             else if (sim_time == 70) {
                 if (verbosity >= INFO) printf("Writing RTS=0x18 to oscillator 0\n");
@@ -136,40 +136,17 @@ int main(int argc, char** argv) {
                 doc_harness->we_n_i = 1;
             }
             
-            // Provide wave data when requested - using frontleft.wavetable sample
+            // Provide wave data when requested - using simple test pattern
             if (doc_harness->wave_rd_o) {
-                static FILE* wave_file = NULL;
-                static uint8_t wave_data[32768]; // Max DOC wave table size
-                static bool wave_data_loaded = false;
-                
-                // Load the wave table data if not already loaded
-                if (!wave_data_loaded) {
-                    if (verbosity >= INFO) printf("Loading frontleft.wavetable sample data...\n");
-                    wave_file = fopen("frontleft.wavetable", "rb");
-                    if (wave_file) {
-                        size_t bytes_read = fread(wave_data, 1, sizeof(wave_data), wave_file);
-                        fclose(wave_file);
-                        if (verbosity >= INFO) printf("Loaded %ld bytes of wave data\n", bytes_read);
-                        wave_data_loaded = true;
-                    } else {
-                        if (verbosity >= ERROR) printf("ERROR: Could not open frontleft.wavetable\n");
-                        // Fallback to generated wave data if file can't be opened
-                        for (int i = 0; i < 256; i++) {
-                            wave_data[i] = 0x80 + (i < 128 ? i : 255-i)/2;
-                        }
-                        wave_data_loaded = true;
-                    }
-                }
-                
                 if (verbosity >= DEBUG) printf("Wave read request at address 0x%04x\n", doc_harness->wave_address_o);
-                // Use the loaded wave table data, addressing within buffer bounds
-                int addr = doc_harness->wave_address_o & 0x7FFF; // Mask to 32K limit
-                doc_harness->wave_data_i = wave_data[addr];
+                
+                // Use simple test pattern for debugging - alternating values
+                // 0xC0 is a positive value (0x80 is zero)
+                doc_harness->wave_data_i = 0xC0;
                 doc_harness->wave_data_ready_i = 1;
                 
-                // Debug sample values occasionally
                 if (verbosity >= DEBUG && (sim_time % 100 == 0)) {
-                    printf("Wave data at 0x%04x = 0x%02x\n", addr, wave_data[addr]);
+                    printf("Wave data at 0x%04x = 0x%02x\n", doc_harness->wave_address_o, doc_harness->wave_data_i);
                 }
             } else {
                 doc_harness->wave_data_ready_i = 0;

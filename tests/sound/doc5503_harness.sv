@@ -103,15 +103,10 @@ module doc5503_harness(
     
     // Instantiate the DOC5503 module
     doc5503 #(
-        .OUTPUT_CHANNEL_MIX(0),
+        .OUTPUT_CHANNEL_MIX(1),
         .OUTPUT_MONO_MIX(1),
         .OUTPUT_STEREO_MIX(1),
-        .NUM_CHANNELS(16),
-        .MIXER_SUM_RESOLUTION(24),
-        .REFRESH_CYCLE_STEPS(24),
-        .NORMAL_CYCLE_STEPS(8),
-        .OUTPUT_SAMPLE_RATE(22050.0),
-        .CLOCK_RATE(7159090.0)
+        .NUM_CHANNELS(16)
     ) doc5503_inst (
         .clk_i(clk_i),
         .reset_n_i(reset_n_i),
@@ -124,7 +119,7 @@ module doc5503_harness(
 
         .addr_i(addr_i),
         .data_i(data_i),
-        .data_o(),  // Not connected since we're bypassing with our mock registers
+        .data_o(data_o),
 
         .wave_address_o(wave_address_o),
         .wave_rd_o(wave_rd_o),
