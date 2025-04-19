@@ -322,6 +322,11 @@ module doc5503 #(
     // This set of read only registers contain
     // last value read from the waveform table for the corresponding
     // oscillator.
+    //
+    // The waveform data format is an 8 bit unsigned with 0x80 being zero level
+    // and 0x01 and 0xFF being the lowest and highest levels
+    // respectively. A value of 0x00 is reserved for the end of the
+    // waveform table and will cause the oscillator to halt.
 
     reg current_wds_reset_req_r;
 
