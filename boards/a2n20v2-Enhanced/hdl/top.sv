@@ -24,9 +24,9 @@
 // Ensoniq, PicoSoC, and DiskII are included via defines in the top module
 // Disk II requires PicoSoC
 
-`undef ENSONIQ
-`define PICOSOC
-`define DISKII
+`define ENSONIQ
+`undef PICOSOC
+`undef DISKII
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -823,9 +823,12 @@ module top #(
         .cy1(acy1),
         .cy2(acy2),
 
-        .is_signed(1'b0),
-        .core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
-        .core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
+        //.is_signed(1'b0),
+        //.core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
+        //.core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
+        .is_signed(1'b1),
+        .core_l(sg_audio_l),
+        .core_r(sg_audio_r),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
@@ -881,8 +884,8 @@ module top #(
     );
 
     always @(posedge clk_logic_w) begin 
-        if (!s2) led <= {3'b111, inh_n_w, !picosoc_led};
-        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
+        //if (!s2) led <= {3'b111, inh_n_w, !picosoc_led};
+        if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
         else led <= {!vdp_unlocked_w, ~vdp_gmode_w};

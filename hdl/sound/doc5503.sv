@@ -654,7 +654,7 @@ module doc5503 #(
                             // Read Waveform Data
                             // Cycle Step 3
 
-                            automatic logic [3:0] high_bit_w = {1'b1, wts_w};
+                            automatic int high_bit_w = {1'b1, wts_w};
                             automatic logic overflow = wave_addr_r[high_bit_w];
                             automatic logic zero_byte_w = (wds_w == 8'h00);
 

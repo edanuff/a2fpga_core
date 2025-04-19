@@ -131,12 +131,15 @@ module doc5503_register_ram  #(
             data_r[priority_write_addr_r] <= priority_write_data_i[priority_write_index];
             priority_write_ack_r[priority_write_index] <= 1;
         end else if (SP_READ_ENABLE) begin
-            automatic reg [DATA_WIDTH-1:0] data_r = data_r[priority_read_addr_r];
+            // Gowin IDE seems to not like using a vector as an index, so we use a single int variable
+            // to index the data array. This is a workaround for synthesis issues.
+            automatic int i = priority_read_addr_r;
+            automatic reg [DATA_WIDTH-1:0] data_curr_r = data_r[i];
             if (priority_read_en_r) begin
-                priority_read_data_r[priority_read_index] <= data_r;
+                priority_read_data_r[priority_read_index] <= data_curr_r;
                 priority_read_ack_r[priority_read_index] <= 1;
             end else if (PORT_A_ENABLE) begin
-                data_a_r <= data_r;
+                data_a_r <= data_curr_r;
             end
         end
     end
