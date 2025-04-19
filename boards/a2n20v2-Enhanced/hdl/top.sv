@@ -830,36 +830,40 @@ module top #(
 
     localparam AUDIO_RATE = 44100;
     localparam AUDIO_BIT_WIDTH = 16;
-    wire clk_audio_w;
-    wire [15:0] audio_sample_word[1:0];
-    audio_out #(
-        .CLK_RATE(CLOCK_SPEED_HZ / 2),
-        .AUDIO_RATE(AUDIO_RATE)
-    ) audio_out
-    (
-        .reset(~device_reset_n_w),
-        .clk(clk_pixel_w),
-
-        .flt_rate(aflt_rate),
-        .cx(acx),
-        .cx0(acx0),
-        .cx1(acx1),
-        .cx2(acx2),
-        .cy0(acy0),
-        .cy1(acy1),
-        .cy2(acy2),
-
-        // DOC is now amplified internally, so we can use normal settings
-        .is_signed(1'b1),  // Using signed audio as our DOC is producing signed output
+    reg clk_audio_w = 0;
+    
+    // Generate audio clock enable pulse at 44.1kHz
+    // This should be a single-cycle pulse at the audio sample rate
+    reg [15:0] audio_clk_counter = 0;
+    always @(posedge clk_pixel_w) begin
+        clk_audio_w <= 1'b0; // Default to 0
         
-        // Mix with other audio sources
-        .core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0} + sg_audio_l),
-        .core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0} + sg_audio_r),
-
-        .audio_clk(clk_audio_w),
-        .audio_l(audio_sample_word[0]),
-        .audio_r(audio_sample_word[1])
-    );
+        audio_clk_counter <= audio_clk_counter + 1;
+        if (audio_clk_counter >= 16'd612) begin  // 27MHz/44.1kHz = 612.24...
+            audio_clk_counter <= 16'd0;
+            clk_audio_w <= 1'b1; // Single-cycle pulse
+        end
+    end
+    
+    // 440Hz standard A4 test tone - should be easily recognizable
+    reg [15:0] test_tone_counter = 0;
+    reg signed [15:0] test_tone = 16'sd0;
+    
+    // Generate 440Hz tone using 27MHz clock
+    // 27MHz ÷ 440Hz ÷ 2 = 30,682 (round to 30,682)
+    localparam [15:0] TONE_DIVISOR = 16'd30682;  // For 440Hz with 27MHz clock
+    
+    always @(posedge clk_pixel_w) begin
+        test_tone_counter <= test_tone_counter + 16'd1;
+        
+        if (test_tone_counter >= TONE_DIVISOR) begin
+            test_tone_counter <= 16'd0;
+            // Toggle between +/- 8192 for clear audio
+            test_tone <= (test_tone >= 16'sd0) ? -16'sd8192 : 16'sd8192;
+        end
+    end
+    
+    // BYPASSING AUDIO PROCESSING - Direct connection to HDMI
 
     // HDMI
 
@@ -890,7 +894,7 @@ module top #(
             scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w
         }),
         .reset(~device_reset_n_w),
-        .audio_sample_word(audio_sample_word),
+        .audio_sample_word('{sg_audio_r, sg_audio_l}),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
         .cx(hdmi_x),

@@ -216,34 +216,42 @@ module sound_glu #(
 
     logic [3:0] volume_shift_w = volume_w ^ 4'hF;
     
-    // Simple 440Hz tone generator for testing
-    reg [15:0] test_tone_counter = 0;
-    reg signed [15:0] test_tone = 0;
-    
-    // Division factor for different frequencies at 54MHz
-    // 440Hz: 54MHz / 440Hz / 2 = 61363
-    // (we divide by 2 because each toggle generates half a cycle)
-    localparam TEST_TONE_DIVISOR = 16'd61363;  // For 440Hz at 54MHz
+    // Using a simple approach focused on direct sample playback
+    // No complex processing, just direct sample access
+    reg [7:0] current_sample = 8'h80;
+
+    // Try even more significant downsampling
+    // Combined with a smoothing filter to reduce robotic sound
+    reg [5:0] downsample_counter = 0;
+    reg [7:0] prev_sample = 8'h80;
     
     always @(posedge a2bus_if.clk_logic) begin
-        // Simple counter-based tone generator
-        test_tone_counter <= test_tone_counter + 1'd1;
-        if (test_tone_counter >= TEST_TONE_DIVISOR) begin
-            test_tone_counter <= 16'd0;
-            test_tone <= ~test_tone;  // Toggle between positive and negative
+        if (wave_data_ready_r) begin
+            // Only take one sample out of every 32
+            downsample_counter <= downsample_counter + 6'd1;
+            
+            if (downsample_counter == 0) begin
+                // Add a simple averaging filter to reduce robotic quality
+                prev_sample <= current_sample;
+                current_sample <= wave_data_r;
+            end
         end
     end
     
-    // DOC is now producing audible output - disable test tone and reduce amplification
+    // Direct sample playback approach with smoothing
     
-    // DOC output - direct connection with no additional amplification
-    // The DOC5503 module is already applying 64x amplification
-    assign audio_l_o = left_mix_w;
-    assign audio_r_o = right_mix_w;
+    // Average current and previous samples for smoother output
+    wire [7:0] smoothed_sample = (current_sample + prev_sample) >> 1;
     
-    // Alternative audio paths with volume controls
-    //assign audio_l_o = left_mix_w >>> volume_shift_w[3:2];
-    //assign audio_r_o = right_mix_w >>> volume_shift_w[3:2];
+    // Convert to signed using XOR with 0x80 (standard DOC approach)
+    wire signed [7:0] signed_sample = smoothed_sample ^ 8'h80;
+    
+    // Scale to 16-bit by shifting left 8 bits
+    wire signed [15:0] scaled_audio = {signed_sample, 8'b0};
+    
+    // Use the processed sample for audio output
+    assign audio_l_o = scaled_audio;
+    assign audio_r_o = scaled_audio;
 
     // Connect debug outputs
     assign wave_rd_o = doc_mem_rd_w;

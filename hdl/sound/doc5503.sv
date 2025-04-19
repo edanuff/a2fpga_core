@@ -536,18 +536,18 @@ module doc5503 #(
 
     (* use_dsp = "yes" *) reg signed [15:0] output_r;  // DSP inference hint for FPGA synthesis
 
-    // Returning to proper DOC operation but with significant amplification
+    // DOC oscillator output calculation with standard bit conversion
+    // No additional amplification or processing
     always @(posedge clk_i) begin
-        // Convert waveform to signed using XOR with 0x80
+        // Convert waveform from DOC's unsigned 8-bit format to signed
+        // 0x80 is the centerline (0), 0x00 is special "halt" value
         automatic logic signed [7:0] data_w = wds_w ^ 8'h80;
         
-        // Volume scaling - using complete volume register for better resolution
-        // No right-shift - gives us a 4x boost right away
-        automatic logic signed [7:0] vol_w_s = vol_w;
+        // Apply standard volume scaling without additional amplification
+        automatic logic signed [15:0] product = data_w * vol_w;
         
-        // Apply multiplication with significant amplification (16x)
-        // Total amplification is 4x (from volume) * 16x = 64x
-        output_r <= (data_w * vol_w_s) <<< 4;
+        // No additional amplification - just use the raw product
+        output_r <= product;
     end
 
     reg output_reset_req;
@@ -863,63 +863,36 @@ module doc5503 #(
                 end
                 MIXER_ADD: begin
                     logic [3:0] ca;
-                    logic signed [15:0] output_value;
                     
                     ca = mixer_control_w[7:4];
 
-                    // Apply 3x contribution for last oscillator in refresh cycle (hardware bug emulation)
-                    output_value = last_osc_is_refresh_r && (mixer_cycle_r == cycle_max_w) ? 
-                                  $signed(16'(($signed(mixer_output_w) * 16'sd3))) : mixer_output_w;
-
-                    if (OUTPUT_CHANNEL_MIX) next_channel_r[ca] <= next_channel_r[ca] + output_value;
-
-                    if (OUTPUT_MONO_MIX) next_mono_mix_r <= next_mono_mix_r + output_value;
-
-                    if (OUTPUT_STEREO_MIX) begin
-                        if (ca[0]) next_left_mix_r <= next_left_mix_r + output_value;
-                        else next_right_mix_r <= next_right_mix_r + output_value;
-                    end
-
+                    // TESTING: BYPASS MIXER COMPLETELY
+                    // We're not accumulating any outputs, just using direct oscillator output
+                    
+                    // Increment mixer cycle counter
                     mixer_cycle_r <= (mixer_cycle_r == cycle_max_w) ? '0 : mixer_cycle_r + 1'd1;
                     if (mixer_cycle_r == cycle_max_w) mixer_state_r <= MIXER_OUTPUT;
                 end
                 MIXER_OUTPUT: begin
-                    // Only update output when output_ready is true (fixed output rate)
+                    // DIRECT PASS-THROUGH TESTING
+                    // Just pass oscillator 0's output directly to all mix outputs
                     if (output_ready) begin
-                        // Apply clamping to prevent overflow
-                        // Channel output clamping
-                        if (next_channel_r[mixer_channel_r] > {{(MIXER_SUM_RESOLUTION-16){1'b0}}, 16'h7FFF}) 
-                            channel_r[mixer_channel_r] <= 16'h7FFF;
-                        else if (next_channel_r[mixer_channel_r] < {{(MIXER_SUM_RESOLUTION-16){1'b1}}, -16'h8000}) 
-                            channel_r[mixer_channel_r] <= -16'h8000;
-                        else 
-                            channel_r[mixer_channel_r] <= next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
-
-                        // Mono output clamping
-                        if (next_mono_mix_r > {{(MIXER_SUM_RESOLUTION-16){1'b0}}, 16'h7FFF})
-                            mono_mix_r <= 16'h7FFF;
-                        else if (next_mono_mix_r < {{(MIXER_SUM_RESOLUTION-16){1'b1}}, -16'h8000})
-                            mono_mix_r <= -16'h8000;
-                        else
-                            mono_mix_r <= next_mono_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
-
-                        // Left output clamping
-                        if (next_left_mix_r > {{(MIXER_SUM_RESOLUTION-16){1'b0}}, 16'h7FFF})
-                            left_mix_r <= 16'h7FFF;
-                        else if (next_left_mix_r < {{(MIXER_SUM_RESOLUTION-16){1'b1}}, -16'h8000})
-                            left_mix_r <= -16'h8000;
-                        else
-                            left_mix_r <= next_left_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
-
-                        // Right output clamping
-                        if (next_right_mix_r > {{(MIXER_SUM_RESOLUTION-16){1'b0}}, 16'h7FFF})
-                            right_mix_r <= 16'h7FFF;
-                        else if (next_right_mix_r < {{(MIXER_SUM_RESOLUTION-16){1'b1}}, -16'h8000})
-                            right_mix_r <= -16'h8000;
-                        else
-                            right_mix_r <= next_right_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                        // For all outputs, directly use oscillator 0's output
+                        // This will be quiet but should be clean if the wave data is correct
+                        
+                        // For mono mix
+                        mono_mix_r <= output_r;
+                        
+                        // For stereo mix - send to both channels
+                        left_mix_r <= output_r;
+                        right_mix_r <= output_r;
+                        
+                        // For individual channels
+                        if (OUTPUT_CHANNEL_MIX) 
+                            channel_r[mixer_channel_r] <= (mixer_channel_r == 0) ? output_r : 16'h0000;
                     end
 
+                    // Continue mixer state machine
                     mixer_channel_r <= mixer_channel_r + 1'd1;
                     if (mixer_channel_r == CHANNEL_MAX) mixer_state_r <= MIXER_ZERO;
                 end
