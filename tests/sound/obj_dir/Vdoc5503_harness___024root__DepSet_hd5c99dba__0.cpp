@@ -1287,8 +1287,11 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                         __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r = 0U;
                     } else {
                         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__high_bit_w 
-                            = (8U | (7U & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__data_a_r) 
-                                           >> 3U)));
+                            = ((7U == (7U & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__data_a_r) 
+                                             >> 3U)))
+                                ? 0xfU : (8U | (7U 
+                                                & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__data_a_r) 
+                                                   >> 3U))));
                         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__overflow 
                             = (1U & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__wave_addr_r) 
                                      >> (0xfU & vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__high_bit_w)));

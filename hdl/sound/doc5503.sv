@@ -814,7 +814,9 @@ module doc5503 #(
                             // Read Waveform Data
                             // Cycle Step 3
 
-                            automatic int high_bit_w = {1'b1, wts_w};
+                            // High bit depends on the table size
+                            // For 32K tables (wts_w == 3'b111), use bit 15
+                            automatic int high_bit_w = (wts_w == 3'b111) ? 15 : {1'b1, wts_w};
                             automatic logic overflow = wave_addr_r[high_bit_w];
                             automatic logic zero_byte_w = (wds_w == 8'h00);
 
