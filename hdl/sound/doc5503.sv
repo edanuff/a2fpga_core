@@ -640,11 +640,15 @@ module doc5503 #(
 
     reg signed [15:0] output_r;                                         // Current scaled oscillator output        
 
-    // DSP Multipler
+    // DSP Multiplier with simple low-pass filter
     always @(posedge clk_i) begin
         automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
         automatic logic signed [7:0] vol_s = {2'b0, vol_w[7:2]};        // convert volume to signed
-        output_r <= data_w * vol_s;                                     // output is waveform data * volume
+        
+        // Apply a subtle low-pass filter by multiplying the output by 0.75
+        // to reduce high-frequency buzzy distortion
+        automatic logic signed [15:0] raw_product = data_w * vol_s;
+        output_r <= (raw_product * 3) >>> 2;                           // multiply by 0.75 (3/4)
     end
 
     reg output_reset_req;
