@@ -190,7 +190,8 @@ int main() {
     printf("\nGenerating DOC-like playback at different frequencies...\n");
     
     // Try different frequencies to demonstrate audio quality with and without filter
-    const int frequencies[] = {128, 256, 512, 1024};
+    // Use 429 as one of the frequencies to match IIgs code frequency offset
+    const int frequencies[] = {128, 256, 429, 1024};
     int16_t* freq_samples[4];
     int16_t* freq_filtered_samples[4];
     int16_t* square_samples[4];

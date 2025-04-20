@@ -78,8 +78,9 @@ int16_t doc_output_current(uint8_t waveform, uint8_t volume) {
     // Calculate raw product
     int32_t product = signed_wave * volume;
     
-    // Apply 1.5x amplification as in our current implementation
-    product = product + (product >> 1);  // product * 1.5
+    // Apply a subtle low-pass filter by multiplying the output by 0.75
+    // to reduce high-frequency buzzy distortion
+    product = (product * 3) >> 2;  // product * 0.75 (3/4)
     
     // Clamp to 16-bit range
     if (product > 32767) return 32767;
