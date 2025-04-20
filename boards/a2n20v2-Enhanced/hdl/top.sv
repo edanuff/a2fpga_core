@@ -28,6 +28,8 @@
 `undef PICOSOC
 `undef DISKII
 
+`include "datetime.svh"
+
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
     parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
@@ -837,10 +839,32 @@ module top #(
 
     // HDMI
 
+    wire scanline_en = scanlines_w && hdmi_y[0];
+
+    wire [7:0] debug_r_w;
+    wire [7:0] debug_g_w;
+    wire [7:0] debug_b_w;
+    DebugOverlay #(
+        .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
+        .ENABLE(1'b1)
+    ) debug_overlay (
+        .clk_i          (clk_pixel_w),
+        .reset_n (device_reset_n_w),
+
+        .screen_x_i     (hdmi_x),
+        .screen_y_i     (hdmi_y),
+
+        .r_i            (scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w),
+        .g_i            (scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w),
+        .b_i            (scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w),
+
+        .r_o            (debug_r_w),
+        .g_o            (debug_g_w),
+        .b_o            (debug_b_w)
+    );  
+
     logic [2:0] tmds;
     wire tmdsClk;
-
-    wire scanline_en = scanlines_w && hdmi_y[0];
 
     hdmi #(
         .VIDEO_ID_CODE(2),
@@ -859,12 +883,12 @@ module top #(
         .clk_pixel(clk_pixel_w),
         .clk_audio(clk_audio_w),
         .rgb({
-            scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w,
-            scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w,
-            scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w
+            debug_r_w,
+            debug_g_w,
+            debug_b_w
         }),
         .reset(~device_reset_n_w),
-        .audio_sample_word(audio_sample_word),
+        .audio_sample_word({sg_audio_r, sg_audio_l}),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
         .cx(hdmi_x),
