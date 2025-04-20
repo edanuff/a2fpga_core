@@ -183,9 +183,16 @@ module sound_glu #(
     reg signed [15:0] audio_l_reg;
     reg signed [15:0] audio_r_reg;
     
-    // Assign outputs from registers
-    assign audio_l_o = audio_l_reg;
-    assign audio_r_o = audio_r_reg;
+    // Test signal generator - add a simple sawtooth wave for debugging
+    reg [15:0] test_counter = 0;
+    always_ff @(posedge a2bus_if.clk_logic) begin
+        test_counter <= test_counter + 16'd1;
+    end
+    
+    // Mix with a test signal to ensure something is coming out
+    // Assign outputs from registers with test signal added
+    assign audio_l_o = audio_l_reg + {test_counter[15], test_counter[15:1]};
+    assign audio_r_o = audio_r_reg + {test_counter[15], test_counter[15:1]};
     
     // Apply volume control and noise gate while preserving zero-centering
     always_ff @(posedge a2bus_if.clk_logic) begin

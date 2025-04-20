@@ -792,12 +792,17 @@ module top #(
     wire [15:0] cdc_audio_l;
     wire [15:0] cdc_audio_r;
 
+    // Mix all audio sources together to ensure at least one works
+    // Including SuperSprite audio, Mockingboard, and Speaker
+    wire [15:0] mixed_audio_l = sg_audio_l + {ssp_audio_w[15], ssp_audio_w[15:1]} + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0};
+    wire [15:0] mixed_audio_r = sg_audio_r + {ssp_audio_w[15], ssp_audio_w[15:1]} + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0};
+    
     cdc_fifo #(
         .WIDTH(16),
         .DEPTH(5) 
     ) audio_cdc_left (
         .clk(clk_pixel_w),
-        .i(sg_audio_l),
+        .i(mixed_audio_l),
         .o(cdc_audio_l)
     );
 
@@ -806,7 +811,7 @@ module top #(
         .DEPTH(5)
     ) audio_cdc_right (
         .clk(clk_pixel_w),
-        .i(sg_audio_r),
+        .i(mixed_audio_r),
         .o(cdc_audio_r)
     );
 
