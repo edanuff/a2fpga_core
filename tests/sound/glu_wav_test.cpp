@@ -88,14 +88,21 @@ int main(int argc, char** argv) {
     }
     write_wav_file("glu_sine_test.wav", audio_samples, num_samples, 22050);
     
-    // Create wavetable data (same as in glu_tb.cpp)
-    // Values are centered around 128 (0x80) which is the zero point in unsigned 8-bit
+    // Create wavetable data following DOC format constraints:
+    // - Values must be in range 0x01-0xFF (1-255)
+    // - 0x00 is a reserved value that stops the oscillator
+    // - Normal waveforms are centered around 0x80 (128) which is zero-crossing
     uint8_t waveTableData[256];
     for (int i = 0; i < 256; i++) {
         if (i < 128) {
             waveTableData[i] = 128 + (i / 2);  // 128-192 (positive values)
         } else {
             waveTableData[i] = 128 + (128 - (i - 128)) / 2;  // 192-128 (returning to zero)
+        }
+        
+        // Ensure no 0x00 values (which would stop the oscillator)
+        if (waveTableData[i] == 0) {
+            waveTableData[i] = 1;  // Use minimum valid value
         }
     }
     
@@ -134,20 +141,22 @@ int main(int argc, char** argv) {
                 // Simulate DOC oscillator playback
                 int oscillator_idx = (i * 250) % 256;  // Similar to frequency setting in test
                 
-                // Explicitly handle unsigned to signed conversion for clarity:
+                // Follow exactly the same zero-centering approach as the DOC5503 module:
+                
+                // 1. Get sample from wavetable (0-255 range)
                 uint8_t raw_sample = waveTableData[oscillator_idx];     // 0-255 range, centered at 128
-                int8_t signed_sample = raw_sample - 128;               // -128 to 127 range, centered at 0
                 
-                // Verify we're properly handling signed values and bitwise operations
-                // (let's avoid potential issues with bit operations and sign extension)
+                // 2. Convert to signed the same way the DOC does
+                int8_t signed_sample = (int8_t)(raw_sample ^ 0x80);    // XOR with 0x80 exactly like DOC5503.sv
                 
-                // Scale signed sample into 16-bit range (full volume = 255)
-                int16_t scaled_sample = signed_sample * 255;           // Preserves sign, expands range
+                // 3. Scale signed sample with full volume (255) as DOC does
+                int16_t scaled_sample = signed_sample * 255;           // Scale to 16-bit range, preserving sign
                 
-                // Apply the 0.75 factor (low-pass filter in DSP multiplier)
-                int16_t filtered_sample = (scaled_sample * 3) / 4;     // Multiply by 0.75
+                // 4. Apply the 0.75 factor (same low-pass filter as DOC)
+                int16_t filtered_sample = (scaled_sample * 3) / 4;     // Multiply by 0.75 as in DOC5503.sv
                 
-                // Apply volume control with arithmetic right shift (properly preserves sign)
+                // 5. Apply volume control with arithmetic right shift (just like the GLU)
+                // This simulates exactly what happens in sound_glu.sv
                 int16_t volume_adjusted = filtered_sample >> volume_shift;
                 
                 // Apply noise gate if enabled - cleans up low-level signals
@@ -175,16 +184,23 @@ int main(int argc, char** argv) {
         int cycle_pos = i % (num_samples / 2);
         
         if (cycle_pos < num_samples / 4) {
-            // Active part - play the waveform with explicit DC centering
+            // Active part - play the waveform - EXACTLY the same as DOC+GLU does
             int oscillator_idx = (i * 250) % 256;
-            uint8_t raw_sample = waveTableData[oscillator_idx];         // 0-255 range
-            int8_t signed_sample = raw_sample - 128;                   // Convert to signed (-128 to 127)
             
-            // Scale to 16-bit range
-            int16_t scaled_sample = signed_sample * 255;                // Scale to full 16-bit range
+            // 1. Get raw sample from wavetable (0-255)
+            uint8_t raw_sample = waveTableData[oscillator_idx];         // 0-255 range centered at 128
             
-            // Apply 0.75 factor like in the real DOC
-            audio_samples[i] = (scaled_sample * 3) / 4;                 // Low-pass filter
+            // 2. Convert to signed the same way as the DOC
+            int8_t signed_sample = (int8_t)(raw_sample ^ 0x80);        // XOR with 0x80 like the DOC
+            
+            // 3. Scale to 16-bit range with volume 255
+            int16_t scaled_sample = signed_sample * 255;                // Scale preserving sign
+            
+            // 4. Apply 0.75 factor low-pass filter
+            int16_t filtered_sample = (scaled_sample * 3) / 4;          // Same as DOC implementation
+            
+            // 5. Store final properly DC-centered sample
+            audio_samples[i] = filtered_sample;                        // Should be perfectly zero-centered
         } else {
             // Silent part - true zero (DC centered)
             audio_samples[i] = 0;
@@ -216,13 +232,14 @@ int main(int argc, char** argv) {
     write_wav_file("glu_fixed.wav", audio_samples, num_samples, 22050);
     
     // Create a square wave test file (zero-centered) to show filter effect
+    // This is a cleaner test case that directly tests the filter
     for (int i = 0; i < num_samples; i++) {
         // Generate a 220Hz square wave
         double time = (double)i / 22050.0;
         double value = sin(2.0 * M_PI * 220 * time) > 0 ? 1.0 : -1.0;
         
-        // Scale to 16-bit range
-        int16_t square_sample = (int16_t)(value * 16000);
+        // Scale to 16-bit range but not too loud
+        int16_t square_sample = (int16_t)(value * 12000);  // Lower amplitude to prevent clipping when filtered
         audio_samples[i] = square_sample;
     }
     write_wav_file("glu_square_raw.wav", audio_samples, num_samples, 22050);
