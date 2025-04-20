@@ -21,7 +21,9 @@
 //
 
 module sound_glu #(
-    parameter bit ENABLE = 1'b1
+    parameter bit ENABLE = 1'b1,
+    parameter bit NOISE_GATE_ENABLE = 1'b1,  // Enable noise gate to prevent buzzing
+    parameter int NOISE_GATE_THRESHOLD = 48  // Threshold for noise gate (0-128)
 ) (
     a2bus_if.slave a2bus_if,
 
@@ -173,11 +175,43 @@ module sound_glu #(
         .channel_o()
     );
 
-    logic [3:0] volume_shift_w = volume_w ^ 4'hF;
-    //assign audio_l_o = left_mix_w >>> volume_shift_w[3:2];
-    //assign audio_r_o = right_mix_w >>> volume_shift_w[3:2];
-    assign audio_l_o = left_mix_w;
-    assign audio_r_o = right_mix_w;
+    // Volume is inverted for right shift (0 is min volume, 15 is max volume)
+    // IIgs volume control ranges from 0-15, invert for right shift (0=lots of shift, 15=no shift)
+    logic [3:0] volume_shift_w = volume_w < 12 ? 4'd4 - {2'b0, volume_w[3:2]} : 4'd0;
+    
+    // Output registers for audio with zero-centering preserved
+    reg signed [15:0] audio_l_reg;
+    reg signed [15:0] audio_r_reg;
+    
+    // Assign outputs from registers
+    assign audio_l_o = audio_l_reg;
+    assign audio_r_o = audio_r_reg;
+    
+    // Apply volume control and noise gate while preserving zero-centering
+    always_ff @(posedge a2bus_if.clk_logic) begin
+        // Apply volume control using arithmetic right shift (>>>)
+        // This preserves the sign bit, maintaining zero-centered audio
+        automatic logic signed [15:0] vol_adjusted_l = left_mix_w >>> volume_shift_w;
+        automatic logic signed [15:0] vol_adjusted_r = right_mix_w >>> volume_shift_w;
+        
+        // Apply noise gate to remove buzzing during silent periods
+        // Only apply when signal level is very low, preserving zero-centering
+        if (NOISE_GATE_ENABLE && 
+            vol_adjusted_l < NOISE_GATE_THRESHOLD && 
+            vol_adjusted_l > -NOISE_GATE_THRESHOLD) begin
+            audio_l_reg <= '0;  // Digital silence
+        end else begin
+            audio_l_reg <= vol_adjusted_l;  // Normal output
+        end
+        
+        if (NOISE_GATE_ENABLE && 
+            vol_adjusted_r < NOISE_GATE_THRESHOLD && 
+            vol_adjusted_r > -NOISE_GATE_THRESHOLD) begin
+            audio_r_reg <= '0;  // Digital silence
+        end else begin
+            audio_r_reg <= vol_adjusted_r;  // Normal output
+        end
+    end
     //assign audio_l_o = channel_w[0] >>> (4'd15 - volume_w);
     //assign audio_r_o = channel_w[0] >>> (4'd15 - volume_w);
     //assign audio_l_o = channel_w[1] >>> (4'd15 - volume_w);
