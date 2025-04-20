@@ -22,8 +22,8 @@
 
 module sound_glu #(
     parameter bit ENABLE = 1'b1,
-    parameter bit NOISE_GATE_ENABLE = 1'b1,  // Enable noise gate to prevent buzzing
-    parameter int NOISE_GATE_THRESHOLD = 48  // Threshold for noise gate (0-128)
+    parameter bit NOISE_GATE_ENABLE = 1'b0,  // Temporarily disable noise gate for testing
+    parameter int NOISE_GATE_THRESHOLD = 16  // Lower threshold for noise gate (0-128)
 ) (
     a2bus_if.slave a2bus_if,
 

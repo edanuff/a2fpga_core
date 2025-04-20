@@ -640,7 +640,7 @@ module doc5503 #(
 
     reg signed [15:0] output_r;                                         // Current scaled oscillator output        
 
-    // DSP Multiplier with simple low-pass filter
+    // DSP Multiplier with simple low-pass filter and noise gate
     always @(posedge clk_i) begin
         automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
         automatic logic signed [7:0] vol_s = {2'b0, vol_w[7:2]};        // convert volume to signed
@@ -648,7 +648,16 @@ module doc5503 #(
         // Apply a subtle low-pass filter by multiplying the output by 0.75
         // to reduce high-frequency buzzy distortion
         automatic logic signed [15:0] raw_product = data_w * vol_s;
-        output_r <= (raw_product * 3) >>> 2;                           // multiply by 0.75 (3/4)
+        automatic logic signed [15:0] filtered_product = (raw_product * 3) >>> 2;  // multiply by 0.75 (3/4)
+        
+        // Add a noise gate to completely silence very quiet signals
+        // This helps prevent low-level noise during "silent" periods
+        // Using a much lower threshold to avoid silencing valid audio
+        if ((filtered_product < 32) && (filtered_product > -32)) begin
+            output_r <= 0;  // Silence very low values to prevent noise floor buzz
+        end else begin
+            output_r <= filtered_product;
+        end
     end
 
     reg output_reset_req;
@@ -976,11 +985,32 @@ module doc5503 #(
                     if (mixer_cycle_r == cycle_max_w) mixer_state_r <= MIXER_OUTPUT;
                 end
                 MIXER_OUTPUT: begin                    
-                    channel_r[mixer_channel_r] <= next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                    // Apply noise gate to channel output - reduced threshold for testing
+                    if (next_channel_r[mixer_channel_r] < 32 && next_channel_r[mixer_channel_r] > -32) begin
+                        channel_r[mixer_channel_r] <= '0;  // Silence very low values
+                    end else begin
+                        channel_r[mixer_channel_r] <= next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                    end
 
-                    mono_mix_r <= next_mono_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
-                    left_mix_r <= next_left_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
-                    right_mix_r <= next_right_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                    // Apply noise gate to mono mix output - reduced threshold for testing
+                    if (next_mono_mix_r < 32 && next_mono_mix_r > -32) begin
+                        mono_mix_r <= '0;  // Silence very low values
+                    end else begin
+                        mono_mix_r <= next_mono_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                    end
+
+                    // Apply noise gate to stereo mix outputs - reduced threshold for testing
+                    if (next_left_mix_r < 32 && next_left_mix_r > -32) begin
+                        left_mix_r <= '0;  // Silence very low values
+                    end else begin
+                        left_mix_r <= next_left_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                    end
+
+                    if (next_right_mix_r < 32 && next_right_mix_r > -32) begin
+                        right_mix_r <= '0;  // Silence very low values
+                    end else begin
+                        right_mix_r <= next_right_mix_r[MIXER_SUM_RESOLUTION-1:MIXER_SUM_RESOLUTION-16];
+                    end
 
                     mixer_channel_r <= mixer_channel_r + 1'd1;
                     if (mixer_channel_r == CHANNEL_MAX) mixer_state_r <= MIXER_ZERO;
