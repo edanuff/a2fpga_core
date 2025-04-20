@@ -80,8 +80,16 @@ int main(int argc, char** argv) {
         return 1;
     }
     
+    // First, generate a pure sine wave for testing DC offset
+    printf("Generating test sine wave (should be perfectly zero-centered)...\n");
+    for (int i = 0; i < num_samples; i++) {
+        double phase = 2.0 * M_PI * i / 100.0; // ~220Hz sine wave
+        audio_samples[i] = (int16_t)(sin(phase) * 16000.0); // -16000 to 16000 range
+    }
+    write_wav_file("glu_sine_test.wav", audio_samples, num_samples, 22050);
+    
     // Create wavetable data (same as in glu_tb.cpp)
-    // Values are centered around 128 (0x80) which is the zero point
+    // Values are centered around 128 (0x80) which is the zero point in unsigned 8-bit
     uint8_t waveTableData[256];
     for (int i = 0; i < 256; i++) {
         if (i < 128) {
@@ -90,6 +98,17 @@ int main(int argc, char** argv) {
             waveTableData[i] = 128 + (128 - (i - 128)) / 2;  // 192-128 (returning to zero)
         }
     }
+    
+    // Print some stats about our wavetable
+    printf("Wavetable statistics:\n");
+    for (int i = 0; i < 256; i += 32) {
+        printf("  Values %3d-%3d: ", i, i+31);
+        for (int j = 0; j < 32 && i+j < 256; j++) {
+            printf("%3d ", waveTableData[i+j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
     
     // Generate audio samples using similar math to what's in the DOC5503 module
     // This simulates a complete path from DOC to GLU to audio output
@@ -115,24 +134,27 @@ int main(int argc, char** argv) {
                 // Simulate DOC oscillator playback
                 int oscillator_idx = (i * 250) % 256;  // Similar to frequency setting in test
                 
-                // Properly convert unsigned (0-255) to signed (-128 to 127)
-                int8_t sample_value = waveTableData[oscillator_idx] ^ 0x80;  // Convert to signed
+                // Explicitly handle unsigned to signed conversion for clarity:
+                uint8_t raw_sample = waveTableData[oscillator_idx];     // 0-255 range, centered at 128
+                int8_t signed_sample = raw_sample - 128;               // -128 to 127 range, centered at 0
                 
-                // Apply DOC volume (maximum = 255)
-                // This multiplication preserves the sign and creates a zero-centered waveform
-                int16_t doc_output = sample_value * 255;
+                // Verify we're properly handling signed values and bitwise operations
+                // (let's avoid potential issues with bit operations and sign extension)
                 
-                // Apply 0.75 factor (low-pass filter in DSP multiplier)
-                int16_t filtered_output = (doc_output * 3) / 4;
+                // Scale signed sample into 16-bit range (full volume = 255)
+                int16_t scaled_sample = signed_sample * 255;           // Preserves sign, expands range
                 
-                // Apply GLU volume control using right shift (preserves sign)
-                int16_t volume_adjusted = filtered_output >> volume_shift;
+                // Apply the 0.75 factor (low-pass filter in DSP multiplier)
+                int16_t filtered_sample = (scaled_sample * 3) / 4;     // Multiply by 0.75
                 
-                // Apply noise gate if enabled (still preserves zero-centered waveform)
+                // Apply volume control with arithmetic right shift (properly preserves sign)
+                int16_t volume_adjusted = filtered_sample >> volume_shift;
+                
+                // Apply noise gate if enabled - cleans up low-level signals
                 if (threshold > 0 && volume_adjusted > -threshold && volume_adjusted < threshold) {
-                    audio_samples[i] = 0;  // Silence (zero-centered)
+                    audio_samples[i] = 0;                             // True digital silence
                 } else {
-                    audio_samples[i] = volume_adjusted;  // Properly signed, zero-centered output
+                    audio_samples[i] = volume_adjusted;                // Full signal (with sign preserved)
                 }
             }
             
@@ -147,45 +169,45 @@ int main(int argc, char** argv) {
     printf("\nGenerating test files for buzzing issue...\n");
     
     // Generate a reference waveform that has silent parts - properly zero-centered
+    printf("Generating audio test patterns with silent sections...\n");
     for (int i = 0; i < num_samples; i++) {
         // Create a pattern that plays for 1/4 second, then silent for 1/4 second
         int cycle_pos = i % (num_samples / 2);
         
         if (cycle_pos < num_samples / 4) {
-            // Active part - play the waveform (with proper DC centering)
+            // Active part - play the waveform with explicit DC centering
             int oscillator_idx = (i * 250) % 256;
-            int8_t sample_value = waveTableData[oscillator_idx] ^ 0x80;  // Convert to signed (-128 to 127)
+            uint8_t raw_sample = waveTableData[oscillator_idx];         // 0-255 range
+            int8_t signed_sample = raw_sample - 128;                   // Convert to signed (-128 to 127)
             
-            // Scale to 16-bit with proper sign extension
-            int16_t scaled_value = sample_value * 255;
+            // Scale to 16-bit range
+            int16_t scaled_sample = signed_sample * 255;                // Scale to full 16-bit range
             
             // Apply 0.75 factor like in the real DOC
-            audio_samples[i] = (scaled_value * 3) / 4;  // Zero-centered output
+            audio_samples[i] = (scaled_sample * 3) / 4;                 // Low-pass filter
         } else {
             // Silent part - true zero (DC centered)
             audio_samples[i] = 0;
         }
     }
+    // Write perfect reference with clean silence
     write_wav_file("glu_reference.wav", audio_samples, num_samples, 22050);
     
-    // Now add simulated buzzing noise during silent parts - zero centered
+    // Create a version with simulated buzzing during silent parts
     for (int i = 0; i < num_samples; i++) {
         int cycle_pos = i % (num_samples / 2);
         
         if (cycle_pos < num_samples / 4) {
-            // Active part - play the waveform (same as reference)
-            int oscillator_idx = (i * 250) % 256;
-            int8_t sample_value = waveTableData[oscillator_idx] ^ 0x80;  // Convert to signed
-            int16_t scaled_value = sample_value * 255;
-            audio_samples[i] = (scaled_value * 3) / 4;  // With DOC filter applied
+            // Keep the active parts unchanged - these should be properly DC centered
+            // No changes needed
         } else {
-            // Silent part with noise - zero-centered, low amplitude noise
-            audio_samples[i] = (rand() % 33) - 16;  // Low-level noise (-16 to +16)
+            // Replace silent parts with low-level noise (properly centered around zero)
+            audio_samples[i] = (rand() % 65) - 32;  // Low-level noise (-32 to +32)
         }
     }
     write_wav_file("glu_with_buzz.wav", audio_samples, num_samples, 22050);
     
-    // Apply noise gate to fix buzzing - still zero-centered
+    // Create a version with noise gate applied to fix the buzzing
     for (int i = 0; i < num_samples; i++) {
         if (audio_samples[i] > -32 && audio_samples[i] < 32) {
             audio_samples[i] = 0;  // Apply noise gate
@@ -193,14 +215,38 @@ int main(int argc, char** argv) {
     }
     write_wav_file("glu_fixed.wav", audio_samples, num_samples, 22050);
     
+    // Create a square wave test file (zero-centered) to show filter effect
+    for (int i = 0; i < num_samples; i++) {
+        // Generate a 220Hz square wave
+        double time = (double)i / 22050.0;
+        double value = sin(2.0 * M_PI * 220 * time) > 0 ? 1.0 : -1.0;
+        
+        // Scale to 16-bit range
+        int16_t square_sample = (int16_t)(value * 16000);
+        audio_samples[i] = square_sample;
+    }
+    write_wav_file("glu_square_raw.wav", audio_samples, num_samples, 22050);
+    
+    // Create a filtered version of the square wave
+    for (int i = 0; i < num_samples; i++) {
+        audio_samples[i] = (audio_samples[i] * 3) / 4;  // Apply 0.75 low-pass filter
+    }
+    write_wav_file("glu_square_filtered.wav", audio_samples, num_samples, 22050);
+    
     // Clean up
     free(audio_samples);
     
     printf("\nGenerated WAV files:\n");
-    printf("1. glu_vol*_gate*.wav - Various volume levels and noise gate settings\n");
-    printf("2. glu_reference.wav - Reference waveform with proper silent parts\n");
-    printf("3. glu_with_buzz.wav - Simulation of the buzzing issue during silent parts\n");
-    printf("4. glu_fixed.wav - Same as above but with noise gate applied\n");
+    printf("1. glu_sine_test.wav - Pure sine wave (verify proper zero-centering in Audacity)\n");
+    printf("2. glu_vol*_gate*.wav - Various volume levels and noise gate settings\n");
+    printf("3. glu_reference.wav - Reference waveform with proper silent parts\n");
+    printf("4. glu_with_buzz.wav - Simulation of the buzzing issue during silent parts\n");
+    printf("5. glu_fixed.wav - Same as above but with noise gate applied\n");
+    printf("6. glu_square_raw.wav - Raw square wave for showing filter effect\n");
+    printf("7. glu_square_filtered.wav - Filtered square wave (0.75x filter)\n");
+    
+    printf("\nNOTE: All files should be properly zero-centered in Audacity. If not, check\n");
+    printf("      your Audacity import settings or view the glu_sine_test.wav file to verify.\n");
     
     return 0;
 }

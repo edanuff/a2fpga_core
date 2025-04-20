@@ -46,6 +46,8 @@ while true; do
     echo "8. GLU Buzzing Simulation and Fix"
     echo "9. GLU Volume Level Comparison (max vs medium)"
     echo "10. GLU Noise Gate Comparison (no gate vs gate=32)"
+    echo "11. GLU Sine Wave Test (verify zero-centering)"
+    echo "12. GLU Square Wave Filter Comparison"
     echo ""
     echo "q. Quit"
     read -p "Enter your choice: " choice
@@ -87,6 +89,14 @@ while true; do
             ;;
         10)
             play_comparison "glu_vol15_gate0.wav" "glu_vol15_gate32.wav" "GLU Noise Gate Comparison - No Gate vs Gate=32"
+            ;;
+        11)
+            echo "Playing: GLU Sine Wave Test (verify zero-centering in Audacity)"
+            $PLAY_CMD "glu_sine_test.wav"
+            echo ""
+            ;;
+        12)
+            play_comparison "glu_square_raw.wav" "glu_square_filtered.wav" "GLU Square Wave - Unfiltered vs Filtered (0.75x)"
             ;;
         q|Q)
             echo "Exiting."
