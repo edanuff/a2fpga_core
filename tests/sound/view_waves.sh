@@ -32,6 +32,8 @@ play_comparison() {
 # Main menu
 while true; do
     echo "Choose a test to listen to:"
+    echo ""
+    echo "DOC5503 Direct Tests:"
     echo "1. Square Wave Comparison (144 Hz - matches IIgs frequency offset 429)"
     echo "2. Square Wave Comparison (higher frequency, 344 Hz)"
     echo "3. Sawtooth Wave Comparison (144 Hz - matches IIgs frequency offset 429)"
@@ -39,8 +41,13 @@ while true; do
     echo "5. Multiple Oscillator Mix Test"
     echo "6. Volume Comparison (vol=192 vs vol=255)"
     echo "7. Scaling Comparison (0.5x vs 1.0x)"
-    echo "q. Quit"
     echo ""
+    echo "GLU Tests (Sound GLU + DOC5503):"
+    echo "8. GLU Buzzing Simulation and Fix"
+    echo "9. GLU Volume Level Comparison (max vs medium)"
+    echo "10. GLU Noise Gate Comparison (no gate vs gate=32)"
+    echo ""
+    echo "q. Quit"
     read -p "Enter your choice: " choice
     
     case $choice in
@@ -64,6 +71,22 @@ while true; do
             ;;
         7)
             play_comparison "doc_output_scale_0.5000.wav" "doc_output_scale_1.0000.wav" "DOC scaling comparison - 0.5x vs. 1.0x"
+            ;;
+        8)
+            echo "Playing: GLU Buzzing Simulation and Fix"
+            echo "First: glu_with_buzz.wav (simulated buzzing during silent periods)"
+            $PLAY_CMD "glu_with_buzz.wav"
+            echo "Second: glu_fixed.wav (with noise gate applied)"
+            $PLAY_CMD "glu_fixed.wav"
+            echo "Third: glu_reference.wav (reference with proper silence)"
+            $PLAY_CMD "glu_reference.wav"
+            echo ""
+            ;;
+        9)
+            play_comparison "glu_vol15_gate0.wav" "glu_vol5_gate0.wav" "GLU Volume Comparison - Maximum (15) vs Medium (5)"
+            ;;
+        10)
+            play_comparison "glu_vol15_gate0.wav" "glu_vol15_gate32.wav" "GLU Noise Gate Comparison - No Gate vs Gate=32"
             ;;
         q|Q)
             echo "Exiting."
