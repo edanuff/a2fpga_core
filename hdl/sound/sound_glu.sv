@@ -31,8 +31,8 @@ module sound_glu #(
     output rd_en_o,
     output irq_n_o,
 
-    output [15:0] audio_l_o,
-    output [15:0] audio_r_o,
+    output signed [15:0] audio_l_o,
+    output signed [15:0] audio_r_o,
 
     sdram_port_if.client glu_mem_if,
     sdram_port_if.client doc_mem_if
@@ -183,16 +183,28 @@ module sound_glu #(
     reg signed [15:0] audio_l_reg;
     reg signed [15:0] audio_r_reg;
     
-    // Test signal generator - add a simple sawtooth wave for debugging
-    reg [15:0] test_counter = 0;
+    // Test signal generator - add a simple square wave for debugging
+    // Using a slower frequency that will be clearly audible (around a440Hz)
+    reg [18:0] test_counter = 0;
+    reg test_tone = 0;
+    
     always_ff @(posedge a2bus_if.clk_logic) begin
-        test_counter <= test_counter + 16'd1;
+        // Divide clock to create audible frequency
+        // For ~50MHz clock, counting to ~60000 gives about 440Hz
+        if (test_counter == 19'd60000) begin
+            test_counter <= 0;
+            test_tone <= ~test_tone;
+        end else begin
+            test_counter <= test_counter + 19'd1;
+        end
     end
     
+    // Create a square wave test signal with 1/4 full scale amplitude
+    wire signed [15:0] test_signal = test_tone ? 16'h1000 : -16'h1000;
+    
     // Mix with a test signal to ensure something is coming out
-    // Assign outputs from registers with test signal added
-    assign audio_l_o = audio_l_reg + {test_counter[15], test_counter[15:1]};
-    assign audio_r_o = audio_r_reg + {test_counter[15], test_counter[15:1]};
+    assign audio_l_o = audio_l_reg + test_signal;
+    assign audio_r_o = audio_r_reg + test_signal;
     
     // Apply volume control and noise gate while preserving zero-centering
     always_ff @(posedge a2bus_if.clk_logic) begin

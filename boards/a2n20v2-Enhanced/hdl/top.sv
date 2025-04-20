@@ -793,9 +793,23 @@ module top #(
     wire [15:0] cdc_audio_r;
 
     // Mix all audio sources together to ensure at least one works
-    // Including SuperSprite audio, Mockingboard, and Speaker
-    wire [15:0] mixed_audio_l = sg_audio_l + {ssp_audio_w[15], ssp_audio_w[15:1]} + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0};
-    wire [15:0] mixed_audio_r = sg_audio_r + {ssp_audio_w[15], ssp_audio_w[15:1]} + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0};
+    // Audio format notes:
+    // - sg_audio_l/r: 16-bit signed from DOC5503 (Ensoniq)
+    // - ssp_audio_w: 16-bit unsigned from SuperSprite
+    // - mb_audio_l/r: 10-bit unsigned from Mockingboard
+    // - speaker_audio_w: 1-bit from Apple speaker
+    
+    // Convert all to 16-bit signed for proper mixing
+    wire signed [15:0] mb_signed_l = {1'b0, mb_audio_l, 5'b0} - 16'h8000; // Unsigned to signed
+    wire signed [15:0] mb_signed_r = {1'b0, mb_audio_r, 5'b0} - 16'h8000;
+    wire signed [15:0] sp_signed = {1'b0, ssp_audio_w} - 16'h8000;
+    
+    // For the 1-bit speaker, use either positive or negative values to create a square wave
+    wire signed [15:0] speaker_signed = speaker_audio_w ? 16'h3000 : -16'h3000; 
+    
+    // Mix properly converted signed audio signals
+    wire signed [15:0] mixed_audio_l = sg_audio_l + sp_signed + mb_signed_l + speaker_signed;
+    wire signed [15:0] mixed_audio_r = sg_audio_r + sp_signed + mb_signed_r + speaker_signed;
     
     cdc_fifo #(
         .WIDTH(16),
