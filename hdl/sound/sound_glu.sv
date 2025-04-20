@@ -23,7 +23,9 @@
 module sound_glu #(
     parameter bit ENABLE = 1'b1,
     parameter bit NOISE_GATE_ENABLE = 1'b0,  // Temporarily disable noise gate for testing
-    parameter int NOISE_GATE_THRESHOLD = 16  // Lower threshold for noise gate (0-128)
+    parameter int NOISE_GATE_THRESHOLD = 16, // Lower threshold for noise gate (0-128)
+    parameter bit DEBUG_MODE = 1'b1,        // Enable debug mode to bypass DOC and inject test signal
+    parameter bit TEST_TONE_ENABLE = 1'b1   // Keep test tone for debugging
 ) (
     a2bus_if.slave a2bus_if,
 
@@ -151,6 +153,33 @@ module sound_glu #(
     wire signed [15:0] right_mix_w;
     //wire signed [15:0] channel_w[15:0]; 
 
+    // Debug signals for DOC access - allows monitoring key registers
+    reg [7:0] debug_osc_enable_r = 8'h00;
+    reg [7:0] debug_osc_control_r = 8'h00;
+    reg [7:0] debug_osc_volume_r = 8'h00;
+    
+    // Logic to capture key register writes for debugging
+    always_ff @(posedge a2bus_if.clk_logic) begin
+        if (!a2bus_if.system_reset_n) begin
+            debug_osc_enable_r <= 8'h00;
+            debug_osc_control_r <= 8'h00;
+            debug_osc_volume_r <= 8'h00;
+        end else if (ENABLE && sd_sel_w && access_doc_w && !a2bus_if.rw_n && a2bus_if.data_in_strobe) begin
+            // Capture oscillator enable writes (0xE1)
+            if (sound_ptr_lo_r == 8'hE1) begin
+                debug_osc_enable_r <= a2bus_if.data;
+            end
+            // Capture first oscillator's control register (0xA0)
+            else if (sound_ptr_lo_r == 8'hA0) begin
+                debug_osc_control_r <= a2bus_if.data;
+            end
+            // Capture first oscillator's volume register (0x40)
+            else if (sound_ptr_lo_r == 8'h40) begin
+                debug_osc_volume_r <= a2bus_if.data;
+            end
+        end
+    end
+
     doc5503 #(
         .OUTPUT_CHANNEL_MIX(0),
         .OUTPUT_MONO_MIX(0),
@@ -161,7 +190,7 @@ module sound_glu #(
         .clk_en_i(a2bus_if.clk_7m_posedge),
         .irq_n_o(irq_n_o),
         .cs_n_i(~(sd_sel_w & access_doc_w & !a2bus_if.rw_n & a2bus_if.data_in_strobe)),
-        .we_n_i(1'b0),
+        .we_n_i(a2bus_if.rw_n),  // Connect correctly so reads work too
         .addr_i(sound_ptr_lo_r),
         .data_i(a2bus_if.data),
         .data_o(doc_data_o_w),
@@ -199,12 +228,43 @@ module sound_glu #(
         end
     end
     
-    // Create a square wave test signal with 1/4 full scale amplitude
+    // Create square wave test signals at different frequencies to distinguish between normal and debug modes
+    // Normal test tone is 440Hz (A note)
     wire signed [15:0] test_signal = test_tone ? 16'h1000 : -16'h1000;
     
-    // Mix with a test signal to ensure something is coming out
-    assign audio_l_o = audio_l_reg + test_signal;
-    assign audio_r_o = audio_r_reg + test_signal;
+    // Debug signal is 880Hz (A one octave higher) - will sound different to help identify
+    reg debug_tone = 0;
+    reg [17:0] debug_counter = 0;
+    
+    always_ff @(posedge a2bus_if.clk_logic) begin
+        // Debug tone at 880Hz (twice the frequency of the regular test tone)
+        if (debug_counter == 18'd30000) begin
+            debug_counter <= 0;
+            debug_tone <= ~debug_tone;
+        end else begin
+            debug_counter <= debug_counter + 18'd1;
+        end
+    end
+    
+    wire signed [15:0] debug_signal = debug_tone ? 16'h1000 : -16'h1000;
+    
+    // Create debug output from key registers for direct listening
+    wire signed [15:0] osc_enable_signal = debug_osc_enable_r[1] ? 16'h0800 : -16'h0800;
+    
+    // In debug mode, output debug signals, otherwise normal audio path
+    // Mix with a test signal to ensure something is coming out (can be disabled with TEST_TONE_ENABLE)
+    generate
+        if (DEBUG_MODE) begin: debug_audio
+            // Output debug info as audio - this will create a distinct pattern that tells us
+            // whether the DOC is being properly configured
+            assign audio_l_o = osc_enable_signal + (TEST_TONE_ENABLE ? debug_signal : 16'h0);
+            assign audio_r_o = ((debug_osc_volume_r > 0) ? 16'h0800 : -16'h0800) + (TEST_TONE_ENABLE ? debug_signal : 16'h0);
+        end else begin: normal_audio
+            // Normal operation - mix DOC output with test tone if enabled
+            assign audio_l_o = audio_l_reg + (TEST_TONE_ENABLE ? test_signal : 16'h0);
+            assign audio_r_o = audio_r_reg + (TEST_TONE_ENABLE ? test_signal : 16'h0);
+        end
+    endgenerate
     
     // Apply volume control and noise gate while preserving zero-centering
     always_ff @(posedge a2bus_if.clk_logic) begin
