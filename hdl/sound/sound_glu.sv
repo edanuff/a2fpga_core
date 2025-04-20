@@ -36,6 +36,12 @@ module sound_glu #(
     output signed [15:0] audio_l_o,
     output signed [15:0] audio_r_o,
 
+    // Debug outputs for external monitoring (LEDs, etc.)
+    output debug_doc_active_o,     // DOC is active and configured
+    output debug_osc_enabled_o,    // Oscillator 0 is enabled
+    output debug_wave_reads_o,     // Wavetable memory reads occurring
+    output [7:0] debug_doc_access_count_o,  // Count of DOC accesses
+    
     sdram_port_if.client glu_mem_if,
     sdram_port_if.client doc_mem_if
     
@@ -153,29 +159,71 @@ module sound_glu #(
     wire signed [15:0] right_mix_w;
     //wire signed [15:0] channel_w[15:0]; 
 
-    // Debug signals for DOC access - allows monitoring key registers
+    // Debug signals for DOC access - allows monitoring key registers and events
     reg [7:0] debug_osc_enable_r = 8'h00;
     reg [7:0] debug_osc_control_r = 8'h00;
     reg [7:0] debug_osc_volume_r = 8'h00;
+    reg [7:0] debug_wtp_r = 8'h00;        // Wave table pointer for first oscillator
+    reg [15:0] debug_freq_r = 16'h0000;   // Frequency for first oscillator
     
-    // Logic to capture key register writes for debugging
+    // Additional event counters for debugging
+    reg [7:0] debug_doc_access_count = 8'h00;  // Count DOC accesses
+    reg [7:0] debug_wave_read_count = 8'h00;   // Count wavetable reads
+    
+    // Flag indicating DOC is being accessed and should be producing sound
+    reg debug_doc_active = 1'b0;
+    
+    // Logic to capture key register writes and events for debugging
     always_ff @(posedge a2bus_if.clk_logic) begin
         if (!a2bus_if.system_reset_n) begin
             debug_osc_enable_r <= 8'h00;
             debug_osc_control_r <= 8'h00;
             debug_osc_volume_r <= 8'h00;
-        end else if (ENABLE && sd_sel_w && access_doc_w && !a2bus_if.rw_n && a2bus_if.data_in_strobe) begin
-            // Capture oscillator enable writes (0xE1)
-            if (sound_ptr_lo_r == 8'hE1) begin
-                debug_osc_enable_r <= a2bus_if.data;
+            debug_wtp_r <= 8'h00;
+            debug_freq_r <= 16'h0000;
+            debug_doc_access_count <= 8'h00;
+            debug_wave_read_count <= 8'h00;
+            debug_doc_active <= 1'b0;
+        end else begin
+            // Count wavetable memory reads (indicates oscillator is running)
+            if (doc_mem_rd_w) begin
+                debug_wave_read_count <= debug_wave_read_count + 8'd1;
+                // If we're reading from the wavetable memory, set active flag
+                debug_doc_active <= 1'b1;
             end
-            // Capture first oscillator's control register (0xA0)
-            else if (sound_ptr_lo_r == 8'hA0) begin
-                debug_osc_control_r <= a2bus_if.data;
-            end
-            // Capture first oscillator's volume register (0x40)
-            else if (sound_ptr_lo_r == 8'h40) begin
-                debug_osc_volume_r <= a2bus_if.data;
+            
+            // Capture DOC register writes
+            if (ENABLE && sd_sel_w && access_doc_w && !a2bus_if.rw_n && a2bus_if.data_in_strobe) begin
+                // Increment access counter on any DOC write
+                debug_doc_access_count <= debug_doc_access_count + 8'd1;
+                
+                // Capture oscillator enable writes (0xE1)
+                if (sound_ptr_lo_r == 8'hE1) begin
+                    debug_osc_enable_r <= a2bus_if.data;
+                end
+                // Capture first oscillator's control register (0xA0)
+                else if (sound_ptr_lo_r == 8'hA0) begin
+                    debug_osc_control_r <= a2bus_if.data;
+                    // Check if oscillator is being enabled (halt bit cleared)
+                    if ((a2bus_if.data & 8'h01) == 8'h00) begin
+                        debug_doc_active <= 1'b1;
+                    end
+                end
+                // Capture first oscillator's volume register (0x40)
+                else if (sound_ptr_lo_r == 8'h40) begin
+                    debug_osc_volume_r <= a2bus_if.data;
+                end
+                // Capture first oscillator's wavetable pointer (0x80)
+                else if (sound_ptr_lo_r == 8'h80) begin
+                    debug_wtp_r <= a2bus_if.data;
+                end
+                // Capture first oscillator's frequency registers
+                else if (sound_ptr_lo_r == 8'h00) begin
+                    debug_freq_r[7:0] <= a2bus_if.data;
+                end
+                else if (sound_ptr_lo_r == 8'h20) begin
+                    debug_freq_r[15:8] <= a2bus_if.data;
+                end
             end
         end
     end
@@ -190,7 +238,7 @@ module sound_glu #(
         .clk_en_i(a2bus_if.clk_7m_posedge),
         .irq_n_o(irq_n_o),
         .cs_n_i(~(sd_sel_w & access_doc_w & !a2bus_if.rw_n & a2bus_if.data_in_strobe)),
-        .we_n_i(a2bus_if.rw_n),  // Connect correctly so reads work too
+        .we_n_i(1'b0),  // DOC must be write-only as it shadows the real DOC chip on motherboard
         .addr_i(sound_ptr_lo_r),
         .data_i(a2bus_if.data),
         .data_o(doc_data_o_w),
@@ -248,17 +296,63 @@ module sound_glu #(
     
     wire signed [15:0] debug_signal = debug_tone ? 16'h1000 : -16'h1000;
     
-    // Create debug output from key registers for direct listening
+    // Create tone pattern sequences based on debug counters for direct audio feedback
+    reg pulse_tone = 0;
+    reg [23:0] pulse_counter = 0;
+    reg [3:0] pulse_pattern_counter = 0;
+    
+    // Generate complex pulse patterns that represent debug states
+    always_ff @(posedge a2bus_if.clk_logic) begin
+        // Create a pulse pattern generator
+        if (pulse_counter >= 24'd500000) begin
+            pulse_counter <= 0;
+            pulse_pattern_counter <= pulse_pattern_counter + 4'd1;
+            if (pulse_pattern_counter >= 4'd10) begin
+                pulse_pattern_counter <= 0;
+            end
+        end else begin
+            pulse_counter <= pulse_counter + 24'd1;
+        end
+        
+        // Create different pulse patterns based on debug state
+        case (pulse_pattern_counter)
+            0: pulse_tone <= 1'b1;  // constant tone for reference
+            1: pulse_tone <= debug_doc_active;  // pulse if DOC is active
+            2: pulse_tone <= debug_osc_enable_r[1];  // Oscillator 0 enabled?
+            3: pulse_tone <= (debug_osc_control_r & 8'h01) == 0;  // Oscillator 0 not halted?
+            4: pulse_tone <= debug_osc_volume_r > 0;  // Oscillator 0 has volume?
+            5: pulse_tone <= debug_wave_read_count > 0;  // Any wavetable reads?
+            6: pulse_tone <= debug_doc_access_count > 0;  // Any DOC accesses?
+            7: pulse_tone <= (debug_freq_r > 0);  // Oscillator frequency set?
+            default: pulse_tone <= 0;
+        endcase
+    end
+    
+    // Create audio pulses for debug output
+    wire signed [15:0] pulse_signal = pulse_tone ? 16'h1000 : -16'h1000;
+    
+    // Also create pure debug tones for key state values
     wire signed [15:0] osc_enable_signal = debug_osc_enable_r[1] ? 16'h0800 : -16'h0800;
+    wire signed [15:0] osc_active_signal = debug_doc_active ? 16'h0800 : -16'h0800;
+    wire signed [15:0] osc_halt_signal = (debug_osc_control_r & 8'h01) == 0 ? 16'h0800 : -16'h0800;
+    wire signed [15:0] osc_volume_signal = (debug_osc_volume_r > 0) ? 16'h0800 : -16'h0800;
+    
+    // Connect debug signals to outputs for LED monitoring
+    assign debug_doc_active_o = debug_doc_active;
+    assign debug_osc_enabled_o = debug_osc_enable_r[1];
+    assign debug_wave_reads_o = (debug_wave_read_count > 0);
+    assign debug_doc_access_count_o = debug_doc_access_count;
     
     // In debug mode, output debug signals, otherwise normal audio path
     // Mix with a test signal to ensure something is coming out (can be disabled with TEST_TONE_ENABLE)
     generate
         if (DEBUG_MODE) begin: debug_audio
-            // Output debug info as audio - this will create a distinct pattern that tells us
-            // whether the DOC is being properly configured
-            assign audio_l_o = osc_enable_signal + (TEST_TONE_ENABLE ? debug_signal : 16'h0);
-            assign audio_r_o = ((debug_osc_volume_r > 0) ? 16'h0800 : -16'h0800) + (TEST_TONE_ENABLE ? debug_signal : 16'h0);
+            // Output debug info as audio in different channels
+            // Left channel: DOC state summary as pulse patterns
+            // Right channel: Key register values mixed with debug tone
+            assign audio_l_o = pulse_signal;
+            assign audio_r_o = osc_volume_signal + osc_enable_signal + 
+                              (TEST_TONE_ENABLE ? debug_signal : 16'h0);
         end else begin: normal_audio
             // Normal operation - mix DOC output with test tone if enabled
             assign audio_l_o = audio_l_reg + (TEST_TONE_ENABLE ? test_signal : 16'h0);

@@ -638,7 +638,8 @@ module top #(
     wire sg_rd_w;
 
     sound_glu #(
-        .ENABLE(ENSONIQ_ENABLE)  
+        .ENABLE(ENSONIQ_ENABLE),
+        .DEBUG_MODE(1'b1)  // Enable debug mode for diagnostics
     ) sg (
         .a2bus_if(a2bus_if),
         .data_o(sg_d_w),                 
@@ -647,6 +648,13 @@ module top #(
 
         .audio_l_o(sg_audio_l),               
         .audio_r_o(sg_audio_r),
+        
+        // Debug outputs for LED monitoring
+        .debug_doc_active_o(sg_debug_doc_active),
+        .debug_osc_enabled_o(sg_debug_osc_enabled),
+        .debug_wave_reads_o(sg_debug_wave_reads),
+        .debug_doc_access_count_o(debug_doc_access_count),
+        
         .glu_mem_if(mem_ports[GLU_MEM_PORT]),
         .doc_mem_if(mem_ports[DOC_MEM_PORT])
     );
@@ -785,6 +793,14 @@ module top #(
 
     assign irq_n_w = mb_irq_n && vdp_irq_n && ssc_irq_n;
 
+    // Debug signals from sound GLU for LED display
+    wire sg_debug_doc_active;
+    wire sg_debug_osc_enabled;
+    wire sg_debug_wave_reads;
+    
+    // Additional debug counter (access count is a good indication of activity)
+    reg [7:0] debug_doc_access_count = 8'h00;
+    
     // Audio
 
     // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
@@ -951,11 +967,14 @@ module top #(
     );
 
     always @(posedge clk_logic_w) begin 
-        //if (!s2) led <= {3'b111, inh_n_w, !picosoc_led};
-        if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
-        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
-        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
-        else led <= {!vdp_unlocked_w, ~vdp_gmode_w};
+        // Use button s2 to toggle between video mode display and DOC debugging
+        if (!s2) begin
+            // In DOC debug mode, show DOC status on LEDs
+            led <= {sg_debug_doc_active, sg_debug_osc_enabled, sg_debug_wave_reads, debug_doc_access_count[1:0]};
+        end else begin 
+            // Normal LED display showing video mode
+            led <= {!vdp_unlocked_w, ~vdp_gmode_w};
+        end
         //else led <= {!vdp_unlocked_w, dip_switches_n_w};
     end
 
