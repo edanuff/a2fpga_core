@@ -787,6 +787,29 @@ module top #(
 
     // Audio
 
+    // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
+
+    wire [15:0] cdc_audio_l;
+    wire [15:0] cdc_audio_r;
+
+    cdc_fifo #(
+        .WIDTH(16),
+        .DEPTH(5) 
+    ) audio_cdc_left (
+        .clk(clk_pixel_w),
+        .i(sg_audio_l),
+        .o(cdc_audio_l)
+    );
+
+    cdc_fifo #(
+        .WIDTH(16),
+        .DEPTH(5)
+    ) audio_cdc_right (
+        .clk(clk_pixel_w),
+        .i(sg_audio_r),
+        .o(cdc_audio_r)
+    );
+
     wire speaker_audio_w;
 
     apple_speaker apple_speaker (
@@ -829,8 +852,8 @@ module top #(
         //.core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
         //.core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
         .is_signed(1'b1),
-        .core_l(sg_audio_l),
-        .core_r(sg_audio_r),
+        .core_l(cdc_audio_l),
+        .core_r(cdc_audio_r),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
@@ -888,7 +911,8 @@ module top #(
             debug_b_w
         }),
         .reset(~device_reset_n_w),
-        .audio_sample_word({sg_audio_r, sg_audio_l}),
+        //.audio_sample_word({cdc_audio_l, cdc_audio_r}),
+        .audio_sample_word(audio_sample_word),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
         .cx(hdmi_x),
