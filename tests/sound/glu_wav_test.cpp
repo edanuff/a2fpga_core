@@ -81,12 +81,13 @@ int main(int argc, char** argv) {
     }
     
     // Create wavetable data (same as in glu_tb.cpp)
+    // Values are centered around 128 (0x80) which is the zero point
     uint8_t waveTableData[256];
     for (int i = 0; i < 256; i++) {
         if (i < 128) {
-            waveTableData[i] = 128 + (i / 2);
+            waveTableData[i] = 128 + (i / 2);  // 128-192 (positive values)
         } else {
-            waveTableData[i] = 128 + (128 - (i - 128)) / 2;
+            waveTableData[i] = 128 + (128 - (i - 128)) / 2;  // 192-128 (returning to zero)
         }
     }
     
@@ -113,22 +114,25 @@ int main(int argc, char** argv) {
             for (int i = 0; i < num_samples; i++) {
                 // Simulate DOC oscillator playback
                 int oscillator_idx = (i * 250) % 256;  // Similar to frequency setting in test
+                
+                // Properly convert unsigned (0-255) to signed (-128 to 127)
                 int8_t sample_value = waveTableData[oscillator_idx] ^ 0x80;  // Convert to signed
                 
                 // Apply DOC volume (maximum = 255)
+                // This multiplication preserves the sign and creates a zero-centered waveform
                 int16_t doc_output = sample_value * 255;
                 
                 // Apply 0.75 factor (low-pass filter in DSP multiplier)
                 int16_t filtered_output = (doc_output * 3) / 4;
                 
-                // Apply GLU volume control
+                // Apply GLU volume control using right shift (preserves sign)
                 int16_t volume_adjusted = filtered_output >> volume_shift;
                 
-                // Apply noise gate if enabled
+                // Apply noise gate if enabled (still preserves zero-centered waveform)
                 if (threshold > 0 && volume_adjusted > -threshold && volume_adjusted < threshold) {
-                    audio_samples[i] = 0;  // Silence
+                    audio_samples[i] = 0;  // Silence (zero-centered)
                 } else {
-                    audio_samples[i] = volume_adjusted;
+                    audio_samples[i] = volume_adjusted;  // Properly signed, zero-centered output
                 }
             }
             
@@ -142,40 +146,46 @@ int main(int argc, char** argv) {
     // Generate combined test that demonstrates the buzzing issue and fix
     printf("\nGenerating test files for buzzing issue...\n");
     
-    // Generate a reference waveform that has silent parts
+    // Generate a reference waveform that has silent parts - properly zero-centered
     for (int i = 0; i < num_samples; i++) {
         // Create a pattern that plays for 1/4 second, then silent for 1/4 second
         int cycle_pos = i % (num_samples / 2);
         
         if (cycle_pos < num_samples / 4) {
-            // Active part - play the waveform
+            // Active part - play the waveform (with proper DC centering)
             int oscillator_idx = (i * 250) % 256;
-            int8_t sample_value = waveTableData[oscillator_idx] ^ 0x80;
-            audio_samples[i] = sample_value * 255;
+            int8_t sample_value = waveTableData[oscillator_idx] ^ 0x80;  // Convert to signed (-128 to 127)
+            
+            // Scale to 16-bit with proper sign extension
+            int16_t scaled_value = sample_value * 255;
+            
+            // Apply 0.75 factor like in the real DOC
+            audio_samples[i] = (scaled_value * 3) / 4;  // Zero-centered output
         } else {
-            // Silent part
+            // Silent part - true zero (DC centered)
             audio_samples[i] = 0;
         }
     }
     write_wav_file("glu_reference.wav", audio_samples, num_samples, 22050);
     
-    // Now add simulated buzzing noise during silent parts
+    // Now add simulated buzzing noise during silent parts - zero centered
     for (int i = 0; i < num_samples; i++) {
         int cycle_pos = i % (num_samples / 2);
         
         if (cycle_pos < num_samples / 4) {
-            // Active part - play the waveform
+            // Active part - play the waveform (same as reference)
             int oscillator_idx = (i * 250) % 256;
-            int8_t sample_value = waveTableData[oscillator_idx] ^ 0x80;
-            audio_samples[i] = sample_value * 255;
+            int8_t sample_value = waveTableData[oscillator_idx] ^ 0x80;  // Convert to signed
+            int16_t scaled_value = sample_value * 255;
+            audio_samples[i] = (scaled_value * 3) / 4;  // With DOC filter applied
         } else {
-            // Silent part with noise
+            // Silent part with noise - zero-centered, low amplitude noise
             audio_samples[i] = (rand() % 33) - 16;  // Low-level noise (-16 to +16)
         }
     }
     write_wav_file("glu_with_buzz.wav", audio_samples, num_samples, 22050);
     
-    // Apply noise gate to fix buzzing
+    // Apply noise gate to fix buzzing - still zero-centered
     for (int i = 0; i < num_samples; i++) {
         if (audio_samples[i] > -32 && audio_samples[i] < 32) {
             audio_samples[i] = 0;  // Apply noise gate
