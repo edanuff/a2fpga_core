@@ -798,9 +798,13 @@ module top #(
     wire sg_debug_osc_enabled;
     wire sg_debug_wave_reads;
     
-    // Additional debug counter (access count is a good indication of activity)
+    // Debug indicators with long persistence for human visibility
     reg [7:0] debug_doc_access_count = 8'h00;
-    reg wavetable_read_indicator = 1'b0;  // Special indicator that lights when wavetable memory is read
+    reg [24:0] wavetable_read_counter = 0;     // Long counter for visible persistence
+    reg wavetable_read_indicator = 1'b0;       // Special indicator that lights when wavetable memory is read
+    reg [24:0] doc_access_counter = 0;         // Long counter for visible persistence
+    reg doc_access_indicator = 1'b0;           // Persisted indicator for DOC register writes
+    reg [24:0] debug_heartbeat_counter = 0;    // Slow ~1Hz heartbeat counter for human visibility
     
     // Audio
 
@@ -967,31 +971,48 @@ module top #(
         .OEN(sleep_w && HDMI_SLEEP_ENABLE)
     );
 
-    // Update wavetable read indicator - this makes it very obvious when wave memory is read
+    // Update persistent indicators with very long delays for human visibility
     always @(posedge clk_logic_w) begin
-        // Set indicator when a read happens, and reset after a visible delay
+        // Update slow heartbeat counter - creates a visible ~1Hz blink
+        debug_heartbeat_counter <= debug_heartbeat_counter + 1'd1;
+        // Wavetable read indicator with ~0.5 second persistence
         if (sg_debug_wave_reads) begin
-            wavetable_read_indicator <= 1'b1;  // Turn on when wavetable is read
-        end else if (a2bus_if.phi1_posedge && wavetable_read_indicator) begin
-            // Slowly count down indicator to make LED stay on long enough to see
-            wavetable_read_indicator <= 1'b0;  // Turn off after delay
+            wavetable_read_counter <= 25'd20_000_000;  // Set to ~0.5 second at ~40MHz
+            wavetable_read_indicator <= 1'b1;
+        end else if (wavetable_read_counter > 0) begin
+            wavetable_read_counter <= wavetable_read_counter - 1'd1;
+            wavetable_read_indicator <= 1'b1;
+        end else begin
+            wavetable_read_indicator <= 1'b0;
+        end
+        
+        // DOC access indicator with ~0.5 second persistence
+        if (debug_doc_access_count != doc_access_counter[7:0]) begin
+            // DOC access count has changed - new accesses happened
+            doc_access_counter <= 25'd20_000_000;  // Set to ~0.5 second at ~40MHz
+            doc_access_indicator <= 1'b1;
+        end else if (doc_access_counter > 0) begin
+            doc_access_counter <= doc_access_counter - 1'd1;
+            doc_access_indicator <= 1'b1;
+        end else begin
+            doc_access_indicator <= 1'b0;
         end
     end
     
     always @(posedge clk_logic_w) begin 
         // Simplified LED debug output - very easy to interpret patterns
         if (!s2) begin
-            // Simple visual debug output:
+            // Simple visual debug output with SLOW, HUMAN-VISIBLE indicators:
             // - LED 0: DOC enable bit set (oscillator 0 enabled)
-            // - LED 1: Any DOC register writes happening
-            // - LED 2: Wavetable memory reads happening (should blink when sound plays)
-            // - LED 3: Alternating blink pattern (visual heartbeat)
-            // - LED 4: Always on when in debug mode
+            // - LED 1: DOC register writes - lights up for 0.5 seconds when any writes happen
+            // - LED 2: Wavetable memory reads - lights up for 0.5 seconds when reads happen
+            // - LED 3: Slow visual heartbeat (~1Hz) to confirm debug mode is active
+            // - LED 4: Always on when in debug mode for reference
             led <= {
                 1'b1,  // LED 4: Always on in debug mode for reference
-                a2bus_if.clk_7m_posedge,  // LED 3: Visual heartbeat
-                wavetable_read_indicator,  // LED 2: Wavetable memory read indicator
-                debug_doc_access_count != 0,  // LED 1: Any DOC register writes
+                (debug_heartbeat_counter[24]),  // LED 3: Slow ~1Hz heartbeat
+                wavetable_read_indicator,  // LED 2: Wavetable read indicator with 0.5s persistence
+                doc_access_indicator,  // LED 1: DOC access indicator with 0.5s persistence
                 sg_debug_osc_enabled  // LED 0: Oscillator 0 enabled
             };
         end else begin 
