@@ -800,6 +800,7 @@ module top #(
     
     // Additional debug counter (access count is a good indication of activity)
     reg [7:0] debug_doc_access_count = 8'h00;
+    reg wavetable_read_indicator = 1'b0;  // Special indicator that lights when wavetable memory is read
     
     // Audio
 
@@ -966,11 +967,33 @@ module top #(
         .OEN(sleep_w && HDMI_SLEEP_ENABLE)
     );
 
+    // Update wavetable read indicator - this makes it very obvious when wave memory is read
+    always @(posedge clk_logic_w) begin
+        // Set indicator when a read happens, and reset after a visible delay
+        if (sg_debug_wave_reads) begin
+            wavetable_read_indicator <= 1'b1;  // Turn on when wavetable is read
+        end else if (a2bus_if.phi1_posedge && wavetable_read_indicator) begin
+            // Slowly count down indicator to make LED stay on long enough to see
+            wavetable_read_indicator <= 1'b0;  // Turn off after delay
+        end
+    end
+    
     always @(posedge clk_logic_w) begin 
-        // Use button s2 to toggle between video mode display and DOC debugging
+        // Simplified LED debug output - very easy to interpret patterns
         if (!s2) begin
-            // In DOC debug mode, show DOC status on LEDs
-            led <= {sg_debug_doc_active, sg_debug_osc_enabled, sg_debug_wave_reads, debug_doc_access_count[1:0]};
+            // Simple visual debug output:
+            // - LED 0: DOC enable bit set (oscillator 0 enabled)
+            // - LED 1: Any DOC register writes happening
+            // - LED 2: Wavetable memory reads happening (should blink when sound plays)
+            // - LED 3: Alternating blink pattern (visual heartbeat)
+            // - LED 4: Always on when in debug mode
+            led <= {
+                1'b1,  // LED 4: Always on in debug mode for reference
+                a2bus_if.clk_7m_posedge,  // LED 3: Visual heartbeat
+                wavetable_read_indicator,  // LED 2: Wavetable memory read indicator
+                debug_doc_access_count != 0,  // LED 1: Any DOC register writes
+                sg_debug_osc_enabled  // LED 0: Oscillator 0 enabled
+            };
         end else begin 
             // Normal LED display showing video mode
             led <= {!vdp_unlocked_w, ~vdp_gmode_w};
