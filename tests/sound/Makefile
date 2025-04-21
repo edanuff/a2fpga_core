@@ -5,12 +5,13 @@ HDLDIR = ../../hdl/sound
 SUPPORTDIR = ../../hdl/support
 BUSDIR = ../../hdl/bus
 MEMORYDIR = ../../hdl/memory
+SDRAMDIR = ../../hdl/sdram
 OBJDIR = obj_dir
 OBJDIR_GLU = obj_dir_glu
 
 # Verilator flags
 VERILATOR_FLAGS = -Wall -Wno-fatal --trace -CFLAGS "-O3 -g3" --cc --exe
-VERILATOR_FLAGS += -I$(HDLDIR) -I$(SUPPORTDIR) -I$(BUSDIR) -I$(MEMORYDIR)
+VERILATOR_FLAGS += -I$(HDLDIR) -I$(SUPPORTDIR) -I$(BUSDIR) -I$(MEMORYDIR) -I$(SDRAMDIR)
 
 # C++ compiler flags
 CXXFLAGS = -std=c++17 -Wall -O3 -g
@@ -25,7 +26,7 @@ DOC_HDLFILES = $(HDLDIR)/doc5503.sv $(HDLDIR)/doc5503_register_ram.sv $(SUPPORTD
 GLU_MODULE_SV = glu_harness.sv
 GLU_MODULE_CPP = glu_tb.cpp
 GLU_HDLFILES = $(HDLDIR)/sound_glu.sv $(HDLDIR)/doc5503.sv $(HDLDIR)/doc5503_register_ram.sv \
-               $(BUSDIR)/a2bus_if.sv $(MEMORYDIR)/sdram_port_if.sv $(SUPPORTDIR)/srff.v
+               $(SUPPORTDIR)/srff.v
 
 # Targets
 all: doc_tests glu_tests

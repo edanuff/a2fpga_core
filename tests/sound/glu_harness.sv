@@ -1,6 +1,85 @@
 // Sound GLU Test Harness
 // Tests the complete sound path from GLU through DOC to audio output
 
+// Simplified a2bus_if for testing
+interface a2bus_if_test();
+    logic clk_logic;
+    logic clk_pixel;
+    logic system_reset_n;
+    logic device_reset_n;
+    logic phi0;
+    logic phi1;
+    logic phi1_posedge;
+    logic phi1_negedge;
+    logic clk_2m_posedge;
+    logic clk_7m;
+    logic clk_7m_posedge;
+    logic clk_7m_negedge;
+    logic clk_14m_posedge;
+    
+    logic sw_gs;
+    logic rw_n;
+    logic [15:0] addr;
+    logic m2sel_n;
+    logic m2b0;
+    logic [7:0] data;
+    logic data_in_strobe;
+    
+    // These are missing in the original interface but needed for sound_glu
+    logic io_select_n = 1'b1;
+    logic dev_select_n = 1'b1;
+    logic io_strobe_n = 1'b1;
+
+    modport slave (
+        input clk_logic,
+        input clk_pixel,
+        input system_reset_n,
+        input device_reset_n,
+        input phi0,
+        input phi1,
+        input phi1_posedge,
+        input phi1_negedge,
+        input clk_2m_posedge,
+        input clk_7m,
+        input clk_7m_posedge,
+        input clk_7m_negedge,
+        input clk_14m_posedge,
+        
+        input rw_n,
+        input addr,
+        input m2sel_n,
+        input m2b0,
+        input data,
+        input data_in_strobe,
+        input sw_gs,
+
+        input io_select_n,
+        input dev_select_n,
+        input io_strobe_n
+    );
+endinterface
+
+// Simplified sdram_port_if for testing
+interface sdram_port_if_test();
+    logic rd;
+    logic wr;
+    logic ready;
+    logic [23:0] addr;
+    logic [31:0] data;
+    logic [3:0] byte_en;
+    logic [31:0] q;
+
+    modport client (
+        output rd,
+        output wr,
+        input ready,
+        output addr,
+        output data,
+        output byte_en,
+        input q
+    );
+endinterface
+
 module glu_harness (
     input clk_i,
     input reset_n_i,
@@ -15,9 +94,9 @@ module glu_harness (
     // Clock enables
     input clk_7m_posedge_i,
     
-    // Audio outputs
-    output [15:0] audio_l_o,
-    output [15:0] audio_r_o,
+    // Audio outputs (now signed for proper audio handling)
+    output signed [15:0] audio_l_o,
+    output signed [15:0] audio_r_o,
     
     // Memory interface
     input sdram_ready_i,
@@ -27,7 +106,7 @@ module glu_harness (
 );
 
     // Apple Bus Interface
-    a2bus_if bus_if();
+    a2bus_if_test bus_if();
     
     // Connect the interface to inputs
     assign bus_if.clk_logic = clk_i;
@@ -41,8 +120,8 @@ module glu_harness (
     assign bus_if.clk_7m_posedge = clk_7m_posedge_i;
     
     // SDRAM Port Interfaces
-    sdram_port_if glu_mem_if();
-    sdram_port_if doc_mem_if();
+    sdram_port_if_test glu_mem_if();
+    sdram_port_if_test doc_mem_if();
     
     // Connect memory interfaces to external pins
     assign glu_mem_if.ready = sdram_ready_i;

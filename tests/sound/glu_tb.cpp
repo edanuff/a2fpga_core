@@ -242,8 +242,11 @@ int main(int argc, char** argv) {
         
         // Print audio output every 10000 cycles
         if (simTime % 10000 == 0) {
+            // Handle signed values correctly by casting to int16_t
+            int16_t audio_l = static_cast<int16_t>(glu->audio_l_o);
+            int16_t audio_r = static_cast<int16_t>(glu->audio_r_o);
             LOG_INFO("Time %d: Audio L: %d, Audio R: %d", 
-                     simTime, glu->audio_l_o, glu->audio_r_o);
+                     simTime, audio_l, audio_r);
         }
         
         // Increment the counter

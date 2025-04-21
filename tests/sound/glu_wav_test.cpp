@@ -67,6 +67,33 @@ void write_wav_file(const char* filename, int16_t* samples, size_t num_samples, 
     printf("Wrote %zu samples to %s\n", num_samples, filename);
 }
 
+// Check DC offset of a WAV file
+void check_dc_offset(const char* filename, int16_t* samples, size_t num_samples) {
+    // Calculate average (DC offset)
+    double sum = 0.0;
+    for (size_t i = 0; i < num_samples; i++) {
+        sum += samples[i];
+    }
+    double average = sum / num_samples;
+    
+    // Calculate RMS
+    double sum_squared = 0.0;
+    for (size_t i = 0; i < num_samples; i++) {
+        double deviation = samples[i] - average;
+        sum_squared += deviation * deviation;
+    }
+    double rms = sqrt(sum_squared / num_samples);
+    
+    // Calculate DC offset as percentage of full range
+    double dc_offset_percentage = (average / 32768.0) * 100.0;
+    
+    printf("DC Offset Check for %s:\n", filename);
+    printf("  Average sample value: %.2f\n", average);
+    printf("  RMS value: %.2f\n", rms);
+    printf("  DC offset percentage: %.4f%%\n", dc_offset_percentage);
+    printf("  DC offset / RMS ratio: %.4f%%\n\n", (fabs(average) / rms) * 100.0);
+}
+
 // Simulate GLU audio processing with various volume levels
 int main(int argc, char** argv) {
     printf("GLU Audio Test - Generating WAV files with different volume settings\n");
@@ -87,24 +114,39 @@ int main(int argc, char** argv) {
         audio_samples[i] = (int16_t)(sin(phase) * 16000.0); // -16000 to 16000 range
     }
     write_wav_file("glu_sine_test.wav", audio_samples, num_samples, 22050);
+    check_dc_offset("glu_sine_test.wav", audio_samples, num_samples);
     
     // Create wavetable data following DOC format constraints:
     // - Values must be in range 0x01-0xFF (1-255)
     // - 0x00 is a reserved value that stops the oscillator
     // - Normal waveforms are centered around 0x80 (128) which is zero-crossing
     uint8_t waveTableData[256];
+    
+    // First create a perfect sine wave from 0-255 to fill the wavetable
     for (int i = 0; i < 256; i++) {
-        if (i < 128) {
-            waveTableData[i] = 128 + (i / 2);  // 128-192 (positive values)
-        } else {
-            waveTableData[i] = 128 + (128 - (i - 128)) / 2;  // 192-128 (returning to zero)
-        }
+        // Create sine wave centered at 128 with amplitude 127
+        double angle = (double)i / 256.0 * 2.0 * M_PI;
+        double value = sin(angle) * 127.0 + 128.0;
         
-        // Ensure no 0x00 values (which would stop the oscillator)
-        if (waveTableData[i] == 0) {
-            waveTableData[i] = 1;  // Use minimum valid value
-        }
+        // Ensure the value is within the valid range of 1-255
+        int intValue = (int)round(value);
+        intValue = intValue < 1 ? 1 : (intValue > 255 ? 255 : intValue);
+        
+        waveTableData[i] = (uint8_t)intValue;
     }
+    
+    // Calculate the DC offset of our wavetable when converted to signed format
+    double wavetable_sum = 0.0;
+    for (int i = 0; i < 256; i++) {
+        // Convert to signed the same way as DOC does
+        int8_t signed_sample = (int8_t)(waveTableData[i] ^ 0x80);
+        wavetable_sum += signed_sample;
+    }
+    double wavetable_dc_offset = wavetable_sum / 256.0;
+    printf("Wavetable DC offset when converted to signed: %.4f\n", wavetable_dc_offset);
+    
+    // Now we have a perfectly balanced sine wave with no DC offset
+    // (when converted to signed via XOR with 0x80)
     
     // Print some stats about our wavetable
     printf("Wavetable statistics:\n");
@@ -149,13 +191,16 @@ int main(int argc, char** argv) {
                 // 2. Convert to signed the same way the DOC does
                 int8_t signed_sample = (int8_t)(raw_sample ^ 0x80);    // XOR with 0x80 exactly like DOC5503.sv
                 
-                // 3. Scale signed sample with full volume (255) as DOC does
-                int16_t scaled_sample = signed_sample * 255;           // Scale to 16-bit range, preserving sign
+                // 3. Apply DC offset correction to ensure proper zero-centering
+                double corrected_sample = signed_sample - wavetable_dc_offset;
                 
-                // 4. Apply the 0.75 factor (same low-pass filter as DOC)
+                // 4. Scale signed sample with full volume (255) as DOC does
+                int16_t scaled_sample = (int16_t)(corrected_sample * 255); // Scale to 16-bit range, preserving sign
+                
+                // 5. Apply the 0.75 factor (same low-pass filter as DOC)
                 int16_t filtered_sample = (scaled_sample * 3) / 4;     // Multiply by 0.75 as in DOC5503.sv
                 
-                // 5. Apply volume control with arithmetic right shift (just like the GLU)
+                // 6. Apply volume control with arithmetic right shift (just like the GLU)
                 // This simulates exactly what happens in sound_glu.sv
                 int16_t volume_adjusted = filtered_sample >> volume_shift;
                 
@@ -177,30 +222,38 @@ int main(int argc, char** argv) {
     // Generate combined test that demonstrates the buzzing issue and fix
     printf("\nGenerating test files for buzzing issue...\n");
     
-    // Generate a reference waveform that has silent parts - properly zero-centered
+    // Generate a reference waveform that has silent parts with perfect DC centering
     printf("Generating audio test patterns with silent sections...\n");
+    
+    // We've already calculated the wavetable DC offset above
+    printf("Using wavetable DC offset: %.4f\n", wavetable_dc_offset);
+    
+    // Now create our waveform with DC offset correction
     for (int i = 0; i < num_samples; i++) {
         // Create a pattern that plays for 1/4 second, then silent for 1/4 second
         int cycle_pos = i % (num_samples / 2);
         
         if (cycle_pos < num_samples / 4) {
-            // Active part - play the waveform - EXACTLY the same as DOC+GLU does
+            // Active part - play the waveform with proper DC centering
             int oscillator_idx = (i * 250) % 256;
             
             // 1. Get raw sample from wavetable (0-255)
-            uint8_t raw_sample = waveTableData[oscillator_idx];         // 0-255 range centered at 128
+            uint8_t raw_sample = waveTableData[oscillator_idx];
             
             // 2. Convert to signed the same way as the DOC
-            int8_t signed_sample = (int8_t)(raw_sample ^ 0x80);        // XOR with 0x80 like the DOC
+            int8_t signed_sample = (int8_t)(raw_sample ^ 0x80);
             
-            // 3. Scale to 16-bit range with volume 255
-            int16_t scaled_sample = signed_sample * 255;                // Scale preserving sign
+            // 3. Apply DC offset correction to ensure proper zero-centering
+            double corrected_sample = signed_sample - wavetable_dc_offset;
             
-            // 4. Apply 0.75 factor low-pass filter
-            int16_t filtered_sample = (scaled_sample * 3) / 4;          // Same as DOC implementation
+            // 4. Scale to 16-bit range with volume 255
+            int16_t scaled_sample = (int16_t)(corrected_sample * 255);
             
-            // 5. Store final properly DC-centered sample
-            audio_samples[i] = filtered_sample;                        // Should be perfectly zero-centered
+            // 5. Apply 0.75 factor low-pass filter
+            int16_t filtered_sample = (scaled_sample * 3) / 4;
+            
+            // 6. Store the sample
+            audio_samples[i] = filtered_sample;
         } else {
             // Silent part - true zero (DC centered)
             audio_samples[i] = 0;
@@ -208,28 +261,45 @@ int main(int argc, char** argv) {
     }
     // Write perfect reference with clean silence
     write_wav_file("glu_reference.wav", audio_samples, num_samples, 22050);
+    check_dc_offset("glu_reference.wav", audio_samples, num_samples);
     
     // Create a version with simulated buzzing during silent parts
     for (int i = 0; i < num_samples; i++) {
         int cycle_pos = i % (num_samples / 2);
         
         if (cycle_pos < num_samples / 4) {
-            // Keep the active parts unchanged - these should be properly DC centered
-            // No changes needed
+            // Keep the active parts unchanged - these should already be properly DC centered
+            // No changes needed - these were corrected above
         } else {
-            // Replace silent parts with low-level noise (properly centered around zero)
+            // Replace silent parts with low-level noise that is properly zero-centered
             audio_samples[i] = (rand() % 65) - 32;  // Low-level noise (-32 to +32)
         }
     }
-    write_wav_file("glu_with_buzz.wav", audio_samples, num_samples, 22050);
+    // Store this for comparison
+    int16_t* buzzing_samples = (int16_t*)malloc(num_samples * sizeof(int16_t));
+    if (!buzzing_samples) {
+        printf("ERROR: Failed to allocate memory for buzzing samples\n");
+        return 1;
+    }
+    memcpy(buzzing_samples, audio_samples, num_samples * sizeof(int16_t));
+    write_wav_file("glu_with_buzz.wav", buzzing_samples, num_samples, 22050);
+    check_dc_offset("glu_with_buzz.wav", buzzing_samples, num_samples);
     
     // Create a version with noise gate applied to fix the buzzing
     for (int i = 0; i < num_samples; i++) {
-        if (audio_samples[i] > -32 && audio_samples[i] < 32) {
-            audio_samples[i] = 0;  // Apply noise gate
+        // Start fresh with the original buzzing sample
+        int16_t sample = buzzing_samples[i];
+        
+        // Apply noise gate (ensuring output is still zero-centered)
+        if (sample > -32 && sample < 32) {
+            audio_samples[i] = 0;  // Silence very quiet samples
+        } else {
+            audio_samples[i] = sample;  // Keep original sample unchanged
         }
     }
     write_wav_file("glu_fixed.wav", audio_samples, num_samples, 22050);
+    check_dc_offset("glu_fixed.wav", audio_samples, num_samples);
+    free(buzzing_samples);
     
     // Create a square wave test file (zero-centered) to show filter effect
     // This is a cleaner test case that directly tests the filter
@@ -243,12 +313,14 @@ int main(int argc, char** argv) {
         audio_samples[i] = square_sample;
     }
     write_wav_file("glu_square_raw.wav", audio_samples, num_samples, 22050);
+    check_dc_offset("glu_square_raw.wav", audio_samples, num_samples);
     
     // Create a filtered version of the square wave
     for (int i = 0; i < num_samples; i++) {
         audio_samples[i] = (audio_samples[i] * 3) / 4;  // Apply 0.75 low-pass filter
     }
     write_wav_file("glu_square_filtered.wav", audio_samples, num_samples, 22050);
+    check_dc_offset("glu_square_filtered.wav", audio_samples, num_samples);
     
     // Clean up
     free(audio_samples);

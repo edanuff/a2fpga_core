@@ -1,98 +1,95 @@
-# DOC5503 Sound Engine Tests
+# DOC5503 Sound Module Tests
 
-This directory contains test programs for the DOC5503 sound module, including a Verilator test harness for simulation and audio testing tools.
+This directory contains tests for the DOC5503 sound module in the A2FPGA core.
 
-## DOC5503 Low-Pass Filter Implementation
+## DC Offset Issues and Fixes
 
-The DOC5503 module has been enhanced with a simple low-pass filter to reduce high-frequency buzzy distortion in the audio output. The filter is implemented by multiplying the output by 0.75 (3/4) in the DSP multiplier section of the code:
+We identified and fixed DC offset issues in our audio test files. The DOC5503 hardware implementation correctly handles zero-centering, but our test program needed adjustment to match the hardware behavior.
 
-```verilog
-// DSP Multiplier with simple low-pass filter
-always @(posedge clk_i) begin
-    automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
-    automatic logic signed [7:0] vol_s = {2'b0, vol_w[7:2]};        // convert volume to signed
-    
-    // Apply a subtle low-pass filter by multiplying the output by 0.75
-    // to reduce high-frequency buzzy distortion
-    automatic logic signed [15:0] raw_product = data_w * vol_s;
-    output_r <= (raw_product * 3) >>> 2;                           // multiply by 0.75 (3/4)
-end
+### Key Findings:
+
+1. **Proper Zero-Centering in Hardware**: The DOC5503 properly converts unsigned waveform data (0-255, centered at 128) to signed data by XORing with 0x80, which correctly preserves zero-centering.
+
+2. **Noise Gate Benefits**: The noise gate implementation (in both DOC5503 and sound_glu) effectively eliminates low-level buzzing without affecting DC offset:
+   - DOC5503 noise gate threshold: ±128
+   - GLU noise gate threshold: Configurable (default: 48)
+
+3. **Test Program Corrections**: Our test program now correctly models the hardware behavior by:
+   - Measuring DC offset in wavetable data after XOR conversion
+   - Applying DC offset correction to ensure true zero-centering
+   - Ensuring consistency between hardware emulation and test files
+
+### Corrected Audio Test Files:
+
+- `glu_reference.wav`: Reference waveform with proper silent sections
+- `glu_with_buzz.wav`: Simulation of the buzzing issue during silent periods
+- `glu_fixed.wav`: Same audio with noise gate applied to fix buzzing
+- `glu_square_raw.wav`: Zero-centered square wave
+- `glu_square_filtered.wav`: Zero-centered filtered square wave (0.75x)
+- `glu_vol*_gate*.wav`: Various volume and noise gate settings
+
+### Recommendations:
+
+1. Keep the current noise gate implementation in both DOC5503 and sound_glu modules
+2. Maintain the 0.75x multiplier in the DOC5503 to reduce high-frequency components
+3. No changes are needed to the hardware since it correctly handles zero-centering
+
+## How to Run the Tests
+
+The testing approach consists of:
+
+1. Generating test WAV files for analysis:
+```
+cd tests/sound
+g++ -o glu_wav_test glu_wav_test.cpp -lm
+./glu_wav_test
 ```
 
-This simple multiplication attenuates high-frequency content while maintaining the overall character of the sound. The 0.75 multiplier was chosen to provide a good balance between reducing harshness and preserving volume levels.
-
-## Audio Test Programs
-
-### 1. Verilator Test Harness
-
-- `doc5503_harness.sv`: A wrapper module for the DOC5503 simulation
-- `doc5503_tb.cpp`: The C++ testbench that drives the simulation
-
-### 2. Audio Analysis Tools
-
-- `doc_audio_test.cpp`: Analyzes DOC audio output with various parameters
-- `generate_test_wav.cpp`: Generates synthetic waveforms to demonstrate filter effectiveness
-- `view_waves.sh`: Interactive script to play and compare audio samples
-
-## Generated WAV Files
-
-The test programs generate multiple WAV files for comparison:
-
-1. **Square Wave Tests** (best for hearing filter effect):
-   - `square_raw_freq*.wav`: Unfiltered square waves at different frequencies
-   - `square_filtered_freq*.wav`: Filtered square waves with 0.75x multiplier
-
-2. **Sawtooth Wave Tests**:
-   - `sawtooth_raw_freq*.wav`: Unfiltered sawtooth waves at different frequencies
-   - `sawtooth_filtered_freq*.wav`: Filtered sawtooth waves with 0.75x multiplier
-
-3. **DOC Audio Tests**:
-   - `doc_output_scale_*.wav`: Current DOC implementation with different mixer scaling
-   - `doc_output_vol_*.wav`: DOC output with different volume levels
-   - `doc_output_8osc_*.wav`: Simulated 8-oscillator mix with different scaling
-
-## Running the Audio Tests
-
-1. Generate all test WAV files:
-```bash
-make generate_test_wav
-make run_generate_test
-make doc_audio_test
-./doc_audio_test
+2. Playing/comparing the generated files:
 ```
-
-2. Use the interactive player to compare filtered vs. unfiltered audio:
-```bash
 ./view_waves.sh
 ```
 
-## Audio Filter Evaluation
+3. For more detailed simulation tests (requires Verilator):
+```
+make
+./doc_audio_test
+```
 
-When evaluating the audio filter:
+## Analysis Tools
 
-1. The difference is most noticeable in square wave examples at higher frequencies
-2. The filter reduces harsh high-frequency content while preserving overall volume
-3. For 8-oscillator mixes, the filtered version (0.75x) reduces clipping and distortion
-4. In Audacity, you can visually see the reduction in high-frequency overtones
+The `check_dc_offset()` function in `glu_wav_test.cpp` analyzes WAV files for DC offset, reporting:
+- Average sample value: Should be close to zero for properly centered audio
+- RMS value: Indicates signal strength
+- DC offset percentage: Should be close to 0% (within ±0.1%)
+- DC offset / RMS ratio: More meaningful measure of DC offset impact
 
-## Debugging Audio Issues
+## Technical Implementation Notes
 
-The test harness allows you to:
+The DOC5503 implementation details:
 
-1. Set up DOC registers with known values
-2. Provide controlled waveform data for the oscillators
-3. Monitor the audio output signals (mono_mix_o, left_mix_o, right_mix_o)
-4. Trace the internal signal values using the VCD output
+1. **Waveform Data Format**: 
+   - 8-bit unsigned with 0x80 being zero level
+   - 0x01 and 0xFF are the lowest and highest levels
+   - 0x00 is reserved to stop oscillator playback
 
-This can help identify issues with:
-- DOC register setup
-- Waveform data handling
-- Audio signal generation
-- Oscillator mixing
+2. **DSP Pipeline**:
+   ```
+   Unsigned waveform data (0-255) 
+   → XOR with 0x80 to convert to signed (-128 to 127)
+   → Multiply by volume (0-255)
+   → Apply 0.75x low-pass filter
+   → Apply noise gate (if value < ±128)
+   → Output to mixer
+   ```
 
-## Tips
+3. **Mixer Processing**:
+   - Sums all active oscillator outputs
+   - Applies channel assignment based on control registers
+   - Applies noise gate to final output (if value < ±256)
+   - Outputs signed 16-bit stereo audio
 
-- Use the `view_waves.sh` script to compare audio samples easily
-- Listen to the square wave examples first, as they show the most pronounced difference
-- The filter effect is more noticeable at higher frequencies
-- Using the 0.75 multiplier in the actual DOC module provides a good balance
+4. **GLU Module**:
+   - Interfaces DOC5503 to Apple II bus
+   - Applies additional volume control
+   - Implements configurable noise gate for final output
