@@ -638,8 +638,7 @@ module top #(
     wire sg_rd_w;
 
     sound_glu #(
-        .ENABLE(ENSONIQ_ENABLE),
-        .DEBUG_MODE(1'b1)  // Enable debug mode for diagnostics
+        .ENABLE(ENSONIQ_ENABLE)
     ) sg (
         .a2bus_if(a2bus_if),
         .data_o(sg_d_w),                 
@@ -648,12 +647,6 @@ module top #(
 
         .audio_l_o(sg_audio_l),               
         .audio_r_o(sg_audio_r),
-        
-        // Debug outputs for LED monitoring
-        .debug_doc_active_o(sg_debug_doc_active),
-        .debug_osc_enabled_o(sg_debug_osc_enabled),
-        .debug_wave_reads_o(sg_debug_wave_reads),
-        .debug_doc_access_count_o(debug_doc_access_count),
         
         .glu_mem_if(mem_ports[GLU_MEM_PORT]),
         .doc_mem_if(mem_ports[DOC_MEM_PORT])
@@ -914,6 +907,14 @@ module top #(
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
 
+        .debug_hex_0_i (8'h00),  // Placeholder for debug hex 0
+        .debug_hex_1_i (8'h01),  // Placeholder for debug hex 1
+        .debug_hex_2_i (8'h02),  // Placeholder for debug hex 2
+        .debug_hex_3_i (8'h03),  // Placeholder for debug hex 3
+
+        .debug_bits_0_i (8'h04),  // Placeholder for debug bits 0
+        .debug_bits_1_i (8'h05),  // Placeholder for debug bits 1
+
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),
 
@@ -971,33 +972,6 @@ module top #(
         .OEN(sleep_w && HDMI_SLEEP_ENABLE)
     );
 
-    // Update persistent indicators with very long delays for human visibility
-    always @(posedge clk_logic_w) begin
-        // Update slow heartbeat counter - creates a visible ~1Hz blink
-        debug_heartbeat_counter <= debug_heartbeat_counter + 1'd1;
-        // Wavetable read indicator with ~0.5 second persistence
-        if (sg_debug_wave_reads) begin
-            wavetable_read_counter <= 25'd20_000_000;  // Set to ~0.5 second at ~40MHz
-            wavetable_read_indicator <= 1'b1;
-        end else if (wavetable_read_counter > 0) begin
-            wavetable_read_counter <= wavetable_read_counter - 1'd1;
-            wavetable_read_indicator <= 1'b1;
-        end else begin
-            wavetable_read_indicator <= 1'b0;
-        end
-        
-        // DOC access indicator with ~0.5 second persistence
-        if (debug_doc_access_count != doc_access_counter[7:0]) begin
-            // DOC access count has changed - new accesses happened
-            doc_access_counter <= 25'd20_000_000;  // Set to ~0.5 second at ~40MHz
-            doc_access_indicator <= 1'b1;
-        end else if (doc_access_counter > 0) begin
-            doc_access_counter <= doc_access_counter - 1'd1;
-            doc_access_indicator <= 1'b1;
-        end else begin
-            doc_access_indicator <= 1'b0;
-        end
-    end
     
     always @(posedge clk_logic_w) begin 
         // Simplified LED debug output - very easy to interpret patterns
@@ -1008,13 +982,13 @@ module top #(
             // - LED 2: Wavetable memory reads - lights up for 0.5 seconds when reads happen
             // - LED 3: Slow visual heartbeat (~1Hz) to confirm debug mode is active
             // - LED 4: Always on when in debug mode for reference
-            led <= {
-                1'b1,  // LED 4: Always on in debug mode for reference
-                (debug_heartbeat_counter[24]),  // LED 3: Slow ~1Hz heartbeat
-                wavetable_read_indicator,  // LED 2: Wavetable read indicator with 0.5s persistence
-                doc_access_indicator,  // LED 1: DOC access indicator with 0.5s persistence
-                sg_debug_osc_enabled  // LED 0: Oscillator 0 enabled
-            };
+            //led <= {
+            //    1'b1,  // LED 4: Always on in debug mode for reference
+            //    (debug_heartbeat_counter[24]),  // LED 3: Slow ~1Hz heartbeat
+            //    wavetable_read_indicator,  // LED 2: Wavetable read indicator with 0.5s persistence
+            //    doc_access_indicator,  // LED 1: DOC access indicator with 0.5s persistence
+            //    sg_debug_osc_enabled  // LED 0: Oscillator 0 enabled
+            //};
         end else begin 
             // Normal LED display showing video mode
             led <= {!vdp_unlocked_w, ~vdp_gmode_w};
