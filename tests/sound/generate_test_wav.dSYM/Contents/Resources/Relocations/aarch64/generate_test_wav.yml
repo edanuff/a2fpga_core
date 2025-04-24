@@ -1,5 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     generate_test_wav
-relocations:     []
-...

@@ -1,5 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     glu_wav_test
-relocations:     []
-...
