@@ -29,11 +29,13 @@ GLU_HDLFILES = $(HDLDIR)/sound_glu.sv $(HDLDIR)/doc5503.sv $(HDLDIR)/doc5503_reg
                $(SUPPORTDIR)/srff.v
 
 # Targets
-all: doc_tests glu_tests
+all: doc_tests glu_tests comparison_tests
 
 doc_tests: $(OBJDIR)/Vdoc5503_harness doc_audio_test doc_wavetable_test generate_test_wav
 
 glu_tests: $(OBJDIR_GLU)/Vglu_harness glu_wav_test
+
+comparison_tests: es5503_standalone.o standalone_es5503_test doc5503_comparison_test
 
 # DOC test targets
 $(OBJDIR)/Vdoc5503_harness: $(DOC_MODULE_SV) $(DOC_MODULE_CPP) $(DOC_HDLFILES)
@@ -76,9 +78,25 @@ run_generate_test: generate_test_wav
 run_glu_wav_test: glu_wav_test
 	./glu_wav_test
 
+# ES5503 standalone and comparison test targets
+es5503_standalone.o: es5503_standalone.cpp es5503_standalone.h
+	g++ $(CXXFLAGS) -c -o $@ es5503_standalone.cpp
+
+standalone_es5503_test: standalone_es5503_test.cpp es5503_standalone.o
+	g++ $(CXXFLAGS) -o $@ $< es5503_standalone.o -lm
+
+doc5503_comparison_test: doc5503_comparison_test.cpp es5503_standalone.o $(OBJDIR)/Vdoc5503_harness__ALL.a
+	g++ $(CXXFLAGS) -o $@ $< es5503_standalone.o $(OBJDIR)/Vdoc5503_harness__ALL.a $(OBJDIR)/verilated.o $(OBJDIR)/verilated_vcd_c.o $(OBJDIR)/verilated_threads.o -I$(OBJDIR) -I$(VERILATOR_INCLUDE) -lm -lpthread
+
+run_comparison_test: doc5503_comparison_test
+	./doc5503_comparison_test
+	
+run_standalone_test: standalone_es5503_test
+	./standalone_es5503_test
+
 # Clean targets
 clean:
-	rm -rf $(OBJDIR) $(OBJDIR_GLU) doc_audio_test doc_wavetable_test generate_test_wav glu_wav_test *.wav
+	rm -rf $(OBJDIR) $(OBJDIR_GLU) doc_audio_test doc_wavetable_test generate_test_wav glu_wav_test doc5503_comparison_test es5503_standalone.o *.wav
 
 clean_doc:
 	rm -rf $(OBJDIR) doc_audio_test doc_wavetable_test generate_test_wav
@@ -86,4 +104,7 @@ clean_doc:
 clean_glu:
 	rm -rf $(OBJDIR_GLU) glu_wav_test
 
-.PHONY: all doc_tests glu_tests run_doc run_glu run_audio_test run_wavetable_test run_generate_test run_glu_wav_test clean clean_doc clean_glu
+clean_comparison:
+	rm -f doc5503_comparison_test es5503_standalone.o doc5503_*_output.wav
+
+.PHONY: all doc_tests glu_tests comparison_tests run_doc run_glu run_audio_test run_wavetable_test run_generate_test run_glu_wav_test run_comparison_test clean clean_doc clean_glu clean_comparison

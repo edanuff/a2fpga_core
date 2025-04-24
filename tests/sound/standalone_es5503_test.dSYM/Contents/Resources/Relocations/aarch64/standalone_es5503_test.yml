@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     standalone_es5503_test
+relocations:     []
+...

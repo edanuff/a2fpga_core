@@ -34,6 +34,8 @@ module sound_glu #(
     output [15:0] audio_l_o,
     output [15:0] audio_r_o,
 
+    output [7:0] debug_osc_en_o,  // Debug output for oscillator enable register
+
     sdram_port_if.client glu_mem_if,
     sdram_port_if.client doc_mem_if
     
@@ -151,6 +153,10 @@ module sound_glu #(
     wire signed [15:0] right_mix_w;
     //wire signed [15:0] channel_w[15:0]; 
 
+    // Debug: Capture and expose the oscillator enable register
+    wire [7:0] doc_osc_en_w;
+    assign debug_osc_en_o = doc_osc_en_w;
+
     doc5503 #(
         .OUTPUT_CHANNEL_MIX(0),
         .OUTPUT_MONO_MIX(0),
@@ -172,7 +178,8 @@ module sound_glu #(
         .left_mix_o(left_mix_w),
         .right_mix_o(right_mix_w),
         .mono_mix_o(),
-        .channel_o()
+        .channel_o(),
+        .osc_en_o(doc_osc_en_w)
     );
 
     // Volume is inverted for right shift (0 is min volume, 15 is max volume)

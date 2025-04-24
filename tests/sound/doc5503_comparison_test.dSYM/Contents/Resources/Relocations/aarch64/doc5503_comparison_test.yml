@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     doc5503_comparison_test
+relocations:     []
+...

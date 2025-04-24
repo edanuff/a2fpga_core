@@ -81,12 +81,17 @@ module doc5503 #(
     output signed [15:0] left_mix_o,
     output signed [15:0] right_mix_o,
 
-    output signed [15:0] channel_o[CHANNEL_MAX:0]
+    output signed [15:0] channel_o[CHANNEL_MAX:0],
+    
+    output [7:0] osc_en_o   // Debug output for oscillator enable register
 
 );
 
     reg [7:0] osc_int_r;            // Oscillator Interrupt Register
     reg [7:0] osc_en_r;             // Oscillator Enable Register
+    
+    // Expose the oscillator enable register for debugging
+    assign osc_en_o = osc_en_r;
 
     wire [15:0] f_w;
     wire [7:0] vol_w;
@@ -143,7 +148,8 @@ module doc5503 #(
     reg [4:0] cycle_r;
     reg [4:0] cycle_step_r;
     wire [4:0] osc_en_num_w = osc_en_r[5:1];
-    wire [4:0] cycle_max_w = osc_en_num_w == 0 ? 0 : 5'(osc_en_num_w - 1'b1);
+    //wire [4:0] cycle_max_w = osc_en_num_w == 0 ? 0 : 5'(osc_en_num_w - 1'b1);
+    wire [4:0] cycle_max_w = osc_en_r[5:1];
 
     reg [5:0] mixer_cycle_r;
     wire [7:0] mixer_control_w;
@@ -638,13 +644,20 @@ module doc5503 #(
 
     // Oscillator Output
 
+    // We are handling the multiplier stage for each oscillator output
+    // in a pipelined fashion, so the output is not available until the next
+    // cycle. The output is stored in a register and then written to the
+    // mixer output RAM in the next cycle. The output is scaled by the
+    // volume register and the waveform data. The waveform data is converted
+    // to signed by XORing with 0x80, and the volume is converted to signed
+
     reg signed [15:0] output_r;                                         // Current scaled oscillator output        
 
     // DSP Multipler
     always @(posedge clk_i) begin
         automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
         automatic logic signed [7:0] vol_s = {2'b0, vol_w[7:2]};        // convert volume to signed
-        output_r <= data_w * vol_s;                                     // output is waveform data * volume
+        output_r <= data_w * vol_w;                                     // output is waveform data * volume
     end
 
     reg output_reset_req;
@@ -705,7 +718,7 @@ module doc5503 #(
     always @(posedge clk_i) begin
         if (!reset_n_i) begin
             osc_int_r <= '0;
-            osc_en_r <= 8'h02;
+            osc_en_r <= 8'h3E;
         end else begin
             prev_cs_n_r <= cs_n_i;
 
@@ -933,7 +946,7 @@ module doc5503 #(
             left_mix_r <= '0;
             right_mix_r <= '0;
 
-        end else begin
+        end else if (!clk_en_i) begin
             case (mixer_state_r)
                 MIXER_INIT: begin
                     channel_r[mixer_channel_r] <= '0;

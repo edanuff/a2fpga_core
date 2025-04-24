@@ -266,9 +266,12 @@ int main() {
         return 1;
     }
     
-    // Create 8 oscillators with offsets
-    const int NUM_OSCILLATORS = 8;
-    const int OFFSETS[NUM_OSCILLATORS] = {0, 128, 256, 384, 512, 640, 768, 896};
+    // Create 31 oscillators with offsets (matching real IIgs hardware)
+    const int NUM_OSCILLATORS = 31;
+    const int OFFSETS[NUM_OSCILLATORS] = {
+        0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480,
+        512, 544, 576, 608, 640, 672, 704, 736, 768, 800, 832, 864, 896, 928, 960
+    };
     
     // Mix the oscillators (raw output, no amplification)
     for (int osc = 0; osc < NUM_OSCILLATORS; osc++) {
@@ -297,13 +300,13 @@ int main() {
         // Calculate statistics
         AudioStats mix_stats = calculate_stats(mixer_scaled_samples, bytes_read);
         
-        printf("8 osc + Scale %.4f: Min=%d, Max=%d, Avg=%.1f, RMS=%.1f, Clipping=%d (%.1f%%)\n", 
+        printf("31 osc + Scale %.4f: Min=%d, Max=%d, Avg=%.1f, RMS=%.1f, Clipping=%d (%.1f%%)\n", 
                scale, mix_stats.min, mix_stats.max, mix_stats.average, mix_stats.rms,
                mix_stats.clipping_count, (mix_stats.clipping_count * 100.0) / mix_stats.total_samples);
         
         // Write WAV for this multiple oscillator mix
         char filename[100];
-        sprintf(filename, "doc_output_8osc_scale_%.4f.wav", scale);
+        sprintf(filename, "doc_output_31osc_scale_%.4f.wav", scale);
         write_wav_file(filename, mixer_scaled_samples, bytes_read, 22050);
     }
     
@@ -313,11 +316,54 @@ int main() {
     free(mixer_scaled_samples);
     free(mixed_samples);
     
+    // Add a specific test for 31 enabled oscillators with only one playing
+    printf("\nTesting a single active oscillator with 31 enabled oscillators (real IIgs configuration):\n");
+    
+    // Reallocate the buffers we need
+    mixed_samples = (int32_t*)calloc(bytes_read, sizeof(int32_t));
+    mixer_scaled_samples = (int16_t*)malloc(bytes_read * sizeof(int16_t));
+    
+    // Only use oscillator 0
+    for (size_t i = 0; i < bytes_read; i++) {
+        mixed_samples[i] = doc_output_raw(wave_data[i], 255); // Max volume for one oscillator
+    }
+    
+    // Apply different scaling and write files
+    for (int s = 0; s < num_scales; s++) {
+        double scale = scales[s];
+        
+        // Apply scaling
+        for (size_t i = 0; i < bytes_read; i++) {
+            int32_t scaled = (int32_t)(mixed_samples[i] * scale);
+            // Clamp to 16-bit range
+            if (scaled > 32767) scaled = 32767;
+            if (scaled < -32768) scaled = -32768;
+            mixer_scaled_samples[i] = (int16_t)scaled;
+        }
+        
+        // Calculate statistics
+        AudioStats single_stats = calculate_stats(mixer_scaled_samples, bytes_read);
+        
+        printf("1 active + 31 enabled, Scale %.4f: Min=%d, Max=%d, Avg=%.1f, RMS=%.1f, Clipping=%d (%.1f%%)\n", 
+               scale, single_stats.min, single_stats.max, single_stats.average, single_stats.rms,
+               single_stats.clipping_count, (single_stats.clipping_count * 100.0) / single_stats.total_samples);
+        
+        // Write WAV for this configuration
+        char filename[100];
+        sprintf(filename, "doc_output_1_31_scale_%.4f.wav", scale);
+        write_wav_file(filename, mixer_scaled_samples, bytes_read, 22050);
+    }
+    
     printf("\nKey insights and recommendations:\n");
     printf("1. Generated WAV files allow direct listening to check for distortion\n");
     printf("2. Try using NO amplification in the oscillator output - just raw product\n");
     printf("3. Apply appropriate mixer scaling based on oscillator count\n");
     printf("4. Consider that distortion might be from elsewhere in the audio chain\n");
+    printf("5. Check behavior with 31 enabled oscillators but only one playing\n");
+    
+    // Clean up the reallocated buffers
+    free(mixer_scaled_samples);
+    free(mixed_samples);
     
     return 0;
 }

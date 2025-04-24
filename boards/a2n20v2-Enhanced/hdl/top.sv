@@ -636,6 +636,7 @@ module top #(
 `ifdef ENSONIQ
     wire [7:0] sg_d_w;
     wire sg_rd_w;
+    wire [7:0] doc_osc_en_w;   // Debug signal for DOC oscillator enable register
 
     sound_glu #(
         .ENABLE(ENSONIQ_ENABLE)
@@ -648,12 +649,15 @@ module top #(
         .audio_l_o(sg_audio_l),               
         .audio_r_o(sg_audio_r),
         
+        .debug_osc_en_o(doc_osc_en_w),   // Capture oscillator enable register value
+        
         .glu_mem_if(mem_ports[GLU_MEM_PORT]),
         .doc_mem_if(mem_ports[DOC_MEM_PORT])
     );
 `else
     assign sg_audio_l = 16'b0;
     assign sg_audio_r = 16'b0;
+    wire [7:0] doc_osc_en_w = 8'h00; // Default value when ENSONIQ is disabled
 `endif
 
     // SuperSprite
@@ -907,13 +911,13 @@ module top #(
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
 
-        .debug_hex_0_i (8'h00),  // Placeholder for debug hex 0
-        .debug_hex_1_i (8'h01),  // Placeholder for debug hex 1
-        .debug_hex_2_i (8'h02),  // Placeholder for debug hex 2
-        .debug_hex_3_i (8'h03),  // Placeholder for debug hex 3
+        .debug_hex_0_i (doc_osc_en_w),  // Display DOC oscillator enable register
+        .debug_hex_1_i (8'h00),         // Placeholder for debug hex 1
+        .debug_hex_2_i (8'h00),         // Placeholder for debug hex 2
+        .debug_hex_3_i (8'h00),         // Placeholder for debug hex 3
 
-        .debug_bits_0_i (8'h04),  // Placeholder for debug bits 0
-        .debug_bits_1_i (8'h05),  // Placeholder for debug bits 1
+        .debug_bits_0_i (8'h00),        // Placeholder for debug bits 0
+        .debug_bits_1_i (8'h00),        // Placeholder for debug bits 1
 
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),

@@ -11,6 +11,18 @@
 // during synthesis.
 //
 // - This module is a register array with priority write and read ports
+//   that can be used to implement the DOC 5503 register interface
+//   in a synthesizable way that is both efficient (as inferred RAM)
+//   and flexible in terms of access without contention.
+//
+// - The goal is to be able to support access to the registers from
+//   the host system (e.g. the Apple IIgs) and from the sound
+//   generation logic (e.g. the sound chip) without contention.  In
+//   order to reduce logic complexity the negatively limits clock rate,
+//   the doc5503 module breaks down functionality into several FSMs
+//   in always blocks and this module provides a simple interface
+//   to the register array that automatically handles priority without
+//   the need for complex handshaking.
 //
 // - The priority write and read ports are edge triggered except
 //   for the first priority write port which can be level triggered
