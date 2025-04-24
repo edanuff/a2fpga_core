@@ -657,7 +657,7 @@ module doc5503 #(
     always @(posedge clk_i) begin
         automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
         automatic logic signed [7:0] vol_s = {2'b0, vol_w[7:2]};        // convert volume to signed
-        output_r <= data_w * vol_w;                                     // output is waveform data * volume
+        output_r <= data_w * vol_s;                                     // output is waveform data * volume
     end
 
     reg output_reset_req;
