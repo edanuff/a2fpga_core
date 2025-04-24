@@ -42,6 +42,9 @@ VL_ATTR_COLD void Vdoc5503_harness___024root___eval_initial__TOP(Vdoc5503_harnes
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_data_i[1U] = 0U;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_read_data_o[0U] = 0U;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_read_data_o[0U] = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r = 0U;
 }
 
 VL_ATTR_COLD void Vdoc5503_harness___024root___eval_final(Vdoc5503_harness___024root* vlSelf) {

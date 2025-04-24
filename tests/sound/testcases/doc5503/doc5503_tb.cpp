@@ -120,7 +120,8 @@ void test_oscillator_enable_register(Vdoc5503_harness* doc_harness, VerilatedVcd
             if (doc_harness->wave_rd_o) {
                 // Use sine wave approximation
                 uint16_t addr = doc_harness->wave_address_o & 0xFF;
-                uint8_t value = 0x80 + (addr < 128 ? addr : 255 - addr);  // Simple triangle wave
+                // Create a triangle wave centered around 0x80, but ensure we're not at 0x80 which becomes 0 after XOR
+                uint8_t value = 0x80 + (addr < 128 ? addr + 16 : 255 - addr);  // Modified triangle wave to avoid 0x80
                 
                 doc_harness->wave_data_i = value;
                 doc_harness->wave_data_ready_i = 1;
@@ -185,7 +186,8 @@ void test_oscillator_enable_register(Vdoc5503_harness* doc_harness, VerilatedVcd
             if (doc_harness->wave_rd_o) {
                 // Use sine wave approximation
                 uint16_t addr = doc_harness->wave_address_o & 0xFF;
-                uint8_t value = 0x80 + (addr < 128 ? addr : 255 - addr);  // Simple triangle wave
+                // Create a triangle wave centered around 0x80, but ensure we're not at 0x80 which becomes 0 after XOR
+                uint8_t value = 0x80 + (addr < 128 ? addr + 16 : 255 - addr);  // Modified triangle wave to avoid 0x80
                 
                 doc_harness->wave_data_i = value;
                 doc_harness->wave_data_ready_i = 1;

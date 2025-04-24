@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     'build/doc5503_volume_wave_test'
+relocations:     []
+...

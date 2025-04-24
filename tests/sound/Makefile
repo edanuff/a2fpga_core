@@ -50,7 +50,7 @@ GLU_HDLFILES = $(HDLDIR)/sound_glu.sv $(HDLDIR)/doc5503.sv $(HDLDIR)/doc5503_reg
 # Targets
 all: doc_tests glu_tests comparison_tests
 
-doc_tests: $(OBJDIR)/Vdoc5503_harness $(BUILDDIR)/doc_audio_test $(BUILDDIR)/doc_wavetable_test $(BUILDDIR)/generate_test_wav $(BUILDDIR)/doc5503_debug_test $(BUILDDIR)/doc5503_unhalt_test $(BUILDDIR)/doc5503_mode_test $(BUILDDIR)/doc5503_interrupt_test $(BUILDDIR)/doc5503_wavetable_resolution_test
+doc_tests: $(OBJDIR)/Vdoc5503_harness $(BUILDDIR)/doc_audio_test $(BUILDDIR)/doc_wavetable_test $(BUILDDIR)/generate_test_wav $(BUILDDIR)/doc5503_debug_test $(BUILDDIR)/doc5503_unhalt_test $(BUILDDIR)/doc5503_mode_test $(BUILDDIR)/doc5503_interrupt_test $(BUILDDIR)/doc5503_wavetable_resolution_test $(BUILDDIR)/doc5503_volume_test $(BUILDDIR)/doc5503_volume_direct_test $(BUILDDIR)/doc5503_volume_wave_test
 
 glu_tests: $(OBJDIR_GLU)/Vglu_harness $(BUILDDIR)/glu_wav_test
 
@@ -81,6 +81,15 @@ $(BUILDDIR)/doc5503_interrupt_test: $(TESTCASESDIR)/doc5503_interrupt_test.cpp $
 
 $(BUILDDIR)/doc5503_wavetable_resolution_test: $(TESTCASESDIR)/doc5503_wavetable_resolution_test.cpp $(OBJDIR)/Vdoc5503_harness__ALL.a
 	g++ $(CXXFLAGS) -o $@ $< $(OBJDIR)/Vdoc5503_harness__ALL.a $(OBJDIR)/verilated.o $(OBJDIR)/verilated_vcd_c.o $(OBJDIR)/verilated_threads.o -I$(OBJDIR) -I$(VERILATOR_INCLUDE) -lm -lpthread
+
+$(BUILDDIR)/doc5503_volume_test: $(TESTCASESDIR)/doc5503_volume_test.cpp $(OBJDIR)/Vdoc5503_harness__ALL.a
+	g++ $(CXXFLAGS) -o $@ $< $(OBJDIR)/Vdoc5503_harness__ALL.a $(OBJDIR)/verilated.o $(OBJDIR)/verilated_vcd_c.o $(OBJDIR)/verilated_threads.o -I$(OBJDIR) -I$(VERILATOR_INCLUDE) -lm -lpthread
+	
+$(BUILDDIR)/doc5503_volume_wave_test: $(TESTCASESDIR)/doc5503_volume_wave_test.cpp $(OBJDIR)/Vdoc5503_harness__ALL.a
+	g++ $(CXXFLAGS) -o $@ $< $(OBJDIR)/Vdoc5503_harness__ALL.a $(OBJDIR)/verilated.o $(OBJDIR)/verilated_vcd_c.o $(OBJDIR)/verilated_threads.o -I$(OBJDIR) -I$(VERILATOR_INCLUDE) -lm -lpthread
+
+$(BUILDDIR)/doc5503_volume_direct_test: $(DOC5503DIR)/doc5503_volume_direct_test.cpp
+	g++ $(CXXFLAGS) -o $@ $< -lm
 
 $(BUILDDIR)/generate_test_wav: $(TOOLSDIR)/generate_test_wav.cpp
 	g++ $(CXXFLAGS) -o $@ $< -lm
@@ -120,6 +129,15 @@ run_interrupt_test: $(BUILDDIR)/doc5503_interrupt_test
 
 run_wavetable_resolution_test: $(BUILDDIR)/doc5503_wavetable_resolution_test
 	cd $(BUILDDIR) && ./doc5503_wavetable_resolution_test
+	
+run_volume_test: $(BUILDDIR)/doc5503_volume_test
+	cd $(BUILDDIR) && ./doc5503_volume_test
+	
+run_volume_direct_test: $(BUILDDIR)/doc5503_volume_direct_test
+	cd $(BUILDDIR) && ./doc5503_volume_direct_test
+	
+run_volume_wave_test: $(BUILDDIR)/doc5503_volume_wave_test
+	cd $(BUILDDIR) && ./doc5503_volume_wave_test
 	
 run_generate_test: $(BUILDDIR)/generate_test_wav
 	cd $(BUILDDIR) && ./generate_test_wav
@@ -169,7 +187,7 @@ clean:
 	rm -rf $(BUILDDIR) $(OUTPUTDIR)
 
 clean_doc:
-	rm -rf $(OBJDIR) $(BUILDDIR)/doc_audio_test $(BUILDDIR)/doc_wavetable_test $(BUILDDIR)/generate_test_wav $(BUILDDIR)/doc5503_debug_test $(BUILDDIR)/doc5503_unhalt_test $(BUILDDIR)/doc5503_mode_test $(BUILDDIR)/doc5503_interrupt_test $(BUILDDIR)/doc5503_wavetable_resolution_test
+	rm -rf $(OBJDIR) $(BUILDDIR)/doc_audio_test $(BUILDDIR)/doc_wavetable_test $(BUILDDIR)/generate_test_wav $(BUILDDIR)/doc5503_debug_test $(BUILDDIR)/doc5503_unhalt_test $(BUILDDIR)/doc5503_mode_test $(BUILDDIR)/doc5503_interrupt_test $(BUILDDIR)/doc5503_wavetable_resolution_test $(BUILDDIR)/doc5503_volume_test $(BUILDDIR)/doc5503_volume_direct_test $(BUILDDIR)/doc5503_volume_wave_test
 
 clean_glu:
 	rm -rf $(OBJDIR_GLU) $(BUILDDIR)/glu_wav_test
@@ -180,4 +198,4 @@ clean_comparison:
 clean_utilities:
 	rm -f $(BUILDDIR)/analyze_distortion $(BUILDDIR)/detect_distortion $(BUILDDIR)/detect_major_dips $(BUILDDIR)/examine_wav $(BUILDDIR)/test_tone $(BUILDDIR)/visualize_waveform
 
-.PHONY: all doc_tests glu_tests comparison_tests utilities run_doc run_glu run_audio_test run_wavetable_test run_generate_test run_glu_wav_test run_comparison_test run_standalone_test clean clean_doc clean_glu clean_comparison clean_utilities
+.PHONY: all doc_tests glu_tests comparison_tests utilities run_doc run_glu run_audio_test run_wavetable_test run_debug_test run_unhalt_test run_mode_test run_interrupt_test run_wavetable_resolution_test run_volume_test run_volume_direct_test run_volume_wave_test run_generate_test run_glu_wav_test run_comparison_test run_standalone_test clean clean_doc clean_glu clean_comparison clean_utilities

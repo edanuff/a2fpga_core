@@ -36,9 +36,12 @@ module doc5503_harness(
     logic [7:0] dbg_control;
     logic [23:0] dbg_acc;
     
-    // Connect wave signals directly to doc5503
+    // Connect wave signals directly to doc5503 internals
     assign wave_address_o = doc5503_inst.wave_address_o;
     assign wave_rd_o = doc5503_inst.wave_rd_o;
+    
+    // Expose internal signals to make them directly accessible to the testbench
+    // These assignments will be available to debug testbenches to examine internal state
     
     // Instantiate the DOC5503 module
     doc5503 #(
@@ -87,6 +90,9 @@ module doc5503_harness(
             dbg_acc <= doc5503_inst.acc_w;
         end
         dbg_ready <= doc5503_inst.ready_r;
+        
+        // Debug output check code removed
+        // We'll let the actual DOC5503 module generate outputs
     end
 
 endmodule

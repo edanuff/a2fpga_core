@@ -1506,21 +1506,27 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r 
                         = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r) 
                                       + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
+                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r 
+                        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
                     if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca))) {
                         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
                             = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r) 
                                           + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
+                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r 
+                            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
                     } else {
                         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
                             = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r) 
                                           + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
+                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r 
+                            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
                     }
                 }
             } else if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r))) {
                 vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r = 0U;
-                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0x1fU;
                 vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r = 0U;
                 vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r = 0U;
+                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0x1fU;
                 __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v1 
                     = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
                 __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v1 = 1U;

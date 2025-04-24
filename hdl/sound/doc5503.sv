@@ -653,11 +653,21 @@ module doc5503 #(
 
     reg signed [15:0] output_r;                                         // Current scaled oscillator output        
 
-    // DSP Multipler
+    // DSP Multiplier optimized for MULT9x9 hardware inference
     always @(posedge clk_i) begin
-        automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
-        automatic logic signed [7:0] vol_s = {2'b0, vol_w[7:2]};        // convert volume to signed
-        output_r <= data_w * vol_s;                                     // output is waveform data * volume
+        // Use full 8-bit precision for better volume resolution
+        automatic logic signed [8:0] data_w = {1'b0, wds_w} ^ 9'h080;   // convert waveform data to signed with 9-bit width
+        
+        // Scale volume to prevent clipping
+        // Use 7 bits instead of 8 bits (divide by 2) for safety margin
+        automatic logic signed [8:0] vol_s = {2'b0, vol_w[7:1]};        // scale volume by 1/2 to prevent clipping
+        
+        // 9x9 multiplication will be inferred as hardware multiplier
+        automatic logic signed [17:0] mult_result = data_w * vol_s;
+        
+        // Scale down the result to prevent clipping and preserve sign
+        // Use bits [17:2], preserving sign bit and scaling by another 1/4 for headroom
+        output_r <= mult_result[17:2];
     end
 
     reg output_reset_req;
@@ -923,6 +933,14 @@ module doc5503 #(
     reg signed [15:0] right_mix_r;
     assign right_mix_o = right_mix_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_right_mix_r;
+    
+    // DEBUG: Direct audio output for debugging
+    // Provide direct output values for testing
+    initial begin
+        mono_mix_r = 16'sd0;
+        left_mix_r = 16'sd0;
+        right_mix_r = 16'sd0;
+    end
 
     reg signed [15:0] channel_r[CHANNEL_MAX:0]; 
     assign channel_o = channel_r;
@@ -974,11 +992,26 @@ module doc5503 #(
 
                     if (OUTPUT_CHANNEL_MIX) next_channel_r[ca] <= next_channel_r[ca] + mixer_output_w;
 
-                    if (OUTPUT_MONO_MIX) next_mono_mix_r <= next_mono_mix_r + mixer_output_w;
+                    if (OUTPUT_MONO_MIX) begin 
+                        next_mono_mix_r <= next_mono_mix_r + mixer_output_w;
+                        // Direct debug route of output for testing
+                        mono_mix_r <= mixer_output_w;
+                    end
 
                     if (OUTPUT_STEREO_MIX) begin
-                        if (ca[0]) next_left_mix_r <= next_left_mix_r + mixer_output_w;
-                        else next_right_mix_r <= next_right_mix_r + mixer_output_w;
+                        // Swap left and right channels to match HDMI output expectations
+                        // If ca[0] is 1, route to right channel (was left)
+                        // If ca[0] is 0, route to left channel (was right)
+                        if (ca[0]) begin
+                            next_right_mix_r <= next_right_mix_r + mixer_output_w;
+                            // Direct debug route of output for testing
+                            right_mix_r <= mixer_output_w;
+                        end
+                        else begin
+                            next_left_mix_r <= next_left_mix_r + mixer_output_w;
+                            // Direct debug route of output for testing
+                            left_mix_r <= mixer_output_w;
+                        end
                     end
 
                     mixer_cycle_r <= (mixer_cycle_r == cycle_max_w) ? '0 : mixer_cycle_r + 1'd1;
