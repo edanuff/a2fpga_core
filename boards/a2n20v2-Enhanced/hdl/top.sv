@@ -826,8 +826,8 @@ module top #(
     wire signed [15:0] speaker_signed = speaker_audio_w ? 16'h3000 : -16'h3000; 
     
     // Mix properly converted signed audio signals
-    wire signed [15:0] mixed_audio_l = sg_audio_l + sp_signed + mb_signed_l + speaker_signed;
-    wire signed [15:0] mixed_audio_r = sg_audio_r + sp_signed + mb_signed_r + speaker_signed;
+    wire signed [15:0] mixed_audio_l = sg_audio_l /* + sp_signed + mb_signed_l + speaker_signed */; 
+    wire signed [15:0] mixed_audio_r = sg_audio_r /* + sp_signed + mb_signed_r + speaker_signed */;
     
     cdc_fifo #(
         .WIDTH(16),
@@ -956,8 +956,8 @@ module top #(
             debug_b_w
         }),
         .reset(~device_reset_n_w),
-        //.audio_sample_word({cdc_audio_l, cdc_audio_r}),
-        .audio_sample_word(audio_sample_word),
+        .audio_sample_word({cdc_audio_l, cdc_audio_r}),
+        //.audio_sample_word(audio_sample_word),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
         .cx(hdmi_x),

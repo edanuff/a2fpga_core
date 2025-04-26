@@ -1486,16 +1486,6 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca 
                         = (0xfU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__data_b_r) 
                                    >> 4U));
-                    if (((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r) 
-                         == (0x1fU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_en_r) 
-                                      >> 1U)))) {
-                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0U;
-                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 3U;
-                    } else {
-                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r 
-                            = (0x3fU & ((IData)(1U) 
-                                        + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r)));
-                    }
                     __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 
                         = (0xffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r
                                       [vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca] 
@@ -1506,20 +1496,34 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r 
                         = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r) 
                                       + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
+                    if ((0U == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r))) {
+                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_1_r 
+                            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
+                    }
                     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r 
                         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
                     if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca))) {
-                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
-                            = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r) 
-                                          + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
-                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r 
-                            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
-                    } else {
                         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
                             = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r) 
                                           + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
                         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r 
                             = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
+                    } else {
+                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
+                            = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r) 
+                                          + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
+                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r 
+                            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
+                    }
+                    if (((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r) 
+                         == (0x1fU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_en_r) 
+                                      >> 1U)))) {
+                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0U;
+                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 3U;
+                    } else {
+                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r 
+                            = (0x3fU & ((IData)(1U) 
+                                        + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r)));
                     }
                 }
             } else if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r))) {
@@ -2167,8 +2171,8 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         }
     }
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__vol_s 
-        = (0x3fU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_a_r) 
-                    >> 2U));
+        = (0x7fU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_a_r) 
+                    >> 1U));
     if ((1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_en_r)))) {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__unnamedblk6__DOT__i 
             = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_addr_r;
@@ -2190,9 +2194,12 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                 = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__unnamedblk6__DOT__data_curr_r;
         }
     }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__mult_result 
+        = (0x3ffffU & VL_MULS_III(18, (0x3ffffU & VL_EXTENDS_II(18,9, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__data_w))), 
+                                  (0x3ffffU & VL_EXTENDS_II(18,9, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__vol_s)))));
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_r 
-        = (0xffffU & VL_MULS_III(16, (0xffffU & VL_EXTENDS_II(16,8, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__data_w))), 
-                                 (0xffffU & VL_EXTENDS_II(16,8, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__vol_s)))));
+        = (0xffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__mult_result 
+                      >> 2U));
     vlSelfRef.mono_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r;
     vlSelfRef.left_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r;
     vlSelfRef.right_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r;

@@ -57,6 +57,8 @@ module doc5503 #(
     parameter int NUM_CHANNELS = 16,
     parameter int OUTPUT_MONO_MIX = 1,
     parameter int OUTPUT_STEREO_MIX = 1,
+    parameter int OUTPUT_OSC_DIRECT = 0, // Output raw oscillator data
+    parameter int DIRECT_OUTPUT_OSC_NUM = 1, // # of Oscillator to direct to audio output
     parameter int CHANNEL_MAX = OUTPUT_CHANNEL_MIX && (NUM_CHANNELS > 1) ? NUM_CHANNELS - 1 : 1
 ) (
     input clk_i,
@@ -655,6 +657,7 @@ module doc5503 #(
 
     // DSP Multiplier optimized for MULT9x9 hardware inference
     always @(posedge clk_i) begin
+        /*
         // Use full 8-bit precision for better volume resolution
         automatic logic signed [8:0] data_w = {1'b0, wds_w} ^ 9'h080;   // convert waveform data to signed with 9-bit width
         
@@ -668,6 +671,11 @@ module doc5503 #(
         // Scale down the result to prevent clipping and preserve sign
         // Use bits [17:2], preserving sign bit and scaling by another 1/4 for headroom
         output_r <= mult_result[17:2];
+        */
+
+        automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
+        automatic logic signed [7:0] vol_s = {2'b0, vol_w[7:2]};        // convert volume to signed
+        output_r <= data_w * vol_s;    
     end
 
     reg output_reset_req;
@@ -922,16 +930,18 @@ module doc5503 #(
 
     localparam int MIXER_SUM_RESOLUTION = 16;
 
+    reg signed [15:0] osc_out_r;
+
     reg signed [15:0] mono_mix_r;
-    assign mono_mix_o = mono_mix_r;
+    assign mono_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : mono_mix_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_mono_mix_r;
 
     reg signed [15:0] left_mix_r;
-    assign left_mix_o = left_mix_r;
+    assign left_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : left_mix_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_left_mix_r;
 
     reg signed [15:0] right_mix_r;
-    assign right_mix_o = right_mix_r;
+    assign right_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : right_mix_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_right_mix_r;
     
     // DEBUG: Direct audio output for debugging
@@ -989,6 +999,10 @@ module doc5503 #(
                 end
                 MIXER_ADD: begin
                     automatic logic [3:0] ca = mixer_control_w[7:4];
+
+                    if (mixer_cycle_r == DIRECT_OUTPUT_OSC_NUM) begin
+                        osc_out_r <= mixer_output_w;
+                    end
 
                     if (OUTPUT_CHANNEL_MIX) next_channel_r[ca] <= next_channel_r[ca] + mixer_output_w;
 

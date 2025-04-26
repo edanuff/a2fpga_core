@@ -1380,6 +1380,7 @@ VL_ATTR_COLD void Vdoc5503_harness___024root___ctor_var_reset(Vdoc5503_harness__
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r = VL_RAND_RESET_I(16);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r = VL_RAND_RESET_I(16);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r = VL_RAND_RESET_I(16);
+    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__osc_1_r = VL_RAND_RESET_I(16);
     for (int __Vi0 = 0; __Vi0 < 16; ++__Vi0) {
         vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__channel_r[__Vi0] = VL_RAND_RESET_I(16);
     }
@@ -1388,8 +1389,9 @@ VL_ATTR_COLD void Vdoc5503_harness___024root___ctor_var_reset(Vdoc5503_harness__
     }
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = VL_RAND_RESET_I(2);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r = VL_RAND_RESET_I(4);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__data_w = VL_RAND_RESET_I(8);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__vol_s = VL_RAND_RESET_I(8);
+    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__data_w = VL_RAND_RESET_I(9);
+    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__vol_s = VL_RAND_RESET_I(9);
+    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__mult_result = VL_RAND_RESET_I(18);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk2__DOT__shift_w = VL_RAND_RESET_I(5);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__high_bit_w = 0;
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__overflow = VL_RAND_RESET_I(1);

@@ -23,7 +23,8 @@
 module sound_glu #(
     parameter bit ENABLE = 1'b1,
     parameter bit NOISE_GATE_ENABLE = 1'b1,  // Enable noise gate to prevent buzzing
-    parameter int NOISE_GATE_THRESHOLD = 48  // Threshold for noise gate (0-128)
+    parameter int NOISE_GATE_THRESHOLD = 48, // Threshold for noise gate (0-128)
+    parameter bit OUTPUT_OSC_DIRECT = 1'b1  // Enable direct output from oscillator 1
 ) (
     a2bus_if.slave a2bus_if,
 
@@ -160,7 +161,8 @@ module sound_glu #(
     doc5503 #(
         .OUTPUT_CHANNEL_MIX(0),
         .OUTPUT_MONO_MIX(0),
-        .OUTPUT_STEREO_MIX(1)
+        .OUTPUT_STEREO_MIX(1),
+        .OUTPUT_OSC_DIRECT(1)
     ) doc5503 (
         .clk_i(a2bus_if.clk_logic),
         .reset_n_i(a2bus_if.system_reset_n),
@@ -196,29 +198,37 @@ module sound_glu #(
     
     // Apply volume control and noise gate while preserving zero-centering
     always_ff @(posedge a2bus_if.clk_logic) begin
-        // Apply volume control using arithmetic right shift (>>>)
-        // This preserves the sign bit, maintaining zero-centered audio
-        //automatic logic signed [15:0] vol_adjusted_l = left_mix_w >>> volume_shift_w;
-        //automatic logic signed [15:0] vol_adjusted_r = right_mix_w >>> volume_shift_w;
-        automatic logic signed [15:0] vol_adjusted_l = left_mix_w;
-        automatic logic signed [15:0] vol_adjusted_r = right_mix_w;
-       
-        // Apply noise gate to remove buzzing during silent periods
-        // Only apply when signal level is very low, preserving zero-centering
-        if (NOISE_GATE_ENABLE && 
-            vol_adjusted_l < NOISE_GATE_THRESHOLD && 
-            vol_adjusted_l > -NOISE_GATE_THRESHOLD) begin
-            audio_l_reg <= '0;  // Digital silence
+        if (OUTPUT_OSC_DIRECT) begin
+            // Direct oscillator 1 output mode - bypass all processing
+            // Send direct oscillator 1 output to both left and right channels
+            audio_l_reg <= left_mix_w;
+            audio_r_reg <= right_mix_w;
         end else begin
-            audio_l_reg <= vol_adjusted_l;  // Normal output
-        end
-        
-        if (NOISE_GATE_ENABLE && 
-            vol_adjusted_r < NOISE_GATE_THRESHOLD && 
-            vol_adjusted_r > -NOISE_GATE_THRESHOLD) begin
-            audio_r_reg <= '0;  // Digital silence
-        end else begin
-            audio_r_reg <= vol_adjusted_r;  // Normal output
+            // Normal mode with volume control and noise gate
+            // Apply volume control using arithmetic right shift (>>>)
+            // This preserves the sign bit, maintaining zero-centered audio
+            //automatic logic signed [15:0] vol_adjusted_l = left_mix_w >>> volume_shift_w;
+            //automatic logic signed [15:0] vol_adjusted_r = right_mix_w >>> volume_shift_w;
+            automatic logic signed [15:0] vol_adjusted_l = left_mix_w;
+            automatic logic signed [15:0] vol_adjusted_r = right_mix_w;
+           
+            // Apply noise gate to remove buzzing during silent periods
+            // Only apply when signal level is very low, preserving zero-centering
+            if (NOISE_GATE_ENABLE && 
+                vol_adjusted_l < NOISE_GATE_THRESHOLD && 
+                vol_adjusted_l > -NOISE_GATE_THRESHOLD) begin
+                audio_l_reg <= '0;  // Digital silence
+            end else begin
+                audio_l_reg <= vol_adjusted_l;  // Normal output
+            end
+            
+            if (NOISE_GATE_ENABLE && 
+                vol_adjusted_r < NOISE_GATE_THRESHOLD && 
+                vol_adjusted_r > -NOISE_GATE_THRESHOLD) begin
+                audio_r_reg <= '0;  // Digital silence
+            end else begin
+                audio_r_reg <= vol_adjusted_r;  // Normal output
+            end
         end
     end
     //assign audio_l_o = channel_w[0] >>> (4'd15 - volume_w);
