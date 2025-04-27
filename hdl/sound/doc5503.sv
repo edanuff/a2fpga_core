@@ -57,8 +57,8 @@ module doc5503 #(
     parameter int NUM_CHANNELS = 16,
     parameter int OUTPUT_MONO_MIX = 1,
     parameter int OUTPUT_STEREO_MIX = 1,
-    parameter int OUTPUT_OSC_DIRECT = 0, // Output raw oscillator data
-    parameter int DIRECT_OUTPUT_OSC_NUM = 1, // # of Oscillator to direct to audio output
+    parameter int OUTPUT_OSC_DIRECT = 1, // Output raw oscillator data
+    parameter int DIRECT_OUTPUT_OSC_NUM = 0, // # of Oscillator to direct to audio output
     parameter int CHANNEL_MAX = OUTPUT_CHANNEL_MIX && (NUM_CHANNELS > 1) ? NUM_CHANNELS - 1 : 1
 ) (
     input clk_i,
@@ -675,8 +675,19 @@ module doc5503 #(
 
         automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
         automatic logic signed [7:0] vol_s = {2'b0, vol_w[7:2]};        // convert volume to signed
-        output_r <= data_w * vol_s;    
+        output_r <= data_w * vol_w;                                     // output is waveform data * volume
     end
+
+    // Scaled oscillator output register
+    // This register holds the scaled output of the oscillator
+    // The main FSM will signal when to update the register with the
+    // current output value from the DSP multiplier
+    // The register is continuously read by the mixer FSM
+    // based on the value of the mixer_cycle_r register.
+    // To account for the pipelining, the output register uses 
+    // mixer_cycle_r + 1'b1 as the address for the mixer output RAM.
+    // This ensures that the output is available at the correct cycle
+    // for the mixer to read.  
 
     reg output_reset_req;
     reg output_update_req;
@@ -943,14 +954,6 @@ module doc5503 #(
     reg signed [15:0] right_mix_r;
     assign right_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : right_mix_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_right_mix_r;
-    
-    // DEBUG: Direct audio output for debugging
-    // Provide direct output values for testing
-    initial begin
-        mono_mix_r = 16'sd0;
-        left_mix_r = 16'sd0;
-        right_mix_r = 16'sd0;
-    end
 
     reg signed [15:0] channel_r[CHANNEL_MAX:0]; 
     assign channel_o = channel_r;
@@ -974,7 +977,7 @@ module doc5503 #(
             left_mix_r <= '0;
             right_mix_r <= '0;
 
-        end else if (!clk_en_i) begin
+        end else begin
             case (mixer_state_r)
                 MIXER_INIT: begin
                     channel_r[mixer_channel_r] <= '0;
@@ -1006,26 +1009,11 @@ module doc5503 #(
 
                     if (OUTPUT_CHANNEL_MIX) next_channel_r[ca] <= next_channel_r[ca] + mixer_output_w;
 
-                    if (OUTPUT_MONO_MIX) begin 
-                        next_mono_mix_r <= next_mono_mix_r + mixer_output_w;
-                        // Direct debug route of output for testing
-                        mono_mix_r <= mixer_output_w;
-                    end
+                    if (OUTPUT_MONO_MIX) next_mono_mix_r <= next_mono_mix_r + mixer_output_w;
 
                     if (OUTPUT_STEREO_MIX) begin
-                        // Swap left and right channels to match HDMI output expectations
-                        // If ca[0] is 1, route to right channel (was left)
-                        // If ca[0] is 0, route to left channel (was right)
-                        if (ca[0]) begin
-                            next_right_mix_r <= next_right_mix_r + mixer_output_w;
-                            // Direct debug route of output for testing
-                            right_mix_r <= mixer_output_w;
-                        end
-                        else begin
-                            next_left_mix_r <= next_left_mix_r + mixer_output_w;
-                            // Direct debug route of output for testing
-                            left_mix_r <= mixer_output_w;
-                        end
+                        if (ca[0]) next_left_mix_r <= next_left_mix_r + mixer_output_w;
+                        else next_right_mix_r <= next_right_mix_r + mixer_output_w;
                     end
 
                     mixer_cycle_r <= (mixer_cycle_r == cycle_max_w) ? '0 : mixer_cycle_r + 1'd1;
