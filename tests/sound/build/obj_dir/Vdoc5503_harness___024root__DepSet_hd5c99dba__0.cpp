@@ -676,6 +676,10 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 0;
     CData/*3:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r = 0;
+    IData/*23:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r = 0;
+    IData/*23:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r = 0;
     CData/*5:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0;
     QData/*39:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r;
@@ -931,6 +935,10 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r;
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 = 0U;
@@ -1487,11 +1495,11 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
                 }
                 if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca))) {
-                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
+                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
                         = (0xffffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
                                         + VL_EXTENDS_II(24,16, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r))));
                 } else {
-                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
+                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
                         = (0xffffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
                                         + VL_EXTENDS_II(24,16, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r))));
                 }
@@ -1508,8 +1516,8 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         } else if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r))) {
             vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r = 0U;
             __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0x1fU;
-            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r = 0U;
-            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r = 0U;
+            __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r = 0U;
+            __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r = 0U;
             __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v1 
                 = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
             __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v1 = 1U;
@@ -1639,12 +1647,12 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction_r 
             = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__sign_bit_l 
-            = (1U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l 
+            = (1U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
                      >> 0x17U));
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_input_l 
             = ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__sign_bit_l)
-                ? (- VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l))
-                : VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l));
+                ? (- VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r))
+                : VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r));
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_scaled_l 
             = (IData)((0xffffffffffULL & VL_SHIFTR_QQI(40,40,32, 
                                                        (0xffffffffffULL 
@@ -1658,12 +1666,12 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                            ? (- (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__final_l))
                            : (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__final_l)));
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__sign_bit_r 
-            = (1U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r 
+            = (1U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
                      >> 0x17U));
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_input_r 
             = ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__sign_bit_r)
-                ? (- VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r))
-                : VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r));
+                ? (- VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r))
+                : VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r));
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_scaled_r 
             = (IData)((0xffffffffffULL & VL_SHIFTR_QQI(40,40,32, 
                                                        (0xffffffffffULL 
@@ -1903,13 +1911,13 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                 ? vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_left_r
                 : vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_right_r);
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_left_r 
-            = (0xffffffU & (VL_GTS_III(32, 0U, VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l))
-                             ? (- vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l)
-                             : vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l));
+            = (0xffffffU & (VL_GTS_III(32, 0U, VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r))
+                             ? (- vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r)
+                             : vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r));
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_right_r 
-            = (0xffffffU & (VL_GTS_III(32, 0U, VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r))
-                             ? (- vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r)
-                             : vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r));
+            = (0xffffffU & (VL_GTS_III(32, 0U, VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r))
+                             ? (- vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r)
+                             : vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r));
     } else {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__max_abs_r = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_left_r = 0U;
@@ -2862,14 +2870,10 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_control_r_inst__priority_read_data_o[2U] 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_data_r
         [2U];
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l 
-        = ((0x8000U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
-                       >> 8U)) | (0x7fffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
-                                             >> 3U)));
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r 
-        = ((0x8000U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
-                       >> 8U)) | (0x7fffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
-                                             >> 3U)));
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
+        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
+        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__last_cycle_step_w 
         = ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__last_cycle_w)
             ? (0x17U == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_step_r))

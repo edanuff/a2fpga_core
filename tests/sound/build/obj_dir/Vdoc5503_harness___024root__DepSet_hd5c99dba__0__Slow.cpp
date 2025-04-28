@@ -135,14 +135,6 @@ VL_ATTR_COLD void Vdoc5503_harness___024root___stl_sequent__TOP__0(Vdoc5503_harn
     vlSelfRef.dbg_vol_o = vlSelfRef.doc5503_harness__DOT__dbg_vol;
     vlSelfRef.dbg_wds_o = vlSelfRef.doc5503_harness__DOT__dbg_wds;
     vlSelfRef.dbg_output_o = vlSelfRef.doc5503_harness__DOT__dbg_output;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l 
-        = ((0x8000U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
-                       >> 8U)) | (0x7fffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
-                                             >> 3U)));
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r 
-        = ((0x8000U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
-                       >> 8U)) | (0x7fffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
-                                             >> 3U)));
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_vol_r_inst__priority_write_data_i[0U] 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_a_r;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_vol_r_inst__priority_write_data_i[1U] 
@@ -1417,8 +1409,6 @@ VL_ATTR_COLD void Vdoc5503_harness___024root___ctor_var_reset(Vdoc5503_harness__
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__unnamedblk4__DOT__ptr_hi_mask_w = VL_RAND_RESET_I(8);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__unnamedblk4__DOT__ptr_w = VL_RAND_RESET_I(16);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__unnamedblk4__DOT__addr_w = VL_RAND_RESET_I(16);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r = VL_RAND_RESET_I(24);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l = VL_RAND_RESET_I(24);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca = VL_RAND_RESET_I(4);
     for (int __Vi0 = 0; __Vi0 < 1; ++__Vi0) {
         vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_w[__Vi0] = VL_RAND_RESET_I(1);

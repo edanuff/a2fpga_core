@@ -981,8 +981,8 @@ module doc5503 #(
     generate
         if (COMPRESSOR_ENABLE) begin: compressor_block
             audio_compressor #(
-                .INPUT_WIDTH(MIXER_SUM_RESOLUTION),
-                .OUTPUT_WIDTH(16),
+                .INPUT_WIDTH(MIXER_SUM_RESOLUTION),  // Use the full mixer resolution (24 bits)
+                .OUTPUT_WIDTH(16),                   // Output standard 16-bit audio
                 .ATTACK_RATE(COMPRESSOR_ATTACK),
                 .RELEASE_RATE(COMPRESSOR_RELEASE),
                 .THRESHOLD(COMPRESSOR_THRESHOLD),
@@ -993,16 +993,10 @@ module doc5503 #(
                 .clk_i(clk_i),
                 .reset_i(!reset_n_i),
                 .enable_i(1'b1),
-                // We need to provide the signal after bit selection to the compressor
-                // because the mixer uses the uncompressed signals internally
-                .audio_in_l({
-                    next_left_mix_r[MIXER_SUM_RESOLUTION-1], 
-                    next_left_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                }),
-                .audio_in_r({
-                    next_right_mix_r[MIXER_SUM_RESOLUTION-1], 
-                    next_right_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                }),
+                // Provide the full mixer resolution to the compressor
+                // for maximum dynamic range and better control
+                .audio_in_l(next_left_mix_r),   // Full 24-bit signal
+                .audio_in_r(next_right_mix_r),  // Full 24-bit signal
                 .audio_out_l(compressed_left_mix_r),
                 .audio_out_r(compressed_right_mix_r)
             );
