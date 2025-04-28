@@ -22,10 +22,15 @@ Vdoc5503_harness::Vdoc5503_harness(VerilatedContext* _vcontextp__, const char* _
     , wave_rd_o{vlSymsp->TOP.wave_rd_o}
     , wave_data_ready_i{vlSymsp->TOP.wave_data_ready_i}
     , wave_data_i{vlSymsp->TOP.wave_data_i}
+    , dbg_cycle_o{vlSymsp->TOP.dbg_cycle_o}
+    , dbg_osc_state_o{vlSymsp->TOP.dbg_osc_state_o}
+    , dbg_vol_o{vlSymsp->TOP.dbg_vol_o}
+    , dbg_wds_o{vlSymsp->TOP.dbg_wds_o}
     , wave_address_o{vlSymsp->TOP.wave_address_o}
     , mono_mix_o{vlSymsp->TOP.mono_mix_o}
     , left_mix_o{vlSymsp->TOP.left_mix_o}
     , right_mix_o{vlSymsp->TOP.right_mix_o}
+    , dbg_output_o{vlSymsp->TOP.dbg_output_o}
     , rootp{&(vlSymsp->TOP)}
 {
     // Register model with the context

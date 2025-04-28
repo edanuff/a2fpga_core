@@ -1,5 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     'build/doc5503_wavetable_resolution_test'
-relocations:     []
-...

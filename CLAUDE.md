@@ -9,6 +9,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Build boot kernel: `cd src/picosoc/boot && make`
 - Program Tang Nano 20K: `openfpgaloader -b tangnano20k -f boards/a2n20v2/impl/pnr/a2n20v2.fs`
 
+## Important Documentation
+- Sound module documentation: Review files in `tests/sound/doc/` directory
+- Audio troubleshooting: See `tests/sound/doc/AUDIO_TROUBLESHOOTING_GUIDE.md`
+- DOC5503 issues: See `tests/sound/doc/DOC5503_Oscillator_Halting_Issue.md`
+
 ## Project Structure
 - Each board type has its own directory under `boards/` (a2n20v1, a2n20v2, a2n20v2-Enhanced, a2n9)
 - Each board directory contains a `hdl/` subdirectory with its own `top.sv` file as the top-level module

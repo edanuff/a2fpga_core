@@ -22,7 +22,14 @@ module doc5503_harness(
 
     output signed [15:0] mono_mix_o,
     output signed [15:0] left_mix_o,
-    output signed [15:0] right_mix_o
+    output signed [15:0] right_mix_o,
+    
+    // Debug outputs for advanced testing
+    output [4:0]  dbg_cycle_o,
+    output [2:0]  dbg_osc_state_o,
+    output [7:0]  dbg_vol_o,
+    output [7:0]  dbg_wds_o,
+    output signed [15:0] dbg_output_o
 );
     // Debug signals - expose more internal state
     logic [4:0] dbg_cycle;
@@ -76,6 +83,13 @@ module doc5503_harness(
         
         .osc_en_o(dbg_osc_en)
     );
+    
+    // Expose debug signals to external world
+    assign dbg_cycle_o = dbg_cycle;
+    assign dbg_osc_state_o = dbg_osc_state;
+    assign dbg_vol_o = dbg_vol;
+    assign dbg_wds_o = dbg_wds;
+    assign dbg_output_o = dbg_output;
     
     // Enhanced debug monitoring
     always @(posedge clk_i) begin

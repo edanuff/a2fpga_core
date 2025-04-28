@@ -668,21 +668,25 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__ready_r = 0;
     CData/*4:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__cycle_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__cycle_r = 0;
+    CData/*4:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r = 0;
     CData/*2:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r = 0;
-    CData/*3:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
-    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r = 0;
     CData/*1:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 0;
+    CData/*3:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r = 0;
     CData/*5:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0;
+    QData/*39:0*/ __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r = 0;
     SData/*15:0*/ __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0;
     __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 = 0;
     CData/*3:0*/ __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0;
     __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 = 0;
     CData/*0:0*/ __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0;
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 = 0;
-    SData/*15:0*/ __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0;
+    IData/*23:0*/ __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0;
     __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 = 0;
     CData/*3:0*/ __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0;
     __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 = 0;
@@ -910,6 +914,8 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_ack_r__v1 = 0U;
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_ack_r__v2 = 0U;
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_ack_r__v3 = 0U;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r;
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_write_ack_r__v4 = 0U;
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_ack_r__v4 = 0U;
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_data_r__v0 = 0U;
@@ -921,18 +927,20 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__cycle_r 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_r;
-    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r;
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 = 0U;
     __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v1 = 0U;
-    __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 = 0U;
-    __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v1 = 0U;
     __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r;
+    __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 = 0U;
+    __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v1 = 0U;
+    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__unnamedblk4__DOT__i = 1U;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__unnamedblk5__DOT__i = 1U;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__unnamedblk4__DOT__i = 1U;
@@ -1428,6 +1436,122 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         vlSelfRef.doc5503_harness__DOT__dbg_ready = 0U;
     }
     if (vlSelfRef.reset_n_i) {
+        if ((1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r)))) {
+            __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r 
+                = (0x1fU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r)));
+            if ((0x1fU == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r))) {
+                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__ready_r = 1U;
+            }
+        }
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__prev_cs_n_r 
+            = vlSelfRef.cs_n_i;
+        if ((2U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r))) {
+            if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r))) {
+                __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 
+                    = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressed_left_mix_r;
+                __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 
+                    = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
+                __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 = 1U;
+                vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r 
+                    = ((0x8000U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r 
+                                   >> 8U)) | (0x7fffU 
+                                              & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r 
+                                                 >> 3U)));
+                vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r 
+                    = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressed_left_mix_r;
+                vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r 
+                    = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressed_right_mix_r;
+                if ((0xfU == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r))) {
+                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 1U;
+                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r = 0U;
+                } else {
+                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
+                        = (0xfU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r)));
+                }
+            } else {
+                vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca 
+                    = (0xfU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__data_b_r) 
+                               >> 4U));
+                __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 
+                    = (0xffffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r
+                                    [vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca] 
+                                    + VL_EXTENDS_II(24,16, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r))));
+                __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 
+                    = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca;
+                __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 = 1U;
+                vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r 
+                    = (0xffffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r 
+                                    + VL_EXTENDS_II(24,16, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r))));
+                if ((0U == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r))) {
+                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_out_r 
+                        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
+                }
+                if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca))) {
+                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
+                        = (0xffffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
+                                        + VL_EXTENDS_II(24,16, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r))));
+                } else {
+                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
+                        = (0xffffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
+                                        + VL_EXTENDS_II(24,16, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r))));
+                }
+                if (((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r) 
+                     == (0x1fU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_en_r) 
+                                  >> 1U)))) {
+                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0U;
+                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 3U;
+                } else {
+                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r 
+                        = (0x3fU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r)));
+                }
+            }
+        } else if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r))) {
+            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r = 0U;
+            __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0x1fU;
+            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r = 0U;
+            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r = 0U;
+            __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v1 
+                = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
+            __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v1 = 1U;
+            if ((0xfU == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r))) {
+                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 2U;
+                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0U;
+            } else {
+                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
+                    = (0xfU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r)));
+            }
+        } else {
+            __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v1 
+                = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
+            __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v1 = 1U;
+            if ((0xfU == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r))) {
+                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r = 0U;
+                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 1U;
+            } else {
+                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
+                    = (0xfU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r)));
+            }
+        }
+        if (((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__req_cs_w) 
+             & (~ (IData)(vlSelfRef.we_n_i)))) {
+            if ((7U == (7U & ((IData)(vlSelfRef.addr_i) 
+                              >> 5U)))) {
+                if ((0U == (0x1fU & (IData)(vlSelfRef.addr_i)))) {
+                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_int_r 
+                        = vlSelfRef.data_i;
+                }
+                if ((0U != (0x1fU & (IData)(vlSelfRef.addr_i)))) {
+                    if ((1U == (0x1fU & (IData)(vlSelfRef.addr_i)))) {
+                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_en_r 
+                            = vlSelfRef.data_i;
+                    }
+                }
+            }
+        }
+        if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_update_req) {
+            __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r 
+                = (0x1fU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r)));
+        }
         if (((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r) 
              & (IData)(vlSelfRef.clk_en_i))) {
             if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__last_cycle_step_w) {
@@ -1442,115 +1566,116 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                 __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__cycle_r 
                     = (0x1fU & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_r));
             }
-        }
-        if ((1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r)))) {
-            __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r 
-                = (0x1fU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r)));
-            if ((0x1fU == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r))) {
-                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__ready_r = 1U;
+            if (((1U == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r)) 
+                 & (0U == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_r)))) {
+                vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__active_osc_count_r 
+                    = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r;
+                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r = 0U;
             }
         }
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__prev_cs_n_r 
-            = vlSelfRef.cs_n_i;
-        if (((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__req_cs_w) 
-             & (~ (IData)(vlSelfRef.we_n_i)))) {
-            if ((7U == (7U & ((IData)(vlSelfRef.addr_i) 
-                              >> 5U)))) {
-                if ((0U == (0x1fU & (IData)(vlSelfRef.addr_i)))) {
-                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_int_r 
-                        = vlSelfRef.data_i;
-                }
-            }
+        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
+            = (0xffffffffffULL & ((vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__max_abs_r 
+                                   > (0xffffffU & (IData)(
+                                                          (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
+                                                           >> 0x10U))))
+                                   ? (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
+                                      + VL_SHIFTR_QQI(40,40,32, 
+                                                      (0xffffffffffULL 
+                                                       & (0x28fULL 
+                                                          * 
+                                                          (0xffffffffffULL 
+                                                           & (VL_SHIFTL_QQI(40,40,32, (QData)((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__max_abs_r)), 0x10U) 
+                                                              - vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r)))), 0x10U))
+                                   : (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
+                                      - VL_SHIFTR_QQI(40,40,32, 
+                                                      (0xffffffffffULL 
+                                                       & (0x42ULL 
+                                                          * 
+                                                          (0xffffffffffULL 
+                                                           & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
+                                                              - 
+                                                              VL_SHIFTL_QQI(40,40,32, (QData)((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__max_abs_r)), 0x10U))))), 0x10U))));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_fp 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized 
+            = (0xffffffffffULL & VL_DIVS_QQQ(40, (0xffffffffffULL 
+                                                  & VL_MULS_QQQ(40, 0x10000ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_fp)), 0x7fffff0000ULL));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_min = 0x999aULL;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_max = 0xccccULL;
+        if (VL_GTS_IQQ(40, 0x999aULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized)) {
+            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction = 0x10000ULL;
+        } else if (VL_LTS_IQQ(40, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_max)) {
+            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__knee_factor 
+                = (0xffffffffffULL & VL_DIVS_QQQ(40, 
+                                                 (0xffffffffffULL 
+                                                  & VL_MULS_QQQ(40, 0x10000ULL, 
+                                                                (0xffffffffffULL 
+                                                                 & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized 
+                                                                    - vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_min)))), 0x3333ULL));
+            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction 
+                = (0xffffffffffULL & (0x10000ULL - 
+                                      VL_DIVS_QQQ(40, 
+                                                  (0xffffffffffULL 
+                                                   & VL_MULS_QQQ(40, 0x30000ULL, 
+                                                                 (0xffffffffffULL 
+                                                                  & VL_MULS_QQQ(40, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__knee_factor, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__knee_factor)))), 0x20000ULL)));
+        } else {
+            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__amount_over 
+                = (0xffffffffffULL & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized 
+                                      - vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_max));
+            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction 
+                = (0xffffffffffULL & (0x10000ULL - 
+                                      VL_DIVS_QQQ(40, 
+                                                  (0xffffffffffULL 
+                                                   & VL_MULS_QQQ(40, 0x30000ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__amount_over)), 0x10000ULL)));
         }
-        if ((1U & (~ (IData)(vlSelfRef.clk_en_i)))) {
-            if ((2U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r))) {
-                if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r))) {
-                    __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 
-                        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r
-                        [vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r];
-                    __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 
-                        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
-                    __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v0 = 1U;
-                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r 
-                        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r;
-                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r 
-                        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r;
-                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r 
-                        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r;
-                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
-                        = (0xfU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r)));
-                    if ((0xfU == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r))) {
-                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 1U;
-                    }
-                } else {
-                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca 
-                        = (0xfU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__data_b_r) 
-                                   >> 4U));
-                    __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 
-                        = (0xffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r
-                                      [vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca] 
-                                      + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
-                    __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 
-                        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca;
-                    __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0 = 1U;
-                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r 
-                        = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r) 
-                                      + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
-                    if ((0U == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r))) {
-                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_1_r 
-                            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
-                    }
-                    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r 
-                        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
-                    if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk5__DOT__ca))) {
-                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
-                            = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r) 
-                                          + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
-                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r 
-                            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
-                    } else {
-                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
-                            = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r) 
-                                          + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r)));
-                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r 
-                            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
-                    }
-                    if (((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r) 
-                         == (0x1fU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_en_r) 
-                                      >> 1U)))) {
-                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0U;
-                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 3U;
-                    } else {
-                        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r 
-                            = (0x3fU & ((IData)(1U) 
-                                        + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r)));
-                    }
-                }
-            } else if ((1U & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r))) {
-                vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r = 0U;
-                vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r = 0U;
-                vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r = 0U;
-                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0x1fU;
-                __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v1 
-                    = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
-                __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v1 = 1U;
-                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
-                    = (0xfU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r)));
-                if ((0xfU == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r))) {
-                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 2U;
-                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r = 0U;
-                }
-            } else {
-                __VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v1 
-                    = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
-                __VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v1 = 1U;
-                __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
-                    = (0xfU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r)));
-                if ((0xfU == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r))) {
-                    __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 1U;
-                }
-            }
+        if (VL_GTS_IQQ(40, 0ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction)) {
+            vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction = 0ULL;
         }
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction 
+            = (0xffffffffffULL & VL_SHIFTR_QQI(40,40,32, 
+                                               (0xffffffffffULL 
+                                                & VL_MULS_QQQ(40, 0x13333ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction)), 0x10U));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction_r 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__sign_bit_l 
+            = (1U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l 
+                     >> 0x17U));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_input_l 
+            = ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__sign_bit_l)
+                ? (- VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l))
+                : VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_scaled_l 
+            = (IData)((0xffffffffffULL & VL_SHIFTR_QQI(40,40,32, 
+                                                       (0xffffffffffULL 
+                                                        & ((QData)((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_input_l)) 
+                                                           * vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction)), 0x10U)));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__final_l 
+            = ((0x7fffU < vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_scaled_l)
+                ? 0x7fffU : (0xffffU & vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_scaled_l));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressed_left_mix_r 
+            = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__sign_bit_l)
+                           ? (- (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__final_l))
+                           : (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__final_l)));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__sign_bit_r 
+            = (1U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r 
+                     >> 0x17U));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_input_r 
+            = ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__sign_bit_r)
+                ? (- VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r))
+                : VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_scaled_r 
+            = (IData)((0xffffffffffULL & VL_SHIFTR_QQI(40,40,32, 
+                                                       (0xffffffffffULL 
+                                                        & ((QData)((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_input_r)) 
+                                                           * vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction)), 0x10U)));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__final_r 
+            = ((0x7fffU < vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_scaled_r)
+                ? 0x7fffU : (0xffffU & vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_scaled_r));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressed_right_mix_r 
+            = (0xffffU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__sign_bit_r)
+                           ? (- (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__final_r))
+                           : (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__final_r)));
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__wave_rd_o = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_am_req_r = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_wds_reset_req_r = 0U;
@@ -1690,11 +1815,18 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r = 0U;
         __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__cycle_r = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_int_r = 0U;
-        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 0U;
         __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r = 0U;
+        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r = 0U;
+        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__active_osc_count_r = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_en_r = 0x3eU;
+        __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r = 0ULL;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction_r = 0x10000ULL;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressed_left_mix_r = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressed_right_mix_r = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__wave_address_o = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__wave_rd_o = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_am_req_r = 0U;
@@ -1765,20 +1897,23 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         }
     }
     if (vlSelfRef.reset_n_i) {
-        if (((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__req_cs_w) 
-             & (~ (IData)(vlSelfRef.we_n_i)))) {
-            if ((7U == (7U & ((IData)(vlSelfRef.addr_i) 
-                              >> 5U)))) {
-                if ((0U != (0x1fU & (IData)(vlSelfRef.addr_i)))) {
-                    if ((1U == (0x1fU & (IData)(vlSelfRef.addr_i)))) {
-                        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_en_r 
-                            = vlSelfRef.data_i;
-                    }
-                }
-            }
-        }
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__max_abs_r 
+            = ((vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_left_r 
+                > vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_right_r)
+                ? vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_left_r
+                : vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_right_r);
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_left_r 
+            = (0xffffffU & (VL_GTS_III(32, 0U, VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l))
+                             ? (- vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l)
+                             : vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l));
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_right_r 
+            = (0xffffffU & (VL_GTS_III(32, 0U, VL_EXTENDS_II(32,24, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r))
+                             ? (- vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r)
+                             : vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r));
     } else {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_en_r = 0x3eU;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__max_abs_r = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_left_r = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_right_r = 0U;
     }
     if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r) {
         vlSelfRef.doc5503_harness__DOT__dbg_vol = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_a_r;
@@ -1969,10 +2104,10 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
     if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_ack_r__v4) {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_ack_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_ack_r__v4] = 1U;
     }
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
-        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r 
         = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r 
+        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
     if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0) {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0] 
             = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__next_channel_r__v0;
@@ -1987,10 +2122,8 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
     if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v1) {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__channel_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__channel_r__v1] = 0U;
     }
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r 
-        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r 
-        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__ready_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r 
+        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__current_active_osc_r;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_addr_i[0U] 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_write_addr_i[0U] 
@@ -2147,6 +2280,11 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         = ((~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_port_loop__BRA__3__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__prev_r_r)) 
            & vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_ack_r
            [3U]);
+    vlSelfRef.dbg_osc_state_o = vlSelfRef.doc5503_harness__DOT__dbg_osc_state;
+    vlSelfRef.dbg_vol_o = vlSelfRef.doc5503_harness__DOT__dbg_vol;
+    vlSelfRef.dbg_wds_o = vlSelfRef.doc5503_harness__DOT__dbg_wds;
+    vlSelfRef.dbg_cycle_o = vlSelfRef.doc5503_harness__DOT__dbg_cycle;
+    vlSelfRef.dbg_output_o = vlSelfRef.doc5503_harness__DOT__dbg_output;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__data_w 
         = (0x80U ^ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_a_r));
     if ((1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_write_en_r)))) {
@@ -2171,8 +2309,7 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         }
     }
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__vol_s 
-        = (0x7fU & ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_a_r) 
-                    >> 1U));
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_a_r;
     if ((1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_en_r)))) {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__unnamedblk6__DOT__i 
             = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_addr_r;
@@ -2194,15 +2331,12 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                 = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__unnamedblk6__DOT__data_curr_r;
         }
     }
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__mult_result 
-        = (0x3ffffU & VL_MULS_III(18, (0x3ffffU & VL_EXTENDS_II(18,9, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__data_w))), 
-                                  (0x3ffffU & VL_EXTENDS_II(18,9, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__vol_s)))));
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_r 
-        = (0xffffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__mult_result 
-                      >> 2U));
-    vlSelfRef.mono_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r;
-    vlSelfRef.left_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r;
-    vlSelfRef.right_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r;
+        = (0xffffU & VL_MULS_III(16, (0xffffU & VL_EXTENDS_II(16,8, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__data_w))), 
+                                 (0xffffU & VL_EXTENDS_II(16,9, (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__vol_s)))));
+    vlSelfRef.mono_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_out_r;
+    vlSelfRef.left_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_out_r;
+    vlSelfRef.right_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_out_r;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_r
         [(0x1fU & ((IData)(1U) + (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r)))];
@@ -2257,47 +2391,6 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__channel_o[0U] 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__channel_r
         [0U];
-    vlSelfRef.wave_rd_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__wave_rd_o;
-    vlSelfRef.wave_address_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__wave_address_o;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_write_addr_i[2U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__last_osc_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_vol_r_inst__priority_write_req_i[0U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_am_req_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_req_i[1U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_reset_req;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_req_i[2U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_update_req;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_acc_r_inst__priority_write_req_i[0U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_acc_add_req_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_acc_r_inst__priority_write_req_i[1U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_acc_reset_req_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_acc_r_inst__priority_write_req_i[2U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__partner_acc_reset_req_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_read_req_i[1U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__partner_control_load_req_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_read_req_i[2U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_control_load_req_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_write_req_i[1U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_wds_reset_req_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_write_req_i[1U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_osc_halt_req_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_write_req_i[2U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__partner_unhalt_req_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_req_i[0U] 
-        = (1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r)));
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_write_req_i[0U] 
-        = (1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r)));
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_write_req_i[0U] 
-        = (1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r)));
-    if ((1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_en_r)))) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__unnamedblk6__DOT__i 
-            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_r;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__unnamedblk6__DOT__data_curr_r 
-            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__data_r
-            [(0x1fU & vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__unnamedblk6__DOT__i)];
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__data_a_r 
-            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__unnamedblk6__DOT__data_curr_r;
-    }
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_w[0U] 
         = (((~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_r_w)) 
             & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_s_w)) 
@@ -2346,6 +2439,107 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__mixer_cycle_r;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__req_cs_w 
         = ((~ (IData)(vlSelfRef.cs_n_i)) & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__prev_cs_n_r));
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
+        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r 
+        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r 
+        = __Vdly__doc5503_harness__DOT__doc5503_inst__DOT__ready_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_en_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_index = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_addr_r = 0U;
+    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_w
+        [0U]) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_ctrl__DOT__found = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_en_r = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_index = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_addr_r 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fl_r_inst__priority_write_addr_i
+            [0U];
+    }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_en_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_index = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_addr_r = 0U;
+    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_w
+        [0U]) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_ctrl__DOT__found = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_en_r = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_index = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_addr_r 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fh_r_inst__priority_write_addr_i
+            [0U];
+    }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_index = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_addr_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_index = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_addr_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_en_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_index = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_read_en_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_read_index = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_data_i[2U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_r;
+    vlSelfRef.wave_rd_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__wave_rd_o;
+    vlSelfRef.wave_address_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__wave_address_o;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_write_addr_i[2U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__last_osc_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_vol_r_inst__priority_write_req_i[0U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_am_req_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_req_i[1U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_reset_req;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_req_i[2U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_update_req;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_acc_r_inst__priority_write_req_i[0U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_acc_add_req_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_acc_r_inst__priority_write_req_i[1U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_acc_reset_req_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_acc_r_inst__priority_write_req_i[2U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__partner_acc_reset_req_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_read_req_i[1U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__partner_control_load_req_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_read_req_i[2U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_control_load_req_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_write_req_i[1U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_wds_reset_req_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_write_req_i[1U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__current_osc_halt_req_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_write_req_i[2U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__partner_unhalt_req_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_req_i[0U] 
+        = (1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r)));
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_write_req_i[0U] 
+        = (1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r)));
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_write_req_i[0U] 
+        = (1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__ready_r)));
+    if ((1U & (~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_en_r)))) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__unnamedblk6__DOT__i 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_r;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__unnamedblk6__DOT__data_curr_r 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__data_r
+            [(0x1fU & vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__unnamedblk6__DOT__i)];
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__data_a_r 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__unnamedblk6__DOT__data_curr_r;
+    }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_en_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_index = 0U;
+    if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_r__v0) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_r__v0] 
+            = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_r__v0;
+    }
+    if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r__v0) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r__v0] 
+            = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r__v0;
+    }
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_s_w 
         = ((~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__prev_s_r)) 
            & vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_vol_r_inst__priority_write_req_i
@@ -2378,21 +2572,55 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         = ((~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__gen_read_ports__DOT__priority_read_port_loop__BRA__2__KET____DOT__read_ff__DOT__prev_s_r)) 
            & vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_read_req_i
            [2U]);
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_en_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_index = 0U;
     if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__data_r__v0) {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__data_r__v0] 
             = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__data_r__v0;
+    }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_en_r = 0U;
+    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_w
+        [0U]) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_ctrl__DOT__found = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_index = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_addr_r 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_rts_r_inst__priority_write_addr_i
+            [0U];
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_en_r = 1U;
     }
     if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_data_r__v0) {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_data_r__v0] 
             = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_data_r__v0;
     }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_en_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_index = 0U;
     if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__data_r__v0) {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__data_r__v0] 
             = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__data_r__v0;
     }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_en_r = 0U;
+    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_w
+        [0U]) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_ctrl__DOT__found = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_index = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_addr_r 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wtp_r_inst__priority_write_addr_i
+            [0U];
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_en_r = 1U;
+    }
     if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_data_r__v0) {
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_data_r__v0] 
             = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_data_r__v0;
+    }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_en_r = 0U;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_index = 0U;
+    if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_r__v0) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_r__v0] 
+            = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_r__v0;
+    }
+    if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r__v0) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r__v0] 
+            = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r__v0;
     }
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_w[0U] 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_req_i
@@ -2449,74 +2677,9 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_data_r__v0] 
             = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_data_r__v0;
     }
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_addr_r = 0U;
-    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_w
-        [0U]) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_ctrl__DOT__found = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_en_r = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_index = 0U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_addr_r 
-            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fl_r_inst__priority_write_addr_i
-            [0U];
-    }
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_addr_r = 0U;
-    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_w
-        [0U]) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_ctrl__DOT__found = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_en_r = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_index = 0U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_addr_r 
-            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fh_r_inst__priority_write_addr_i
-            [0U];
-    }
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_addr_r = 0U;
-    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_w
-        [0U]) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_ctrl__DOT__found = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_en_r = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_index = 0U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_write_addr_r 
-            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wtp_r_inst__priority_write_addr_i
-            [0U];
-    }
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_addr_r = 0U;
-    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_w
-        [0U]) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_ctrl__DOT__found = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_en_r = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_index = 0U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_addr_r 
-            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_rts_r_inst__priority_write_addr_i
-            [0U];
-    }
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_read_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_read_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_ctrl__DOT__found = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_read_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_data_i[2U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_vol_r_inst__priority_read_data_o[0U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r
+        [0U];
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_w[0U] 
         = (((~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_r_w)) 
             & (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_s_w)) 
@@ -2554,6 +2717,11 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         [0U];
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_wtp_r_inst__priority_read_data_o[0U] 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_data_r
+        [0U];
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_vol_r_inst__priority_write_data_i[0U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_a_r;
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_wds_r_inst__priority_read_data_o[0U] 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r
         [0U];
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_w[1U] 
         = (((~ (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_port_loop__BRA__1__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_r_w)) 
@@ -2611,6 +2779,28 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_read_index = 0U;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_read_addr_r 
             = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fh_r_inst__priority_read_addr_i
+            [0U];
+    }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_addr_r 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_r;
+    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_w
+        [0U]) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_ctrl__DOT__found = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_en_r = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_index = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_addr_r 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_vol_r_inst__priority_read_addr_i
+            [0U];
+    }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_addr_r 
+        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_r;
+    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_w
+        [0U]) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_ctrl__DOT__found = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_en_r = 1U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_index = 0U;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_addr_r 
+            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_read_addr_i
             [0U];
     }
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wtp_r_inst__DOT__priority_read_addr_r 
@@ -2672,48 +2862,14 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_control_r_inst__priority_read_data_o[2U] 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_data_r
         [2U];
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_addr_r 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_r;
-    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_w
-        [0U]) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_ctrl__DOT__found = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_en_r = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_index = 0U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_addr_r 
-            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_vol_r_inst__priority_read_addr_i
-            [0U];
-    }
-    if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_r__v0) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_r__v0] 
-            = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_r__v0;
-    }
-    if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r__v0) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r__v0] 
-            = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r__v0;
-    }
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_en_r = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_index = 0U;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_addr_r 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_r;
-    if (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_w
-        [0U]) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_ctrl__DOT__found = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_en_r = 1U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_index = 0U;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_addr_r 
-            = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_read_addr_i
-            [0U];
-    }
-    if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_r__v0) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_r__v0] 
-            = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_r__v0;
-    }
-    if (__VdlySet__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r__v0) {
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r[__VdlyDim0__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r__v0] 
-            = __VdlyVal__doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r__v0;
-    }
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_l 
+        = ((0x8000U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
+                       >> 8U)) | (0x7fffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r 
+                                             >> 3U)));
+    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__compressor_block__DOT__compressor__audio_in_r 
+        = ((0x8000U & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
+                       >> 8U)) | (0x7fffU & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__next_right_mix_r 
+                                             >> 3U)));
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__last_cycle_step_w 
         = ((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__last_cycle_w)
             ? (0x17U == (IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__cycle_step_r))
@@ -2926,14 +3082,6 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_control_r_inst__priority_write_data_i[2U] 
         = (0xfeU & vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_control_r_inst__priority_read_data_o
            [1U]);
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_vol_r_inst__priority_read_data_o[0U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r
-        [0U];
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_vol_r_inst__priority_write_data_i[0U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__data_a_r;
-    vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_wds_r_inst__priority_read_data_o[0U] 
-        = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_read_data_r
-        [0U];
     vlSelfRef.data_o = ((0U == (7U & ((IData)(vlSelfRef.addr_i) 
                                       >> 5U))) ? vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_fl_r_inst__priority_read_data_o
                         [0U] : ((1U == (7U & ((IData)(vlSelfRef.addr_i) 

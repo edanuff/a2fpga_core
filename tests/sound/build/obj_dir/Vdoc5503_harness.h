@@ -41,10 +41,15 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness VL_NOT_FINAL : public Verila
     VL_OUT8(&wave_rd_o,0,0);
     VL_IN8(&wave_data_ready_i,0,0);
     VL_IN8(&wave_data_i,7,0);
+    VL_OUT8(&dbg_cycle_o,4,0);
+    VL_OUT8(&dbg_osc_state_o,2,0);
+    VL_OUT8(&dbg_vol_o,7,0);
+    VL_OUT8(&dbg_wds_o,7,0);
     VL_OUT16(&wave_address_o,15,0);
     VL_OUT16(&mono_mix_o,15,0);
     VL_OUT16(&left_mix_o,15,0);
     VL_OUT16(&right_mix_o,15,0);
+    VL_OUT16(&dbg_output_o,15,0);
 
     // CELLS
     // Public to allow access to /* verilator public */ items.
