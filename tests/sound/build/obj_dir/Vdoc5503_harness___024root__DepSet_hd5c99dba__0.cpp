@@ -1589,7 +1589,7 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                                    ? (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
                                       + VL_SHIFTR_QQI(40,40,32, 
                                                       (0xffffffffffULL 
-                                                       & (0x28fULL 
+                                                       & (0x148ULL 
                                                           * 
                                                           (0xffffffffffULL 
                                                            & (VL_SHIFTL_QQI(40,40,32, (QData)((IData)(vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__max_abs_r)), 0x10U) 
@@ -1597,7 +1597,7 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                                    : (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
                                       - VL_SHIFTR_QQI(40,40,32, 
                                                       (0xffffffffffULL 
-                                                       & (0x42ULL 
+                                                       & (0x21ULL 
                                                           * 
                                                           (0xffffffffffULL 
                                                            & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r 
@@ -1608,9 +1608,9 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized 
             = (0xffffffffffULL & VL_DIVS_QQQ(40, (0xffffffffffULL 
                                                   & VL_MULS_QQQ(40, 0x10000ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_fp)), 0x7fffff0000ULL));
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_min = 0x999aULL;
-        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_max = 0xccccULL;
-        if (VL_GTS_IQQ(40, 0x999aULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized)) {
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_min = 0x599aULL;
+        vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_max = 0xa666ULL;
+        if (VL_GTS_IQQ(40, 0x599aULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized)) {
             vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction = 0x10000ULL;
         } else if (VL_LTS_IQQ(40, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_max)) {
             vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__knee_factor 
@@ -1619,12 +1619,12 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                                                   & VL_MULS_QQQ(40, 0x10000ULL, 
                                                                 (0xffffffffffULL 
                                                                  & (vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized 
-                                                                    - vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_min)))), 0x3333ULL));
+                                                                    - vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_min)))), 0x4ccdULL));
             vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction 
                 = (0xffffffffffULL & (0x10000ULL - 
                                       VL_DIVS_QQQ(40, 
                                                   (0xffffffffffULL 
-                                                   & VL_MULS_QQQ(40, 0x30000ULL, 
+                                                   & VL_MULS_QQQ(40, 0x70000ULL, 
                                                                  (0xffffffffffULL 
                                                                   & VL_MULS_QQQ(40, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__knee_factor, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__knee_factor)))), 0x20000ULL)));
         } else {
@@ -1635,7 +1635,7 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
                 = (0xffffffffffULL & (0x10000ULL - 
                                       VL_DIVS_QQQ(40, 
                                                   (0xffffffffffULL 
-                                                   & VL_MULS_QQQ(40, 0x30000ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__amount_over)), 0x10000ULL)));
+                                                   & VL_MULS_QQQ(40, 0x70000ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__amount_over)), 0x10000ULL)));
         }
         if (VL_GTS_IQQ(40, 0ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction)) {
             vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction = 0ULL;
@@ -1643,7 +1643,7 @@ VL_INLINE_OPT void Vdoc5503_harness___024root___nba_sequent__TOP__0(Vdoc5503_har
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction 
             = (0xffffffffffULL & VL_SHIFTR_QQI(40,40,32, 
                                                (0xffffffffffULL 
-                                                & VL_MULS_QQQ(40, 0x13333ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction)), 0x10U));
+                                                & VL_MULS_QQQ(40, 0x10000ULL, vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction)), 0x10U));
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction_r 
             = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction;
         vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__sign_bit_l 

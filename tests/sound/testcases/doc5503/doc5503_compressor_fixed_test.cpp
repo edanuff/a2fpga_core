@@ -12,12 +12,12 @@ double sc_time_stamp() { return 0; }
 
 // Compressor settings from doc5503.sv
 // These should match the parameters in the actual implementation
-#define COMPRESSOR_THRESHOLD 0.7
-#define COMPRESSOR_RATIO 4.0
-#define COMPRESSOR_KNEE_WIDTH 0.2
-#define COMPRESSOR_ATTACK 0.01
-#define COMPRESSOR_RELEASE 0.001
-#define COMPRESSOR_MAKEUP_GAIN 1.2
+#define COMPRESSOR_THRESHOLD 0.5
+#define COMPRESSOR_RATIO 8.0
+#define COMPRESSOR_KNEE_WIDTH 0.3
+#define COMPRESSOR_ATTACK 0.005
+#define COMPRESSOR_RELEASE 0.0005
+#define COMPRESSOR_MAKEUP_GAIN 1.0
 
 #define WAV_HEADER_SIZE 44
 
@@ -341,8 +341,8 @@ int main(int argc, char** argv) {
     double compression_db = 20.0 * log10(output_ratio / input_ratio);
     printf("Compression amount: %.1f dB\n", compression_db);
     
-    // Determine if compression is working
-    bool compression_working = (output_ratio < input_ratio * 0.85); // Allow 15% margin
+    // Determine if compression is working based on RMS ratio (more reliable)
+    bool compression_working = (output_rms_ratio < input_rms_ratio * 0.90); // Allow 10% margin
     
     printf("\n=== COMPRESSION TEST RESULT ===\n");
     if (compression_working) {

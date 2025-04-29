@@ -176,19 +176,29 @@ module doc5503 #(
         end
     end
 
-    // cycles are 8 steps long except for last cycle is 24 steps long, corresponds to RAM refresh
+    // cycles are 8 steps long except for last cycle is 24 steps long
+    // this corresponds to the two additional cycles for RAM refresh in the DOC5503
+    // we implement this as "overtime" steps in the last cycle to simplify the FSM logic
+    // the overtime 16 steps are used for the mixer cycle and a 1 clk pulse is generated
+    // at the start of the overtime steps to trigger the mixer
     wire last_cycle_w = cycle_r == cycle_max_w;
     wire last_cycle_step_w = last_cycle_w ? (cycle_step_r == 5'd23) : (cycle_step_r == 5'd7);
+    reg mixer_trigger_r;
 
     always @(posedge clk_i) begin
         if (!reset_n_i) begin
             cycle_r <= '0;
             cycle_step_r <= '0;
         end else begin
-           if (ready_r & clk_en_i) begin
+            mixer_trigger_r <= 1'b0;
+            if (ready_r & clk_en_i) begin
                 cycle_step_r <= last_cycle_step_w ? '0 : cycle_step_r + 1'd1;
                 cycle_r <= last_cycle_step_w ? (last_cycle_w ? '0 : cycle_r + 1'd1) : cycle_r;
-           end
+                // trigger the mixer at the start of the overtime steps
+                if (last_cycle_w && (cycle_step_r == 5'd8)) begin
+                    mixer_trigger_r <= 1'b1;
+                end
+            end
         end
     end
 
@@ -658,7 +668,7 @@ module doc5503 #(
     // DSP Multiplier optimized for MULT9x9 hardware inference
     always @(posedge clk_i) begin
         automatic logic signed [7:0] data_w = wds_w ^ 8'h80;       // convert waveform data to signed
-        automatic logic signed [8:0] vol_s = {1'b0, vol_w};        // convert volume to signed
+        automatic logic signed [8:0] vol_s = {1'b00, vol_w[7:1]};        // convert volume to signed
         output_r <= data_w * vol_s;                                // output is waveform data * volume
     end
 
@@ -950,14 +960,14 @@ module doc5503 #(
     localparam int TOP_BIT_OFFSET = 6;   // Skip this many bits from the top of the accumulator
     localparam int WINDOW_SIZE = 15;     // Use this many bits for magnitude
 
-    // Compressor parameters
+    // Compressor parameters - Enhanced for multi-oscillator playback
     localparam real COMPRESSOR_ENABLE = 1; // Set to 0 to bypass compressor
-    localparam real COMPRESSOR_ATTACK = 0.01;
-    localparam real COMPRESSOR_RELEASE = 0.001;
-    localparam real COMPRESSOR_THRESHOLD = 0.7;
-    localparam real COMPRESSOR_RATIO = 4.0;
-    localparam real COMPRESSOR_KNEE_WIDTH = 0.2;
-    localparam real COMPRESSOR_MAKEUP_GAIN = 1.2;
+    localparam real COMPRESSOR_ATTACK = 0.005;   // Faster attack to catch peaks quicker
+    localparam real COMPRESSOR_RELEASE = 0.0005; // Slightly faster release
+    localparam real COMPRESSOR_THRESHOLD = 0.5;  // Lower threshold to start compressing earlier
+    localparam real COMPRESSOR_RATIO = 8.0;      // More aggressive compression ratio
+    localparam real COMPRESSOR_KNEE_WIDTH = 0.3; // Wider knee for smoother transition
+    localparam real COMPRESSOR_MAKEUP_GAIN = 1.0; // No makeup gain to prevent pushing levels back up
 
     reg signed [15:0] osc_out_r;
 
@@ -1008,38 +1018,42 @@ module doc5503 #(
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_channel_r[CHANNEL_MAX:0]; 
 
 
-    localparam [1:0] MIXER_INIT = 2'd0;
-    localparam [1:0] MIXER_ZERO = 2'd1;
+    localparam [1:0] MIXER_ZERO = 2'd0;
+    localparam [1:0] MIXER_IDLE = 2'd1;
     localparam [1:0] MIXER_ADD = 2'd2;
     localparam [1:0] MIXER_OUTPUT = 2'd3;
 
     reg [1:0] mixer_state_r;
     reg [3:0] mixer_channel_r;
 
+    reg mixer_reset_r;
+
     always @(posedge clk_i) begin
         if (!reset_n_i) begin
-            mixer_state_r <= MIXER_INIT;
+            mixer_state_r <= MIXER_ZERO;
             mixer_channel_r <= '0;
             
             mono_mix_r <= '0;
             left_mix_r <= '0;
             right_mix_r <= '0;
 
+            mixer_reset_r <= 1'b1;
+
         end else begin
             case (mixer_state_r)
-                MIXER_INIT: begin
-                    channel_r[mixer_channel_r] <= '0;
-
-                    if (mixer_channel_r == CHANNEL_MAX) begin
+                MIXER_IDLE: begin
+                    // Wait for next cycle to start mixing
+                    if (mixer_trigger_r) begin
                         mixer_state_r <= MIXER_ZERO;
-                        mixer_channel_r <= '0;
-                    end else begin
-                        mixer_channel_r <= mixer_channel_r + 1'd1;
                     end
+                    mixer_cycle_r <= '0;
+                    mixer_channel_r <= '0;
                 end
+
                 MIXER_ZERO: begin
                     mixer_cycle_r <= 6'd31;
 
+                    if (mixer_reset_r) channel_r[mixer_channel_r] <= '0;
                     next_channel_r[mixer_channel_r] <= '0;
 
                     next_mono_mix_r <= '0;
@@ -1047,12 +1061,18 @@ module doc5503 #(
                     next_right_mix_r <= '0;
 
                     if (mixer_channel_r == CHANNEL_MAX) begin
-                        mixer_state_r <= MIXER_ADD;
+                        if (mixer_reset_r) begin
+                            mixer_reset_r <= 1'b0; // Reset only once at the start of mixing
+                            mixer_state_r <= MIXER_IDLE;
+                        end else begin
+                            mixer_state_r <= MIXER_ADD;
+                        end
                         mixer_cycle_r <= '0;
                     end else begin
                         mixer_channel_r <= mixer_channel_r + 1'd1;
                     end
                 end
+
                 MIXER_ADD: begin
                     automatic logic [3:0] ca = mixer_control_w[7:4];
                     // With 24-bit accumulation, we have sufficient headroom to avoid clipping
@@ -1075,6 +1095,7 @@ module doc5503 #(
                     mixer_cycle_r <= (mixer_cycle_r == cycle_max_w) ? '0 : mixer_cycle_r + 1'd1;
                     if (mixer_cycle_r == cycle_max_w) mixer_state_r <= MIXER_OUTPUT;
                 end
+
                 MIXER_OUTPUT: begin
                     // Apply output to channel registers
                     if (OUTPUT_CHANNEL_MIX) begin
@@ -1120,7 +1141,7 @@ module doc5503 #(
                     end
 
                     if (mixer_channel_r == CHANNEL_MAX) begin
-                        mixer_state_r <= MIXER_ZERO;
+                        mixer_state_r <= MIXER_IDLE;
                         mixer_channel_r <= '0;
                     end else begin
                         mixer_channel_r <= mixer_channel_r + 1'd1;
