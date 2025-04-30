@@ -960,15 +960,6 @@ module doc5503 #(
     localparam int TOP_BIT_OFFSET = 6;   // Skip this many bits from the top of the accumulator
     localparam int WINDOW_SIZE = 15;     // Use this many bits for magnitude
 
-    // Compressor parameters - Enhanced for multi-oscillator playback
-    localparam real COMPRESSOR_ENABLE = 0; // Set to 0 to bypass compressor
-    localparam real COMPRESSOR_ATTACK = 0.005;   // Faster attack to catch peaks quicker
-    localparam real COMPRESSOR_RELEASE = 0.0005; // Slightly faster release
-    localparam real COMPRESSOR_THRESHOLD = 0.5;  // Lower threshold to start compressing earlier
-    localparam real COMPRESSOR_RATIO = 8.0;      // More aggressive compression ratio
-    localparam real COMPRESSOR_KNEE_WIDTH = 0.3; // Wider knee for smoother transition
-    localparam real COMPRESSOR_MAKEUP_GAIN = 1.0; // No makeup gain to prevent pushing levels back up
-
     reg signed [15:0] osc_out_r;
 
     reg signed [15:0] mono_mix_r;
@@ -977,41 +968,13 @@ module doc5503 #(
 
     reg signed [15:0] left_mix_r;
     reg signed [15:0] compressed_left_mix_r;
-    assign left_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : 
-                        (COMPRESSOR_ENABLE ? compressed_left_mix_r : left_mix_r);
+    assign left_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : left_mix_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_left_mix_r;
 
     reg signed [15:0] right_mix_r;
     reg signed [15:0] compressed_right_mix_r;
-    assign right_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : 
-                         (COMPRESSOR_ENABLE ? compressed_right_mix_r : right_mix_r);
+    assign right_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : right_mix_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_right_mix_r;
-    
-    // Audio compressor for dynamic range control
-    generate
-        if (COMPRESSOR_ENABLE) begin: compressor_block
-            audio_compressor #(
-                .INPUT_WIDTH(MIXER_SUM_RESOLUTION),  // Use the full mixer resolution (24 bits)
-                .OUTPUT_WIDTH(16),                   // Output standard 16-bit audio
-                .ATTACK_RATE(COMPRESSOR_ATTACK),
-                .RELEASE_RATE(COMPRESSOR_RELEASE),
-                .THRESHOLD(COMPRESSOR_THRESHOLD),
-                .RATIO(COMPRESSOR_RATIO),
-                .KNEE_WIDTH(COMPRESSOR_KNEE_WIDTH),
-                .MAKEUP_GAIN(COMPRESSOR_MAKEUP_GAIN)
-            ) compressor (
-                .clk_i(clk_i),
-                .reset_i(!reset_n_i),
-                .enable_i(1'b0),
-                // Provide the full mixer resolution to the compressor
-                // for maximum dynamic range and better control
-                .audio_in_l(next_left_mix_r),   // Full 24-bit signal
-                .audio_in_r(next_right_mix_r),  // Full 24-bit signal
-                .audio_out_l(compressed_left_mix_r),
-                .audio_out_r(compressed_right_mix_r)
-            );
-        end
-    endgenerate
 
     reg signed [15:0] channel_r[CHANNEL_MAX:0]; 
     assign channel_o = channel_r;
@@ -1099,18 +1062,13 @@ module doc5503 #(
                 MIXER_OUTPUT: begin
                     // Apply output to channel registers
                     if (OUTPUT_CHANNEL_MIX) begin
-                        if (COMPRESSOR_ENABLE) begin
-                            // Compressor will handle the output scaling
-                            channel_r[mixer_channel_r] <= compressed_left_mix_r;
-                        end else begin
-                            // Manual bit selection scaling
-                            channel_r[mixer_channel_r] <= {
-                                // Sign bit
-                                next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1],
-                                // Magnitude bits - using parameterized window 
-                                next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                            };
-                        end
+                        // Manual bit selection scaling
+                        channel_r[mixer_channel_r] <= {
+                            // Sign bit
+                            next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1],
+                            // Magnitude bits - using parameterized window 
+                            next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
+                        };
                     end
                     
                     // Apply output to mono mix register
@@ -1123,21 +1081,16 @@ module doc5503 #(
                     
                     // Apply output to stereo mix registers
                     if (OUTPUT_STEREO_MIX) begin
-                        if (!COMPRESSOR_ENABLE) begin
-                            // Manual bit selection scaling when compressor is disabled
-                            left_mix_r <= {
-                                next_left_mix_r[MIXER_SUM_RESOLUTION-1],
-                                next_left_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                            };
-                            right_mix_r <= {
-                                next_right_mix_r[MIXER_SUM_RESOLUTION-1],
-                                next_right_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                            };
-                        end else begin
-                            // When compressor is enabled, it handles the bit scaling
-                            left_mix_r <= compressed_left_mix_r;
-                            right_mix_r <= compressed_right_mix_r;
-                        end
+                        // Manual bit selection scaling when compressor is disabled
+                        left_mix_r <= {
+                            next_left_mix_r[MIXER_SUM_RESOLUTION-1],
+                            next_left_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
+                        };
+                        right_mix_r <= {
+                            next_right_mix_r[MIXER_SUM_RESOLUTION-1],
+                            next_right_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
+                        };
+
                     end
 
                     if (mixer_channel_r == CHANNEL_MAX) begin
