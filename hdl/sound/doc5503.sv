@@ -668,7 +668,7 @@ module doc5503 #(
     // DSP Multiplier optimized for MULT9x9 hardware inference
     always @(posedge clk_i) begin
         automatic logic signed [7:0] data_w = wds_w ^ 8'h80;       // convert waveform data to signed
-        automatic logic signed [8:0] vol_s = {1'b00, vol_w[7:1]};        // convert volume to signed
+        automatic logic signed [8:0] vol_s = {1'b0, vol_w[7:0]};        // convert volume to signed
         output_r <= data_w * vol_s;                                // output is waveform data * volume
     end
 
@@ -961,7 +961,7 @@ module doc5503 #(
     localparam int WINDOW_SIZE = 15;     // Use this many bits for magnitude
 
     // Compressor parameters - Enhanced for multi-oscillator playback
-    localparam real COMPRESSOR_ENABLE = 1; // Set to 0 to bypass compressor
+    localparam real COMPRESSOR_ENABLE = 0; // Set to 0 to bypass compressor
     localparam real COMPRESSOR_ATTACK = 0.005;   // Faster attack to catch peaks quicker
     localparam real COMPRESSOR_RELEASE = 0.0005; // Slightly faster release
     localparam real COMPRESSOR_THRESHOLD = 0.5;  // Lower threshold to start compressing earlier
@@ -1002,7 +1002,7 @@ module doc5503 #(
             ) compressor (
                 .clk_i(clk_i),
                 .reset_i(!reset_n_i),
-                .enable_i(1'b1),
+                .enable_i(1'b0),
                 // Provide the full mixer resolution to the compressor
                 // for maximum dynamic range and better control
                 .audio_in_l(next_left_mix_r),   // Full 24-bit signal

@@ -248,6 +248,10 @@ module audio_compressor #(
       // So we don't need this additional check anymore
       
       // We already clip in the sign-preserving code above
+    end else begin
+      // If not enabled, just pass through the input
+      audio_out_l <= {audio_in_l[INPUT_WIDTH-1], audio_in_l[INPUT_WIDTH-7 -: OUTPUT_WIDTH-1]};
+      audio_out_r <= {audio_in_r[INPUT_WIDTH-1], audio_in_r[INPUT_WIDTH-7 -: OUTPUT_WIDTH-1]};
     end
   end
 endmodule
