@@ -6,7 +6,7 @@ Based on the analysis of the NINJATRACKER.S player, we should implement the foll
 
 The NinjaTracker code demonstrates sophisticated use of the control register (lines 1414-1422, 1188-1189), showing we should test:
 
-- **Interrupts Handling**
+- **Interrupts Handling** NOT ACTUALLY NECESSARY FOR OUR USE
   - Verify that bit 3 (Interrupt Enable) works correctly
   - Test that when a wavetable ends, interrupts are generated properly
   - Confirm that the interrupt register (0xE0) correctly shows which oscillator triggered the interrupt

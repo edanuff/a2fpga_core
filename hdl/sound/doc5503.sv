@@ -57,7 +57,7 @@ module doc5503 #(
     parameter int NUM_CHANNELS = 16,
     parameter int OUTPUT_MONO_MIX = 1,
     parameter int OUTPUT_STEREO_MIX = 1,
-    parameter int OUTPUT_OSC_DIRECT = 1, // Output raw oscillator data
+    parameter int OUTPUT_OSC_DIRECT = 0, // Output raw oscillator data
     parameter int DIRECT_OUTPUT_OSC_NUM = 0, // # of Oscillator to direct to audio output
     parameter int CHANNEL_MAX = OUTPUT_CHANNEL_MIX && (NUM_CHANNELS > 1) ? NUM_CHANNELS - 1 : 1
 ) (
@@ -176,22 +176,58 @@ module doc5503 #(
         end
     end
 
+    // Timing
+
+    // 7.15909 MHz clock is divided by 8 for each oscillator cycle
+    // Each oscillator cycle take 1117.46 ns or approximately 1.12 microseconds
+    // After all oscillators are serviced, the DOC5503 takes two additional cycles
+    // to refresh the RAM. 
+    // With all oscillators enabled, the DOC takes approximately 38 microseconds to
+    // service all 32.  ((32 + 2) * 1.12) ≈ 38.08 microseconds)
+
     // cycles are 8 steps long except for last cycle is 24 steps long
     // this corresponds to the two additional cycles for RAM refresh in the DOC5503
     // we implement this as "overtime" steps in the last cycle to simplify the FSM logic
     // the overtime 16 steps are used for the mixer cycle and a 1 clk pulse is generated
     // at the start of the overtime steps to trigger the mixer
+
+    reg E;
+    reg Q;
+    reg [2:0] clk_en_count_r;
+    always @(posedge clk_i) begin
+        if (!reset_n_i) begin
+            E <= 1'b0;
+            Q <= 1'b0;
+        end else begin
+            if (clk_en_i) begin
+                clk_en_count_r <= clk_en_count_r + 1'd1;
+                if (clk_en_count_r == 3'd6) begin
+                    E <= 1'b1; // 7th clk_en_i pulse
+                end else begin
+                    E <= 1'b0;
+                end
+            end else begin
+                clk_en_count_r <= '0;
+            end
+            if (E) begin
+                Q <= ~Q; // toggle on every 7th clk_en_i pulse
+            end
+        end
+    end
+
+
+
     wire last_cycle_w = cycle_r == cycle_max_w;
     wire last_cycle_step_w = last_cycle_w ? (cycle_step_r == 5'd23) : (cycle_step_r == 5'd7);
     reg mixer_trigger_r;
 
     always @(posedge clk_i) begin
-        if (!reset_n_i) begin
+        if (!reset_n_i || !ready_r) begin
             cycle_r <= '0;
             cycle_step_r <= '0;
         end else begin
             mixer_trigger_r <= 1'b0;
-            if (ready_r & clk_en_i) begin
+            if (clk_en_i) begin
                 cycle_step_r <= last_cycle_step_w ? '0 : cycle_step_r + 1'd1;
                 cycle_r <= last_cycle_step_w ? (last_cycle_w ? '0 : cycle_r + 1'd1) : cycle_r;
                 // trigger the mixer at the start of the overtime steps
@@ -875,7 +911,9 @@ module doc5503 #(
                             automatic logic zero_byte_w = (wds_w == 8'h00);
 
                             osc_state_r <= OSC_OUT;
-                            if (!(overflow & mode_w[0]) & !zero_byte_w) begin
+                            
+                            // Always read next byte from SDRAM, even on overflow for consistent behavior
+                            if (!zero_byte_w) begin
                                 // Read next byte from SDRAM
                                 automatic logic [7:0] ptr_hi_mask_w = 8'hFF << wts_w;
                                 automatic logic [15:0] ptr_w = {ptr_hi_mask_w & wtp_w, 8'b0};
@@ -883,15 +921,27 @@ module doc5503 #(
                                 wave_rd_o <= 1'b1; 
                                 wave_address_o <= addr_w;
                                 last_osc_r <= cycle_r;
-                            end 
+                            end
+                            
+                            // Handle overflow or zero byte conditions
                             if (overflow | zero_byte_w) begin
-                                current_acc_reset_req_r <= 1;                                   // reset accumulator
-                                if (zero_byte_w | mode_w[0]) begin                              // zero byte halts oscillator
-                                    osc_state_r <= OSC_HALT;
-                                end  
+                                // For non-free run modes, or zero data, handle specially
+                                if (mode_w != MODE_FREE || zero_byte_w) begin
+                                    current_acc_reset_req_r <= 1;                               // reset accumulator
+                                    
+                                    // Zero byte always halts, and one-shot mode halts on overflow
+                                    if (zero_byte_w || mode_w == MODE_ONESHOT) begin
+                                        osc_state_r <= OSC_HALT;
+                                    end
+                                end else begin
+                                    // Free run mode without zero - just loop but preserve phase
+                                    current_acc_reset_req_r <= 0;                               // don't reset accumulator
+                                end
                                 if (mode_w == MODE_SYNC_AM) begin                               // Sync AM Mode
                                     if (even_osc_w) begin                                       // Sync Mode, even oscillator
-                                        partner_acc_reset_req_r <= 1;                           // reset partner oscillator
+                                        if (!partner_halt_w) begin                              // Only if partner is not halted
+                                            partner_acc_reset_req_r <= 1;                       // reset partner oscillator
+                                        end
                                     end
                                 end
                             end
@@ -911,8 +961,8 @@ module doc5503 #(
                             if (mode_w == MODE_SWAP) begin                                      // Swap Mode
                                 partner_unhalt_req_r <= 1;                                      // unhalt partner oscillator
                                 partner_acc_reset_req_r <= 1;                                   // reset partner accumulator
-                            //end else if ((partner_mode_w == MODE_SWAP) && even_osc_w) begin     // Partner Swap Mode, even oscillator
-                            //    current_osc_halt_req_r <= 0;                                    // belay the halt request
+                            end else if ((partner_mode_w == MODE_SWAP) && even_osc_w) begin     // Partner Swap Mode, even oscillator
+                                current_osc_halt_req_r <= 0;                                    // belay the halt request
                             end
                             
                             osc_state_r <= OSC_IDLE;
@@ -923,9 +973,12 @@ module doc5503 #(
 
                             if ((mode_w == MODE_SYNC_AM) & odd_osc_w) begin                     // Sync AM Mode, odd oscillator outputs nothing
                                 output_reset_req <= 1;                                          // silence output
-                                if ((cycle_r < 30) & !next_halt_w) begin                        // if next oscillator is not halted
+                                if ((cycle_r < 31) & !next_halt_w) begin                        // if next oscillator is not halted
                                     next_am_req_r <= 1;                                         // it's volume is set to current oscillator's waveform data
                                 end
+                            end else if ((mode_w == MODE_SYNC_AM) & even_osc_w) begin           // Even oscillator in sync/AM pair
+                                // In AM mode, even oscillator uses volume from odd
+                                output_update_req <= 1;                                         // Output is processed normally
                             end else begin
                                 output_update_req <= 1;                                         // output is waveform data * volume
                             end
@@ -1046,13 +1099,22 @@ module doc5503 #(
                         osc_out_r <= mixer_output_w;
                     end
 
-                    if (OUTPUT_CHANNEL_MIX) next_channel_r[ca] <= next_channel_r[ca] + mixer_output_w;
+                    // Only process active oscillators (not halted)
+                    if (!(mixer_control_w & 1'b1)) begin
+                        // Channel assignment - use all 4 bits of channel assignment
+                        if (OUTPUT_CHANNEL_MIX && (ca < CHANNEL_MAX)) begin
+                            next_channel_r[ca] <= next_channel_r[ca] + mixer_output_w;
+                        end
 
-                    if (OUTPUT_MONO_MIX) next_mono_mix_r <= next_mono_mix_r + mixer_output_w;
+                        // Always add to mono mix regardless of channel
+                        if (OUTPUT_MONO_MIX) next_mono_mix_r <= next_mono_mix_r + mixer_output_w;
 
-                    if (OUTPUT_STEREO_MIX) begin
-                        if (ca[0]) next_left_mix_r <= next_left_mix_r + mixer_output_w;
-                        else next_right_mix_r <= next_right_mix_r + mixer_output_w;
+                        // For stereo, use the LSB of channel to determine left/right
+                        // This matches the original ES5503 behavior where even channels go right, odd go left
+                        if (OUTPUT_STEREO_MIX) begin
+                            if (ca[0]) next_left_mix_r <= next_left_mix_r + mixer_output_w;
+                            else next_right_mix_r <= next_right_mix_r + mixer_output_w;
+                        end
                     end
 
                     mixer_cycle_r <= (mixer_cycle_r == cycle_max_w) ? '0 : mixer_cycle_r + 1'd1;

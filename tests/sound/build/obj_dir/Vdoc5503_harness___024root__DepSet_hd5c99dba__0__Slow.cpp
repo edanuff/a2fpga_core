@@ -127,9 +127,9 @@ VL_ATTR_COLD void Vdoc5503_harness___024root___stl_sequent__TOP__0(Vdoc5503_harn
         = vlSelfRef.data_i;
     vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_output_r_inst__priority_write_data_i[2U] 
         = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__output_r;
-    vlSelfRef.mono_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_out_r;
-    vlSelfRef.left_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_out_r;
-    vlSelfRef.right_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__osc_out_r;
+    vlSelfRef.mono_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__mono_mix_r;
+    vlSelfRef.left_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__left_mix_r;
+    vlSelfRef.right_mix_o = vlSelfRef.doc5503_harness__DOT__doc5503_inst__DOT__right_mix_r;
     vlSelfRef.dbg_cycle_o = vlSelfRef.doc5503_harness__DOT__dbg_cycle;
     vlSelfRef.dbg_osc_state_o = vlSelfRef.doc5503_harness__DOT__dbg_osc_state;
     vlSelfRef.dbg_vol_o = vlSelfRef.doc5503_harness__DOT__dbg_vol;
@@ -1209,6 +1209,7 @@ VL_ATTR_COLD void Vdoc5503_harness___024root___ctor_var_reset(Vdoc5503_harness__
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r = VL_RAND_RESET_I(5);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__last_cycle_w = VL_RAND_RESET_I(1);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__last_cycle_step_w = VL_RAND_RESET_I(1);
+    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__mixer_trigger_r = VL_RAND_RESET_I(1);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__inhibit_host_writes_r = VL_RAND_RESET_I(1);
     for (int __Vi0 = 0; __Vi0 < 1; ++__Vi0) {
         vlSelf->doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_fl_r_inst__priority_read_data_o[__Vi0] = VL_RAND_RESET_I(8);
@@ -1400,6 +1401,7 @@ VL_ATTR_COLD void Vdoc5503_harness___024root___ctor_var_reset(Vdoc5503_harness__
     }
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r = VL_RAND_RESET_I(2);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r = VL_RAND_RESET_I(4);
+    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__mixer_reset_r = VL_RAND_RESET_I(1);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__data_w = VL_RAND_RESET_I(8);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__vol_s = VL_RAND_RESET_I(9);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk2__DOT__shift_w = VL_RAND_RESET_I(5);
@@ -1847,28 +1849,6 @@ VL_ATTR_COLD void Vdoc5503_harness___024root___ctor_var_reset(Vdoc5503_harness__
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_port_loop__BRA__2__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__q_r = VL_RAND_RESET_I(1);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_port_loop__BRA__2__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_s_w = VL_RAND_RESET_I(1);
     vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_port_loop__BRA__2__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_r_w = VL_RAND_RESET_I(1);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction_r = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_left_r = VL_RAND_RESET_I(24);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_right_r = VL_RAND_RESET_I(24);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__max_abs_r = VL_RAND_RESET_I(24);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_fp = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_min = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_max = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__knee_factor = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__amount_over = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__left_reduced = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__right_reduced = VL_RAND_RESET_Q(40);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__sign_bit_l = VL_RAND_RESET_I(1);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_input_l = VL_RAND_RESET_I(32);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_scaled_l = VL_RAND_RESET_I(32);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__final_l = VL_RAND_RESET_I(16);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__sign_bit_r = VL_RAND_RESET_I(1);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_input_r = VL_RAND_RESET_I(32);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_scaled_r = VL_RAND_RESET_I(32);
-    vlSelf->doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__final_r = VL_RAND_RESET_I(16);
     vlSelf->__Vtrigprevexpr___TOP__clk_i__0 = VL_RAND_RESET_I(1);
     for (int __Vi0 = 0; __Vi0 < 3; ++__Vi0) {
         vlSelf->__Vm_traceActivity[__Vi0] = 0;

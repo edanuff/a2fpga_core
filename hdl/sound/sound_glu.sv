@@ -21,8 +21,7 @@
 //
 
 module sound_glu #(
-    parameter bit ENABLE = 1'b1,
-    parameter bit OUTPUT_OSC_DIRECT = 1'b1  // Enable direct output from oscillator 1
+    parameter bit ENABLE = 1'b1
 ) (
     a2bus_if.slave a2bus_if,
 

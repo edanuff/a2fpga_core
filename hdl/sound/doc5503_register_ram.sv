@@ -161,7 +161,16 @@ module doc5503_register_ram  #(
 
     always @(posedge clk_i) begin
         if (PORT_B_ENABLE) begin
-            data_b_r <= data_r[addr_b_i];
+            // we can't write and read from the same address in the same clock cycle,
+            // so we need to check if the priority write address matches the read address
+            if (priority_write_en_r && (priority_write_addr_r == addr_b_i)) begin
+                // if the priority write is enabled and the address matches, return the priority write data
+                // since it will be the value at the address after the current clock cycle
+                data_b_r <= priority_write_data_i[priority_write_index]; 
+            end else begin
+                // otherwise, just read from the data array
+                data_b_r <= data_r[addr_b_i];
+            end
         end
     end
 

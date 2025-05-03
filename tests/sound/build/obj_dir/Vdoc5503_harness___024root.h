@@ -50,6 +50,7 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         CData/*4:0*/ doc5503_harness__DOT__doc5503_inst__DOT__init_cycle_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__last_cycle_w;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__last_cycle_step_w;
+        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__mixer_trigger_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__inhibit_host_writes_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__next_am_req_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__current_wds_reset_req_r;
@@ -69,6 +70,7 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         CData/*2:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_state_r;
         CData/*1:0*/ doc5503_harness__DOT__doc5503_inst__DOT__mixer_state_r;
         CData/*3:0*/ doc5503_harness__DOT__doc5503_inst__DOT__mixer_channel_r;
+        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__mixer_reset_r;
         CData/*7:0*/ doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk1__DOT__data_w;
         CData/*4:0*/ doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk2__DOT__shift_w;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__overflow;
@@ -78,10 +80,10 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_en_r;
         CData/*4:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_addr_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_en_r;
-        CData/*4:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_addr_r;
-        CData/*7:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__data_a_r;
     };
     struct {
+        CData/*4:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_addr_r;
+        CData/*7:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__data_a_r;
         CData/*7:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__data_b_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_write_ctrl__DOT__found;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__priority_read_ctrl__DOT__found;
@@ -144,10 +146,10 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_port_loop__BRA__1__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_s_w;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_port_loop__BRA__1__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_r_w;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__gen_read_ports__DOT__priority_read_port_loop__BRA__0__KET____DOT__read_ff__DOT__prev_s_r;
-        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__gen_read_ports__DOT__priority_read_port_loop__BRA__0__KET____DOT__read_ff__DOT__prev_r_r;
-        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__gen_read_ports__DOT__priority_read_port_loop__BRA__0__KET____DOT__read_ff__DOT__q_r;
     };
     struct {
+        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__gen_read_ports__DOT__priority_read_port_loop__BRA__0__KET____DOT__read_ff__DOT__prev_r_r;
+        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__gen_read_ports__DOT__priority_read_port_loop__BRA__0__KET____DOT__read_ff__DOT__q_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__gen_read_ports__DOT__priority_read_port_loop__BRA__0__KET____DOT__read_ff__DOT__edge_s_w;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__gen_read_ports__DOT__priority_read_port_loop__BRA__0__KET____DOT__read_ff__DOT__edge_r_w;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_wds_r_inst__DOT__priority_write_en_r;
@@ -210,10 +212,10 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         CData/*4:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_addr_r;
         CData/*7:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__data_a_r;
         CData/*7:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__data_b_r;
-        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_ctrl__DOT__found;
-        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_ctrl__DOT__unnamedblk1__DOT__unnamedblk2__DOT__inhibit_en;
     };
     struct {
+        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_ctrl__DOT__found;
+        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_write_ctrl__DOT__unnamedblk1__DOT__unnamedblk2__DOT__inhibit_en;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_ctrl__DOT__found;
         CData/*7:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__unnamedblk6__DOT__data_curr_r;
         CData/*7:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT____Vlvbound_hdf6ad119__0;
@@ -276,10 +278,10 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT____Vlvbound_h8dbb67ef__0;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__prev_s_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__prev_r_r;
-        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__q_r;
-        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_s_w;
     };
     struct {
+        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__q_r;
+        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_s_w;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_port_loop__BRA__0__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_r_w;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_port_loop__BRA__1__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__prev_s_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_acc_r_inst__DOT__priority_write_port_loop__BRA__1__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__prev_r_r;
@@ -305,8 +307,6 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_port_loop__BRA__2__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__q_r;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_port_loop__BRA__2__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_s_w;
         CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_port_loop__BRA__2__KET____DOT__gen_edge_triggered__DOT__write_ff__DOT__edge_r_w;
-        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__sign_bit_l;
-        CData/*0:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__sign_bit_r;
         CData/*0:0*/ __VstlFirstIteration;
         CData/*0:0*/ __VicoFirstIteration;
         CData/*0:0*/ __Vtrigprevexpr___TOP__clk_i__0;
@@ -331,8 +331,6 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         SData/*15:0*/ doc5503_harness__DOT__doc5503_inst__DOT__unnamedblk3__DOT__unnamedblk4__DOT__addr_w;
         SData/*15:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_a_r;
         SData/*15:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__data_b_r;
-        SData/*15:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__final_l;
-        SData/*15:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__final_r;
         IData/*23:0*/ doc5503_harness__DOT__dbg_acc;
         IData/*23:0*/ doc5503_harness__DOT__doc5503_inst__DOT__next_mono_mix_r;
         IData/*23:0*/ doc5503_harness__DOT__doc5503_inst__DOT__next_left_mix_r;
@@ -344,10 +342,10 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__unnamedblk5__DOT__i;
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fl_r_inst__DOT__unnamedblk6__DOT__i;
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_write_index;
-    };
-    struct {
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__priority_read_index;
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__unnamedblk4__DOT__i;
+    };
+    struct {
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__unnamedblk5__DOT__i;
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_fh_r_inst__DOT__unnamedblk6__DOT__i;
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_index;
@@ -385,33 +383,13 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__priority_write_index;
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__unnamedblk4__DOT__i;
         IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__osc_output_r_inst__DOT__unnamedblk5__DOT__i;
-        IData/*23:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_left_r;
-        IData/*23:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__abs_right_r;
-        IData/*23:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__max_abs_r;
-        IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_input_l;
-        IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk1__DOT__abs_scaled_l;
-        IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_input_r;
-        IData/*31:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__unnamedblk2__DOT__abs_scaled_r;
         IData/*31:0*/ __VactIterCount;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__envelope_r;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction_r;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_fp;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__gain_reduction;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__level_normalized;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_min;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__threshold_max;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__knee_factor;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__amount_over;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__left_reduced;
-        QData/*39:0*/ doc5503_harness__DOT__doc5503_inst__DOT__compressor_block__DOT__compressor__DOT__right_reduced;
         VlUnpacked<SData/*15:0*/, 16> doc5503_harness__DOT__doc5503_inst__DOT__channel_o;
         VlUnpacked<CData/*7:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_fl_r_inst__priority_read_data_o;
         VlUnpacked<CData/*4:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fl_r_inst__priority_read_addr_i;
         VlUnpacked<CData/*0:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fl_r_inst__priority_read_req_i;
         VlUnpacked<CData/*7:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fl_r_inst__priority_write_data_i;
         VlUnpacked<CData/*4:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fl_r_inst__priority_write_addr_i;
-    };
-    struct {
         VlUnpacked<CData/*0:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fl_r_inst__priority_write_req_i;
         VlUnpacked<CData/*7:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_fh_r_inst__priority_read_data_o;
         VlUnpacked<CData/*4:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_fh_r_inst__priority_read_addr_i;
@@ -432,6 +410,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         VlUnpacked<CData/*4:0*/, 4> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_write_addr_i;
         VlUnpacked<CData/*0:0*/, 4> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wds_r_inst__priority_write_req_i;
         VlUnpacked<CData/*7:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellout__osc_wtp_r_inst__priority_read_data_o;
+    };
+    struct {
         VlUnpacked<CData/*4:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wtp_r_inst__priority_read_addr_i;
         VlUnpacked<CData/*0:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wtp_r_inst__priority_read_req_i;
         VlUnpacked<CData/*7:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT____Vcellinp__osc_wtp_r_inst__priority_write_data_i;
@@ -476,8 +456,6 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         VlUnpacked<CData/*0:0*/, 2> doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_w;
         VlUnpacked<CData/*0:0*/, 2> doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_write_ack_r;
         VlUnpacked<CData/*0:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_w;
-    };
-    struct {
         VlUnpacked<CData/*0:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_ack_r;
         VlUnpacked<CData/*7:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__priority_read_data_r;
         VlUnpacked<CData/*7:0*/, 32> doc5503_harness__DOT__doc5503_inst__DOT__osc_vol_r_inst__DOT__data_r;
@@ -498,6 +476,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness___024root final : public Ver
         VlUnpacked<CData/*0:0*/, 3> doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_w;
         VlUnpacked<CData/*0:0*/, 3> doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_ack_r;
         VlUnpacked<CData/*7:0*/, 3> doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__priority_read_data_r;
+    };
+    struct {
         VlUnpacked<CData/*7:0*/, 32> doc5503_harness__DOT__doc5503_inst__DOT__osc_control_r_inst__DOT__data_r;
         VlUnpacked<CData/*0:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_w;
         VlUnpacked<CData/*0:0*/, 1> doc5503_harness__DOT__doc5503_inst__DOT__osc_rts_r_inst__DOT__priority_write_ack_r;
