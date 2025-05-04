@@ -29,7 +29,14 @@ module doc5503_harness(
     output [2:0]  dbg_osc_state_o,
     output [7:0]  dbg_vol_o,
     output [7:0]  dbg_wds_o,
-    output signed [15:0] dbg_output_o
+    output signed [15:0] dbg_output_o,
+    
+    // Clock synchronization signals
+    output        dbg_E_o,            // E signal for synchronization
+    output [2:0]  dbg_clk_count_o,    // Full clock counter for debugging
+    
+    // Module ready signal
+    output        ready_o             // Indicates when the module is ready
 );
     // Debug signals - expose more internal state
     logic [4:0] dbg_cycle;
@@ -43,19 +50,17 @@ module doc5503_harness(
     logic [7:0] dbg_control;
     logic [23:0] dbg_acc;
     
-    // Connect wave signals directly to doc5503 internals
+    // Connect wave signals directly to doc5503 module ports
     assign wave_address_o = doc5503_inst.wave_address_o;
     assign wave_rd_o = doc5503_inst.wave_rd_o;
     
     // Expose internal signals to make them directly accessible to the testbench
     // These assignments will be available to debug testbenches to examine internal state
     
-    // Instantiate the DOC5503 module
+    // Instantiate the DOC5503 module with refactored design
     doc5503 #(
-        .OUTPUT_CHANNEL_MIX(1),
-        .OUTPUT_MONO_MIX(1),
-        .OUTPUT_STEREO_MIX(1),
-        .NUM_CHANNELS(16)
+        .CLOCK_SPEED_HZ(54_000_000),
+        .DOC_CLOCK_SPEED_HZ(7_159_090)
     ) doc5503_inst (
         .clk_i(clk_i),
         .reset_n_i(reset_n_i),
@@ -81,7 +86,12 @@ module doc5503_harness(
         
         .channel_o(),  // Not connected for this test
         
-        .osc_en_o(dbg_osc_en)
+        // Connect debug signals
+        .E_o(dbg_E_o),
+        .clk_count_o(dbg_clk_count_o),
+        
+        // Connect ready signal
+        .ready_o(ready_o)
     );
     
     // Expose debug signals to external world
@@ -91,19 +101,21 @@ module doc5503_harness(
     assign dbg_wds_o = dbg_wds;
     assign dbg_output_o = dbg_output;
     
-    // Enhanced debug monitoring
+    // Enhanced debug monitoring for refactored code
     always @(posedge clk_i) begin
-        if (doc5503_inst.ready_r) begin
-            dbg_cycle <= doc5503_inst.cycle_r;
-            dbg_cycle_max <= doc5503_inst.cycle_max_w;
-            dbg_osc_state <= doc5503_inst.osc_state_r;
-            dbg_output <= doc5503_inst.output_r;
-            dbg_wds <= doc5503_inst.wds_w;
-            dbg_vol <= doc5503_inst.vol_w;
-            dbg_control <= doc5503_inst.control_w;
-            dbg_acc <= doc5503_inst.acc_w;
-        end
-        dbg_ready <= doc5503_inst.ready_r;
+        // Map to new signal naming from refactored doc5503.sv
+        dbg_cycle <= doc5503_inst.curr_osc_r;
+        dbg_cycle_max <= doc5503_inst.osc_max_w;
+        dbg_osc_state <= doc5503_inst.osc_state_r;
+        dbg_output <= doc5503_inst.curr_output_r;
+        dbg_wds <= doc5503_inst.curr_wds_r;
+        dbg_vol <= doc5503_inst.curr_vol_r;
+        dbg_control <= doc5503_inst.curr_control_r;
+        dbg_acc <= doc5503_inst.curr_acc_r;
+        dbg_osc_en <= doc5503_inst.osc_en_r;
+        
+        // In refactored code, we don't need the ready_r check
+        dbg_ready <= 1'b1;
         
         // Debug output check code removed
         // We'll let the actual DOC5503 module generate outputs

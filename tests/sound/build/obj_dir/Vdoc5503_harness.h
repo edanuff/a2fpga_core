@@ -29,7 +29,11 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness VL_NOT_FINAL : public Verila
     // PORTS
     // The application code writes and reads these signals to
     // propagate new values into/out from the Verilated model.
+    VL_IN8(&clk,0,0);
     VL_IN8(&clk_i,0,0);
+    VL_IN8(&s,0,0);
+    VL_IN8(&r,0,0);
+    VL_OUT8(&q,0,0);
     VL_IN8(&reset_n_i,0,0);
     VL_IN8(&clk_en_i,0,0);
     VL_OUT8(&irq_n_o,0,0);
@@ -45,6 +49,9 @@ class alignas(VL_CACHE_LINE_BYTES) Vdoc5503_harness VL_NOT_FINAL : public Verila
     VL_OUT8(&dbg_osc_state_o,2,0);
     VL_OUT8(&dbg_vol_o,7,0);
     VL_OUT8(&dbg_wds_o,7,0);
+    VL_OUT8(&dbg_E_o,0,0);
+    VL_OUT8(&dbg_clk_count_o,2,0);
+    VL_OUT8(&ready_o,0,0);
     VL_OUT16(&wave_address_o,15,0);
     VL_OUT16(&mono_mix_o,15,0);
     VL_OUT16(&left_mix_o,15,0);

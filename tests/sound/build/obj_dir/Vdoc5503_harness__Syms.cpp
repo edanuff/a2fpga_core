@@ -18,7 +18,7 @@ Vdoc5503_harness__Syms::Vdoc5503_harness__Syms(VerilatedContext* contextp, const
     , TOP{this, namep}
 {
         // Check resources
-        Verilated::stackCheck(265);
+        Verilated::stackCheck(249);
     // Configure time unit / time precision
     _vm_contextp__->timeunit(-12);
     _vm_contextp__->timeprecision(-12);

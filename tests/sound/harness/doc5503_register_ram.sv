@@ -74,12 +74,8 @@ module doc5503 #(
     output signed [15:0] left_mix_o,
     output signed [15:0] right_mix_o,
 
-    output signed [15:0] channel_o[16],
-    
-    output logic E_o,               // Expose E signal for synchronization
+    output signed [15:0] channel_o[16]
 
-    output logic ready_o,           // Indicate when out of reset and ready to process
-    output [2:0] clk_count_o        // Expose the full clk_count for debugging
 );
 
     // Registers
@@ -191,7 +187,7 @@ module doc5503 #(
     localparam int PHASE_WIDTH = (TICKS_PER_PHASE <= 1) ? 1 : $clog2(TICKS_PER_PHASE + 1);
     logic [CYCLE_WIDTH-1:0] cycle_timer_r;
     logic [PHASE_WIDTH-1:0] phase_timer_w;
-    logic cycle_start_w = (cycle_timer_r == '0);  // Start new oscillator cycle when timer is zero
+    logic cycle_start_w = (cycle_timer_r == '0);
 
     localparam [1:0] CYCLE_RESET = 2'b00;
     localparam [1:0] CYCLE_OSC = 2'b01;
@@ -199,8 +195,6 @@ module doc5503 #(
     localparam [1:0] CYCLE_REFRESH_1 = 2'b11;
 
     reg [1:0] cycle_state_r;
-    wire ready_w = (cycle_state_r != CYCLE_RESET);
-    assign ready_o = ready_w;
 
     reg [2:0] clk_count_r;
     always @(posedge clk_i) begin
@@ -247,22 +241,20 @@ module doc5503 #(
             E = clk_count_r[2];
             Q = clk_count_r[2] ^ clk_count_r[1];
     end
-    assign E_o = E; // Connect to output for debugging/synchronization
-    assign clk_count_o = clk_count_r; // Expose the entire clock counter
 
     localparam int OSC_STATE_COUNT = 11;
     typedef enum logic [$clog2(OSC_STATE_COUNT)-1:0] {
-        OSC_IDLE = 0,
-        OSC_START = 1,
-        OSC_LOAD_PARTNER_CONTROL = 2,
-        OSC_ACC = 3,
-        OSC_ADDR = 4,
-        OSC_READ_DATA = 5,
-        OSC_AM_SYNC_EVEN = 6,
-        OSC_HALT = 7,
-        OSC_HALT_PARTNER = 8,
-        OSC_OUT = 9,
-        OSC_MIX = 10
+        OSC_IDLE,
+        OSC_START,
+        OSC_LOAD_PARTNER_CONTROL,
+        OSC_ACC,
+        OSC_ADDR,
+        OSC_READ_DATA,
+        OSC_AM_SYNC_EVEN,
+        OSC_HALT,
+        OSC_HALT_PARTNER,
+        OSC_OUT,
+        OSC_MIX
     } osc_state_e;
     osc_state_e osc_state_r; 
     
@@ -279,38 +271,44 @@ module doc5503 #(
             if (wave_data_ready_i) begin
                 data_pending_r <= 1'b1;
             end
-            if (E & ready_w) begin
+            if (E & (cycle_state_r != CYCLE_RESET)) begin
                 // Handle host access to the registers
                 if (!cs_n_i) begin
                     if (addr_i == 8'hE0) begin
                         // Oscillator Interrupt Register
-                        if (!we_n_i) osc_int_r <= data_i; 
-                        end else data_o <= osc_int_r;
+                        if (!we_n_i) begin
+                            osc_int_r <= data_i;
+                        end else begin
+                            data_o <= osc_int_r;
+                        end
                     end else if (addr_i == 8'hE1) begin
                         // Oscillator Enable Register
-                        if (!we_n_i) osc_en_r <= data_i;
-                        else data_o <= osc_en_r;
+                        if (!we_n_i) begin
+                            osc_en_r <= data_i;
+                        end else begin
+                            data_o <= osc_en_r;
+                        end
                     end else if (addr_i >= 8'h00 && addr_i <= 8'hDF) begin
                         // Oscillator Registers
                         if (!we_n_i) begin
                             case (addr_i[7:5])
-                                3'b000: fl_r[addr_i[4:0]] <= data_i;        // $00-1F
-                                3'b001: fh_r[addr_i[4:0]] <= data_i;        // $20-3F
-                                3'b010: vol_r[addr_i[4:0]] <= data_i;       // $40-5F
-                                3'b011: wds_r[addr_i[4:0]] <= data_i;       // $60-7F
-                                3'b100: wtp_r[addr_i[4:0]] <= data_i;       // $80-9F
-                                3'b101: control_r[addr_i[4:0]] <= data_i;   // $A0-BF
-                                3'b110: rts_r[addr_i[4:0]] <= data_i;       // $C0-DF
+                                3'b000: fl_r[addr_i[4:0]] <= data_i;     // $00-1F
+                                3'b001: fh_r[addr_i[4:0]] <= data_i;     // $20-3F
+                                3'b010: vol_r[addr_i[4:0]] <= data_i;    // $40-5F
+                                3'b011: wds_r[addr_i[4:0]] <= data_i;    // $60-7F
+                                3'b100: wtp_r[addr_i[4:0]] <= data_i;    // $80-9F
+                                3'b101: control_r[addr_i[4:0]] <= data_i; // $A0-BF
+                                3'b110: rts_r[addr_i[4:0]] <= data_i;    // $C0-DF
                             endcase
                         end else begin
                             case (addr_i[7:5])
-                                3'b000: data_o <= fl_r[addr_i[4:0]];        // $00-1F
-                                3'b001: data_o <= fh_r[addr_i[4:0]];        // $20-3F
-                                3'b010: data_o <= vol_r[addr_i[4:0]];       // $40-5F
-                                3'b011: data_o <= wds_r[addr_i[4:0]];       // $60-7F
-                                3'b100: data_o <= wtp_r[addr_i[4:0]];       // $80-9F
-                                3'b101: data_o <= control_r[addr_i[4:0]];   // $A0-BF
-                                3'b110: data_o <= rts_r[addr_i[4:0]];       // $C0-DF
+                                3'b000: data_o <= fl_r[addr_i[4:0]];      // $00-1F
+                                3'b001: data_o <= fh_r[addr_i[4:0]];      // $20-3F
+                                3'b010: data_o <= vol_r[addr_i[4:0]];     // $40-5F
+                                3'b011: data_o <= wds_r[addr_i[4:0]];     // $60-7F
+                                3'b100: data_o <= wtp_r[addr_i[4:0]];     // $80-9F
+                                3'b101: data_o <= control_r[addr_i[4:0]]; // $A0-BF
+                                3'b110: data_o <= rts_r[addr_i[4:0]];     // $C0-DF
                             endcase
                         end
                     end
@@ -323,10 +321,10 @@ module doc5503 #(
                         fl_r[cycle_timer_r[4:0]] <= '0;
                         fh_r[cycle_timer_r[4:0]] <= '0;
                         vol_r[cycle_timer_r[4:0]] <= '0;
-                        wds_r[cycle_timer_r[4:0]] <= 8'h80; // Default to silence (zero crossing)
+                        wds_r[cycle_timer_r[4:0]] <= '0;
                         wtp_r[cycle_timer_r[4:0]] <= '0;
                         rts_r[cycle_timer_r[4:0]] <= '0;
-                        control_r[cycle_timer_r[4:0]] <= '0; // Ensure oscillators start not halted
+                        control_r[cycle_timer_r[4:0]] <= '0;
                         acc_r[cycle_timer_r[4:0]] <= '0;
                     end
                     CYCLE_OSC: begin
@@ -335,25 +333,21 @@ module doc5503 #(
                                 if (data_pending_r) begin
                                     wds_r[last_osc_r] <= last_wave_data_r;
                                     data_pending_r <= 1'b0;
-                                    
                                 end
-                                
                                 if (cycle_start_w) begin
                                     osc_state_r <= OSC_START;
                                 end
                             end
                             OSC_START: begin
-                                // Load all current oscillator registers
-                                curr_fl_r <= fl_r[curr_osc_r];          // Frequency low
-                                curr_fh_r <= fh_r[curr_osc_r];          // Frequency high
-                                curr_vol_r <= vol_r[curr_osc_r];        // Volume
-                                curr_wds_r <= wds_r[curr_osc_r];        // Waveform data sample
-                                curr_wtp_r <= wtp_r[curr_osc_r];        // Waveform table pointer
-                                curr_control_r <= control_r[curr_osc_r]; // Control
-                                curr_rts_r <= rts_r[curr_osc_r];        // Resolution/table size
-                                curr_acc_r <= acc_r[curr_osc_r];        // Accumulator
-                                
-                                // Init other working values
+                                curr_fl_r <= fl_r[curr_osc_r];
+                                curr_fh_r <= fh_r[curr_osc_r];
+                                curr_vol_r <= vol_r[curr_osc_r];
+                                curr_wds_r <= wds_r[curr_osc_r];
+                                curr_wtp_r <= wtp_r[curr_osc_r];
+                                curr_control_r <= control_r[curr_osc_r];
+                                curr_rts_r <= rts_r[curr_osc_r];
+                                curr_acc_r <= acc_r[curr_osc_r];
+
                                 curr_wave_addr_r <= '0;
                                 curr_output_r <= '0;
 
@@ -369,17 +363,13 @@ module doc5503 #(
 
                                 // Accumulator 
                                 if (!halt_w) begin
-                                    // When not halted, accumulate frequency into counter
                                     curr_acc_r <= curr_acc_r + {curr_fh_r, curr_fl_r};
                                     osc_state_r <= OSC_ADDR;
                                 end else begin
-                                    // When halted but in one-shot mode, clear accumulator
                                     if (curr_mode_w[0]) begin
                                         acc_r[curr_osc_r] <= '0;
                                     end
-                                    // When halted, skip OUT and return to IDLE state
                                     osc_state_r <= OSC_IDLE;
-                                    wds_r[curr_osc_r] <= 8'h80;
                                 end                                
                             end
                             OSC_ADDR: begin
@@ -397,13 +387,11 @@ module doc5503 #(
                                 // For 32K tables (wts_w == 3'b111), use bit 15
                                 automatic int high_bit_w = (curr_wts_w == 3'b111) ? 15 : {1'b1, curr_wts_w};
                                 automatic logic overflow = curr_wave_addr_r[high_bit_w];
-                                // A zero byte (0x00) triggers a halt in many DOC modes
                                 automatic logic zero_byte_w = (curr_wds_r == 8'h00);
 
                                 if (overflow | zero_byte_w) begin
                                     acc_r[curr_osc_r] <= '0;                                        // reset accumulator
-                                    // Fixed condition: Only halt in one-shot mode OR when explicit zero byte encountered
-                                    if (curr_mode_w[0] || (zero_byte_w && !curr_mode_w[0])) begin
+                                    if (zero_byte_w & curr_mode_w[0]) begin                              // only halt in one-shot mode or when explicit zero byte during run
                                         osc_state_r <= OSC_HALT;
                                     end else if (curr_mode_w == MODE_SYNC_AM && curr_osc_even_w) begin   // Sync AM Mode, even oscillator
                                         osc_state_r <= OSC_AM_SYNC_EVEN;
@@ -418,7 +406,6 @@ module doc5503 #(
                                     wave_rd_o <= 1'b1; 
                                     wave_address_o <= addr_w;
                                     last_osc_r <= curr_osc_r;
-                                                                        
                                     osc_state_r <= OSC_OUT;
                                 end
                             end
@@ -430,22 +417,19 @@ module doc5503 #(
                             OSC_HALT: begin
                                 // Halt Oscillator
 
-                                curr_wds_r <= 8'h80;                                                // set to zero crossing for silence
-                                wds_r[curr_osc_r] <= 8'h80;
+                                curr_wds_r <= '0;                                                   // silence output
 
                                 control_r[curr_osc_r] <= curr_control_r | 1'b1;                     // halt current oscillator
                                 
                                 if (curr_mode_w == MODE_SWAP) begin                                 // Swap Mode
                                     osc_state_r <= OSC_HALT_PARTNER;
                                 end else begin
-                                    // If halting, skip the current output
                                     osc_state_r <= OSC_IDLE;
                                 end
                             end
                             OSC_HALT_PARTNER: begin
                                 control_r[partner_osc_w] <= partner_control_r & 8'b11111110;
                                 acc_r[partner_osc_w] <= '0;                                        // reset partner accumulator
-                                // After halting partner, skip the current output
                                 osc_state_r <= OSC_IDLE;
                             end
                             OSC_OUT: begin
@@ -455,34 +439,20 @@ module doc5503 #(
                                     if ((curr_osc_r < 30) & !next_halt_w) begin                     // if next oscillator is not halted
                                         vol_r[curr_osc_r + 1'b1] <= curr_wds_r;                     // it's volume is set to current oscillator's waveform data
                                     end
-                                    // Skip mixing for odd oscillators in SYNC_AM mode
                                     osc_state_r <= OSC_IDLE;
                                 end else begin
-                                    // Fixed waveform data polarity and volume calculation
-                                    automatic logic signed [7:0] data_w = curr_wds_r ^ 8'h80;       // convert waveform data to signed (8'h80 = 0)
-                                    automatic logic signed [8:0] vol_s = {1'b0, curr_vol_r};        // convert volume to signed (unsigned expanded)
-                                    automatic logic signed [15:0] output_w = data_w * vol_s;        // output is waveform data * volume (signed * signed)
-                                    curr_output_r <= output_w;                                      // store calculated output
-                                    channel_sum_r <= next_channel_r[curr_ca_w];                     // load channel accumulator
-                                    
-                                    // Always go to OSC_MIX from here except in the special case above
+                                    automatic logic signed [7:0] data_w = curr_wds_r ^ 8'h80;       // convert waveform data to signed
+                                    automatic logic signed [8:0] vol_s = {1'b0, curr_vol_r};        // convert volume to signed
+                                    curr_output_r <= data_w * vol_s;                                // output is waveform data * volume (signed * signed)
+                                    channel_sum_r <= next_channel_r[curr_ca_w];
                                     osc_state_r <= OSC_MIX;
                                 end
                             end
                             OSC_MIX : begin
-                                // Add current oscillator output to channel accumulator
                                 next_channel_r[curr_ca_w] <= channel_sum_r + curr_output_r;
-                                
-                                // Add to mono mix (all channels)
                                 next_mono_mix_r <= next_mono_mix_r + curr_output_r;
-                                
-                                // Add to left/right mix based on channel number
-                                // Channel 0,2,4,etc. go to right, 1,3,5,etc. go to left
-                                if (curr_ca_w[0]) 
-                                    next_left_mix_r <= next_left_mix_r + curr_output_r;
-                                else 
-                                    next_right_mix_r <= next_right_mix_r + curr_output_r;
-                                
+                                if (curr_ca_w[0]) next_left_mix_r <= next_left_mix_r + curr_output_r;
+                                else next_right_mix_r <= next_right_mix_r + curr_output_r;
                                 osc_state_r <= OSC_IDLE;
                             end
 
@@ -492,26 +462,16 @@ module doc5503 #(
                     CYCLE_REFRESH_0: begin
                         // Use this cycle to copy the channel sums to the output registers
                         channel_r[cycle_timer_r[3:0]] <= next_channel_r[cycle_timer_r[3:0]];
-                        
-                        // Only copy the final values when processing the last channel (15)
-                        if (cycle_timer_r[3:0] == 4'hF) begin
-                            mono_mix_r <= next_mono_mix_r;
-                            left_mix_r <= next_left_mix_r;
-                            right_mix_r <= next_right_mix_r;
-                            // Debug: Print the final mix values
-                            
-                        end
+                        mono_mix_r <= next_mono_mix_r;
+                        left_mix_r <= next_left_mix_r;
+                        right_mix_r <= next_right_mix_r;
                     end
                     CYCLE_REFRESH_1: begin
                         // Use this cycle to zero the channel sums for the next cycle
                         next_channel_r[cycle_timer_r[3:0]] <= '0;
-                        
-                        // Only reset the mix values when processing the last channel (15)
-                        if (cycle_timer_r[3:0] == 4'hF) begin
-                            next_mono_mix_r <= '0;
-                            next_left_mix_r <= '0;
-                            next_right_mix_r <= '0;
-                        end
+                        next_mono_mix_r <= '0;
+                        next_left_mix_r <= '0;
+                        next_right_mix_r <= '0;
                     end
                 endcase // case (cycle_state_r)
             end

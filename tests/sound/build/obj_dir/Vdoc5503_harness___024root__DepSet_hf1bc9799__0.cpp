@@ -32,8 +32,11 @@ void Vdoc5503_harness___024root___eval_triggers__act(Vdoc5503_harness___024root*
     Vdoc5503_harness__Syms* const __restrict vlSymsp VL_ATTR_UNUSED = vlSelf->vlSymsp;
     auto& vlSelfRef = std::ref(*vlSelf).get();
     // Body
-    vlSelfRef.__VactTriggered.set(0U, ((IData)(vlSelfRef.clk_i) 
+    vlSelfRef.__VactTriggered.set(0U, ((IData)(vlSelfRef.clk) 
+                                       & (~ (IData)(vlSelfRef.__Vtrigprevexpr___TOP__clk__0))));
+    vlSelfRef.__VactTriggered.set(1U, ((IData)(vlSelfRef.clk_i) 
                                        & (~ (IData)(vlSelfRef.__Vtrigprevexpr___TOP__clk_i__0))));
+    vlSelfRef.__Vtrigprevexpr___TOP__clk__0 = vlSelfRef.clk;
     vlSelfRef.__Vtrigprevexpr___TOP__clk_i__0 = vlSelfRef.clk_i;
 #ifdef VL_DEBUG
     if (VL_UNLIKELY(vlSymsp->_vm_contextp__->debug())) {

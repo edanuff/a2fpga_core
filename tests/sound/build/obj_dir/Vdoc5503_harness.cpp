@@ -10,7 +10,11 @@
 Vdoc5503_harness::Vdoc5503_harness(VerilatedContext* _vcontextp__, const char* _vcname__)
     : VerilatedModel{*_vcontextp__}
     , vlSymsp{new Vdoc5503_harness__Syms(contextp(), _vcname__, this)}
+    , clk{vlSymsp->TOP.clk}
     , clk_i{vlSymsp->TOP.clk_i}
+    , s{vlSymsp->TOP.s}
+    , r{vlSymsp->TOP.r}
+    , q{vlSymsp->TOP.q}
     , reset_n_i{vlSymsp->TOP.reset_n_i}
     , clk_en_i{vlSymsp->TOP.clk_en_i}
     , irq_n_o{vlSymsp->TOP.irq_n_o}
@@ -26,6 +30,9 @@ Vdoc5503_harness::Vdoc5503_harness(VerilatedContext* _vcontextp__, const char* _
     , dbg_osc_state_o{vlSymsp->TOP.dbg_osc_state_o}
     , dbg_vol_o{vlSymsp->TOP.dbg_vol_o}
     , dbg_wds_o{vlSymsp->TOP.dbg_wds_o}
+    , dbg_E_o{vlSymsp->TOP.dbg_E_o}
+    , dbg_clk_count_o{vlSymsp->TOP.dbg_clk_count_o}
+    , ready_o{vlSymsp->TOP.ready_o}
     , wave_address_o{vlSymsp->TOP.wave_address_o}
     , mono_mix_o{vlSymsp->TOP.mono_mix_o}
     , left_mix_o{vlSymsp->TOP.left_mix_o}
