@@ -331,36 +331,39 @@ module doc5503 #(
                         case (osc_state_r)
                             OSC_IDLE: begin                             
                                 if (cycle_start_w) begin
-                                    osc_state_r <= OSC_START;
+
+                                    // Load all current oscillator registers
+                                    curr_fl_r <= fl_r[curr_osc_r];                  // Frequency low
+                                    curr_fh_r <= fh_r[curr_osc_r];                  // Frequency high
+                                    curr_vol_r <= vol_r[curr_osc_r];                // Volume
+                                    curr_wds_r <= wds_r[curr_osc_r];                // Waveform data sample
+                                    curr_wtp_r <= wtp_r[curr_osc_r];                // Waveform table pointer
+                                    curr_control_r <= control_r[curr_osc_r];        // Control
+                                    curr_rts_r <= rts_r[curr_osc_r];                // Resolution/table size
+                                    curr_acc_r <= acc_r[curr_osc_r];                // Accumulator
+                                    
+                                    // Init other working values
+                                    curr_wave_addr_r <= '0;
+                                    curr_output_r <= '0;
+                                    halt_zero_r <= 1'b0;
+                                    halt_acc_overflow_r <= 1'b0;
+
+                                    osc_state_r <= OSC_REQUEST_DATA;
+
                                 end
                             end
 
-                            OSC_START: begin
-                                // Load all current oscillator registers
-                                curr_fl_r <= fl_r[curr_osc_r];                  // Frequency low
-                                curr_fh_r <= fh_r[curr_osc_r];                  // Frequency high
-                                curr_vol_r <= vol_r[curr_osc_r];                // Volume
-                                curr_wds_r <= wds_r[curr_osc_r];                // Waveform data sample
-                                curr_wtp_r <= wtp_r[curr_osc_r];                // Waveform table pointer
-                                curr_control_r <= control_r[curr_osc_r];        // Control
-                                curr_rts_r <= rts_r[curr_osc_r];                // Resolution/table size
-                                curr_acc_r <= acc_r[curr_osc_r];                // Accumulator
-                                
-                                // Init other working values
-                                curr_wave_addr_r <= '0;
-                                curr_output_r <= '0;
-                                halt_zero_r <= 1'b0;
-                                halt_acc_overflow_r <= 1'b0;
-
-                                osc_state_r <= OSC_LOAD_PARTNER_CONTROL;
-                            end
-
                             OSC_REQUEST_DATA: begin
-                                partner_control_r <= control_r[partner_osc_w];
+                                // Request data from SDRAM if not halted
+                                // If halted, clear accumulator if in one-shot mode and skip to OSC_IDLE
+                                // Needs the following registers to be loaded:
+                                //   curr_control_r, curr_acc_r, curr_rts_r, curr_wtp_r
+                                // Accesses or modifies the following oscillator registers:
+                                //   acc_r[curr_osc_r], control_r[partner_osc_w]
+                                // Modifies the following registers:
+                                //   partner_control_r, wave_address_o, wave_rd_o
 
-                                // Accumulator 
                                 if (!halt_w) begin
-
                                     // Address Output Multiplexer - create wave table address from accumulator
                                     automatic logic [15:0] curr_wave_addr_w <= 16'(curr_acc_r >> curr_shift_w);
                                     // Create mask for wave table pointer based on wave table size
@@ -385,10 +388,22 @@ module doc5503 #(
                                     // When halted, skip OUT and return to IDLE state
                                     osc_state_r <= OSC_IDLE;
                                 end                                
+
+                                // load partner control register (needed later)
+                                partner_control_r <= control_r[partner_osc_w];
                             end
 
                             OSC_HANDLE_DATA: begin
-                                next_control_r <= control_r[curr_osc_r + 1'b1];
+                                // Handle the data returned from SDRAM
+                                // If the data is zero, set the halt flag and skip to OSC_IDLE
+                                // Otherwise proceed to OSC_OUT
+                                // Needs the following registers to be loaded:
+                                //   --
+                                // Accesses or modifies the following oscillator registers:
+                                //   control_r[curr_osc_r + 1], wds_r[curr_osc_r]
+                                // Modifies the following registers:
+                                //   curr_wds_r, halt_zero_r
+
                                 if (loaded_wds_pending_r) begin
                                     loaded_wds_pending_r <= 1'b0;
                                     wds_r[curr_osc_r] <= loaded_wds_r;;
@@ -399,10 +414,22 @@ module doc5503 #(
                                     end
                                     else osc_state_r <= OSC_OUT;
                                 end
+
+                                // load next control register (needed later)
+                                next_control_r <= control_r[curr_osc_r + 1'b1];
                             end
 
                             OSC_OUT: begin
                                 // Oscillator Output
+                                // If in SYNC_AM mode, odd oscillator outputs nothing
+                                // but it's value is used to set the volume of the next
+                                // even oscillator
+                                // Needs the following registers to be loaded:
+                                //   curr_wds_r, curr_vol_r, curr_control_r
+                                // Accesses or modifies the following oscillator registers:
+                                //   vol_r[curr_osc_r + 1], next_channel_r[curr_ca_w]
+                                // Modifies the following registers:
+                                //   curr_output_r, channel_sum_r, next_channel_r[curr_ca_w]
 
                                 if ((curr_mode_w == MODE_SYNC_AM) & curr_osc_odd_w) begin           // Sync AM Mode, odd oscillator outputs nothing
                                     if ((curr_osc_r < 30) & !next_halt_w) begin                     // if next oscillator is not halted
@@ -451,14 +478,8 @@ module doc5503 #(
 
                                 osc_state_r <= OSC_IDLE;
                                 if (overflow) begin
-                                    // If overflow, set halt flag and clear accumulator
-                                    if (curr_mode_w == MODE_ONESHOT) begin
-                                        acc_r[curr_osc_r] <= '0;                                    // reset current accumulator
-                                        curr_acc_r <= '0;
-                                        osc_state_r <= OSC_IDLE;
-                                    end else begin
-                                        osc_state <= OSC_HALT;
-                                    end
+                                    curr_acc_overflow_r <= 1'b1;                                    // Set overflow flag
+                                    osc_state <= OSC_HALT;
                                 end else begin
                                     // If not in one-shot mode, just set the accumulator
                                     acc_r[curr_osc_r] <= curr_acc_r;
