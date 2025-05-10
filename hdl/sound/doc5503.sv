@@ -76,8 +76,7 @@ module doc5503 #(
 
     output signed [15:0] channel_o[16],
     
-    output logic ready_o,           // Indicate when out of reset and ready to process
-    output [2:0] clk_count_o        // Expose the full clk_count for debugging
+    output logic ready_o           // Indicate when out of reset and ready to process
 );
 
     // Registers
@@ -97,6 +96,19 @@ module doc5503 #(
     reg [7:0] rts_r[32];            // $C0-DF : Resolution Table Size Register
 
     reg [23:0] acc_r[32];           // Oscillator Accumulator Register
+
+    /*
+    reg [5:0] fl_osc_r;
+    reg [7:0] fl_i_r;
+    reg fl_wr_r;
+    reg [7:0] fl_o_r;
+    always@(posedge clk_i)
+    begin
+        if(fl_wr_r)
+            fl_r[fl_osc_r] <= fl_i_r;
+        fl_o_r <= fl_r[fl_osc_r];
+    end
+    */
 
     // Current oscillator state, copied from the register file at the start of each cycle
     reg [7:0] curr_fl_r;
@@ -183,7 +195,7 @@ module doc5503 #(
     localparam int TICKS_PER_CYCLE = CLOCK_SPEED_HZ / (DOC_CLOCK_SPEED_HZ / 8);
     localparam int CYCLE_WIDTH = (TICKS_PER_CYCLE <= 1) ? 1 : $clog2(TICKS_PER_CYCLE + 1);
     logic [CYCLE_WIDTH-1:0] cycle_timer_r;
-    logic cycle_start_w = (cycle_timer_r == '0);  // Start new oscillator cycle when timer is zero
+    wire cycle_start_w = (cycle_timer_r == '0);  // Start new oscillator cycle when timer is zero
 
     localparam [1:0] CYCLE_RESET = 2'b00;
     localparam [1:0] CYCLE_OSC = 2'b01;
@@ -289,7 +301,7 @@ module doc5503 #(
 
     end // always_ff
 
-    task host_access();
+    task automatic host_access();
         // Handles CPU register read/write access to DOC registers
         // Processes access to oscillator interrupt (0xE0) and enable (0xE1) registers
         // Handles access to oscillator-specific registers (frequency, volume, waveform, etc.)
@@ -331,7 +343,7 @@ module doc5503 #(
         end
     endtask: host_access
 
-    task cycle_reset();
+    task automatic cycle_reset();
         // Initialize all oscillator registers during reset cycle
         // Sets frequency, volume, waveform, control registers to default values
         // Ensures all oscillators start in non-halted state with zeroed accumulators
@@ -346,7 +358,7 @@ module doc5503 #(
         acc_r[cycle_timer_r[4:0]] <= '0;
     endtask: cycle_reset
 
-    task cycle_refresh0();
+    task automatic cycle_refresh0();
         // First phase of output channel refresh cycle
         // Copies next_channel values to channel output registers
         // Updates mono_mix, left_mix, and right_mix final output values
@@ -363,7 +375,7 @@ module doc5503 #(
         end
     endtask: cycle_refresh0
 
-    task cycle_refresh1();
+    task automatic cycle_refresh1();
         // Second phase of output channel refresh cycle 
         // Resets next_channel accumulators for the next oscillator processing cycle
         // Clears mono_mix, left_mix, and right_mix accumulators when processing last channel
@@ -379,7 +391,7 @@ module doc5503 #(
         end
     endtask: cycle_refresh1
 
-    task cycle_osc();
+    task automatic cycle_osc();
         case (osc_state_r)
             OSC_IDLE: osc_idle();
             OSC_REQUEST_DATA: osc_request_data();
@@ -395,7 +407,7 @@ module doc5503 #(
         endcase // case (osc_state_r)
     endtask: cycle_osc
     
-    task osc_idle();
+    task automatic osc_idle();
         // Initializes oscillator cycle when cycle_start_w triggers
         // Loads all current oscillator registers from register file
         // Resets working registers and clears halt_zero flag
@@ -421,7 +433,7 @@ module doc5503 #(
         end
     endtask : osc_idle
 
-    task osc_request_data();
+    task automatic osc_request_data();
         // Generate wave table address and request data if oscillator not halted
         // If oscillator is halted, handles one-shot mode accumulator reset
         // Needs: curr_control_r (halt bit), curr_acc_r (position in waveform)
@@ -460,7 +472,7 @@ module doc5503 #(
         partner_control_r <= control_r[partner_osc_w];
     endtask: osc_request_data
 
-    task osc_handle_data();
+    task automatic osc_handle_data();
         // Processes wave data received from memory request
         // Stores loaded_wds_r into both wds_r array and curr_wds_r
         // Detects zero byte (0x00) which triggers special halt behavior
@@ -488,7 +500,7 @@ module doc5503 #(
 
     endtask: osc_handle_data
 
-    task osc_out();
+    task automatic osc_out();
         // Calculates audio output by scaling waveform data by volume
         // Handles special case for SYNC_AM mode where odd oscillators don't output
         // but instead modify the volume of the following even oscillator
@@ -517,7 +529,7 @@ module doc5503 #(
         end
     endtask: osc_out
 
-    task osc_mix();
+    task automatic osc_mix();
         // Mixes the oscillator output into the appropriate channel and stereo mix
         // Accumulates output into next_channel_r for the current channel assignment (curr_ca_w)
         // Updates mono (all channels), left (odd channels), and right (even channels) mixes
@@ -538,7 +550,7 @@ module doc5503 #(
         osc_state_r <= OSC_ACC;
     endtask: osc_mix
 
-    task osc_acc();
+    task automatic osc_acc();
         // Updates oscillator accumulator by adding frequency value
         // Detects overflow based on resolution and table size settings
         // Applies appropriate masking to ensure proper wraparound within wave table
@@ -556,7 +568,7 @@ module doc5503 #(
         end
     endtask: osc_acc
 
-    task osc_halt();
+    task automatic osc_halt();
         // Handles oscillator state on halt events (overflow or zero byte)
         // Special processing for SYNC_AM mode where even oscillator halt
         // resets the accumulator of the previous odd oscillator
@@ -575,7 +587,7 @@ module doc5503 #(
         osc_state_r <= OSC_HALT_ONE_SHOT_OR_ZERO_BYTE;
     endtask: osc_halt
 
-    task osc_halt_one_shot_or_zero_byte();
+    task automatic osc_halt_one_shot_or_zero_byte();
         // Determines if oscillator should be marked as halted in the control register
         // Halts oscillator if in one-shot mode (MODE_ONE_SHOT) or zero byte was detected
         // Handles special transition cases for SWAP mode and partner oscillator interactions
@@ -600,7 +612,7 @@ module doc5503 #(
         end
     endtask: osc_halt_one_shot_or_zero_byte
 
-    task osc_start_partner();
+    task automatic osc_start_partner();
         // Starts partner oscillator when in SWAP mode
         // Clears halt bit in partner's control register
         // Resets partner's accumulator to start from beginning of wave table
@@ -613,7 +625,7 @@ module doc5503 #(
         osc_state_r <= OSC_IDLE;
     endtask: osc_start_partner
 
-    task osc_retrigger();
+    task automatic osc_retrigger();
         // Handles the specific edge case where an even oscillator retriggering is needed
         // This occurs when the even oscillator is halted but its odd partner is in SWAP mode
         // Copies the partner's control value (with halt bit cleared) to the current oscillator
@@ -625,3 +637,20 @@ module doc5503 #(
     endtask: osc_retrigger
 
 endmodule
+
+module osc_reg_ram (
+    input clk_i,
+    input we_i,
+    input [7:0] osc_i,
+    input [7:0] data_i,
+    output reg [7:0] data_o
+);
+    reg [7:0] osc_reg_r[32]; 
+    always_ff @(posedge clk_i) begin
+        if (we_i) begin
+            osc_reg_r[osc_i] <= data_i;
+        end
+        data_o <= osc_reg_r[osc_i];
+    end
+endmodule
+
