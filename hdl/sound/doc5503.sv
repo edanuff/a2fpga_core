@@ -107,8 +107,6 @@ module doc5503 #(
     reg [7:0] curr_control_r;
     reg [7:0] curr_rts_r;
     reg [7:0] partner_control_r;
-    reg [7:0] next_control_r;
-    reg [7:0] prev_control_r;
 
     wire zero_byte_w = (curr_wds_r == 8'h00);
     
@@ -128,13 +126,7 @@ module doc5503 #(
     wire partner_halt_w = partner_control_r[0];
     wire [1:0] partner_mode_w = partner_control_r[2:1];
 
-    wire next_halt_w = next_control_r[0];
-    wire [1:0] next_mode_w = next_control_r[2:1];
-
-    wire prev_halt_w = prev_control_r[0];
-    wire [1:0] prev_mode_w = prev_control_r[2:1];
-
-   reg [23:0] curr_acc_r;
+    reg [23:0] curr_acc_r;
     reg [15:0] curr_wave_addr_r;
     reg [15:0] curr_output_r;
 
@@ -144,10 +136,10 @@ module doc5503 #(
 
     always_ff @(posedge clk_i) begin
         if (!reset_n_i) begin
-            loaded_wds_r; <= 8'h80;
+            loaded_wds_r <= 8'h80;
         end else begin
             if (wave_data_ready_i) begin
-                loaded_wds_r; <= wave_data_i;
+                loaded_wds_r <= wave_data_i;
             end
         end
     end
@@ -179,7 +171,7 @@ module doc5503 #(
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_right_mix_r;
 
     localparam [1:0] MODE_FREE = 2'b00;
-	localparam [1:0] MODE_ONESHOT = 2'b01;
+	localparam [1:0] MODE_ONE_SHOT = 2'b01;
     localparam [1:0] MODE_SYNC_AM = 2'b10;
     localparam [1:0] MODE_SWAP = 2'b11;
 
@@ -236,19 +228,18 @@ module doc5503 #(
         end
     end
 
-   localparam int OSC_STATE_COUNT = 11;
+   localparam int OSC_STATE_COUNT = 10;
     typedef enum logic [$clog2(OSC_STATE_COUNT)-1:0] {
         OSC_IDLE = 0,
-        OSC_START = 1,
-        OSC_LOAD_PARTNER_CONTROL = 2,
-        OSC_ACC = 3,
-        OSC_ADDR = 4,
-        OSC_READ_DATA = 5,
-        OSC_AM_SYNC_EVEN = 6,
-        OSC_HALT = 7,
-        OSC_HALT_PARTNER = 8,
-        OSC_OUT = 9,
-        OSC_MIX = 10
+        OSC_REQUEST_DATA = 1,
+        OSC_HANDLE_DATA = 2,
+        OSC_OUT = 3,
+        OSC_MIX = 4,
+        OSC_ACC = 5,
+        OSC_HALT = 6,
+        OSC_HALT_ONE_SHOT_OR_ZERO_BYTE = 7,
+        OSC_START_PARTNER = 8,
+        OSC_RETRIGGER = 9
     } osc_state_e;
     osc_state_e osc_state_r; 
     
@@ -257,7 +248,6 @@ module doc5503 #(
     reg host_access_r = 1'b0;
 
     reg halt_zero_r = 1'b0;
-    reg halt_acc_overflow_r = 1'b0;
 
     always_ff @(posedge clk_i) begin
         if (!reset_n_i) begin
@@ -267,7 +257,6 @@ module doc5503 #(
             loaded_wds_pending_r <= '0;
             host_access_r <= 1'b0;
             halt_zero_r <= 1'b0;
-            halt_acc_overflow_r <= 1'b0;
         end else begin
             host_access_r <= ~host_access_r;
             wave_rd_o <= '0;
@@ -369,12 +358,13 @@ module doc5503 #(
             OSC_REQUEST_DATA: osc_request_data();
             OSC_HANDLE_DATA: osc_handle_data();
             OSC_OUT: osc_out();
-            OSC_MIX : osc_mix();
-            OSC_ACC : osc_acc();
+            OSC_MIX: osc_mix();
+            OSC_ACC: osc_acc();
             OSC_HALT: osc_halt();
-            OSC_HALT2: osc_halt2();
-            OSC_HALT_PARTNER: osc_halt_partner();
-            OSC_AM_SYNC_EVEN: osc_am_sync_even();
+            OSC_HALT_ONE_SHOT_OR_ZERO_BYTE: osc_halt_one_shot_or_zero_byte();
+            OSC_START_PARTNER: osc_start_partner();
+            OSC_RETRIGGER: osc_retrigger();
+            default: osc_idle();
         endcase // case (osc_state_r)
     endtask: cycle_osc
     
@@ -395,7 +385,6 @@ module doc5503 #(
             curr_wave_addr_r <= '0;
             curr_output_r <= '0;
             halt_zero_r <= 1'b0;
-            halt_acc_overflow_r <= 1'b0;
 
             osc_state_r <= OSC_REQUEST_DATA;
         end
@@ -413,7 +402,7 @@ module doc5503 #(
 
         if (!halt_w) begin
             // Address Output Multiplexer - create wave table address from accumulator
-            automatic logic [15:0] curr_wave_addr_w <= 16'(curr_acc_r >> curr_shift_w);
+            automatic logic [15:0] curr_wave_addr_w = 16'(curr_acc_r >> curr_shift_w);
             // Create mask for wave table pointer based on wave table size
             automatic logic [7:0] ptr_hi_mask_w = 8'hFF << curr_wts_w;
             // Create pointer to wave table with ignored bits masked out
@@ -456,15 +445,13 @@ module doc5503 #(
             loaded_wds_pending_r <= 1'b0;
             wds_r[curr_osc_r] <= loaded_wds_r;;
             curr_wds_r <= loaded_wds_r;
-            if (loaded_wds_r; == 8'h00) begin
+            if (loaded_wds_r == 8'h00) begin
                 halt_zero_r <= 1'b1;                                    // Set halt zero flag
                 osc_state_r <= OSC_HALT;
             end
             else osc_state_r <= OSC_OUT;
         end
 
-        // load next control register (needed later)
-        next_control_r <= control_r[curr_osc_r + 1'b1];
     endtask: osc_handle_data
 
     task osc_out();
@@ -480,7 +467,7 @@ module doc5503 #(
         //   curr_output_r, channel_sum_r, next_channel_r[curr_ca_w] 
 
         if ((curr_mode_w == MODE_SYNC_AM) & curr_osc_odd_w) begin           // Sync AM Mode, odd oscillator outputs nothing
-            if ((curr_osc_r < 30) & !next_halt_w) begin                     // if next oscillator is not halted
+            if ((curr_osc_r < 30) & !control_r[curr_osc_r + 1'b1][0]) begin // if next oscillator is not halted
                 vol_r[curr_osc_r + 1'b1] <= curr_wds_r;                     // it's volume is set to current oscillator's waveform data
             end
             // Skip mixing for odd oscillators in SYNC_AM mode
@@ -517,60 +504,64 @@ module doc5503 #(
 
     task osc_acc();
         // Accumulator
-        automatic logic [24:0] temp_acc <= curr_acc_r + {curr_fh_r, curr_fl_r};
+        automatic logic [24:0] temp_acc = curr_acc_r + {curr_fh_r, curr_fl_r};
         automatic logic [23:0] curr_acc_mask_w = {16'((1 << (5'd9 + curr_res_w)) - 1), 8'hFF};
-        automatic int high_bit_w = 17 + curr_res_w 
+        automatic int high_bit_w = 17 + curr_res_w;
         automatic logic overflow = temp_acc[high_bit_w];
-        curr_acc_overflow_r <= overflow;
-        curr_acc_r <= curr_wave_addr_w[23:0] & curr_acc_mask_w;             // wrap around address
+        acc_r[curr_osc_r] <= temp_acc[23:0] & curr_acc_mask_w;      // wrap around address
 
         osc_state_r <= OSC_IDLE;
         if (overflow) begin
-            curr_acc_overflow_r <= 1'b1;                                    // Set overflow flag
-            osc_state <= OSC_HALT;
-        end else begin
-            // If not in one-shot mode, just set the accumulator
-            acc_r[curr_osc_r] <= curr_acc_r;
+            osc_state_r <= OSC_HALT;
         end
     endtask: osc_acc
 
     task osc_halt();
         // Halt Oscillator
-        if (mode == MODE_SYNC_AM) begin
+        if (curr_mode_w == MODE_SYNC_AM) begin
             if (curr_osc_even_w) begin
                 // we're even, so if the odd oscillator 1 below us is playing,
                 // restart it.
-                if (!partner_halt_w) begin
-                    acc_r[partner_osc_w] <= '0;                                    // reset partner accumulator
+                if (!control_r[curr_osc_r - 1'b1][0]) begin
+                    acc_r[curr_osc_r - 1] <= '0;                           // reset previous accumulator
                 end
             end
         end
+        osc_state_r <= OSC_HALT_ONE_SHOT_OR_ZERO_BYTE;
     endtask: osc_halt
 
-    task osc_halt2();
-        // MODE_ONESHOT, MODE_SWAP, or zero byte
+    task osc_halt_one_shot_or_zero_byte();
+        // MODE_ONE_SHOT, MODE_SWAP, or zero byte
         if (curr_mode_w[0] || halt_zero_r) begin
-            control_r[curr_osc_r] <= curr_control_r | 1'b1;                     // halt current oscillator
+            control_r[curr_osc_r] <= curr_control_r | 1'b1;                 // halt current oscillator
         end
 
+        osc_state_r <= OSC_IDLE;
+
+	    // if we're in swap mode, start the partner
         if (curr_mode_w == MODE_SWAP) begin                                 // Swap Mode
             osc_state_r <= OSC_START_PARTNER;
         end else begin
-            osc_state_r <= OSC_PARTNER_SWAP;
+		    // if we're not swap and we're the even oscillator of the pair and the partner's swap
+		    // but we aren't, we retrigger (!!!)  Verified on IIgs hardware.
+            if ((partner_mode_w == MODE_SWAP) && curr_osc_even_w) begin
+                osc_state_r <= OSC_RETRIGGER;
+            end
         end
-    endtask: osc_halt2
+    endtask: osc_halt_one_shot_or_zero_byte
 
-    task osc_halt_partner();
-        control_r[partner_osc_w] <= partner_control_r & 8'b11111110;
-        acc_r[partner_osc_w] <= '0;                                        // reset partner accumulator
+    task osc_start_partner();
+        control_r[partner_osc_w] <= partner_control_r & 8'b11111110;        // clear the halt bit
+        acc_r[partner_osc_w] <= '0;                                         // reset partner accumulator
+
         // After halting partner, skip the current output
         osc_state_r <= OSC_IDLE;
-    endtask: osc_halt_partner
+    endtask: osc_start_partner
 
-    task osc_am_sync_even();
-        // Sync AM Mode, even oscillator
-        acc_r[partner_osc_w] <= '0;                                        // reset partner accumulator
-        osc_state_r <= OSC_OUT;
-    endtask: osc_am_sync_even
+    task osc_retrigger();
+        control_r[curr_osc_r] <= partner_control_r & 8'b11111110;        // clear the halt bit    
+
+        osc_state_r <= OSC_IDLE;
+    endtask: osc_retrigger
 
 endmodule
