@@ -479,6 +479,11 @@ module doc5503 #(
                 osc_state_r <= OSC_HALT;
             end
             else osc_state_r <= OSC_OUT;
+        end else if (cycle_timer_r > 'd40) begin
+            // If we get here, we didn't get the data in time
+            // This is a problem, but we'll just ignore it for now.
+            // We should never get here unless the memory is really slow.
+            osc_state_r <= OSC_IDLE;
         end
 
     endtask: osc_handle_data
