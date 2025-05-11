@@ -644,7 +644,6 @@ module top #(
         .a2bus_if(a2bus_if),
         .data_o(sg_d_w),                 
         .rd_en_o(sg_rd_w),
-        .irq_n_o(),
 
         .audio_l_o(sg_audio_l),               
         .audio_r_o(sg_audio_r),

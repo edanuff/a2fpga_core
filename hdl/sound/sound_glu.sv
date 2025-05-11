@@ -27,7 +27,6 @@ module sound_glu #(
 
     output [7:0] data_o,
     output rd_en_o,
-    output irq_n_o,
 
     output [15:0] audio_l_o,
     output [15:0] audio_r_o,
@@ -160,7 +159,6 @@ module sound_glu #(
         .clk_i(a2bus_if.clk_logic),
         .reset_n_i(a2bus_if.system_reset_n),
         .clk_en_i(a2bus_if.clk_7m_posedge),
-        .irq_n_o(irq_n_o),
         .cs_n_i(~(sd_sel_w & access_doc_w & !a2bus_if.rw_n & a2bus_if.data_in_strobe)),
         .we_n_i(1'b0),
         .addr_i(sound_ptr_lo_r),
@@ -173,7 +171,9 @@ module sound_glu #(
         .left_mix_o(left_mix_w),
         .right_mix_o(right_mix_w),
         .mono_mix_o(),
-        .channel_o()
+        .channel_o(),
+        .ready_o(),
+        .osc_en_o(doc_osc_en_w)
     );
 
     // Volume is inverted for right shift (0 is min volume, 15 is max volume)

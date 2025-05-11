@@ -56,8 +56,6 @@ module doc5503 #(
     input reset_n_i,
     input clk_en_i,
 
-    output reg irq_n_o,
-
     input cs_n_i,
     input we_n_i,
 
@@ -76,39 +74,156 @@ module doc5503 #(
 
     output signed [15:0] channel_o[16],
     
-    output logic ready_o           // Indicate when out of reset and ready to process
+    output logic ready_o,          // Indicate when out of reset and ready to process
+
+    output [7:0] osc_en_o   // Debug output for oscillator enable register
+
 );
+
+    reg [7:0] host_addr_r;         // Address register for host access
+    reg [7:0] host_data_r;        // Data register for host access
+    reg host_we_n_r;              // Write enable register for host access
+    reg prev_cs_n_r;          // Previous chip select state
+    reg prev_we_n_r;          // Previous write enable state
+    reg host_access_r;         // Host access register
+
+    always_ff @(posedge clk_i) begin
+        if (!reset_n_i) begin
+            host_addr_r <= '0;
+            host_data_r <= '0;
+            host_we_n_r <= 1'b1;
+        end else begin
+            prev_cs_n_r <= cs_n_i;
+            prev_we_n_r <= we_n_i;
+            host_access_r <= 1'b0;
+            if (!cs_n_i) begin
+                host_addr_r <= addr_i;
+                host_data_r <= data_i;
+                host_we_n_r <= we_n_i;
+
+                // Pulse host_access_r on negative edge of cs_n_i
+                // if cs_n_i is low and negative edge of we_n_i
+                if (prev_cs_n_r || (!we_n_i && prev_we_n_r)) begin
+                    host_access_r <= 1'b1;
+                end
+            end
+        end
+    end
 
     // Registers
 
     reg [7:0] osc_int_r;            // $E0    : Oscillator Interrupt Register
     reg [7:0] osc_en_r;             // $E1    : Oscillator Enable Register
+    assign osc_en_o = osc_en_r;
 
-    // In order for these to be safely synthesized as ram, we need to never access them
-    // multiple times in the same clock cycle
 
-    reg [7:0] fl_r[32];             // $00-1F : Frequency Low Register
-    reg [7:0] fh_r[32];             // $20-3F : Frequency High Register
-    reg [7:0] vol_r[32];            // $40-5F : Volume Register
-    reg [7:0] wds_r[32];            // $60-7F : Waveform Data Sample Register
-    reg [7:0] wtp_r[32];            // $80-9F : Waveform Table Pointer Register
-    reg [7:0] control_r[32];        // $A0-BF : Control Register
-    reg [7:0] rts_r[32];            // $C0-DF : Resolution Table Size Register
+    reg [4:0] target_osc_fl_r;      // Target oscillator for frequency low operation
+    reg [4:0] target_osc_fh_r;      // Target oscillator for frequency high operation
+    reg [4:0] target_osc_vol_r;     // Target oscillator for volume operation
+    reg [4:0] target_osc_wds_r;     // Target oscillator for waveform data sample operation
+    reg [4:0] target_osc_wtp_r;     // Target oscillator for waveform table pointer operation
+    reg [4:0] target_osc_control_r; // Target oscillator for control operation
+    reg [4:0] target_osc_rts_r;     // Target oscillator for resolution table size operation
+    reg [4:0] target_osc_acc_r;     // Target oscillator for accumulator operation
 
-    reg [23:0] acc_r[32];           // Oscillator Accumulator Register
+    reg target_fl_we_r;             // Target oscillator write enable for frequency low register
+    reg target_fh_we_r;             // Target oscillator write enable for frequency high register
+    reg target_vol_we_r;            // Target oscillator write enable for volume register
+    reg target_wds_we_r;            // Target oscillator write enable for waveform data sample register
+    reg target_wtp_we_r;            // Target oscillator write enable for waveform table pointer register
+    reg target_control_we_r;        // Target oscillator write enable for control register
+    reg target_rts_we_r;            // Target oscillator write enable for resolution table size register
+    reg target_acc_we_r;            // Target oscillator write enable for accumulator register
 
-    /*
-    reg [5:0] fl_osc_r;
-    reg [7:0] fl_i_r;
-    reg fl_wr_r;
-    reg [7:0] fl_o_r;
-    always@(posedge clk_i)
-    begin
-        if(fl_wr_r)
-            fl_r[fl_osc_r] <= fl_i_r;
-        fl_o_r <= fl_r[fl_osc_r];
-    end
-    */
+    reg [7:0] target_fl_din_r;      // Target oscillator data in for frequency low register
+    reg [7:0] target_fh_din_r;      // Target oscillator data in for frequency high register
+    reg [7:0] target_vol_din_r;     // Target oscillator data in for volume register
+    reg [7:0] target_wds_din_r;     // Target oscillator data in for waveform data sample register
+    reg [7:0] target_wtp_din_r;     // Target oscillator data in for waveform table pointer register
+    reg [7:0] target_control_din_r; // Target oscillator data in for control register
+    reg [7:0] target_rts_din_r;     // Target oscillator data in for resolution table size register
+    reg [23:0] target_acc_din_r;    // Target oscillator data in for accumulator register
+
+    wire [7:0] target_fl_dout_w;    // Target oscillator data out for frequency low register
+    wire [7:0] target_fh_dout_w;    // Target oscillator data out for frequency high register
+    wire [7:0] target_vol_dout_w;   // Target oscillator data out for volume register
+    wire [7:0] target_wds_dout_w;   // Target oscillator data out for waveform data sample register
+    wire [7:0] target_wtp_dout_w;   // Target oscillator data out for waveform table pointer register
+    wire [7:0] target_control_dout_w; // Target oscillator data out for control register
+    wire [7:0] target_rts_dout_w;   // Target oscillator data out for resolution table size register
+    wire [23:0] target_acc_dout_w;  // Target oscillator data out for accumulator register
+
+    // $00-1F : Frequency Low Register
+    osc_reg_ram fl_ram (
+        .clk_i(clk_i),
+        .osc_i(target_osc_fl_r),
+        .we_i(target_fl_we_r),
+        .data_i(target_fl_din_r),
+        .data_o(target_fl_dout_w)
+    );
+
+    // $20-3F : Frequency High Register
+    osc_reg_ram fh_ram (
+        .clk_i(clk_i),
+        .osc_i(target_osc_fh_r),
+        .we_i(target_fh_we_r),
+        .data_i(target_fh_din_r),
+        .data_o(target_fh_dout_w)
+    );
+
+    // $40-5F : Volume Register
+    osc_reg_ram vol_ram (
+        .clk_i(clk_i),
+        .osc_i(target_osc_vol_r),
+        .we_i(target_vol_we_r),
+        .data_i(target_vol_din_r),
+        .data_o(target_vol_dout_w)
+    );
+
+    // $60-7F : Waveform Data Sample Register
+    osc_reg_ram wds_ram (
+        .clk_i(clk_i),
+        .osc_i(target_osc_wds_r),
+        .we_i(target_wds_we_r),
+        .data_i(target_wds_din_r),
+        .data_o(target_wds_dout_w)
+    );
+
+    // $80-9F : Waveform Table Pointer Register
+    osc_reg_ram wtp_ram (
+        .clk_i(clk_i),
+        .osc_i(target_osc_wtp_r),
+        .we_i(target_wtp_we_r),
+        .data_i(target_wtp_din_r),
+        .data_o(target_wtp_dout_w)
+    );
+
+    // $A0-BF : Control Register
+    osc_reg_ram control_ram (
+        .clk_i(clk_i),
+        .osc_i(target_osc_control_r),
+        .we_i(target_control_we_r),
+        .data_i(target_control_din_r),
+        .data_o(target_control_dout_w)
+    );
+
+    // $C0-DF : Resolution Table Size Register
+    osc_reg_ram rts_ram (
+        .clk_i(clk_i),
+        .osc_i(target_osc_rts_r),
+        .we_i(target_rts_we_r),
+        .data_i(target_rts_din_r),
+        .data_o(target_rts_dout_w)
+    );
+
+    // $E0-FF : Oscillator Accumulator Register
+    osc_reg_ram #(.DATA_WIDTH(24)) acc_ram (
+        .clk_i(clk_i),
+        .osc_i(target_osc_acc_r),
+        .we_i(target_acc_we_r),
+        .data_i(target_acc_din_r),
+        .data_o(target_acc_dout_w)
+    );
 
     // Current oscillator state, copied from the register file at the start of each cycle
     reg [7:0] curr_fl_r;
@@ -119,10 +234,12 @@ module doc5503 #(
     reg [7:0] curr_control_r;
     reg [7:0] curr_rts_r;
     reg [7:0] partner_control_r;
+    reg [7:0] next_control_r;
+    reg [7:0] prev_control_r;
 
     wire zero_byte_w = (curr_wds_r == 8'h00);
     
-    reg [5:0] curr_osc_r;
+    reg [4:0] curr_osc_r;
     wire curr_osc_odd_w = curr_osc_r[0];
     wire curr_osc_even_w = ~curr_osc_odd_w;
     wire [4:0] partner_osc_w = 5'(curr_osc_r^1);
@@ -137,6 +254,12 @@ module doc5503 #(
 
     wire partner_halt_w = partner_control_r[0];
     wire [1:0] partner_mode_w = partner_control_r[2:1];
+
+    wire next_halt_w = next_control_r[0];
+    wire [1:0] next_mode_w = next_control_r[2:1];
+
+    wire prev_halt_w = prev_control_r[0];
+    wire [1:0] prev_mode_w = prev_control_r[2:1];
 
     reg [23:0] curr_acc_r;
     reg [15:0] curr_wave_addr_r;
@@ -240,33 +363,30 @@ module doc5503 #(
         end
     end
 
-   localparam int OSC_STATE_COUNT = 10;
+   localparam int OSC_STATE_COUNT = 13;
     typedef enum logic [$clog2(OSC_STATE_COUNT)-1:0] {
-        OSC_IDLE = 0,
-        OSC_REQUEST_DATA = 1,
-        OSC_HANDLE_DATA = 2,
-        OSC_OUT = 3,
-        OSC_MIX = 4,
-        OSC_ACC = 5,
-        OSC_HALT = 6,
-        OSC_HALT_ONE_SHOT_OR_ZERO_BYTE = 7,
-        OSC_START_PARTNER = 8,
-        OSC_RETRIGGER = 9
+        OSC_IDLE,
+        OSC_LOAD_REGISTERS,
+        OSC_LOAD_PARTNER_CONTROL,
+        OSC_LOAD_NEXT_CONTROL,
+        OSC_REQUEST_DATA,
+        OSC_HANDLE_DATA,
+        OSC_OUT,
+        OSC_MIX,
+        OSC_ACC,
+        OSC_HALT,
+        OSC_HALT_ONE_SHOT_OR_ZERO_BYTE,
+        OSC_START_PARTNER,
+        OSC_RETRIGGER
     } osc_state_e;
     osc_state_e osc_state_r; 
     
     reg loaded_wds_pending_r;
 
-    reg host_access_r = 1'b0;
-
     reg halt_zero_r = 1'b0;
 
-    // Host access to the DOC5503 registers
-    // Stretch the CS and WE signals an extra cycle
-    reg prev_cs_n_r;
-    reg prev_we_n_r;
-    wire host_cs_n_w = cs_n_i & prev_cs_n_r;
-    wire host_we_n_w = we_n_i & prev_we_n_r;
+    reg host_request_pending_r = 1'b0;
+    reg device_response_pending_r = 1'b0;
 
     always_ff @(posedge clk_i) begin
         if (!reset_n_i) begin
@@ -274,73 +394,182 @@ module doc5503 #(
             wave_address_o <= '0;
             wave_rd_o <= '0;
             loaded_wds_pending_r <= '0;
-            host_access_r <= 1'b0;
             halt_zero_r <= 1'b0;
-            prev_cs_n_r <= 1'b1;
-            prev_we_n_r <= 1'b1;
+
+            host_request_pending_r <= 1'b0;
+            device_response_pending_r <= 1'b0;
+
+            target_fl_we_r <= 1'b0;
+            target_fh_we_r <= 1'b0;
+            target_vol_we_r <= 1'b0;
+            target_wds_we_r <= 1'b0;
+            target_wtp_we_r <= 1'b0;
+            target_control_we_r <= 1'b0;
+            target_rts_we_r <= 1'b0;
+            target_acc_we_r <= 1'b0;
+
         end else begin
-            host_access_r <= ~host_access_r;
-            prev_cs_n_r <= cs_n_i;
-            prev_we_n_r <= we_n_i;
+
             wave_rd_o <= '0;
+
+            if (host_access_r) begin
+                host_request_pending_r <= 1'b1;
+            end
+            device_response_pending_r <= 1'b0;
+
+            // Default all target oscillators to the current oscillator
+            target_osc_fl_r <= curr_osc_r;
+            target_osc_fh_r <= curr_osc_r;
+            target_osc_vol_r <= curr_osc_r;
+            target_osc_wds_r <= curr_osc_r;
+            target_osc_wtp_r <= curr_osc_r;
+            target_osc_control_r <= curr_osc_r;
+            target_osc_rts_r <= curr_osc_r;
+            target_osc_acc_r <= curr_osc_r;
+
+            // Default all target write enables to 0
+            target_fl_we_r <= 1'b0;
+            target_fh_we_r <= 1'b0;
+            target_vol_we_r <= 1'b0;
+            target_wds_we_r <= 1'b0;
+            target_wtp_we_r <= 1'b0;
+            target_control_we_r <= 1'b0;
+            target_rts_we_r <= 1'b0;
+            target_acc_we_r <= 1'b0;
+
             if (wave_data_ready_i) begin
                 loaded_wds_pending_r <= 1'b1;
             end
-            if (host_access_r & ready_w) begin
-                host_access();
-            end else begin
-                // Handle the oscillator state machine
-                case (cycle_state_r)
-                    CYCLE_RESET: cycle_reset();
-                    CYCLE_OSC: cycle_osc();
-                    CYCLE_REFRESH_0: cycle_refresh0();
-                    CYCLE_REFRESH_1: cycle_refresh1();
-                endcase // case (cycle_state_r)
-            end
+
+            case (cycle_state_r)
+                CYCLE_RESET: cycle_reset();
+                CYCLE_OSC: cycle_osc();
+                CYCLE_REFRESH_0: cycle_refresh0();
+                CYCLE_REFRESH_1: cycle_refresh1();
+            endcase // case (cycle_state_r)
+
         end // else: !if(!reset_n_i)
 
     end // always_ff
 
-    task automatic host_access();
+    task automatic host_request();
         // Handles CPU register read/write access to DOC registers
         // Processes access to oscillator interrupt (0xE0) and enable (0xE1) registers
         // Handles access to oscillator-specific registers (frequency, volume, waveform, etc.)
-        // Called when host_access_r is active and device is ready (not in reset)
         // Handle host access to the registers
-        if (!host_cs_n_w) begin
-            if (addr_i == 8'hE0) begin
-                // Oscillator Interrupt Register
-                if (!host_we_n_w) osc_int_r <= data_i; 
-                else data_o <= osc_int_r;
-            end else if (addr_i == 8'hE1) begin
-                // Oscillator Enable Register
-                if (!host_we_n_w) osc_en_r <= data_i;
-                else data_o <= osc_en_r;
-            end else if (addr_i >= 8'h00 && addr_i <= 8'hDF) begin
-                // Oscillator Registers
-                if (!host_we_n_w) begin
-                    case (addr_i[7:5])
-                        3'b000: fl_r[addr_i[4:0]] <= data_i;        // $00-1F
-                        3'b001: fh_r[addr_i[4:0]] <= data_i;        // $20-3F
-                        3'b010: vol_r[addr_i[4:0]] <= data_i;       // $40-5F
-                        3'b011: wds_r[addr_i[4:0]] <= data_i;       // $60-7F
-                        3'b100: wtp_r[addr_i[4:0]] <= data_i;       // $80-9F
-                        3'b101: control_r[addr_i[4:0]] <= data_i;   // $A0-BF
-                        3'b110: rts_r[addr_i[4:0]] <= data_i;       // $C0-DF
+        if (host_request_pending_r) begin
+            host_request_pending_r <= 1'b0;
+            if (!host_we_n_r) begin
+                if (host_addr_r == 8'hE0) begin
+                    // Oscillator Interrupt Register
+                    osc_int_r <= host_data_r; 
+                end else if (host_addr_r == 8'hE1) begin
+                    // Oscillator Enable Register
+                    osc_en_r <= host_data_r;
+                end else if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
+                    // Oscillator Registers
+                    case (host_addr_r[7:5])
+                        3'b000: begin                               // $00-1F
+                            target_osc_fl_r <= host_addr_r[4:0];
+                            target_fl_din_r <= host_data_r;
+                            target_fl_we_r <= 1'b1;
+                        end
+                        3'b001: begin                               // $20-3F
+                            target_osc_fh_r <= host_addr_r[4:0];
+                            target_fh_din_r <= host_data_r;
+                            target_fh_we_r <= 1'b1;
+                        end
+                        3'b010: begin                               // $40-5F
+                            target_osc_vol_r <= host_addr_r[4:0];
+                            target_vol_din_r <= host_data_r;
+                            target_vol_we_r <= 1'b1;
+                        end
+                        3'b011: begin                               // $60-7F
+                            target_osc_wds_r <= host_addr_r[4:0];
+                            target_wds_din_r <= host_data_r;
+                            target_wds_we_r <= 1'b1;
+                        end
+                        3'b100: begin                               // $80-9F
+                            target_osc_wtp_r <= host_addr_r[4:0];
+                            target_wtp_din_r <= host_data_r;
+                            target_wtp_we_r <= 1'b1;
+                        end
+                        3'b101: begin                               // $A0-BF
+                            target_osc_control_r <= host_addr_r[4:0];
+                            target_control_din_r <= host_data_r;
+                            target_control_we_r <= 1'b1;
+                        end
+                        3'b110: begin                               // $C0-DF
+                            target_osc_rts_r <= host_addr_r[4:0];
+                            target_rts_din_r <= host_data_r;
+                            target_rts_we_r <= 1'b1;
+                        end
                     endcase
-                end else begin
-                    case (addr_i[7:5])
-                        3'b000: data_o <= fl_r[addr_i[4:0]];        // $00-1F
-                        3'b001: data_o <= fh_r[addr_i[4:0]];        // $20-3F
-                        3'b010: data_o <= vol_r[addr_i[4:0]];       // $40-5F
-                        3'b011: data_o <= wds_r[addr_i[4:0]];       // $60-7F
-                        3'b100: data_o <= wtp_r[addr_i[4:0]];       // $80-9F
-                        3'b101: data_o <= control_r[addr_i[4:0]];   // $A0-BF
-                        3'b110: data_o <= rts_r[addr_i[4:0]];       // $C0-DF
+                end
+            end else begin
+                device_response_pending_r <= 1'b1;
+                if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
+                    case (host_addr_r[7:5])
+                        3'b000: target_osc_fl_r <= host_addr_r[4:0];
+                        3'b001: target_osc_fh_r <= host_addr_r[4:0];
+                        3'b010: target_osc_vol_r <= host_addr_r[4:0];
+                        3'b011: target_osc_wds_r <= host_addr_r[4:0];
+                        3'b100: target_osc_wtp_r <= host_addr_r[4:0];
+                        3'b101: target_osc_control_r <= host_addr_r[4:0];
+                        3'b110: target_osc_rts_r <= host_addr_r[4:0];
                     endcase
                 end
             end
+
         end
+    endtask: host_request
+
+    task automatic device_response();
+        device_response_pending_r <= 1'b0;
+        if (device_response_pending_r) begin
+            // Handle device response to host request
+            if (host_we_n_r) begin
+                // Read from oscillator registers
+                if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
+                    case (host_addr_r[7:5])
+                        3'b000: begin                               // $00-1F
+                            data_o <= target_fl_dout_w;
+                        end
+                        3'b001: begin                               // $20-3F
+                            data_o <= target_fh_dout_w;
+                        end
+                        3'b010: begin                               // $40-5F
+                            data_o <= target_vol_dout_w;
+                        end
+                        3'b011: begin                               // $60-7F
+                            data_o <= target_wds_dout_w;
+                        end
+                        3'b100: begin                               // $80-9F
+                            data_o <= target_wtp_dout_w;
+                        end
+                        3'b101: begin                               // $A0-BF
+                            data_o <= target_control_dout_w;
+                        end
+                        3'b110: begin                               // $C0-DF
+                            data_o <= target_rts_dout_w;
+                        end
+                    endcase
+                end else if (host_addr_r == 8'hE0) begin
+                    // Oscillator Interrupt Register
+                    data_o <= osc_int_r; 
+                end else if (host_addr_r == 8'hE1) begin
+                    // Oscillator Enable Register
+                    data_o <= osc_en_r;
+                end else begin
+                    data_o <= '0; // Default value for unrecognized addresses
+                end
+            end
+        end
+    endtask: device_response
+
+    task automatic host_access();
+        host_request();
+        device_response();
     endtask: host_access
 
     task automatic cycle_reset();
@@ -348,14 +577,35 @@ module doc5503 #(
         // Sets frequency, volume, waveform, control registers to default values
         // Ensures all oscillators start in non-halted state with zeroed accumulators
         // Called during CYCLE_RESET state only
-        fl_r[cycle_timer_r[4:0]] <= '0;
-        fh_r[cycle_timer_r[4:0]] <= '0;
-        vol_r[cycle_timer_r[4:0]] <= '0;
-        wds_r[cycle_timer_r[4:0]] <= '0;
-        wtp_r[cycle_timer_r[4:0]] <= '0;
-        rts_r[cycle_timer_r[4:0]] <= '0;
-        control_r[cycle_timer_r[4:0]] <= '0; // Ensure oscillators start not halted
-        acc_r[cycle_timer_r[4:0]] <= '0;
+
+         // Set target oscillators based on cycle time
+        target_osc_fl_r <= cycle_timer_r[4:0];
+        target_osc_fh_r <= cycle_timer_r[4:0];
+        target_osc_vol_r <= cycle_timer_r[4:0];
+        target_osc_wds_r <= cycle_timer_r[4:0];
+        target_osc_wtp_r <= cycle_timer_r[4:0];
+        target_osc_control_r <= cycle_timer_r[4:0];
+        target_osc_rts_r <= cycle_timer_r[4:0];
+        target_osc_acc_r <= cycle_timer_r[4:0];
+
+        target_fl_we_r <= 1'b1;
+        target_fh_we_r <= 1'b1;
+        target_vol_we_r <= 1'b1;
+        target_wds_we_r <= 1'b1;
+        target_wtp_we_r <= 1'b1;
+        target_control_we_r <= 1'b1;
+        target_rts_we_r <= 1'b1;
+        target_acc_we_r <= 1'b1;
+
+        target_fl_din_r <= '0;
+        target_fh_din_r <= '0;
+        target_vol_din_r <= '0;
+        target_wds_din_r <= '0;
+        target_wtp_din_r <= '0;
+        target_control_din_r <= '0; // Ensure oscillators start not halted
+        target_rts_din_r <= '0;
+        target_acc_din_r <= '0;
+
     endtask: cycle_reset
 
     task automatic cycle_refresh0();
@@ -364,15 +614,40 @@ module doc5503 #(
         // Updates mono_mix, left_mix, and right_mix final output values
         // Only updates final mix values when processing the last channel (15)
         // Use this cycle to copy the channel sums to the output registers
-        channel_r[cycle_timer_r[3:0]] <= next_channel_r[cycle_timer_r[3:0]];
-        
-        // Only copy the final values when processing the last channel (15)
-        if (cycle_timer_r[3:0] == 4'hF) begin
-            mono_mix_r <= next_mono_mix_r;
-            left_mix_r <= next_left_mix_r;
-            right_mix_r <= next_right_mix_r;
-            // Debug: Print the final mix values
+
+        if (cycle_timer_r < 'd16) begin
+            if (cycle_start_w) begin
+                device_response();
+            end
+    
+            channel_r[cycle_timer_r[3:0]] <= {
+                // Sign bit
+                next_channel_r[cycle_timer_r[3:0]][MIXER_SUM_RESOLUTION-1],
+                // Magnitude bits - using parameterized window 
+                next_channel_r[cycle_timer_r[3:0]][MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
+            };
+            
+            // Only copy the final values when processing the last channel (15)
+            if (cycle_timer_r[3:0] == 4'hF) begin
+                mono_mix_r <= {
+                    next_mono_mix_r[MIXER_SUM_RESOLUTION-1],
+                    next_mono_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
+                };
+                left_mix_r <= {
+                    next_left_mix_r[MIXER_SUM_RESOLUTION-1],
+                    next_left_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
+                };
+                right_mix_r <= {
+                    next_right_mix_r[MIXER_SUM_RESOLUTION-1],
+                    next_right_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
+                };
+                // Debug: Print the final mix values
+            end
+        end else begin
+            // use remaining time to process host access
+            host_access();
         end
+
     endtask: cycle_refresh0
 
     task automatic cycle_refresh1();
@@ -381,19 +656,33 @@ module doc5503 #(
         // Clears mono_mix, left_mix, and right_mix accumulators when processing last channel
         // Prepares all mixing registers for the next set of oscillators
         // Use this cycle to zero the channel sums for the next cycle
-        next_channel_r[cycle_timer_r[3:0]] <= '0;
-        
-        // Only reset the mix values when processing the last channel (15)
-        if (cycle_timer_r[3:0] == 4'hF) begin
-            next_mono_mix_r <= '0;
-            next_left_mix_r <= '0;
-            next_right_mix_r <= '0;
+
+        if (cycle_timer_r < 'd16) begin
+            if (cycle_start_w) begin
+                device_response();
+            end
+
+            next_channel_r[cycle_timer_r[3:0]] <= '0;
+            
+            // Only reset the mix values when processing the last channel (15)
+            if (cycle_timer_r[3:0] == 4'hF) begin
+                next_mono_mix_r <= '0;
+                next_left_mix_r <= '0;
+                next_right_mix_r <= '0;
         end
+        end else begin
+            // use remaining time to process host access
+            host_access();
+        end
+
     endtask: cycle_refresh1
 
     task automatic cycle_osc();
         case (osc_state_r)
             OSC_IDLE: osc_idle();
+            OSC_LOAD_REGISTERS: osc_load_registers();
+            OSC_LOAD_PARTNER_CONTROL: osc_load_partner_control();
+            OSC_LOAD_NEXT_CONTROL: osc_load_next_control();
             OSC_REQUEST_DATA: osc_request_data();
             OSC_HANDLE_DATA: osc_handle_data();
             OSC_OUT: osc_out();
@@ -413,25 +702,50 @@ module doc5503 #(
         // Resets working registers and clears halt_zero flag
         // Transitions to OSC_REQUEST_DATA state to begin oscillator processing
         if (cycle_start_w) begin
+            device_response();
 
-            // Load all current oscillator registers
-            curr_fl_r <= fl_r[curr_osc_r];                  // Frequency low
-            curr_fh_r <= fh_r[curr_osc_r];                  // Frequency high
-            curr_vol_r <= vol_r[curr_osc_r];                // Volume
-            curr_wds_r <= wds_r[curr_osc_r];                // Waveform data sample
-            curr_wtp_r <= wtp_r[curr_osc_r];                // Waveform table pointer
-            curr_control_r <= control_r[curr_osc_r];        // Control
-            curr_rts_r <= rts_r[curr_osc_r];                // Resolution/table size
-            curr_acc_r <= acc_r[curr_osc_r];                // Accumulator
-            
             // Init other working values
             curr_wave_addr_r <= '0;
             curr_output_r <= '0;
             halt_zero_r <= 1'b0;
 
-            osc_state_r <= OSC_REQUEST_DATA;
-        end
+            osc_state_r <= OSC_LOAD_REGISTERS;
+        end else begin
+             // use remaining time to process host access
+            host_access();
+       end
+
     endtask : osc_idle
+
+    task automatic osc_load_registers();
+        // Load all current oscillator registers from register file
+        // Resets working registers and clears halt_zero flag
+        // Transitions to OSC_REQUEST_DATA state to begin oscillator processing
+        curr_fl_r <= target_fl_dout_w;                  // Frequency low
+        curr_fh_r <= target_fh_dout_w;                  // Frequency high
+        curr_vol_r <= target_vol_dout_w;                // Volume
+        curr_wds_r <= target_wds_dout_w;                // Waveform data sample
+        curr_wtp_r <= target_wtp_dout_w;                // Waveform table pointer
+        curr_control_r <= target_control_dout_w;        // Control
+        curr_rts_r <= target_rts_dout_w;                // Resolution/table size
+        curr_acc_r <= target_acc_dout_w;                // Accumulator
+
+        target_osc_control_r <= partner_osc_w;
+
+        osc_state_r <= OSC_LOAD_PARTNER_CONTROL;             // Request data from memory
+    endtask: osc_load_registers
+
+    task automatic osc_load_partner_control();
+            partner_control_r <= target_control_dout_w;
+            target_osc_control_r <= curr_osc_r + 1'b1;
+            osc_state_r <= OSC_LOAD_NEXT_CONTROL;
+    endtask: osc_load_partner_control
+
+    task automatic osc_load_next_control();
+        next_control_r <= target_control_dout_w;
+        target_osc_control_r <= curr_osc_r - 1'b1;
+        osc_state_r <= OSC_REQUEST_DATA;
+    endtask: osc_load_next_control
 
     task automatic osc_request_data();
         // Generate wave table address and request data if oscillator not halted
@@ -462,14 +776,15 @@ module doc5503 #(
         end else begin
             // When halted but in one-shot mode, clear accumulator
             if (curr_mode_w[0]) begin
-                acc_r[curr_osc_r] <= '0;
+                target_acc_we_r <= 1'b1;
+                target_acc_din_r <= '0;
             end
             // When halted, skip OUT and return to IDLE state
             osc_state_r <= OSC_IDLE;
         end                                
 
-        // load partner control register (needed later)
-        partner_control_r <= control_r[partner_osc_w];
+        // load prev control register (needed later)
+        prev_control_r <= target_control_dout_w;
     endtask: osc_request_data
 
     task automatic osc_handle_data();
@@ -484,7 +799,8 @@ module doc5503 #(
 
         if (loaded_wds_pending_r) begin
             loaded_wds_pending_r <= 1'b0;
-            wds_r[curr_osc_r] <= loaded_wds_r;;
+            target_wds_we_r <= 1'b1;
+            target_wds_din_r <= loaded_wds_r;
             curr_wds_r <= loaded_wds_r;
             if (loaded_wds_r == 8'h00) begin
                 halt_zero_r <= 1'b1;                                    // Set halt zero flag
@@ -511,8 +827,10 @@ module doc5503 #(
         // State transitions: OSC_MIX for normal operation, OSC_ACC for SYNC_AM odd oscillators
 
         if ((curr_mode_w == MODE_SYNC_AM) & curr_osc_odd_w) begin           // Sync AM Mode, odd oscillator outputs nothing
-            if ((curr_osc_r < 30) & !control_r[curr_osc_r + 1'b1][0]) begin // if next oscillator is not halted
-                vol_r[curr_osc_r + 1'b1] <= curr_wds_r;                     // it's volume is set to current oscillator's waveform data
+            if ((curr_osc_r < 30) & !next_halt_w) begin                     // if next oscillator is not halted
+                target_osc_vol_r <= curr_osc_r + 1'b1;                      // set target oscillator to next one
+                target_vol_we_r <= 1'b1;                                    // write to volume register
+                target_vol_din_r <= curr_wds_r;                             // set volume to waveform data
             end
             // Skip mixing for odd oscillators in SYNC_AM mode
             osc_state_r <= OSC_ACC;
@@ -560,7 +878,8 @@ module doc5503 #(
         automatic logic [23:0] curr_acc_mask_w = {16'((1 << (5'd9 + curr_res_w)) - 1), 8'hFF};
         automatic int high_bit_w = 17 + curr_res_w;
         automatic logic overflow = temp_acc[high_bit_w];
-        acc_r[curr_osc_r] <= temp_acc[23:0] & curr_acc_mask_w;      // wrap around address
+        target_acc_we_r <= 1'b1;
+        target_acc_din_r <= temp_acc[23:0] & curr_acc_mask_w;      // wrap around address
 
         osc_state_r <= OSC_IDLE;
         if (overflow) begin
@@ -579,8 +898,10 @@ module doc5503 #(
             if (curr_osc_even_w) begin
                 // we're even, so if the odd oscillator 1 below us is playing,
                 // restart it.
-                if (!control_r[curr_osc_r - 1'b1][0]) begin
-                    acc_r[curr_osc_r - 1] <= '0;                           // reset previous accumulator
+                if (!prev_halt_w) begin
+                    target_osc_acc_r <= curr_osc_r - 1'b1;                // set target oscillator to previous one
+                    target_acc_we_r <= 1'b1;                              // write to accumulator register
+                    target_acc_din_r <= '0;                               // set accumulator to zero
                 end
             end
         end
@@ -595,7 +916,8 @@ module doc5503 #(
         // even oscillators with odd partners in SWAP mode, OSC_IDLE otherwise
         // MODE_ONE_SHOT, MODE_SWAP, or zero byte
         if (curr_mode_w[0] || halt_zero_r) begin
-            control_r[curr_osc_r] <= curr_control_r | 1'b1;                 // halt current oscillator
+            target_control_we_r <= 1'b1;                                   // write to control register
+            target_control_din_r <= curr_control_r | 1'b1;                 // set halt bit
         end
 
         osc_state_r <= OSC_IDLE;
@@ -618,8 +940,14 @@ module doc5503 #(
         // Resets partner's accumulator to start from beginning of wave table
         // Used specifically for SWAP mode to implement alternate triggering behavior
         // Always transitions back to OSC_IDLE after starting partner
-        control_r[partner_osc_w] <= partner_control_r & 8'b11111110;        // clear the halt bit
-        acc_r[partner_osc_w] <= '0;                                         // reset partner accumulator
+
+        target_osc_control_r <= partner_osc_w;                          // set target oscillator to partner
+        target_control_we_r <= 1'b1;                                    // write to control register
+        target_control_din_r <= partner_control_r & 8'b11111110;        // set halt bit to zero
+
+        target_osc_acc_r <= partner_osc_w;                              // set target oscillator to partner
+        target_acc_we_r <= 1'b1;                                        // write to accumulator register
+        target_acc_din_r <= '0;                                         // set accumulator to zero
 
         // After halting partner, skip the current output
         osc_state_r <= OSC_IDLE;
@@ -631,26 +959,36 @@ module doc5503 #(
         // Copies the partner's control value (with halt bit cleared) to the current oscillator
         // This behavior was verified on actual Apple IIgs hardware
         // Transitions back to OSC_IDLE after retriggering
-        control_r[curr_osc_r] <= partner_control_r & 8'b11111110;        // clear the halt bit    
+
+        target_control_we_r <= 1'b1;                                    // write to control register
+        target_control_din_r <= curr_control_r & 8'b11111110;        // set halt bit to zero    
 
         osc_state_r <= OSC_IDLE;
     endtask: osc_retrigger
 
 endmodule
 
-module osc_reg_ram (
+module osc_reg_ram #(
+    parameter int DATA_WIDTH = 8
+) (
     input clk_i,
+    input [4:0] osc_i,
     input we_i,
-    input [7:0] osc_i,
-    input [7:0] data_i,
-    output reg [7:0] data_o
+    input [DATA_WIDTH-1:0] data_i,
+    output [DATA_WIDTH-1:0] data_o
 );
-    reg [7:0] osc_reg_r[32]; 
+    // This should infer as a RAM16 single port SSRAM during synthesis
+    // that is implemented in LUTs via Configurable Function Units,
+    // allowing for synchronous write and asynchronous read
+    // Other FPGA families may use different synthesis directives
+    reg [DATA_WIDTH-1:0] osc_reg_r[32] /*synthesis syn_ramstyle="distributed_ram"*/; 
     always_ff @(posedge clk_i) begin
         if (we_i) begin
             osc_reg_r[osc_i] <= data_i;
         end
-        data_o <= osc_reg_r[osc_i];
     end
+
+    assign data_o = osc_reg_r[osc_i];
+
 endmodule
 
