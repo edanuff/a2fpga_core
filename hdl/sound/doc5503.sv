@@ -736,9 +736,9 @@ module doc5503 #(
     endtask: osc_load_registers
 
     task automatic osc_load_partner_control();
-            partner_control_r <= target_control_dout_w;
-            target_osc_control_r <= curr_osc_r + 1'b1;
-            osc_state_r <= OSC_LOAD_NEXT_CONTROL;
+        partner_control_r <= target_control_dout_w;
+        target_osc_control_r <= curr_osc_r + 1'b1;
+        osc_state_r <= OSC_LOAD_NEXT_CONTROL;
     endtask: osc_load_partner_control
 
     task automatic osc_load_next_control();
