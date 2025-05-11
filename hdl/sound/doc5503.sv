@@ -363,9 +363,10 @@ module doc5503 #(
         end
     end
 
-   localparam int OSC_STATE_COUNT = 13;
+   localparam int OSC_STATE_COUNT = 14;
     typedef enum logic [$clog2(OSC_STATE_COUNT)-1:0] {
         OSC_IDLE,
+        OSC_START,
         OSC_LOAD_REGISTERS,
         OSC_LOAD_PARTNER_CONTROL,
         OSC_LOAD_NEXT_CONTROL,
@@ -459,7 +460,9 @@ module doc5503 #(
         // Handle host access to the registers
         if (host_request_pending_r) begin
             host_request_pending_r <= 1'b0;
+
             if (!host_we_n_r) begin
+                data_o <= host_data_r;
                 if (host_addr_r == 8'hE0) begin
                     // Oscillator Interrupt Register
                     osc_int_r <= host_data_r; 
@@ -470,44 +473,42 @@ module doc5503 #(
                     // Oscillator Registers
                     case (host_addr_r[7:5])
                         3'b000: begin                               // $00-1F
-                            target_osc_fl_r <= host_addr_r[4:0];
                             target_fl_din_r <= host_data_r;
                             target_fl_we_r <= 1'b1;
                         end
                         3'b001: begin                               // $20-3F
-                            target_osc_fh_r <= host_addr_r[4:0];
                             target_fh_din_r <= host_data_r;
                             target_fh_we_r <= 1'b1;
                         end
                         3'b010: begin                               // $40-5F
-                            target_osc_vol_r <= host_addr_r[4:0];
                             target_vol_din_r <= host_data_r;
                             target_vol_we_r <= 1'b1;
                         end
                         3'b011: begin                               // $60-7F
-                            target_osc_wds_r <= host_addr_r[4:0];
                             target_wds_din_r <= host_data_r;
                             target_wds_we_r <= 1'b1;
                         end
                         3'b100: begin                               // $80-9F
-                            target_osc_wtp_r <= host_addr_r[4:0];
                             target_wtp_din_r <= host_data_r;
                             target_wtp_we_r <= 1'b1;
                         end
                         3'b101: begin                               // $A0-BF
-                            target_osc_control_r <= host_addr_r[4:0];
                             target_control_din_r <= host_data_r;
                             target_control_we_r <= 1'b1;
                         end
                         3'b110: begin                               // $C0-DF
-                            target_osc_rts_r <= host_addr_r[4:0];
                             target_rts_din_r <= host_data_r;
                             target_rts_we_r <= 1'b1;
                         end
                     endcase
                 end
             end else begin
+                // Host read access to oscillator registers
+                // Set the device response pending flag to indicate a read request
+                // and set up the address for the read operation to be ready
+                // for the next cycle
                 device_response_pending_r <= 1'b1;
+
                 if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
                     case (host_addr_r[7:5])
                         3'b000: target_osc_fl_r <= host_addr_r[4:0];
@@ -525,12 +526,13 @@ module doc5503 #(
     endtask: host_request
 
     task automatic device_response();
-        device_response_pending_r <= 1'b0;
         if (device_response_pending_r) begin
+            device_response_pending_r <= 1'b0;
             // Handle device response to host request
+
             if (host_we_n_r) begin
-                // Read from oscillator registers
                 if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
+                    // Read from oscillator registers
                     case (host_addr_r[7:5])
                         3'b000: begin                               // $00-1F
                             data_o <= target_fl_dout_w;
@@ -678,8 +680,12 @@ module doc5503 #(
     endtask: cycle_refresh1
 
     task automatic cycle_osc();
-        case (osc_state_r)
+        // Force oscillator state machine to idle state if at the start of a cycle
+        automatic osc_state_e osc_state_w;
+        osc_state_w = cycle_start_w ? OSC_IDLE : osc_state_r;
+        case (osc_state_w)
             OSC_IDLE: osc_idle();
+            OSC_START: osc_start();
             OSC_LOAD_REGISTERS: osc_load_registers();
             OSC_LOAD_PARTNER_CONTROL: osc_load_partner_control();
             OSC_LOAD_NEXT_CONTROL: osc_load_next_control();
@@ -697,25 +703,31 @@ module doc5503 #(
     endtask: cycle_osc
     
     task automatic osc_idle();
-        // Initializes oscillator cycle when cycle_start_w triggers
-        // Loads all current oscillator registers from register file
-        // Resets working registers and clears halt_zero flag
-        // Transitions to OSC_REQUEST_DATA state to begin oscillator processing
+        // Idle state for oscillator state machine
+        // Waits for the start of a new cycle to begin processing
+        // Handles host access to oscillator registers
+        // Sets the oscillator state to OSC_START when a new cycle begins
+        // Needs: cycle_start_w (start of new cycle)
+
+        osc_state_r <= OSC_IDLE;
+        host_access();
+
         if (cycle_start_w) begin
-            device_response();
-
-            // Init other working values
-            curr_wave_addr_r <= '0;
-            curr_output_r <= '0;
-            halt_zero_r <= 1'b0;
-
-            osc_state_r <= OSC_LOAD_REGISTERS;
-        end else begin
-             // use remaining time to process host access
-            host_access();
-       end
+            osc_state_r <= OSC_START;
+        end
 
     endtask : osc_idle
+
+    task automatic osc_start();
+        device_response();
+
+        // Init other working values
+        curr_wave_addr_r <= '0;
+        curr_output_r <= '0;
+        halt_zero_r <= 1'b0;
+
+        osc_state_r <= OSC_LOAD_REGISTERS;
+    endtask: osc_start
 
     task automatic osc_load_registers();
         // Load all current oscillator registers from register file

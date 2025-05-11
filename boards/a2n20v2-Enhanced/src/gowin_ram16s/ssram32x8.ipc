@@ -1,0 +1,12 @@
+[General]
+file=ssram32x8
+ipc_version=4
+module=ssram32x8
+target_device=gw2ar18c-000
+type=ssram_ram16s
+version=1.0
+
+[Config]
+DEPTH=32
+LANG=0
+WIDTH=8

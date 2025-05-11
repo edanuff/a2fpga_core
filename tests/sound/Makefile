@@ -49,7 +49,7 @@ GLU_HDLFILES = $(HDLDIR)/sound_glu.sv $(HDLDIR)/doc5503.sv $(SUPPORTDIR)/srff.v
 # Targets
 all: doc_tests glu_tests comparison_tests
 
-doc_tests: $(OBJDIR)/Vdoc5503_harness $(BUILDDIR)/doc_audio_test $(BUILDDIR)/doc_wavetable_test $(BUILDDIR)/generate_test_wav $(BUILDDIR)/doc5503_debug_test $(BUILDDIR)/doc5503_unhalt_test $(BUILDDIR)/doc5503_oscillator_unhalt_test $(BUILDDIR)/doc5503_basic_wave_test $(BUILDDIR)/doc5503_core_state_dump $(BUILDDIR)/doc5503_mode_test $(BUILDDIR)/doc5503_interrupt_test $(BUILDDIR)/doc5503_wavetable_resolution_test $(BUILDDIR)/doc5503_volume_test $(BUILDDIR)/doc5503_volume_direct_test $(BUILDDIR)/doc5503_volume_wave_test $(BUILDDIR)/doc5503_volume_wave_test_workaround $(BUILDDIR)/doc5503_tb_fixed $(BUILDDIR)/doc5503_compressor_test $(BUILDDIR)/doc5503_compressor_fixed_test $(BUILDDIR)/doc5503_wave_polarity_fix $(BUILDDIR)/doc5503_data_dump_test $(BUILDDIR)/doc5503_debug_sine_test
+doc_tests: $(OBJDIR)/Vdoc5503_harness $(BUILDDIR)/doc_audio_test $(BUILDDIR)/doc_wavetable_test $(BUILDDIR)/generate_test_wav $(BUILDDIR)/doc5503_debug_test $(BUILDDIR)/doc5503_unhalt_test $(BUILDDIR)/doc5503_oscillator_unhalt_test $(BUILDDIR)/doc5503_basic_wave_test $(BUILDDIR)/doc5503_core_state_dump $(BUILDDIR)/doc5503_mode_test $(BUILDDIR)/doc5503_interrupt_test $(BUILDDIR)/doc5503_wavetable_resolution_test $(BUILDDIR)/doc5503_volume_test $(BUILDDIR)/doc5503_volume_direct_test $(BUILDDIR)/doc5503_volume_wave_test $(BUILDDIR)/doc5503_volume_wave_test_workaround $(BUILDDIR)/doc5503_tb_fixed $(BUILDDIR)/doc5503_compressor_test $(BUILDDIR)/doc5503_compressor_fixed_test $(BUILDDIR)/doc5503_wave_polarity_fix $(BUILDDIR)/doc5503_data_dump_test $(BUILDDIR)/doc5503_debug_sine_test $(BUILDDIR)/doc5503_audio_test $(BUILDDIR)/doc5503_reg_test
 
 glu_tests: $(OBJDIR_GLU)/Vglu_harness $(BUILDDIR)/glu_wav_test
 
@@ -118,6 +118,12 @@ $(BUILDDIR)/doc5503_data_dump_test: $(TESTCASESDIR)/doc5503_data_dump_test.cpp $
 	g++ $(CXXFLAGS) -o $@ $< $(OBJDIR)/Vdoc5503_harness__ALL.a $(OBJDIR)/verilated.o $(OBJDIR)/verilated_vcd_c.o $(OBJDIR)/verilated_threads.o -I$(OBJDIR) -I$(VERILATOR_INCLUDE) -lm -lpthread
 
 $(BUILDDIR)/doc5503_debug_sine_test: $(TESTCASESDIR)/doc5503_debug_sine_test.cpp $(OBJDIR)/Vdoc5503_harness__ALL.a
+	g++ $(CXXFLAGS) -o $@ $< $(OBJDIR)/Vdoc5503_harness__ALL.a $(OBJDIR)/verilated.o $(OBJDIR)/verilated_vcd_c.o $(OBJDIR)/verilated_threads.o -I$(OBJDIR) -I$(VERILATOR_INCLUDE) -lm -lpthread
+
+$(BUILDDIR)/doc5503_audio_test: $(DOC5503DIR)/doc5503_audio_test.cpp $(OBJDIR)/Vdoc5503_harness__ALL.a
+	g++ $(CXXFLAGS) -o $@ $< $(OBJDIR)/Vdoc5503_harness__ALL.a $(OBJDIR)/verilated.o $(OBJDIR)/verilated_vcd_c.o $(OBJDIR)/verilated_threads.o -I$(OBJDIR) -I$(VERILATOR_INCLUDE) -lm -lpthread
+
+$(BUILDDIR)/doc5503_reg_test: $(DOC5503DIR)/doc5503_reg_test.cpp $(OBJDIR)/Vdoc5503_harness__ALL.a
 	g++ $(CXXFLAGS) -o $@ $< $(OBJDIR)/Vdoc5503_harness__ALL.a $(OBJDIR)/verilated.o $(OBJDIR)/verilated_vcd_c.o $(OBJDIR)/verilated_threads.o -I$(OBJDIR) -I$(VERILATOR_INCLUDE) -lm -lpthread
 
 $(BUILDDIR)/generate_test_wav: $(TOOLSDIR)/generate_test_wav.cpp
@@ -197,7 +203,13 @@ run_data_dump_test: $(BUILDDIR)/doc5503_data_dump_test
 
 run_debug_sine_test: $(BUILDDIR)/doc5503_debug_sine_test
 	cd $(BUILDDIR) && ./doc5503_debug_sine_test
-	
+
+run_reg_test: $(BUILDDIR)/doc5503_reg_test
+	cd $(BUILDDIR) && ./doc5503_reg_test
+
+run_audio_test: $(BUILDDIR)/doc5503_audio_test
+	cd $(BUILDDIR) && ./doc5503_audio_test
+
 run_generate_test: $(BUILDDIR)/generate_test_wav
 	cd $(BUILDDIR) && ./generate_test_wav
 
@@ -257,4 +269,4 @@ clean_comparison:
 clean_utilities:
 	rm -f $(BUILDDIR)/analyze_distortion $(BUILDDIR)/detect_distortion $(BUILDDIR)/detect_major_dips $(BUILDDIR)/examine_wav $(BUILDDIR)/test_tone $(BUILDDIR)/visualize_waveform
 
-.PHONY: all doc_tests glu_tests comparison_tests utilities run_doc run_glu run_audio_test run_wavetable_test run_debug_test run_unhalt_test run_oscillator_unhalt_test run_basic_wave_test run_core_state_dump run_mode_test run_interrupt_test run_wavetable_resolution_test run_volume_test run_volume_direct_test run_volume_wave_test run_compressor_test run_compressor_fixed_test run_wave_polarity_fix run_data_dump_test run_debug_sine_test run_generate_test run_glu_wav_test run_comparison_test run_standalone_test clean clean_doc clean_glu clean_comparison clean_utilities
+.PHONY: all doc_tests glu_tests comparison_tests utilities run_doc run_glu run_audio_test run_wavetable_test run_debug_test run_unhalt_test run_oscillator_unhalt_test run_basic_wave_test run_core_state_dump run_mode_test run_interrupt_test run_wavetable_resolution_test run_volume_test run_volume_direct_test run_volume_wave_test run_compressor_test run_compressor_fixed_test run_wave_polarity_fix run_data_dump_test run_debug_sine_test run_audio_test run_generate_test run_glu_wav_test run_comparison_test run_standalone_test clean clean_doc clean_glu clean_comparison clean_utilities

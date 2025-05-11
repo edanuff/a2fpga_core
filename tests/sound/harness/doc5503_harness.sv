@@ -6,7 +6,7 @@ module doc5503_harness(
     input         reset_n_i,
     input         clk_en_i,
 
-    output        irq_n_o,
+    output logic  irq_n_o, // Placeholder - not connected in doc5503 module
 
     input         cs_n_i,
     input         we_n_i,
@@ -32,8 +32,8 @@ module doc5503_harness(
     output signed [15:0] dbg_output_o,
     
     // Clock synchronization signals
-    output        dbg_E_o,            // E signal for synchronization
-    output [2:0]  dbg_clk_count_o,    // Full clock counter for debugging
+    output [2:0]  dbg_E_o,            // Debug clock count signal
+    output logic [2:0]  dbg_clk_count_o,    // Debug clock counter (not connected to doc5503)
     
     // Module ready signal
     output        ready_o             // Indicates when the module is ready
@@ -50,9 +50,9 @@ module doc5503_harness(
     logic [7:0] dbg_control;
     logic [23:0] dbg_acc;
     
-    // Connect wave signals directly to doc5503 module ports
-    assign wave_address_o = doc5503_inst.wave_address_o;
-    assign wave_rd_o = doc5503_inst.wave_rd_o;
+    // REMOVE THESE DIRECT ASSIGNMENTS - They don't work because the ports are left unconnected below
+    // assign wave_address_o = doc5503_inst.wave_address_o;
+    // assign wave_rd_o = doc5503_inst.wave_rd_o;
     
     // Expose internal signals to make them directly accessible to the testbench
     // These assignments will be available to debug testbenches to examine internal state
@@ -66,7 +66,7 @@ module doc5503_harness(
         .reset_n_i(reset_n_i),
         .clk_en_i(clk_en_i),
 
-        .irq_n_o(irq_n_o),
+        // .irq_n_o(irq_n_o), // Not connected in doc5503 module
 
         .cs_n_i(cs_n_i),
         .we_n_i(we_n_i),
@@ -75,8 +75,8 @@ module doc5503_harness(
         .data_i(data_i),
         .data_o(data_o),
 
-        .wave_address_o(), // Connected directly above
-        .wave_rd_o(),      // Connected directly above
+        .wave_address_o(wave_address_o), // Connect directly to harness outputs
+        .wave_rd_o(wave_rd_o),      // Connect directly to harness outputs
         .wave_data_ready_i(wave_data_ready_i),
         .wave_data_i(wave_data_i),
 
@@ -87,11 +87,13 @@ module doc5503_harness(
         .channel_o(),  // Not connected for this test
         
         // Connect debug signals
-        .E_o(dbg_E_o),
-        .clk_count_o(dbg_clk_count_o),
-        
+        // .clk_count_o(dbg_clk_count_o), // Not connected in doc5503 module
+
         // Connect ready signal
-        .ready_o(ready_o)
+        .ready_o(ready_o),
+
+        // Connect osc_en_o for debug
+        .osc_en_o()
     );
     
     // Expose debug signals to external world

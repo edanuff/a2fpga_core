@@ -8,6 +8,9 @@
 #include <verilated_vcd_c.h>
 #include "Vdoc5503_harness.h"
 
+// Time stamp function required by Verilator
+double sc_time_stamp() { return 0; }
+
 // Maximum simulation time
 #define MAX_SIM_TIME 100000
 
@@ -299,32 +302,34 @@ void test_oscillator_enable_register(Vdoc5503_harness* doc_harness, VerilatedVcd
 // Helper function to write a register value
 void write_register(Vdoc5503_harness* doc_harness, uint8_t addr, uint8_t data, int* sim_time, bool clk, VerilatedVcdC* tfp) {
     // Write register on next rising edge
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 4; i++) {  // Increased to 4 clock edges for better stability
         clk = !clk;
         doc_harness->clk_i = clk;
-        
+
         if (clk) {
             doc_harness->cs_n_i = 0;
             doc_harness->we_n_i = 0;
             doc_harness->addr_i = addr;
             doc_harness->data_i = data;
+            doc_harness->clk_en_i = ((*sim_time % 8) == 0);  // Maintain clk_en_i generation
         }
-        
+
         doc_harness->eval();
         if (dump_vcd) tfp->dump(*sim_time);
         (*sim_time)++;
     }
-    
+
     // Reset control signals
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 4; i++) {  // Increased to 4 clock edges for better stability
         clk = !clk;
         doc_harness->clk_i = clk;
-        
+
         if (clk) {
             doc_harness->cs_n_i = 1;
             doc_harness->we_n_i = 1;
+            doc_harness->clk_en_i = ((*sim_time % 8) == 0);  // Maintain clk_en_i generation
         }
-        
+
         doc_harness->eval();
         if (dump_vcd) tfp->dump(*sim_time);
         (*sim_time)++;
@@ -335,23 +340,45 @@ void write_register(Vdoc5503_harness* doc_harness, uint8_t addr, uint8_t data, i
 void write_and_verify_register(Vdoc5503_harness* doc_harness, uint8_t addr, uint8_t data, int* sim_time, bool clk, VerilatedVcdC* tfp) {
     // Write the register
     write_register(doc_harness, addr, data, sim_time, clk, tfp);
-    
-    // Read back and verify
-    for (int i = 0; i < 2; i++) {
+
+    // Wait for at least 4 clk_en_i pulses (32 clock cycles) to ensure proper synchronization
+    int clk_en_count = 0;
+    while (clk_en_count < 4) {
         clk = !clk;
         doc_harness->clk_i = clk;
-        
+
         if (clk) {
-            doc_harness->cs_n_i = 0;
-            doc_harness->we_n_i = 1;
-            doc_harness->addr_i = addr;
+            bool clk_en = ((*sim_time % 8) == 0);
+            doc_harness->clk_en_i = clk_en;
+            if (clk_en) clk_en_count++;
+
+            if (verbosity >= DEBUG && clk_en) {
+                printf("DEBUG: Waiting for register to settle, clk_en_count=%d\n", clk_en_count);
+            }
         }
-        
+
         doc_harness->eval();
         if (dump_vcd) tfp->dump(*sim_time);
         (*sim_time)++;
     }
-    
+
+    // Read back and verify
+    for (int i = 0; i < 2; i++) {
+        clk = !clk;
+        doc_harness->clk_i = clk;
+
+        if (clk) {
+            doc_harness->cs_n_i = 0;
+            doc_harness->we_n_i = 1;
+            doc_harness->addr_i = addr;
+            doc_harness->clk_en_i = ((*sim_time % 8) == 0);
+        }
+
+        doc_harness->eval();
+        if (dump_vcd) tfp->dump(*sim_time);
+        (*sim_time)++;
+    }
+
     // Check the value
     if (doc_harness->data_o != data) {
         printf("ERROR: Register verification failed! Address: 0x%02X, Expected: 0x%02X, Got: 0x%02X\n",
@@ -360,17 +387,18 @@ void write_and_verify_register(Vdoc5503_harness* doc_harness, uint8_t addr, uint
         printf("DEBUG: Register verification passed! Address: 0x%02X, Value: 0x%02X\n",
                addr, data);
     }
-    
+
     // Reset control signals
     for (int i = 0; i < 2; i++) {
         clk = !clk;
         doc_harness->clk_i = clk;
-        
+
         if (clk) {
             doc_harness->cs_n_i = 1;
             doc_harness->we_n_i = 1;
+            doc_harness->clk_en_i = ((*sim_time % 8) == 0);
         }
-        
+
         doc_harness->eval();
         if (dump_vcd) tfp->dump(*sim_time);
         (*sim_time)++;
