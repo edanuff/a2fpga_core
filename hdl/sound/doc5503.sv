@@ -53,13 +53,6 @@
 //
 
 module doc5503 #(
-    parameter int OUTPUT_CHANNEL_MIX = 1,
-    parameter int NUM_CHANNELS = 16,
-    parameter int OUTPUT_MONO_MIX = 1,
-    parameter int OUTPUT_STEREO_MIX = 1,
-    parameter int OUTPUT_OSC_DIRECT = 0, // Output raw oscillator data
-    parameter int DIRECT_OUTPUT_OSC_NUM = 0, // # of Oscillator to direct to audio output
-    parameter int CHANNEL_MAX = OUTPUT_CHANNEL_MIX && (NUM_CHANNELS > 1) ? NUM_CHANNELS - 1 : 1
 ) (
     input clk_i,
     input reset_n_i,
@@ -83,11 +76,23 @@ module doc5503 #(
     output signed [15:0] left_mix_o,
     output signed [15:0] right_mix_o,
 
-    output signed [15:0] channel_o[CHANNEL_MAX:0],
+    output signed [15:0] channel_o[16],
     
     output [7:0] osc_en_o   // Debug output for oscillator enable register
 
 );
+
+    reg signed [15:0] mono_mix_r;
+    assign mono_mix_o = mono_mix_r;
+
+    reg signed [15:0] left_mix_r;
+    assign left_mix_o = left_mix_r;
+
+    reg signed [15:0] right_mix_r;
+    assign right_mix_o = right_mix_r;
+
+    reg signed [15:0] channel_r[16]; 
+    assign channel_o = channel_r;
 
     reg [7:0] osc_int_r;            // Oscillator Interrupt Register
     reg [7:0] osc_en_r;             // Oscillator Enable Register
@@ -132,6 +137,7 @@ module doc5503 #(
 
     wire halt_w = control_w[0];
     wire [1:0] mode_w = control_w[2:1];
+    wire [3:0] ca_w = control_w[7:4];
 
     wire partner_halt_w = partner_control_w[0];
     wire [1:0] partner_mode_w = partner_control_w[2:1];
@@ -152,10 +158,6 @@ module doc5503 #(
     wire [4:0] osc_en_num_w = osc_en_r[5:1];
     //wire [4:0] cycle_max_w = osc_en_num_w == 0 ? 0 : 5'(osc_en_num_w - 1'b1);
     wire [4:0] cycle_max_w = osc_en_r[5:1];
-
-    reg [5:0] mixer_cycle_r;
-    wire [7:0] mixer_control_w;
-    wire signed [15:0] mixer_output_w;
 
     reg [4:0] last_osc_r;
 
@@ -533,8 +535,7 @@ module doc5503 #(
         .PRIORITY_WRITE_PORTS(4),
         .PRIORITY_READ_PORTS(3),
         .FIRST_PRIORITY_WRITE_PORT_LEVEL_TRIGGERED(1),
-        .LAST_PRIORITY_WRITE_PORT_INHIBITABLE(1),
-        .PORT_B_ENABLE(1)
+        .LAST_PRIORITY_WRITE_PORT_INHIBITABLE(1)
     ) osc_control_r_inst (
         .clk_i(clk_i),
         .inhibit_i(inhibit_host_writes_r),
@@ -573,8 +574,8 @@ module doc5503 #(
         }),
         .addr_a_i(cycle_r),
         .data_a_o(control_w),
-        .addr_b_i(5'(mixer_cycle_r + 1'b1)),
-        .data_b_o(mixer_control_w)
+        .addr_b_i('0),
+        .data_b_o()
     );
 
     // Oscillator Resolution Table Size
@@ -690,90 +691,6 @@ module doc5503 #(
         .data_b_o()
     );
 
-    // Oscillator Output
-
-    // We are handling the multiplier stage for each oscillator output
-    // in a pipelined fashion, so the output is not available until the next
-    // cycle. The output is stored in a register and then written to the
-    // mixer output RAM in the next cycle. The output is scaled by the
-    // volume register and the waveform data. The waveform data is converted
-    // to signed by XORing with 0x80, and the volume is converted to signed
-
-    reg signed [15:0] output_r;                                         // Current scaled oscillator output        
-
-    // DSP Multiplier optimized for MULT9x9 hardware inference
-    always @(posedge clk_i) begin
-        automatic logic signed [7:0] data_w = wds_w ^ 8'h80;       // convert waveform data to signed
-        automatic logic signed [8:0] vol_s = {1'b0, vol_w[7:0]};        // convert volume to signed
-        output_r <= data_w * vol_s;                                // output is waveform data * volume
-    end
-
-    // Scaled oscillator output register
-    // This register holds the scaled output of the oscillator
-    // The main FSM will signal when to update the register with the
-    // current output value from the DSP multiplier
-    // The register is continuously read by the mixer FSM
-    // based on the value of the mixer_cycle_r register.
-    // To account for the pipelining, the output register uses 
-    // mixer_cycle_r + 1'b1 as the address for the mixer output RAM.
-    // This ensures that the output is available at the correct cycle
-    // for the mixer to read.  
-
-    reg output_reset_req;
-    reg output_update_req;
-
-    doc5503_register_ram #(
-        .PRIORITY_WRITE_PORTS(3),
-        .PRIORITY_READ_PORTS(0),
-        .FIRST_PRIORITY_WRITE_PORT_LEVEL_TRIGGERED(1),
-        .PORT_A_ENABLE(0),
-        .PORT_B_ENABLE(1),
-        .DATA_WIDTH(16)
-    ) osc_output_r_inst (
-        .clk_i(clk_i),
-        .inhibit_i(inhibit_host_writes_r),
-        .priority_write_req_i('{
-            !ready_r,
-            output_reset_req,
-            output_update_req
-        }),
-        .priority_write_addr_i('{
-            init_cycle_r,
-            cycle_r,
-            cycle_r
-        }),
-        .priority_write_data_i('{
-            16'h0000,
-            16'h0000,
-            output_r
-        }),
-        .priority_read_req_i('{0}),
-        .priority_read_addr_i('{0}),
-        .priority_read_data_o(),
-        .addr_a_i('0),
-        .data_a_o(),
-        .addr_b_i(5'(mixer_cycle_r + 1'b1)),
-        .data_b_o(mixer_output_w)
-    );
-
-    reg [4:0] current_active_osc_r; // Current active oscillators
-    reg [4:0] active_osc_count_r; // Count of active oscillators
-    always @(posedge clk_i) begin
-        if (!reset_n_i) begin
-            current_active_osc_r <= 5'd0;
-            active_osc_count_r <= 5'd0;
-        end else begin
-            if (output_update_req) current_active_osc_r <= current_active_osc_r + 1'b1;
-            if (ready_r & clk_en_i) begin
-                if ((osc_state_r ==  OSC_START) && (cycle_r == 5'd0)) begin
-                    // Reset active oscillators at the start of each cycle
-                    active_osc_count_r <= current_active_osc_r;
-                    current_active_osc_r <= 5'd0;
-                end
-            end
-        end
-    end
-
     // Host Interface
 
     // Controls setting of registers $E0 and $E1
@@ -841,9 +758,6 @@ module doc5503 #(
             current_osc_halt_req_r <= 0;
             partner_unhalt_req_r <= 0;
 
-            output_reset_req <= 0;
-            output_update_req <= 0;
-
             inhibit_host_writes_r <= 0;
 
         end else begin
@@ -862,8 +776,6 @@ module doc5503 #(
             current_osc_halt_req_r <= 0;
             partner_unhalt_req_r <= 0;
 
-            output_reset_req <= 0;
-            output_update_req <= 0;
             
             if (clk_en_i) begin
                 if (ready_r) begin
@@ -888,7 +800,7 @@ module doc5503 #(
                                 if (mode_w[0]) begin
                                     current_acc_reset_req_r <= 1;
                                 end
-                                output_reset_req <= 1;
+                                //output_reset_req <= 1;
                                 osc_state_r <= OSC_IDLE;
                             end
                         end
@@ -972,15 +884,21 @@ module doc5503 #(
                             // Cycle Step 4
 
                             if ((mode_w == MODE_SYNC_AM) & odd_osc_w) begin                     // Sync AM Mode, odd oscillator outputs nothing
-                                output_reset_req <= 1;                                          // silence output
+                                //output_reset_req <= 1;                                          // silence output
                                 if ((cycle_r < 31) & !next_halt_w) begin                        // if next oscillator is not halted
                                     next_am_req_r <= 1;                                         // it's volume is set to current oscillator's waveform data
                                 end
-                            end else if ((mode_w == MODE_SYNC_AM) & even_osc_w) begin           // Even oscillator in sync/AM pair
-                                // In AM mode, even oscillator uses volume from odd
-                                output_update_req <= 1;                                         // Output is processed normally
                             end else begin
-                                output_update_req <= 1;                                         // output is waveform data * volume
+                                automatic logic signed [7:0] data_w = wds_w ^ 8'h80;            // convert waveform data to signed
+                                automatic logic signed [8:0] vol_s = {1'b0, vol_w[7:0]};        // convert volume to signed
+                                automatic logic signed [16:0] output_w = data_w * vol_s;        // output is waveform data * volume
+
+                                if (ca_w[0]) left_mix_r <= output_w[16:1];
+                                else right_mix_r <= output_w[16:1];
+
+                                mono_mix_r <= output_w[16:1];
+
+                                channel_r[ca_w] <= output_w[16:1];
                             end
                             
                             osc_state_r <= OSC_IDLE;
@@ -1001,170 +919,5 @@ module doc5503 #(
         end
 
     end
-
-    // Mixer
-
-    // Use 24-bit accumulators for mixing to provide more headroom and prevent clipping
-    localparam int MIXER_SUM_RESOLUTION = 24;
-    
-    // Adjustable parameters for output scaling
-    // TOP_BIT_OFFSET: How many bits from the top to start the window (0 = full amplitude)
-    // WINDOW_SIZE: Number of bits to use for magnitude portion (should be 15 for 16-bit output with sign bit)
-    localparam int TOP_BIT_OFFSET = 6;   // Skip this many bits from the top of the accumulator
-    localparam int WINDOW_SIZE = 15;     // Use this many bits for magnitude
-
-    reg signed [15:0] osc_out_r;
-
-    reg signed [15:0] mono_mix_r;
-    assign mono_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : mono_mix_r;
-    reg signed [MIXER_SUM_RESOLUTION-1:0] next_mono_mix_r;
-
-    reg signed [15:0] left_mix_r;
-    reg signed [15:0] compressed_left_mix_r;
-    assign left_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : left_mix_r;
-    reg signed [MIXER_SUM_RESOLUTION-1:0] next_left_mix_r;
-
-    reg signed [15:0] right_mix_r;
-    reg signed [15:0] compressed_right_mix_r;
-    assign right_mix_o = OUTPUT_OSC_DIRECT ? osc_out_r : right_mix_r;
-    reg signed [MIXER_SUM_RESOLUTION-1:0] next_right_mix_r;
-
-    reg signed [15:0] channel_r[CHANNEL_MAX:0]; 
-    assign channel_o = channel_r;
-    reg signed [MIXER_SUM_RESOLUTION-1:0] next_channel_r[CHANNEL_MAX:0]; 
-
-
-    localparam [1:0] MIXER_ZERO = 2'd0;
-    localparam [1:0] MIXER_IDLE = 2'd1;
-    localparam [1:0] MIXER_ADD = 2'd2;
-    localparam [1:0] MIXER_OUTPUT = 2'd3;
-
-    reg [1:0] mixer_state_r;
-    reg [3:0] mixer_channel_r;
-
-    reg mixer_reset_r;
-
-    always @(posedge clk_i) begin
-        if (!reset_n_i) begin
-            mixer_state_r <= MIXER_ZERO;
-            mixer_channel_r <= '0;
-            
-            mono_mix_r <= '0;
-            left_mix_r <= '0;
-            right_mix_r <= '0;
-
-            mixer_reset_r <= 1'b1;
-
-        end else begin
-            case (mixer_state_r)
-                MIXER_IDLE: begin
-                    // Wait for next cycle to start mixing
-                    if (mixer_trigger_r) begin
-                        mixer_state_r <= MIXER_ZERO;
-                    end
-                    mixer_cycle_r <= '0;
-                    mixer_channel_r <= '0;
-                end
-
-                MIXER_ZERO: begin
-                    mixer_cycle_r <= 6'd31;
-
-                    if (mixer_reset_r) channel_r[mixer_channel_r] <= '0;
-                    next_channel_r[mixer_channel_r] <= '0;
-
-                    next_mono_mix_r <= '0;
-                    next_left_mix_r <= '0;
-                    next_right_mix_r <= '0;
-
-                    if (mixer_channel_r == CHANNEL_MAX) begin
-                        if (mixer_reset_r) begin
-                            mixer_reset_r <= 1'b0; // Reset only once at the start of mixing
-                            mixer_state_r <= MIXER_IDLE;
-                        end else begin
-                            mixer_state_r <= MIXER_ADD;
-                        end
-                        mixer_cycle_r <= '0;
-                    end else begin
-                        mixer_channel_r <= mixer_channel_r + 1'd1;
-                    end
-                end
-
-                MIXER_ADD: begin
-                    automatic logic [3:0] ca = mixer_control_w[7:4];
-                    // With 24-bit accumulation, we have sufficient headroom to avoid clipping
-                    // No need to scale individual outputs
-
-                    if (mixer_cycle_r == DIRECT_OUTPUT_OSC_NUM) begin
-                        // Direct output for monitoring/testing a single oscillator
-                        osc_out_r <= mixer_output_w;
-                    end
-
-                    // Only process active oscillators (not halted)
-                    if (!(mixer_control_w & 1'b1)) begin
-                        // Channel assignment - use all 4 bits of channel assignment
-                        if (OUTPUT_CHANNEL_MIX && (ca < CHANNEL_MAX)) begin
-                            next_channel_r[ca] <= next_channel_r[ca] + mixer_output_w;
-                        end
-
-                        // Always add to mono mix regardless of channel
-                        if (OUTPUT_MONO_MIX) next_mono_mix_r <= next_mono_mix_r + mixer_output_w;
-
-                        // For stereo, use the LSB of channel to determine left/right
-                        // This matches the original ES5503 behavior where even channels go right, odd go left
-                        if (OUTPUT_STEREO_MIX) begin
-                            if (ca[0]) next_left_mix_r <= next_left_mix_r + mixer_output_w;
-                            else next_right_mix_r <= next_right_mix_r + mixer_output_w;
-                        end
-                    end
-
-                    mixer_cycle_r <= (mixer_cycle_r == cycle_max_w) ? '0 : mixer_cycle_r + 1'd1;
-                    if (mixer_cycle_r == cycle_max_w) mixer_state_r <= MIXER_OUTPUT;
-                end
-
-                MIXER_OUTPUT: begin
-                    // Apply output to channel registers
-                    if (OUTPUT_CHANNEL_MIX) begin
-                        // Manual bit selection scaling
-                        channel_r[mixer_channel_r] <= {
-                            // Sign bit
-                            next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1],
-                            // Magnitude bits - using parameterized window 
-                            next_channel_r[mixer_channel_r][MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                        };
-                    end
-                    
-                    // Apply output to mono mix register
-                    if (OUTPUT_MONO_MIX) begin
-                        mono_mix_r <= {
-                            next_mono_mix_r[MIXER_SUM_RESOLUTION-1],
-                            next_mono_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                        };
-                    end
-                    
-                    // Apply output to stereo mix registers
-                    if (OUTPUT_STEREO_MIX) begin
-                        // Manual bit selection scaling when compressor is disabled
-                        left_mix_r <= {
-                            next_left_mix_r[MIXER_SUM_RESOLUTION-1],
-                            next_left_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                        };
-                        right_mix_r <= {
-                            next_right_mix_r[MIXER_SUM_RESOLUTION-1],
-                            next_right_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                        };
-
-                    end
-
-                    if (mixer_channel_r == CHANNEL_MAX) begin
-                        mixer_state_r <= MIXER_IDLE;
-                        mixer_channel_r <= '0;
-                    end else begin
-                        mixer_channel_r <= mixer_channel_r + 1'd1;
-                    end
-                end
-            endcase
-        end
-    end
-
     
 endmodule

@@ -155,12 +155,7 @@ module sound_glu #(
     wire [7:0] doc_osc_en_w;
     assign debug_osc_en_o = doc_osc_en_w;
 
-    doc5503 #(
-        .OUTPUT_CHANNEL_MIX(0),
-        .OUTPUT_MONO_MIX(0),
-        .OUTPUT_STEREO_MIX(1),
-        .OUTPUT_OSC_DIRECT(0)
-    ) doc5503 (
+    doc5503 doc5503 (
         .clk_i(a2bus_if.clk_logic),
         .reset_n_i(a2bus_if.system_reset_n),
         .clk_en_i(a2bus_if.clk_7m_posedge),

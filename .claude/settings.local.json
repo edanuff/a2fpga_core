@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./glu_wav_test)",
+      "Bash(build/doc5503_volume_direct_test)",
+      "Bash(g++:*)",
+      "Bash(make)",
+      "Bash(make:*)",
+      "Bash(mkdir:*)",
+      "Bash(sed:*)",
+      "Bash(timeout:*)"
+    ],
+    "deny": []
+  }
+}
