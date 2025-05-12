@@ -1,0 +1,63 @@
+# Makefile for building and running the fixed sine wave test
+
+# Directory paths
+HDLDIR = ../../hdl/sound
+SUPPORTDIR = ../../hdl/support
+BUSDIR = ../../hdl/bus
+MEMORYDIR = ../../hdl/memory
+SDRAMDIR = ../../hdl/sdram
+
+# Build output paths
+BUILDDIR = build
+OBJDIR = $(BUILDDIR)/obj_dir
+OUTPUTDIR = output
+
+# Local directory structure
+HARNESSDIR = harness
+TESTCASESDIR = testcases
+
+# Make sure build and output directories exist
+$(shell mkdir -p $(BUILDDIR) $(OUTPUTDIR))
+
+# Verilator flags
+VERILATOR_FLAGS = -Wall -Wno-fatal --trace -CFLAGS "-O3 -g3" --cc --exe
+VERILATOR_FLAGS += -I$(HDLDIR) -I$(SUPPORTDIR) -I$(BUSDIR) -I$(MEMORYDIR) -I$(SDRAMDIR)
+
+# C++ compiler flags
+CXXFLAGS = -std=c++17 -Wall -O3 -g
+VERILATOR_INCLUDE = /opt/homebrew/Cellar/verilator/5.034/share/verilator/include
+
+# Source files for DOC testing
+DOC_MODULE_SV = $(HARNESSDIR)/doc5503_harness.sv
+DOC_HDLFILES = $(HDLDIR)/doc5503.sv $(SUPPORTDIR)/srff.v
+
+# Create build directory structure before building
+$(shell mkdir -p $(OBJDIR))
+
+# Default target builds and runs the fixed sine wave test
+all: build run
+
+# Build the harness if it doesn't exist
+$(OBJDIR)/Vdoc5503_harness: $(DOC_MODULE_SV) $(DOC_HDLFILES)
+	verilator $(VERILATOR_FLAGS) $(DOC_MODULE_SV) $(DOC_HDLFILES) $(TESTCASESDIR)/doc5503_tb.cpp -Mdir $(OBJDIR)
+	make -C $(OBJDIR) -f Vdoc5503_harness.mk
+
+# Build the fixed sine wave test
+$(BUILDDIR)/doc5503_sine_test_fixed: $(TESTCASESDIR)/doc5503_sine_test_fixed.cpp $(OBJDIR)/Vdoc5503_harness__ALL.a
+	g++ $(CXXFLAGS) -o $@ $< $(OBJDIR)/Vdoc5503_harness__ALL.a $(OBJDIR)/verilated.o $(OBJDIR)/verilated_vcd_c.o $(OBJDIR)/verilated_threads.o -I$(OBJDIR) -I$(VERILATOR_INCLUDE) -lm -lpthread
+
+# Build target
+build: $(OBJDIR)/Vdoc5503_harness $(BUILDDIR)/doc5503_sine_test_fixed
+
+# Run target
+run: $(BUILDDIR)/doc5503_sine_test_fixed
+	cd $(BUILDDIR) && ./doc5503_sine_test_fixed
+
+# Clean target
+clean:
+	rm -f $(BUILDDIR)/doc5503_sine_test_fixed
+	rm -f $(BUILDDIR)/doc5503_sine_test_fixed.vcd
+	rm -f $(BUILDDIR)/doc5503_sine_left_fixed.wav
+	rm -f $(BUILDDIR)/doc5503_sine_right_fixed.wav
+
+.PHONY: all build run clean

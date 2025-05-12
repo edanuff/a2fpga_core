@@ -473,30 +473,37 @@ module doc5503 #(
                     // Oscillator Registers
                     case (host_addr_r[7:5])
                         3'b000: begin                               // $00-1F
+                            target_osc_fl_r <= host_addr_r[4:0];
                             target_fl_din_r <= host_data_r;
                             target_fl_we_r <= 1'b1;
                         end
                         3'b001: begin                               // $20-3F
+                            target_osc_fh_r <= host_addr_r[4:0];
                             target_fh_din_r <= host_data_r;
                             target_fh_we_r <= 1'b1;
                         end
                         3'b010: begin                               // $40-5F
+                            target_osc_vol_r <= host_addr_r[4:0];
                             target_vol_din_r <= host_data_r;
                             target_vol_we_r <= 1'b1;
                         end
                         3'b011: begin                               // $60-7F
+                            target_osc_wds_r <= host_addr_r[4:0];
                             target_wds_din_r <= host_data_r;
                             target_wds_we_r <= 1'b1;
                         end
                         3'b100: begin                               // $80-9F
+                            target_osc_wtp_r <= host_addr_r[4:0];
                             target_wtp_din_r <= host_data_r;
                             target_wtp_we_r <= 1'b1;
                         end
                         3'b101: begin                               // $A0-BF
+                            target_osc_control_r <= host_addr_r[4:0];
                             target_control_din_r <= host_data_r;
                             target_control_we_r <= 1'b1;
                         end
                         3'b110: begin                               // $C0-DF
+                            target_osc_rts_r <= host_addr_r[4:0];
                             target_rts_din_r <= host_data_r;
                             target_rts_we_r <= 1'b1;
                         end

@@ -1,0 +1,41 @@
+# Makefile for DOC5503 Basic Register Test
+
+# Verilator flags
+VERILATOR_FLAGS = -Wall -Wno-fatal --trace -CFLAGS "-O3 -g3"
+
+# Directories
+HDL_DIR = ../../hdl/sound
+SUPPORT_DIR = ../../hdl/support
+HARNESS_DIR = harness
+TEST_DIR = testcases
+BUILD_DIR = build/obj_dir
+
+# Source files
+MAIN_SRC = $(TEST_DIR)/doc5503_basic_reg_test.cpp
+HDL_SRCS = $(HARNESS_DIR)/doc5503_reg_harness.sv $(HDL_DIR)/doc5503.sv $(SUPPORT_DIR)/srff.v
+
+# Target top module
+TOP_MODULE = doc5503_reg_harness
+
+# Verilator output module name
+VMODULE = V$(TOP_MODULE)
+
+# Default target
+all: $(BUILD_DIR)/$(VMODULE)
+
+# Build the Verilated model
+$(BUILD_DIR)/$(VMODULE): $(HDL_SRCS) $(MAIN_SRC)
+	@mkdir -p $(BUILD_DIR)
+	verilator $(VERILATOR_FLAGS) --cc --exe -I$(HDL_DIR) -I$(SUPPORT_DIR) $(HDL_SRCS) $(MAIN_SRC) --top-module $(TOP_MODULE) -Mdir $(BUILD_DIR)
+	make -C $(BUILD_DIR) -f $(VMODULE).mk
+
+# Run the test
+run: $(BUILD_DIR)/$(VMODULE)
+	$(BUILD_DIR)/$(VMODULE)
+
+# Clean build artifacts
+clean:
+	rm -rf $(BUILD_DIR)
+	rm -f *.vcd
+
+.PHONY: all run clean

@@ -44,12 +44,12 @@ VM_USER_LDLIBS = \
 
 # User .cpp files (from .cpp's on Verilator command line)
 VM_USER_CLASSES = \
-	doc5503_reg_test \
+	doc5503_basic_reg_test \
 
 # User .cpp directories (from .cpp's on Verilator command line)
 VM_USER_DIR = \
 	../.. \
-	../../testcases/doc5503 \
+	../../testcases \
 
 
 ### Default rules...
@@ -61,7 +61,7 @@ include $(VERILATOR_ROOT)/include/verilated.mk
 ### Executable rules... (from --exe)
 VPATH += $(VM_USER_DIR)
 
-doc5503_reg_test.o: testcases/doc5503/doc5503_reg_test.cpp 
+doc5503_basic_reg_test.o: testcases/doc5503_basic_reg_test.cpp 
 	$(OBJCACHE) $(CXX) $(CXXFLAGS) $(CPPFLAGS) $(OPT_FAST)  -c -o $@ $<
 
 ### Link rules... (from --exe)
