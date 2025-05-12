@@ -267,7 +267,7 @@ module doc5503 #(
 
     // Incoming wave date requested by the FSM
 
-    reg [7:0] loaded_wds_r;;
+    reg [7:0] loaded_wds_r;
 
     always_ff @(posedge clk_i) begin
         if (!reset_n_i) begin
@@ -279,31 +279,17 @@ module doc5503 #(
         end
     end
 
-    // Use 24-bit accumulators for mixing to provide more headroom and prevent clipping
-    localparam int MIXER_SUM_RESOLUTION = 24;
-
-    // Adjustable parameters for output scaling
-    // TOP_BIT_OFFSET: How many bits from the top to start the window (0 = full amplitude)
-    // WINDOW_SIZE: Number of bits to use for magnitude portion (should be 15 for 16-bit output with sign bit)
-    localparam int TOP_BIT_OFFSET = 6;   // Skip this many bits from the top of the accumulator
-    localparam int WINDOW_SIZE = 15;     // Use this many bits for magnitude
-
     reg signed [15:0] channel_r[16]; 
     assign channel_o = channel_r;
-    reg signed [MIXER_SUM_RESOLUTION-1:0] next_channel_r[16]; 
-    reg signed [MIXER_SUM_RESOLUTION-1:0] channel_sum_r;
 
     reg signed [15:0] mono_mix_r;
     assign mono_mix_o = mono_mix_r;
-    reg signed [MIXER_SUM_RESOLUTION-1:0] next_mono_mix_r;
 
     reg signed [15:0] left_mix_r;
     assign left_mix_o = left_mix_r;
-    reg signed [MIXER_SUM_RESOLUTION-1:0] next_left_mix_r;
 
     reg signed [15:0] right_mix_r;
     assign right_mix_o = right_mix_r;
-    reg signed [MIXER_SUM_RESOLUTION-1:0] next_right_mix_r;
 
     localparam [1:0] MODE_FREE = 2'b00;
 	localparam [1:0] MODE_ONE_SHOT = 2'b01;
@@ -618,71 +604,16 @@ module doc5503 #(
     endtask: cycle_reset
 
     task automatic cycle_refresh0();
-        // First phase of output channel refresh cycle
-        // Copies next_channel values to channel output registers
-        // Updates mono_mix, left_mix, and right_mix final output values
-        // Only updates final mix values when processing the last channel (15)
-        // Use this cycle to copy the channel sums to the output registers
-
-        if (cycle_timer_r < 'd16) begin
-            if (cycle_start_w) begin
-                device_response();
-            end
-    
-            channel_r[cycle_timer_r[3:0]] <= {
-                // Sign bit
-                next_channel_r[cycle_timer_r[3:0]][MIXER_SUM_RESOLUTION-1],
-                // Magnitude bits - using parameterized window 
-                next_channel_r[cycle_timer_r[3:0]][MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-            };
-            
-            // Only copy the final values when processing the last channel (15)
-            if (cycle_timer_r[3:0] == 4'hF) begin
-                mono_mix_r <= {
-                    next_mono_mix_r[MIXER_SUM_RESOLUTION-1],
-                    next_mono_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                };
-                left_mix_r <= {
-                    next_left_mix_r[MIXER_SUM_RESOLUTION-1],
-                    next_left_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                };
-                right_mix_r <= {
-                    next_right_mix_r[MIXER_SUM_RESOLUTION-1],
-                    next_right_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                };
-                // Debug: Print the final mix values
-            end
-        end else begin
-            // use remaining time to process host access
-            host_access();
-        end
+        // First phase of output channel refresh cycle 
+ 
+        host_access();
 
     endtask: cycle_refresh0
 
     task automatic cycle_refresh1();
         // Second phase of output channel refresh cycle 
-        // Resets next_channel accumulators for the next oscillator processing cycle
-        // Clears mono_mix, left_mix, and right_mix accumulators when processing last channel
-        // Prepares all mixing registers for the next set of oscillators
-        // Use this cycle to zero the channel sums for the next cycle
 
-        if (cycle_timer_r < 'd16) begin
-            if (cycle_start_w) begin
-                device_response();
-            end
-
-            next_channel_r[cycle_timer_r[3:0]] <= '0;
-            
-            // Only reset the mix values when processing the last channel (15)
-            if (cycle_timer_r[3:0] == 4'hF) begin
-                next_mono_mix_r <= '0;
-                next_left_mix_r <= '0;
-                next_right_mix_r <= '0;
-        end
-        end else begin
-            // use remaining time to process host access
-            host_access();
-        end
+        host_access();
 
     endtask: cycle_refresh1
 
@@ -824,13 +755,9 @@ module doc5503 #(
             if (loaded_wds_r == 8'h00) begin
                 halt_zero_r <= 1'b1;                                    // Set halt zero flag
                 osc_state_r <= OSC_HALT;
+            end else begin
+                osc_state_r <= OSC_OUT;
             end
-            else osc_state_r <= OSC_OUT;
-        end else if (cycle_timer_r > 'd40) begin
-            // If we get here, we didn't get the data in time
-            // This is a problem, but we'll just ignore it for now.
-            // We should never get here unless the memory is really slow.
-            osc_state_r <= OSC_IDLE;
         end
 
     endtask: osc_handle_data
@@ -846,7 +773,7 @@ module doc5503 #(
         // State transitions: OSC_MIX for normal operation, OSC_ACC for SYNC_AM odd oscillators
 
         if ((curr_mode_w == MODE_SYNC_AM) & curr_osc_odd_w) begin           // Sync AM Mode, odd oscillator outputs nothing
-            if ((curr_osc_r < 30) & !next_halt_w) begin                     // if next oscillator is not halted
+            if ((curr_osc_r < 31) & !next_halt_w) begin                     // if next oscillator is not halted
                 target_osc_vol_r <= curr_osc_r + 1'b1;                      // set target oscillator to next one
                 target_vol_we_r <= 1'b1;                                    // write to volume register
                 target_vol_din_r <= curr_wds_r;                             // set volume to waveform data
@@ -857,9 +784,9 @@ module doc5503 #(
             // Fixed waveform data polarity and volume calculation
             automatic logic signed [7:0] data_w = curr_wds_r ^ 8'h80;       // convert waveform data to signed (8'h80 = 0)
             automatic logic signed [8:0] vol_s = {1'b0, curr_vol_r};        // convert volume to signed (unsigned expanded)
-            automatic logic signed [15:0] output_w = data_w * vol_s;        // output is waveform data * volume (signed * signed)
-            curr_output_r <= output_w;                                      // store calculated output
-            channel_sum_r <= next_channel_r[curr_ca_w];                     // load channel accumulator
+            automatic logic signed [16:0] output_w = data_w * vol_s;        // output is waveform data * volume (signed * signed)
+            curr_output_r <= output_w[16:1];                                // store calculated output
+            //channel_sum_r <= next_channel_r[curr_ca_w];                   // load channel accumulator
             
             // Always go to OSC_MIX from here except in the special case above
             osc_state_r <= OSC_MIX;
@@ -872,17 +799,19 @@ module doc5503 #(
         // Updates mono (all channels), left (odd channels), and right (even channels) mixes
         // Prepares for next oscillator cycle by transitioning to OSC_ACC
         // Add current oscillator output to channel accumulator
-        next_channel_r[curr_ca_w] <= channel_sum_r + curr_output_r;
+        //next_channel_r[curr_ca_w] <= channel_sum_r + curr_output_r;
         
         // Add to mono mix (all channels)
-        next_mono_mix_r <= next_mono_mix_r + curr_output_r;
+        mono_mix_r <= curr_output_r;
         
         // Add to left/right mix based on channel number
         // Channel 0,2,4,etc. go to right, 1,3,5,etc. go to left
         if (curr_ca_w[0]) 
-            next_left_mix_r <= next_left_mix_r + curr_output_r;
+            left_mix_r <= curr_output_r;
         else 
-            next_right_mix_r <= next_right_mix_r + curr_output_r;
+            right_mix_r <= curr_output_r;
+
+        channel_r[curr_ca_w] <= curr_output_r; // Store output in channel array
         
         osc_state_r <= OSC_ACC;
     endtask: osc_mix
