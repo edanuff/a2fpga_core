@@ -262,12 +262,11 @@ module doc5503 #(
     wire [1:0] prev_mode_w = prev_control_r[2:1];
 
     reg [23:0] curr_acc_r;
-    reg [15:0] curr_wave_addr_r;
-    reg [15:0] curr_output_r;
+    reg signed [17:0] curr_output_r;
 
     // Incoming wave date requested by the FSM
 
-    reg [7:0] loaded_wds_r;;
+    reg [7:0] loaded_wds_r;
 
     always_ff @(posedge clk_i) begin
         if (!reset_n_i) begin
@@ -501,6 +500,10 @@ module doc5503 #(
                             target_osc_control_r <= host_addr_r[4:0];
                             target_control_din_r <= host_data_r;
                             target_control_we_r <= 1'b1;
+                            if (!host_data_r[0]) begin
+                                target_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
+                                target_acc_we_r <= 1'b1;
+                            end
                         end
                         3'b110: begin                               // $C0-DF
                             target_osc_rts_r <= host_addr_r[4:0];
@@ -729,7 +732,6 @@ module doc5503 #(
         device_response();
 
         // Init other working values
-        curr_wave_addr_r <= '0;
         curr_output_r <= '0;
         halt_zero_r <= 1'b0;
 
@@ -826,11 +828,6 @@ module doc5503 #(
                 osc_state_r <= OSC_HALT;
             end
             else osc_state_r <= OSC_OUT;
-        end else if (cycle_timer_r > 'd40) begin
-            // If we get here, we didn't get the data in time
-            // This is a problem, but we'll just ignore it for now.
-            // We should never get here unless the memory is really slow.
-            osc_state_r <= OSC_IDLE;
         end
 
     endtask: osc_handle_data
@@ -846,7 +843,7 @@ module doc5503 #(
         // State transitions: OSC_MIX for normal operation, OSC_ACC for SYNC_AM odd oscillators
 
         if ((curr_mode_w == MODE_SYNC_AM) & curr_osc_odd_w) begin           // Sync AM Mode, odd oscillator outputs nothing
-            if ((curr_osc_r < 30) & !next_halt_w) begin                     // if next oscillator is not halted
+            if ((curr_osc_r != 5'd31) & !next_halt_w) begin                     // if next oscillator is not halted
                 target_osc_vol_r <= curr_osc_r + 1'b1;                      // set target oscillator to next one
                 target_vol_we_r <= 1'b1;                                    // write to volume register
                 target_vol_din_r <= curr_wds_r;                             // set volume to waveform data
@@ -857,7 +854,7 @@ module doc5503 #(
             // Fixed waveform data polarity and volume calculation
             automatic logic signed [7:0] data_w = curr_wds_r ^ 8'h80;       // convert waveform data to signed (8'h80 = 0)
             automatic logic signed [8:0] vol_s = {1'b0, curr_vol_r};        // convert volume to signed (unsigned expanded)
-            automatic logic signed [15:0] output_w = data_w * vol_s;        // output is waveform data * volume (signed * signed)
+            automatic logic signed [17:0] output_w = data_w * vol_s;        // output is waveform data * volume (signed * signed)
             curr_output_r <= output_w;                                      // store calculated output
             channel_sum_r <= next_channel_r[curr_ca_w];                     // load channel accumulator
             
