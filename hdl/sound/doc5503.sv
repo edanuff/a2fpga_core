@@ -116,113 +116,122 @@ module doc5503 #(
     reg [7:0] osc_en_r;             // $E1    : Oscillator Enable Register
     assign osc_en_o = osc_en_r;
 
+    // Oscillator registers as RAM
+    // Necessary to use RAMs to implement the large number of registers but adds
+    // complexity to the design.  Current implementation uses synchronous writes
+    // and asynchronous reads which means that read data is available on the next
+    // clock cycle.
 
-    reg [4:0] target_osc_fl_r;      // Target oscillator for frequency low operation
-    reg [4:0] target_osc_fh_r;      // Target oscillator for frequency high operation
-    reg [4:0] target_osc_vol_r;     // Target oscillator for volume operation
-    reg [4:0] target_osc_wds_r;     // Target oscillator for waveform data sample operation
-    reg [4:0] target_osc_wtp_r;     // Target oscillator for waveform table pointer operation
-    reg [4:0] target_osc_control_r; // Target oscillator for control operation
-    reg [4:0] target_osc_rts_r;     // Target oscillator for resolution table size operation
-    reg [4:0] target_osc_acc_r;     // Target oscillator for accumulator operation
+    // Oscillator RAM control signals
 
-    reg target_fl_we_r;             // Target oscillator write enable for frequency low register
-    reg target_fh_we_r;             // Target oscillator write enable for frequency high register
-    reg target_vol_we_r;            // Target oscillator write enable for volume register
-    reg target_wds_we_r;            // Target oscillator write enable for waveform data sample register
-    reg target_wtp_we_r;            // Target oscillator write enable for waveform table pointer register
-    reg target_control_we_r;        // Target oscillator write enable for control register
-    reg target_rts_we_r;            // Target oscillator write enable for resolution table size register
-    reg target_acc_we_r;            // Target oscillator write enable for accumulator register
+    reg [4:0] ram_fl_osc_r;         // RAM oscillator for frequency low operation
+    reg [4:0] ram_fh_osc_r;         // RAM oscillator for frequency high operation
+    reg [4:0] ram_vol_osc_r;        // RAM oscillator for volume operation
+    reg [4:0] ram_wds_osc_r;        // RAM oscillator for waveform data sample operation
+    reg [4:0] ram_wtp_osc_r;        // RAM oscillator for waveform table pointer operation
+    reg [4:0] ram_control_osc_r;    // RAM oscillator for control operation
+    reg [4:0] ram_rts_osc_r;        // RAM oscillator for resolution table size operation
+    reg [4:0] ram_acc_osc_r;        // RAM oscillator for accumulator operation
 
-    reg [7:0] target_fl_din_r;      // Target oscillator data in for frequency low register
-    reg [7:0] target_fh_din_r;      // Target oscillator data in for frequency high register
-    reg [7:0] target_vol_din_r;     // Target oscillator data in for volume register
-    reg [7:0] target_wds_din_r;     // Target oscillator data in for waveform data sample register
-    reg [7:0] target_wtp_din_r;     // Target oscillator data in for waveform table pointer register
-    reg [7:0] target_control_din_r; // Target oscillator data in for control register
-    reg [7:0] target_rts_din_r;     // Target oscillator data in for resolution table size register
-    reg [23:0] target_acc_din_r;    // Target oscillator data in for accumulator register
+    reg ram_fl_we_r;                // RAM oscillator write enable for frequency low register
+    reg ram_fh_we_r;                // RAM oscillator write enable for frequency high register
+    reg ram_vol_we_r;               // RAM oscillator write enable for volume register
+    reg ram_wds_we_r;               // RAM oscillator write enable for waveform data sample register
+    reg ram_wtp_we_r;               // RAM oscillator write enable for waveform table pointer register
+    reg ram_control_we_r;           // RAM oscillator write enable for control register
+    reg ram_rts_we_r;               // RAM oscillator write enable for resolution table size register
+    reg ram_acc_we_r;               // RAM oscillator write enable for accumulator register
 
-    wire [7:0] target_fl_dout_w;    // Target oscillator data out for frequency low register
-    wire [7:0] target_fh_dout_w;    // Target oscillator data out for frequency high register
-    wire [7:0] target_vol_dout_w;   // Target oscillator data out for volume register
-    wire [7:0] target_wds_dout_w;   // Target oscillator data out for waveform data sample register
-    wire [7:0] target_wtp_dout_w;   // Target oscillator data out for waveform table pointer register
-    wire [7:0] target_control_dout_w; // Target oscillator data out for control register
-    wire [7:0] target_rts_dout_w;   // Target oscillator data out for resolution table size register
-    wire [23:0] target_acc_dout_w;  // Target oscillator data out for accumulator register
+    reg [7:0] ram_fl_din_r;         // RAM oscillator data in for frequency low register
+    reg [7:0] ram_fh_din_r;         // RAM oscillator data in for frequency high register
+    reg [7:0] ram_vol_din_r;        // RAM oscillator data in for volume register
+    reg [7:0] ram_wds_din_r;        // RAM oscillator data in for waveform data sample register
+    reg [7:0] ram_wtp_din_r;        // RAM oscillator data in for waveform table pointer register
+    reg [7:0] ram_control_din_r;    // RAM oscillator data in for control register
+    reg [7:0] ram_rts_din_r;        // RAM oscillator data in for resolution table size register
+    reg [23:0] ram_acc_din_r;       // RAM oscillator data in for accumulator register
+
+    wire [7:0] ram_fl_dout_w;       // RAM oscillator data out for frequency low register
+    wire [7:0] ram_fh_dout_w;       // RAM oscillator data out for frequency high register
+    wire [7:0] ram_vol_dout_w;      // RAM oscillator data out for volume register
+    wire [7:0] ram_wds_dout_w;      // RAM oscillator data out for waveform data sample register
+    wire [7:0] ram_wtp_dout_w;      // RAM oscillator data out for waveform table pointer register
+    wire [7:0] ram_control_dout_w;  // RAM oscillator data out for control register
+    wire [7:0] ram_rts_dout_w;      // RAM oscillator data out for resolution table size register
+    wire [23:0] ram_acc_dout_w;     // RAM oscillator data out for accumulator register
+
+    // Instantiate the RAMs for each oscillator register
 
     // $00-1F : Frequency Low Register
     osc_reg_ram fl_ram (
         .clk_i(clk_i),
-        .osc_i(target_osc_fl_r),
-        .we_i(target_fl_we_r),
-        .data_i(target_fl_din_r),
-        .data_o(target_fl_dout_w)
+        .osc_i(ram_fl_osc_r),
+        .we_i(ram_fl_we_r),
+        .data_i(ram_fl_din_r),
+        .data_o(ram_fl_dout_w)
     );
 
     // $20-3F : Frequency High Register
     osc_reg_ram fh_ram (
         .clk_i(clk_i),
-        .osc_i(target_osc_fh_r),
-        .we_i(target_fh_we_r),
-        .data_i(target_fh_din_r),
-        .data_o(target_fh_dout_w)
+        .osc_i(ram_fh_osc_r),
+        .we_i(ram_fh_we_r),
+        .data_i(ram_fh_din_r),
+        .data_o(ram_fh_dout_w)
     );
 
     // $40-5F : Volume Register
     osc_reg_ram vol_ram (
         .clk_i(clk_i),
-        .osc_i(target_osc_vol_r),
-        .we_i(target_vol_we_r),
-        .data_i(target_vol_din_r),
-        .data_o(target_vol_dout_w)
+        .osc_i(ram_vol_osc_r),
+        .we_i(ram_vol_we_r),
+        .data_i(ram_vol_din_r),
+        .data_o(ram_vol_dout_w)
     );
 
     // $60-7F : Waveform Data Sample Register
     osc_reg_ram wds_ram (
         .clk_i(clk_i),
-        .osc_i(target_osc_wds_r),
-        .we_i(target_wds_we_r),
-        .data_i(target_wds_din_r),
-        .data_o(target_wds_dout_w)
+        .osc_i(ram_wds_osc_r),
+        .we_i(ram_wds_we_r),
+        .data_i(ram_wds_din_r),
+        .data_o(ram_wds_dout_w)
     );
 
     // $80-9F : Waveform Table Pointer Register
     osc_reg_ram wtp_ram (
         .clk_i(clk_i),
-        .osc_i(target_osc_wtp_r),
-        .we_i(target_wtp_we_r),
-        .data_i(target_wtp_din_r),
-        .data_o(target_wtp_dout_w)
+        .osc_i(ram_wtp_osc_r),
+        .we_i(ram_wtp_we_r),
+        .data_i(ram_wtp_din_r),
+        .data_o(ram_wtp_dout_w)
     );
 
     // $A0-BF : Control Register
     osc_reg_ram control_ram (
         .clk_i(clk_i),
-        .osc_i(target_osc_control_r),
-        .we_i(target_control_we_r),
-        .data_i(target_control_din_r),
-        .data_o(target_control_dout_w)
+        .osc_i(ram_control_osc_r),
+        .we_i(ram_control_we_r),
+        .data_i(ram_control_din_r),
+        .data_o(ram_control_dout_w)
     );
 
     // $C0-DF : Resolution Table Size Register
     osc_reg_ram rts_ram (
         .clk_i(clk_i),
-        .osc_i(target_osc_rts_r),
-        .we_i(target_rts_we_r),
-        .data_i(target_rts_din_r),
-        .data_o(target_rts_dout_w)
+        .osc_i(ram_rts_osc_r),
+        .we_i(ram_rts_we_r),
+        .data_i(ram_rts_din_r),
+        .data_o(ram_rts_dout_w)
     );
 
     // $E0-FF : Oscillator Accumulator Register
     osc_reg_ram #(.DATA_WIDTH(24)) acc_ram (
         .clk_i(clk_i),
-        .osc_i(target_osc_acc_r),
-        .we_i(target_acc_we_r),
-        .data_i(target_acc_din_r),
-        .data_o(target_acc_dout_w)
+        .osc_i(ram_acc_osc_r),
+        .we_i(ram_acc_we_r),
+        .data_i(ram_acc_din_r),
+        .data_o(ram_acc_dout_w)
     );
 
     // Current oscillator state, copied from the register file at the start of each cycle
@@ -242,7 +251,7 @@ module doc5503 #(
     reg [4:0] curr_osc_r;
     wire curr_osc_odd_w = curr_osc_r[0];
     wire curr_osc_even_w = ~curr_osc_odd_w;
-    wire [4:0] partner_osc_w = 5'(curr_osc_r^1);
+    wire [4:0] partner_osc_w = 5'(curr_osc_r ^ 1'b1);
 
     wire [2:0] curr_wts_w = curr_rts_r[5:3];
     wire [2:0] curr_res_w = curr_rts_r[2:0];
@@ -317,7 +326,6 @@ module doc5503 #(
     localparam int TICKS_PER_CYCLE = CLOCK_SPEED_HZ / (DOC_CLOCK_SPEED_HZ / 8);
     localparam int CYCLE_WIDTH = (TICKS_PER_CYCLE <= 1) ? 1 : $clog2(TICKS_PER_CYCLE + 1);
     logic [CYCLE_WIDTH-1:0] cycle_timer_r;
-    wire cycle_start_w = (cycle_timer_r == '0);  // Start new oscillator cycle when timer is zero
 
     localparam [1:0] CYCLE_RESET = 2'b00;
     localparam [1:0] CYCLE_OSC = 2'b01;
@@ -327,6 +335,7 @@ module doc5503 #(
     reg [1:0] cycle_state_r;
     wire ready_w = (cycle_state_r != CYCLE_RESET);
     assign ready_o = ready_w;
+    reg cycle_start_r;
 
     reg [2:0] clk_count_r;
     always @(posedge clk_i) begin
@@ -335,12 +344,15 @@ module doc5503 #(
             cycle_timer_r <= '0;
             cycle_state_r <= CYCLE_RESET;
             curr_osc_r <= '0;
+            cycle_start_r <= 1'b0;
         end else begin
             cycle_timer_r <= cycle_timer_r + 1'd1;
+            cycle_start_r <= 1'b0;
             if (clk_en_i) begin
                 clk_count_r <= clk_count_r + 1'd1;
                 if (clk_count_r == 3'b111) begin
                     cycle_timer_r <= '0;
+                    cycle_start_r <= 1'b1;
 
                     if (cycle_state_r == CYCLE_RESET) begin
                         curr_osc_r <= '0;
@@ -399,14 +411,34 @@ module doc5503 #(
             host_request_pending_r <= 1'b0;
             device_response_pending_r <= 1'b0;
 
-            target_fl_we_r <= 1'b0;
-            target_fh_we_r <= 1'b0;
-            target_vol_we_r <= 1'b0;
-            target_wds_we_r <= 1'b0;
-            target_wtp_we_r <= 1'b0;
-            target_control_we_r <= 1'b0;
-            target_rts_we_r <= 1'b0;
-            target_acc_we_r <= 1'b0;
+            // Reset all oscillator RAM control signals
+
+            ram_fl_osc_r <= '0;
+            ram_fh_osc_r <= '0;
+            ram_vol_osc_r <= '0;
+            ram_wds_osc_r <= '0;
+            ram_wtp_osc_r <= '0;
+            ram_control_osc_r <= '0;
+            ram_rts_osc_r <= '0;
+            ram_acc_osc_r <= '0;
+
+            ram_fl_din_r <= '0;
+            ram_fh_din_r <= '0;
+            ram_vol_din_r <= '0;
+            ram_wds_din_r <= '0;
+            ram_wtp_din_r <= '0;
+            ram_control_din_r <= '0;
+            ram_rts_din_r <= '0;
+            ram_acc_din_r <= '0;
+
+            ram_fl_we_r <= 1'b0;
+            ram_fh_we_r <= 1'b0;
+            ram_vol_we_r <= 1'b0;
+            ram_wds_we_r <= 1'b0;
+            ram_wtp_we_r <= 1'b0;
+            ram_control_we_r <= 1'b0;
+            ram_rts_we_r <= 1'b0;
+            ram_acc_we_r <= 1'b0;
 
         end else begin
 
@@ -418,24 +450,24 @@ module doc5503 #(
             device_response_pending_r <= 1'b0;
 
             // Default all target oscillators to the current oscillator
-            target_osc_fl_r <= curr_osc_r;
-            target_osc_fh_r <= curr_osc_r;
-            target_osc_vol_r <= curr_osc_r;
-            target_osc_wds_r <= curr_osc_r;
-            target_osc_wtp_r <= curr_osc_r;
-            target_osc_control_r <= curr_osc_r;
-            target_osc_rts_r <= curr_osc_r;
-            target_osc_acc_r <= curr_osc_r;
+            ram_fl_osc_r <= curr_osc_r;
+            ram_fh_osc_r <= curr_osc_r;
+            ram_vol_osc_r <= curr_osc_r;
+            ram_wds_osc_r <= curr_osc_r;
+            ram_wtp_osc_r <= curr_osc_r;
+            ram_control_osc_r <= curr_osc_r;
+            ram_rts_osc_r <= curr_osc_r;
+            ram_acc_osc_r <= curr_osc_r;
 
             // Default all target write enables to 0
-            target_fl_we_r <= 1'b0;
-            target_fh_we_r <= 1'b0;
-            target_vol_we_r <= 1'b0;
-            target_wds_we_r <= 1'b0;
-            target_wtp_we_r <= 1'b0;
-            target_control_we_r <= 1'b0;
-            target_rts_we_r <= 1'b0;
-            target_acc_we_r <= 1'b0;
+            ram_fl_we_r <= 1'b0;
+            ram_fh_we_r <= 1'b0;
+            ram_vol_we_r <= 1'b0;
+            ram_wds_we_r <= 1'b0;
+            ram_wtp_we_r <= 1'b0;
+            ram_control_we_r <= 1'b0;
+            ram_rts_we_r <= 1'b0;
+            ram_acc_we_r <= 1'b0;
 
             if (wave_data_ready_i) begin
                 loaded_wds_pending_r <= 1'b1;
@@ -472,43 +504,43 @@ module doc5503 #(
                     // Oscillator Registers
                     case (host_addr_r[7:5])
                         3'b000: begin                               // $00-1F
-                            target_osc_fl_r <= host_addr_r[4:0];
-                            target_fl_din_r <= host_data_r;
-                            target_fl_we_r <= 1'b1;
+                            ram_fl_osc_r <= host_addr_r[4:0];
+                            ram_fl_din_r <= host_data_r;
+                            ram_fl_we_r <= 1'b1;
                         end
                         3'b001: begin                               // $20-3F
-                            target_osc_fh_r <= host_addr_r[4:0];
-                            target_fh_din_r <= host_data_r;
-                            target_fh_we_r <= 1'b1;
+                            ram_fh_osc_r <= host_addr_r[4:0];
+                            ram_fh_din_r <= host_data_r;
+                            ram_fh_we_r <= 1'b1;
                         end
                         3'b010: begin                               // $40-5F
-                            target_osc_vol_r <= host_addr_r[4:0];
-                            target_vol_din_r <= host_data_r;
-                            target_vol_we_r <= 1'b1;
+                            ram_vol_osc_r <= host_addr_r[4:0];
+                            ram_vol_din_r <= host_data_r;
+                            ram_vol_we_r <= 1'b1;
                         end
                         3'b011: begin                               // $60-7F
-                            target_osc_wds_r <= host_addr_r[4:0];
-                            target_wds_din_r <= host_data_r;
-                            target_wds_we_r <= 1'b1;
+                            ram_wds_osc_r <= host_addr_r[4:0];
+                            ram_wds_din_r <= host_data_r;
+                            ram_wds_we_r <= 1'b1;
                         end
                         3'b100: begin                               // $80-9F
-                            target_osc_wtp_r <= host_addr_r[4:0];
-                            target_wtp_din_r <= host_data_r;
-                            target_wtp_we_r <= 1'b1;
+                            ram_wtp_osc_r <= host_addr_r[4:0];
+                            ram_wtp_din_r <= host_data_r;
+                            ram_wtp_we_r <= 1'b1;
                         end
                         3'b101: begin                               // $A0-BF
-                            target_osc_control_r <= host_addr_r[4:0];
-                            target_control_din_r <= host_data_r;
-                            target_control_we_r <= 1'b1;
+                            ram_control_osc_r <= host_addr_r[4:0];
+                            ram_control_din_r <= host_data_r;
+                            ram_control_we_r <= 1'b1;
                             if (!host_data_r[0]) begin
-                                target_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
-                                target_acc_we_r <= 1'b1;
+                                ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
+                                ram_acc_we_r <= 1'b1;
                             end
                         end
                         3'b110: begin                               // $C0-DF
-                            target_osc_rts_r <= host_addr_r[4:0];
-                            target_rts_din_r <= host_data_r;
-                            target_rts_we_r <= 1'b1;
+                            ram_rts_osc_r <= host_addr_r[4:0];
+                            ram_rts_din_r <= host_data_r;
+                            ram_rts_we_r <= 1'b1;
                         end
                     endcase
                 end
@@ -521,13 +553,13 @@ module doc5503 #(
 
                 if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
                     case (host_addr_r[7:5])
-                        3'b000: target_osc_fl_r <= host_addr_r[4:0];
-                        3'b001: target_osc_fh_r <= host_addr_r[4:0];
-                        3'b010: target_osc_vol_r <= host_addr_r[4:0];
-                        3'b011: target_osc_wds_r <= host_addr_r[4:0];
-                        3'b100: target_osc_wtp_r <= host_addr_r[4:0];
-                        3'b101: target_osc_control_r <= host_addr_r[4:0];
-                        3'b110: target_osc_rts_r <= host_addr_r[4:0];
+                        3'b000: ram_fl_osc_r <= host_addr_r[4:0];
+                        3'b001: ram_fh_osc_r <= host_addr_r[4:0];
+                        3'b010: ram_vol_osc_r <= host_addr_r[4:0];
+                        3'b011: ram_wds_osc_r <= host_addr_r[4:0];
+                        3'b100: ram_wtp_osc_r <= host_addr_r[4:0];
+                        3'b101: ram_control_osc_r <= host_addr_r[4:0];
+                        3'b110: ram_rts_osc_r <= host_addr_r[4:0];
                     endcase
                 end
             end
@@ -545,25 +577,25 @@ module doc5503 #(
                     // Read from oscillator registers
                     case (host_addr_r[7:5])
                         3'b000: begin                               // $00-1F
-                            data_o <= target_fl_dout_w;
+                            data_o <= ram_fl_dout_w;
                         end
                         3'b001: begin                               // $20-3F
-                            data_o <= target_fh_dout_w;
+                            data_o <= ram_fh_dout_w;
                         end
                         3'b010: begin                               // $40-5F
-                            data_o <= target_vol_dout_w;
+                            data_o <= ram_vol_dout_w;
                         end
                         3'b011: begin                               // $60-7F
-                            data_o <= target_wds_dout_w;
+                            data_o <= ram_wds_dout_w;
                         end
                         3'b100: begin                               // $80-9F
-                            data_o <= target_wtp_dout_w;
+                            data_o <= ram_wtp_dout_w;
                         end
                         3'b101: begin                               // $A0-BF
-                            data_o <= target_control_dout_w;
+                            data_o <= ram_control_dout_w;
                         end
                         3'b110: begin                               // $C0-DF
-                            data_o <= target_rts_dout_w;
+                            data_o <= ram_rts_dout_w;
                         end
                     endcase
                 end else if (host_addr_r == 8'hE0) begin
@@ -591,32 +623,32 @@ module doc5503 #(
         // Called during CYCLE_RESET state only
 
          // Set target oscillators based on cycle time
-        target_osc_fl_r <= cycle_timer_r[4:0];
-        target_osc_fh_r <= cycle_timer_r[4:0];
-        target_osc_vol_r <= cycle_timer_r[4:0];
-        target_osc_wds_r <= cycle_timer_r[4:0];
-        target_osc_wtp_r <= cycle_timer_r[4:0];
-        target_osc_control_r <= cycle_timer_r[4:0];
-        target_osc_rts_r <= cycle_timer_r[4:0];
-        target_osc_acc_r <= cycle_timer_r[4:0];
+        ram_fl_osc_r <= cycle_timer_r[4:0];
+        ram_fh_osc_r <= cycle_timer_r[4:0];
+        ram_vol_osc_r <= cycle_timer_r[4:0];
+        ram_wds_osc_r <= cycle_timer_r[4:0];
+        ram_wtp_osc_r <= cycle_timer_r[4:0];
+        ram_control_osc_r <= cycle_timer_r[4:0];
+        ram_rts_osc_r <= cycle_timer_r[4:0];
+        ram_acc_osc_r <= cycle_timer_r[4:0];
 
-        target_fl_we_r <= 1'b1;
-        target_fh_we_r <= 1'b1;
-        target_vol_we_r <= 1'b1;
-        target_wds_we_r <= 1'b1;
-        target_wtp_we_r <= 1'b1;
-        target_control_we_r <= 1'b1;
-        target_rts_we_r <= 1'b1;
-        target_acc_we_r <= 1'b1;
+        ram_fl_we_r <= 1'b1;
+        ram_fh_we_r <= 1'b1;
+        ram_vol_we_r <= 1'b1;
+        ram_wds_we_r <= 1'b1;
+        ram_wtp_we_r <= 1'b1;
+        ram_control_we_r <= 1'b1;
+        ram_rts_we_r <= 1'b1;
+        ram_acc_we_r <= 1'b1;
 
-        target_fl_din_r <= '0;
-        target_fh_din_r <= '0;
-        target_vol_din_r <= '0;
-        target_wds_din_r <= '0;
-        target_wtp_din_r <= '0;
-        target_control_din_r <= '0; // Ensure oscillators start not halted
-        target_rts_din_r <= '0;
-        target_acc_din_r <= '0;
+        ram_fl_din_r <= '0;
+        ram_fh_din_r <= '0;
+        ram_vol_din_r <= '0;
+        ram_wds_din_r <= '0;
+        ram_wtp_din_r <= '0;
+        ram_control_din_r <= '0; // Ensure oscillators start not halted
+        ram_rts_din_r <= '0;
+        ram_acc_din_r <= '0;
 
     endtask: cycle_reset
 
@@ -628,7 +660,7 @@ module doc5503 #(
         // Use this cycle to copy the channel sums to the output registers
 
         if (cycle_timer_r < 'd16) begin
-            if (cycle_start_w) begin
+            if (cycle_start_r) begin
                 device_response();
             end
     
@@ -670,7 +702,7 @@ module doc5503 #(
         // Use this cycle to zero the channel sums for the next cycle
 
         if (cycle_timer_r < 'd16) begin
-            if (cycle_start_w) begin
+            if (cycle_start_r) begin
                 device_response();
             end
 
@@ -692,7 +724,7 @@ module doc5503 #(
     task automatic cycle_osc();
         // Force oscillator state machine to idle state if at the start of a cycle
         automatic osc_state_e osc_state_w;
-        osc_state_w = cycle_start_w ? OSC_IDLE : osc_state_r;
+        osc_state_w = cycle_start_r ? OSC_IDLE : osc_state_r;
         case (osc_state_w)
             OSC_IDLE: osc_idle();
             OSC_START: osc_start();
@@ -717,12 +749,12 @@ module doc5503 #(
         // Waits for the start of a new cycle to begin processing
         // Handles host access to oscillator registers
         // Sets the oscillator state to OSC_START when a new cycle begins
-        // Needs: cycle_start_w (start of new cycle)
+        // Needs: cycle_start_r (start of new cycle)
 
         osc_state_r <= OSC_IDLE;
         host_access();
 
-        if (cycle_start_w) begin
+        if (cycle_start_r) begin
             osc_state_r <= OSC_START;
         end
 
@@ -742,29 +774,29 @@ module doc5503 #(
         // Load all current oscillator registers from register file
         // Resets working registers and clears halt_zero flag
         // Transitions to OSC_REQUEST_DATA state to begin oscillator processing
-        curr_fl_r <= target_fl_dout_w;                  // Frequency low
-        curr_fh_r <= target_fh_dout_w;                  // Frequency high
-        curr_vol_r <= target_vol_dout_w;                // Volume
-        curr_wds_r <= target_wds_dout_w;                // Waveform data sample
-        curr_wtp_r <= target_wtp_dout_w;                // Waveform table pointer
-        curr_control_r <= target_control_dout_w;        // Control
-        curr_rts_r <= target_rts_dout_w;                // Resolution/table size
-        curr_acc_r <= target_acc_dout_w;                // Accumulator
+        curr_fl_r <= ram_fl_dout_w;                  // Frequency low
+        curr_fh_r <= ram_fh_dout_w;                  // Frequency high
+        curr_vol_r <= ram_vol_dout_w;                // Volume
+        curr_wds_r <= ram_wds_dout_w;                // Waveform data sample
+        curr_wtp_r <= ram_wtp_dout_w;                // Waveform table pointer
+        curr_control_r <= ram_control_dout_w;        // Control
+        curr_rts_r <= ram_rts_dout_w;                // Resolution/table size
+        curr_acc_r <= ram_acc_dout_w;                // Accumulator
 
-        target_osc_control_r <= partner_osc_w;
+        ram_control_osc_r <= partner_osc_w;
 
         osc_state_r <= OSC_LOAD_PARTNER_CONTROL;             // Request data from memory
     endtask: osc_load_registers
 
     task automatic osc_load_partner_control();
-        partner_control_r <= target_control_dout_w;
-        target_osc_control_r <= curr_osc_r + 1'b1;
+        partner_control_r <= ram_control_dout_w;
+        ram_control_osc_r <= curr_osc_r + 1'b1;
         osc_state_r <= OSC_LOAD_NEXT_CONTROL;
     endtask: osc_load_partner_control
 
     task automatic osc_load_next_control();
-        next_control_r <= target_control_dout_w;
-        target_osc_control_r <= curr_osc_r - 1'b1;
+        next_control_r <= ram_control_dout_w;
+        ram_control_osc_r <= curr_osc_r - 1'b1;
         osc_state_r <= OSC_REQUEST_DATA;
     endtask: osc_load_next_control
 
@@ -797,15 +829,15 @@ module doc5503 #(
         end else begin
             // When halted but in one-shot mode, clear accumulator
             if (curr_mode_w[0]) begin
-                target_acc_we_r <= 1'b1;
-                target_acc_din_r <= '0;
+                ram_acc_we_r <= 1'b1;
+                ram_acc_din_r <= '0;
             end
             // When halted, skip OUT and return to IDLE state
             osc_state_r <= OSC_IDLE;
         end                                
 
         // load prev control register (needed later)
-        prev_control_r <= target_control_dout_w;
+        prev_control_r <= ram_control_dout_w;
     endtask: osc_request_data
 
     task automatic osc_handle_data();
@@ -820,14 +852,15 @@ module doc5503 #(
 
         if (loaded_wds_pending_r) begin
             loaded_wds_pending_r <= 1'b0;
-            target_wds_we_r <= 1'b1;
-            target_wds_din_r <= loaded_wds_r;
+            ram_wds_we_r <= 1'b1;
+            ram_wds_din_r <= loaded_wds_r;
             curr_wds_r <= loaded_wds_r;
             if (loaded_wds_r == 8'h00) begin
                 halt_zero_r <= 1'b1;                                    // Set halt zero flag
                 osc_state_r <= OSC_HALT;
+            end else begin
+                osc_state_r <= OSC_OUT;
             end
-            else osc_state_r <= OSC_OUT;
         end
 
     endtask: osc_handle_data
@@ -844,9 +877,9 @@ module doc5503 #(
 
         if ((curr_mode_w == MODE_SYNC_AM) & curr_osc_odd_w) begin           // Sync AM Mode, odd oscillator outputs nothing
             if ((curr_osc_r != 5'd31) & !next_halt_w) begin                     // if next oscillator is not halted
-                target_osc_vol_r <= curr_osc_r + 1'b1;                      // set target oscillator to next one
-                target_vol_we_r <= 1'b1;                                    // write to volume register
-                target_vol_din_r <= curr_wds_r;                             // set volume to waveform data
+                ram_vol_osc_r <= curr_osc_r + 1'b1;                      // set target oscillator to next one
+                ram_vol_we_r <= 1'b1;                                    // write to volume register
+                ram_vol_din_r <= curr_wds_r;                             // set volume to waveform data
             end
             // Skip mixing for odd oscillators in SYNC_AM mode
             osc_state_r <= OSC_ACC;
@@ -894,8 +927,8 @@ module doc5503 #(
         automatic logic [23:0] curr_acc_mask_w = {16'((1 << (5'd9 + curr_res_w)) - 1), 8'hFF};
         automatic int high_bit_w = 17 + curr_res_w;
         automatic logic overflow = temp_acc[high_bit_w];
-        target_acc_we_r <= 1'b1;
-        target_acc_din_r <= temp_acc[23:0] & curr_acc_mask_w;      // wrap around address
+        ram_acc_we_r <= 1'b1;
+        ram_acc_din_r <= temp_acc[23:0] & curr_acc_mask_w;      // wrap around address
 
         osc_state_r <= OSC_IDLE;
         if (overflow) begin
@@ -915,9 +948,9 @@ module doc5503 #(
                 // we're even, so if the odd oscillator 1 below us is playing,
                 // restart it.
                 if (!prev_halt_w) begin
-                    target_osc_acc_r <= curr_osc_r - 1'b1;                // set target oscillator to previous one
-                    target_acc_we_r <= 1'b1;                              // write to accumulator register
-                    target_acc_din_r <= '0;                               // set accumulator to zero
+                    ram_acc_osc_r <= curr_osc_r - 1'b1;                // set target oscillator to previous one
+                    ram_acc_we_r <= 1'b1;                              // write to accumulator register
+                    ram_acc_din_r <= '0;                               // set accumulator to zero
                 end
             end
         end
@@ -932,14 +965,14 @@ module doc5503 #(
         // even oscillators with odd partners in SWAP mode, OSC_IDLE otherwise
         // MODE_ONE_SHOT, MODE_SWAP, or zero byte
         if (curr_mode_w[0] || halt_zero_r) begin
-            target_control_we_r <= 1'b1;                                   // write to control register
-            target_control_din_r <= curr_control_r | 1'b1;                 // set halt bit
+            ram_control_we_r <= 1'b1;                                   // write to control register
+            ram_control_din_r <= {curr_control_r[7:1], 1'b1};           // set halt bit
         end
 
         osc_state_r <= OSC_IDLE;
 
 	    // if we're in swap mode, start the partner
-        if (curr_mode_w == MODE_SWAP) begin                                 // Swap Mode
+        if (curr_mode_w == MODE_SWAP) begin                             // Swap Mode
             osc_state_r <= OSC_START_PARTNER;
         end else begin
 		    // if we're not swap and we're the even oscillator of the pair and the partner's swap
@@ -957,13 +990,13 @@ module doc5503 #(
         // Used specifically for SWAP mode to implement alternate triggering behavior
         // Always transitions back to OSC_IDLE after starting partner
 
-        target_osc_control_r <= partner_osc_w;                          // set target oscillator to partner
-        target_control_we_r <= 1'b1;                                    // write to control register
-        target_control_din_r <= partner_control_r & 8'b11111110;        // set halt bit to zero
+        ram_control_osc_r <= partner_osc_w;                         // set target oscillator to partner
+        ram_control_we_r <= 1'b1;                                   // write to control register
+        ram_control_din_r <= {partner_control_r[7:1], 1'b0};        // set halt bit to zero
 
-        target_osc_acc_r <= partner_osc_w;                              // set target oscillator to partner
-        target_acc_we_r <= 1'b1;                                        // write to accumulator register
-        target_acc_din_r <= '0;                                         // set accumulator to zero
+        ram_acc_osc_r <= partner_osc_w;                             // set target oscillator to partner
+        ram_acc_we_r <= 1'b1;                                       // write to accumulator register
+        ram_acc_din_r <= '0;                                        // set accumulator to zero
 
         // After halting partner, skip the current output
         osc_state_r <= OSC_IDLE;
@@ -976,8 +1009,8 @@ module doc5503 #(
         // This behavior was verified on actual Apple IIgs hardware
         // Transitions back to OSC_IDLE after retriggering
 
-        target_control_we_r <= 1'b1;                                    // write to control register
-        target_control_din_r <= curr_control_r & 8'b11111110;        // set halt bit to zero    
+        ram_control_we_r <= 1'b1;                                   // write to control register
+        ram_control_din_r <= {curr_control_r[7:1], 1'b0};           // set halt bit to zero    
 
         osc_state_r <= OSC_IDLE;
     endtask: osc_retrigger
@@ -993,10 +1026,14 @@ module osc_reg_ram #(
     input [DATA_WIDTH-1:0] data_i,
     output [DATA_WIDTH-1:0] data_o
 );
-    // This should infer as a RAM16 single port SSRAM during synthesis
+    // This should infer as a RAM16 single port SSRAM during synthesis on Gowin
     // that is implemented in LUTs via Configurable Function Units,
-    // allowing for synchronous write and asynchronous read
-    // Other FPGA families may use different synthesis directives
+    // allowing for synchronous write and asynchronous read.
+    // Other FPGA families may use different synthesis directives.
+    // Use of a different RAM structure like blockram might require
+    // a different approach if asynchronous read is not supported, such as
+    // requiring waiting an additional clock cycle from address valid to
+    // data available.
     reg [DATA_WIDTH-1:0] osc_reg_r[32] /*synthesis syn_ramstyle="distributed_ram"*/; 
     always_ff @(posedge clk_i) begin
         if (we_i) begin
