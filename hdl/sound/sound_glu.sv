@@ -32,6 +32,9 @@ module sound_glu #(
     output [15:0] audio_r_o,
 
     output [7:0] debug_osc_en_o,  // Debug output for oscillator enable register
+    output [1:0] debug_osc_mode_o[8], // Debug output for oscillator mode register;
+    output [7:0] debug_osc_halt_o, // Debug output for oscillator halt register
+
 
     sdram_port_if.client glu_mem_if,
     sdram_port_if.client doc_mem_if
@@ -154,6 +157,11 @@ module sound_glu #(
     wire [7:0] doc_osc_en_w;
     assign debug_osc_en_o = doc_osc_en_w;
 
+    wire [1:0] osc_mode_w[8];
+    assign debug_osc_mode_o = osc_mode_w;
+    wire [7:0] osc_halt_w;
+    assign debug_osc_halt_o = osc_halt_w;
+
     doc5503 #(
     ) doc5503 (
         .clk_i(a2bus_if.clk_logic),
@@ -173,7 +181,9 @@ module sound_glu #(
         .mono_mix_o(),
         .channel_o(),
         .ready_o(),
-        .osc_en_o(doc_osc_en_w)
+        .osc_en_o(doc_osc_en_w),
+        .osc_mode_o(osc_mode_w),
+        .osc_halt_o(osc_halt_w)
     );
 
     // Volume is inverted for right shift (0 is min volume, 15 is max volume)

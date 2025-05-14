@@ -76,7 +76,10 @@ module doc5503 #(
     
     output logic ready_o,          // Indicate when out of reset and ready to process
 
-    output [7:0] osc_en_o   // Debug output for oscillator enable register
+    output [7:0] osc_en_o,   // Debug output for oscillator enable register
+
+    output [1:0] osc_mode_o[8], // Debug output for oscillator mode register;
+    output [7:0] osc_halt_o // Debug output for oscillator halt register
 
 );
 
@@ -115,6 +118,11 @@ module doc5503 #(
     reg [7:0] osc_int_r;            // $E0    : Oscillator Interrupt Register
     reg [7:0] osc_en_r;             // $E1    : Oscillator Enable Register
     assign osc_en_o = osc_en_r;
+
+    reg [1:0] osc_mode_r[8];         // $E2-E9 : Oscillator Mode Register
+    assign osc_mode_o = osc_mode_r;
+    reg [7:0] osc_halt_r;              // $EA-EF : Oscillator Halt Register
+    assign osc_halt_o = osc_halt_r;
 
     // Oscillator registers as RAM
     // Necessary to use RAMs to implement the large number of registers but adds
@@ -251,7 +259,7 @@ module doc5503 #(
     reg [4:0] curr_osc_r;
     wire curr_osc_odd_w = curr_osc_r[0];
     wire curr_osc_even_w = ~curr_osc_odd_w;
-    wire [4:0] partner_osc_w = 5'(curr_osc_r ^ 1'b1);
+    wire [4:0] partner_osc_w = curr_osc_r ^ 5'b1;
 
     wire [2:0] curr_wts_w = curr_rts_r[5:3];
     wire [2:0] curr_res_w = curr_rts_r[2:0];
@@ -834,7 +842,12 @@ module doc5503 #(
             end
             // When halted, skip OUT and return to IDLE state
             osc_state_r <= OSC_IDLE;
-        end                                
+        end
+
+        if (curr_osc_r < 5'd8) begin
+            osc_mode_r[curr_osc_r[2:0]] <= curr_mode_w;
+            osc_halt_r[3'd7 - curr_osc_r[2:0]] <= curr_control_r[0];
+        end
 
         // load prev control register (needed later)
         prev_control_r <= ram_control_dout_w;
@@ -967,6 +980,7 @@ module doc5503 #(
         if (curr_mode_w[0] || halt_zero_r) begin
             ram_control_we_r <= 1'b1;                                   // write to control register
             ram_control_din_r <= {curr_control_r[7:1], 1'b1};           // set halt bit
+            curr_control_r <= {curr_control_r[7:1], 1'b1};              // set halt bit in working copy
         end
 
         osc_state_r <= OSC_IDLE;
@@ -1005,7 +1019,6 @@ module doc5503 #(
     task automatic osc_retrigger();
         // Handles the specific edge case where an even oscillator retriggering is needed
         // This occurs when the even oscillator is halted but its odd partner is in SWAP mode
-        // Copies the partner's control value (with halt bit cleared) to the current oscillator
         // This behavior was verified on actual Apple IIgs hardware
         // Transitions back to OSC_IDLE after retriggering
 

@@ -637,6 +637,8 @@ module top #(
     wire [7:0] sg_d_w;
     wire sg_rd_w;
     wire [7:0] doc_osc_en_w;   // Debug signal for DOC oscillator enable register
+    wire [1:0] doc_osc_mode_w[8];
+    wire [7:0]  doc_osc_halt_w;
 
     sound_glu #(
         .ENABLE(ENSONIQ_ENABLE)
@@ -649,6 +651,8 @@ module top #(
         .audio_r_o(sg_audio_r),
         
         .debug_osc_en_o(doc_osc_en_w),   // Capture oscillator enable register value
+        .debug_osc_mode_o(doc_osc_mode_w), // Capture oscillator mode register values
+        .debug_osc_halt_o(doc_osc_halt_w), // Capture oscillator halt register value
         
         .glu_mem_if(mem_ports[GLU_MEM_PORT]),
         .doc_mem_if(mem_ports[DOC_MEM_PORT])
@@ -788,20 +792,7 @@ module top #(
     // Interrupts
 
     assign irq_n_w = mb_irq_n && vdp_irq_n && ssc_irq_n;
-
-    // Debug signals from sound GLU for LED display
-    wire sg_debug_doc_active;
-    wire sg_debug_osc_enabled;
-    wire sg_debug_wave_reads;
-    
-    // Debug indicators with long persistence for human visibility
-    reg [7:0] debug_doc_access_count = 8'h00;
-    reg [24:0] wavetable_read_counter = 0;     // Long counter for visible persistence
-    reg wavetable_read_indicator = 1'b0;       // Special indicator that lights when wavetable memory is read
-    reg [24:0] doc_access_counter = 0;         // Long counter for visible persistence
-    reg doc_access_indicator = 1'b0;           // Persisted indicator for DOC register writes
-    reg [24:0] debug_heartbeat_counter = 0;    // Slow ~1Hz heartbeat counter for human visibility
-    
+        
     // Audio
 
     // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
@@ -910,13 +901,13 @@ module top #(
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
 
-        .debug_hex_0_i (doc_osc_en_w),  // Display DOC oscillator enable register
-        .debug_hex_1_i (8'h00),         // Placeholder for debug hex 1
-        .debug_hex_2_i (8'h00),         // Placeholder for debug hex 2
-        .debug_hex_3_i (8'h00),         // Placeholder for debug hex 3
+        .debug_hex_0_i ({2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]}),  // Display DOC oscillator enable register
+        .debug_hex_1_i ({2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]}),         // Placeholder for debug hex 1
+        .debug_hex_2_i ({2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]}),         // Placeholder for debug hex 2
+        .debug_hex_3_i ({2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]}),         // Placeholder for debug hex 3
 
-        .debug_bits_0_i (8'h00),        // Placeholder for debug bits 0
-        .debug_bits_1_i (8'h00),        // Placeholder for debug bits 1
+        .debug_bits_0_i (doc_osc_halt_w),        // Placeholder for debug bits 0
+        .debug_bits_1_i (8'h01),        // Placeholder for debug bits 1
 
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),
