@@ -541,6 +541,7 @@ module doc5503 #(
                             ram_control_din_r <= host_data_r;
                             ram_control_we_r <= 1'b1;
                             if (!host_data_r[0]) begin
+                                ram_acc_osc_r <= host_addr_r[4:0];
                                 ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
                                 ram_acc_we_r <= 1'b1;
                             end

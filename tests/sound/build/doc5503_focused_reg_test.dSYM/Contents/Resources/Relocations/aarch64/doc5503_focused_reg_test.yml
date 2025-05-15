@@ -1,5 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     'build/doc5503_focused_reg_test'
-relocations:     []
-...

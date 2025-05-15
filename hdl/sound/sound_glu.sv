@@ -100,18 +100,26 @@ module sound_glu #(
             sound_ptr_hi_r <= 8'h00;
         end else begin
 
-            if (ENABLE && glu_sel_w && !a2bus_if.rw_n && a2bus_if.data_in_strobe) begin
-                case (a2bus_if.addr[1:0])
-                    2'b00: sound_control_r <= a2bus_if.data;
-                    2'b01: begin
-                        sound_data_r <= a2bus_if.data;
+            if (ENABLE && glu_sel_w && a2bus_if.data_in_strobe) begin
+                if (!a2bus_if.rw_n) begin
+                    case (a2bus_if.addr[1:0])
+                        2'b00: sound_control_r <= a2bus_if.data;
+                        2'b01: begin
+                            sound_data_r <= a2bus_if.data;
+                            if (auto_inc_w) begin
+                                {sound_ptr_hi_r, sound_ptr_lo_r} <= {sound_ptr_hi_r, sound_ptr_lo_r} + 1'd1;
+                            end
+                        end
+                        2'b10: sound_ptr_lo_r <= a2bus_if.data;
+                        2'b11: sound_ptr_hi_r <= a2bus_if.data;
+                    endcase
+                end else begin
+                    if (a2bus_if.addr[1:0] == 2'b01) begin
                         if (auto_inc_w) begin
                             {sound_ptr_hi_r, sound_ptr_lo_r} <= {sound_ptr_hi_r, sound_ptr_lo_r} + 1'd1;
                         end
                     end
-                    2'b10: sound_ptr_lo_r <= a2bus_if.data;
-                    2'b11: sound_ptr_hi_r <= a2bus_if.data;
-                endcase
+                end
             end
 
         end
