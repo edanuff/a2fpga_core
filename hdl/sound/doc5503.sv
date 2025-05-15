@@ -404,6 +404,7 @@ module doc5503 #(
     reg loaded_wds_pending_r;
 
     reg halt_zero_r = 1'b0;
+    reg halt_overflow_r = 1'b0;
 
     reg host_request_pending_r = 1'b0;
     reg device_response_pending_r = 1'b0;
@@ -415,6 +416,7 @@ module doc5503 #(
             wave_rd_o <= '0;
             loaded_wds_pending_r <= '0;
             halt_zero_r <= 1'b0;
+            halt_overflow_r <= 1'b0;
 
             host_request_pending_r <= 1'b0;
             device_response_pending_r <= 1'b0;
@@ -775,6 +777,7 @@ module doc5503 #(
         // Init other working values
         curr_output_r <= '0;
         halt_zero_r <= 1'b0;
+        halt_overflow_r <= 1'b0;
 
         osc_state_r <= OSC_LOAD_REGISTERS;
     endtask: osc_start
@@ -941,6 +944,7 @@ module doc5503 #(
         automatic logic [23:0] curr_acc_mask_w = {16'((1 << (5'd9 + curr_res_w)) - 1), 8'hFF};
         automatic int high_bit_w = 17 + curr_res_w;
         automatic logic overflow = temp_acc[high_bit_w];
+        halt_overflow_r <= overflow;
         ram_acc_we_r <= 1'b1;
         ram_acc_din_r <= temp_acc[23:0] & curr_acc_mask_w;      // wrap around address
 
