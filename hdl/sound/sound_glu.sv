@@ -35,7 +35,6 @@ module sound_glu #(
     output [1:0] debug_osc_mode_o[8], // Debug output for oscillator mode register;
     output [7:0] debug_osc_halt_o, // Debug output for oscillator halt register
 
-
     sdram_port_if.client glu_mem_if,
     sdram_port_if.client doc_mem_if
     
@@ -86,26 +85,46 @@ module sound_glu #(
     // and for future standalone IIgs core
     assign glu_mem_if.rd = '0;
     // DOC memory is at 0x4_0000/8 or 0x1_0000/32
-    assign glu_mem_if.addr = {4'b0, 1'b1, 2'b0, sound_ptr_hi_r, sound_ptr_lo_r[7:2]};
-    assign glu_mem_if.wr = ENABLE && glu_sel_w && access_ram_w && !a2bus_if.rw_n && a2bus_if.data_in_strobe;
-    assign glu_mem_if.byte_en = 1'b1 << sound_ptr_lo_r[1:0];
+    reg [20:0] glu_mem_addr_r;
+    assign glu_mem_if.addr = glu_mem_addr_r;
+    reg glu_mem_wr_r;
+    assign glu_mem_if.wr = glu_mem_wr_r;
+    reg [3:0] glu_mem_byte_en_r;
+    assign glu_mem_if.byte_en = glu_mem_byte_en_r;
     assign glu_mem_if.data = {a2bus_if.data, a2bus_if.data, a2bus_if.data, a2bus_if.data};
+
+    reg doc_wr_r;
+    reg [7:0] doc_addr_r;
 
     always_ff @(posedge a2bus_if.clk_logic) begin
 
         if (!a2bus_if.system_reset_n) begin
+            glu_mem_wr_r <= 1'b0;
+            glu_mem_addr_r <= 21'h0;
+            glu_mem_byte_en_r <= 4'b1111;
             sound_control_r <= 8'h0F;
             sound_data_r <= 8'h00;
             sound_ptr_lo_r <= 8'h00;
             sound_ptr_hi_r <= 8'h00;
         end else begin
-
+            glu_mem_wr_r <= 1'b0;
+            doc_wr_r <= 1'b0;
             if (ENABLE && glu_sel_w && a2bus_if.data_in_strobe) begin
                 if (!a2bus_if.rw_n) begin
                     case (a2bus_if.addr[1:0])
                         2'b00: sound_control_r <= a2bus_if.data;
                         2'b01: begin
                             sound_data_r <= a2bus_if.data;
+                            if (access_ram_w) begin
+                                // write to sound RAM
+                                glu_mem_wr_r <= 1'b1;
+                                glu_mem_addr_r <= {4'b0, 1'b1, 2'b0, sound_ptr_hi_r, sound_ptr_lo_r[7:2]};
+                                glu_mem_byte_en_r <= 1'b1 << sound_ptr_lo_r[1:0];
+                            end else if (access_doc_w) begin
+                                // write to DOC
+                                doc_wr_r <= 1'b1;
+                                doc_addr_r <= sound_ptr_lo_r;
+                            end
                             if (auto_inc_w) begin
                                 {sound_ptr_hi_r, sound_ptr_lo_r} <= {sound_ptr_hi_r, sound_ptr_lo_r} + 1'd1;
                             end
@@ -162,22 +181,22 @@ module sound_glu #(
     //wire signed [15:0] channel_w[15:0]; 
 
     // Debug: Capture and expose the oscillator enable register
-    wire [7:0] doc_osc_en_w;
-    assign debug_osc_en_o = doc_osc_en_w;
+    wire [7:0] debug_doc_osc_en_w;
+    assign debug_osc_en_o = debug_doc_osc_en_w;
 
-    wire [1:0] osc_mode_w[8];
-    assign debug_osc_mode_o = osc_mode_w;
-    wire [7:0] osc_halt_w;
-    assign debug_osc_halt_o = osc_halt_w;
+    wire [1:0] debug_osc_mode_w[8];
+    assign debug_osc_mode_o = debug_osc_mode_w;
+    wire [7:0] debug_osc_halt_w;
+    assign debug_osc_halt_o = debug_osc_halt_w;
 
     doc5503 #(
     ) doc5503 (
         .clk_i(a2bus_if.clk_logic),
         .reset_n_i(a2bus_if.system_reset_n),
         .clk_en_i(a2bus_if.clk_7m_posedge),
-        .cs_n_i(~(sd_sel_w & access_doc_w & !a2bus_if.rw_n & a2bus_if.data_in_strobe)),
+        .cs_n_i(~doc_wr_r),
         .we_n_i(1'b0),
-        .addr_i(sound_ptr_lo_r),
+        .addr_i(doc_addr_r),
         .data_i(a2bus_if.data),
         .data_o(doc_data_o_w),
         .wave_address_o(wave_addr_w),
@@ -189,9 +208,9 @@ module sound_glu #(
         .mono_mix_o(),
         .channel_o(),
         .ready_o(),
-        .osc_en_o(doc_osc_en_w),
-        .osc_mode_o(osc_mode_w),
-        .osc_halt_o(osc_halt_w)
+        .debug_osc_en_o(debug_doc_osc_en_w),
+        .debug_osc_mode_o(debug_osc_mode_w),
+        .debug_osc_halt_o(debug_osc_halt_w)
     );
 
     // Volume is inverted for right shift (0 is min volume, 15 is max volume)
