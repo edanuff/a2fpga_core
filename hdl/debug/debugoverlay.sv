@@ -12,6 +12,10 @@ module DebugOverlay #(
     input  wire [7:0]  debug_hex_1_i,
     input  wire [7:0]  debug_hex_2_i,
     input  wire [7:0]  debug_hex_3_i,
+    input  wire [7:0]  debug_hex_4_i,
+    input  wire [7:0]  debug_hex_5_i,
+    input  wire [7:0]  debug_hex_6_i,
+    input  wire [7:0]  debug_hex_7_i,
     
     input  wire [7:0]  debug_bits_0_i,
     input  wire [7:0]  debug_bits_1_i,
@@ -29,7 +33,7 @@ module DebugOverlay #(
     localparam CHAR_WIDTH  = 8;
     localparam CHAR_HEIGHT = 8;
     localparam NUM_CHARS   = 14;          // Number of characters in VERSION string
-    localparam NUM_DEBUG_CHARS = 8;       // 4 debug values x 2 hex digits each
+    localparam NUM_DEBUG_CHARS = 16;      // 8 debug values x 2 hex digits each
     localparam X_OFFSET    = 16;
     localparam Y_OFFSET    = 24;
     localparam DEBUG_SPACE = 8;           // Space between debug values
@@ -228,22 +232,30 @@ module DebugOverlay #(
                 end
             end
             else begin
-                // For debug hex value regions
-                if (debug_value_index == 2'd0) begin
-                    // First debug value (high or low nibble)
+                // For debug hex value regions based on screen position
+                if (rel_x >= debug_0_start && rel_x < debug_0_end) begin
                     x_bit = debug_nibble ? 3'(rel_debug_0 - CHAR_WIDTH) : rel_debug_0[2:0];
                 end
-                else if (debug_value_index == 2'd1) begin
-                    // Second debug value (high or low nibble)
+                else if (rel_x >= debug_1_start && rel_x < debug_1_end) begin
                     x_bit = debug_nibble ? 3'(rel_debug_1 - CHAR_WIDTH) : rel_debug_1[2:0];
                 end
-                else if (debug_value_index == 2'd2) begin
-                    // Third debug value (high or low nibble)
+                else if (rel_x >= debug_2_start && rel_x < debug_2_end) begin
                     x_bit = debug_nibble ? 3'(rel_debug_2 - CHAR_WIDTH) : rel_debug_2[2:0];
                 end
-                else if (debug_value_index == 2'd3) begin
-                    // Fourth debug value (high or low nibble)
+                else if (rel_x >= debug_3_start && rel_x < debug_3_end) begin
                     x_bit = debug_nibble ? 3'(rel_debug_3 - CHAR_WIDTH) : rel_debug_3[2:0];
+                end
+                else if (rel_x >= debug_4_start && rel_x < debug_4_end) begin
+                    x_bit = debug_nibble ? 3'(rel_debug_4 - CHAR_WIDTH) : rel_debug_4[2:0];
+                end
+                else if (rel_x >= debug_5_start && rel_x < debug_5_end) begin
+                    x_bit = debug_nibble ? 3'(rel_debug_5 - CHAR_WIDTH) : rel_debug_5[2:0];
+                end
+                else if (rel_x >= debug_6_start && rel_x < debug_6_end) begin
+                    x_bit = debug_nibble ? 3'(rel_debug_6 - CHAR_WIDTH) : rel_debug_6[2:0];
+                end
+                else if (rel_x >= debug_7_start && rel_x < debug_7_end) begin
+                    x_bit = debug_nibble ? 3'(rel_debug_7 - CHAR_WIDTH) : rel_debug_7[2:0];
                 end
             end
             // All cases covered, no latch needed
@@ -284,6 +296,10 @@ module DebugOverlay #(
     // For debug_hex_1_i: 2 chars starting at x_debug_start + 2*CHAR_WIDTH + DEBUG_SPACE
     // For debug_hex_2_i: 2 chars starting at x_debug_start + 4*CHAR_WIDTH + 2*DEBUG_SPACE
     // For debug_hex_3_i: 2 chars starting at x_debug_start + 6*CHAR_WIDTH + 3*DEBUG_SPACE
+    // For debug_hex_4_i: 2 chars starting at x_debug_start + 8*CHAR_WIDTH + 4*DEBUG_SPACE
+    // For debug_hex_5_i: 2 chars starting at x_debug_start + 10*CHAR_WIDTH + 5*DEBUG_SPACE
+    // For debug_hex_6_i: 2 chars starting at x_debug_start + 12*CHAR_WIDTH + 6*DEBUG_SPACE
+    // For debug_hex_7_i: 2 chars starting at x_debug_start + 14*CHAR_WIDTH + 7*DEBUG_SPACE
     // For debug_bits_0_i: 8 chars starting after debug_hex with DEBUG_SPACE
     // For debug_bits_1_i: 8 chars starting after debug_bits_0_i with DEBUG_SPACE
     
@@ -300,15 +316,27 @@ module DebugOverlay #(
     wire [9:0] debug_3_start = debug_2_end + 10'd8;  // DEBUG_SPACE = 8
     wire [9:0] debug_3_end = debug_3_start + 10'd16; // 2*CHAR_WIDTH = 16
     
+    wire [9:0] debug_4_start = debug_3_end + 10'd8;  // DEBUG_SPACE = 8
+    wire [9:0] debug_4_end = debug_4_start + 10'd16; // 2*CHAR_WIDTH = 16
+    
+    wire [9:0] debug_5_start = debug_4_end + 10'd8;  // DEBUG_SPACE = 8
+    wire [9:0] debug_5_end = debug_5_start + 10'd16; // 2*CHAR_WIDTH = 16
+    
+    wire [9:0] debug_6_start = debug_5_end + 10'd8;  // DEBUG_SPACE = 8
+    wire [9:0] debug_6_end = debug_6_start + 10'd16; // 2*CHAR_WIDTH = 16
+    
+    wire [9:0] debug_7_start = debug_6_end + 10'd8;  // DEBUG_SPACE = 8
+    wire [9:0] debug_7_end = debug_7_start + 10'd16; // 2*CHAR_WIDTH = 16
+    
     // Define bit display regions (8 characters each, one per bit)
-    wire [9:0] bits_0_start = debug_3_end + 10'd8;   // DEBUG_SPACE = 8
+    wire [9:0] bits_0_start = debug_7_end + 10'd8;   // DEBUG_SPACE = 8
     wire [9:0] bits_0_end = bits_0_start + 10'd64;   // 8*CHAR_WIDTH = 64
     
     wire [9:0] bits_1_start = bits_0_end + 10'd8;    // DEBUG_SPACE = 8
     wire [9:0] bits_1_end = bits_1_start + 10'd64;   // 8*CHAR_WIDTH = 64
     
     // Calculate positions for debug hex characters and bits
-    reg [3:0] debug_char_pos;
+    reg [3:0] debug_char_pos; // 3 bits for position (0-7) + 1 bit for nibble
     reg [1:0] debug_value_index;
     reg debug_nibble;
     
@@ -323,6 +351,10 @@ module DebugOverlay #(
     wire [9:0] rel_debug_1 = rel_x - debug_1_start;
     wire [9:0] rel_debug_2 = rel_x - debug_2_start;
     wire [9:0] rel_debug_3 = rel_x - debug_3_start;
+    wire [9:0] rel_debug_4 = rel_x - debug_4_start;
+    wire [9:0] rel_debug_5 = rel_x - debug_5_start;
+    wire [9:0] rel_debug_6 = rel_x - debug_6_start;
+    wire [9:0] rel_debug_7 = rel_x - debug_7_start;
     wire [9:0] rel_bits_0 = rel_x - bits_0_start;
     wire [9:0] rel_bits_1 = rel_x - bits_1_start;
     
@@ -330,9 +362,14 @@ module DebugOverlay #(
     wire in_space_0 = (rel_x >= debug_0_end && rel_x < debug_1_start);
     wire in_space_1 = (rel_x >= debug_1_end && rel_x < debug_2_start);
     wire in_space_2 = (rel_x >= debug_2_end && rel_x < debug_3_start);
-    wire in_space_3 = (rel_x >= debug_3_end && rel_x < bits_0_start);
-    wire in_space_4 = (rel_x >= bits_0_end && rel_x < bits_1_start);
-    wire in_any_space = in_space_0 || in_space_1 || in_space_2 || in_space_3 || in_space_4;
+    wire in_space_3 = (rel_x >= debug_3_end && rel_x < debug_4_start);
+    wire in_space_4 = (rel_x >= debug_4_end && rel_x < debug_5_start);
+    wire in_space_5 = (rel_x >= debug_5_end && rel_x < debug_6_start);
+    wire in_space_6 = (rel_x >= debug_6_end && rel_x < debug_7_start);
+    wire in_space_7 = (rel_x >= debug_7_end && rel_x < bits_0_start);
+    wire in_space_8 = (rel_x >= bits_0_end && rel_x < bits_1_start);
+    wire in_any_space = in_space_0 || in_space_1 || in_space_2 || in_space_3 || 
+                      in_space_4 || in_space_5 || in_space_6 || in_space_7 || in_space_8;
     
     always_comb begin
         // Default values
@@ -350,25 +387,49 @@ module DebugOverlay #(
             if (rel_x >= debug_0_start && rel_x < debug_0_end) begin
                 debug_value_index = 2'd0;
                 debug_nibble = (rel_debug_0 >= CHAR_WIDTH);
-                debug_char_pos = {2'd0, debug_nibble};
+                debug_char_pos = {3'd0, debug_nibble};
             end
             // Second set of hex digits (debug_hex_1_i)
             else if (rel_x >= debug_1_start && rel_x < debug_1_end) begin
                 debug_value_index = 2'd1;
                 debug_nibble = (rel_debug_1 >= CHAR_WIDTH);
-                debug_char_pos = {2'd1, debug_nibble};
+                debug_char_pos = {3'd1, debug_nibble};
             end
             // Third set of hex digits (debug_hex_2_i)
             else if (rel_x >= debug_2_start && rel_x < debug_2_end) begin
                 debug_value_index = 2'd2;
                 debug_nibble = (rel_debug_2 >= CHAR_WIDTH);
-                debug_char_pos = {2'd2, debug_nibble};
+                debug_char_pos = {3'd2, debug_nibble};
             end
             // Fourth set of hex digits (debug_hex_3_i)
             else if (rel_x >= debug_3_start && rel_x < debug_3_end) begin
                 debug_value_index = 2'd3;
                 debug_nibble = (rel_debug_3 >= CHAR_WIDTH);
-                debug_char_pos = {2'd3, debug_nibble};
+                debug_char_pos = {3'd3, debug_nibble};
+            end
+            // Fifth set of hex digits (debug_hex_4_i)
+            else if (rel_x >= debug_4_start && rel_x < debug_4_end) begin
+                debug_value_index = 2'd0;
+                debug_nibble = (rel_debug_4 >= CHAR_WIDTH);
+                debug_char_pos = {3'd4, debug_nibble};
+            end
+            // Sixth set of hex digits (debug_hex_5_i)
+            else if (rel_x >= debug_5_start && rel_x < debug_5_end) begin
+                debug_value_index = 2'd1;
+                debug_nibble = (rel_debug_5 >= CHAR_WIDTH);
+                debug_char_pos = {3'd5, debug_nibble};
+            end
+            // Seventh set of hex digits (debug_hex_6_i)
+            else if (rel_x >= debug_6_start && rel_x < debug_6_end) begin
+                debug_value_index = 2'd2;
+                debug_nibble = (rel_debug_6 >= CHAR_WIDTH);
+                debug_char_pos = {3'd6, debug_nibble};
+            end
+            // Eighth set of hex digits (debug_hex_7_i)
+            else if (rel_x >= debug_7_start && rel_x < debug_7_end) begin
+                debug_value_index = 2'd3;
+                debug_nibble = (rel_debug_7 >= CHAR_WIDTH);
+                debug_char_pos = {3'd7, debug_nibble};
             end
             // First set of bits (debug_bits_0_i)
             else if (rel_x >= bits_0_start && rel_x < bits_0_end) begin
@@ -392,10 +453,11 @@ module DebugOverlay #(
     end
     
     // Get the appropriate debug value based on index
-    wire [7:0] debug_value = (debug_value_index == 2'd0) ? debug_hex_0_i :
-                            (debug_value_index == 2'd1) ? debug_hex_1_i :
-                            (debug_value_index == 2'd2) ? debug_hex_2_i :
-                                                         debug_hex_3_i;
+    wire [7:0] debug_value =
+        (debug_value_index == 2'd0) ? (rel_x < debug_4_start ? debug_hex_0_i : debug_hex_4_i) :
+        (debug_value_index == 2'd1) ? (rel_x < debug_4_start ? debug_hex_1_i : debug_hex_5_i) :
+        (debug_value_index == 2'd2) ? (rel_x < debug_4_start ? debug_hex_2_i : debug_hex_6_i) :
+                                     (rel_x < debug_4_start ? debug_hex_3_i : debug_hex_7_i);
                                                          
     // Get the correct nibble from the debug value
     wire [3:0] debug_nibble_value = debug_nibble ? debug_value[3:0] : debug_value[7:4];
