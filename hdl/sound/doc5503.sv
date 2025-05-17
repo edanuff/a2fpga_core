@@ -76,10 +76,9 @@ module doc5503 #(
     
     output logic ready_o,          // Indicate when out of reset and ready to process
 
-    output [7:0] osc_en_o,   // Debug output for oscillator enable register
-
-    output [1:0] osc_mode_o[8], // Debug output for oscillator mode register;
-    output [7:0] osc_halt_o // Debug output for oscillator halt register
+    output [7:0] debug_osc_en_o,   // Debug output for oscillator enable register
+    output [1:0] debug_osc_mode_o[8], // Debug output for oscillator mode register;
+    output [7:0] debug_osc_halt_o // Debug output for oscillator halt register
 
 );
 
@@ -117,12 +116,13 @@ module doc5503 #(
 
     reg [7:0] osc_int_r;            // $E0    : Oscillator Interrupt Register
     reg [7:0] osc_en_r;             // $E1    : Oscillator Enable Register
-    assign osc_en_o = osc_en_r;
+    assign debug_osc_en_o = osc_en_r;
 
-    reg [1:0] osc_mode_r[8];         // $E2-E9 : Oscillator Mode Register
-    assign osc_mode_o = osc_mode_r;
-    reg [7:0] osc_halt_r;              // $EA-EF : Oscillator Halt Register
-    assign osc_halt_o = osc_halt_r;
+    reg [1:0] debug_osc_mode_r[8];
+    assign debug_osc_mode_o = debug_osc_mode_r;
+    reg [7:0] debug_osc_halt_r;
+    assign debug_osc_halt_o = debug_osc_halt_r;
+
 
     // Oscillator registers as RAM
     // Necessary to use RAMs to implement the large number of registers but adds
@@ -264,6 +264,7 @@ module doc5503 #(
     wire [2:0] curr_wts_w = curr_rts_r[5:3];
     wire [2:0] curr_res_w = curr_rts_r[2:0];
     wire [4:0] curr_shift_w = 5'd9 + curr_res_w - curr_wts_w;
+    wire [23:0] curr_acc_mask_w = {8'((1 << (1'd1 + curr_res_w)) - 1), 16'hFFFF};
 
     wire halt_w = curr_control_r[0];
     wire [1:0] curr_mode_w = curr_control_r[2:1];
@@ -340,6 +341,25 @@ module doc5503 #(
     localparam [1:0] CYCLE_REFRESH_0 = 2'b10;
     localparam [1:0] CYCLE_REFRESH_1 = 2'b11;
 
+   localparam int OSC_STATE_COUNT = 14;
+    typedef enum logic [$clog2(OSC_STATE_COUNT)-1:0] {
+        OSC_IDLE,
+        OSC_START,
+        OSC_LOAD_REGISTERS,
+        OSC_LOAD_PARTNER_CONTROL,
+        OSC_LOAD_NEXT_CONTROL,
+        OSC_REQUEST_DATA,
+        OSC_HANDLE_DATA,
+        OSC_OUT,
+        OSC_MIX,
+        OSC_ACC,
+        OSC_HALT,
+        OSC_HALT_ONE_SHOT_OR_ZERO_BYTE,
+        OSC_START_PARTNER,
+        OSC_RETRIGGER
+    } osc_state_e;
+    osc_state_e osc_state_r; 
+    
     reg [1:0] cycle_state_r;
     wire ready_w = (cycle_state_r != CYCLE_RESET);
     assign ready_o = ready_w;
@@ -382,25 +402,6 @@ module doc5503 #(
         end
     end
 
-   localparam int OSC_STATE_COUNT = 14;
-    typedef enum logic [$clog2(OSC_STATE_COUNT)-1:0] {
-        OSC_IDLE,
-        OSC_START,
-        OSC_LOAD_REGISTERS,
-        OSC_LOAD_PARTNER_CONTROL,
-        OSC_LOAD_NEXT_CONTROL,
-        OSC_REQUEST_DATA,
-        OSC_HANDLE_DATA,
-        OSC_OUT,
-        OSC_MIX,
-        OSC_ACC,
-        OSC_HALT,
-        OSC_HALT_ONE_SHOT_OR_ZERO_BYTE,
-        OSC_START_PARTNER,
-        OSC_RETRIGGER
-    } osc_state_e;
-    osc_state_e osc_state_r; 
-    
     reg loaded_wds_pending_r;
 
     reg halt_zero_r = 1'b0;
@@ -542,11 +543,11 @@ module doc5503 #(
                             ram_control_osc_r <= host_addr_r[4:0];
                             ram_control_din_r <= host_data_r;
                             ram_control_we_r <= 1'b1;
-                            if (!host_data_r[0]) begin
-                                ram_acc_osc_r <= host_addr_r[4:0];
-                                ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
-                                ram_acc_we_r <= 1'b1;
-                            end
+                            //if (!host_data_r[0]) begin
+                            //    ram_acc_osc_r <= host_addr_r[4:0];
+                            //    ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
+                            //    ram_acc_we_r <= 1'b1;
+                            //end
                         end
                         3'b110: begin                               // $C0-DF
                             ram_rts_osc_r <= host_addr_r[4:0];
@@ -657,7 +658,7 @@ module doc5503 #(
         ram_vol_din_r <= '0;
         ram_wds_din_r <= '0;
         ram_wtp_din_r <= '0;
-        ram_control_din_r <= '0; // Ensure oscillators start not halted
+        ram_control_din_r <= '1; // Ensure oscillators start not halted
         ram_rts_din_r <= '0;
         ram_acc_din_r <= '0;
 
@@ -821,17 +822,18 @@ module doc5503 #(
         //           wave_address_o and wave_rd_o (for memory requests)
         // State transitions: OSC_HANDLE_DATA if requesting data, OSC_IDLE if halted
 
+            automatic logic [15:0] curr_wave_addr_w = 16'(curr_acc_r >> curr_shift_w);
         if (!halt_w) begin
             // Address Output Multiplexer - create wave table address from accumulator
-            automatic logic [15:0] curr_wave_addr_w = 16'(curr_acc_r >> curr_shift_w);
             // Create mask for wave table pointer based on wave table size
-            automatic logic [7:0] ptr_hi_mask_w = 8'hFF << curr_wts_w;
+            automatic logic [7:0] ptr_hi_mask_w = 8'(8'hFF << curr_wts_w);
             // Create pointer to wave table with ignored bits masked out
             automatic logic [15:0] ptr_w = {ptr_hi_mask_w & curr_wtp_r, 8'b0};
             // 
             automatic logic [15:0] addr_w = curr_wave_addr_w | ptr_w;
 
             // Read next byte from SDRAM
+            loaded_wds_pending_r <= 1'b0;
             wave_rd_o <= 1'b1; 
             wave_address_o <= addr_w;
                                                 
@@ -849,8 +851,8 @@ module doc5503 #(
         end
 
         if (curr_osc_r < 5'd8) begin
-            osc_mode_r[curr_osc_r[2:0]] <= curr_mode_w;
-            osc_halt_r[3'd7 - curr_osc_r[2:0]] <= curr_control_r[0];
+            debug_osc_mode_r[curr_osc_r[2:0]] <= curr_mode_w;
+            debug_osc_halt_r[3'd7 - curr_osc_r[2:0]] <= curr_control_r[0];
         end
 
         // load prev control register (needed later)
@@ -878,6 +880,10 @@ module doc5503 #(
             end else begin
                 osc_state_r <= OSC_OUT;
             end
+        end else if (clk_count_r == 3'd6) begin
+            // If no data received, set default waveform data to 0x80
+            curr_wds_r <= 8'h80;
+            osc_state_r <= OSC_OUT;
         end
 
     endtask: osc_handle_data
@@ -941,7 +947,6 @@ module doc5503 #(
         // State transitions: OSC_HALT on overflow, OSC_IDLE otherwise
         // Accumulator
         automatic logic [24:0] temp_acc = curr_acc_r + {curr_fh_r, curr_fl_r};
-        automatic logic [23:0] curr_acc_mask_w = {16'((1 << (5'd9 + curr_res_w)) - 1), 8'hFF};
         automatic int high_bit_w = 17 + curr_res_w;
         automatic logic overflow = temp_acc[high_bit_w];
         halt_overflow_r <= overflow;
@@ -1013,9 +1018,9 @@ module doc5503 #(
         ram_control_we_r <= 1'b1;                                   // write to control register
         ram_control_din_r <= {partner_control_r[7:1], 1'b0};        // set halt bit to zero
 
-        ram_acc_osc_r <= partner_osc_w;                             // set target oscillator to partner
-        ram_acc_we_r <= 1'b1;                                       // write to accumulator register
-        ram_acc_din_r <= '0;                                        // set accumulator to zero
+        //ram_acc_osc_r <= partner_osc_w;                             // set target oscillator to partner
+        //ram_acc_we_r <= 1'b1;                                       // write to accumulator register
+        //ram_acc_din_r <= '0;                                        // set accumulator to zero
 
         // After halting partner, skip the current output
         osc_state_r <= OSC_IDLE;
@@ -1027,8 +1032,8 @@ module doc5503 #(
         // This behavior was verified on actual Apple IIgs hardware
         // Transitions back to OSC_IDLE after retriggering
 
-        ram_control_we_r <= 1'b1;                                   // write to control register
-        ram_control_din_r <= {curr_control_r[7:1], 1'b0};           // set halt bit to zero    
+        //ram_control_we_r <= 1'b1;                                   // write to control register
+        //ram_control_din_r <= {curr_control_r[7:1], 1'b0};           // set halt bit to zero    
 
         osc_state_r <= OSC_IDLE;
     endtask: osc_retrigger
