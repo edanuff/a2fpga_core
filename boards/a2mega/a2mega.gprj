@@ -54,8 +54,8 @@
         <File path="../../hdl/video/vgc.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/video_control_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/video.hex" type="file.other" enable="1"/>
-        <File path="hdl/a2n20v2.cst" type="file.cst" enable="1"/>
-        <File path="hdl/a2n20v2.sdc" type="file.sdc" enable="1"/>
+        <File path="hdl/a2mega.cst" type="file.cst" enable="1"/>
+        <File path="hdl/a2mega.sdc" type="file.sdc" enable="1"/>
         <File path="hdl/bus/apple_bus.sv" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/clk_pll.v" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
