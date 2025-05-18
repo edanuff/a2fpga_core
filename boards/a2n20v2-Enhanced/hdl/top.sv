@@ -24,9 +24,11 @@
 // Ensoniq, PicoSoC, and DiskII are included via defines in the top module
 // Disk II requires PicoSoC
 
-`undef ENSONIQ
-`define PICOSOC
-`define DISKII
+`define ENSONIQ
+`undef PICOSOC
+`undef DISKII
+
+`include "datetime.svh"
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -128,7 +130,7 @@ module top #(
     wire hdmi_rst_n_w;
     wire a2_2M;
 
-    // PLL - 100Mhz from 27
+    // PLL - 54hz from 27
     clk_logic clk_logic_inst (
         .clkout(clk_logic_w),  //output clkout
         .lock(clk_logic_lock_w),  //output lock
@@ -138,7 +140,7 @@ module top #(
         .clkin(clk)  //input clkin
     );
 
-    // PLL - 125Mhz from 25
+    // PLL - 135Mhz from 27
     clk_hdmi clk_hdmi_inst (
         .clkout(clk_hdmi_w),  //output clkout
         .lock(clk_hdmi_lock_w),  //output lock
@@ -150,7 +152,28 @@ module top #(
 
     wire device_reset_n_w = rst_n & clk_logic_lock_w & clk_hdmi_lock_w;
 
-    wire system_reset_n_w = device_reset_n_w & a2_reset_n;
+    /*
+    wire a2_reset_n_w;
+    cdc cdc_a2reset (
+        .clk(clk_logic_w),
+        .i(a2_reset_n),
+        .o(a2_reset_n_w),
+        .o_n(),
+        .o_posedge(),
+        .o_negedge()
+    );
+    */
+
+    wire a2_reset_cdc_w;
+    cdc_fifo #(
+        .WIDTH(1)
+    ) cdc_a2reset (
+        .clk(clk_logic_w),
+        .i(a2_reset_n),
+        .o(a2_reset_cdc_w)
+    );
+
+    wire system_reset_n_w = device_reset_n_w & a2_reset_cdc_w;
 
     // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
     // delays Phi1 by 2 cycles = 40ns
@@ -159,7 +182,7 @@ module top #(
     wire phi1_posedge;
     wire phi1_negedge;
     wire clk_2m_posedge_w = phi1_posedge | phi1_negedge;
-    cdc cdc_phi1 (
+    cdc_denoise cdc_phi1 (
         .clk(clk_logic_w),
         .i(a2_phi1),
         .o(phi1),
@@ -172,7 +195,7 @@ module top #(
     wire clk_7m_posedge_w;
     wire clk_7m_negedge_w;
     wire clk_14m_posedge_w = clk_7m_posedge_w | clk_7m_negedge_w;
-    cdc cdc_7m (
+    cdc_denoise cdc_7m (
         .clk(clk_logic_w),
         .i(a2_7M),
         .o(clk_7m_w),
@@ -188,8 +211,8 @@ module top #(
     localparam VIDEO_MEM_PORT = 0;
     localparam MAIN_MEM_PORT = 1;
 `ifdef ENSONIQ
-    localparam GLU_MEM_PORT = 2;
-    localparam DOC_MEM_PORT = 3;
+    localparam GLU_MEM_PORT = 3;
+    localparam DOC_MEM_PORT = 2;
     `ifdef PICOSOC
     localparam SOC_MEM_PORT = 4;
         `ifdef DISKII
@@ -290,6 +313,8 @@ module top #(
 
     wire irq_n_w;
 
+    wire inh_n_w;
+
     wire data_out_en_w;
     wire [7:0] data_out_w;
 
@@ -331,6 +356,7 @@ module top #(
         .data_out_i(data_out_w),
 
         .irq_n_i(irq_n_w),
+        .inh_n_i(inh_n_w),
 
         .dip_switches_n_o(dip_switches_n_w),
 
@@ -383,7 +409,22 @@ module top #(
         .slot_if(slot_if)
     );
 
+wire picosoc_led;
+
 `ifdef PICOSOC
+
+    wire cardrom_release_w;
+    wire [0:7] cardrom_d_w;
+    wire cardrom_rd;
+
+    CardROM cardrom (
+        .a2bus_if(a2bus_if),
+
+        .data_o(cardrom_d_w),
+        .rd_en_o(cardrom_rd),
+        .inh_n_o(inh_n_w),
+        .req_rom_release_i(cardrom_release_w)
+    );
 
     // PicoSOC
 
@@ -395,8 +436,6 @@ module top #(
 
     //assign uart_tx = picosoc_uart_tx_w;
     assign picosoc_uart_rx_w = uart_rx;
-
-    wire picosoc_led;
 
     video_control_if video_control_if();
 
@@ -414,6 +453,9 @@ module top #(
         .data_o (picosoc_d_w),
         .rd_en_o(picosoc_rd_w),
         .irq_n_o(picosoc_irq_n),
+
+        .cardrom_active_i(!inh_n_w),
+        .cardrom_release_o(cardrom_release_w),
 
         .uart_rx_i(picosoc_uart_rx_w),
         .uart_tx_o(picosoc_uart_tx_w),
@@ -522,6 +564,13 @@ module top #(
 
     assign a2bus_control_if.ready = 1'b1;
 
+    wire [0:7] cardrom_d_w = 8'b0;
+    wire cardrom_rd = 1'b0;
+    assign inh_n_w = 1'b1;
+
+    assign picosoc_led = 1'b0;
+
+
 `endif
 
     // Video
@@ -589,23 +638,31 @@ module top #(
 `ifdef ENSONIQ
     wire [7:0] sg_d_w;
     wire sg_rd_w;
+    wire [7:0] doc_osc_en_w;   // Debug signal for DOC oscillator enable register
+    wire [1:0] doc_osc_mode_w[8];
+    wire [7:0]  doc_osc_halt_w;
 
     sound_glu #(
-        .ENABLE(ENSONIQ_ENABLE)  
+        .ENABLE(ENSONIQ_ENABLE)
     ) sg (
         .a2bus_if(a2bus_if),
         .data_o(sg_d_w),                 
         .rd_en_o(sg_rd_w),
-        .irq_n_o(),
 
         .audio_l_o(sg_audio_l),               
         .audio_r_o(sg_audio_r),
+        
+        .debug_osc_en_o(doc_osc_en_w),   // Capture oscillator enable register value
+        .debug_osc_mode_o(doc_osc_mode_w), // Capture oscillator mode register values
+        .debug_osc_halt_o(doc_osc_halt_w), // Capture oscillator halt register value
+    
         .glu_mem_if(mem_ports[GLU_MEM_PORT]),
         .doc_mem_if(mem_ports[DOC_MEM_PORT])
     );
 `else
     assign sg_audio_l = 16'b0;
     assign sg_audio_r = 16'b0;
+    wire [7:0] doc_osc_en_w = 8'h00; // Default value when ENSONIQ is disabled
 `endif
 
     // SuperSprite
@@ -725,19 +782,62 @@ module top #(
 
     // Data output
 
-    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || diskii_rd;
+    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || diskii_rd || cardrom_rd;
 
     assign data_out_w = ssc_rd ? ssc_d_w :
         ssp_rd ? ssp_d_w : 
         mb_rd ? mb_d_w : 
         diskii_rd ? diskii_d_w :
+        cardrom_rd ? cardrom_d_w :
         a2bus_if.data;
 
     // Interrupts
 
     assign irq_n_w = mb_irq_n && vdp_irq_n && ssc_irq_n;
-
+        
     // Audio
+
+    // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
+
+    wire [15:0] cdc_audio_l;
+    wire [15:0] cdc_audio_r;
+
+    // Mix all audio sources together to ensure at least one works
+    // Audio format notes:
+    // - sg_audio_l/r: 16-bit signed from DOC5503 (Ensoniq)
+    // - ssp_audio_w: 16-bit unsigned from SuperSprite
+    // - mb_audio_l/r: 10-bit unsigned from Mockingboard
+    // - speaker_audio_w: 1-bit from Apple speaker
+    
+    // Convert all to 16-bit signed for proper mixing
+    wire signed [15:0] mb_signed_l = {1'b0, mb_audio_l, 5'b0} - 16'h8000; // Unsigned to signed
+    wire signed [15:0] mb_signed_r = {1'b0, mb_audio_r, 5'b0} - 16'h8000;
+    wire signed [15:0] sp_signed = {1'b0, ssp_audio_w} - 16'h8000;
+    
+    // For the 1-bit speaker, use either positive or negative values to create a square wave
+    wire signed [15:0] speaker_signed = speaker_audio_w ? 16'h3000 : -16'h3000; 
+    
+    // Mix properly converted signed audio signals
+    wire signed [15:0] mixed_audio_l = sg_audio_l /* + sp_signed + mb_signed_l + speaker_signed */; 
+    wire signed [15:0] mixed_audio_r = sg_audio_r /* + sp_signed + mb_signed_r + speaker_signed */;
+    
+    cdc_fifo #(
+        .WIDTH(16),
+        .DEPTH(5) 
+    ) audio_cdc_left (
+        .clk(clk_pixel_w),
+        .i(mixed_audio_l),
+        .o(cdc_audio_l)
+    );
+
+    cdc_fifo #(
+        .WIDTH(16),
+        .DEPTH(5)
+    ) audio_cdc_right (
+        .clk(clk_pixel_w),
+        .i(mixed_audio_r),
+        .o(cdc_audio_r)
+    );
 
     wire speaker_audio_w;
 
@@ -777,9 +877,12 @@ module top #(
         .cy1(acy1),
         .cy2(acy2),
 
-        .is_signed(1'b0),
-        .core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
-        .core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
+        //.is_signed(1'b0),
+        //.core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
+        //.core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
+        .is_signed(1'b1),
+        .core_l(cdc_audio_l),
+        .core_r(cdc_audio_r),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
@@ -788,10 +891,44 @@ module top #(
 
     // HDMI
 
+    wire scanline_en = scanlines_w && hdmi_y[0];
+
+    wire [7:0] debug_r_w;
+    wire [7:0] debug_g_w;
+    wire [7:0] debug_b_w;
+    DebugOverlay #(
+        .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
+        .ENABLE(1'b1)
+    ) debug_overlay (
+        .clk_i          (clk_pixel_w),
+        .reset_n (device_reset_n_w),
+
+        .debug_hex_0_i ({2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]}),
+        .debug_hex_1_i ({2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]}),
+        .debug_hex_2_i ({2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]}), 
+        .debug_hex_3_i ({2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]}),
+        .debug_hex_4_i ('0),       
+        .debug_hex_5_i ('0),
+        .debug_hex_6_i ('0),
+        .debug_hex_7_i ('0), 
+
+        .debug_bits_0_i (doc_osc_halt_w), 
+        .debug_bits_1_i ('0),
+
+        .screen_x_i     (hdmi_x),
+        .screen_y_i     (hdmi_y),
+
+        .r_i            (scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w),
+        .g_i            (scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w),
+        .b_i            (scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w),
+
+        .r_o            (debug_r_w),
+        .g_o            (debug_g_w),
+        .b_o            (debug_b_w)
+    );  
+
     logic [2:0] tmds;
     wire tmdsClk;
-
-    wire scanline_en = scanlines_w && hdmi_y[0];
 
     hdmi #(
         .VIDEO_ID_CODE(2),
@@ -810,11 +947,12 @@ module top #(
         .clk_pixel(clk_pixel_w),
         .clk_audio(clk_audio_w),
         .rgb({
-            scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w,
-            scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w,
-            scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w
+            debug_r_w,
+            debug_g_w,
+            debug_b_w
         }),
         .reset(~device_reset_n_w),
+        //.audio_sample_word({cdc_audio_l, cdc_audio_r}),
         .audio_sample_word(audio_sample_word),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
@@ -834,6 +972,7 @@ module top #(
         .OEN(sleep_w && HDMI_SLEEP_ENABLE)
     );
 
+    
     always @(posedge clk_logic_w) begin 
         if (!s2) led <= {4'b1111, !picosoc_led};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};

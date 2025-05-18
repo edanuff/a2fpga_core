@@ -123,7 +123,7 @@ module top #(
     wire phi1_posedge;
     wire phi1_negedge;
     wire clk_2m_posedge_w = phi1_posedge | phi1_negedge;
-    cdc cdc_phi1 (
+    cdc_denoise cdc_phi1 (
         .clk(clk_logic_w),
         .i(a2_phi1),
         .o(phi1),
@@ -136,7 +136,7 @@ module top #(
     wire clk_7m_posedge_w;
     wire clk_7m_negedge_w;
     wire clk_14m_posedge_w = clk_7m_posedge_w | clk_7m_negedge_w;
-    cdc cdc_7m (
+    cdc_denoise cdc_7m (
         .clk(clk_logic_w),
         .i(a2_7M),
         .o(clk_7m_w),
