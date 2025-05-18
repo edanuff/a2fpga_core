@@ -36,3 +36,4 @@ src/picosoc/firmware/firmware.hex
 src/cardrom/cardrom_Output.txt
 src/cardrom/_FileInformation.txt
 src/cardrom/cardrom
+/.claude
