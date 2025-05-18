@@ -498,7 +498,7 @@ module doc5503 #(
         // Handles CPU register read/write access to DOC registers
         // Processes access to oscillator interrupt (0xE0) and enable (0xE1) registers
         // Handles access to oscillator-specific registers (frequency, volume, waveform, etc.)
-        // Handle host access to the registers
+
         if (host_request_pending_r) begin
             host_request_pending_r <= 1'b0;
 
@@ -631,6 +631,7 @@ module doc5503 #(
         // Initialize all oscillator registers during reset cycle
         // Sets frequency, volume, waveform, control registers to default values
         // Ensures all oscillators start in non-halted state with zeroed accumulators
+        // This differs from the original DOC5503 which initializes the register bits to 1
         // Called during CYCLE_RESET state only
 
          // Set target oscillators based on cycle time
@@ -657,7 +658,7 @@ module doc5503 #(
         ram_vol_din_r <= '0;
         ram_wds_din_r <= '0;
         ram_wtp_din_r <= '0;
-        ram_control_din_r <= '1; // Ensure oscillators start not halted
+        ram_control_din_r <= '1;
         ram_rts_din_r <= '0;
         ram_acc_din_r <= '0;
 
@@ -668,7 +669,6 @@ module doc5503 #(
         // Copies next_channel values to channel output registers
         // Updates mono_mix, left_mix, and right_mix final output values
         // Only updates final mix values when processing the last channel (15)
-        // Use this cycle to copy the channel sums to the output registers
 
         if (cycle_timer_r < 'd16) begin
             if (cycle_start_r) begin
@@ -709,8 +709,6 @@ module doc5503 #(
         // Second phase of output channel refresh cycle 
         // Resets next_channel accumulators for the next oscillator processing cycle
         // Clears mono_mix, left_mix, and right_mix accumulators when processing last channel
-        // Prepares all mixing registers for the next set of oscillators
-        // Use this cycle to zero the channel sums for the next cycle
 
         if (cycle_timer_r < 'd16) begin
             if (cycle_start_r) begin
@@ -760,7 +758,6 @@ module doc5503 #(
         // Waits for the start of a new cycle to begin processing
         // Handles host access to oscillator registers
         // Sets the oscillator state to OSC_START when a new cycle begins
-        // Needs: cycle_start_r (start of new cycle)
 
         osc_state_r <= OSC_IDLE;
         host_access();
@@ -783,8 +780,7 @@ module doc5503 #(
     endtask: osc_start
 
     task automatic osc_load_registers();
-        // Load all current oscillator registers from register file
-        // Resets working registers and clears halt_zero flag
+        // Load all current oscillator registers from register file RAM
         // Transitions to OSC_REQUEST_DATA state to begin oscillator processing
         curr_fl_r <= ram_fl_dout_w;                  // Frequency low
         curr_fh_r <= ram_fh_dout_w;                  // Frequency high
@@ -815,13 +811,12 @@ module doc5503 #(
     task automatic osc_request_data();
         // Generate wave table address and request data if oscillator not halted
         // If oscillator is halted, handles one-shot mode accumulator reset
-        // Needs: curr_control_r (halt bit), curr_acc_r (position in waveform)
-        //        curr_rts_r (table size), curr_wtp_r (wave table pointer)
-        // Modifies: acc_r (for one-shot reset), partner_control_r (loaded for later use)
-        //           wave_address_o and wave_rd_o (for memory requests)
-        // State transitions: OSC_HANDLE_DATA if requesting data, OSC_IDLE if halted
+        // Note: This differs from the original DOC5503 in that it appears that the
+        // DOC5503 may not actually request and retrieve wave data in the same cycle
+        // Rather, it appears that it plays the wave data that is already in the
+        // wds register and then requests the next wave data sample.
 
-            automatic logic [15:0] curr_wave_addr_w = 16'(curr_acc_r >> curr_shift_w);
+        automatic logic [15:0] curr_wave_addr_w = 16'(curr_acc_r >> curr_shift_w);
         if (!halt_w) begin
             // Address Output Multiplexer - create wave table address from accumulator
             // Create mask for wave table pointer based on wave table size
@@ -837,7 +832,6 @@ module doc5503 #(
             wave_address_o <= addr_w;
                                                 
             osc_state_r <= OSC_HANDLE_DATA;
-
 
         end else begin
             // When halted but in one-shot mode, clear accumulator
@@ -863,10 +857,6 @@ module doc5503 #(
         // Stores loaded_wds_r into both wds_r array and curr_wds_r
         // Detects zero byte (0x00) which triggers special halt behavior
         // Sets halt_zero_r flag when zero byte detected
-        // State transitions: OSC_HALT if zero byte, OSC_OUT otherwise
-        // Needs: loaded_wds_r (from memory read), loaded_wds_pending_r (data valid flag)
-        // Modifies: wds_r[curr_osc_r] (register file update), curr_wds_r (working copy),
-        //           halt_zero_r (zero byte detection flag)
 
         if (loaded_wds_pending_r) begin
             loaded_wds_pending_r <= 1'b0;
@@ -891,11 +881,6 @@ module doc5503 #(
         // Calculates audio output by scaling waveform data by volume
         // Handles special case for SYNC_AM mode where odd oscillators don't output
         // but instead modify the volume of the following even oscillator
-        // Needs: curr_wds_r (wave data), curr_vol_r (scaling), 
-        //        curr_mode_w/curr_osc_odd_w (mode detection)
-        // Modifies: vol_r (for sync AM), curr_output_r (calculated output), 
-        //           channel_sum_r (loaded for mixing)
-        // State transitions: OSC_MIX for normal operation, OSC_ACC for SYNC_AM odd oscillators
 
         if ((curr_mode_w == MODE_SYNC_AM) & curr_osc_odd_w) begin           // Sync AM Mode, odd oscillator outputs nothing
             if ((curr_osc_r != 5'd31) & !next_halt_w) begin                     // if next oscillator is not halted
@@ -922,8 +907,7 @@ module doc5503 #(
         // Mixes the oscillator output into the appropriate channel and stereo mix
         // Accumulates output into next_channel_r for the current channel assignment (curr_ca_w)
         // Updates mono (all channels), left (odd channels), and right (even channels) mixes
-        // Prepares for next oscillator cycle by transitioning to OSC_ACC
-        // Add current oscillator output to channel accumulator
+
         next_channel_r[curr_ca_w] <= channel_sum_r + curr_output_r;
         
         // Add to mono mix (all channels)
@@ -943,8 +927,7 @@ module doc5503 #(
         // Updates oscillator accumulator by adding frequency value
         // Detects overflow based on resolution and table size settings
         // Applies appropriate masking to ensure proper wraparound within wave table
-        // State transitions: OSC_HALT on overflow, OSC_IDLE otherwise
-        // Accumulator
+
         automatic logic [24:0] temp_acc = curr_acc_r + {curr_fh_r, curr_fl_r};
         automatic int high_bit_w = 17 + curr_res_w;
         automatic logic overflow = temp_acc[high_bit_w];
@@ -962,9 +945,7 @@ module doc5503 #(
         // Handles oscillator state on halt events (overflow or zero byte)
         // Special processing for SYNC_AM mode where even oscillator halt
         // resets the accumulator of the previous odd oscillator
-        // Transitions to OSC_HALT_ONE_SHOT_OR_ZERO_BYTE to determine if
-        // oscillator should be marked as halted based on mode and cause
-        // Halt Oscillator
+
         if (curr_mode_w == MODE_SYNC_AM) begin
             if (curr_osc_even_w) begin
                 // we're even, so if the odd oscillator 1 below us is playing,
@@ -983,9 +964,7 @@ module doc5503 #(
         // Determines if oscillator should be marked as halted in the control register
         // Halts oscillator if in one-shot mode (MODE_ONE_SHOT) or zero byte was detected
         // Handles special transition cases for SWAP mode and partner oscillator interactions
-        // State transitions: OSC_START_PARTNER for SWAP mode, OSC_RETRIGGER for 
-        // even oscillators with odd partners in SWAP mode, OSC_IDLE otherwise
-        // MODE_ONE_SHOT, MODE_SWAP, or zero byte
+
         if (curr_mode_w[0] || halt_zero_r) begin
             ram_control_we_r <= 1'b1;                                   // write to control register
             ram_control_din_r <= {curr_control_r[7:1], 1'b1};           // set halt bit
@@ -1011,7 +990,6 @@ module doc5503 #(
         // Clears halt bit in partner's control register
         // Resets partner's accumulator to start from beginning of wave table
         // Used specifically for SWAP mode to implement alternate triggering behavior
-        // Always transitions back to OSC_IDLE after starting partner
 
         ram_control_osc_r <= partner_osc_w;                         // set target oscillator to partner
         ram_control_we_r <= 1'b1;                                   // write to control register
@@ -1029,7 +1007,6 @@ module doc5503 #(
         // Handles the specific edge case where an even oscillator retriggering is needed
         // This occurs when the even oscillator is halted but its odd partner is in SWAP mode
         // This behavior was verified on actual Apple IIgs hardware
-        // Transitions back to OSC_IDLE after retriggering
 
         ram_control_we_r <= 1'b1;                                   // write to control register
         ram_control_din_r <= {curr_control_r[7:1], 1'b0};           // set halt bit to zero    
