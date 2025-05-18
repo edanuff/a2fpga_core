@@ -43,7 +43,7 @@ VL_INLINE_OPT VlCoroutine Vdoc5503_verilog_test___024root___eval_initial__TOP__V
     Vdoc5503_verilog_test__Syms* const __restrict vlSymsp VL_ATTR_UNUSED = vlSelf->vlSymsp;
     auto& vlSelfRef = std::ref(*vlSelf).get();
     // Body
-    co_await vlSelfRef.__VdlySched.delay(0x2540be400ULL, 
+    co_await vlSelfRef.__VdlySched.delay(0x174876e800ULL, 
                                          nullptr, "doc5503_verilog_swap_test.sv", 
                                          257);
     VL_WRITEF_NX("Simulation timed out\n",0);
@@ -95,8 +95,6 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
     __Vtask_doc5503_verilog_test__DOT__dut__DOT__cycle_osc__23__osc_state_w = 0;
     IData/*24:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__temp_acc;
     __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__temp_acc = 0;
-    IData/*23:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__curr_acc_mask_w;
-    __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__curr_acc_mask_w = 0;
     IData/*31:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__high_bit_w;
     __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__high_bit_w = 0;
     CData/*0:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__overflow;
@@ -107,14 +105,14 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
     __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_out__34__unnamedblk2__DOT__vol_s = 0;
     IData/*17:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_out__34__unnamedblk2__DOT__output_w;
     __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_out__34__unnamedblk2__DOT__output_w = 0;
-    SData/*15:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__curr_wave_addr_w;
-    __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__curr_wave_addr_w = 0;
     CData/*7:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__ptr_hi_mask_w;
     __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__ptr_hi_mask_w = 0;
     SData/*15:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__ptr_w;
     __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__ptr_w = 0;
     SData/*15:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__addr_w;
     __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__addr_w = 0;
+    SData/*15:0*/ __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__curr_wave_addr_w;
+    __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__curr_wave_addr_w = 0;
     IData/*31:0*/ __Vdly__doc5503_verilog_test__DOT__cycle_count;
     __Vdly__doc5503_verilog_test__DOT__cycle_count = 0;
     CData/*2:0*/ __Vdly__doc5503_verilog_test__DOT__dut__DOT__clk_count_r;
@@ -157,12 +155,12 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
     __VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__next_channel_r__v1 = 0;
     CData/*0:0*/ __VdlySet__doc5503_verilog_test__DOT__dut__DOT__next_channel_r__v1;
     __VdlySet__doc5503_verilog_test__DOT__dut__DOT__next_channel_r__v1 = 0;
-    CData/*1:0*/ __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0;
-    __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0 = 0;
-    CData/*2:0*/ __VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0;
-    __VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0 = 0;
-    CData/*0:0*/ __VdlySet__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0;
-    __VdlySet__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0 = 0;
+    CData/*1:0*/ __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0;
+    __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0 = 0;
+    CData/*2:0*/ __VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0;
+    __VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0 = 0;
+    CData/*0:0*/ __VdlySet__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0;
+    __VdlySet__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0 = 0;
     CData/*7:0*/ __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__fl_ram__DOT__osc_reg_r__v0;
     __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__fl_ram__DOT__osc_reg_r__v0 = 0;
     CData/*4:0*/ __VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__fl_ram__DOT__osc_reg_r__v0;
@@ -240,7 +238,7 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
     __VdlySet__doc5503_verilog_test__DOT__dut__DOT__next_channel_r__v1 = 0U;
     __Vdly__doc5503_verilog_test__DOT__dut__DOT__curr_control_r 
         = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_control_r;
-    __VdlySet__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0 = 0U;
+    __VdlySet__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0 = 0U;
     __VdlySet__doc5503_verilog_test__DOT__dut__DOT__channel_r__v0 = 0U;
     __VdlySet__doc5503_verilog_test__DOT__dut__DOT__fl_ram__DOT__osc_reg_r__v0 = 0U;
     __VdlySet__doc5503_verilog_test__DOT__dut__DOT__fh_ram__DOT__osc_reg_r__v0 = 0U;
@@ -525,10 +523,6 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                                     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_din_r 
                                         = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_data_r;
                                     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_we_r = 1U;
-                                    if ((1U & (~ (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_data_r)))) {
-                                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_din_r = 0U;
-                                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_we_r = 1U;
-                                    }
                                 } else if ((6U == (7U 
                                                    & ((IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_addr_r) 
                                                       >> 5U)))) {
@@ -770,10 +764,6 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                                 vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_din_r 
                                     = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_data_r;
                                 vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_we_r = 1U;
-                                if ((1U & (~ (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_data_r)))) {
-                                    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_din_r = 0U;
-                                    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_we_r = 1U;
-                                }
                             } else if ((6U == (7U & 
                                                ((IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_addr_r) 
                                                 >> 5U)))) {
@@ -979,10 +969,6 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_din_r 
                                             = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_data_r;
                                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_we_r = 1U;
-                                        if ((1U & (~ (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_data_r)))) {
-                                            vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_din_r = 0U;
-                                            vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_we_r = 1U;
-                                        }
                                     } else if ((6U 
                                                 == 
                                                 (7U 
@@ -1065,9 +1051,6 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                             vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_state_r = 1U;
                         }
                     } else if ((1U & (IData)(__Vtask_doc5503_verilog_test__DOT__dut__DOT__cycle_osc__23__osc_state_w))) {
-                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_we_r = 1U;
-                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_din_r 
-                            = (0xfeU & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_control_r));
                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_state_r = 0U;
                     } else {
                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_osc_r 
@@ -1075,10 +1058,6 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_we_r = 1U;
                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_din_r 
                             = (0xfeU & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__partner_control_r));
-                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_osc_r 
-                            = (1U ^ (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_osc_r));
-                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_we_r = 1U;
-                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_din_r = 0U;
                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_state_r = 0U;
                     }
                 } else if ((2U & (IData)(__Vtask_doc5503_verilog_test__DOT__dut__DOT__cycle_osc__23__osc_state_w))) {
@@ -1119,14 +1098,6 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                                          + (((IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_fh_r) 
                                              << 8U) 
                                             | (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_fl_r))));
-                    __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__curr_acc_mask_w 
-                        = (0xffU | (0xffff00U & ((((IData)(1U) 
-                                                   << 
-                                                   (0x1fU 
-                                                    & ((IData)(9U) 
-                                                       + (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_res_w)))) 
-                                                  - (IData)(1U)) 
-                                                 << 8U)));
                     __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__high_bit_w 
                         = ((IData)(0x11U) + (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_res_w));
                     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_we_r = 1U;
@@ -1134,9 +1105,11 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                         = ((0x18U >= (0x1fU & __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__high_bit_w)) 
                            && (1U & (__Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__temp_acc 
                                      >> (0x1fU & __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__high_bit_w))));
+                    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__halt_overflow_r 
+                        = __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__overflow;
                     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_din_r 
                         = (__Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__temp_acc 
-                           & __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__curr_acc_mask_w);
+                           & vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_acc_mask_w);
                     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_state_r = 0U;
                     if (__Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_acc__32__overflow) {
                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_state_r = 0xaU;
@@ -1210,6 +1183,9 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                         }
                     }
                 } else if ((1U & (IData)(__Vtask_doc5503_verilog_test__DOT__dut__DOT__cycle_osc__23__osc_state_w))) {
+                    __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__curr_wave_addr_w 
+                        = (0xffffU & (vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_acc_r 
+                                      >> (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_shift_w)));
                     if (vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__halt_w) {
                         if ((1U & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_mode_w))) {
                             vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_we_r = 1U;
@@ -1217,9 +1193,6 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                         }
                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_state_r = 0U;
                     } else {
-                        __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__curr_wave_addr_w 
-                            = (0xffffU & (vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_acc_r 
-                                          >> (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_shift_w)));
                         __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__ptr_hi_mask_w 
                             = (0xffU & ((IData)(0xffU) 
                                         << (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_wts_w)));
@@ -1227,25 +1200,26 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                             = (((IData)(__Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__ptr_hi_mask_w) 
                                 & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_wtp_r)) 
                                << 8U);
+                        __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__addr_w 
+                            = ((IData)(__Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__curr_wave_addr_w) 
+                               | (IData)(__Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__ptr_w));
+                        __Vdly__doc5503_verilog_test__DOT__dut__DOT__loaded_wds_pending_r = 0U;
                         vlSelfRef.doc5503_verilog_test__DOT__wave_rd = 1U;
                         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_state_r = 6U;
-                        __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__addr_w 
-                            = ((IData)(__Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__curr_wave_addr_w) 
-                               | (IData)(__Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__ptr_w));
                         vlSelfRef.doc5503_verilog_test__DOT__wave_address 
                             = __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__unnamedblk1__DOT__addr_w;
                     }
                     if ((8U > (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_osc_r))) {
-                        __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0 
+                        __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0 
                             = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_mode_w;
-                        __VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0 
+                        __VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0 
                             = (7U & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_osc_r));
-                        __VdlySet__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0 = 1U;
-                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_halt_r 
+                        __VdlySet__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0 = 1U;
+                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_halt_r 
                             = (((~ ((IData)(1U) << 
                                     (7U & ((IData)(7U) 
                                            - (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_osc_r))))) 
-                                & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_halt_r)) 
+                                & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_halt_r)) 
                                | (0xffU & ((1U & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_control_r)) 
                                            << (7U & 
                                                ((IData)(7U) 
@@ -1253,6 +1227,13 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                     }
                     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__prev_control_r 
                         = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_dout_w;
+                    if ((6U == (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_osc_r))) {
+                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_acc_r 
+                            = __Vtask_doc5503_verilog_test__DOT__dut__DOT__osc_request_data__36__curr_wave_addr_w;
+                        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_freq_r 
+                            = (((IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_fh_r) 
+                                << 8U) | (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_fl_r));
+                    }
                 } else {
                     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__next_control_r 
                         = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_dout_w;
@@ -1341,6 +1322,7 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                 }
                 vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_output_r = 0U;
                 vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__halt_zero_r = 0U;
+                vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__halt_overflow_r = 0U;
                 vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_state_r = 2U;
             } else {
                 vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_state_r = 0U;
@@ -1442,10 +1424,6 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                                 vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_din_r 
                                     = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_data_r;
                                 vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_we_r = 1U;
-                                if ((1U & (~ (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_data_r)))) {
-                                    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_din_r = 0U;
-                                    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_we_r = 1U;
-                                }
                             } else if ((6U == (7U & 
                                                ((IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_addr_r) 
                                                 >> 5U)))) {
@@ -1541,7 +1519,7 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
             vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_vol_din_r = 0U;
             vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_wds_din_r = 0U;
             vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_wtp_din_r = 0U;
-            vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_din_r = 0U;
+            vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_control_din_r = 0xffU;
             vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_rts_din_r = 0U;
             vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_din_r = 0U;
         }
@@ -1606,6 +1584,7 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
         vlSelfRef.doc5503_verilog_test__DOT__wave_address = 0U;
         vlSelfRef.doc5503_verilog_test__DOT__wave_rd = 0U;
         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__halt_zero_r = 0U;
+        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__halt_overflow_r = 0U;
         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_fl_osc_r = 0U;
         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_fh_osc_r = 0U;
         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_vol_osc_r = 0U;
@@ -1695,9 +1674,9 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
     }
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_control_r 
         = __Vdly__doc5503_verilog_test__DOT__dut__DOT__curr_control_r;
-    if (__VdlySet__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0) {
-        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r[__VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0] 
-            = __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__osc_mode_r__v0;
+    if (__VdlySet__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0) {
+        vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r[__VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0] 
+            = __VdlyVal__doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r__v0;
     }
     if (__VdlySet__doc5503_verilog_test__DOT__dut__DOT__channel_r__v0) {
         vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__channel_r[__VdlyDim0__doc5503_verilog_test__DOT__dut__DOT__channel_r__v0] 
@@ -1751,29 +1730,35 @@ VL_INLINE_OPT void Vdoc5503_verilog_test___024root___nba_sequent__TOP__0(Vdoc550
                  >> 3U));
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_res_w 
         = (7U & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_rts_r));
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[0U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_acc_mask_w 
+        = (0xffffU | (0xff0000U & ((((IData)(1U) << 
+                                     (7U & ((IData)(1U) 
+                                            + (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_rts_r)))) 
+                                    - (IData)(1U)) 
+                                   << 0x10U)));
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[0U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [0U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[1U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[1U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [1U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[2U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[2U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [2U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[3U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[3U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [3U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[4U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[4U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [4U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[5U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[5U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [5U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[6U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[6U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [6U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[7U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[7U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [7U];
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__channel_o[0U] 
         = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__channel_r

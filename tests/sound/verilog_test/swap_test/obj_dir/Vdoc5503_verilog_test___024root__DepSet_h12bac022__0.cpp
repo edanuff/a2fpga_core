@@ -154,7 +154,7 @@ VL_INLINE_OPT VlCoroutine Vdoc5503_verilog_test___024root___eval_initial__TOP__V
     }
     VL_WRITEF_NX("DOC5503 is ready after %0# cycles\n\nEnabling oscillators 0 and 1 (0xE1 = 0x02)\n",0,
                  32,vlSelfRef.doc5503_verilog_test__DOT__cycle_count);
-    __Vtask_doc5503_verilog_test__DOT__write_register__0__reg_data = 2U;
+    __Vtask_doc5503_verilog_test__DOT__write_register__0__reg_data = 0x3cU;
     __Vtask_doc5503_verilog_test__DOT__write_register__0__reg_addr = 0xe1U;
     VL_WRITEF_NX("  Writing register 0x%02x = 0x%02x\n",0,
                  8,__Vtask_doc5503_verilog_test__DOT__write_register__0__reg_addr,
@@ -503,7 +503,7 @@ VL_INLINE_OPT VlCoroutine Vdoc5503_verilog_test___024root___eval_initial__TOP__V
                  1,vlSelfRef.doc5503_verilog_test__DOT__we_n,
                  1,(IData)(vlSelfRef.doc5503_verilog_test__DOT__clk_en),
                  8,vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_en_r);
-    __Vtask_doc5503_verilog_test__DOT__write_register__1__reg_data = 0U;
+    __Vtask_doc5503_verilog_test__DOT__write_register__1__reg_data = 0xadU;
     __Vtask_doc5503_verilog_test__DOT__write_register__1__reg_addr = 0U;
     VL_WRITEF_NX("  Writing register 0x%02x = 0x%02x\n",0,
                  8,__Vtask_doc5503_verilog_test__DOT__write_register__1__reg_addr,
@@ -2248,7 +2248,7 @@ VL_INLINE_OPT VlCoroutine Vdoc5503_verilog_test___024root___eval_initial__TOP__V
                  1,vlSelfRef.doc5503_verilog_test__DOT__we_n,
                  1,(IData)(vlSelfRef.doc5503_verilog_test__DOT__clk_en),
                  8,vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_en_r);
-    __Vtask_doc5503_verilog_test__DOT__write_register__6__reg_data = 0U;
+    __Vtask_doc5503_verilog_test__DOT__write_register__6__reg_data = 0x24U;
     __Vtask_doc5503_verilog_test__DOT__write_register__6__reg_addr = 0xc0U;
     VL_WRITEF_NX("  Writing register 0x%02x = 0x%02x\n",0,
                  8,__Vtask_doc5503_verilog_test__DOT__write_register__6__reg_addr,
@@ -2597,7 +2597,7 @@ VL_INLINE_OPT VlCoroutine Vdoc5503_verilog_test___024root___eval_initial__TOP__V
                  1,vlSelfRef.doc5503_verilog_test__DOT__we_n,
                  1,(IData)(vlSelfRef.doc5503_verilog_test__DOT__clk_en),
                  8,vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_en_r);
-    __Vtask_doc5503_verilog_test__DOT__write_register__7__reg_data = 0U;
+    __Vtask_doc5503_verilog_test__DOT__write_register__7__reg_data = 0xadU;
     __Vtask_doc5503_verilog_test__DOT__write_register__7__reg_addr = 1U;
     VL_WRITEF_NX("  Writing register 0x%02x = 0x%02x\n",0,
                  8,__Vtask_doc5503_verilog_test__DOT__write_register__7__reg_addr,
@@ -4342,7 +4342,7 @@ VL_INLINE_OPT VlCoroutine Vdoc5503_verilog_test___024root___eval_initial__TOP__V
                  1,vlSelfRef.doc5503_verilog_test__DOT__we_n,
                  1,(IData)(vlSelfRef.doc5503_verilog_test__DOT__clk_en),
                  8,vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_en_r);
-    __Vtask_doc5503_verilog_test__DOT__write_register__12__reg_data = 0U;
+    __Vtask_doc5503_verilog_test__DOT__write_register__12__reg_data = 0x24U;
     __Vtask_doc5503_verilog_test__DOT__write_register__12__reg_addr = 0xc1U;
     VL_WRITEF_NX("  Writing register 0x%02x = 0x%02x\n",0,
                  8,__Vtask_doc5503_verilog_test__DOT__write_register__12__reg_addr,
@@ -4691,7 +4691,7 @@ VL_INLINE_OPT VlCoroutine Vdoc5503_verilog_test___024root___eval_initial__TOP__V
                  1,vlSelfRef.doc5503_verilog_test__DOT__we_n,
                  1,(IData)(vlSelfRef.doc5503_verilog_test__DOT__clk_en),
                  8,vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_en_r);
-    doc5503_verilog_test__DOT__unnamedblk1_2__DOT____Vrepeat1 = 0x7a120U;
+    doc5503_verilog_test__DOT__unnamedblk1_2__DOT____Vrepeat1 = 0x4c4b40U;
     while (VL_LTS_III(32, 0U, doc5503_verilog_test__DOT__unnamedblk1_2__DOT____Vrepeat1)) {
         co_await vlSelfRef.__VtrigSched_h49264d22__0.trigger(0U, 
                                                              nullptr, 

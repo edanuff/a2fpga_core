@@ -209,10 +209,10 @@ module top #(
 
     // SDRAM ports, lower number is higher priority
     localparam VIDEO_MEM_PORT = 0;
-    localparam MAIN_MEM_PORT = 1;
+    localparam MAIN_MEM_PORT = 2;
 `ifdef ENSONIQ
-    localparam GLU_MEM_PORT = 2;
-    localparam DOC_MEM_PORT = 3;
+    localparam GLU_MEM_PORT = 3;
+    localparam DOC_MEM_PORT = 1;
     `ifdef PICOSOC
     localparam SOC_MEM_PORT = 4;
         `ifdef DISKII
@@ -653,7 +653,7 @@ module top #(
         .debug_osc_en_o(doc_osc_en_w),   // Capture oscillator enable register value
         .debug_osc_mode_o(doc_osc_mode_w), // Capture oscillator mode register values
         .debug_osc_halt_o(doc_osc_halt_w), // Capture oscillator halt register value
-        
+    
         .glu_mem_if(mem_ports[GLU_MEM_PORT]),
         .doc_mem_if(mem_ports[DOC_MEM_PORT])
     );
@@ -901,13 +901,17 @@ module top #(
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
 
-        .debug_hex_0_i ({2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]}),  // Display DOC oscillator enable register
-        .debug_hex_1_i ({2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]}),         // Placeholder for debug hex 1
-        .debug_hex_2_i ({2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]}),         // Placeholder for debug hex 2
-        .debug_hex_3_i ({2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]}),         // Placeholder for debug hex 3
+        .debug_hex_0_i ({2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]}),
+        .debug_hex_1_i ({2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]}),
+        .debug_hex_2_i ({2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]}), 
+        .debug_hex_3_i ({2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]}),
+        .debug_hex_4_i ('0),       
+        .debug_hex_5_i ('0),
+        .debug_hex_6_i ('0),
+        .debug_hex_7_i ('0), 
 
-        .debug_bits_0_i (doc_osc_halt_w),        // Placeholder for debug bits 0
-        .debug_bits_1_i (8'h01),        // Placeholder for debug bits 1
+        .debug_bits_0_i (doc_osc_halt_w), 
+        .debug_bits_1_i ('0),
 
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),
@@ -946,8 +950,8 @@ module top #(
             debug_b_w
         }),
         .reset(~device_reset_n_w),
-        .audio_sample_word({cdc_audio_l, cdc_audio_r}),
-        //.audio_sample_word(audio_sample_word),
+        //.audio_sample_word({cdc_audio_l, cdc_audio_r}),
+        .audio_sample_word(audio_sample_word),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
         .cx(hdmi_x),

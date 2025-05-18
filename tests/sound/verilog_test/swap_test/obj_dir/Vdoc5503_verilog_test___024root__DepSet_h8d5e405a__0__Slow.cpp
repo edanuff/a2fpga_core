@@ -23,6 +23,7 @@ VL_ATTR_COLD void Vdoc5503_verilog_test___024root___eval_static__TOP(Vdoc5503_ve
     auto& vlSelfRef = std::ref(*vlSelf).get();
     // Body
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__halt_zero_r = 0U;
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__halt_overflow_r = 0U;
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__host_request_pending_r = 0U;
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__device_response_pending_r = 0U;
 }
@@ -119,6 +120,12 @@ VL_ATTR_COLD void Vdoc5503_verilog_test___024root___stl_sequent__TOP__0(Vdoc5503
                  >> 3U));
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_res_w 
         = (7U & (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_rts_r));
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_acc_mask_w 
+        = (0xffffU | (0xff0000U & ((((IData)(1U) << 
+                                     (7U & ((IData)(1U) 
+                                            + (IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__curr_rts_r)))) 
+                                    - (IData)(1U)) 
+                                   << 0x10U)));
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__partner_mode_w 
         = (3U & ((IData)(vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__partner_control_r) 
                  >> 1U));
@@ -150,29 +157,29 @@ VL_ATTR_COLD void Vdoc5503_verilog_test___024root___stl_sequent__TOP__0(Vdoc5503
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_dout_w 
         = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__acc_ram__DOT__osc_reg_r
         [vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__ram_acc_osc_r];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[0U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[0U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [0U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[1U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[1U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [1U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[2U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[2U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [2U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[3U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[3U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [3U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[4U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[4U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [4U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[5U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[5U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [5U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[6U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[6U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [6U];
-    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[7U] 
-        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__osc_mode_r
+    vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[7U] 
+        = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r
         [7U];
     vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__channel_o[0U] 
         = vlSelfRef.doc5503_verilog_test__DOT__dut__DOT__channel_r
@@ -310,7 +317,7 @@ VL_ATTR_COLD void Vdoc5503_verilog_test___024root___ctor_var_reset(Vdoc5503_veri
         vlSelf->doc5503_verilog_test__DOT__dut__DOT__channel_o[__Vi0] = VL_RAND_RESET_I(16);
     }
     for (int __Vi0 = 0; __Vi0 < 8; ++__Vi0) {
-        vlSelf->doc5503_verilog_test__DOT__dut__DOT__osc_mode_o[__Vi0] = VL_RAND_RESET_I(2);
+        vlSelf->doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_o[__Vi0] = VL_RAND_RESET_I(2);
     }
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__host_addr_r = VL_RAND_RESET_I(8);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__host_data_r = VL_RAND_RESET_I(8);
@@ -321,9 +328,11 @@ VL_ATTR_COLD void Vdoc5503_verilog_test___024root___ctor_var_reset(Vdoc5503_veri
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__osc_int_r = VL_RAND_RESET_I(8);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__osc_en_r = VL_RAND_RESET_I(8);
     for (int __Vi0 = 0; __Vi0 < 8; ++__Vi0) {
-        vlSelf->doc5503_verilog_test__DOT__dut__DOT__osc_mode_r[__Vi0] = VL_RAND_RESET_I(2);
+        vlSelf->doc5503_verilog_test__DOT__dut__DOT__debug_osc_mode_r[__Vi0] = VL_RAND_RESET_I(2);
     }
-    vlSelf->doc5503_verilog_test__DOT__dut__DOT__osc_halt_r = VL_RAND_RESET_I(8);
+    vlSelf->doc5503_verilog_test__DOT__dut__DOT__debug_osc_halt_r = VL_RAND_RESET_I(8);
+    vlSelf->doc5503_verilog_test__DOT__dut__DOT__debug_osc_acc_r = VL_RAND_RESET_I(16);
+    vlSelf->doc5503_verilog_test__DOT__dut__DOT__debug_osc_freq_r = VL_RAND_RESET_I(16);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__ram_fl_osc_r = VL_RAND_RESET_I(5);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__ram_fh_osc_r = VL_RAND_RESET_I(5);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__ram_vol_osc_r = VL_RAND_RESET_I(5);
@@ -370,6 +379,7 @@ VL_ATTR_COLD void Vdoc5503_verilog_test___024root___ctor_var_reset(Vdoc5503_veri
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__curr_wts_w = VL_RAND_RESET_I(3);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__curr_res_w = VL_RAND_RESET_I(3);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__curr_shift_w = VL_RAND_RESET_I(5);
+    vlSelf->doc5503_verilog_test__DOT__dut__DOT__curr_acc_mask_w = VL_RAND_RESET_I(24);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__halt_w = VL_RAND_RESET_I(1);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__curr_mode_w = VL_RAND_RESET_I(2);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__curr_ca_w = VL_RAND_RESET_I(4);
@@ -399,6 +409,7 @@ VL_ATTR_COLD void Vdoc5503_verilog_test___024root___ctor_var_reset(Vdoc5503_veri
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__osc_state_r = VL_RAND_RESET_I(4);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__loaded_wds_pending_r = VL_RAND_RESET_I(1);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__halt_zero_r = VL_RAND_RESET_I(1);
+    vlSelf->doc5503_verilog_test__DOT__dut__DOT__halt_overflow_r = VL_RAND_RESET_I(1);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__host_request_pending_r = VL_RAND_RESET_I(1);
     vlSelf->doc5503_verilog_test__DOT__dut__DOT__device_response_pending_r = VL_RAND_RESET_I(1);
     for (int __Vi0 = 0; __Vi0 < 32; ++__Vi0) {

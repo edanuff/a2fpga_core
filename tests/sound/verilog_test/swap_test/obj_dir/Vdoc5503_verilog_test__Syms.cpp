@@ -43,7 +43,7 @@ Vdoc5503_verilog_test__Syms::Vdoc5503_verilog_test__Syms(VerilatedContext* conte
     , TOP{this, namep}
 {
         // Check resources
-        Verilated::stackCheck(238);
+        Verilated::stackCheck(230);
     // Configure time unit / time precision
     _vm_contextp__->timeunit(-9);
     _vm_contextp__->timeprecision(-12);

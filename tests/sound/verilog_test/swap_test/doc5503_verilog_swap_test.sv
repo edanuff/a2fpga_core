@@ -104,13 +104,13 @@ module doc5503_verilog_test;
     
     // Write oscillator enable register (0xE1) with value 0x02
     $display("\nEnabling oscillators 0 and 1 (0xE1 = 0x02)");
-    write_register(8'hE1, 8'h02);
+    write_register(8'hE1, 8'h3C);
     
     // Configure oscillator 0 registers
     $display("\nConfiguring oscillator 0 registers");
     
     // Frequency low
-    write_register(8'h00, 8'h00);
+    write_register(8'h00, 8'hAD);
     
     // Frequency high
     write_register(8'h20, 8'h01);
@@ -126,13 +126,13 @@ module doc5503_verilog_test;
     write_register(8'hA0, 8'h06);
     
     // Resolution/Table size (256 bytes, standard resolution)
-    write_register(8'hC0, 8'h00);
+    write_register(8'hC0, 8'h24);
     
     // Configure oscillator 1 registers
     $display("\nConfiguring oscillator 1 registers");
     
     // Frequency low
-    write_register(8'h01, 8'h00);
+    write_register(8'h01, 8'hAD);
     
     // Frequency high
     write_register(8'h21, 8'h01);
@@ -148,13 +148,13 @@ module doc5503_verilog_test;
     write_register(8'hA1, 8'h07);
     
     // Resolution/Table size (256 bytes, standard resolution)
-    write_register(8'hC1, 8'h00);
+    write_register(8'hC1, 8'h24);
     
     $display("\nConfiguration completed");
     $display("Running simulation to observe SWAP behavior");
     
     // Run for a while to observe behavior
-    repeat (500000) @(posedge clk);
+    repeat (5000000) @(posedge clk);
     
     $finish;
   end
@@ -254,7 +254,7 @@ module doc5503_verilog_test;
   
   // For waveform viewer: make sure we don't run forever
   initial begin
-  #10000000; // 5ms max simulation time
+  #100000000; // 5ms max simulation time
     $display("Simulation timed out");
     $finish;
   end
