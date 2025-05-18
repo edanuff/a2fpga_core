@@ -123,7 +123,6 @@ module doc5503 #(
     reg [7:0] debug_osc_halt_r;
     assign debug_osc_halt_o = debug_osc_halt_r;
 
-
     // Oscillator registers as RAM
     // Necessary to use RAMs to implement the large number of registers but adds
     // complexity to the design.  Current implementation uses synchronous writes
@@ -543,11 +542,11 @@ module doc5503 #(
                             ram_control_osc_r <= host_addr_r[4:0];
                             ram_control_din_r <= host_data_r;
                             ram_control_we_r <= 1'b1;
-                            //if (!host_data_r[0]) begin
-                            //    ram_acc_osc_r <= host_addr_r[4:0];
-                            //    ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
-                            //    ram_acc_we_r <= 1'b1;
-                            //end
+                            if (!host_data_r[0]) begin
+                                ram_acc_osc_r <= host_addr_r[4:0];
+                                ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
+                                ram_acc_we_r <= 1'b1;
+                            end
                         end
                         3'b110: begin                               // $C0-DF
                             ram_rts_osc_r <= host_addr_r[4:0];
@@ -1018,9 +1017,9 @@ module doc5503 #(
         ram_control_we_r <= 1'b1;                                   // write to control register
         ram_control_din_r <= {partner_control_r[7:1], 1'b0};        // set halt bit to zero
 
-        //ram_acc_osc_r <= partner_osc_w;                             // set target oscillator to partner
-        //ram_acc_we_r <= 1'b1;                                       // write to accumulator register
-        //ram_acc_din_r <= '0;                                        // set accumulator to zero
+        ram_acc_osc_r <= partner_osc_w;                             // set target oscillator to partner
+        ram_acc_we_r <= 1'b1;                                       // write to accumulator register
+        ram_acc_din_r <= '0;                                        // set accumulator to zero
 
         // After halting partner, skip the current output
         osc_state_r <= OSC_IDLE;
@@ -1032,8 +1031,8 @@ module doc5503 #(
         // This behavior was verified on actual Apple IIgs hardware
         // Transitions back to OSC_IDLE after retriggering
 
-        //ram_control_we_r <= 1'b1;                                   // write to control register
-        //ram_control_din_r <= {curr_control_r[7:1], 1'b0};           // set halt bit to zero    
+        ram_control_we_r <= 1'b1;                                   // write to control register
+        ram_control_din_r <= {curr_control_r[7:1], 1'b0};           // set halt bit to zero    
 
         osc_state_r <= OSC_IDLE;
     endtask: osc_retrigger
