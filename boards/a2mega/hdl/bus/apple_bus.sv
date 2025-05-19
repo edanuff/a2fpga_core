@@ -39,14 +39,32 @@ module apple_bus #(
     input [7:0] a2_d_i,
     input a2_rw_n_i,
 
+    input clk_2m_negedge_i,
+
+    input  a2_inh_n,
+    input  a2_rdy_n,
+    input  a2_dma_n,
+    input  a2_nmi_n,
+    input  a2_reset_n,
+    input  a2_mb20,
+    input  a2_sync_n,
+    input  a2_m2sel_n,
+    output  a2_res_out_n,
+    output  a2_int_out_n,
+    input  a2_int_in_n,
+    output  a2_dma_out_n,
+    input  a2_dma_in_n,
+
+    input irq_n_i,
+
     output sleep_o
 
 );
 
-    assign a2bus_if.sw_gs = 1'b0;
-    assign a2bus_if.m2sel_n = 1'b0; 
-    assign a2bus_if.m2b0 = 1'b0; 
+    assign a2_dma_out_n = a2_dma_in_n;
+    assign a2_int_out_n = a2_int_in_n;
 
+    assign a2_res_out_n = 1'b0;
 
     // data and address latches on input
     reg [15:0] addr_r;
@@ -56,6 +74,22 @@ module apple_bus #(
     assign a2bus_if.addr = addr_r;
     assign a2bus_if.data = data_r;
     assign a2bus_if.rw_n = rw_n_r;
+
+    assign a2bus_if.sw_gs = 1'b0;
+    assign a2bus_if.m2sel_n = a2_m2sel_n; 
+
+    reg m2b0_r;
+	always @(posedge a2bus_if.clk_logic) begin
+        if (a2bus_if.phi1 && clk_2m_negedge_i) m2b0_r <= a2_mb20;
+	end
+    assign a2bus_if.m2b0 = m2b0_r; 
+
+    assign a2bus_if.control_inh_n = a2_inh_n;
+    assign a2bus_if.control_irq_n = 1'b1;
+    assign a2bus_if.control_rdy_n = a2_rdy_n;
+    assign a2bus_if.control_dma_n = a2_dma_n;
+    assign a2bus_if.control_nmi_n = a2_nmi_n;
+    assign a2bus_if.control_reset_n = a2_reset_n;
 
     reg [5:0] phase_cycles_r = 0;
     assign sleep_o = phase_cycles_r == 6'b111111;

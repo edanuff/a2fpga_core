@@ -57,7 +57,7 @@ module top #(
     output a2_irq_n,
     input  a2_dma_n,
     input  a2_nmi_n,
-    input  a2_mb20_n,
+    input  a2_mb20,
     input  a2_sync_n,
     input  a2_m2sel_n,
     output  a2_res_out_n,
@@ -121,7 +121,6 @@ module top #(
     wire phi0;
     wire phi1_posedge;
     wire phi1_negedge;
-    wire clk_2m_posedge_w = phi1_posedge | phi1_negedge;
     cdc_denoise cdc_phi1 (
         .clk(clk_logic_w),
         .i(a2_phi1),
@@ -129,6 +128,18 @@ module top #(
         .o_n(phi0),
         .o_posedge(phi1_posedge),
         .o_negedge(phi1_negedge)
+    );
+
+    wire clk_2m_w;
+    wire clk_2m_posedge_w;
+    wire clk_2m_negedge_w;
+    cdc_denoise cdc_2m (
+        .clk(clk_logic_w),
+        .i(a2_q3),
+        .o(clk_2m_w),
+        .o_n(),
+        .o_posedge(clk_2m_posedge_w),
+        .o_negedge(clk_2m_negedge_w)
     );
 
     wire clk_7m_w;
@@ -203,6 +214,23 @@ module top #(
         .a2_a_i(a2_a),
         .a2_d_i(a2_d_buf_w),
         .a2_rw_n_i(a2_rw_n),
+
+        .clk_2m_negedge_i(clk_2m_negedge_w),
+        
+        .a2_inh_n(a2_inh_n),
+        .a2_rdy_n(a2_rdy_n),
+        .a2_dma_n(a2_dma_n),
+        .a2_nmi_n(a2_nmi_n),
+        .a2_reset_n(a2_reset_n),
+        .a2_mb20(a2_mb20),
+        .a2_sync_n(a2_sync_n),
+        .a2_m2sel_n(a2_m2sel_n),
+        .a2_res_out_n(a2_res_out_n),
+        .a2_int_out_n(a2_int_out_n),
+        .a2_int_in_n(a2_int_in_n),
+        .a2_dma_out_n(a2_dma_out_n),
+        .a2_dma_in_n(a2_dma_in_n),
+        .irq_n_i(1'b1),
 
         .sleep_o(sleep_w)
     );

@@ -82,7 +82,7 @@ IO_PORT "a2_irq_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC  "a2_dma_n" C22;
 IO_PORT "a2_dma_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC  "a2_nmi_n" E18;
+IO_LOC  "a2_nmi_n" B22;
 IO_PORT "a2_nmi_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
 IO_LOC  "a2_mb20" F19;
@@ -131,7 +131,7 @@ IO_PORT "a2_d[1]" IO_TYPE=LVCMOS33;
 IO_LOC  "a2_d[2]" M18;
 IO_PORT "a2_d[2]" IO_TYPE=LVCMOS33;
 
-IO_LOC  "a2_d[3]" M19;
+IO_LOC  "a2_d[3]" L18;
 IO_PORT "a2_d[3]" IO_TYPE=LVCMOS33;
 
 IO_LOC  "a2_d[4]" K18;
