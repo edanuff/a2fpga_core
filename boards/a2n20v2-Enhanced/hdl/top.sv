@@ -677,7 +677,7 @@ wire picosoc_led;
     wire vdp_transparent;
     wire vdp_ext_video;
     wire vdp_irq_n;
-    wire [15:0] ssp_audio_w;
+    wire signed [13:0] ssp_audio_w;
     wire vdp_unlocked_w;
     wire [3:0] vdp_gmode_w;
     wire scanlines_w;
@@ -727,8 +727,8 @@ wire picosoc_led;
     wire [7:0] mb_d_w;
     wire mb_rd;
     wire mb_irq_n;
-    wire [9:0] mb_audio_l;
-    wire [9:0] mb_audio_r;
+    wire signed [13:0] mb_audio_l;
+    wire signed [13:0] mb_audio_r;
 
     Mockingboard #(
         .ENABLE(MOCKINGBOARD_ENABLE),
@@ -797,54 +797,43 @@ wire picosoc_led;
         
     // Audio
 
+    wire signed [13:0] speaker_audio_w;
+
+    apple_speaker apple_speaker (
+        .a2bus_if(a2bus_if),
+        .enable(APPLE_SPEAKER_ENABLE | sw_apple_speaker_w),
+        .speaker_o(),
+        .pcm_o(speaker_audio_w)
+    );
+
+    wire signed [15:0] core_audio_l_w;
+    wire signed [15:0] core_audio_r_w;
+    assign core_audio_l_w = ssp_audio_w + mb_audio_l + speaker_audio_w;
+    assign core_audio_r_w = ssp_audio_w + mb_audio_r + speaker_audio_w;
+
     // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
 
     wire [15:0] cdc_audio_l;
     wire [15:0] cdc_audio_r;
 
-    // Mix all audio sources together to ensure at least one works
-    // Audio format notes:
-    // - sg_audio_l/r: 16-bit signed from DOC5503 (Ensoniq)
-    // - ssp_audio_w: 16-bit unsigned from SuperSprite
-    // - mb_audio_l/r: 10-bit unsigned from Mockingboard
-    // - speaker_audio_w: 1-bit from Apple speaker
-    
-    // Convert all to 16-bit signed for proper mixing
-    wire signed [15:0] mb_signed_l = {1'b0, mb_audio_l, 5'b0} - 16'h8000; // Unsigned to signed
-    wire signed [15:0] mb_signed_r = {1'b0, mb_audio_r, 5'b0} - 16'h8000;
-    wire signed [15:0] sp_signed = {1'b0, ssp_audio_w} - 16'h8000;
-    
-    // For the 1-bit speaker, use either positive or negative values to create a square wave
-    wire signed [15:0] speaker_signed = speaker_audio_w ? 16'h3000 : -16'h3000; 
-    
-    // Mix properly converted signed audio signals
-    wire signed [15:0] mixed_audio_l = sg_audio_l /* + sp_signed + mb_signed_l + speaker_signed */; 
-    wire signed [15:0] mixed_audio_r = sg_audio_r /* + sp_signed + mb_signed_r + speaker_signed */;
-    
-    cdc_fifo #(
-        .WIDTH(16),
-        .DEPTH(5) 
+    cdc_sampling #(
+        .WIDTH(16)
     ) audio_cdc_left (
-        .clk(clk_pixel_w),
-        .i(mixed_audio_l),
-        .o(cdc_audio_l)
+        .rst_n(device_reset_n_w),
+        .clk_fast(clk_logic_w),
+        .clk_slow(clk_pixel_w),
+        .data_in(core_audio_l_w),
+        .data_out(cdc_audio_l)
     );
 
-    cdc_fifo #(
-        .WIDTH(16),
-        .DEPTH(5)
+    cdc_sampling #(
+        .WIDTH(16)
     ) audio_cdc_right (
-        .clk(clk_pixel_w),
-        .i(mixed_audio_r),
-        .o(cdc_audio_r)
-    );
-
-    wire speaker_audio_w;
-
-    apple_speaker apple_speaker (
-        .a2bus_if(a2bus_if),
-        .enable(APPLE_SPEAKER_ENABLE | sw_apple_speaker_w),
-        .speaker_o(speaker_audio_w)
+        .rst_n(device_reset_n_w),
+        .clk_fast(clk_logic_w),
+        .clk_slow(clk_pixel_w),
+        .data_in(core_audio_r_w),
+        .data_out(cdc_audio_r)
     );
 
     localparam [31:0] aflt_rate = 7_056_000;

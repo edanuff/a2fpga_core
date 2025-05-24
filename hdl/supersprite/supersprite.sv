@@ -72,7 +72,7 @@ module SuperSprite #(
 
     f18a_gpu_if.master f18a_gpu_if,
 
-    output [15:0] ssp_audio_o
+    output [13:0] ssp_audio_o
 
 );
 
@@ -188,6 +188,7 @@ module SuperSprite #(
     wire [7:0] ssp_psg_ch_a_o, ssp_psg_ch_b_o, ssp_psg_ch_c_o;
     wire [13:0] ssp_psg_mix_audio_o, ssp_psg_pcm14s_o;
 
+    /*
     YM2149 ssp_psg (
         .CLK(a2bus_if.clk_logic),
         .CE(a2bus_if.phi1_negedge & card_enable),
@@ -216,6 +217,22 @@ module SuperSprite #(
         ({4'b00, ssp_psg_ch_a_o, 4'b00}) + 
         ({4'b00, ssp_psg_ch_b_o, 4'b00}) + 
         ({4'b00, ssp_psg_ch_c_o, 4'b00}));
+    */
+    ym2149_audio ssp_psg (
+        .clk_i(a2bus_if.clk_logic),
+        .en_clk_psg_i(a2bus_if.phi1_negedge & card_enable),
+        .sel_n_i(1'b1),
+        .reset_n_i(a2bus_if.system_reset_n),
+        .bc_i(ssp_psg_data_rd || ssp_psg_address_wr),
+        .bdir_i(ssp_psg_address_wr || ssp_psg_data_wr),
+        .data_i(a2bus_if.data),
+        .data_r_o(ssp_psg_d_o),
+        .ch_a_o(),
+        .ch_b_o(),
+        .ch_c_o(),
+        .mix_audio_o(),
+        .pcm14s_o(ssp_audio_o)
+    );
 
     assign data_o = ssp_psg_data_rd ? ssp_psg_d_o : vdp_d_o;
     assign rd_en_o = ssp_psg_data_rd || vdp_rd;

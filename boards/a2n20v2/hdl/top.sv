@@ -354,7 +354,7 @@ module top #(
     wire vdp_transparent;
     wire vdp_ext_video;
     wire vdp_irq_n;
-    wire [15:0] ssp_audio_w;
+    wire signed [13:0] ssp_audio_w;
     wire vdp_unlocked_w;
     wire [3:0] vdp_gmode_w;
     wire scanlines_w;
@@ -417,8 +417,8 @@ module top #(
     wire [7:0] mb_d_w;
     wire mb_rd;
     wire mb_irq_n;
-    wire [9:0] mb_audio_l;
-    wire [9:0] mb_audio_r;
+    wire signed [13:0] mb_audio_l;
+    wire signed [13:0] mb_audio_r;
 
     Mockingboard #(
         .ENABLE(MOCKINGBOARD_ENABLE),
@@ -481,13 +481,19 @@ module top #(
 
     // Audio
 
-    wire speaker_audio_w;
+    wire signed [13:0] speaker_audio_w;
 
     apple_speaker apple_speaker (
         .a2bus_if(a2bus_if),
         .enable(APPLE_SPEAKER_ENABLE | sw_apple_speaker_w),
-        .speaker_o(speaker_audio_w)
+        .speaker_o(),
+        .pcm_o(speaker_audio_w)
     );
+
+    wire signed [15:0] core_audio_l_w;
+    wire signed [15:0] core_audio_r_w;
+    assign core_audio_l_w = ssp_audio_w + mb_audio_l + speaker_audio_w;
+    assign core_audio_r_w = ssp_audio_w + mb_audio_r + speaker_audio_w;
 
     localparam [31:0] aflt_rate = 7_056_000;
     localparam [39:0] acx  = 4258969;
@@ -519,9 +525,9 @@ module top #(
         .cy1(acy1),
         .cy2(acy2),
 
-        .is_signed(1'b0),
-        .core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
-        .core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
+        .is_signed(1'b1),
+        .core_l(core_audio_l_w),
+        .core_r(core_audio_r_w),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),

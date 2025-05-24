@@ -27,8 +27,8 @@ module Mockingboard #(
     output rd_en_o,
     output irq_n_o,
 
-    output [9:0] audio_l_o,
-    output [9:0] audio_r_o
+    output signed [13:0] audio_l_o,
+    output signed [13:0] audio_r_o
 );
 
     reg card_enable;
@@ -123,6 +123,7 @@ module Mockingboard #(
     );
 
 
+    /*
     YM2149 psg_left (
         .CLK(a2bus_if.clk_logic),
         .CE(a2bus_if.phi1_negedge & card_enable),
@@ -148,6 +149,23 @@ module Mockingboard #(
     );
 
     assign audio_l_o = (({2'b00, psg_al_o}) + ({2'b00, psg_bl_o}) + ({2'b00, psg_cl_o}));
+    */
+
+    ym2149_audio psg_left (
+        .clk_i(a2bus_if.clk_logic),
+        .en_clk_psg_i(a2bus_if.phi1_negedge & card_enable),
+        .sel_n_i(1'b1),
+        .reset_n_i(pb_l_o[2]),
+        .bc_i(pb_l_o[0]),
+        .bdir_i(pb_l_o[1]),
+        .data_i(psg_l_i),
+        .data_r_o(psg_l_o),
+        .ch_a_o(),
+        .ch_b_o(),
+        .ch_c_o(),
+        .mix_audio_o(),
+        .pcm14s_o(audio_l_o)
+    );
 
     // Right Channel
 
@@ -189,7 +207,7 @@ module Mockingboard #(
         .irq(irq_r_o)
     );
 
-
+    /*
     YM2149 psg_right (
         .CLK(a2bus_if.clk_logic),
         .CE(a2bus_if.phi1_negedge & card_enable),
@@ -215,5 +233,22 @@ module Mockingboard #(
     );
 
     assign audio_r_o = (({2'b00, psg_ar_o}) + ({2'b00, psg_br_o}) + ({2'b00, psg_cr_o}));
+    */
+
+    ym2149_audio psg_right (
+        .clk_i(a2bus_if.clk_logic),
+        .en_clk_psg_i(a2bus_if.phi1_negedge & card_enable),
+        .sel_n_i(1'b1),
+        .reset_n_i(pb_r_o[2]),
+        .bc_i(pb_r_o[0]),
+        .bdir_i(pb_r_o[1]),
+        .data_i(psg_r_i),
+        .data_r_o(psg_r_o),
+        .ch_a_o(),
+        .ch_b_o(),
+        .ch_c_o(),
+        .mix_audio_o(),
+        .pcm14s_o(audio_r_o)
+    );
 
 endmodule
