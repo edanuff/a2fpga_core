@@ -1,22 +1,18 @@
 module DebugOverlay #(
     parameter [8*14-1:0] VERSION = "00000000000000", // 14 ASCII characters
-    parameter bit ENABLE = 1'b1
+    parameter bit ENABLE = 1'b1,
+    parameter NUM_HEX_BYTES = 8         // Number of hex bytes to display
 )(
     input  wire        clk_i,
     input  wire        reset_n,
+
+    input wire enable_i,
 
     input  wire [9:0]  screen_x_i,
     input  wire [9:0]  screen_y_i,
 
     // 8 hex bytes to display
-    input  wire [7:0]  debug_hex_0_i,
-    input  wire [7:0]  debug_hex_1_i,
-    input  wire [7:0]  debug_hex_2_i,
-    input  wire [7:0]  debug_hex_3_i,
-    input  wire [7:0]  debug_hex_4_i,
-    input  wire [7:0]  debug_hex_5_i,
-    input  wire [7:0]  debug_hex_6_i,
-    input  wire [7:0]  debug_hex_7_i,
+    input wire [7:0] hex_values[NUM_HEX_BYTES],
     
     // 2 bit fields to display
     input  wire [7:0]  debug_bits_0_i,
@@ -36,7 +32,6 @@ module DebugOverlay #(
     localparam CHAR_WIDTH  = 8;
     localparam CHAR_HEIGHT = 8;
     localparam NUM_CHARS   = 14;          // Number of characters in VERSION string
-    localparam NUM_HEX_BYTES = 8;         // Number of hex bytes to display
     localparam NUM_BITS_FIELDS = 2;       // Number of bit fields
     localparam NUM_BITS_PER_FIELD = 8;    // Number of bits per field
     localparam X_OFFSET    = 16;
@@ -391,17 +386,6 @@ module DebugOverlay #(
         end
     end
     
-    // Select the hex value to display
-    wire [7:0] hex_values[NUM_HEX_BYTES];
-    assign hex_values[0] = debug_hex_0_i;
-    assign hex_values[1] = debug_hex_1_i;
-    assign hex_values[2] = debug_hex_2_i;
-    assign hex_values[3] = debug_hex_3_i;
-    assign hex_values[4] = debug_hex_4_i;
-    assign hex_values[5] = debug_hex_5_i;
-    assign hex_values[6] = debug_hex_6_i;
-    assign hex_values[7] = debug_hex_7_i;
-    
     wire [7:0] current_hex_value = is_in_hex_region ? hex_values[current_hex_byte] : 8'h00;
     
     // Get the correct nibble from the hex value
@@ -429,7 +413,7 @@ module DebugOverlay #(
         font_row = 8'd0;
         pixel_on = 1'b0;
         
-        if (ENABLE && in_bounds) begin
+        if (ENABLE && enable_i && in_bounds) begin
             // Handle spaces specially - should be blank
             if (debug_region && in_space) begin
                 pixel_on = 1'b0;

@@ -43,12 +43,14 @@
         <File path="../../hdl/ssc/super_serial_card.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/supersprite/supersprite.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc_denoise.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/support/cdc_sampling.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/iir_filter.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/sdpram32.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_6551.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_rx.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_tx.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/via6522.vhd" type="file.vhdl" enable="1"/>
+        <File path="../../hdl/support/ym2149_audio.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/support/YM2149.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/apple_video.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/vgc.sv" type="file.verilog" enable="1"/>

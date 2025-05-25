@@ -891,15 +891,18 @@ wire picosoc_led;
     ) debug_overlay (
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
+        .enable_i(1'b1),
 
-        .debug_hex_0_i ({2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]}),
-        .debug_hex_1_i ({2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]}),
-        .debug_hex_2_i ({2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]}), 
-        .debug_hex_3_i ({2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]}),
-        .debug_hex_4_i ('0),       
-        .debug_hex_5_i ('0),
-        .debug_hex_6_i ('0),
-        .debug_hex_7_i ('0), 
+        .hex_values ({
+            {2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]},
+            {2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]},
+            {2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]}, 
+            {2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]},
+            '0,       
+            '0,
+            '0,
+            '0
+        }), 
 
         .debug_bits_0_i (doc_osc_halt_w), 
         .debug_bits_1_i ('0),
