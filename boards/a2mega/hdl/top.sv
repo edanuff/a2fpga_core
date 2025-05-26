@@ -16,9 +16,6 @@
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
-// Using the Gowin IDE
-`define GW_IDE
-
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
     parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
@@ -38,14 +35,15 @@ module top #(
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
-    parameter bit HDMI_SLEEP_ENABLE = 1,        // Sleep HDMI output on CPU stop
+    parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
     parameter bit BUS_DATA_OUT_ENABLE = 1       // Allow driving data to Apple bus
 
 ) (
     // fpga clocks
     input clk,
-    input rst_n,
+    input resetn,
+    input rst,
 
     // A2 signals
     output a2_bus_oe,
@@ -81,8 +79,14 @@ module top #(
     output [2:0] tmds_d_p,
     output [2:0] tmds_d_n,
 
+    input hdmi_hpd,
+    output hdmi_scl,
+    output hdmi_sda,
+    output hdmi_cec,
+
     // leds
-    //output reg [5:0] led,
+    output [1:0] led,
+
     input button,  // 0 when pressed
 
     input [3:0] dip_switches_n,
@@ -93,27 +97,64 @@ module top #(
 
 );
 
+    assign hdmi_scl = 1'b1;
+    assign hdmi_sda = 1'b1;
+    assign hdmi_cec = 1'b0;
+
+    reg led_r;
+    reg [25:0] led_counter_r;
+
+    always @(posedge clk) begin
+        if (led_counter_r == 26'd24_999_999) begin
+            led_counter_r <= 0;
+            led_r <= ~led_r;  // Toggle LED every 0.5s, so full blink is 1s
+        end else begin
+            led_counter_r <= led_counter_r + 1;
+        end
+    end
+
+    assign led[0] = !led_r;
+
     // Clocks
 
     wire clk_logic_w;
     wire clk_lock_w;
     wire clk_pixel_w;
     wire clk_hdmi_w;
+    wire clk_27m_w;
 
     clk_pll your_instance_name(
         .lock(clk_lock_w), //output lock
-        .clkout0(clk_pixel_w), //output clkout0
+        .clkout0(clk_27m_w), //output clkout0
         .clkout1(clk_hdmi_w), //output clkout1
         .clkout2(clk_logic_w), //output clkout2
-        .clkin(clk), //input clkin
-        .reset(~rst_n) //input reset
+        .clkin(clk) //input clkin
     );
+
+    CLKDIV clkdiv_inst (
+        .HCLKIN(clk_hdmi_w),
+        .RESETN(clk_lock_w),
+        .CALIB(1'b0),
+        .CLKOUT(clk_pixel_w)
+    );
+    defparam clkdiv_inst.DIV_MODE="5";
 
     // Reset
 
-    wire device_reset_n_w = rst_n & clk_lock_w;
 
-    wire system_reset_n_w = device_reset_n_w & a2_reset_n;
+    wire device_reset_n_w;
+    Reset_Sync u_Reset_Sync (
+		.resetn(device_reset_n_w),
+		.ext_reset(!rst & clk_lock_w),
+		.clk(clk_logic_w)
+	);
+
+    //wire device_reset_n_w = ~rst;
+
+    assign led[1] = device_reset_n_w;
+
+
+    wire system_reset_n_w = device_reset_n_w;
 
     // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
     // delays Phi1 by 2 cycles = 40ns
@@ -575,7 +616,14 @@ module top #(
             scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w,
             scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w
         }),
-        .reset(~device_reset_n_w),
+        /*
+        .rgb({
+            8'hFF,
+            8'h00,
+            8'h00
+        }),
+        */
+        .reset(!device_reset_n_w),
         .audio_sample_word(audio_sample_word),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
@@ -588,12 +636,28 @@ module top #(
     );
 
     // Gowin LVDS output buffer
+    /*
     ELVDS_TBUF tmds_bufds[3:0] (
         .I({clk_pixel_w, tmds}),
         .O({tmds_clk_p, tmds_d_p}),
         .OB({tmds_clk_n, tmds_d_n}),
         .OEN(sleep_w && HDMI_SLEEP_ENABLE)
     );
+    */
+
+    ELVDS_OBUF tmds_bufds[3:0] (
+        .I({clk_pixel_w, tmds}),
+        .O({tmds_clk_p, tmds_d_p}),
+        .OB({tmds_clk_n, tmds_d_n})
+    );
+
+    /*
+    ELVDS_OBUF tmds_bufds[3:0] (
+        .I({clk_pixel_w, tmds}),
+        .O({tmds_clk_p, tmds_d_n}),
+        .OB({tmds_clk_n, tmds_d_p})
+    );
+    */
 
     /*
     always @(posedge clk_logic_w) begin 
@@ -605,5 +669,24 @@ module top #(
     end
     */
 
+
+endmodule
+
+module Reset_Sync (
+    input clk,
+    input ext_reset,
+    output resetn
+);
+
+    reg [3:0] reset_cnt = 0;
+
+    always @(posedge clk or negedge ext_reset) begin
+        if (~ext_reset)
+            reset_cnt <= 4'b0;
+        else
+            reset_cnt <= reset_cnt + !resetn;
+    end
+
+    assign resetn = &reset_cnt;
 
 endmodule

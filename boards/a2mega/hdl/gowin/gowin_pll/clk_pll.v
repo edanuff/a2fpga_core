@@ -5,16 +5,15 @@
 //Part Number: GW5AT-LV60PG484AC1/I0
 //Device: GW5AT-60
 //Device Version: B
-//Created Time: Sun May 18 13:57:16 2025
+//Created Time: Sun May 18 23:36:58 2025
 
-module clk_pll (lock, clkout0, clkout1, clkout2, clkin, reset);
+module clk_pll (lock, clkout0, clkout1, clkout2, clkin);
 
 output lock;
 output clkout0;
 output clkout1;
 output clkout2;
 input clkin;
-input reset;
 
 wire clkout3;
 wire clkout4;
@@ -39,7 +38,7 @@ PLLA PLLA_inst (
     .MDRDO(mdrdo),
     .CLKIN(clkin),
     .CLKFB(gw_gnd),
-    .RESET(reset),
+    .RESET(gw_gnd),
     .PLLPWD(gw_gnd),
     .RESET_I(gw_gnd),
     .RESET_O(gw_gnd),

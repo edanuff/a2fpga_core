@@ -11,7 +11,7 @@
 -type PLL_ADV
 -file_type vlg
 -ssc false
--rst true
+-rst false
 -rst_pwd false
 -rst_i false
 -rst_o false
