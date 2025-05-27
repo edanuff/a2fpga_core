@@ -674,7 +674,7 @@ wire picosoc_led;
     wire vdp_transparent;
     wire vdp_ext_video;
     wire vdp_irq_n;
-    wire [15:0] ssp_audio_w;
+    wire [9:0] ssp_audio_w;
     wire vdp_unlocked_w;
     wire [3:0] vdp_gmode_w;
     wire scanlines_w;
@@ -794,54 +794,50 @@ wire picosoc_led;
         
     // Audio
 
-    // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
-
-    wire [15:0] cdc_audio_l;
-    wire [15:0] cdc_audio_r;
-
-    // Mix all audio sources together to ensure at least one works
-    // Audio format notes:
-    // - sg_audio_l/r: 16-bit signed from DOC5503 (Ensoniq)
-    // - ssp_audio_w: 16-bit unsigned from SuperSprite
-    // - mb_audio_l/r: 10-bit unsigned from Mockingboard
-    // - speaker_audio_w: 1-bit from Apple speaker
-    
-    // Convert all to 16-bit signed for proper mixing
-    wire signed [15:0] mb_signed_l = {1'b0, mb_audio_l, 5'b0} - 16'h8000; // Unsigned to signed
-    wire signed [15:0] mb_signed_r = {1'b0, mb_audio_r, 5'b0} - 16'h8000;
-    wire signed [15:0] sp_signed = {1'b0, ssp_audio_w} - 16'h8000;
-    
-    // For the 1-bit speaker, use either positive or negative values to create a square wave
-    wire signed [15:0] speaker_signed = speaker_audio_w ? 16'h3000 : -16'h3000; 
-    
-    // Mix properly converted signed audio signals
-    wire signed [15:0] mixed_audio_l = sg_audio_l /* + sp_signed + mb_signed_l + speaker_signed */; 
-    wire signed [15:0] mixed_audio_r = sg_audio_r /* + sp_signed + mb_signed_r + speaker_signed */;
-    
-    cdc_fifo #(
-        .WIDTH(16),
-        .DEPTH(5) 
-    ) audio_cdc_left (
-        .clk(clk_pixel_w),
-        .i(mixed_audio_l),
-        .o(cdc_audio_l)
-    );
-
-    cdc_fifo #(
-        .WIDTH(16),
-        .DEPTH(5)
-    ) audio_cdc_right (
-        .clk(clk_pixel_w),
-        .i(mixed_audio_r),
-        .o(cdc_audio_r)
-    );
-
     wire speaker_audio_w;
 
     apple_speaker apple_speaker (
         .a2bus_if(a2bus_if),
         .enable(APPLE_SPEAKER_ENABLE | sw_apple_speaker_w),
         .speaker_o(speaker_audio_w)
+    );
+
+    // Extend all the unsigned audio signals to 13 bits
+    wire [12:0] speaker_audio_ext_w = {speaker_audio_w, 12'b0};
+    wire [12:0] ssp_audio_ext_w = {ssp_audio_w, 3'b0};
+    wire [12:0] mb_audio_l_ext_w = {mb_audio_l, 3'b0};
+    wire [12:0] mb_audio_r_ext_w = {mb_audio_r, 3'b0};
+
+    wire signed [15:0] core_audio_l_w;
+    wire signed [15:0] core_audio_r_w;
+    // Combine all the audio sources into a single 16-bit signed audio signal
+    // This could theoretically overflow by 1 bit and clip, but unlikely
+    assign core_audio_l_w = sg_audio_l + ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
+    assign core_audio_r_w = sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
+
+    // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
+
+    wire [15:0] cdc_audio_l;
+    wire [15:0] cdc_audio_r;
+
+    cdc_sampling #(
+        .WIDTH(16)
+    ) audio_cdc_left (
+        .rst_n(device_reset_n_w),
+        .clk_fast(clk_logic_w),
+        .clk_slow(clk_pixel_w),
+        .data_in(core_audio_l_w),
+        .data_out(cdc_audio_l)
+    );
+
+    cdc_sampling #(
+        .WIDTH(16)
+    ) audio_cdc_right (
+        .rst_n(device_reset_n_w),
+        .clk_fast(clk_logic_w),
+        .clk_slow(clk_pixel_w),
+        .data_in(core_audio_r_w),
+        .data_out(cdc_audio_r)
     );
 
     localparam [31:0] aflt_rate = 7_056_000;
@@ -874,9 +870,6 @@ wire picosoc_led;
         .cy1(acy1),
         .cy2(acy2),
 
-        //.is_signed(1'b0),
-        //.core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
-        //.core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
         .is_signed(1'b1),
         .core_l(cdc_audio_l),
         .core_r(cdc_audio_r),
@@ -899,15 +892,18 @@ wire picosoc_led;
     ) debug_overlay (
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
+        .enable_i(1'b1),
 
-        .debug_hex_0_i ({2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]}),
-        .debug_hex_1_i ({2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]}),
-        .debug_hex_2_i ({2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]}), 
-        .debug_hex_3_i ({2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]}),
-        .debug_hex_4_i ('0),       
-        .debug_hex_5_i ('0),
-        .debug_hex_6_i ('0),
-        .debug_hex_7_i ('0), 
+        .hex_values ({
+            {2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]},
+            {2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]},
+            {2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]}, 
+            {2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]},
+            8'h0,       
+            8'h0,
+            8'h0,
+            8'h0
+        }), 
 
         .debug_bits_0_i (doc_osc_halt_w), 
         .debug_bits_1_i ('0),
