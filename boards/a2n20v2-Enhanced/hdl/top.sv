@@ -18,9 +18,6 @@
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
-// Using the Gowin IDE
-`define GW_IDE
-
 // Ensoniq, PicoSoC, and DiskII are included via defines in the top module
 // Disk II requires PicoSoC
 
@@ -808,8 +805,8 @@ wire picosoc_led;
 
     wire signed [15:0] core_audio_l_w;
     wire signed [15:0] core_audio_r_w;
-    assign core_audio_l_w = ssp_audio_w + mb_audio_l + speaker_audio_w;
-    assign core_audio_r_w = ssp_audio_w + mb_audio_r + speaker_audio_w;
+    assign core_audio_l_w = sg_audio_l + ssp_audio_w + mb_audio_l + speaker_audio_w;
+    assign core_audio_r_w = sg_audio_r + ssp_audio_w + mb_audio_r + speaker_audio_w;
 
     // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
 

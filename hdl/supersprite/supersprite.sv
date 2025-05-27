@@ -72,7 +72,7 @@ module SuperSprite #(
 
     f18a_gpu_if.master f18a_gpu_if,
 
-    output [13:0] ssp_audio_o
+    output signed [13:0] ssp_audio_o
 
 );
 
