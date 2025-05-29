@@ -18,15 +18,14 @@
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
-// Using the Gowin IDE
-`define GW_IDE
-
 // Ensoniq, PicoSoC, and DiskII are included via defines in the top module
 // Disk II requires PicoSoC
 
-`undef ENSONIQ
-`define PICOSOC
-`define DISKII
+`define ENSONIQ
+`undef PICOSOC
+`undef DISKII
+
+`include "datetime.svh"
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -128,7 +127,7 @@ module top #(
     wire hdmi_rst_n_w;
     wire a2_2M;
 
-    // PLL - 100Mhz from 27
+    // PLL - 54hz from 27
     clk_logic clk_logic_inst (
         .clkout(clk_logic_w),  //output clkout
         .lock(clk_logic_lock_w),  //output lock
@@ -138,7 +137,7 @@ module top #(
         .clkin(clk)  //input clkin
     );
 
-    // PLL - 125Mhz from 25
+    // PLL - 135Mhz from 27
     clk_hdmi clk_hdmi_inst (
         .clkout(clk_hdmi_w),  //output clkout
         .lock(clk_hdmi_lock_w),  //output lock
@@ -150,7 +149,28 @@ module top #(
 
     wire device_reset_n_w = rst_n & clk_logic_lock_w & clk_hdmi_lock_w;
 
-    wire system_reset_n_w = device_reset_n_w & a2_reset_n;
+    /*
+    wire a2_reset_n_w;
+    cdc cdc_a2reset (
+        .clk(clk_logic_w),
+        .i(a2_reset_n),
+        .o(a2_reset_n_w),
+        .o_n(),
+        .o_posedge(),
+        .o_negedge()
+    );
+    */
+
+    wire a2_reset_cdc_w;
+    cdc_fifo #(
+        .WIDTH(1)
+    ) cdc_a2reset (
+        .clk(clk_logic_w),
+        .i(a2_reset_n),
+        .o(a2_reset_cdc_w)
+    );
+
+    wire system_reset_n_w = device_reset_n_w & a2_reset_cdc_w;
 
     // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
     // delays Phi1 by 2 cycles = 40ns
@@ -159,7 +179,7 @@ module top #(
     wire phi1_posedge;
     wire phi1_negedge;
     wire clk_2m_posedge_w = phi1_posedge | phi1_negedge;
-    cdc cdc_phi1 (
+    cdc_denoise cdc_phi1 (
         .clk(clk_logic_w),
         .i(a2_phi1),
         .o(phi1),
@@ -172,7 +192,7 @@ module top #(
     wire clk_7m_posedge_w;
     wire clk_7m_negedge_w;
     wire clk_14m_posedge_w = clk_7m_posedge_w | clk_7m_negedge_w;
-    cdc cdc_7m (
+    cdc_denoise cdc_7m (
         .clk(clk_logic_w),
         .i(a2_7M),
         .o(clk_7m_w),
@@ -290,6 +310,8 @@ module top #(
 
     wire irq_n_w;
 
+    wire inh_n_w;
+
     wire data_out_en_w;
     wire [7:0] data_out_w;
 
@@ -331,6 +353,7 @@ module top #(
         .data_out_i(data_out_w),
 
         .irq_n_i(irq_n_w),
+        .inh_n_i(inh_n_w),
 
         .dip_switches_n_o(dip_switches_n_w),
 
@@ -383,7 +406,22 @@ module top #(
         .slot_if(slot_if)
     );
 
+wire picosoc_led;
+
 `ifdef PICOSOC
+
+    wire cardrom_release_w;
+    wire [0:7] cardrom_d_w;
+    wire cardrom_rd;
+
+    CardROM cardrom (
+        .a2bus_if(a2bus_if),
+
+        .data_o(cardrom_d_w),
+        .rd_en_o(cardrom_rd),
+        .inh_n_o(inh_n_w),
+        .req_rom_release_i(cardrom_release_w)
+    );
 
     // PicoSOC
 
@@ -395,8 +433,6 @@ module top #(
 
     //assign uart_tx = picosoc_uart_tx_w;
     assign picosoc_uart_rx_w = uart_rx;
-
-    wire picosoc_led;
 
     video_control_if video_control_if();
 
@@ -414,6 +450,9 @@ module top #(
         .data_o (picosoc_d_w),
         .rd_en_o(picosoc_rd_w),
         .irq_n_o(picosoc_irq_n),
+
+        .cardrom_active_i(!inh_n_w),
+        .cardrom_release_o(cardrom_release_w),
 
         .uart_rx_i(picosoc_uart_rx_w),
         .uart_tx_o(picosoc_uart_tx_w),
@@ -521,6 +560,13 @@ module top #(
     wire diskii_rd = 1'b0;
 
     assign a2bus_control_if.ready = 1'b1;
+
+    wire [0:7] cardrom_d_w = 8'b0;
+    wire cardrom_rd = 1'b0;
+    assign inh_n_w = 1'b1;
+
+    assign picosoc_led = 1'b0;
+
 
 `endif
 
@@ -631,7 +677,7 @@ module top #(
     wire vdp_transparent;
     wire vdp_ext_video;
     wire vdp_irq_n;
-    wire [15:0] ssp_audio_w;
+    wire signed [13:0] ssp_audio_w;
     wire vdp_unlocked_w;
     wire [3:0] vdp_gmode_w;
     wire scanlines_w;
@@ -681,8 +727,8 @@ module top #(
     wire [7:0] mb_d_w;
     wire mb_rd;
     wire mb_irq_n;
-    wire [9:0] mb_audio_l;
-    wire [9:0] mb_audio_r;
+    wire signed [13:0] mb_audio_l;
+    wire signed [13:0] mb_audio_r;
 
     Mockingboard #(
         .ENABLE(MOCKINGBOARD_ENABLE),
@@ -736,26 +782,58 @@ module top #(
 
     // Data output
 
-    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || diskii_rd;
+    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || diskii_rd || cardrom_rd;
 
     assign data_out_w = ssc_rd ? ssc_d_w :
         ssp_rd ? ssp_d_w : 
         mb_rd ? mb_d_w : 
         diskii_rd ? diskii_d_w :
+        cardrom_rd ? cardrom_d_w :
         a2bus_if.data;
 
     // Interrupts
 
     assign irq_n_w = mb_irq_n && vdp_irq_n && ssc_irq_n;
-
+        
     // Audio
 
-    wire speaker_audio_w;
+    wire signed [13:0] speaker_audio_w;
 
     apple_speaker apple_speaker (
         .a2bus_if(a2bus_if),
         .enable(APPLE_SPEAKER_ENABLE | sw_apple_speaker_w),
-        .speaker_o(speaker_audio_w)
+        .speaker_o(),
+        .pcm_o(speaker_audio_w)
+    );
+
+    wire signed [15:0] core_audio_l_w;
+    wire signed [15:0] core_audio_r_w;
+    assign core_audio_l_w = sg_audio_l + ssp_audio_w + mb_audio_l + speaker_audio_w;
+    assign core_audio_r_w = sg_audio_r + ssp_audio_w + mb_audio_r + speaker_audio_w;
+
+    // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
+
+    wire [15:0] cdc_audio_l;
+    wire [15:0] cdc_audio_r;
+
+    cdc_sampling #(
+        .WIDTH(16)
+    ) audio_cdc_left (
+        .rst_n(device_reset_n_w),
+        .clk_fast(clk_logic_w),
+        .clk_slow(clk_pixel_w),
+        .data_in(core_audio_l_w),
+        .data_out(cdc_audio_l)
+    );
+
+    cdc_sampling #(
+        .WIDTH(16)
+    ) audio_cdc_right (
+        .rst_n(device_reset_n_w),
+        .clk_fast(clk_logic_w),
+        .clk_slow(clk_pixel_w),
+        .data_in(core_audio_r_w),
+        .data_out(cdc_audio_r)
     );
 
     localparam [31:0] aflt_rate = 7_056_000;
@@ -788,9 +866,12 @@ module top #(
         .cy1(acy1),
         .cy2(acy2),
 
-        .is_signed(1'b0),
-        .core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
-        .core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
+        //.is_signed(1'b0),
+        //.core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
+        //.core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
+        .is_signed(1'b1),
+        .core_l(cdc_audio_l),
+        .core_r(cdc_audio_r),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
