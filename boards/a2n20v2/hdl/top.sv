@@ -554,8 +554,8 @@ module top #(
         .cy2(acy2),
 
         .is_signed(1'b1),
-        .core_l(cdc_audio_l),
-        .core_r(cdc_audio_r),
+        .core_l(core_audio_l_w),
+        .core_r(core_audio_r_w),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
