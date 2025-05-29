@@ -25,9 +25,19 @@
 #define reg_a2fpga_a2_data (*(volatile uint8_t*)0x05000048)
 #define reg_a2fpga_countdown (*(volatile uint32_t*)0x0500004C)
 #define reg_a2fpga_a2bus_ready (*(volatile uint8_t*)0x05000050) 
+#define reg_a2fpga_cardrom_release (*(volatile uint8_t*)0x05000054)
+#define reg_a2fpga_cardrom_active (*(volatile uint8_t*)0x05000058)
+#define reg_a2fpga_reset (*(volatile uint8_t*)0x0500005C)
+#define reg_a2fpga_a2bus_inh_n (*(volatile uint8_t*)0x05000060)
+#define reg_a2fpga_a2bus_irq_n (*(volatile uint8_t*)0x05000064)
+#define reg_a2fpga_a2bus_rdy_n (*(volatile uint8_t*)0x05000068)
+#define reg_a2fpga_a2bus_dma_n (*(volatile uint8_t*)0x0500006C)
+#define reg_a2fpga_a2bus_nmi_n (*(volatile uint8_t*)0x05000070)
+#define reg_a2fpga_a2bus_reset_n (*(volatile uint8_t*)0x05000074)
 
 uint8_t wait_for_cmd();
 uint8_t wait_for_char();
+uint8_t wait_for_a2reset();
 void wait_for_countdown(uint32_t us);
 
 #endif

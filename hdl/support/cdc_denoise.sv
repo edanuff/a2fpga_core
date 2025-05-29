@@ -1,4 +1,4 @@
-module cdc (
+module cdc_denoise (
     input  clk,
     input  i,
     output o,
@@ -7,9 +7,10 @@ module cdc (
     output o_negedge    // o_negedge is asserted on the first negedge of i, o is still 1
 );
 
-    reg i_sync1, i_sync2;
-    reg [2:0] i_debounce;
-    reg i_stable;
+    reg i_sync1 /*synthesis syn_keep=1*/;
+    reg i_sync2 /*synthesis syn_keep=1*/;
+    reg [2:0] i_debounce /*synthesis syn_keep=1*/;
+    reg i_stable /*synthesis syn_keep=1*/;
 
     always @(posedge clk) begin
         // Step 1: Synchronize slow clock to fast clock domain

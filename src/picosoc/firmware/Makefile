@@ -28,8 +28,10 @@ C_FILES = \
 
 all: firmware.hex
 
+asm: firmware.asm
+
 firmware.elf: $(C_FILES) 
-	$(GCC) -march=rv32im -mabi=ilp32 -mno-div \
+	$(GCC) -march=rv32i -mabi=ilp32 -mno-div \
 		-nostartfiles \
 		-Wl,-Bstatic,-T,$(LDS_FILE),--strip-debug,-Map=firmware.map,--cref \
 		-fno-zero-initialized-in-bss -ffreestanding -Os \
@@ -37,7 +39,7 @@ firmware.elf: $(C_FILES)
 		-I$(INCLUDE_DIR) $(START_FILE) $(C_FILES)
 
 firmware.asm: $(C_FILES) 
-	$(GCC) -march=rv32im -mabi=ilp32 -mno-div \
+	$(GCC) -march=rv32i -mabi=ilp32 -mno-div \
 		-nostartfiles \
 		-Wl,-Bstatic,-T,$(LDS_FILE),--strip-debug,-Map=firmware.map,--cref \
 		-fno-zero-initialized-in-bss -ffreestanding -Os \

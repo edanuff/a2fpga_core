@@ -22,6 +22,7 @@
 
 #include <stdbool.h>
 #include "diskio.h"
+#include <a2fpga/a2fpga.h>
 
 
 /*-------------------------------------------------------------------------*/
@@ -47,9 +48,7 @@ static uint8_t sdcard_xfer(uint8_t value)
 
 static void dly_us (UINT n)	/* Delay n microseconds (avr-gcc -Os) */
 {
-	do {
-		asm volatile (""); 
-	} while (--n);
+	wait_for_countdown(n);
 }
 
 static void forward (BYTE d)	/* Data forwarding function (console out) */
@@ -212,6 +211,9 @@ DSTATUS disk_initialize (void)
 	BYTE n, cmd, ty, buf[4];
 	UINT tmr;
 
+
+	reg_sdcard_prescale = 16;
+	reg_sdcard_mode = 0;
 
 	sdcard_cs(false);
 	skip_mmc(10);			/* Dummy clocks */

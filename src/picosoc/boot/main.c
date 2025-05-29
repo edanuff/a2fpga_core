@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <soc/soc.h>
+#include <gpio/gpio.h>
 #include <a2fpga/a2fpga.h>
 #include <uart/uart.h>
 #include <xprintf/xprintf.h>
@@ -32,6 +33,11 @@
 // well as other system configuration options.
 //
 
+static const char *const FW_Date = __DATE__;
+static const char *const FW_Time = __TIME__;
+static const char HOT_KEY = 26;
+static const char ESC_KEY = 27;
+
 #define reg_uart_clkdiv (*(volatile uint32_t*)0x02000004)
 #define reg_uart_data (*(volatile uint32_t*)0x02000008)
 #define gpio (*(volatile uint32_t*)0x03000000)
@@ -52,31 +58,47 @@ static void put_rc (FRESULT rc)
 	xprintf("rc=%u FR_%s\n", (UINT)rc, str);
 }
 
+void flash_screen()
+{
+	reg_a2fpga_video_enable = 1;
+
+	soc_wait(10000);
+
+	reg_a2fpga_video_enable = 0;
+}
+
+void die ()
+{
+	reg_a2fpga_a2bus_ready = 1;
+    
+	reg_ws2812 = 0x00FF0000;
+
+    flash_screen();
+
+    reg_a2fpga_cardrom_release = 1;
+
+	// idle forever on error
+	while (1) {
+        wait_for_a2reset();
+        reg_a2fpga_cardrom_release = 1;
+	}
+}
+
+
 FATFS FatFs;				/* File system object for each logical drive */
 FILINFO Finfo;
 DIR Dir;					/* Directory object */
 
-void main(soc_firmware_jump_table_t* firmware_jump_table) {
-	soc_irq(0);
-
-    reg_uart_clkdiv = 468; // 54000000 / 115200
-
-	xdev_out(screen_putchar);
-	reg_a2fpga_video_enable = 1;
-
-    screen_clear();
-    xputs("A2FPGA OS Loaded\n\n");
-
+void dump_directory() {
 	FRESULT res;
 	UINT acc_files, acc_dirs;
  	QWORD acc_size;
-
-    res = f_mount(&FatFs, "", 0);
-    if (res) { put_rc(res); return; }
-   
+    
     res = f_opendir(&Dir, "");
-    if (res) { put_rc(res); return; }
-
+    if (res) { 
+        put_rc(res); 
+        die (); 
+    }
     acc_size = acc_dirs = acc_files = 0;
     for(;;) {
         res = f_readdir(&Dir, &Finfo);
@@ -94,18 +116,81 @@ void main(soc_firmware_jump_table_t* firmware_jump_table) {
     xprintf("\n%4u File(s)\n", acc_files);
     xprintf("%9llu bytes total\n", acc_size);
     xprintf("%4u Dir(s)\n", acc_dirs);
+}
 
-	uint32_t *buff=(uint32_t *)0x04080000;
-	UINT br;
+void handle_menu_key(uint8_t c)
+{
+    screen_putchar(c);
+}
+
+void handle_menu() {
+    xputs("\nEntering menu...\n");
+    uint8_t c;
+    while ((c = wait_for_char()) != ESC_KEY) {
+        handle_menu_key(c);
+    }
+    xputs("\nExiting menu...\n");
+}
+
+void menu_event_loop(bool skip_reset_wait) {
+
+    while (1) {
+
+        bool hotkey_pressed = false;
+        if (skip_reset_wait) {
+            hotkey_pressed = true;
+        } else {
+            wait_for_a2reset();
+
+            for (int i = 0; i < 500; i++)
+            {
+                uint8_t c = reg_a2fpga_keycode & 0x1F;
+                if (c == HOT_KEY) {
+                    hotkey_pressed = true;
+                    break;
+                } else if (c) {
+                    break;
+                }
+            }
+        }
+        skip_reset_wait = false;
+
+        reg_a2fpga_keycode = 0;
+
+        if (hotkey_pressed)
+        {
+            reg_a2fpga_reset = 0;
+            reg_a2fpga_video_enable = 1;
+
+            handle_menu();
+        }
+
+        reg_a2fpga_reset = 0;
+        reg_a2fpga_video_enable = 0;
+
+        reg_a2fpga_cardrom_release = 1;
+    }
+
+}
+
+FRESULT load_dos() {
 
     FIL fil;
-	xputs("\nOpening DOS 3.3...\n");
-	res = f_open(&fil, "dos33.nib", FA_READ);
-    if (res) { put_rc(res); return; }
+
+    xputs("\nOpening DOS 3.3...\n");
+    FRESULT res = f_open(&fil, "dos33.nib", FA_READ);
+    if (res) { 
+        put_rc(res); 
+        return res;
+    }
 
     xputs("\nLoading DOS 3.3...\n");
-	res = f_read(&fil, buff, 0x40000, &br);
-    //if (res) { put_rc(res); return; }
+    UINT br;
+    res = f_read(&fil, (uint32_t *)0x04080000, 0x40000, &br);
+    if (res) { 
+        put_rc(res); 
+        return res;
+    }
 
     f_close(&fil);
 
@@ -113,34 +198,79 @@ void main(soc_firmware_jump_table_t* firmware_jump_table) {
 
     xputs("\nDOS 3.3 loaded!\n");
 
-    reg_a2fpga_volume_0_ready = 1;
-    reg_a2fpga_volume_0_mounted = 1;
-    reg_a2fpga_volume_0_readonly = 1;
-    reg_a2fpga_volume_0_size = 0x40000;
-    reg_a2fpga_volume_0_blk_cnt = 0x80;
-    reg_a2fpga_volume_0_ack = 1;
+    return FR_OK;
+}
 
-    soc_wait(5000);
+void main(boot_params_t* boot_params) {
+	soc_irq(0);
 
-	reg_a2fpga_video_enable = 0;
+    reg_uart_clkdiv = 468; // 54000000 / 115200
 
-    while (1) {
+	xdev_out(screen_putchar);
 
-        firmware_jump_table->wait_for_cmd();
-        reg_a2fpga_a2_cmd = 0;
+    screen_clear();
+    xputs("A2FPGA OS Loaded\n\n");
 
-        reg_a2fpga_video_enable = 1;
-	    xputs("\nEntering co-processor...\n");
+	xprintf("Firmware Build: %s %s\n", boot_params->FW_Date, boot_params->FW_Time);
+	xprintf("Kernel Build: %s %s\n\n", FW_Date, FW_Time);
 
-        uint8_t c;
-        //while (c = firmware_jump_table->wait_for_char() != 'Q') {
-        while ((c = wait_for_char()) != 'Q') {
-            screen_putchar(c);
+    reg_a2disk_volume_0_ready = 0;
+    reg_a2disk_volume_0_mounted = 0;
+    reg_a2disk_volume_0_readonly = 1;
+    reg_a2disk_volume_0_size = 0x40000;
+    reg_a2disk_volume_0_blk_cnt = 0x80;
+    reg_a2disk_volume_0_ack = 0;
+
+    reg_a2disk_volume_1_ready = 0;
+    reg_a2disk_volume_1_mounted = 0;
+    reg_a2disk_volume_1_readonly = 1;
+    reg_a2disk_volume_1_size = 0x40000;
+    reg_a2disk_volume_1_blk_cnt = 0x80;
+    reg_a2disk_volume_1_ack = 0;
+
+	FRESULT res;
+
+    res = f_mount(&FatFs, "", 0);
+    if (res == FR_OK) {
+        res = load_dos();
+        if (res == FR_OK) {
+            reg_a2disk_volume_0_ready = 1;
+            reg_a2disk_volume_0_mounted = 1;
+            reg_a2disk_volume_0_readonly = 1;
+            reg_a2disk_volume_0_size = 0x40000;
+            reg_a2disk_volume_0_blk_cnt = 0x80;
+            reg_a2disk_volume_0_ack = 1;
         }
-	    xputs("\nExiting co-processor...\n");
+        else {
+            put_rc(res);
+            xputs("Unable to load Dos 3.3 (dos33.nib)\n");
+        }
+    } else {
+        put_rc(res); 
+        xputs("Unable to mount SD Card\n");
+    }
+   
+    //dump_directory();
 
-        reg_a2fpga_video_enable = 0;
+	reg_a2fpga_reset = 0;
+
+    if (reg_a2fpga_cardrom_active) {
+        xputs("\nA2FPGA Card Rom Active\n");
     }
 
-    //printf("\nDone!\n");
+    if (reg_a2fpga_video_enable) {
+        xputs("\nA2FPGA Video Enabled\n");
+    }
+
+    bool skip_reset_wait = boot_params->enter_menu;
+    if (skip_reset_wait) {
+        xputs("\nSkipping initial reset wait\n");
+    }
+
+    menu_event_loop(skip_reset_wait);
+
+    // should never get here
+    xputs("\nKernal unexpectedly exited\n");
+    die();
 }
+

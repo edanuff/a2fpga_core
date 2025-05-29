@@ -34,6 +34,10 @@
 // interface for debugging and a simple timer interrupt for blinking the LEDs.
 //
 
+static const char *const FW_Date = __DATE__;
+static const char *const FW_Time = __TIME__;
+static const char HOT_KEY = 26;
+static const char ESC_KEY = 27;
 
 void die (		/* Stop with dying message */
 	FRESULT rc	/* FatFs return value */
@@ -52,8 +56,14 @@ void die (		/* Stop with dying message */
 
 	reg_ws2812 = 0x00FF0000;
 
+
+    reg_a2fpga_cardrom_release = 1;
+
 	// idle forever on error
-	for (;;) ;
+	while (1) {
+        wait_for_a2reset();
+        reg_a2fpga_cardrom_release = 1;
+	}
 }
 
 void update_leds()
@@ -129,6 +139,7 @@ void irq_handler(uint32_t irq_mask, uint32_t *regs)
 		soc_wait(10000);
 		reg_a2fpga_video_enable = 0;
 		reg_a2fpga_a2bus_ready = 1;
+		reg_a2fpga_cardrom_release = 1;
 		
 		soc_sbreak();
 	}
@@ -141,16 +152,49 @@ void debug_putchar(uint8_t c)
 	screen_putchar(c);
 }
 
-soc_firmware_jump_table_t jump_table = {
+boot_params_t boot_params = {
+	.version = 1,
+	.enter_menu = 0,
+	.FW_Date = __DATE__,
+	.FW_Time = __TIME__,
+	.irq_handler = irq_handler,
 	.wait_for_cmd = wait_for_cmd,
 	.wait_for_char = wait_for_char,
+	.wait_for_a2reset = wait_for_a2reset
 };
+
+void dump_slots()
+{
+	for (int i = 0; i < 8; i++)
+	{
+		uint8_t card = slots_get_card(i);
+		xprintf("Slot: %u Card: %u\n", i, card);
+	}
+}
+
+bool check_hotkey()
+{
+	bool hotkey_pressed = false;
+	for (int i = 0; i < 500; i++)
+	{
+		uint8_t c = reg_a2fpga_keycode & 0x1F;
+		if (c == HOT_KEY) {
+			hotkey_pressed = true;
+			break;
+		}
+	}
+	reg_a2fpga_keycode = 0;
+
+	return hotkey_pressed;
+}
 
 void main() {
 	// set UART clock divider for 115200 baud
     reg_uart_clkdiv = 468; // 54000000 / 115200
 
 	reg_ws2812 = 0x00FFFF00;
+	reg_a2fpga_reset = 0;
+	reg_a2fpga_a2bus_ready = 1;
 
 	//xdev_out(uart_putchar);
 	//for (int i = 0; i < 10; i++) xputs("Testing Serial Port\n");
@@ -170,14 +214,27 @@ void main() {
 
 	shadow_ram_init();
 
-	reg_a2fpga_a2bus_ready = 1;
+	//reg_a2fpga_cardrom_release = 1;
+	//reg_a2fpga_a2bus_ready = 1;
 
     screen_clear();
     xputs("        A2FPGA Firmware v1.0b1\n\n");
 
-	for (int i = 0; i < 8; i++)
+	xprintf("Build: %s %s\n\n", FW_Date, FW_Time);
+
+	bool hotkey_pressed = check_hotkey();
+
+	if (hotkey_pressed)
 	{
-		xprintf("Slot: %u Card: %u\n", i, slots_get_card(i));
+		reg_a2fpga_video_enable = 1;
+		xputs("\n\nEscape pressed, entering menu...\n");
+		boot_params.enter_menu = 1;
+
+	}
+	else
+	{
+		reg_a2fpga_cardrom_release = 1;
+		boot_params.enter_menu = 0;
 	}
 
 	FATFS fatfs;			/* File system object */
@@ -208,8 +265,13 @@ void main() {
 
 	reg_ws2812 = 0x0000FF00;
 
-	void (*kernel_ptr)(soc_firmware_jump_table_t*) = (void *)0x04400000;
+	void (*kernel_ptr)(boot_params_t*) = (void *)0x04400000;
 
-	(*kernel_ptr)(&jump_table); 
+	(*kernel_ptr)(&boot_params); 
+
+	while (1) {
+        wait_for_a2reset();
+        reg_a2fpga_cardrom_release = 1;
+	}
 
 }
