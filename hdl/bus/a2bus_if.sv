@@ -66,9 +66,6 @@ interface a2bus_if (
         output m2b0,
         output data,
         output data_in_strobe,
-<<<<<<< Updated upstream
-        output sw_gs
-=======
         output sw_gs,
         output extended_cycle,
 
@@ -78,7 +75,6 @@ interface a2bus_if (
         output control_dma_n,
         output control_nmi_n,
         output control_reset_n
->>>>>>> Stashed changes
     );
 
     modport slave (
