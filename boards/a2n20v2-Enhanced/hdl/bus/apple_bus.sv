@@ -34,9 +34,16 @@ module apple_bus #(
     parameter int CLOCK_SPEED_HZ = 50_000_000,
     parameter int APPLE_HZ = 14_318_181,
     parameter int CPU_HZ = APPLE_HZ / 14,                   // 1_022_727
+<<<<<<< Updated upstream
     parameter int CYCLE_COUNT = CLOCK_SPEED_HZ / CPU_HZ,    // 49
     parameter int PHASE_COUNT = CYCLE_COUNT / 2,            // 24
     parameter int READ_COUNT = CYCLE_COUNT / 3,             // 16
+=======
+    parameter int CYCLE_COUNT = CLOCK_SPEED_HZ / CPU_HZ,    // 52
+    parameter int APPLE_14M_CYCLE_COUNT = CLOCK_SPEED_HZ / APPLE_HZ, // 3
+    parameter int PHASE_COUNT = CYCLE_COUNT / 2,            // 26
+    parameter int READ_COUNT = CYCLE_COUNT / 3,             // 17
+>>>>>>> Stashed changes
     parameter int WRITE_COUNT = CYCLE_COUNT / 5             // 10
 ) (
     a2bus_if.master a2bus_if,
@@ -92,16 +99,33 @@ module apple_bus #(
     assign a2bus_if.data = data_r;
     assign a2bus_if.rw_n = rw_n_r;
 
-    reg [5:0] phase_cycles_r = 0;
-    assign sleep_o = phase_cycles_r == 6'b111111;
+    reg [5:0] phase_timer_r = 0;
+    assign sleep_o = phase_timer_r == 6'b111111;
 
     always @(posedge a2bus_if.clk_logic) begin
 
         // capture phase transtitions and count cycles
         if (a2bus_if.phi1_posedge || a2bus_if.phi1_negedge) begin
-            phase_cycles_r <= 6'b0;
-        end else if (phase_cycles_r != 6'b111111) begin
-            phase_cycles_r <= phase_cycles_r + 1'b1;
+            phase_timer_r <= 6'b0;
+        end else if (phase_timer_r != 6'b111111) begin
+            phase_timer_r <= phase_timer_r + 1'b1;
+        end
+
+    end
+
+    reg [6:0] cycle_timer_r = 0;
+    reg extended_cycle_r = 0;
+    assign a2bus_if.extended_cycle = extended_cycle_r;
+    always @(posedge a2bus_if.clk_logic) begin
+        extended_cycle_r <= 0;
+        cycle_timer_r <= cycle_timer_r + 1'b1;
+        // capture cycle transitions and count cycles
+        if (a2bus_if.phi1_posedge) begin
+            cycle_timer_r <= 7'b0;
+            // check if last cycle was extended duration
+            if (cycle_timer_r >= (CYCLE_COUNT + APPLE_14M_CYCLE_COUNT)) begin
+                extended_cycle_r <= 1'b1;
+            end
         end
 
     end
@@ -144,6 +168,7 @@ module apple_bus #(
         end else begin
             data_in_strobe_r <= 1'b0;
 
+<<<<<<< Updated upstream
             if (a2bus_if.phi1 && (phase_cycles_r == READ_COUNT)) begin
                 next_io_state <= IO_READ_ADDR;
             end else if (a2bus_if.phi0 && (phase_cycles_r == WRITE_COUNT) && data_out_en_i) begin
@@ -153,6 +178,19 @@ module apple_bus #(
             end else if (!io_state_pending && (control_out_r != prev_control_out_r)) begin
                 next_io_state <= IO_WRITE_GPIO;
                 prev_control_out_r <= control_out_r;
+=======
+            if (io_state != IO_INIT) begin
+                if (a2bus_if.phi1 && (phase_timer_r == READ_COUNT)) begin
+                    next_io_state <= IO_READ_ADDR;
+                end else if (a2bus_if.phi0 && (phase_timer_r == WRITE_COUNT) && data_out_en_i) begin
+                    next_io_state <= IO_WRITE_DATA;
+                end else if (a2bus_if.phi0 && (phase_timer_r == READ_COUNT)) begin
+                    next_io_state <= IO_READ_DATA;
+                end else if (!io_state_pending && (control_out_r != prev_control_out_r)) begin
+                    next_io_state <= IO_WRITE_GPIO;
+                    prev_control_out_r <= control_out_r;
+                end
+>>>>>>> Stashed changes
             end
 
             case (io_state) 

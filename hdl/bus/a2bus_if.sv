@@ -43,6 +43,7 @@ interface a2bus_if (
     logic m2b0;
     logic [7:0] data;
     logic data_in_strobe;
+    logic extended_cycle;
 
     modport master (
         input clk_logic,
@@ -65,7 +66,19 @@ interface a2bus_if (
         output m2b0,
         output data,
         output data_in_strobe,
+<<<<<<< Updated upstream
         output sw_gs
+=======
+        output sw_gs,
+        output extended_cycle,
+
+        output control_inh_n,
+        output control_irq_n,
+        output control_rdy_n,
+        output control_dma_n,
+        output control_nmi_n,
+        output control_reset_n
+>>>>>>> Stashed changes
     );
 
     modport slave (
@@ -90,6 +103,7 @@ interface a2bus_if (
         input data,
         input data_in_strobe,
         input sw_gs,
+        input extended_cycle,
 
         import io_select_n,
         import dev_select_n,

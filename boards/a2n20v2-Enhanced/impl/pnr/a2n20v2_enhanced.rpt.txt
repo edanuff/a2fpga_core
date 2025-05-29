@@ -12,12 +12,17 @@
   <Part Number>: GW2AR-LV18QN88C8/I7
   <Device>: GW2AR-18
   <Device Version>: C
+<<<<<<< Updated upstream
   <Created Time>:Mon Sep 23 17:38:54 2024
+=======
+  <Created Time>:Wed May 28 20:02:40 2025
+>>>>>>> Stashed changes
 
 
 2. PnR Details
 
   Running placement:
+<<<<<<< Updated upstream
     Placement Phase 0: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
     Placement Phase 1: CPU time = 0h 0m 0.273s, Elapsed time = 0h 0m 0.273s
     Placement Phase 2: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
@@ -33,10 +38,28 @@
     CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
 
  Total Time and Memory Usage: CPU time = 0h 0m 19s, Elapsed time = 0h 0m 19s, Peak memory usage = 375MB
+=======
+    Placement Phase 0: CPU time = 0h 0m 0.529s, Elapsed time = 0h 0m 0.502s
+    Placement Phase 1: CPU time = 0h 0m 0.181s, Elapsed time = 0h 0m 0.168s
+    Placement Phase 2: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    Total Placement: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+ Running routing:
+    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
+    Routing Phase 1: CPU time = 0h 0m 0.193s, Elapsed time = 0h 0m 0.189s
+    Routing Phase 2: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+    Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
+    Total Routing: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+ Generate output files:
+    CPU time = 0h 0m 0.955s, Elapsed time = 0h 0m 0.904s
+
+ Total Time and Memory Usage: CPU time = 0h 0m 9s, Elapsed time = 0h 0m 8s, Peak memory usage = 238MB
+>>>>>>> Stashed changes
 
 
 3. Resource Usage Summary
 
+<<<<<<< Updated upstream
   ----------------------------------------------------------
   Resources                   | Usage
   ----------------------------------------------------------
@@ -55,12 +78,33 @@
     --Output Buf              | 21
     --Inout Buf               | 8
   IOLOGIC                     | 5%
+=======
+  --------------------------------------------------------------------------------
+  Resources                   | Usage                               | Utilization
+  --------------------------------------------------------------------------------
+  Logic                       | 6436/20736                          |  32%
+    --LUT,ALU,ROM16           | 5386(4901 LUT, 485 ALU, 0 ROM16)    | -
+    --SSRAM(RAM16)            | 175                                 | -
+  Register                    | 2926/15915                          |  19%
+    --Logic Register as Latch | 0/15552                             |  0%
+    --Logic Register as FF    | 2886/15552                          |  19%
+    --I/O Register as Latch   | 0/363                               |  0%
+    --I/O Register as FF      | 40/363                              |  12%
+  CLS                         | 4488/10368                          |  44%
+  I/O Port                    | 41/66                               |  63%
+  I/O Buf                     | 36                                  | -
+    --Input Buf               | 7                                   | -
+    --Output Buf              | 21                                  | -
+    --Inout Buf               | 8                                   | -
+  IOLOGIC                     | 6/121                               | 5%
+>>>>>>> Stashed changes
     --OSER10                  | 3
   BSRAM                       | 90%
     --SP                      | 10
     --SDPB                    | 17
     --DPB                     | 9
     --DPX9B                   | 2
+<<<<<<< Updated upstream
     --pROM                    | 3
   DSP                         | 75%
     --MULT9X9                 | 4
@@ -76,6 +120,13 @@
   DQS                         | 0/1  0%
   DHCEN                       | 0/16  0%
   ==========================================================
+=======
+    --pROM                    | 2
+  DSP                         | 2/24                                | 9%
+    --MULT9X9                 | 4
+    --MULTADDALU18X18         | 1
+  ================================================================================
+>>>>>>> Stashed changes
 
 
 
@@ -118,11 +169,19 @@
   clk_logic_w    | PRIMARY        |  TR TL BR BL
   O_sdram_clk_d  | PRIMARY        |  TR
   clk_pixel_w    | PRIMARY        |  TR TL BR BL
+<<<<<<< Updated upstream
   n39_7          | LW             |  -
   n29_11         | LW             |  -
   picosoc/gpio_peripheral/ws2812_inst/clk_count_31_10| LW             |  -
   picosoc/cpu/mem_xfer| LW             |  -
   supersprite/vdp/f18a_core/inst_cpu/n957_6| LW             |  -
+=======
+  n3226_5        | LW             |  -
+  timer_a_count_15_7| LW             |  -
+  n29_11         | LW             |  -
+  supersprite/vdp/f18a_core/reset_n_r| LW             |  -
+  supersprite/vdp/f18a_core/inst_cpu/n931_6| LW             |  -
+>>>>>>> Stashed changes
   mockingboard/pb_l_o[2]| LW             |  -
   mockingboard/pb_r_o[2]| LW             |  -
   superserial/COM2/n67_5| LW             |  -

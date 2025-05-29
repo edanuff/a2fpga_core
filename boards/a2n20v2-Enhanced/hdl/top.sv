@@ -188,8 +188,13 @@ module top #(
     localparam VIDEO_MEM_PORT = 0;
     localparam MAIN_MEM_PORT = 1;
 `ifdef ENSONIQ
+<<<<<<< Updated upstream
     localparam GLU_MEM_PORT = 2;
     localparam DOC_MEM_PORT = 3;
+=======
+    localparam DOC_MEM_PORT = 2;
+    localparam GLU_MEM_PORT = 3;
+>>>>>>> Stashed changes
     `ifdef PICOSOC
     localparam SOC_MEM_PORT = 4;
         `ifdef DISKII
@@ -586,6 +591,9 @@ module top #(
 
     wire [15:0] sg_audio_l;
     wire [15:0] sg_audio_r;
+    wire [7:0] debug_doc_osc_en_w;   // Debug signal for DOC oscillator enable register
+    wire [1:0] debug_doc_osc_mode_w[8];
+    wire [7:0] debug_doc_osc_halt_w;
 `ifdef ENSONIQ
     wire [7:0] sg_d_w;
     wire sg_rd_w;
@@ -600,12 +608,26 @@ module top #(
 
         .audio_l_o(sg_audio_l),               
         .audio_r_o(sg_audio_r),
+<<<<<<< Updated upstream
+=======
+        
+        .debug_osc_en_o(debug_doc_osc_en_w),   // Capture oscillator enable register value
+        .debug_osc_mode_o(debug_doc_osc_mode_w), // Capture oscillator mode register values
+        .debug_osc_halt_o(debug_doc_osc_halt_w), // Capture oscillator halt register value
+    
+>>>>>>> Stashed changes
         .glu_mem_if(mem_ports[GLU_MEM_PORT]),
         .doc_mem_if(mem_ports[DOC_MEM_PORT])
     );
 `else
     assign sg_audio_l = 16'b0;
     assign sg_audio_r = 16'b0;
+<<<<<<< Updated upstream
+=======
+    assign debug_doc_osc_en_w = 8'h00; // Default value when ENSONIQ is disabled
+    assign debug_doc_osc_mode_w = '{8{2'b00}}; // Default value when ENSONIQ is disabled
+    assign debug_doc_osc_halt_w = 8'h00; // Default value when ENSONIQ is disabled
+>>>>>>> Stashed changes
 `endif
 
     // SuperSprite
@@ -788,6 +810,73 @@ module top #(
 
     // HDMI
 
+<<<<<<< Updated upstream
+=======
+    reg [8:0] scanline_counter_r;
+    reg [1:0] vreset;
+    always @(posedge clk_logic_w) begin
+        if (!system_reset_n_w) begin
+            scanline_counter_r <= 9'd0;
+            vreset <= 2'b01;
+        end else begin
+            vreset <= {vreset[0], 1'b0}; 
+            if (a2bus_if.extended_cycle) begin
+                if (scanline_counter_r == 9'd261) begin
+                    scanline_counter_r <= 9'd0;
+                    vreset <= 2'b01;
+                end else begin
+                    scanline_counter_r <= scanline_counter_r + 1'b1;
+                end
+            end
+        end
+    end
+    wire vreset_w = |vreset;
+
+    wire scanline_en = scanlines_w && hdmi_y[0];
+
+    wire [7:0] debug_r_w;
+    wire [7:0] debug_g_w;
+    wire [7:0] debug_b_w;
+    DebugOverlay #(
+        .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
+        .ENABLE(1'b1)
+    ) debug_overlay (
+        .clk_i(clk_pixel_w),
+        .reset_n (device_reset_n_w),
+        .enable_i(1'b1),
+
+        .hex_values ({
+            {2'b0, debug_doc_osc_mode_w[0], 2'b0, debug_doc_osc_mode_w[1]},
+            {2'b0, debug_doc_osc_mode_w[2], 2'b0, debug_doc_osc_mode_w[3]},
+            {2'b0, debug_doc_osc_mode_w[4], 2'b0, debug_doc_osc_mode_w[5]}, 
+            {2'b0, debug_doc_osc_mode_w[6], 2'b0, debug_doc_osc_mode_w[7]},
+            8'h0,       
+            8'h0,
+            8'h0,
+            8'h0
+        }), 
+
+        .debug_bits_0_i (debug_doc_osc_halt_w), 
+        .debug_bits_1_i ('0),
+
+        .screen_x_i(hdmi_x),
+        .screen_y_i(hdmi_y),
+
+        .r_i(scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w),
+        .g_i(scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w),
+        .b_i(scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w),
+
+        .r_o(debug_r_w),
+        .g_o(debug_g_w),
+        .b_o(debug_b_w)
+    );
+
+    wire [7:0] sc_debug_r_w = scanline_counter_r == 9'd100 ? 8'hFF : debug_r_w;
+    wire [7:0] sc_debug_g_w = scanline_counter_r == 9'd100 ? 8'hFF : debug_g_w;
+    wire [7:0] sc_debug_b_w = scanline_counter_r == 9'd100 ? 8'hFF : debug_b_w;
+    
+
+>>>>>>> Stashed changes
     logic [2:0] tmds;
     wire tmdsClk;
 
@@ -795,7 +884,7 @@ module top #(
 
     hdmi #(
         .VIDEO_ID_CODE(2),
-        .DVI_OUTPUT(0),
+        .DVI_OUTPUT(1),
         .VIDEO_REFRESH_RATE(59.94),
         .IT_CONTENT(1),
         .AUDIO_RATE(AUDIO_RATE),
@@ -810,11 +899,22 @@ module top #(
         .clk_pixel(clk_pixel_w),
         .clk_audio(clk_audio_w),
         .rgb({
+<<<<<<< Updated upstream
             scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w,
             scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w,
             scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w
         }),
         .reset(~device_reset_n_w),
+=======
+            sc_debug_r_w,
+            sc_debug_g_w,
+            sc_debug_b_w
+        }),
+        .reset(~device_reset_n_w),
+        .ext_vsync(vreset_w),
+        //.ext_vsync(1'b0),
+        //.audio_sample_word({cdc_audio_l, cdc_audio_r}),
+>>>>>>> Stashed changes
         .audio_sample_word(audio_sample_word),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
