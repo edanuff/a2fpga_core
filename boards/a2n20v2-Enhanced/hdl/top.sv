@@ -59,6 +59,7 @@ module top #(
 ) (
     // fpga clocks
     input clk,
+    input clk_3,
 
     // fpga buttons
     input s1,
@@ -134,7 +135,7 @@ module top #(
         .clkoutp(clk_logic_p_w),  //output clkoutp
         .clkoutd(clk_pixel_w),  //output clkoutd
         .reset(~rst_n),  //input reset
-        .clkin(clk)  //input clkin
+        .clkin(clk_3)  //input clkin
     );
 
     // PLL - 135Mhz from 27
@@ -953,6 +954,7 @@ wire picosoc_led;
     hdmi #(
         .VIDEO_ID_CODE(2),
         .DVI_OUTPUT(0),
+        .EXT_VSYNC(1),
         .VIDEO_REFRESH_RATE(59.94),
         .IT_CONTENT(1),
         .AUDIO_RATE(AUDIO_RATE),

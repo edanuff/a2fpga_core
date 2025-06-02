@@ -7,6 +7,7 @@ module hdmi
     // See README.md or CEA-861-D for enumeration of video id codes.
     // Pixel repetition, interlaced scans and other special output modes are not implemented (yet).
     parameter int VIDEO_ID_CODE = 1,
+    parameter bit EXT_VSYNC=0,
 
     // The IT content bit indicates that image samples are generated in an ad-hoc
     // manner (e.g. directly from values in a framebuffer, as by a PC video
@@ -215,7 +216,7 @@ localparam real VIDEO_RATE = (VIDEO_ID_CODE == 1 ? 25.2E6
 //reg ext_vsync_req;
 always_ff @(posedge clk_pixel)
 begin
-    if (reset | ext_vsync)
+    if (reset || (EXT_VSYNC && ext_vsync))
     begin
         cx <= BIT_WIDTH'(START_X);
         cy <= BIT_HEIGHT'(START_Y);
@@ -224,8 +225,11 @@ begin
     begin
         //if (ext_vsync) ext_vsync_req <= 1;
         cx <= cx == frame_width-1'b1 ? BIT_WIDTH'(0) : cx + 1'b1;
-        //cy <= cx == frame_width-1'b1 ? cy == frame_height-1'b1 ? BIT_HEIGHT'(0) : cy + 1'b1 : cy;
-        cy <= cx == frame_width-1'b1 ? cy + 1'b1 : cy;
+        if (EXT_VSYNC) begin
+            cy <= cx == frame_width-1'b1 ? cy + 1'b1 : cy;
+        end else begin
+            cy <= cx == frame_width-1'b1 ? cy == frame_height-1'b1 ? BIT_HEIGHT'(0) : cy + 1'b1 : cy;
+        end
         /*
         if (cx == frame_width-1'b1) begin
             if (ext_vsync | ext_vsync_req) begin
