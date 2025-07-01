@@ -107,6 +107,22 @@ module top #(
         .clkin(clk_pixel_w)  //input clkin
     );
 
+    reg led_r;
+    reg [25:0] led_counter_r;
+
+    always @(posedge clk) begin
+        if (led_counter_r == 26'd24_999_999) begin
+            led_counter_r <= 0;
+            led_r <= ~led_r;  // Toggle LED every 0.5s, so full blink is 1s
+        end else begin
+            led_counter_r <= led_counter_r + 1;
+        end
+    end
+
+    assign led[0] = !led_r;
+
+
+
     // Reset
 
     wire device_reset_n_w = rst_n & clk_logic_lock_w & clk_hdmi_lock_w;

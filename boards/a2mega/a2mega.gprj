@@ -56,6 +56,7 @@
         <File path="hdl/a2mega.cst" type="file.cst" enable="1"/>
         <File path="hdl/a2mega.sdc" type="file.sdc" enable="1"/>
         <File path="hdl/bus/apple_bus.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/ddr3/DDR3.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/clk_pll.v" type="file.verilog" enable="1"/>
         <File path="hdl/hdmi/serializer.sv" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
