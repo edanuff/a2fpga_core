@@ -16,6 +16,8 @@
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
+`include "datetime.svh"
+
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
     parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
@@ -89,7 +91,7 @@ module top #(
     wire hdmi_rst_n_w;
     wire a2_2M;
 
-    // PLL - 100Mhz from 27
+    // PLL - 54hz from 27
     clk_logic clk_logic_inst (
         .clkout(clk_logic_w),  //output clkout
         .lock(clk_logic_lock_w),  //output lock
@@ -99,29 +101,13 @@ module top #(
         .clkin(clk)  //input clkin
     );
 
-    // PLL - 125Mhz from 25
+    // PLL - 135Mhz from 27
     clk_hdmi clk_hdmi_inst (
         .clkout(clk_hdmi_w),  //output clkout
         .lock(clk_hdmi_lock_w),  //output lock
         .reset(~clk_logic_lock_w),  //input reset
         .clkin(clk_pixel_w)  //input clkin
     );
-
-    reg led_r;
-    reg [25:0] led_counter_r;
-
-    always @(posedge clk) begin
-        if (led_counter_r == 26'd24_999_999) begin
-            led_counter_r <= 0;
-            led_r <= ~led_r;  // Toggle LED every 0.5s, so full blink is 1s
-        end else begin
-            led_counter_r <= led_counter_r + 1;
-        end
-    end
-
-    assign led[0] = !led_r;
-
-
 
     // Reset
 
@@ -580,10 +566,49 @@ module top #(
 
     // HDMI
 
+    wire scanline_en = scanlines_w && hdmi_y[0];
+
+    reg show_debug_overlay_r = 1'b0;
+
+    wire [7:0] debug_r_w;
+    wire [7:0] debug_g_w;
+    wire [7:0] debug_b_w;
+    DebugOverlay #(
+        .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
+        .ENABLE(1'b1)
+    ) debug_overlay (
+        .clk_i          (clk_pixel_w),
+        .reset_n (device_reset_n_w),
+        .enable_i(show_debug_overlay_r),
+
+        .hex_values ({
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,
+            8'h0,
+            8'h0
+        }), 
+
+        .debug_bits_0_i (doc_osc_halt_w), 
+        .debug_bits_1_i ('0),
+
+        .screen_x_i     (hdmi_x),
+        .screen_y_i     (hdmi_y),
+
+        .r_i            (scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w),
+        .g_i            (scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w),
+        .b_i            (scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w),
+
+        .r_o            (debug_r_w),
+        .g_o            (debug_g_w),
+        .b_o            (debug_b_w)
+    );  
+
     logic [2:0] tmds;
     wire tmdsClk;
-
-    wire scanline_en = scanlines_w && hdmi_y[0];
 
     hdmi #(
         .VIDEO_ID_CODE(2),
@@ -602,9 +627,9 @@ module top #(
         .clk_pixel(clk_pixel_w),
         .clk_audio(clk_audio_w),
         .rgb({
-            scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w,
-            scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w,
-            scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w
+            debug_r_w,
+            debug_g_w,
+            debug_b_w
         }),
         .reset(~device_reset_n_w),
         .audio_sample_word(audio_sample_word),
@@ -626,11 +651,29 @@ module top #(
         .OEN(sleep_w && HDMI_SLEEP_ENABLE)
     );
 
+    wire s2_debounced_w;
+    debounce #(
+        .DEBOUNCE_TIME(10000)
+    ) debounce_a2reset (
+        .clk(clk_logic_w),
+        .rst(~device_reset_n_w),
+        .i(s2),
+        .o(s2_debounced_w)
+    );
+
+    reg prev_button_s2 = 1'b0;
+    wire button_s2_posedge_w = s2_debounced_w && !prev_button_s2;
     always @(posedge clk_logic_w) begin 
-        if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
+        prev_button_s2 <= s2_debounced_w;
+        if (button_s2_posedge_w) begin
+            show_debug_overlay_r <= !show_debug_overlay_r;
+        end
+        //led <= {4'b1111, !picosoc_led};
+        //if (!s2) 
+        led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
-        else led <= {!vdp_unlocked_w, ~vdp_gmode_w};
+        //else led <= {!vdp_unlocked_w, ~vdp_gmode_w};
         //else led <= {!vdp_unlocked_w, dip_switches_n_w};
     end
 

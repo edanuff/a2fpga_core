@@ -524,6 +524,9 @@ wire picosoc_led;
     assign slotmaker_config_if.slot = 3'b0;
     assign slotmaker_config_if.wr = 1'b0;
     assign slotmaker_config_if.card_i = 8'b0;
+    assign slotmaker_config_if.reconfig = 1'b0;
+
+    // Video
 
     video_control_if video_control_if();
     assign video_control_if.enable = 1'b0;
@@ -947,7 +950,6 @@ wire picosoc_led;
             debug_b_w
         }),
         .reset(~device_reset_n_w),
-        //.audio_sample_word({cdc_audio_l, cdc_audio_r}),
         .audio_sample_word(audio_sample_word),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
