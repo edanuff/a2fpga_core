@@ -52,7 +52,7 @@ module top #(
 
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit SHADOW_ALL_MEMORY = 0,        // Shadoow all memory in SDRAM, not just video ram
-    parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
+    parameter bit HDMI_SLEEP_ENABLE = 1,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
     parameter bit BUS_DATA_OUT_ENABLE = 1       // Allow driving data to Apple bus
 
@@ -883,6 +883,8 @@ wire picosoc_led;
 
     wire scanline_en = scanlines_w && hdmi_y[0];
 
+    reg show_debug_overlay_r = 1'b0;
+
     wire [7:0] debug_r_w;
     wire [7:0] debug_g_w;
     wire [7:0] debug_b_w;
@@ -892,7 +894,7 @@ wire picosoc_led;
     ) debug_overlay (
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
-        .enable_i(1'b1),
+        .enable_i(show_debug_overlay_r),
 
         .hex_values ({
             {2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]},
@@ -965,13 +967,29 @@ wire picosoc_led;
         .OEN(sleep_w && HDMI_SLEEP_ENABLE)
     );
 
-    
+    wire s2_debounced_w;
+    debounce #(
+        .DEBOUNCE_TIME(10000)
+    ) debounce_a2reset (
+        .clk(clk_logic_w),
+        .rst(~device_reset_n_w),
+        .i(s2),
+        .o(s2_debounced_w)
+    );
+
+    reg prev_button_s2 = 1'b0;
+    wire button_s2_posedge_w = s2_debounced_w && !prev_button_s2;
     always @(posedge clk_logic_w) begin 
-        if (!s2) led <= {4'b1111, !picosoc_led};
-        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
+        prev_button_s2 <= s2_debounced_w;
+        if (button_s2_posedge_w) begin
+            show_debug_overlay_r <= !show_debug_overlay_r;
+        end
+        //led <= {4'b1111, !picosoc_led};
+        //if (!s2) 
+        led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
-        else led <= {!vdp_unlocked_w, ~vdp_gmode_w};
+        //else led <= {!vdp_unlocked_w, ~vdp_gmode_w};
         //else led <= {!vdp_unlocked_w, dip_switches_n_w};
     end
 
