@@ -250,7 +250,7 @@ void main() {
 		reg_a2fpga_a2bus_ready = 1;
 		reg_a2fpga_video_enable = 1;
 		reg_a2fpga_cardrom_release = 1;
-		reg_ws2812 = 0x00FF0000;  // Red LED to indicate no SD card
+		reg_ws2812 = 0x000000FF;  // Blue LED to indicate no SD card
 		
 		// Continue running without SD card instead of dying
 		while (1) {
