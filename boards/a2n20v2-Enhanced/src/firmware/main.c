@@ -248,7 +248,7 @@ void main() {
 	if (sd_status != 0) {
 		xputs("No SD card detected!\n");
 		reg_a2fpga_a2bus_ready = 1;
-		reg_a2fpga_video_enable = 1;
+		reg_a2fpga_video_enable = 0;
 		reg_a2fpga_cardrom_release = 1;
 		reg_ws2812 = 0x000000FF;  // Blue LED to indicate no SD card
 		

@@ -22,7 +22,7 @@
 // Disk II requires PicoSoC
 
 `define ENSONIQ
-`undef PICOSOC
+`define PICOSOC
 `undef DISKII
 
 `include "datetime.svh"
