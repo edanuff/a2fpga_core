@@ -8,31 +8,31 @@
   <Design File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2p25/impl/gwsynthesis/a2p25.vg
   <Physical Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2p25/hdl/a2p25.cst
   <Timing Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2p25/hdl/a2p25.sdc
-  <Tool Version>: V1.9.11.02
+  <Tool Version>: V1.9.11.03
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
-  <Device Version>: B
-  <Created Time>:Thu Jun  5 22:55:47 2025
+  <Device Version>: A
+  <Created Time>:Sat Jul 19 16:35:21 2025
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.667s, Elapsed time = 0h 0m 0.658s
-    Placement Phase 1: CPU time = 0h 0m 0.151s, Elapsed time = 0h 0m 0.146s
-    Placement Phase 2: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-    Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
-    Total Placement: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+    Placement Phase 0: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
+    Placement Phase 1: CPU time = 0h 0m 0.225s, Elapsed time = 0h 0m 0.218s
+    Placement Phase 2: CPU time = 0h 0m 12s, Elapsed time = 0h 0m 12s
+    Placement Phase 3: CPU time = 0h 3m 51s, Elapsed time = 0h 3m 50s
+    Total Placement: CPU time = 0h 4m 5s, Elapsed time = 0h 4m 3s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
-    Routing Phase 1: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
-    Routing Phase 2: CPU time = 0h 0m 0.062s, Elapsed time = 0h 0m 0.059s
+    Routing Phase 0: CPU time = 0h 0m 0.004s, Elapsed time = 0h 0m 0.004s
+    Routing Phase 1: CPU time = 0h 0m 21s, Elapsed time = 0h 0m 20s
+    Routing Phase 2: CPU time = 0h 0m 0.162s, Elapsed time = 0h 0m 0.159s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+    Total Routing: CPU time = 0h 0m 21s, Elapsed time = 0h 0m 21s
  Generate output files:
-    CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
 
- Total Time and Memory Usage: CPU time = 0h 0m 9s, Elapsed time = 0h 0m 9s, Peak memory usage = 1570MB
+ Total Time and Memory Usage: CPU time = 0h 4m 27s, Elapsed time = 0h 4m 25s, Peak memory usage = 3196MB
 
 
 3. Resource Usage Summary
@@ -40,29 +40,29 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 8452/23040                          |  37%
-    --LUT,ALU,ROM16           | 7582(6368 LUT, 1214 ALU, 0 ROM16)   | -
-    --SSRAM(RAM16)            | 145                                 | -
-  Register                    | 3835/23280                          |  17%
+  Logic                       | 13444/23040                         |  59%
+    --LUT,ALU,ROM16           | 13444(12202 LUT, 1242 ALU, 0 ROM16) | -
+    --SSRAM(RAM16)            | 0                                   | -
+  Register                    | 13049/23280                         |  57%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 3807/23040                          |  17%
+    --Logic Register as FF    | 13023/23040                         |  57%
     --I/O Register as Latch   | 0/240                               |  0%
-    --I/O Register as FF      | 28/240                              |  12%
-  CLS                         | 5831/11520                          |  51%
+    --I/O Register as FF      | 26/240                              |  11%
+  CLS                         | 11154/11520                         |  97%
   I/O Port                    | 57/86                               |  67%
-  I/O Buf                     | 46                                  | -
-    --Input Buf               | 25                                  | -
+  I/O Buf                     | 44                                  | -
+    --Input Buf               | 23                                  | -
     --Output Buf              | 13                                  | -
     --Inout Buf               | 8                                   | -
   IOLOGIC                     | 6/80                                | 8%
     --OSER10                  | 3
-  BSRAM                       | 40/56                               | 72%
+  BSRAM                       | 41/56                               | 74%
     --SDPB                    | 28
     --DPB                     | 8
     --DPX9B                   | 2
-    --pROM                    | 2
-  DSP                         | 16/28                               | 58%
-    --MULT12X12               | 4
+    --pROM                    | 3
+  DSP                         | 18/28                               | 65%
+    --MULT12X12               | 8
     --MULT27X36               | 7
   ================================================================================
 
@@ -90,9 +90,10 @@
   ------------------------------------------
   Clock Resource| Usage         | Utilization 
   ------------------------------------------
-  PRIMARY       | 5/8           | 63%
+  PRIMARY       | 6/8           | 75%
   LW            | 8/8           | 100%
   GCLK_PIN      | 21/30         | 70%
+  CLKDIV        | 1/16          | 7%
   PLLA          | 1/6           | 17%
   ==========================================
 
@@ -102,20 +103,21 @@
   -------------------------------------------
   Signal         | Global Clock   | Location
   -------------------------------------------
-  clk_d          | PRIMARY        |  TL BL
-  clk_pixel_w    | PRIMARY        |  TR TL BR BL
+  clk_d          | PRIMARY        |  BR BL
+  clk_pixel_w    | PRIMARY        |  TR BR
+  clk_hdmi_w     | PRIMARY        |  BR
   clk_logic_w    | PRIMARY        |  TR TL BR BL
-  mockingboard/psg_left/n2554_5| PRIMARY        |  TR TL BR BL
-  mockingboard/psg_right/n2554_6| PRIMARY        |  BR BL
-  n778_7         | LW             |  -
-  timer_a_count_15_7| LW             |  -
+  mockingboard/psg_right/n2554_5| PRIMARY        |  TR BR
+  audio_out/IIR_filter/n869_5| PRIMARY        |  TR BR
+  n776_7         | LW             |  -
+  n29_11         | LW             |  -
   supersprite/vdp/f18a_core/reset_n_r| LW             |  -
   supersprite/vdp/f18a_core/inst_cpu/n931_6| LW             |  -
-  supersprite/ssp_psg/n2554_6| LW             |  -
+  supersprite/ssp_psg/n2554_5| LW             |  -
   mockingboard/pb_l_o[2]| LW             |  -
   mockingboard/pb_r_o[2]| LW             |  -
-  superserial/COM2/n67_5| LW             |  -
-  clk_hdmi_w     | HCLK           | BANK2_BANK3_HCLK2
+  superserial/COM2/n67_7| LW             |  -
+  clk_hdmi_w     | HCLK           | BANK2_BANK3_HCLK0
   ===========================================
 
 

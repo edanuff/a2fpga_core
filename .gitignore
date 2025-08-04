@@ -37,3 +37,4 @@ src/cardrom/cardrom_Output.txt
 src/cardrom/_FileInformation.txt
 src/cardrom/cardrom
 /.claude
+/boards/a2p25/src/esp32/build

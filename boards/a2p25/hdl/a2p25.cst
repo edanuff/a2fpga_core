@@ -17,16 +17,16 @@ IO_PORT "uart_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
 // HDMI
 
-IO_LOC  "tmds_clk_p" G2,G1;
+IO_LOC  "tmds_clk_p" G1,G2;
 IO_PORT "tmds_clk_p" IO_TYPE=LVCMOS33D PULL_MODE=NONE DRIVE=8;
 
-IO_LOC  "tmds_d_p[0]" J4,K4;
+IO_LOC  "tmds_d_p[0]" K4,J4;
 IO_PORT "tmds_d_p[0]" IO_TYPE=LVCMOS33D PULL_MODE=NONE DRIVE=8;
 
-IO_LOC  "tmds_d_p[1]" K1,K2;
+IO_LOC  "tmds_d_p[1]" K2,K1;
 IO_PORT "tmds_d_p[1]" IO_TYPE=LVCMOS33D PULL_MODE=NONE DRIVE=8;
 
-IO_LOC  "tmds_d_p[2]" L2,L1;
+IO_LOC  "tmds_d_p[2]" L1,L2;
 IO_PORT "tmds_d_p[2]" IO_TYPE=LVCMOS33D PULL_MODE=NONE DRIVE=8;
 
 // Apple II Bus Interface

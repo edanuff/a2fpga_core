@@ -312,6 +312,7 @@ module top #(
     wire irq_n_w;
 
     wire inh_n_w;
+    wire cardrom_active_w;
 
     wire data_out_en_w;
     wire [7:0] data_out_w;
@@ -421,7 +422,8 @@ wire picosoc_led;
         .data_o(cardrom_d_w),
         .rd_en_o(cardrom_rd),
         .inh_n_o(inh_n_w),
-        .req_rom_release_i(cardrom_release_w)
+        .req_rom_release_i(cardrom_release_w),
+        .rom_en_o(cardrom_active_w)
     );
 
     // PicoSOC
@@ -452,7 +454,7 @@ wire picosoc_led;
         .rd_en_o(picosoc_rd_w),
         .irq_n_o(picosoc_irq_n),
 
-        .cardrom_active_i(!inh_n_w),
+        .cardrom_active_i(cardrom_active_w),
         .cardrom_release_o(cardrom_release_w),
 
         .uart_rx_i(picosoc_uart_rx_w),
@@ -568,6 +570,7 @@ wire picosoc_led;
     wire [0:7] cardrom_d_w = 8'b0;
     wire cardrom_rd = 1'b0;
     assign inh_n_w = 1'b1;
+    assign cardrom_active_w = 1'b0;
 
     assign picosoc_led = 1'b0;
 
@@ -990,7 +993,7 @@ wire picosoc_led;
         end
         //led <= {4'b1111, !picosoc_led};
         //if (!s2) 
-        led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
+        led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !cardrom_active_w, inh_n_w};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
         //else led <= {!vdp_unlocked_w, ~vdp_gmode_w};

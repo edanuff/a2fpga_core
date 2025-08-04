@@ -67,7 +67,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Tool Version</td>
-<td>V1.9.11.02</td>
+<td>V1.9.11.03</td>
 </tr>
 <tr>
 <td class="label">Part Number</td>
@@ -79,11 +79,11 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Device Version</td>
-<td>B</td>
+<td>A</td>
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Thu Jun  5 22:55:47 2025
+<td>Sat Jul 19 16:35:21 2025
 </td>
 </tr>
 <tr>
@@ -97,24 +97,24 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <tr>
 <td class="label">Place & Route Process</td>
 <td>Running placement:
-   Placement Phase 0: CPU time = 0h 0m 0.667s, Elapsed time = 0h 0m 0.658s
-   Placement Phase 1: CPU time = 0h 0m 0.151s, Elapsed time = 0h 0m 0.146s
-   Placement Phase 2: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-   Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
-   Total Placement: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+   Placement Phase 0: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
+   Placement Phase 1: CPU time = 0h 0m 0.225s, Elapsed time = 0h 0m 0.218s
+   Placement Phase 2: CPU time = 0h 0m 12s, Elapsed time = 0h 0m 12s
+   Placement Phase 3: CPU time = 0h 3m 51s, Elapsed time = 0h 3m 50s
+   Total Placement: CPU time = 0h 4m 5s, Elapsed time = 0h 4m 3s
 Running routing:
-   Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
-   Routing Phase 1: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
-   Routing Phase 2: CPU time = 0h 0m 0.062s, Elapsed time = 0h 0m 0.059s
+   Routing Phase 0: CPU time = 0h 0m 0.004s, Elapsed time = 0h 0m 0.004s
+   Routing Phase 1: CPU time = 0h 0m 21s, Elapsed time = 0h 0m 20s
+   Routing Phase 2: CPU time = 0h 0m 0.162s, Elapsed time = 0h 0m 0.159s
    Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-   Total Routing: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+   Total Routing: CPU time = 0h 0m 21s, Elapsed time = 0h 0m 21s
 Generate output files:
-   CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+   CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
 </td>
 </tr>
 <tr>
 <td class="label">Total Time and Memory Usage</td>
-<td>CPU time = 0h 0m 9s, Elapsed time = 0h 0m 9s, Peak memory usage = 1570MB</td>
+<td>CPU time = 0h 4m 27s, Elapsed time = 0h 4m 25s, Peak memory usage = 3196MB</td>
 </tr>
 </table>
 <br/>
@@ -129,23 +129,23 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Logic</td>
-<td>8452/23040</td>
-<td>37%</td>
+<td>13444/23040</td>
+<td>59%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --LUT,ALU,ROM16</td>
-<td>7582(6368 LUT, 1214 ALU, 0 ROM16)</td>
+<td>13444(12202 LUT, 1242 ALU, 0 ROM16)</td>
 <td>-</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --SSRAM(RAM16)</td>
-<td>145</td>
+<td>0</td>
 <td>-</td>
 </tr>
 <tr>
 <td class="label">Register</td>
-<td>3835/23280</td>
-<td>17%</td>
+<td>13049/23280</td>
+<td>57%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as Latch</td>
@@ -154,8 +154,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as FF</td>
-<td>3807/23040</td>
-<td>17%</td>
+<td>13023/23040</td>
+<td>57%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --I/O Register as Latch</td>
@@ -164,13 +164,13 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --I/O Register as FF</td>
-<td>28/240</td>
-<td>12%</td>
+<td>26/240</td>
+<td>11%</td>
 </tr>
 <tr>
 <td class="label">CLS</td>
-<td>5831/11520</td>
-<td>51%</td>
+<td>11154/11520</td>
+<td>97%</td>
 </tr>
 <tr>
 <td class="label">I/O Port</td>
@@ -179,12 +179,12 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">I/O Buf</td>
-<td>46</td>
+<td>44</td>
 <td>-</td>
 </tr>
 <tr>
 <td class="label"> &nbsp &nbsp --Input Buf</td>
-<td>25</td>
+<td>23</td>
 <td>-</td>
 </tr>
 <tr>
@@ -204,12 +204,12 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">BSRAM</td>
-<td>28 SDPB<br/>8 DPB<br/>2 DPX9B<br/>2 pROM<br/></td>
-<td>72%</td>
+<td>28 SDPB<br/>8 DPB<br/>2 DPX9B<br/>3 pROM<br/></td>
+<td>74%</td>
 </tr>
 <tr>
 <td class="label">DSP</td>
-<td>4 MULT12X12<br/>7 MULT27X36<br/></td><td>58%</td>
+<td>8 MULT12X12<br/>7 MULT27X36<br/></td><td>65%</td>
 </tr>
 </table>
 <h2><a name="I/O_Bank_Usage_Summary">I/O Bank Usage Summary:</a></h2>
@@ -265,8 +265,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">PRIMARY</td>
-<td>5/8</td>
-<td>63%</td>
+<td>6/8</td>
+<td>75%</td>
 </tr>
 <tr>
 <td class="label">LW</td>
@@ -277,6 +277,11 @@ Generate output files:
 <td class="label">GCLK_PIN</td>
 <td>21/30</td>
 <td>70%</td>
+</tr>
+<tr>
+<td class="label">CLKDIV</td>
+<td>1/16</td>
+<td>7%</td>
 </tr>
 <tr>
 <td class="label">PLLA</td>
@@ -295,12 +300,17 @@ Generate output files:
 <tr>
 <td class="label">clk_d</td>
 <td>PRIMARY</td>
-<td> TL BL</td>
+<td> BR BL</td>
 </tr>
 <tr>
 <td class="label">clk_pixel_w</td>
 <td>PRIMARY</td>
-<td> TR TL BR BL</td>
+<td> TR BR</td>
+</tr>
+<tr>
+<td class="label">clk_hdmi_w</td>
+<td>PRIMARY</td>
+<td> BR</td>
 </tr>
 <tr>
 <td class="label">clk_logic_w</td>
@@ -308,22 +318,22 @@ Generate output files:
 <td> TR TL BR BL</td>
 </tr>
 <tr>
-<td class="label">mockingboard/psg_left/n2554_5</td>
+<td class="label">mockingboard/psg_right/n2554_5</td>
 <td>PRIMARY</td>
-<td> TR TL BR BL</td>
+<td> TR BR</td>
 </tr>
 <tr>
-<td class="label">mockingboard/psg_right/n2554_6</td>
+<td class="label">audio_out/IIR_filter/n869_5</td>
 <td>PRIMARY</td>
-<td> BR BL</td>
+<td> TR BR</td>
 </tr>
 <tr>
-<td class="label">n778_7</td>
+<td class="label">n776_7</td>
 <td>LW</td>
 <td> -</td>
 </tr>
 <tr>
-<td class="label">timer_a_count_15_7</td>
+<td class="label">n29_11</td>
 <td>LW</td>
 <td> -</td>
 </tr>
@@ -338,7 +348,7 @@ Generate output files:
 <td> -</td>
 </tr>
 <tr>
-<td class="label">supersprite/ssp_psg/n2554_6</td>
+<td class="label">supersprite/ssp_psg/n2554_5</td>
 <td>LW</td>
 <td> -</td>
 </tr>
@@ -353,14 +363,14 @@ Generate output files:
 <td> -</td>
 </tr>
 <tr>
-<td class="label">superserial/COM2/n67_5</td>
+<td class="label">superserial/COM2/n67_7</td>
 <td>LW</td>
 <td> -</td>
 </tr>
 <tr>
 <td class="label">clk_hdmi_w</td>
 <td>HCLK</td>
-<td>BANK2_BANK3_HCLK2</td>
+<td>BANK2_BANK3_HCLK0</td>
 </tr>
 </table>
 <br/>

@@ -3,9 +3,10 @@
 <Project>
     <Template>FPGA</Template>
     <Version>5</Version>
-    <Device name="" pn="">gw5a25b-003</Device>
+    <Device name="GW5A-25A" pn="GW5A-LV25MG121NC1/I0">gw5a25a-002</Device>
     <FileList>
         <File path="../../hdl/bus/a2bus_if.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/debug/debugoverlay.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/f18a/f18a_color.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/f18a/f18a_core.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/f18a/f18a_counters.vhd" type="file.vhdl" enable="1"/>
@@ -27,6 +28,7 @@
         <File path="../../hdl/hdmi/hdmi.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/hdmi/packet_assembler.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/hdmi/packet_picker.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/hdmi/serializer.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/hdmi/source_product_description_info_frame.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/hdmi/tmds_channel.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/memory/a2mem_if.sv" type="file.verilog" enable="1"/>
@@ -56,10 +58,9 @@
         <File path="hdl/a2p25.cst" type="file.cst" enable="1"/>
         <File path="hdl/a2p25.sdc" type="file.sdc" enable="1"/>
         <File path="hdl/bus/apple_bus.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/gowin_pll.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/gowin_pll_mod.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_pll/gowin_pll.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/pll_init.v" type="file.verilog" enable="1"/>
-        <File path="hdl/hdmi/serializer.sv" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
     </FileList>
 </Project>
