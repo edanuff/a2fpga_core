@@ -28,7 +28,7 @@
  * Tools->USB Mode: Hardware CDC and JTAG
  */
 
-#include "driver/parlio_rx.h"
+#include "driver/i2s_std.h"
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h"
 #include "soc/gpio_sig_map.h"
@@ -74,11 +74,14 @@
 #define DMA_BUFFER_COUNT     4        // Ping-pong buffers for continuous capture
 #define PACKET_SIZE_BYTES    4        // Apple II bus packets: 32-bit (addr+data+flags)
 
-// Global handles and state for DMA packet capture system
-parlio_rx_unit_handle_t rx_unit = NULL;           // PARL_IO hardware unit handle
-QueueHandle_t packet_queue;                       // Queue for DMA completion notifications
+// Global handles and state for I2S parallel packet capture system
+i2s_chan_handle_t i2s_rx_handle = NULL;          // I2S RX channel handle
 TaskHandle_t packet_processor_task;               // Dedicated packet processing task
 bool usb_was_connected = false;                   // USB JTAG connection state tracking
+
+// Receive buffers for ping-pong operation
+uint8_t *rx_buffers[DMA_BUFFER_COUNT];            // Receive buffer pointers
+volatile int current_buffer = 0;                  // Current buffer index
 
 // Performance statistics (volatile for ISR access)
 volatile uint32_t packets_received = 0;           // DMA buffers completed
@@ -128,47 +131,74 @@ void unroute_usb_jtag_to_gpio() {
     ESP_LOGI(TAG, "USB JTAG unrouted from GPIO pins - normal operation");
 }
 
-// DMA completion callback - runs in interrupt context
-// DISABLED: Requires PARL_IO peripheral support
-/*
-static bool IRAM_ATTR on_dma_receive_done(parlio_rx_unit_handle_t rx_unit, 
-                                          const parlio_rx_event_data_t *edata, 
-                                          void *user_ctx) {
-    BaseType_t high_task_woken = pdFALSE;
-    
-    // Send buffer info to processing task
-    uint32_t buffer_info = (uint32_t)edata->data;
-    xQueueSendFromISR(packet_queue, &buffer_info, &high_task_woken);
-    
-    packets_received++;
-    return high_task_woken == pdTRUE;
-}
-*/
+// Note: Using I2S polling mode instead of callbacks for simplicity
 
-void setup_parlio_dma() {
-    // IMPORTANT: PARL_IO peripheral requires ESP-IDF v5.0+ with full driver support
-    // Current Arduino Core ESP32 v3.2.0 has incomplete PARL_IO API implementation
-    // This function is disabled until a compatible ESP-IDF version is available
+void setup_i2s_parallel() {
+    ESP_LOGI(TAG, "Setting up I2S parallel mode for 4-bit packet capture");
     
-    ESP_LOGW(TAG, "PARL_IO DMA setup disabled - requires newer ESP-IDF version");
-    ESP_LOGW(TAG, "Packet capture functionality not available in this build");
+    // Allocate receive buffers for ping-pong operation
+    for (int i = 0; i < DMA_BUFFER_COUNT; i++) {
+        rx_buffers[i] = (uint8_t*)heap_caps_malloc(DMA_BUFFER_SIZE, MALLOC_CAP_DMA);
+        if (!rx_buffers[i]) {
+            ESP_LOGE(TAG, "Failed to allocate receive buffer %d", i);
+            return;
+        }
+        ESP_LOGD(TAG, "Allocated RX buffer %d at %p", i, rx_buffers[i]);
+    }
     
-    // TODO: Implement alternative using GPIO interrupts or polling for development
-    // Alternative: Use SPI peripheral in slave mode for packet capture
+    // Configure I2S channel for RX
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_SLAVE);
+    chan_cfg.dma_desc_num = DMA_BUFFER_COUNT;
+    chan_cfg.dma_frame_num = DMA_BUFFER_SIZE / 4; // 4 bytes per frame for 32-bit data
     
-    /*
-    // Original PARL_IO implementation (requires ESP-IDF v5.0+):
-    parlio_rx_unit_config_t rx_config = {
-        .clk_src = PARLIO_CLK_SRC_DEFAULT,
-        .data_width = PARLIO_DATA_WIDTH,
-        .data_gpio_nums = {PIN_QSPI_D0, PIN_QSPI_D1, PIN_QSPI_D2, PIN_QSPI_D3},
-        .clk_in_gpio_num = PIN_QSPI_CLK,
-        .valid_gpio_num = PIN_FRAME,
-        .clk_edge = PARLIO_SAMPLE_EDGE_POS,
-        .bit_pack_order = PARLIO_BIT_PACK_ORDER_MSB,
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &i2s_rx_handle));
+    ESP_LOGI(TAG, "I2S RX channel created");
+    
+    // Configure I2S for parallel data capture
+    // We'll use standard I2S config but with external clock
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = 1000000,              // 1MHz from FPGA
+            .clk_src = I2S_CLK_SRC_EXTERNAL,        // External clock from FPGA
+            .ext_clk_freq_hz = 1000000,             // External clock frequency
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256, // MCLK multiple
+        },
+        .slot_cfg = {
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT, // 32-bit packets
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT,
+            .slot_mode = I2S_SLOT_MODE_MONO,        // Single channel
+            .slot_mask = I2S_STD_SLOT_LEFT,         // Use left channel
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,   // Word select width
+            .ws_pol = false,                        // Word select polarity
+            .bit_shift = true,                      // MSB shift
+            .left_align = false,                    // Right align
+            .big_endian = false,                    // Little endian
+            .bit_order_lsb = false                  // MSB first
+        },
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,                // No MCLK needed
+            .bclk = (gpio_num_t)PIN_QSPI_CLK,       // Bit clock from FPGA
+            .ws = (gpio_num_t)PIN_FRAME,            // Word select (frame) from FPGA
+            .dout = I2S_GPIO_UNUSED,                // No data out
+            .din = (gpio_num_t)PIN_QSPI_D0,         // Data input (we'll handle multiple pins via GPIO matrix)
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false,
+            },
+        },
     };
-    ESP_ERROR_CHECK(parlio_new_rx_unit(&rx_config, &rx_unit));
-    */
+    
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(i2s_rx_handle, &std_cfg));
+    ESP_LOGI(TAG, "I2S standard mode configured");
+    
+    // Enable the I2S channel
+    ESP_ERROR_CHECK(i2s_channel_enable(i2s_rx_handle));
+    ESP_LOGI(TAG, "I2S RX channel enabled and ready for packet capture");
+    
+    // TODO: Configure additional data pins (D1, D2, D3) via GPIO matrix
+    // For now, this captures 1-bit data on D0, but we need 4-bit parallel
+    ESP_LOGW(TAG, "Note: Currently configured for 1-bit capture - need GPIO matrix for 4-bit");
 }
 
 // ============================================================================
@@ -208,49 +238,50 @@ void process_packet(uint32_t pkt) {
 // ============================================================================
 
 void packet_processor_task_func(void *param) {
-    // DISABLED: Packet processing task requires PARL_IO DMA functionality
-    ESP_LOGW(TAG, "Packet processor task started but DMA capture is disabled");
+    ESP_LOGI(TAG, "Starting I2S packet processing task");
+    
+    // Use polling approach for I2S data reading
+    // This is simpler and more reliable than the callback approach
+    uint8_t *current_rx_buffer = rx_buffers[0];
+    size_t bytes_read = 0;
     
     while (1) {
-        // Placeholder: Could implement alternative packet capture here
-        // For now, just sleep to prevent task watchdog
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Read data from I2S in blocking mode
+        esp_err_t ret = i2s_channel_read(i2s_rx_handle, current_rx_buffer, DMA_BUFFER_SIZE, &bytes_read, portMAX_DELAY);
         
-        // TODO: Implement GPIO-based packet capture or SPI slave mode
-        // TODO: Process packets from alternative capture method
-    }
-    
-    /*
-    // Original DMA-based implementation:
-    uint32_t buffer_ptr;
-    
-    while (1) {
-        if (xQueueReceive(packet_queue, &buffer_ptr, portMAX_DELAY) == pdTRUE) {
-            uint8_t *buffer = (uint8_t*)buffer_ptr;
+        if (ret == ESP_OK && bytes_read > 0) {
+            packets_received++;
+            ESP_LOGD(TAG, "Read %d bytes from I2S", bytes_read);
             
-            for (int i = 0; i < DMA_BUFFER_SIZE; i += PACKET_SIZE_BYTES) {
+            // Process all complete packets in the received data
+            size_t complete_packets = bytes_read / PACKET_SIZE_BYTES;
+            for (size_t i = 0; i < complete_packets; i++) {
+                size_t offset = i * PACKET_SIZE_BYTES;
+                
+                // Reconstruct 32-bit packet from 4 sequential bytes
+                // I2S data format depends on configuration, may need adjustment
                 uint32_t packet = 0;
                 for (int j = 0; j < PACKET_SIZE_BYTES; j++) {
-                    packet = (packet << 8) | buffer[i + j];
+                    packet = (packet << 8) | current_rx_buffer[offset + j];
                 }
                 
+                // Skip empty packets (FPGA may send padding)
                 if (packet != 0) {
                     process_packet(packet);
                     packets_processed++;
                 }
             }
             
-            parlio_receive_config_t recv_config = {
-                .flags = {.partial_rx_en = false}
-            };
-            esp_err_t ret = parlio_rx_unit_receive(rx_unit, buffer, DMA_BUFFER_SIZE, &recv_config);
-            if (ret != ESP_OK) {
-                dma_overruns++;
-                ESP_LOGW(TAG, "Failed to re-queue DMA buffer: %s", esp_err_to_name(ret));
-            }
+            // Switch to next buffer for ping-pong operation
+            current_buffer = (current_buffer + 1) % DMA_BUFFER_COUNT;
+            current_rx_buffer = rx_buffers[current_buffer];
+            
+        } else if (ret != ESP_OK) {
+            dma_overruns++;  // Track I2S read failures
+            ESP_LOGW(TAG, "I2S read failed: %s", esp_err_to_name(ret));
+            vTaskDelay(pdMS_TO_TICKS(10)); // Small delay before retry
         }
     }
-    */
 }
 
 void setup() {
@@ -267,15 +298,11 @@ void setup() {
     Serial.begin(115200);
     Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);
     
-    // Create queue for DMA buffer notifications
-    packet_queue = xQueueCreate(DMA_BUFFER_COUNT * 2, sizeof(uint32_t));
-    if (!packet_queue) {
-        ESP_LOGE(TAG, "Failed to create packet queue");
-        return;
-    }
+    // Note: I2S uses polling mode, so no queue needed for notifications
+    ESP_LOGI(TAG, "I2S polling mode - no notification queue required");
     
-    // Setup PARL_IO with DMA
-    setup_parlio_dma();
+    // Setup I2S parallel capture
+    setup_i2s_parallel();
     
     // Create dedicated packet processing task
     xTaskCreatePinnedToCore(

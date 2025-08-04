@@ -14,7 +14,7 @@ ARDUINO_CLI = arduino-cli
 FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=80
 
 # Source files
-SKETCH = esp32.ino
+SKETCH = a2fpga_esp32.ino
 
 # Default target
 .PHONY: all

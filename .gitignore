@@ -38,3 +38,4 @@ src/cardrom/_FileInformation.txt
 src/cardrom/cardrom
 /.claude
 /boards/a2p25/src/esp32/build
+/boards/a2p25/src/a2fpga_esp32/build
