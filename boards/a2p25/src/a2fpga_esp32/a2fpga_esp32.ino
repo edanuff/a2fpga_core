@@ -138,16 +138,16 @@ void unroute_usb_jtag_to_gpio() {
 }
 
 void setup_lcd_cam_parallel() {
-   //Serial.println("[INFO] Setting up LCD_CAM peripheral for 4-bit parallel packet capture");
+    Serial.println("[INFO] Setting up LCD_CAM peripheral for 4-bit parallel packet capture");
     
-    // Configure camera for parallel data capture
+    // Try a minimal camera configuration that might bypass sensor requirements
     camera_config_t camera_config = {
         // Pin configuration for 4-bit parallel data
         .pin_pwdn = -1,                             // Power down pin (not used)
         .pin_reset = -1,                            // Reset pin (not used)
         .pin_xclk = -1,                             // External clock output (not used - we receive clock)
-        .pin_sscb_sda = -1,                         // I2C SDA (not used)
-        .pin_sscb_scl = -1,                         // I2C SCL (not used)
+        .pin_sscb_sda = -1,                         // I2C SDA (DISABLED - no sensor communication)
+        .pin_sscb_scl = -1,                         // I2C SCL (DISABLED - no sensor communication)
         
         // Parallel data pins (4-bit interface)
         .pin_d7 = -1,                               // Data bit 7 (unused)
@@ -160,53 +160,50 @@ void setup_lcd_cam_parallel() {
         .pin_d0 = PIN_PARL_D0,                      // Data bit 0 (LSB of our 4-bit data)
         
         // Clock and sync pins
-        .pin_vsync = PIN_PARL_FRAME,                     // VSYNC - Frame/packet sync from FPGA
+        .pin_vsync = PIN_PARL_FRAME,                // VSYNC - Frame/packet sync from FPGA
         .pin_href = -1,                             // HREF - Horizontal sync (not used)
         .pin_pclk = PIN_PARL_CLK,                   // PCLK - Pixel clock from FPGA
         
         // Timing configuration
-        .xclk_freq_hz = 6750000,                    // Expected clock frequency (~6.75MHz - packet-rate driven)
+        .xclk_freq_hz = 0,                          // No external clock generation
         .ledc_timer = LEDC_TIMER_0,                 // LEDC timer (not used for input)
         .ledc_channel = LEDC_CHANNEL_0,             // LEDC channel (not used for input)
         
-        // Image format and size
+        // Image format and size - use smallest possible to minimize memory
         .pixel_format = PIXFORMAT_GRAYSCALE,        // Grayscale (8-bit per pixel)
-        .frame_size = FRAMESIZE_QQVGA,              // Small frame size (160x120)
+        .frame_size = FRAMESIZE_96X96,              // Minimal frame size (96x96)
         .jpeg_quality = 0,                          // JPEG quality (not used)
-        .fb_count = DMA_BUFFER_COUNT,               // Frame buffer count (ping-pong)
+        .fb_count = 2,                              // Minimal frame buffer count
         .fb_location = CAMERA_FB_IN_PSRAM,          // Use PSRAM for frame buffers
         .grab_mode = CAMERA_GRAB_LATEST,            // Always get latest frame
         
-        // Additional flags
-        .sccb_i2c_port = -1,                        // I2C port (not used)
+        // Additional flags - try to disable sensor communication
+        .sccb_i2c_port = -1,                        // I2C port DISABLED
     };
     
-    // Using QQVGA (160x120) for packet capture
-    // We'll treat captured data as a stream of 4-bit parallel data
-    
     // Initialize camera with enhanced error handling
-    //Serial.println("[INFO] Attempting LCD_CAM initialization for FPGA data capture...");
-    //Serial.printf("[INFO] Free heap before init: %lu bytes\n", esp_get_free_heap_size());
+    Serial.println("[INFO] Attempting LCD_CAM initialization for FPGA data capture...");
+    Serial.printf("[INFO] Free heap before init: %lu bytes\n", esp_get_free_heap_size());
     
-    esp_err_t err = esp_camera_init(&camera_config);
-    if (err != ESP_OK) {
-        //Serial.printf("[ERROR] Camera init failed with error 0x%x\n", err);
-        //Serial.println("[ERROR] This is expected if no camera sensor is connected");
-        //Serial.println("[ERROR] Continuing without camera functionality...");
-        return;
-    }
+    // For now, just configure the GPIO pins manually to avoid the crash
+    Serial.println("[WARNING] Skipping esp_camera_init() to avoid sensor communication crash");
+    Serial.println("[INFO] Configuring GPIO pins manually for parallel data capture");
     
-    //Serial.println("[INFO] LCD_CAM configured for 4-bit parallel packet capture");
-    //Serial.printf("[INFO] Data pins: D0=%d, D1=%d, D2=%d, D3=%d\n", 
-    //         PIN_PARL_D0, PIN_PARL_D1, PIN_PARL_D2, PIN_PARL_D3);
-    //Serial.printf("[INFO] Clock pin: PCLK=%d, Frame sync: VSYNC=%d\n", 
-    //         PIN_PARL_CLK, PIN_PARL_FRAME);
+    // Configure GPIO pins for parallel data input
+    pinMode(PIN_PARL_D0, INPUT);        // Data bit 0 (LSB)
+    pinMode(PIN_PARL_D1, INPUT);        // Data bit 1
+    pinMode(PIN_PARL_D2, INPUT);        // Data bit 2
+    pinMode(PIN_PARL_D3, INPUT);        // Data bit 3 (MSB)
+    pinMode(PIN_PARL_CLK, INPUT);       // Clock signal from FPGA
+    pinMode(PIN_PARL_FRAME, INPUT);     // Frame/packet sync from FPGA
     
-    // Skip sensor configuration - we're using LCD_CAM for FPGA data capture, not a camera sensor
-    //Serial.println("[INFO] Skipping camera sensor configuration - using LCD_CAM for FPGA parallel data capture");
+    Serial.println("[INFO] GPIO pins configured for 4-bit parallel data capture");
+    Serial.printf("[INFO] Data pins: D0=%d, D1=%d, D2=%d, D3=%d\n", 
+             PIN_PARL_D0, PIN_PARL_D1, PIN_PARL_D2, PIN_PARL_D3);
+    Serial.printf("[INFO] Clock pin: PCLK=%d, Frame sync: VSYNC=%d\n", 
+             PIN_PARL_CLK, PIN_PARL_FRAME);
     
-    // Note: We don't need sensor configuration since we're capturing data from FPGA, not a camera
-    // The frame size is already set in camera_config above
+    Serial.println("[INFO] Manual GPIO configuration complete - LCD_CAM init skipped to avoid crash");
 }
 
 // ============================================================================
@@ -328,7 +325,7 @@ void setup() {
     Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);
     
     // Setup LCD_CAM parallel capture
-    //setup_lcd_cam_parallel();
+    setup_lcd_cam_parallel();
     
     // Create dedicated packet processing task
     /*
