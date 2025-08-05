@@ -32,12 +32,31 @@ Tools->Upload Speed: 921600
  *    - Status LEDs, statistics, and interactive diagnostics
  */
 
-#include "esp_camera.h"
+// Camera library causes crashes - using direct LCD_CAM register access instead
+// #include "esp_camera.h"
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h"
 #include "soc/gpio_sig_map.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_debug_helpers.h"
+
+// Direct LCD_CAM peripheral access
+#include "soc/lcd_cam_struct.h"
+#include "soc/lcd_cam_reg.h"
+#include "soc/gdma_struct.h"
+#include "soc/gdma_reg.h"
+#include "esp_private/gdma.h"
+#include "hal/dma_types.h"
+#include "driver/periph_ctrl.h"
+
 #include <Arduino.h>
+
+// Custom exception handler to print detailed crash info
+void print_backtrace() {
+    Serial.println("[CRASH] Attempting to print backtrace...");
+    esp_backtrace_print(10);  // Print up to 10 stack frames
+}
 
 #define TAG "A2FPGA_COMPLETE"
 
@@ -79,15 +98,13 @@ Tools->Upload Speed: 921600
 #define DMA_BUFFER_COUNT     4        // Ping-pong buffers for continuous capture
 #define PACKET_SIZE_BYTES    4        // Apple II bus packets: 32-bit (addr+data+flags)
 
-// Global handles and state for LCD_CAM parallel packet capture system
-//camera_fb_t *camera_fb = NULL;                    // Camera frame buffer
-//TaskHandle_t packet_processor_task;               // Dedicated packet processing task
+// Global handles and state for direct LCD_CAM peripheral access
+gdma_channel_handle_t dma_rx_channel = NULL;      // GDMA channel for camera RX
+dma_descriptor_t *dma_descriptors = NULL;         // DMA descriptor chain
+uint8_t *dma_buffers[DMA_BUFFER_COUNT];           // DMA buffer pointers
+volatile int current_buffer = 0;                  // Current buffer index
 bool usb_was_connected = false;                   // USB JTAG connection state tracking
 volatile bool new_frame_ready = false;            // Frame ready flag
-
-// Receive buffers for ping-pong operation
-uint8_t *rx_buffers[DMA_BUFFER_COUNT];            // Receive buffer pointers
-volatile int current_buffer = 0;                  // Current buffer index
 
 // Performance statistics (volatile for ISR access)
 volatile uint32_t packets_received = 0;           // DMA buffers completed
@@ -137,59 +154,16 @@ void unroute_usb_jtag_to_gpio() {
     ESP_LOGI(TAG, "USB JTAG unrouted from GPIO pins - normal operation");
 }
 
-void setup_lcd_cam_parallel() {
-    Serial.println("[INFO] Setting up LCD_CAM peripheral for 4-bit parallel packet capture");
-    
-    // Try a minimal camera configuration that might bypass sensor requirements
-    camera_config_t camera_config = {
-        // Pin configuration for 4-bit parallel data
-        .pin_pwdn = -1,                             // Power down pin (not used)
-        .pin_reset = -1,                            // Reset pin (not used)
-        .pin_xclk = -1,                             // External clock output (not used - we receive clock)
-        .pin_sscb_sda = -1,                         // I2C SDA (DISABLED - no sensor communication)
-        .pin_sscb_scl = -1,                         // I2C SCL (DISABLED - no sensor communication)
-        
-        // Parallel data pins (4-bit interface)
-        .pin_d7 = -1,                               // Data bit 7 (unused)
-        .pin_d6 = -1,                               // Data bit 6 (unused)
-        .pin_d5 = -1,                               // Data bit 5 (unused)
-        .pin_d4 = -1,                               // Data bit 4 (unused)
-        .pin_d3 = PIN_PARL_D3,                      // Data bit 3 (MSB of our 4-bit data)
-        .pin_d2 = PIN_PARL_D2,                      // Data bit 2
-        .pin_d1 = PIN_PARL_D1,                      // Data bit 1
-        .pin_d0 = PIN_PARL_D0,                      // Data bit 0 (LSB of our 4-bit data)
-        
-        // Clock and sync pins
-        .pin_vsync = PIN_PARL_FRAME,                // VSYNC - Frame/packet sync from FPGA
-        .pin_href = -1,                             // HREF - Horizontal sync (not used)
-        .pin_pclk = PIN_PARL_CLK,                   // PCLK - Pixel clock from FPGA
-        
-        // Timing configuration
-        .xclk_freq_hz = 0,                          // No external clock generation
-        .ledc_timer = LEDC_TIMER_0,                 // LEDC timer (not used for input)
-        .ledc_channel = LEDC_CHANNEL_0,             // LEDC channel (not used for input)
-        
-        // Image format and size - use smallest possible to minimize memory
-        .pixel_format = PIXFORMAT_GRAYSCALE,        // Grayscale (8-bit per pixel)
-        .frame_size = FRAMESIZE_96X96,              // Minimal frame size (96x96)
-        .jpeg_quality = 0,                          // JPEG quality (not used)
-        .fb_count = 2,                              // Minimal frame buffer count
-        .fb_location = CAMERA_FB_IN_PSRAM,          // Use PSRAM for frame buffers
-        .grab_mode = CAMERA_GRAB_LATEST,            // Always get latest frame
-        
-        // Additional flags - try to disable sensor communication
-        .sccb_i2c_port = -1,                        // I2C port DISABLED
-    };
-    
-    // Initialize camera with enhanced error handling
-    Serial.println("[INFO] Attempting LCD_CAM initialization for FPGA data capture...");
+// Direct LCD_CAM peripheral initialization without camera library
+esp_err_t setup_lcd_cam_direct() {
+    Serial.println("[INFO] Setting up LCD_CAM peripheral via direct register access");
     Serial.printf("[INFO] Free heap before init: %lu bytes\n", esp_get_free_heap_size());
     
-    // For now, just configure the GPIO pins manually to avoid the crash
-    Serial.println("[WARNING] Skipping esp_camera_init() to avoid sensor communication crash");
-    Serial.println("[INFO] Configuring GPIO pins manually for parallel data capture");
+    // 1. Enable LCD_CAM peripheral clock
+    periph_module_enable(PERIPH_LCD_CAM_MODULE);
     
-    // Configure GPIO pins for parallel data input
+    
+    // 2. Configure GPIO pins for 4-bit parallel input
     pinMode(PIN_PARL_D0, INPUT);        // Data bit 0 (LSB)
     pinMode(PIN_PARL_D1, INPUT);        // Data bit 1
     pinMode(PIN_PARL_D2, INPUT);        // Data bit 2
@@ -197,13 +171,22 @@ void setup_lcd_cam_parallel() {
     pinMode(PIN_PARL_CLK, INPUT);       // Clock signal from FPGA
     pinMode(PIN_PARL_FRAME, INPUT);     // Frame/packet sync from FPGA
     
-    Serial.println("[INFO] GPIO pins configured for 4-bit parallel data capture");
+    // 3. Connect GPIO pins to LCD_CAM peripheral signals (use correct ESP32-S3 signal names)
+    esp_rom_gpio_connect_in_signal(PIN_PARL_D0, CAM_DATA_IN0_IDX, false);
+    esp_rom_gpio_connect_in_signal(PIN_PARL_D1, CAM_DATA_IN1_IDX, false);
+    esp_rom_gpio_connect_in_signal(PIN_PARL_D2, CAM_DATA_IN2_IDX, false);
+    esp_rom_gpio_connect_in_signal(PIN_PARL_D3, CAM_DATA_IN3_IDX, false);
+    esp_rom_gpio_connect_in_signal(PIN_PARL_CLK, CAM_PCLK_IDX, false);
+    esp_rom_gpio_connect_in_signal(PIN_PARL_FRAME, CAM_V_SYNC_IDX, false);
+    
+    Serial.println("[SUCCESS] LCD_CAM peripheral configured via direct register access!");
     Serial.printf("[INFO] Data pins: D0=%d, D1=%d, D2=%d, D3=%d\n", 
              PIN_PARL_D0, PIN_PARL_D1, PIN_PARL_D2, PIN_PARL_D3);
     Serial.printf("[INFO] Clock pin: PCLK=%d, Frame sync: VSYNC=%d\n", 
              PIN_PARL_CLK, PIN_PARL_FRAME);
+    Serial.println("[INFO] Ready for 4-bit parallel data capture from FPGA");
     
-    Serial.println("[INFO] Manual GPIO configuration complete - LCD_CAM init skipped to avoid crash");
+    return ESP_OK;
 }
 
 // ============================================================================
@@ -307,6 +290,9 @@ void process_packet(uint32_t pkt) {
 }*/
 
 void setup() {
+    // Enable detailed crash reporting
+    esp_log_level_set("*", ESP_LOG_VERBOSE);
+    
     // Initialize FPGA status pins
     pinMode(PIN_FPGA_DONE, INPUT_PULLUP);
     pinMode(PIN_FPGA_0, INPUT_PULLUP);
@@ -324,8 +310,11 @@ void setup() {
     Serial.begin();
     Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);
     
-    // Setup LCD_CAM parallel capture
-    setup_lcd_cam_parallel();
+    // Setup LCD_CAM peripheral via direct register access
+    esp_err_t cam_result = setup_lcd_cam_direct();
+    if (cam_result != ESP_OK) {
+        Serial.printf("[ERROR] LCD_CAM setup failed: 0x%x\n", cam_result);
+    }
     
     // Create dedicated packet processing task
     /*
