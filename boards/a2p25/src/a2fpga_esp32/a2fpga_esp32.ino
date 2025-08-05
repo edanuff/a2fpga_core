@@ -98,18 +98,35 @@ void print_backtrace() {
 #define DMA_BUFFER_COUNT     4        // Ping-pong buffers for continuous capture
 #define PACKET_SIZE_BYTES    4        // Apple II bus packets: 32-bit (addr+data+flags)
 
-// Global handles and state for direct LCD_CAM peripheral access
-gdma_channel_handle_t dma_rx_channel = NULL;      // GDMA channel for camera RX
-dma_descriptor_t *dma_descriptors = NULL;         // DMA descriptor chain
-uint8_t *dma_buffers[DMA_BUFFER_COUNT];           // DMA buffer pointers
-volatile int current_buffer = 0;                  // Current buffer index
-bool usb_was_connected = false;                   // USB JTAG connection state tracking
-volatile bool new_frame_ready = false;            // Frame ready flag
-
-// Performance statistics (volatile for ISR access)
+// Performance statistics (volatile for ISR access) - MUST be declared before callback
 volatile uint32_t packets_received = 0;           // DMA buffers completed
 volatile uint32_t packets_processed = 0;          // Individual packets decoded
 volatile uint32_t dma_overruns = 0;               // Buffer re-queue failures
+
+// Global handles and state for direct LCD_CAM peripheral access
+gdma_channel_handle_t dma_rx_channel = NULL;      // GDMA channel for camera RX
+dma_descriptor_t dma_descriptors[DMA_BUFFER_COUNT]; // DMA descriptor array
+uint8_t *dma_buffers[DMA_BUFFER_COUNT];           // DMA buffer pointers
+volatile int current_buffer = 0;                  // Current buffer index
+volatile int buffers_ready = 0;                   // Number of buffers ready for processing
+bool usb_was_connected = false;                   // USB JTAG connection state tracking
+volatile bool dma_capture_active = false;         // DMA capture state
+
+// DMA interrupt callback
+static bool IRAM_ATTR dma_rx_callback(gdma_channel_handle_t dma_chan, gdma_event_data_t *event_data, void *user_data) {
+    BaseType_t high_task_awoken = pdFALSE;
+    
+    // Buffer completed - increment ready count
+    buffers_ready++;
+    packets_received++;
+    
+    // Cycle to next buffer
+    current_buffer = (current_buffer + 1) % DMA_BUFFER_COUNT;
+    
+    return high_task_awoken == pdTRUE;
+}
+
+// Performance statistics moved above (before DMA callback)
 
 // ============================================================================
 // USB JTAG BRIDGE SYSTEM
@@ -179,14 +196,161 @@ esp_err_t setup_lcd_cam_direct() {
     esp_rom_gpio_connect_in_signal(PIN_PARL_CLK, CAM_PCLK_IDX, false);
     esp_rom_gpio_connect_in_signal(PIN_PARL_FRAME, CAM_V_SYNC_IDX, false);
     
+    // 4. Allocate GDMA channel for camera RX
+    gdma_channel_alloc_config_t rx_alloc_config = {
+        .direction = GDMA_CHANNEL_DIRECTION_RX,
+    };
+    esp_err_t ret = gdma_new_channel(&rx_alloc_config, &dma_rx_channel);
+    if (ret != ESP_OK) {
+        Serial.printf("[ERROR] Failed to allocate GDMA channel: 0x%x\n", ret);
+        return ret;
+    }
+    
+    // 5. Connect GDMA channel to LCD_CAM peripheral
+    gdma_connect(dma_rx_channel, GDMA_MAKE_TRIGGER(GDMA_TRIG_PERIPH_CAM, 0));
+    
+    // 6. Set up DMA interrupt callback
+    gdma_rx_event_callbacks_t cbs = {
+        .on_recv_done = dma_rx_callback,
+    };
+    gdma_register_rx_event_callbacks(dma_rx_channel, &cbs, NULL);
+    
+    // 7. Allocate DMA buffers in DRAM
+    for (int i = 0; i < DMA_BUFFER_COUNT; i++) {
+        dma_buffers[i] = (uint8_t*)heap_caps_malloc(DMA_BUFFER_SIZE, MALLOC_CAP_DMA);
+        if (!dma_buffers[i]) {
+            Serial.printf("[ERROR] Failed to allocate DMA buffer %d\n", i);
+            return ESP_ERR_NO_MEM;
+        }
+        Serial.printf("[DEBUG] DMA buffer %d allocated at 0x%08x\n", i, (uint32_t)dma_buffers[i]);
+    }
+    
+    // 8. Set up DMA descriptors (linked list for continuous capture)
+    for (int i = 0; i < DMA_BUFFER_COUNT; i++) {
+        dma_descriptors[i].dw0.size = DMA_BUFFER_SIZE;
+        dma_descriptors[i].dw0.length = 0;
+        dma_descriptors[i].dw0.suc_eof = 1;  // Generate EOF interrupt
+        dma_descriptors[i].dw0.owner = 1;    // DMA owns this descriptor
+        dma_descriptors[i].buffer = dma_buffers[i];
+        dma_descriptors[i].next = &dma_descriptors[(i + 1) % DMA_BUFFER_COUNT];  // Circular buffer
+    }
+    
+    // 9. Configure LCD_CAM control registers for continuous capture
+    LCD_CAM.cam_ctrl.cam_stop_en = 0;                    // Disable auto-stop
+    LCD_CAM.cam_ctrl.cam_vsync_filter_thres = 4;        // VSYNC filter threshold
+    LCD_CAM.cam_ctrl.cam_byte_order = 0;                // Normal byte order
+    LCD_CAM.cam_ctrl.cam_bit_order = 0;                 // Normal bit order
+    LCD_CAM.cam_ctrl.cam_line_int_en = 0;               // Disable line interrupt
+    LCD_CAM.cam_ctrl.cam_vs_eof_en = 1;                 // Enable VSYNC EOF
+    
+    LCD_CAM.cam_ctrl1.cam_rec_data_bytelen = DMA_BUFFER_SIZE - 1;  // Max bytes per transfer
+    LCD_CAM.cam_ctrl1.cam_line_int_num = 0;             // Line interrupt number
+    LCD_CAM.cam_ctrl1.cam_clk_inv = 0;                  // Don't invert clock
+    LCD_CAM.cam_ctrl1.cam_vsync_filter_en = 1;          // Enable VSYNC filter
+    LCD_CAM.cam_ctrl1.cam_2byte_en = 0;                 // Single byte mode
+    LCD_CAM.cam_ctrl1.cam_de_inv = 0;                   // Don't invert DE
+    LCD_CAM.cam_ctrl1.cam_hsync_inv = 0;                // Don't invert HSYNC
+    LCD_CAM.cam_ctrl1.cam_vsync_inv = 0;                // Don't invert VSYNC
+    
+    // 10. Reset LCD_CAM peripheral
+    LCD_CAM.cam_ctrl1.cam_afifo_reset = 1;
+    LCD_CAM.cam_ctrl1.cam_afifo_reset = 0;
+    
     Serial.println("[SUCCESS] LCD_CAM peripheral configured via direct register access!");
     Serial.printf("[INFO] Data pins: D0=%d, D1=%d, D2=%d, D3=%d\n", 
              PIN_PARL_D0, PIN_PARL_D1, PIN_PARL_D2, PIN_PARL_D3);
     Serial.printf("[INFO] Clock pin: PCLK=%d, Frame sync: VSYNC=%d\n", 
              PIN_PARL_CLK, PIN_PARL_FRAME);
-    Serial.println("[INFO] Ready for 4-bit parallel data capture from FPGA");
+    Serial.printf("[INFO] Allocated %d DMA buffers of %d bytes each\n", DMA_BUFFER_COUNT, DMA_BUFFER_SIZE);
+    Serial.println("[INFO] DMA descriptors configured for continuous capture");
     
     return ESP_OK;
+}
+
+// Start DMA capture
+esp_err_t start_dma_capture() {
+    if (dma_capture_active) {
+        Serial.println("[WARNING] DMA capture already active");
+        return ESP_OK;
+    }
+    
+    Serial.println("[INFO] Starting DMA capture...");
+    
+    // Reset buffer state
+    current_buffer = 0;
+    buffers_ready = 0;
+    
+    // Start GDMA transfer with first descriptor
+    esp_err_t ret = gdma_start(dma_rx_channel, (intptr_t)&dma_descriptors[0]);
+    if (ret != ESP_OK) {
+        Serial.printf("[ERROR] Failed to start GDMA: 0x%x\n", ret);
+        return ret;
+    }
+    
+    // Update LCD_CAM registers to reflect current transfer settings
+    LCD_CAM.cam_ctrl.cam_update = 1;
+    
+    // Start LCD_CAM capture
+    LCD_CAM.cam_ctrl1.cam_start = 1;
+    
+    dma_capture_active = true;
+    Serial.println("[SUCCESS] DMA capture started - ready to receive FPGA data!");
+    
+    return ESP_OK;
+}
+
+// Stop DMA capture
+esp_err_t stop_dma_capture() {
+    if (!dma_capture_active) {
+        return ESP_OK;
+    }
+    
+    Serial.println("[INFO] Stopping DMA capture...");
+    
+    // Stop LCD_CAM capture
+    LCD_CAM.cam_ctrl1.cam_start = 0;
+    
+    // Stop GDMA
+    gdma_stop(dma_rx_channel);
+    
+    dma_capture_active = false;
+    Serial.println("[INFO] DMA capture stopped");
+    
+    return ESP_OK;
+}
+
+// Process received data buffers
+void process_dma_buffers() {
+    while (buffers_ready > 0) {
+        // Calculate which buffer to process
+        int process_buffer = (current_buffer - buffers_ready + DMA_BUFFER_COUNT) % DMA_BUFFER_COUNT;
+        
+        uint8_t *buffer_data = dma_buffers[process_buffer];
+        size_t bytes_received = DMA_BUFFER_SIZE; // For now, assume full buffer
+        
+        Serial.printf("[DEBUG] Processing buffer %d: %d bytes\n", process_buffer, bytes_received);
+        
+        // Process 4-bit parallel data as Apple II packets
+        // Each byte contains two 4-bit nibbles from consecutive clock cycles
+        for (size_t i = 0; i < bytes_received && i < 64; i++) { // Limit debug output
+            uint8_t byte_data = buffer_data[i];
+            uint8_t nibble_high = (byte_data >> 4) & 0x0F;  // Upper 4 bits
+            uint8_t nibble_low = byte_data & 0x0F;          // Lower 4 bits
+            
+            // For now, just show the raw data
+            if (i < 16) {  // Show first 16 bytes for debugging
+                Serial.printf("[DATA] Byte %02d: 0x%02X (nibbles: %X %X)\n", i, byte_data, nibble_high, nibble_low);
+            }
+        }
+        
+        packets_processed++;
+        buffers_ready--;
+        
+        // Show some basic statistics
+        if (packets_processed % 10 == 0) {
+            Serial.printf("[STATS] Processed %lu buffers, %lu total packets\n", packets_processed, packets_received);
+        }
+    }
 }
 
 // ============================================================================
@@ -314,6 +478,12 @@ void setup() {
     esp_err_t cam_result = setup_lcd_cam_direct();
     if (cam_result != ESP_OK) {
         Serial.printf("[ERROR] LCD_CAM setup failed: 0x%x\n", cam_result);
+    } else {
+        // Start DMA capture automatically
+        esp_err_t capture_result = start_dma_capture();
+        if (capture_result != ESP_OK) {
+            Serial.printf("[ERROR] Failed to start DMA capture: 0x%x\n", capture_result);
+        }
     }
     
     // Create dedicated packet processing task
@@ -354,27 +524,39 @@ void loop() {
     }
     usb_was_connected = usb_is_connected;
 
-    // 3. Update Status LEDs
+    // 3. Process DMA buffers if data is ready
+    if (buffers_ready > 0) {
+        process_dma_buffers();
+    }
+    
+    // 4. Update Status LEDs
     digitalWrite(PIN_LED0, digitalRead(PIN_FPGA_DONE) ? LED_ON : LED_OFF);
     digitalWrite(PIN_LED1, digitalRead(PIN_FPGA_0) ? LED_ON : LED_OFF);
 
-    // 4. Handle Serial1 Commands (moved from Serial to avoid JTAG interference)
-    /*
-    if (Serial1.available()) {
-        String cmd = Serial1.readStringUntil('\n');
+    // 5. Handle Serial Commands for DMA control
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
         cmd.trim();
         cmd.toLowerCase();
         
         if (cmd == "stats") {
-            Serial.printf("📈 Packets: RX=%lu, Processed=%lu, Overruns=%lu\n", 
-                         packets_received, packets_processed, dma_overruns);
+            Serial.printf("📈 Packets: RX=%lu, Processed=%lu, Ready=%d\n", 
+                         packets_received, packets_processed, buffers_ready);
             Serial.printf("💾 Free heap: %lu bytes\n", esp_get_free_heap_size());
             Serial.printf("🔌 USB JTAG: %s\n", usb_is_connected ? "Connected" : "Disconnected");
+            Serial.printf("📡 DMA Capture: %s\n", dma_capture_active ? "Active" : "Stopped");
             Serial.printf("🎯 FPGA Status: DONE=%d, GPIO0=%d, GPIO1=%d\n", 
                          digitalRead(PIN_FPGA_DONE), digitalRead(PIN_FPGA_0), digitalRead(PIN_FPGA_1));
         } 
+        else if (cmd == "start") {
+            start_dma_capture();
+        }
+        else if (cmd == "stop") {
+            stop_dma_capture();
+        }
         else if (cmd == "reset") {
             packets_received = packets_processed = dma_overruns = 0;
+            buffers_ready = 0;
             Serial.println("📊 Statistics reset");
         }
         else if (cmd == "jtag") {
@@ -385,21 +567,25 @@ void loop() {
         else if (cmd == "help") {
             Serial.println("🔧 Available commands:");
             Serial.println("  stats  - Show performance statistics");
+            Serial.println("  start  - Start DMA capture");
+            Serial.println("  stop   - Stop DMA capture");
             Serial.println("  reset  - Reset statistics counters");
             Serial.println("  jtag   - Show JTAG connection status");
             Serial.println("  help   - Show this help");
         }
     }
-        */
 
-    // 5. Periodic Status Updates (much less frequent now)
+    // 6. Periodic Status Updates (much less frequent now)
     static uint32_t last_stats = 0;
+    static uint32_t last_processed = 0;
     if (millis() - last_stats > 10000) {  // Every 10 seconds
-        uint32_t rate = (packets_processed - last_stats) / 10;
-        if (rate > 0) {
-            Serial.printf("📊 Packet rate: %lu/sec\n", rate);
+        uint32_t rate = (packets_processed - last_processed) / 10;
+        if (rate > 0 || dma_capture_active) {
+            Serial.printf("📊 DMA Status: %s, Buffer rate: %lu/sec, Ready: %d\n", 
+                         dma_capture_active ? "ACTIVE" : "STOPPED", rate, buffers_ready);
         }
-        last_stats = packets_processed;
+        last_processed = packets_processed;
+        last_stats = millis();
     }
     
     // Much more relaxed main loop timing
