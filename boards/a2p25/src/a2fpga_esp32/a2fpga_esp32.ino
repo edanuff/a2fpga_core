@@ -381,13 +381,13 @@ void process_packet(uint32_t pkt) {
 
     // Audio register writes (Mockingboard/sound cards at $C040-$C04F)
     if ((addr & 0xFFF0) == 0xC040) {
-        //Serial.printf("🎵 Audio: %02X\n", data);
+        Serial.printf("🎵 Audio: %02X\n", data);
         return;
     }
 
     // Log other I/O page activity (reduce noise by filtering to I/O space)
     if ((addr & 0xFF00) == 0xC000) {  // Apple II I/O page ($C000-$C0FF)
-        //Serial.printf("📦 I/O: %04X %02X %02X\n", addr, data, flags);
+        Serial.printf("📦 I/O: %04X %02X %02X\n", addr, data, flags);
     }
 }
 
