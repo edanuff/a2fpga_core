@@ -2,8 +2,7 @@
 // Apple II Bus Capture - Proper Interface Usage
 // -----------------------------------------------------
 module a2bus_stream #(
-    parameter bit ENABLE = 1'b1,
-    parameter FIFO_DEPTH = 64
+    parameter bit ENABLE = 1'b1
 )(
     a2bus_if.slave a2bus_if,
     
@@ -15,6 +14,7 @@ module a2bus_stream #(
     // Control and Status
     input  logic        capture_enable,
     input  logic [2:0]  capture_mode,
+    input  logic        heartbeat_pulse,    // NEW: Heartbeat for testing
     output logic        activity_led,
     output logic        overflow_led,
     output logic [7:0]  debug_status
@@ -52,7 +52,7 @@ module a2bus_stream #(
     wire capture_trigger_w = bus_cycle_w & capture_this_cycle;
     
     // Packet formation: [ADDR:16][DATA:8][FLAGS:8]
-    // FLAGS: [7]=RW_N, [6]=M2SEL_N, [5]=M2B0, [4]=SW_GS, [3:0]=Reserved
+    // FLAGS: [7]=RW_N, [6]=M2SEL_N, [5]=M2B0, [4]=SW_GS, [3:1]=Reserved, [0]=Reset indicator
     wire [31:0] packet_data_w = {
         a2bus_if.addr,           // [31:16] Address
         a2bus_if.data,           // [15:8]  Data  
@@ -60,48 +60,89 @@ module a2bus_stream #(
         a2bus_if.m2sel_n,        // [6]     M2SEL
         a2bus_if.m2b0,           // [5]     M2B0
         a2bus_if.sw_gs,          // [4]     IIgs mode
-        4'b0000                  // [3:0]   Reserved
+        3'b000,                  // [3:1]   Reserved
+        1'b0                     // [0]     Reset indicator (0 = normal packet)
+    };
+    
+    // Reset indicator packet: sent once on system reset
+    wire [31:0] reset_packet_w = {
+        16'h0000,                // [31:16] Address = 0
+        8'h00,                   // [15:8]  Data = 0
+        4'b0000,                 // [7:4]   All flags = 0
+        3'b000,                  // [3:1]   Reserved = 0
+        1'b1                     // [0]     Reset indicator = 1
+    };
+    
+    // Heartbeat packet: sent periodically for testing
+    reg [7:0] heartbeat_counter = 8'h0;
+    wire [31:0] heartbeat_packet_w = {
+        16'hC0FF,                // [31:16] Address = 0xC0FF (I/O page - will be visible)
+        heartbeat_counter,       // [15:8]  Data = counter
+        4'b1010,                 // [7:4]   Test flags pattern
+        3'b101,                  // [3:1]   Test reserved bits
+        1'b0                     // [0]     Normal packet (not reset)
     };
     
     // Register the packet on the bus clock edge
     reg [31:0] packet_data_r;
     reg        packet_valid_r;
+    reg        reset_packet_sent_r;
+    reg        heartbeat_pending_r;
+    reg        startup_done_r;
     
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
+            // Initialize all registers on reset
             packet_data_r <= 32'h0;
             packet_valid_r <= 1'b0;
+            reset_packet_sent_r <= 1'b0;
+            heartbeat_pending_r <= 1'b0;
+            startup_done_r <= 1'b0;
+            heartbeat_counter <= 8'h0;
+        end else if (!startup_done_r) begin
+            // Send reset packet on FPGA startup
+            packet_data_r <= reset_packet_w;
+            packet_valid_r <= 1'b1;
+            reset_packet_sent_r <= 1'b1;
+            startup_done_r <= 1'b1;
+            heartbeat_pending_r <= 1'b0;
+            heartbeat_counter <= 8'h0;
         end else begin
-            if (capture_trigger_w) begin
+            // Clear packet when accepted by stream serializer
+            if (packet_accepted_w) begin
+                packet_valid_r <= 1'b0;
+                if (heartbeat_pending_r) heartbeat_pending_r <= 1'b0;
+            end
+            // Handle heartbeat pulse - works without Apple II system
+            else if (heartbeat_pulse && !heartbeat_pending_r && !packet_valid_r) begin
+                packet_data_r <= heartbeat_packet_w;
+                packet_valid_r <= 1'b1;
+                heartbeat_pending_r <= 1'b1;
+                heartbeat_counter <= heartbeat_counter + 1;
+            end
+            // Normal bus capture (when Apple II system_reset_n is available)
+            else if (a2bus_if.system_reset_n && capture_trigger_w && !packet_valid_r) begin
                 packet_data_r <= packet_data_w;
                 packet_valid_r <= 1'b1;
-            end else if (packet_valid_r & !fifo_full) begin
-                // Clear valid when packet is accepted by FIFO
-                packet_valid_r <= 1'b0;
             end
         end
     end
 
-    // I2S FIFO instance
-    wire fifo_full, fifo_empty, fifo_almost_full;
-    wire [6:0] fifo_count;  // 7-bit counter for 64-deep FIFO
+    // Direct connection to stream serializer - no FIFO needed!
+    // Stream serializer can keep up since: 32 clocks/packet < 47+ clocks/Apple II cycle
     
-    wire packet_accepted_w = packet_valid_r & !fifo_full;
-
-    i2s_4bit_stream_fifo #(
-        .FIFO_DEPTH(FIFO_DEPTH)
-    ) i2s_stream (
+    wire stream_busy;
+    wire packet_accepted_w = packet_valid_r & !stream_busy;
+    
+    stream_serializer stream_serializer_inst (
         .clk(a2bus_if.clk_logic),
         .rst_n(a2bus_if.system_reset_n),
-        .fifo_wr_en(packet_accepted_w),
-        .fifo_data_in(packet_data_r),
-        .fifo_full(fifo_full),
-        .fifo_empty(fifo_empty),
-        .fifo_almost_full(fifo_almost_full),
+        .wr_i(packet_accepted_w),
+        .data_i(packet_data_r),
         .qclk(esp_qclk),
         .frame(esp_frame),
         .qdata(esp_qdata),
-        .fifo_count(fifo_count)
+        .busy(stream_busy)
     );
 
     // Activity detection
@@ -115,13 +156,13 @@ module a2bus_stream #(
     end
 
     // Status outputs
-    assign activity_led = bus_active_r | !fifo_empty;
-    assign overflow_led = packet_valid_r & fifo_full;
+    assign activity_led = bus_active_r | stream_busy;
+    assign overflow_led = packet_valid_r & stream_busy;  // Packet dropped due to busy serializer
     assign debug_status = {
-        fifo_full,              // [7]
-        fifo_almost_full,       // [6] 
+        stream_busy,            // [7] Stream serializer busy
+        esp_frame,              // [6] Currently transmitting (frame signal)
         capture_enable,         // [5]
-        capture_mode            // [4:2]
+        capture_mode,           // [4:2]
         packet_valid_r,         // [1]
         bus_active_r            // [0]
     };
@@ -137,7 +178,7 @@ module a2bus_stream #(
         end else begin
             if (packet_accepted_w)
                 packets_captured_r <= packets_captured_r + 1;
-            if (packet_valid_r & fifo_full)
+            if (packet_valid_r & stream_busy)
                 packets_dropped_r <= packets_dropped_r + 1;
         end
     end
