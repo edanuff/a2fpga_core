@@ -79,7 +79,11 @@ module top #(
     output [2:0] tmds_d_p,
     output [2:0] tmds_d_n,
 
-    output ESP32_GPIO_0,
+    output esp32_gpio_0,
+
+    output esp32_parl_frame,
+    output esp32_parl_clk,
+    output [3:0] esp32_parl_d,
 
     // uart
     output  uart_tx,
@@ -118,8 +122,8 @@ module top #(
     reg [25:0] led_counter_r;
     reg rstn_r;
 
-    always @(posedge clk_pixel_w) begin
-        if (led_counter_r == 26'd04_999_999) begin
+    always @(posedge clk_logic_w) begin
+        if (led_counter_r == 26'd09_999_999) begin
             led_counter_r <= 0;
             led_r <= ~led_r;  // Toggle LED every 0.5s, so full blink is 1s
             rstn_r <= 1'b1; // Release reset after 0.5s
@@ -128,17 +132,11 @@ module top #(
         end
     end
 
-    assign ESP32_GPIO_0 = !led_r;
+    assign esp32_gpio_0 = !led_r;
 
     // Reset
 
-
-    wire device_reset_n_w;
-    Reset_Sync u_Reset_Sync (
-		.resetn(device_reset_n_w),
-		.ext_reset(rstn_r & clk_lock_w),
-		.clk(clk_logic_w)
-	);
+    wire device_reset_n_w = rstn_r; // Use reset signal from LED logic
 
     //wire device_reset_n_w = ~rst;
 
@@ -292,35 +290,128 @@ module top #(
         .vgc_data_o(vgc_data_w)
     );
 
-    // ESP32 Bus Stream
-
-    // ESP32 Interface
-    logic esp_qclk,
-    logic esp_frame, 
-    logic [3:0]  esp_qdata,
+    // ESP32 QSPI Protocol Generator
     
-    // Simple control (could be connected to DIP switches, etc.)
-    input logic capture_enable,
-    input logic [2:0]  capture_mode,
+    // QSPI transaction state machine
+    typedef enum logic [2:0] {
+        IDLE,
+        CS_SETUP,
+        TRANSMIT,
+        CS_HOLD,
+        CS_RELEASE
+    } qspi_state_t;
     
-    // Status LEDs
-    logic activity_led,
-    logic overflow_led
-
-    a2bus_stream #(
-        .ENABLE(1'b1),
-        .FIFO_DEPTH(64)
-    ) capture (
-        .a2bus_if(a2bus_if),
-        .esp_qclk(esp_qclk),
-        .esp_frame(esp_frame),
-        .esp_qdata(esp_qdata),
-        .capture_enable(capture_enable),
-        .capture_mode(capture_mode),
-        .activity_led(activity_led),
-        .overflow_led(overflow_led),
-        .debug_status()  // Not connected in this simple example
-    );
+    qspi_state_t qspi_state_r = IDLE;
+    
+    // Timing and data registers
+    reg [7:0] timer_r = 8'h0;           // General purpose timer
+    reg [3:0] bit_counter_r = 4'h0;     // Counts 8 nibbles per transaction
+    reg [31:0] packet_data_r = 32'h0;   // 32-bit packet to transmit
+    reg [7:0] packet_counter_r = 8'h0;  // Packet sequence number
+    
+    // QSPI output signals
+    reg qspi_cs_r = 1'b1;      // Chip Select (active low)
+    reg qspi_clk_r = 1'b0;     // SCLK 
+    reg [3:0] qspi_data_r = 4'h0; // 4-bit parallel data
+    
+    // Clock divider for QSPI timing - much simpler approach
+    reg [2:0] clk_div_r = '0;  // 3-bit counter for divide-by-8  
+    wire qspi_clk_en_w = (clk_div_r == '0);  // Enable every 8 logic clocks
+    
+    // Clock calculation: 54MHz / 32 / 2 = 844kHz SCLK
+    // This is close to 1MHz and good for reliable testing
+    
+    always @(posedge clk_logic_w) begin
+        clk_div_r <= clk_div_r + 1;
+        
+        // Clock always runs - independent of state machine
+        if (qspi_clk_en_w) begin
+            qspi_clk_r <= ~qspi_clk_r;
+        end
+        
+        // State machine controls CS and data
+        if (qspi_clk_en_w) begin
+            case (qspi_state_r)
+                IDLE: begin
+                    // Wait before starting next transaction
+                    timer_r <= timer_r + 1;
+                    qspi_cs_r <= 1'b1;
+                    
+                    if (timer_r >= 8'd100) begin  // Wait between transactions for ESP32
+                        timer_r <= 8'h0;
+                        bit_counter_r <= 4'h0;
+                        
+                        // Prepare simple test packet: AA BB CC DD  
+                        packet_data_r <= 32'hAABBCCDD;  // Fixed pattern for easy debugging
+                        packet_counter_r <= packet_counter_r + 1;
+                        
+                        qspi_state_r <= CS_SETUP;
+                    end
+                end
+                
+                CS_SETUP: begin
+                    // Assert CS and setup first data
+                    qspi_cs_r <= 1'b0;  // CS active low
+                    qspi_data_r <= packet_data_r[31:28];  // First nibble (MSB first)
+                    timer_r <= 8'h0;
+                    qspi_state_r <= TRANSMIT;
+                end
+                
+                TRANSMIT: begin
+                    // Keep CS LOW during transmission
+                    qspi_cs_r <= 1'b0;
+                    
+                    // Count clock edges and update data
+                    if (!qspi_clk_r) begin  // On rising edge, advance to next nibble
+                        bit_counter_r <= bit_counter_r + 1;
+                        
+                        // After 8 clock edges, we've sent all nibbles
+                        if (bit_counter_r >= 4'h7) begin  
+                            qspi_state_r <= CS_HOLD;
+                            timer_r <= 8'h0;
+                        end
+                    end
+                    
+                    // Always update data based on current counter
+                    case (bit_counter_r[2:0])  // 8 nibbles total
+                        3'h0: qspi_data_r <= packet_data_r[31:28];  // 1st nibble
+                        3'h1: qspi_data_r <= packet_data_r[27:24];  // 2nd nibble
+                        3'h2: qspi_data_r <= packet_data_r[23:20];  // 3rd nibble  
+                        3'h3: qspi_data_r <= packet_data_r[19:16];  // 4th nibble
+                        3'h4: qspi_data_r <= packet_data_r[15:12];  // 5th nibble
+                        3'h5: qspi_data_r <= packet_data_r[11:8];   // 6th nibble
+                        3'h6: qspi_data_r <= packet_data_r[7:4];    // 7th nibble
+                        3'h7: qspi_data_r <= packet_data_r[3:0];    // 8th nibble
+                    endcase
+                end
+                
+                CS_HOLD: begin
+                    // Hold final data stable with CS still active
+                    qspi_cs_r <= 1'b0;      // Keep CS LOW during hold
+                    timer_r <= timer_r + 1;
+                    
+                    if (timer_r >= 8'd5) begin  // Hold for ESP32 to process
+                        qspi_state_r <= CS_RELEASE;
+                    end
+                end
+                
+                CS_RELEASE: begin
+                    // Release CS to end transaction
+                    qspi_cs_r <= 1'b1;
+                    qspi_data_r <= 4'h0;
+                    timer_r <= 8'h0;
+                    qspi_state_r <= IDLE;
+                end
+                
+                default: qspi_state_r <= IDLE;
+            endcase
+        end
+    end
+    
+    // Connect QSPI signals to ESP32 pins
+    assign esp32_parl_clk = qspi_clk_r;      // SCLK 
+    assign esp32_parl_frame = qspi_cs_r;     // CS (note: active low)
+    assign esp32_parl_d = qspi_data_r;       // 4-bit parallel data
 
     // Slots
 
@@ -724,24 +815,5 @@ module top #(
     end
     */
 
-
-endmodule
-
-module Reset_Sync (
-    input clk,
-    input ext_reset,
-    output resetn
-);
-
-    reg [3:0] reset_cnt = 0;
-
-    always @(posedge clk or negedge ext_reset) begin
-        if (~ext_reset)
-            reset_cnt <= 4'b0;
-        else
-            reset_cnt <= reset_cnt + !resetn;
-    end
-
-    assign resetn = &reset_cnt;
 
 endmodule

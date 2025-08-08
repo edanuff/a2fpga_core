@@ -1,593 +1,538 @@
 /*
-Tools->Board->Boards Manager->esp32 by espressif
-Tools->USB CDC On Boot: Enabled
-Tools->CPU Frequency: 240 MHz (WiFi)
-Tools->Board: Adafruit QT Py ESP32-S3 (4M Flash 2M PSRAM)
-Tools->JTAG Adapter: Integrated USB JTAG
-Tools->USB Mode: Hardware CDC and JTAG
-Tools->Upload Mode: UART0 / Hardware CDC
-Tools->Upload Speed: 921600
-*/
-
-/*
- * A2FPGA ESP32-S3 Bridge System
- * 
- * This system provides three key functions for Apple II FPGA development:
- * 
- * 1. HIGH-PERFORMANCE PACKET CAPTURE (LCD_CAM + DMA)
- *    - Captures 4-bit parallel data from FPGA using ESP32-S3's LCD_CAM peripheral
- *    - FPGA streams packets at Apple II bus rate (~1MHz) with 8×4-bit chunks per packet
- *    - Uses ping-pong DMA buffers for zero-copy packet reception
- *    - Processes 32-bit Apple II bus transactions (address, data, flags)
- *    - Dedicated FreeRTOS task on core 1 for real-time packet processing
- * 
- * 2. DYNAMIC USB JTAG BRIDGE
- *    - Auto-detects USB JTAG connection and routes signals to GPIO pins
- *    - Enables FPGA programming/debugging through ESP32's built-in USB JTAG
- *    - Cleanly switches between JTAG and normal GPIO operation
- * 
- * 3. SERIAL PASSTHROUGH & SYSTEM MONITORING
- *    - Bidirectional serial bridge between USB and UART
- *    - Real-time Apple II bus analysis with specific I/O decoding
- *    - Status LEDs, statistics, and interactive diagnostics
+ * ESP32-S3 QSPI Slave Mode for 4-bit Data Capture
+ * Using dedicated SPI3 peripheral in slave mode with GDMA
  */
 
-// Camera library causes crashes - using direct LCD_CAM register access instead
-// #include "esp_camera.h"
-#include "driver/gpio.h"
-#include "soc/usb_serial_jtag_reg.h"
-#include "soc/gpio_sig_map.h"
-#include "esp_log.h"
-#include "esp_system.h"
-#include "esp_debug_helpers.h"
-
-// Direct LCD_CAM peripheral access
-#include "soc/lcd_cam_struct.h"
-#include "soc/lcd_cam_reg.h"
-#include "soc/gdma_struct.h"
-#include "soc/gdma_reg.h"
-#include "esp_private/gdma.h"
-#include "hal/dma_types.h"
-#include "driver/periph_ctrl.h"
-
 #include <Arduino.h>
+#include "driver/spi_slave.h"
+#include "driver/gpio.h"
+#include "esp_log.h"
+#include "soc/usb_serial_jtag_reg.h"  // For USB-JTAG bridge
+#include "soc/gpio_sig_map.h"         // For GPIO signal routing
 
-// Custom exception handler to print detailed crash info
-void print_backtrace() {
-    Serial.println("[CRASH] Attempting to print backtrace...");
-    esp_backtrace_print(10);  // Print up to 10 stack frames
+// 4-bit Parallel Data Interface via QSPI Slave
+#define PIN_QSPI_CLK   13    // SCLK - Clock from FPGA
+#define PIN_QSPI_CS    12    // CS - Frame signal from FPGA (active low)
+#define PIN_QSPI_D0    14    // SIO0 - Data bit 0 (MOSI equivalent)
+#define PIN_QSPI_D1    15    // SIO1 - Data bit 1 (MISO equivalent)  
+#define PIN_QSPI_D2    16    // SIO2 - Data bit 2
+#define PIN_QSPI_D3    17    // SIO3 - Data bit 3
+
+// JTAG Interface to FPGA (for USB programming)
+#define PIN_TCK        40    // JTAG Clock
+#define PIN_TMS        41    // JTAG Mode Select
+#define PIN_TDI        42    // JTAG Data In
+#define PIN_TDO        45    // JTAG Data Out  
+#define PIN_SRST       7     // JTAG Reset (unused but required)
+#define PIN_FPGA_DONE  48    // Configuration done signal
+
+#define PIN_FPGA_0      9
+
+// LEDs and other pins
+#define PIN_LED0       1     // Status LED 0
+#define PIN_LED1       2     // Status LED 1
+#define PIN_RXD        44    // UART RX from FPGA
+#define PIN_TXD        43    // UART TX to FPGA
+#define UART_BAUD      115200
+
+// SPI Configuration
+#define SPI_HOST_ID    SPI3_HOST
+#define DMA_BUFFER_SIZE 512
+#define DMA_NUM_BUFFERS 2
+
+// Data processing
+volatile int packets_received = 0;
+volatile int packets_processed = 0;
+
+// QSPI Slave variables
+static uint8_t *qspi_rx_buffer;
+static uint8_t *qspi_tx_buffer;  // Not used but required by SPI slave
+static spi_slave_transaction_t qspi_trans;
+static volatile bool transaction_complete = false;
+
+// USB-JTAG variables
+static bool usb_was_connected = false;
+static bool jtag_enabled = false;
+
+// QSPI Slave transaction callback
+static void qspi_post_setup_cb(spi_slave_transaction_t *trans) {
+    // Transaction setup complete
 }
 
-#define TAG "A2FPGA_COMPLETE"
-
-// Status LEDs - Connected to ESP32-S3 QT Py onboard LEDs
-#define PIN_LED0 1              // LED shows FPGA_DONE status
-#define PIN_LED1 2              // LED shows FPGA GPIO0 status  
-#define LED_ON  HIGH
-#define LED_OFF LOW
-
-// FPGA Status Monitoring Pins
-#define PIN_FPGA_DONE 48        // FPGA configuration complete signal
-#define PIN_FPGA_0 9            // FPGA general purpose status pin 0
-#define PIN_FPGA_1 10           // FPGA general purpose status pin 1
-#define PIN_FPGA_RECONFIG_N  21
-
-// 4-bit Parallel Data Interface from FPGA (PARL_IO)
-#define PIN_PARL_D0 14          // Data bit 0 (LSB)
-#define PIN_PARL_D1 15          // Data bit 1
-#define PIN_PARL_D2 16          // Data bit 2  
-#define PIN_PARL_D3 17          // Data bit 3 (MSB)
-#define PIN_PARL_CLK 13         // Clock signal from FPGA
-#define PIN_PARL_FRAME     12        // Frame/Valid signal for packet boundaries
-
-// Serial Passthrough Interface (UART to FPGA)
-#define PIN_RXD  44             // Receive from FPGA
-#define PIN_TXD  43             // Transmit to FPGA
-#define BAUD     115200         // Serial baud rate
-
-// JTAG Programming Interface (routed from USB JTAG)
-#define PIN_TCK  40             // Test Clock
-#define PIN_TMS  41             // Test Mode Select
-#define PIN_TDI  42             // Test Data In (to FPGA)
-#define PIN_TDO  45             // Test Data Out (from FPGA)
-#define PIN_SRST 7              // System Reset
-
-// DMA Configuration for High-Performance Packet Capture
-#define PARLIO_DATA_WIDTH    4        // 4-bit parallel data bus from FPGA
-#define DMA_BUFFER_SIZE      2048     // Large buffers minimize interrupt overhead
-#define DMA_BUFFER_COUNT     4        // Ping-pong buffers for continuous capture
-#define PACKET_SIZE_BYTES    4        // Apple II bus packets: 32-bit (addr+data+flags)
-
-// Performance statistics (volatile for ISR access) - MUST be declared before callback
-volatile uint32_t packets_received = 0;           // DMA buffers completed
-volatile uint32_t packets_processed = 0;          // Individual packets decoded
-volatile uint32_t dma_overruns = 0;               // Buffer re-queue failures
-
-// Global handles and state for direct LCD_CAM peripheral access
-gdma_channel_handle_t dma_rx_channel = NULL;      // GDMA channel for camera RX
-dma_descriptor_t dma_descriptors[DMA_BUFFER_COUNT]; // DMA descriptor array
-uint8_t *dma_buffers[DMA_BUFFER_COUNT];           // DMA buffer pointers
-volatile int current_buffer = 0;                  // Current buffer index
-volatile int buffers_ready = 0;                   // Number of buffers ready for processing
-bool usb_was_connected = false;                   // USB JTAG connection state tracking
-volatile bool dma_capture_active = false;         // DMA capture state
-
-// DMA interrupt callback
-static bool IRAM_ATTR dma_rx_callback(gdma_channel_handle_t dma_chan, gdma_event_data_t *event_data, void *user_data) {
-    BaseType_t high_task_awoken = pdFALSE;
-    
-    // Buffer completed - increment ready count
-    buffers_ready++;
-    packets_received++;
-    
-    // Cycle to next buffer
-    current_buffer = (current_buffer + 1) % DMA_BUFFER_COUNT;
-    
-    return high_task_awoken == pdTRUE;
+static void qspi_post_trans_cb(spi_slave_transaction_t *trans) {
+    // Transaction completed
+    transaction_complete = true;
 }
 
-// Performance statistics moved above (before DMA callback)
+// Setup QSPI slave for 4-bit parallel data capture
+static esp_err_t setup_qspi_slave() {
+    Serial.println("Setting up QSPI slave...");
+    
+    // Allocate DMA-capable buffers
+    qspi_rx_buffer = (uint8_t*)heap_caps_malloc(DMA_BUFFER_SIZE, MALLOC_CAP_DMA);
+    qspi_tx_buffer = (uint8_t*)heap_caps_malloc(DMA_BUFFER_SIZE, MALLOC_CAP_DMA);
+    
+    if (!qspi_rx_buffer || !qspi_tx_buffer) {
+        Serial.println("Failed to allocate QSPI buffers");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    // Clear buffers
+    memset(qspi_rx_buffer, 0, DMA_BUFFER_SIZE);
+    memset(qspi_tx_buffer, 0, DMA_BUFFER_SIZE);
+    
+    // Configure QSPI slave
+    spi_bus_config_t bus_cfg = {
+        .mosi_io_num = PIN_QSPI_D0,      // SIO0 - Data 0
+        .miso_io_num = PIN_QSPI_D1,      // SIO1 - Data 1  
+        .sclk_io_num = PIN_QSPI_CLK,     // SCLK - Clock from FPGA
+        .quadwp_io_num = PIN_QSPI_D2,    // SIO2 - Data 2
+        .quadhd_io_num = PIN_QSPI_D3,    // SIO3 - Data 3
+        .max_transfer_sz = DMA_BUFFER_SIZE,
+        .flags = SPICOMMON_BUSFLAG_SLAVE | SPICOMMON_BUSFLAG_GPIO_PINS
+    };
+    
+    spi_slave_interface_config_t slave_cfg = {
+        .spics_io_num = PIN_QSPI_CS,     // CS - Frame signal (active low)
+        .flags = 0,                      // No special flags
+        .queue_size = 3,                 // Larger queue for better handling
+        .mode = 0,                       // SPI Mode 0 (CPOL=0, CPHA=0) - back to original
+        .post_setup_cb = qspi_post_setup_cb,
+        .post_trans_cb = qspi_post_trans_cb
+    };
+    
+    // Initialize SPI slave
+    esp_err_t ret = spi_slave_initialize(SPI_HOST_ID, &bus_cfg, &slave_cfg, SPI_DMA_CH_AUTO);
+    if (ret != ESP_OK) {
+        Serial.printf("QSPI slave init failed: %x\n", ret);
+        return ret;
+    }
+    
+    Serial.println("QSPI slave setup complete");
+    Serial.printf("Pin mapping - CLK:%d, CS:%d, D0:%d, D1:%d, D2:%d, D3:%d\n",
+                  PIN_QSPI_CLK, PIN_QSPI_CS, PIN_QSPI_D0, PIN_QSPI_D1, PIN_QSPI_D2, PIN_QSPI_D3);
+    
+    return ESP_OK;
+}
 
-// ============================================================================
-// USB JTAG BRIDGE SYSTEM
-// Dynamically routes ESP32-S3's built-in USB JTAG to external GPIO pins
-// for FPGA programming/debugging. Automatically manages connection state.
-// ============================================================================
-
+// USB-JTAG Bridge Functions
 void route_usb_jtag_to_gpio() {
-    // Configure JTAG pins for output (except TDO which is input from target)
-    pinMode(PIN_TCK, OUTPUT);   // Test Clock - to FPGA
-    pinMode(PIN_TMS, OUTPUT);   // Test Mode Select - to FPGA  
-    pinMode(PIN_TDI, OUTPUT);   // Test Data In - to FPGA
-    pinMode(PIN_TDO, INPUT);    // Test Data Out - from FPGA
-    pinMode(PIN_SRST, OUTPUT);  // System Reset - to FPGA
-
-    // Enable the ESP32-S3's USB JTAG bridge hardware
+    Serial.println("Enabling USB-JTAG bridge for FPGA programming...");
+    
+    pinMode(PIN_TCK, OUTPUT);
+    pinMode(PIN_TMS, OUTPUT);
+    pinMode(PIN_TDI, OUTPUT);
+    pinMode(PIN_TDO, INPUT);
+    pinMode(PIN_SRST, OUTPUT);
+    
+    // Enable USB-JTAG bridge
     WRITE_PERI_REG(USB_SERIAL_JTAG_CONF0_REG,
         READ_PERI_REG(USB_SERIAL_JTAG_CONF0_REG) | USB_SERIAL_JTAG_USB_JTAG_BRIDGE_EN);
-
-    // Route internal USB JTAG signals to external GPIO pins
-    esp_rom_gpio_connect_out_signal(PIN_TCK, USB_JTAG_TCK_IDX, false, false);
-    esp_rom_gpio_connect_out_signal(PIN_TMS, USB_JTAG_TMS_IDX, false, false);
-    esp_rom_gpio_connect_out_signal(PIN_TDI, USB_JTAG_TDI_IDX, false, false);
-    esp_rom_gpio_connect_out_signal(PIN_SRST, USB_JTAG_TRST_IDX, false, false);
-    esp_rom_gpio_connect_in_signal(PIN_TDO, USB_JTAG_TDO_BRIDGE_IDX, false);
     
-    ESP_LOGI(TAG, "USB JTAG routed to GPIO pins - FPGA programming enabled");
+    // Route JTAG signals to GPIO pins
+    esp_rom_gpio_connect_out_signal(PIN_TCK,  USB_JTAG_TCK_IDX,  false, false);
+    esp_rom_gpio_connect_out_signal(PIN_TMS,  USB_JTAG_TMS_IDX,  false, false);
+    esp_rom_gpio_connect_out_signal(PIN_TDI,  USB_JTAG_TDI_IDX,  false, false);
+    esp_rom_gpio_connect_out_signal(PIN_SRST, USB_JTAG_TRST_IDX, false, false);
+    esp_rom_gpio_connect_in_signal(PIN_TDO,   USB_JTAG_TDO_BRIDGE_IDX, false);
+    
+    jtag_enabled = true;
 }
 
 void unroute_usb_jtag_to_gpio() {
-    // Disable the USB JTAG bridge to disconnect signals
+    Serial.println("Disabling USB-JTAG bridge, returning to normal operation...");
+    
+    // Disable USB-JTAG bridge
     WRITE_PERI_REG(USB_SERIAL_JTAG_CONF0_REG,
         READ_PERI_REG(USB_SERIAL_JTAG_CONF0_REG) & ~USB_SERIAL_JTAG_USB_JTAG_BRIDGE_EN);
-
-    // Return all JTAG pins to high-impedance input state
+    
+    // Set JTAG pins to input (high impedance)
     pinMode(PIN_TCK, INPUT);
     pinMode(PIN_TMS, INPUT);
     pinMode(PIN_TDI, INPUT);
     pinMode(PIN_TDO, INPUT);
     pinMode(PIN_SRST, INPUT);
     
-    ESP_LOGI(TAG, "USB JTAG unrouted from GPIO pins - normal operation");
+    jtag_enabled = false;
+    
+    // Restart QSPI after JTAG session (pins may have been affected)
+    Serial.println("Restarting QSPI slave after JTAG session...");
+    spi_slave_free(SPI_HOST_ID);
+    delay(100);
+    setup_qspi_slave();
+    start_qspi_transaction();
 }
 
-// Direct LCD_CAM peripheral initialization without camera library
-esp_err_t setup_lcd_cam_direct() {
-    Serial.println("[INFO] Setting up LCD_CAM peripheral via direct register access");
-    Serial.printf("[INFO] Free heap before init: %lu bytes\n", esp_get_free_heap_size());
+// Start QSPI transaction to capture data
+esp_err_t start_qspi_transaction() {
+    // Clear transaction complete flag
+    transaction_complete = false;
     
-    // 1. Enable LCD_CAM peripheral clock
-    periph_module_enable(PERIPH_LCD_CAM_MODULE);
+    // Setup transaction for 32-bit packet (8 nibbles = 32 bits)
+    memset(&qspi_trans, 0, sizeof(qspi_trans));
+    qspi_trans.length = 32;              // 32 bits = 8 nibbles = 4 bytes
+    qspi_trans.rx_buffer = qspi_rx_buffer;
+    qspi_trans.tx_buffer = qspi_tx_buffer;
     
+    Serial.printf("QSPI transaction configured for %d bits (%d bytes)\n", 
+                  qspi_trans.length, qspi_trans.length / 8);
     
-    // 2. Configure GPIO pins for 4-bit parallel input
-    pinMode(PIN_PARL_D0, INPUT);        // Data bit 0 (LSB)
-    pinMode(PIN_PARL_D1, INPUT);        // Data bit 1
-    pinMode(PIN_PARL_D2, INPUT);        // Data bit 2
-    pinMode(PIN_PARL_D3, INPUT);        // Data bit 3 (MSB)
-    pinMode(PIN_PARL_CLK, INPUT);       // Clock signal from FPGA
-    pinMode(PIN_PARL_FRAME, INPUT);     // Frame/packet sync from FPGA
-    
-    // 3. Connect GPIO pins to LCD_CAM peripheral signals (use correct ESP32-S3 signal names)
-    esp_rom_gpio_connect_in_signal(PIN_PARL_D0, CAM_DATA_IN0_IDX, false);
-    esp_rom_gpio_connect_in_signal(PIN_PARL_D1, CAM_DATA_IN1_IDX, false);
-    esp_rom_gpio_connect_in_signal(PIN_PARL_D2, CAM_DATA_IN2_IDX, false);
-    esp_rom_gpio_connect_in_signal(PIN_PARL_D3, CAM_DATA_IN3_IDX, false);
-    esp_rom_gpio_connect_in_signal(PIN_PARL_CLK, CAM_PCLK_IDX, false);
-    esp_rom_gpio_connect_in_signal(PIN_PARL_FRAME, CAM_V_SYNC_IDX, false);
-    
-    // 4. Allocate GDMA channel for camera RX
-    gdma_channel_alloc_config_t rx_alloc_config = {
-        .direction = GDMA_CHANNEL_DIRECTION_RX,
-    };
-    esp_err_t ret = gdma_new_channel(&rx_alloc_config, &dma_rx_channel);
+    // Queue the transaction
+    esp_err_t ret = spi_slave_queue_trans(SPI_HOST_ID, &qspi_trans, portMAX_DELAY);
     if (ret != ESP_OK) {
-        Serial.printf("[ERROR] Failed to allocate GDMA channel: 0x%x\n", ret);
+        Serial.printf("QSPI transaction queue failed: %x\n", ret);
         return ret;
     }
     
-    // 5. Connect GDMA channel to LCD_CAM peripheral
-    gdma_connect(dma_rx_channel, GDMA_MAKE_TRIGGER(GDMA_TRIG_PERIPH_CAM, 0));
-    
-    // 6. Set up DMA interrupt callback
-    gdma_rx_event_callbacks_t cbs = {
-        .on_recv_done = dma_rx_callback,
-    };
-    gdma_register_rx_event_callbacks(dma_rx_channel, &cbs, NULL);
-    
-    // 7. Allocate DMA buffers in DRAM
-    for (int i = 0; i < DMA_BUFFER_COUNT; i++) {
-        dma_buffers[i] = (uint8_t*)heap_caps_malloc(DMA_BUFFER_SIZE, MALLOC_CAP_DMA);
-        if (!dma_buffers[i]) {
-            Serial.printf("[ERROR] Failed to allocate DMA buffer %d\n", i);
-            return ESP_ERR_NO_MEM;
-        }
-        Serial.printf("[DEBUG] DMA buffer %d allocated at 0x%08x\n", i, (uint32_t)dma_buffers[i]);
-    }
-    
-    // 8. Set up DMA descriptors (linked list for continuous capture)
-    for (int i = 0; i < DMA_BUFFER_COUNT; i++) {
-        dma_descriptors[i].dw0.size = DMA_BUFFER_SIZE;
-        dma_descriptors[i].dw0.length = 0;
-        dma_descriptors[i].dw0.suc_eof = 1;  // Generate EOF interrupt
-        dma_descriptors[i].dw0.owner = 1;    // DMA owns this descriptor
-        dma_descriptors[i].buffer = dma_buffers[i];
-        dma_descriptors[i].next = &dma_descriptors[(i + 1) % DMA_BUFFER_COUNT];  // Circular buffer
-    }
-    
-    // 9. Configure LCD_CAM control registers for continuous capture
-    LCD_CAM.cam_ctrl.cam_stop_en = 0;                    // Disable auto-stop
-    LCD_CAM.cam_ctrl.cam_vsync_filter_thres = 4;        // VSYNC filter threshold
-    LCD_CAM.cam_ctrl.cam_byte_order = 0;                // Normal byte order
-    LCD_CAM.cam_ctrl.cam_bit_order = 0;                 // Normal bit order
-    LCD_CAM.cam_ctrl.cam_line_int_en = 0;               // Disable line interrupt
-    LCD_CAM.cam_ctrl.cam_vs_eof_en = 1;                 // Enable VSYNC EOF
-    
-    LCD_CAM.cam_ctrl1.cam_rec_data_bytelen = DMA_BUFFER_SIZE - 1;  // Max bytes per transfer
-    LCD_CAM.cam_ctrl1.cam_line_int_num = 0;             // Line interrupt number
-    LCD_CAM.cam_ctrl1.cam_clk_inv = 0;                  // Don't invert clock
-    LCD_CAM.cam_ctrl1.cam_vsync_filter_en = 1;          // Enable VSYNC filter
-    LCD_CAM.cam_ctrl1.cam_2byte_en = 0;                 // Single byte mode
-    LCD_CAM.cam_ctrl1.cam_de_inv = 0;                   // Don't invert DE
-    LCD_CAM.cam_ctrl1.cam_hsync_inv = 0;                // Don't invert HSYNC
-    LCD_CAM.cam_ctrl1.cam_vsync_inv = 0;                // Don't invert VSYNC
-    
-    // 10. Reset LCD_CAM peripheral
-    LCD_CAM.cam_ctrl1.cam_afifo_reset = 1;
-    LCD_CAM.cam_ctrl1.cam_afifo_reset = 0;
-    
-    Serial.println("[SUCCESS] LCD_CAM peripheral configured via direct register access!");
-    Serial.printf("[INFO] Data pins: D0=%d, D1=%d, D2=%d, D3=%d\n", 
-             PIN_PARL_D0, PIN_PARL_D1, PIN_PARL_D2, PIN_PARL_D3);
-    Serial.printf("[INFO] Clock pin: PCLK=%d, Frame sync: VSYNC=%d\n", 
-             PIN_PARL_CLK, PIN_PARL_FRAME);
-    Serial.printf("[INFO] Allocated %d DMA buffers of %d bytes each\n", DMA_BUFFER_COUNT, DMA_BUFFER_SIZE);
-    Serial.println("[INFO] DMA descriptors configured for continuous capture");
-    
+    Serial.println("QSPI transaction queued, waiting for FPGA data...");
     return ESP_OK;
 }
 
-// Start DMA capture
-esp_err_t start_dma_capture() {
-    if (dma_capture_active) {
-        Serial.println("[WARNING] DMA capture already active");
-        return ESP_OK;
-    }
-    
-    Serial.println("[INFO] Starting DMA capture...");
-    
-    // Reset buffer state
-    current_buffer = 0;
-    buffers_ready = 0;
-    
-    // Start GDMA transfer with first descriptor
-    esp_err_t ret = gdma_start(dma_rx_channel, (intptr_t)&dma_descriptors[0]);
-    if (ret != ESP_OK) {
-        Serial.printf("[ERROR] Failed to start GDMA: 0x%x\n", ret);
-        return ret;
-    }
-    
-    // Update LCD_CAM registers to reflect current transfer settings
-    LCD_CAM.cam_ctrl.cam_update = 1;
-    
-    // Start LCD_CAM capture
-    LCD_CAM.cam_ctrl1.cam_start = 1;
-    
-    dma_capture_active = true;
-    Serial.println("[SUCCESS] DMA capture started - ready to receive FPGA data!");
-    
-    return ESP_OK;
-}
-
-// Stop DMA capture
-esp_err_t stop_dma_capture() {
-    if (!dma_capture_active) {
-        return ESP_OK;
-    }
-    
-    Serial.println("[INFO] Stopping DMA capture...");
-    
-    // Stop LCD_CAM capture
-    LCD_CAM.cam_ctrl1.cam_start = 0;
-    
-    // Stop GDMA
-    gdma_stop(dma_rx_channel);
-    
-    dma_capture_active = false;
-    Serial.println("[INFO] DMA capture stopped");
-    
-    return ESP_OK;
-}
-
-// Process received data buffers
-void process_dma_buffers() {
-    while (buffers_ready > 0) {
-        // Calculate which buffer to process
-        int process_buffer = (current_buffer - buffers_ready + DMA_BUFFER_COUNT) % DMA_BUFFER_COUNT;
+// Check for completed QSPI transactions
+void check_qspi_data() {
+    if (transaction_complete) {
+        transaction_complete = false;
+        packets_received++;
         
-        uint8_t *buffer_data = dma_buffers[process_buffer];
-        size_t bytes_received = DMA_BUFFER_SIZE; // For now, assume full buffer
+        // Get the completed transaction
+        spi_slave_transaction_t *trans_out;
+        esp_err_t ret = spi_slave_get_trans_result(SPI_HOST_ID, &trans_out, 0);
         
-        Serial.printf("[DEBUG] Processing buffer %d: %d bytes\n", process_buffer, bytes_received);
-        
-        // Process 4-bit parallel data as Apple II packets
-        // Each byte contains two 4-bit nibbles from consecutive clock cycles
-        for (size_t i = 0; i < bytes_received && i < 64; i++) { // Limit debug output
-            uint8_t byte_data = buffer_data[i];
-            uint8_t nibble_high = (byte_data >> 4) & 0x0F;  // Upper 4 bits
-            uint8_t nibble_low = byte_data & 0x0F;          // Lower 4 bits
+        if (ret == ESP_OK) {
+            Serial.printf("QSPI Transaction Complete - %d bits received (%d bytes), Buffer: ", 
+                         trans_out->trans_len, trans_out->trans_len / 8);
             
-            // For now, just show the raw data
-            if (i < 16) {  // Show first 16 bytes for debugging
-                Serial.printf("[DATA] Byte %02d: 0x%02X (nibbles: %X %X)\n", i, byte_data, nibble_high, nibble_low);
+            // Show first 8 bytes  
+            for (int i = 0; i < 8 && i < DMA_BUFFER_SIZE; i++) {
+                Serial.printf("%02X ", qspi_rx_buffer[i]);
             }
-        }
-        
-        packets_processed++;
-        buffers_ready--;
-        
-        // Show some basic statistics
-        if (packets_processed % 10 == 0) {
-            Serial.printf("[STATS] Processed %lu buffers, %lu total packets\n", packets_processed, packets_received);
+            Serial.println();
+            
+            // Debug: show current CS and CLK states
+            Serial.printf("  Current GPIO - CS:%d, CLK:%d, Data:0x%X\n", 
+                         digitalRead(PIN_QSPI_CS), digitalRead(PIN_QSPI_CLK),
+                         (digitalRead(PIN_QSPI_D3)<<3) | (digitalRead(PIN_QSPI_D2)<<2) |
+                         (digitalRead(PIN_QSPI_D1)<<1) | digitalRead(PIN_QSPI_D0));
+            
+            // Process the 4-bit parallel data
+            process_4bit_data(qspi_rx_buffer, trans_out->trans_len / 8);
+            packets_processed++;
+            
+            // Start next transaction for continuous capture
+            start_qspi_transaction();
         }
     }
 }
 
-// ============================================================================
-// APPLE II BUS PACKET ANALYSIS
-// Decodes 32-bit packets from FPGA containing Apple II bus transactions
-// Packet format: [16-bit address][8-bit data][7-bit flags][1-bit reset indicator]
-// Flags: [7]=RW_N, [6]=M2SEL_N, [5]=M2B0, [4]=SW_GS, [3:1]=Reserved, [0]=Reset
-// ============================================================================
-
-void process_packet(uint32_t pkt) {
-    // Check for reset indicator packet (bit 0 set)
-    if (pkt & 0x1) {
-        //Serial.println("🔄 FPGA System Reset Detected");
-        packets_received = packets_processed = dma_overruns = 0;  // Reset statistics
-        return;
-    }
-    
-    // Extract packet components for normal packets
-    uint16_t addr = (pkt >> 16) & 0xFFFF;   // Memory/I/O address
-    uint8_t data  = (pkt >> 8) & 0xFF;      // Data value
-    uint8_t flags = pkt & 0xFE;             // Bus flags (excluding reset bit)
-
-    // Apple II Speaker detection ($C030 - classic click sound)
-    if (addr == 0xC030) {
-        //Serial.println("🔊 Speaker Toggle");
-        return;
-    }
-
-    // Audio register writes (Mockingboard/sound cards at $C040-$C04F)
-    if ((addr & 0xFFF0) == 0xC040) {
-        Serial.printf("🎵 Audio: %02X\n", data);
-        return;
-    }
-
-    // Log other I/O page activity (reduce noise by filtering to I/O space)
-    if ((addr & 0xFF00) == 0xC000) {  // Apple II I/O page ($C000-$C0FF)
-        Serial.printf("📦 I/O: %04X %02X %02X\n", addr, data, flags);
-    }
-}
-
-// ============================================================================
-// FREERTOS PACKET PROCESSING TASK
-// Dedicated task running on Core 1 for real-time packet processing
-// Operates independently from main loop to ensure consistent performance
-// ============================================================================
-
-/*void packet_processor_task_func(void *param) {
-    ESP_LOGI(TAG, "Starting LCD_CAM packet processing task");
-    
-    while (1) {
-        // Capture frame from LCD_CAM (this blocks until frame is ready)
-        camera_fb_t *fb = esp_camera_fb_get();
+// Process 4-bit parallel data from QSPI buffer
+void process_4bit_data(uint8_t* buffer, size_t length) {
+    if (length >= 4) {
+        // Reconstruct the 32-bit packet from 4 bytes
+        uint32_t packet = (buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3];
         
-        if (fb != NULL) {
-            packets_received++;
-            ESP_LOGD(TAG, "Captured frame: %d bytes, %dx%d pixels", 
-                     fb->len, fb->width, fb->height);
-            
-            // Process the captured frame data as packets
-            // Each "pixel" in our grayscale frame represents captured parallel data
-            uint8_t *frame_data = fb->buf;
-            size_t frame_size = fb->len;
-            
-            // Process data based on how LCD_CAM captures our 4-bit parallel data
-            // The exact format depends on the LCD_CAM configuration
-            if (fb->format == PIXFORMAT_GRAYSCALE) {
-                // In grayscale mode, each byte represents 8 bits of captured data
-                // Our 4-bit parallel data gets packed into bytes
-                
-                // Process all complete packets in the frame
-                size_t complete_packets = frame_size / PACKET_SIZE_BYTES;
-                for (size_t i = 0; i < complete_packets; i++) {
-                    size_t offset = i * PACKET_SIZE_BYTES;
-                    
-                    // Reconstruct 32-bit packet from captured parallel data
-                    // Note: The exact bit packing depends on LCD_CAM configuration
-                    uint32_t packet = 0;
-                    for (int j = 0; j < PACKET_SIZE_BYTES; j++) {
-                        packet = (packet << 8) | frame_data[offset + j];
-                    }
-                    
-                    // Skip empty packets (FPGA may send padding)
-                    if (packet != 0) {
-                        process_packet(packet);
-                        packets_processed++;
-                    }
-                }
-            } else {
-                ESP_LOGW(TAG, "Unexpected pixel format: %d", fb->format);
-            }
-            
-            // Return the frame buffer to the driver for reuse
-            esp_camera_fb_return(fb);
-            
+        Serial.printf("32-bit packet: 0x%08X = [%02X][%02X][%02X][%02X]\n", 
+                     packet, buffer[0], buffer[1], buffer[2], buffer[3]);
+        
+        // Extract expected pattern: [counter][00][01][02]
+        uint8_t counter = buffer[0];
+        uint8_t byte1 = buffer[1]; 
+        uint8_t byte2 = buffer[2];
+        uint8_t byte3 = buffer[3];
+        
+        Serial.printf("  Counter: 0x%02X, Pattern: %02X-%02X-%02X ", counter, byte1, byte2, byte3);
+        
+        if (byte1 == 0x00 && byte2 == 0x01 && byte3 == 0x02) {
+            Serial.println("✓ CORRECT PATTERN");
         } else {
-            dma_overruns++;  // Track camera capture failures
-            ESP_LOGW(TAG, "Camera capture failed - no frame buffer");
-            vTaskDelay(pdMS_TO_TICKS(10)); // Small delay before retry
+            Serial.println("✗ Pattern mismatch");
+        }
+    } else {
+        Serial.printf("Processing %d bytes (too short): ", length);
+        for (size_t i = 0; i < length; i++) {
+            Serial.printf("%02X ", buffer[i]);
+        }
+        Serial.println();
+    }
+}
+
+void process_command(String cmd) {
+    cmd.toLowerCase();
+    
+    if (cmd == "start") {
+        start_qspi_transaction();
+    }
+    else if (cmd == "stop") {
+        Serial.println("Stopping QSPI capture...");
+        // Note: SPI slave transactions auto-complete, no explicit stop needed
+        transaction_complete = false;
+        Serial.println("QSPI capture stopped");
+    }
+    else if (cmd == "test") {
+        Serial.println("Testing QSPI slave capture...");
+        
+        // Start capture
+        start_qspi_transaction();
+        
+        // Check for data for 5 seconds
+        Serial.println("Monitoring QSPI for 5 seconds...");
+        unsigned long start_time = millis();
+        int initial_packets = packets_received;
+        
+        while (millis() - start_time < 5000) {
+            check_qspi_data();
+            delay(50);
+        }
+        
+        int packets_captured = packets_received - initial_packets;
+        Serial.printf("Test result: %d QSPI transactions completed in 5 seconds\n", packets_captured);
+        
+        if (packets_captured > 0) {
+            Serial.println("SUCCESS: QSPI capturing data!");
+        } else {
+            Serial.println("FAIL: No QSPI transactions completed");
+            Serial.println("Check FPGA is sending clock and CS signals");
+            Serial.println("CS should go LOW to start transaction");
         }
     }
-}*/
+    else if (cmd == "check") {
+        Serial.println("Single QSPI check...");
+        check_qspi_data();
+    }
+    else if (cmd == "status") {
+        Serial.printf("QSPI Slave Status:\n");
+        Serial.printf("  Packets received: %d\n", packets_received);
+        Serial.printf("  Packets processed: %d\n", packets_processed);
+        Serial.printf("  Transaction complete flag: %s\n", transaction_complete ? "true" : "false");
+        
+        // Check for queued transactions
+        Serial.printf("  Expected transaction length: 32 bits (4 bytes)\n");
+        Serial.printf("  Success rate: %.1f%%\n", packets_received > 0 ? (float)packets_processed * 100 / packets_received : 0);
+        
+        // Read current GPIO states for comparison
+        Serial.printf("Current GPIO states:\n");
+        Serial.printf("  Data: %d%d%d%d (0x%X)\n", 
+                     digitalRead(PIN_QSPI_D3), digitalRead(PIN_QSPI_D2),
+                     digitalRead(PIN_QSPI_D1), digitalRead(PIN_QSPI_D0),
+                     (digitalRead(PIN_QSPI_D3)<<3) | (digitalRead(PIN_QSPI_D2)<<2) |
+                     (digitalRead(PIN_QSPI_D1)<<1) | digitalRead(PIN_QSPI_D0));
+        Serial.printf("  Clock: %d, CS: %d\n", digitalRead(PIN_QSPI_CLK), digitalRead(PIN_QSPI_CS));
+        
+        Serial.println("Run 'test' to see current transaction format");
+    }
+    else if (cmd == "bitbang") {
+        Serial.println("Bit-banged manual capture (waiting for FPGA transaction)...");
+        
+        // Temporarily disable SPI slave to avoid conflicts
+        Serial.println("Temporarily disabling QSPI slave...");
+        spi_slave_free(SPI_HOST_ID);
+        
+        // Configure pins as regular GPIO inputs
+        pinMode(PIN_QSPI_CS, INPUT);
+        pinMode(PIN_QSPI_CLK, INPUT);
+        pinMode(PIN_QSPI_D0, INPUT);
+        pinMode(PIN_QSPI_D1, INPUT);
+        pinMode(PIN_QSPI_D2, INPUT);
+        pinMode(PIN_QSPI_D3, INPUT);
+        
+        delay(100);  // Let pins settle
+        
+        // Show current pin states first
+        Serial.printf("Current pin states: CS=%d, CLK=%d, Data=0x%X\n",
+                     digitalRead(PIN_QSPI_CS), digitalRead(PIN_QSPI_CLK),
+                     (digitalRead(PIN_QSPI_D3)<<3) | (digitalRead(PIN_QSPI_D2)<<2) |
+                     (digitalRead(PIN_QSPI_D1)<<1) | digitalRead(PIN_QSPI_D0));
+        
+        // Wait for CS to go LOW (start of transaction)
+        Serial.println("Waiting for CS LOW...");
+        unsigned long timeout = millis() + 5000;  // 5 second timeout
+        int wait_count = 0;
+        while (digitalRead(PIN_QSPI_CS) == HIGH && millis() < timeout) {
+            delayMicroseconds(10);
+            wait_count++;
+            
+            // Show progress every 100ms
+            if (wait_count % 10000 == 0) {
+                Serial.printf("Still waiting... CS=%d (waited %d ms)\n", 
+                             digitalRead(PIN_QSPI_CS), (wait_count * 10) / 1000);
+            }
+        }
+        
+        if (digitalRead(PIN_QSPI_CS) == HIGH) {
+            Serial.println("TIMEOUT: No CS LOW detected in 5 seconds");
+            return;
+        }
+        
+        Serial.println("CS LOW detected - capturing transaction...");
+        
+        // Capture data while CS is LOW
+        int clock_edges = 0;
+        bool last_clk = digitalRead(PIN_QSPI_CLK);
+        uint8_t captured_data[16];  // Store up to 16 nibbles
+        
+        timeout = millis() + 1000;  // 1 second max transaction time
+        while (digitalRead(PIN_QSPI_CS) == LOW && millis() < timeout && clock_edges < 16) {
+            bool current_clk = digitalRead(PIN_QSPI_CLK);
+            
+            // Detect clock rising edge (or falling edge - we'll try both)
+            if (current_clk && !last_clk) {  // Rising edge
+                // Read 4-bit data
+                uint8_t data_nibble = 0;
+                data_nibble |= digitalRead(PIN_QSPI_D0) << 0;
+                data_nibble |= digitalRead(PIN_QSPI_D1) << 1;
+                data_nibble |= digitalRead(PIN_QSPI_D2) << 2;
+                data_nibble |= digitalRead(PIN_QSPI_D3) << 3;
+                
+                captured_data[clock_edges] = data_nibble;
+                
+                Serial.printf("Clock %d: Data=0x%X (CS=%d, CLK=%d)\n", 
+                             clock_edges, data_nibble, 
+                             digitalRead(PIN_QSPI_CS), digitalRead(PIN_QSPI_CLK));
+                
+                clock_edges++;
+            }
+            
+            last_clk = current_clk;
+            delayMicroseconds(1);  // Small delay to avoid overwhelming
+        }
+        
+        Serial.printf("Transaction complete: %d clock edges captured\n", clock_edges);
+        Serial.printf("Final CS state: %d\n", digitalRead(PIN_QSPI_CS));
+        
+        // Reconstruct bytes from nibbles
+        if (clock_edges >= 8) {
+            Serial.println("Reconstructed data:");
+            for (int i = 0; i < clock_edges; i += 2) {
+                if (i + 1 < clock_edges) {
+                    uint8_t byte_val = (captured_data[i] << 4) | captured_data[i + 1];
+                    Serial.printf("  Byte %d: 0x%02X (nibbles 0x%X, 0x%X)\n", 
+                                 i/2, byte_val, captured_data[i], captured_data[i + 1]);
+                }
+            }
+        }
+        
+        // Show raw nibble sequence
+        Serial.print("Raw nibble sequence: ");
+        for (int i = 0; i < clock_edges; i++) {
+            Serial.printf("%X", captured_data[i]);
+        }
+        Serial.println();
+        
+        // Restore QSPI slave
+        Serial.println("Restoring QSPI slave...");
+        setup_qspi_slave();
+        start_qspi_transaction();
+    }
+    else if (cmd == "reset") {
+        packets_received = 0;
+        packets_processed = 0;
+        transaction_complete = false;
+        Serial.println("Statistics reset");
+    }
+    else if (cmd == "help") {
+        Serial.println("QSPI Slave Parallel Capture Commands:");
+        Serial.println("  start   - Start QSPI transaction");
+        Serial.println("  stop    - Stop QSPI capture"); 
+        Serial.println("  test    - Test capture for 5 seconds");
+        Serial.println("  check   - Single QSPI check");
+        Serial.println("  bitbang - Manual bit-banged capture (debug)");
+        Serial.println("  status  - Show status and GPIO states");
+        Serial.println("  reset   - Reset statistics");
+        Serial.println("  help    - Show this help");
+    }
+    else {
+        Serial.printf("Unknown command: %s\n", cmd.c_str());
+    }
+}
 
 void setup() {
-    // Enable detailed crash reporting
-    esp_log_level_set("*", ESP_LOG_VERBOSE);
-    
-    // Initialize FPGA status pins
+    // Initialize pins
     pinMode(PIN_FPGA_DONE, INPUT_PULLUP);
-    pinMode(PIN_FPGA_0, INPUT_PULLUP);
-    pinMode(PIN_FPGA_1, INPUT_PULLUP);
-    
-    // Initialize LEDs
     pinMode(PIN_LED0, OUTPUT);
+    pinMode(PIN_FPGA_0, INPUT_PULLUP);
     pinMode(PIN_LED1, OUTPUT);
-
-    // Enable FPGA configuration
-    pinMode(PIN_FPGA_RECONFIG_N, OUTPUT);
-    digitalWrite(PIN_FPGA_RECONFIG_N, HIGH);
+    digitalWrite(PIN_LED0, LOW);
+    digitalWrite(PIN_LED1, LOW);
     
     // Initialize serial communications
-    Serial.begin();
-    Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);
+    Serial.begin(115200);           // USB serial for commands
+    Serial1.begin(UART_BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);  // UART to FPGA
+    delay(1000);  // Allow serial to stabilize
     
-    // Setup LCD_CAM peripheral via direct register access
-    esp_err_t cam_result = setup_lcd_cam_direct();
-    if (cam_result != ESP_OK) {
-        Serial.printf("[ERROR] LCD_CAM setup failed: 0x%x\n", cam_result);
+    Serial.println("ESP32-S3 QSPI Slave + USB-JTAG Bridge");
+    Serial.println("Using SPI3 peripheral in quad slave mode with GDMA");
+    Serial.println("USB-JTAG bridge automatically enables when programmer connects");
+    
+    if (setup_qspi_slave() == ESP_OK) {
+        Serial.println("QSPI slave setup complete - type 'help' for commands");
+        Serial.println("Ready to capture 4-bit parallel data from FPGA");
+        Serial.printf("Pin mapping - CLK:%d, CS:%d, D0:%d, D1:%d, D2:%d, D3:%d\n",
+                     PIN_QSPI_CLK, PIN_QSPI_CS, PIN_QSPI_D0, PIN_QSPI_D1, PIN_QSPI_D2, PIN_QSPI_D3);
+        Serial.printf("JTAG pins - TCK:%d, TMS:%d, TDI:%d, TDO:%d\n",
+                     PIN_TCK, PIN_TMS, PIN_TDI, PIN_TDO);
+        Serial.println("FPGA QSPI Protocol:");
+        Serial.println("  - CS starts HIGH, goes LOW for transaction");  
+        Serial.println("  - SCLK toggles during transaction");
+        Serial.println("  - 32-bit packets sent as 8 nibbles on D0-D3");
+        Serial.println("  - Packet format: [counter][00][01][02] for testing");
     } else {
-        // Start DMA capture automatically
-        esp_err_t capture_result = start_dma_capture();
-        if (capture_result != ESP_OK) {
-            Serial.printf("[ERROR] Failed to start DMA capture: 0x%x\n", capture_result);
-        }
+        Serial.println("QSPI slave setup failed!");
     }
-    
-    // Create dedicated packet processing task
-    /*
-    xTaskCreatePinnedToCore(
-        packet_processor_task_func,
-        "packet_processor",
-        4096,                    // Stack size
-        NULL,                    // Parameters
-        configMAX_PRIORITIES - 2, // High priority but below ISR
-        &packet_processor_task,
-        1                        // Pin to core 1 (core 0 handles WiFi/BT)
-    );
-    */
-    
-    Serial.println("🚀 Complete system started: LCD_CAM DMA + JTAG Bridge + Serial");
-    Serial.println("📊 Commands: 'stats', 'reset', 'jtag', 'help'");
 }
 
 void loop() {
-    // 1. Handle Serial Passthrough (always active)
-    if (Serial.available()) {
-        Serial1.write(Serial.read());
+    // Handle USB-JTAG bridge detection
+    bool usb_is_connected = usb_serial_jtag_is_connected();
+    if (usb_was_connected == false && usb_is_connected == true) {
+        route_usb_jtag_to_gpio();
     }
+    if (usb_was_connected == true && usb_is_connected == false) {
+        unroute_usb_jtag_to_gpio();
+    }
+    usb_was_connected = usb_is_connected;
+    
+    // UART bridge between USB serial and FPGA serial
+    if (Serial.available()) {
+        String input = Serial.readStringUntil('\n');
+        input.trim();
+        if (input.length() > 0) {
+            // Check if it's a command or should be forwarded to FPGA
+            if (input.startsWith("start") || input.startsWith("stop") || 
+                input.startsWith("test") || input.startsWith("check") || 
+                input.startsWith("bitbang") || input.startsWith("status") || 
+                input.startsWith("reset") || input.startsWith("help")) {
+                // ESP32 command
+                process_command(input);
+            } else {
+                // Forward to FPGA UART
+                Serial1.println(input);
+            }
+        }
+    }
+    
+    // Forward FPGA UART output to USB serial
     if (Serial1.available()) {
         Serial.write(Serial1.read());
     }
-
-    // 2. Handle USB JTAG Connection State Changes
-    bool usb_is_connected = usb_serial_jtag_is_connected();
-    if (!usb_was_connected && usb_is_connected) {
-        route_usb_jtag_to_gpio();
-        //Serial.println("🔌 USB JTAG connected - routing to GPIO");
-    }
-    if (usb_was_connected && !usb_is_connected) {
-        unroute_usb_jtag_to_gpio();
-        //Serial.println("🔌 USB JTAG disconnected - unrouting GPIO");
-    }
-    usb_was_connected = usb_is_connected;
-
-    // 3. Process DMA buffers if data is ready
-    if (buffers_ready > 0) {
-        process_dma_buffers();
+    
+    // Check for QSPI transactions (only when JTAG not active)
+    if (!jtag_enabled) {
+        check_qspi_data();
     }
     
-    // 4. Update Status LEDs
-    digitalWrite(PIN_LED0, digitalRead(PIN_FPGA_DONE) ? LED_ON : LED_OFF);
-    digitalWrite(PIN_LED1, digitalRead(PIN_FPGA_0) ? LED_ON : LED_OFF);
-
-    // 5. Handle Serial Commands for DMA control
-    if (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
-        cmd.toLowerCase();
-        
-        if (cmd == "stats") {
-            Serial.printf("📈 Packets: RX=%lu, Processed=%lu, Ready=%d\n", 
-                         packets_received, packets_processed, buffers_ready);
-            Serial.printf("💾 Free heap: %lu bytes\n", esp_get_free_heap_size());
-            Serial.printf("🔌 USB JTAG: %s\n", usb_is_connected ? "Connected" : "Disconnected");
-            Serial.printf("📡 DMA Capture: %s\n", dma_capture_active ? "Active" : "Stopped");
-            Serial.printf("🎯 FPGA Status: DONE=%d, GPIO0=%d, GPIO1=%d\n", 
-                         digitalRead(PIN_FPGA_DONE), digitalRead(PIN_FPGA_0), digitalRead(PIN_FPGA_1));
-        } 
-        else if (cmd == "start") {
-            start_dma_capture();
+    // Update status LEDs
+    digitalWrite(PIN_LED0, digitalRead(PIN_FPGA_DONE));  // LED0 shows FPGA configured
+    // LED1 controlled by JTAG status (set in route/unroute functions)
+    digitalWrite(PIN_LED1, digitalRead(PIN_FPGA_0)); 
+    
+    // Periodic status update
+    static unsigned long last_status = 0;
+    if (millis() - last_status > 15000) {  // Every 15 seconds
+        if (packets_received > 0 && !jtag_enabled) {
+            Serial.printf("QSPI Activity: %d transactions completed, %d processed\n", 
+                         packets_received, packets_processed);
         }
-        else if (cmd == "stop") {
-            stop_dma_capture();
-        }
-        else if (cmd == "reset") {
-            packets_received = packets_processed = dma_overruns = 0;
-            buffers_ready = 0;
-            Serial.println("📊 Statistics reset");
-        }
-        else if (cmd == "jtag") {
-            Serial.printf("🔧 JTAG Status: %s\n", usb_is_connected ? "Active on GPIO" : "Inactive");
-            Serial.printf("   TCK=%d, TMS=%d, TDI=%d, TDO=%d, SRST=%d\n", 
-                         PIN_TCK, PIN_TMS, PIN_TDI, PIN_TDO, PIN_SRST);
-        }
-        else if (cmd == "help") {
-            Serial.println("🔧 Available commands:");
-            Serial.println("  stats  - Show performance statistics");
-            Serial.println("  start  - Start DMA capture");
-            Serial.println("  stop   - Stop DMA capture");
-            Serial.println("  reset  - Reset statistics counters");
-            Serial.println("  jtag   - Show JTAG connection status");
-            Serial.println("  help   - Show this help");
-        }
-    }
-
-    // 6. Periodic Status Updates (much less frequent now)
-    static uint32_t last_stats = 0;
-    static uint32_t last_processed = 0;
-    if (millis() - last_stats > 10000) {  // Every 10 seconds
-        uint32_t rate = (packets_processed - last_processed) / 10;
-        if (rate > 0 || dma_capture_active) {
-            Serial.printf("📊 DMA Status: %s, Buffer rate: %lu/sec, Ready: %d\n", 
-                         dma_capture_active ? "ACTIVE" : "STOPPED", rate, buffers_ready);
-        }
-        last_processed = packets_processed;
-        last_stats = millis();
+        last_status = millis();
     }
     
-    // Much more relaxed main loop timing
-    delay(10);
+    delay(5);  // Short delay for responsive operation
 }
