@@ -58,9 +58,7 @@
         <File path="hdl/a2p25.cst" type="file.cst" enable="1"/>
         <File path="hdl/a2p25.sdc" type="file.sdc" enable="1"/>
         <File path="hdl/bus/apple_bus.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/esp32/a2bus_stream.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/esp32/stream_serializer.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/esp32/test_stream.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/esp32/qspi_serializer.sv" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/gowin_pll_mod.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/gowin_pll.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/pll_init.v" type="file.verilog" enable="1"/>

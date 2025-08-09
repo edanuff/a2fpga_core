@@ -1,4 +1,9 @@
-module qspi_serializer (
+// Fixed version of qspi_serializer for testing
+// (fixes syntax errors in original)
+
+module qspi_serializer #(
+    parameter int COUNT_WIDTH = 8
+) (
     input         clk_i,
     input         rst_n,
     input         wr_i,
@@ -19,15 +24,15 @@ module qspi_serializer (
         end
     end
 
-    reg [1:0] clk_count_r = 2'b0;
-    wire qspi_clk_w = clk_count_r[1]; // Use the second bit for 4x clock
-    wire qspi_clk_rising_w = (clk_count_r == 2'b10);
-    wire qspi_clk_falling_w = (clk_count_r == 2'b00);
+    reg [COUNT_WIDTH-1:0] clk_count_r = '0;
+    wire qspi_clk_w = clk_count_r[COUNT_WIDTH-1]; // Use the MSB for clock
+    wire qspi_clk_rising_w = (clk_count_r == (1 << (COUNT_WIDTH-1))); // MSB transitions 0->1
+    wire qspi_clk_falling_w = (clk_count_r == '0); // Counter wraps to 0
     always @(posedge clk_i or negedge rst_n) begin
         if (!rst_n) begin
-            clk_count_r <= 2'b0;
+            clk_count_r <= '0;
         end else begin
-            qclk_count_r <= clk_count_r + 1;
+            clk_count_r <= clk_count_r + 1;  // Fixed: was 'qclk_count_r'
         end
     end
     assign qspi_clk = qspi_clk_w;
@@ -36,10 +41,10 @@ module qspi_serializer (
     reg packet_pending_r = 1'b0;
     reg [31:0] packet_data_r;
     assign qspi_data = packet_data_r[3:0];
-    assign qspi_cs = packet_active_r;
+    assign qspi_cs = ~packet_active_r;  // Fixed: CS should be active low (inverted)
     reg [2:0] nibble_count_r = 3'b0;
 
-    always @(posedge clk or negedge rst_n) begin
+    always @(posedge clk_i or negedge rst_n) begin  // Fixed: was 'clk'
         if (!rst_n) begin
             nibble_count_r <= 3'b0;
             packet_active_r <= 1'b0;
@@ -63,12 +68,7 @@ module qspi_serializer (
                     end
                 end
             end
-
         end
     end
-
-
-
-
 
 endmodule

@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include "driver/spi_slave.h"
+#include "driver/spi_slave_hd.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "soc/usb_serial_jtag_reg.h"  // For USB-JTAG bridge
@@ -54,19 +55,18 @@ static volatile bool transaction_complete = false;
 static bool usb_was_connected = false;
 static bool jtag_enabled = false;
 
-// QSPI Slave transaction callback
+// QSPI slave callbacks  
 static void qspi_post_setup_cb(spi_slave_transaction_t *trans) {
     // Transaction setup complete
 }
-
 static void qspi_post_trans_cb(spi_slave_transaction_t *trans) {
     // Transaction completed
     transaction_complete = true;
 }
 
-// Setup QSPI slave for 4-bit parallel data capture
+// Setup QSPI slave with QUAD flag for 4-bit parallel data capture
 static esp_err_t setup_qspi_slave() {
-    Serial.println("Setting up QSPI slave...");
+    Serial.println("Setting up QSPI slave with QUAD flag...");
     
     // Allocate DMA-capable buffers
     qspi_rx_buffer = (uint8_t*)heap_caps_malloc(DMA_BUFFER_SIZE, MALLOC_CAP_DMA);
@@ -81,7 +81,7 @@ static esp_err_t setup_qspi_slave() {
     memset(qspi_rx_buffer, 0, DMA_BUFFER_SIZE);
     memset(qspi_tx_buffer, 0, DMA_BUFFER_SIZE);
     
-    // Configure QSPI slave
+    // Configure SPI bus for QSPI with QUAD flag
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = PIN_QSPI_D0,      // SIO0 - Data 0
         .miso_io_num = PIN_QSPI_D1,      // SIO1 - Data 1  
@@ -89,14 +89,14 @@ static esp_err_t setup_qspi_slave() {
         .quadwp_io_num = PIN_QSPI_D2,    // SIO2 - Data 2
         .quadhd_io_num = PIN_QSPI_D3,    // SIO3 - Data 3
         .max_transfer_sz = DMA_BUFFER_SIZE,
-        .flags = SPICOMMON_BUSFLAG_SLAVE | SPICOMMON_BUSFLAG_GPIO_PINS
+        .flags = SPICOMMON_BUSFLAG_SLAVE | SPICOMMON_BUSFLAG_GPIO_PINS | SPICOMMON_BUSFLAG_QUAD
     };
     
     spi_slave_interface_config_t slave_cfg = {
         .spics_io_num = PIN_QSPI_CS,     // CS - Frame signal (active low)
-        .flags = 0,                      // No special flags
+        .flags = 0,                      // Standard flags
         .queue_size = 3,                 // Larger queue for better handling
-        .mode = 0,                       // SPI Mode 0 (CPOL=0, CPHA=0) - back to original
+        .mode = 0,                       // SPI Mode 0 (CPOL=0, CPHA=0)
         .post_setup_cb = qspi_post_setup_cb,
         .post_trans_cb = qspi_post_trans_cb
     };
@@ -108,7 +108,7 @@ static esp_err_t setup_qspi_slave() {
         return ret;
     }
     
-    Serial.println("QSPI slave setup complete");
+    Serial.println("QSPI slave with QUAD flag setup complete");
     Serial.printf("Pin mapping - CLK:%d, CS:%d, D0:%d, D1:%d, D2:%d, D3:%d\n",
                   PIN_QSPI_CLK, PIN_QSPI_CS, PIN_QSPI_D0, PIN_QSPI_D1, PIN_QSPI_D2, PIN_QSPI_D3);
     
@@ -342,6 +342,28 @@ void process_command(String cmd) {
                      (digitalRead(PIN_QSPI_D3)<<3) | (digitalRead(PIN_QSPI_D2)<<2) |
                      (digitalRead(PIN_QSPI_D1)<<1) | digitalRead(PIN_QSPI_D0));
         
+        // Test continuous clock detection - should see toggles even when CS=HIGH
+        Serial.println("Testing clock detection (should see continuous toggles)...");
+        bool last_clk_test = digitalRead(PIN_QSPI_CLK);
+        int toggle_count = 0;
+        unsigned long test_start = millis();
+        while (millis() - test_start < 100 && toggle_count < 10) {  // 100ms test
+            bool current_clk_test = digitalRead(PIN_QSPI_CLK);
+            if (current_clk_test != last_clk_test) {
+                toggle_count++;
+                Serial.printf("Clock toggle %d: %d->%d at %dms\n", 
+                             toggle_count, last_clk_test, current_clk_test, 
+                             (int)(millis() - test_start));
+                last_clk_test = current_clk_test;
+            }
+            delayMicroseconds(10);
+        }
+        Serial.printf("Clock test complete: %d toggles in 100ms\n", toggle_count);
+        if (toggle_count == 0) {
+            Serial.println("ERROR: No clock toggles detected! Check FPGA or pin connections.");
+            return;
+        }
+        
         // Wait for CS to go LOW (start of transaction)
         Serial.println("Waiting for CS LOW...");
         unsigned long timeout = millis() + 5000;  // 5 second timeout
@@ -362,19 +384,23 @@ void process_command(String cmd) {
             return;
         }
         
-        Serial.println("CS LOW detected - capturing transaction...");
-        
-        // Capture data while CS is LOW
+        // Start capturing immediately - no printing delays!
         int clock_edges = 0;
         bool last_clk = digitalRead(PIN_QSPI_CLK);
         uint8_t captured_data[16];  // Store up to 16 nibbles
+        int loop_count = 0;
         
-        timeout = millis() + 1000;  // 1 second max transaction time
-        while (digitalRead(PIN_QSPI_CS) == LOW && millis() < timeout && clock_edges < 16) {
+        unsigned long start_time = millis();
+        unsigned long timeout_duration = 100;  // 100ms max transaction time  
+        bool timed_out = false;
+        
+        while (clock_edges < 8 && !timed_out) {  // Capture 8 clock edges for 8 nibbles
+            loop_count++;
             bool current_clk = digitalRead(PIN_QSPI_CLK);
             
-            // Detect clock rising edge (or falling edge - we'll try both)
-            if (current_clk && !last_clk) {  // Rising edge
+            // Only capture data when CS is still LOW (transaction active)
+            bool current_cs = digitalRead(PIN_QSPI_CS);
+            if (current_cs == LOW && current_clk && !last_clk) {  // Rising edge during active transaction
                 // Read 4-bit data
                 uint8_t data_nibble = 0;
                 data_nibble |= digitalRead(PIN_QSPI_D0) << 0;
@@ -384,19 +410,41 @@ void process_command(String cmd) {
                 
                 captured_data[clock_edges] = data_nibble;
                 
-                Serial.printf("Clock %d: Data=0x%X (CS=%d, CLK=%d)\n", 
-                             clock_edges, data_nibble, 
-                             digitalRead(PIN_QSPI_CS), digitalRead(PIN_QSPI_CLK));
+                // Don't print during capture - too slow!
                 
                 clock_edges++;
             }
             
             last_clk = current_clk;
-            delayMicroseconds(1);  // Small delay to avoid overwhelming
+            
+            // Check timeout only occasionally to avoid constant millis() calls
+            if (loop_count % 1000 == 0) {
+                timed_out = (millis() - start_time > timeout_duration);
+            }
+        }
+        
+        // Report why the loop exited
+        if (clock_edges >= 8) {
+            Serial.println("Loop exit reason: Captured 8 clock edges (SUCCESS)");
+        } else if (timed_out) {
+            Serial.println("Loop exit reason: TIMEOUT - no clock edges detected");
+        } else {
+            Serial.println("Loop exit reason: UNKNOWN");
         }
         
         Serial.printf("Transaction complete: %d clock edges captured\n", clock_edges);
-        Serial.printf("Final CS state: %d\n", digitalRead(PIN_QSPI_CS));
+        Serial.printf("Final CS state: %d, Final CLK state: %d\n", 
+                     digitalRead(PIN_QSPI_CS), digitalRead(PIN_QSPI_CLK));
+        Serial.printf("Total loop iterations: %d\n", loop_count);
+        
+        // Print captured data
+        if (clock_edges > 0) {
+            Serial.print("Captured data during CS LOW: ");
+            for (int i = 0; i < clock_edges; i++) {
+                Serial.printf("0x%X ", captured_data[i]);
+            }
+            Serial.println();
+        }
         
         // Reconstruct bytes from nibbles
         if (clock_edges >= 8) {
