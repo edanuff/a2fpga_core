@@ -298,24 +298,24 @@ module top #(
         send_counter_r <= send_counter_r + 1;
     end
 
-    wire [3:0] qspi_data_w;
-    wire qspi_cs_w;
-    wire qspi_clk_w;
+    wire [3:0] cam_data_w;
+    wire cam_sync_w;
+    wire cam_pclk_w;
 
-    qspi_serializer qspi_serializer (
+    cam_serializer qspi_serializer (
         .clk_i(clk_logic_w),
         .rst_n(system_reset_n_w),
         .wr_i(send_strobe_w),
         .data_i(32'h12345678),
-        .qspi_clk(qspi_clk_w),
-        .qspi_cs(qspi_cs_w),
-        .qspi_data(qspi_data_w)
+        .cam_pclk(cam_pclk_w),
+        .cam_sync(cam_sync_w),
+        .cam_data(cam_data_w)
     );
 
     // Connect QSPI signals to ESP32 pins
-    assign esp32_parl_clk = qspi_clk_w;      // SCLK
-    assign esp32_parl_frame = qspi_cs_w;     // CS (note: active low)
-    assign esp32_parl_d = qspi_data_w;       // 4-bit parallel data
+    assign esp32_parl_clk = cam_pclk_w;      // SCLK
+    assign esp32_parl_frame = cam_sync_w;     // CS (note: active low)
+    assign esp32_parl_d = cam_data_w;       // 4-bit parallel data
 
     // Slots
 
