@@ -93,7 +93,7 @@ module test_cam_serializer;
             wr = 0;
             
             // Wait for at least one complete packet (8 nibbles + some margin)
-            repeat(200) @(posedge clk);
+            repeat(500) @(posedge clk);
         end
     endtask
     

@@ -294,9 +294,14 @@ module top #(
 
     reg [19:0] send_counter_r;  // Reduced from 26 bits to 20 bits for faster testing
     wire send_strobe_w = (send_counter_r == 20'd0);
+    reg send_switch_r;
     always @(posedge clk_logic_w) begin
         send_counter_r <= send_counter_r + 1;
+        if (send_strobe_w) begin
+            send_switch_r <= ~send_switch_r;
+        end
     end
+    wire [31:0] send_data_w = send_switch_r ? 32'hCAFEBABE : 32'h12345678;
 
     wire [3:0] cam_data_w;
     wire cam_sync_w;
@@ -306,7 +311,7 @@ module top #(
         .clk_i(clk_logic_w),
         .rst_n(system_reset_n_w),
         .wr_i(send_strobe_w),
-        .data_i(32'h12345678),
+        .data_i(send_data_w),
         .cam_pclk(cam_pclk_w),
         .cam_sync(cam_sync_w),
         .cam_data(cam_data_w)

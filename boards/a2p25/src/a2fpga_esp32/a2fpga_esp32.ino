@@ -1,18 +1,13 @@
 /*
- * ESP32-S3 4-bit parallel capture via LCD_CAM + GDMA
- * Mode: Continuous capture, EOF on VSYNC (Option B)
- * - VSYNC generates GDMA EOF, capture continues (we re-arm the same descriptor)
- * - Each completed chunk: we pack the last 8 bytes (low nibbles) into one 32-bit word (LSN-first)
- * - DE is forced HIGH via GPIO-matrix constant when available (gate always open)
- * - Only bitfields are touched (no .val = 0 nukes)
+ * ESP32-S3 4-bit capture via LCD_CAM + GDMA
+ * Mode: VSYNC->EOF + STOP on EOF, immediate restart
+ * Packet (FPGA): 10 PCLKs total -> 8 data nibbles (LSN-first), 1 VSYNC pulse (nibble #8),
+ *                1 dummy/stopper nibble. PCLK idles between packets.
+ *
+ * We stop on VSYNC EOF, pack the FIRST 8 bytes, then rearm & restart immediately.
  *
  * Commands:
- *   lcam        -> init + start capture (5s smoke test)
- *   stop        -> stop capture
- *   status      -> print GPIO + GDMA status
- *   edge 0/1    -> cam_clk_inv (0=rising, 1=falling)
- *   deinv 0/1   -> invert DE (0=active-high, 1=active-low)
- *   we N        -> print every N words
+ *   lcam | stop | status | edge 0/1 | we N
  */
 
 #include <Arduino.h>
@@ -26,91 +21,108 @@
 #include "soc/gdma_reg.h"
 #include "esp_rom_gpio.h"
 
-// lldesc descriptor (Arduino-ESP32 3.3.0 provides ROM header)
-#if __has_include("esp32/rom/lldesc.h")
-  #include "esp32/rom/lldesc.h"
-#else
-  #include "rom/lldesc.h"
+// ---------- Camera signal IDs ----------
+#ifndef CAM_PCLK_IDX
+  #ifdef CAM_PCLK_IN_IDX
+    #define CAM_PCLK_IDX CAM_PCLK_IN_IDX
+  #else
+    #error "CAM_PCLK_IDX/CAM_PCLK_IN_IDX not found."
+  #endif
+#endif
+#ifndef CAM_V_SYNC_IDX
+  #ifdef CAM_V_SYNC_IN_IDX
+    #define CAM_V_SYNC_IDX CAM_V_SYNC_IN_IDX
+  #else
+    #error "CAM_V_SYNC_IDX/CAM_V_SYNC_IN_IDX not found."
+  #endif
+#endif
+#ifndef CAM_H_ENABLE_IDX
+  #ifdef CAM_H_ENABLE_IN_IDX
+    #define CAM_H_ENABLE_IDX CAM_H_ENABLE_IN_IDX
+  #else
+    #define CAM_H_ENABLE_IDX (-1) // proceed without DE gate
+  #endif
+#endif
+#ifndef CAM_DATA_IN0_IDX
+  #error "CAM_DATA_IN0..3_IDX not found (S3 camera signals missing?)."
+#endif
+#ifndef GPIO_MATRIX_CONST_ONE_INPUT
+  #define GPIO_MATRIX_CONST_ONE_INPUT 0x38
 #endif
 
-// ---------- Pins (adjust to your wiring) ----------
+// ---------- Pins ----------
 #define PIN_CAM_PCLK   13
-#define PIN_CAM_VSYNC  12   // VSYNC pulses at 1st nibble of each 32-bit word
+#define PIN_CAM_VSYNC  12
 #define PIN_CAM_D0     14
 #define PIN_CAM_D1     15
 #define PIN_CAM_D2     16
 #define PIN_CAM_D3     17
-
-// If CONST_ONE not available, we’ll tie a spare pin HIGH and feed that.
 #define PIN_DE_VIRT    10
 
-// ---------- Capture sizing ----------
-#define CAM_BUFFER_SIZE   256   // allows >8 bytes; VSYNC EOFs earlier
-#define BYTES_PER_WORD      8   // 8 nibbles -> 8 bytes (we use low nibble of each)
-#define PRINT_BYTES        16
-#define GDMA_CH             0
+// ---------- Sizes ----------
+#define BYTES_PER_WORD   8
+#define CAM_BUFFER_SIZE 16
+#define GDMA_CH          0
 
-// ---------- Runtime toggles ----------
-static uint8_t s_clk_inv   = 0;   // 0=rising, 1=falling
-static uint8_t s_de_invert = 0;   // 0=active-high DE, 1=active-low DE
-
-// ---------- Word print throttling ----------
-static uint32_t word_print_every = 256;
+// ---------- Runtime ----------
+static uint8_t  s_clk_inv = 0;
+static uint32_t word_print_every = 512;
 static uint32_t words_seen = 0;
-
-// ---------- DMA state ----------
-static uint8_t  *cam_rx = nullptr;
-static lldesc_t  s_desc __attribute__((aligned(16)));
 static volatile uint32_t chunks_rx = 0;
 
-// ---------- CAM signal macro compatibility ----------
-#ifndef CAM_PCLK_IDX
-#  ifdef CAM_PCLK_IN_IDX
-#    define CAM_PCLK_IDX CAM_PCLK_IN_IDX
-#  else
-#    error "CAM_PCLK_IDX/CAM_PCLK_IN_IDX not found for this core."
-#  endif
+// ---------- DMA descriptor portability ----------
+#if __has_include("hal/dma_types.h")
+  #include "hal/dma_types.h"
+  typedef dma_descriptor_t DESC_T;
+  #define DESC_OWNER(d)      ((d)->dw0.owner)
+  #define DESC_SUC_EOF(d)    ((d)->dw0.suc_eof)
+  #define DESC_SIZE(d)       ((d)->dw0.size)
+  #define DESC_LENGTH(d)     ((d)->dw0.length)
+  static inline void      DESC_SET_BUF(DESC_T* d, uint8_t* p) { d->buffer = (void*)p; }
+  static inline uint8_t*  DESC_GET_BUF(DESC_T* d)             { return (uint8_t*)d->buffer; }
+  static inline void      DESC_SET_NEXT(DESC_T* d, DESC_T* n) { d->next   = n; }
+#else
+  typedef struct my_dma_desc_s {
+    volatile uint32_t size   :12;
+    volatile uint32_t length :12;
+    volatile uint32_t suc_eof:1;
+    volatile uint32_t owner  :1;
+    volatile uint32_t rsvd   :6;
+    uint8_t*                 buffer;
+    struct my_dma_desc_s*    next;
+  } DESC_T;
+  #define DESC_OWNER(d)      ((d)->owner)
+  #define DESC_SUC_EOF(d)    ((d)->suc_eof)
+  #define DESC_SIZE(d)       ((d)->size)
+  #define DESC_LENGTH(d)     ((d)->length)
+  static inline void      DESC_SET_BUF(DESC_T* d, uint8_t* p) { d->buffer = p; }
+  static inline uint8_t*  DESC_GET_BUF(DESC_T* d)             { return d->buffer; }
+  static inline void      DESC_SET_NEXT(DESC_T* d, DESC_T* n) { d->next   = n; }
 #endif
 
-#ifndef CAM_V_SYNC_IDX
-#  ifdef CAM_V_SYNC_IN_IDX
-#    define CAM_V_SYNC_IDX CAM_V_SYNC_IN_IDX
-#  else
-#    error "CAM_V_SYNC_IDX/CAM_V_SYNC_IN_IDX not found for this core."
-#  endif
-#endif
+// ---------- State ----------
+static uint8_t* cam_rx = nullptr;
+static DESC_T   s_desc __attribute__((aligned(16)));
 
-// DE (H_ENABLE) is optional in some core versions
-#if defined(CAM_H_ENABLE_IN_IDX)
-  #define CAM_H_ENABLE_IDX CAM_H_ENABLE_IN_IDX
-#endif
-
-#ifndef GPIO_MATRIX_CONST_ONE_INPUT
-  #define GPIO_MATRIX_CONST_ONE_INPUT  0x38
-#endif
-
-// ---------- Small helpers ----------
+// ---------- Helpers ----------
 static inline void route_in(int gpio, int sig_idx, bool inv=false) {
   esp_rom_gpio_connect_in_signal(gpio, sig_idx, inv);
 }
 static inline void route_const_one_to(int sig_idx) {
-#ifdef CAM_H_ENABLE_IDX
+  if (sig_idx < 0) return;
   esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT, sig_idx, false);
-#else
-  (void)sig_idx; // not exposed by this core; skip
-#endif
 }
 static inline bool dma_eof() { return GDMA.channel[GDMA_CH].in.int_st.in_suc_eof; }
 static inline void dma_ack_eof() { GDMA.channel[GDMA_CH].in.int_clr.in_suc_eof = 1; }
 
-static inline void prep_descriptor(lldesc_t* d, uint8_t* buf, size_t len) {
+static void desc_init_one(DESC_T* d, uint8_t* buf, size_t len, DESC_T* next) {
   memset(d, 0, sizeof(*d));
-  d->size   = len;
-  d->length = len;
-  d->owner  = 1;   // DMA owns
-  d->eof    = 0;   // HW sets on EOF
-  d->buf    = buf;
-  d->qe.stqe_next = NULL;
+  DESC_SET_BUF(d, buf);
+  DESC_SET_NEXT(d, next);
+  DESC_SIZE(d)    = len;
+  DESC_LENGTH(d)  = len;
+  DESC_OWNER(d)   = 1;
+  DESC_SUC_EOF(d) = 0;
 }
 
 static void print_status_line() {
@@ -119,14 +131,17 @@ static void print_status_line() {
     ((uint8_t)digitalRead(PIN_CAM_D2) << 2) |
     ((uint8_t)digitalRead(PIN_CAM_D1) << 1) |
     ((uint8_t)digitalRead(PIN_CAM_D0) << 0);
-  Serial.printf("PCLK:%d VSYNC:%d D[3:0]=0x%X  edge=%u de_inv=%u  chunks=%u words=%lu\n",
-    digitalRead(PIN_CAM_PCLK), digitalRead(PIN_CAM_VSYNC), d,
-    s_clk_inv, s_de_invert, (unsigned)chunks_rx, (unsigned long)words_seen);
+  Serial.printf("PCLK:%d VSYNC:%d D[3:0]=0x%X  edge=%u  chunks=%lu words=%lu\n",
+    digitalRead(PIN_CAM_PCLK), digitalRead(PIN_CAM_VSYNC), d, s_clk_inv,
+    (unsigned long)chunks_rx, (unsigned long)words_seen);
+  Serial.printf("GDMA: IN_ST=0x%08X INLINK=0x%08X\n",
+    GDMA.channel[GDMA_CH].in.int_st.val, GDMA.channel[GDMA_CH].in.link.addr);
 }
 
-// ---------- Pack one 32-bit LSN-first word from 8 bytes (low nibble of each) ----------
+// Pack 32-bit word from first 8 bytes (LSN-first, low nibble only)
 static inline uint32_t pack_word_lsn_first(const uint8_t *b) {
   uint32_t w = 0;
+  #pragma unroll
   for (int i = 0; i < BYTES_PER_WORD; ++i) {
     w |= (uint32_t)(b[i] & 0x0F) << (4*i);
   }
@@ -135,7 +150,6 @@ static inline uint32_t pack_word_lsn_first(const uint8_t *b) {
 
 // ---------- LCD_CAM + GDMA bring-up ----------
 static esp_err_t setup_lcd_cam_once() {
-  // Buffer
   if (!cam_rx) {
     cam_rx = (uint8_t*)heap_caps_aligned_alloc(16, CAM_BUFFER_SIZE,
                                                MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
@@ -143,21 +157,20 @@ static esp_err_t setup_lcd_cam_once() {
     memset(cam_rx, 0xBB, CAM_BUFFER_SIZE);
   }
 
-  // Enable peripherals (IDF helpers)
   periph_module_enable(PERIPH_LCD_CAM_MODULE);
   periph_module_reset(PERIPH_LCD_CAM_MODULE);
   periph_module_enable(PERIPH_GDMA_MODULE);
   periph_module_reset(PERIPH_GDMA_MODULE);
 
-  // Reset CAM & AFIFO (bitwise)
+  // CAM reset / AFIFO reset
   LCD_CAM.cam_ctrl1.cam_reset       = 1;
   LCD_CAM.cam_ctrl1.cam_afifo_reset = 1;
   delayMicroseconds(3);
   LCD_CAM.cam_ctrl1.cam_reset       = 0;
   LCD_CAM.cam_ctrl1.cam_afifo_reset = 0;
 
-  // Internal CAM clock (state machine) — 160MHz/4 = 40MHz (safe; external PCLK still drives sampling)
-  LCD_CAM.cam_ctrl.cam_clk_sel        = 2;
+  // Internal CAM state machine clock (not PCLK)
+  LCD_CAM.cam_ctrl.cam_clk_sel        = 2;  // 160MHz/4 = 40MHz
   LCD_CAM.cam_ctrl.cam_clkm_div_a     = 0;
   LCD_CAM.cam_ctrl.cam_clkm_div_b     = 0;
   LCD_CAM.cam_ctrl.cam_clkm_div_num   = 4;
@@ -172,76 +185,62 @@ static esp_err_t setup_lcd_cam_once() {
   gpio_set_direction((gpio_num_t)PIN_CAM_D3,    GPIO_MODE_INPUT);
 
   // Matrix routing
-  route_in(PIN_CAM_PCLK,  CAM_PCLK_IDX,    false);
-  route_in(PIN_CAM_VSYNC, CAM_V_SYNC_IDX,  false);    // used for EOF
+  route_in(PIN_CAM_PCLK,  CAM_PCLK_IDX,   false);
+  route_in(PIN_CAM_VSYNC, CAM_V_SYNC_IDX, false);    // EOF source
   route_in(PIN_CAM_D0,    CAM_DATA_IN0_IDX, false);
   route_in(PIN_CAM_D1,    CAM_DATA_IN1_IDX, false);
   route_in(PIN_CAM_D2,    CAM_DATA_IN2_IDX, false);
   route_in(PIN_CAM_D3,    CAM_DATA_IN3_IDX, false);
+  if (CAM_H_ENABLE_IDX >= 0) {
+    route_const_one_to(CAM_H_ENABLE_IDX);           // keep window open
+  } else {
+    Serial.println("Note: CAM_H_ENABLE not exposed by this core; proceeding without DE gate.");
+  }
 
-  // Keep capture window always enabled via DE (if H_ENABLE signal is exposed by the core)
-  route_const_one_to(
-  #ifdef CAM_H_ENABLE_IDX
-    CAM_H_ENABLE_IDX
-  #else
-    0
-  #endif
-  );
-
-  // GDMA RX setup
+  // GDMA RX
   GDMA.channel[GDMA_CH].in.conf0.in_rst            = 1;
   GDMA.channel[GDMA_CH].in.conf0.in_rst            = 0;
   GDMA.channel[GDMA_CH].in.conf0.indscr_burst_en   = 1;
   GDMA.channel[GDMA_CH].in.conf0.in_data_burst_en  = 1;
 
-  prep_descriptor(&s_desc, cam_rx, CAM_BUFFER_SIZE);
+  desc_init_one(&s_desc, cam_rx, CAM_BUFFER_SIZE, nullptr);
 
-  // Link GDMA to LCD_CAM (legacy selector value 5 = LCD_CAM on ESP32-S3)
-  GDMA.channel[GDMA_CH].in.peri_sel.sel = 5;
-  GDMA.channel[GDMA_CH].in.link.addr  = (uint32_t)&s_desc;
-  GDMA.channel[GDMA_CH].in.link.start = 1;
-  GDMA.channel[GDMA_CH].in.int_ena.val = 0;
+  GDMA.channel[GDMA_CH].in.peri_sel.sel = 5; // LCD_CAM
+  GDMA.channel[GDMA_CH].in.link.addr    = (uint32_t)&s_desc;
+  GDMA.channel[GDMA_CH].in.int_ena.val  = 0;
   GDMA.channel[GDMA_CH].in.int_ena.in_suc_eof = 1;
 
-  // CAM control — VSYNC generates EOF; do NOT stop; byte/bit order normal
-  LCD_CAM.cam_ctrl.cam_vs_eof_en        = 1;
-  LCD_CAM.cam_ctrl.cam_stop_en          = 0;
-  // (Do not touch *vsync_filter* bits; not present on all cores)
+  // Camera control — VSYNC triggers EOF *and stops*, we restart in software
+  LCD_CAM.cam_ctrl.cam_vs_eof_en        = 1;  // EOF at VSYNC
+  LCD_CAM.cam_ctrl.cam_stop_en          = 1;  // STOP on EOF (fresh window per word)
   LCD_CAM.cam_ctrl.cam_byte_order       = 0;
   LCD_CAM.cam_ctrl.cam_bit_order        = 0;
   LCD_CAM.cam_ctrl.cam_update           = 1;
 
-  // 8-bit mode; we only use low nibble D[3:0]; DE gate kept high
-  LCD_CAM.cam_ctrl1.cam_2byte_en         = 0;                    // 8-bit
-  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen = CAM_BUFFER_SIZE - 1;  // VSYNC EOFs earlier
+  // 8-bit mode; low nibble used
+  LCD_CAM.cam_ctrl1.cam_2byte_en         = 0;
+  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen = CAM_BUFFER_SIZE - 1;  // harmless in VSYNC mode
   LCD_CAM.cam_ctrl1.cam_clk_inv          = s_clk_inv;
-  LCD_CAM.cam_ctrl1.cam_de_inv           = s_de_invert;
-  LCD_CAM.cam_ctrl1.cam_vh_de_mode_en    = 0;                    // DE-only; VSYNC not used for gating
+  LCD_CAM.cam_ctrl1.cam_de_inv           = 0;
+  LCD_CAM.cam_ctrl1.cam_vh_de_mode_en    = 0;
   LCD_CAM.cam_ctrl.cam_update            = 1;
 
-  Serial.println("LCD_CAM + GDMA configured (VSYNC->EOF, continuous)");
+  Serial.println("LCD_CAM + GDMA configured (VSYNC->EOF, stop-on-EOF, immediate restart)");
   return ESP_OK;
 }
 
 static esp_err_t start_lcd_cam() {
-  // Clear pending
   GDMA.channel[GDMA_CH].in.int_clr.val = 0xFFFFFFFF;
+  DESC_OWNER(&s_desc)   = 1;
+  DESC_SUC_EOF(&s_desc) = 0;
 
-  // Re-arm descriptor
-  s_desc.owner  = 1;
-  s_desc.eof    = 0;
-  s_desc.length = CAM_BUFFER_SIZE;
   GDMA.channel[GDMA_CH].in.link.stop  = 1;
   GDMA.channel[GDMA_CH].in.link.addr  = (uint32_t)&s_desc;
   GDMA.channel[GDMA_CH].in.link.start = 1;
 
-  // Apply runtime fields
   LCD_CAM.cam_ctrl1.cam_clk_inv = s_clk_inv;
-  LCD_CAM.cam_ctrl1.cam_de_inv  = s_de_invert;
   LCD_CAM.cam_ctrl.cam_update   = 1;
-
-  // Go!
-  LCD_CAM.cam_ctrl1.cam_start = 1;
+  LCD_CAM.cam_ctrl1.cam_start   = 1;
   return ESP_OK;
 }
 
@@ -250,50 +249,58 @@ static void stop_lcd_cam() {
   GDMA.channel[GDMA_CH].in.link.stop = 1;
 }
 
-// ---------- Per-chunk processing (one word per EOF) ----------
+// ---------- Per-EOF processing ----------
 static void pump_once() {
   if (!dma_eof()) return;
+
   dma_ack_eof();
   chunks_rx++;
 
-  // How many bytes did DMA write?
-  uint32_t got = s_desc.length;
-  if (got == 0 || got > CAM_BUFFER_SIZE) got = CAM_BUFFER_SIZE;
+  // How many bytes actually came in this EOF
+  uint32_t got = DESC_LENGTH(&s_desc);
+  if (got > CAM_BUFFER_SIZE) got = CAM_BUFFER_SIZE;
 
-  // Take the LAST 8 bytes before VSYNC (previous word). If less than 8 arrived, take what we have.
-  int take  = (got >= BYTES_PER_WORD) ? BYTES_PER_WORD : (int)got;
-  int start = (got >= BYTES_PER_WORD) ? (int)got - BYTES_PER_WORD : 0;
+  // Need at least the 8 data bytes
+  if (got >= BYTES_PER_WORD) {
+    // In our packet format, extras (stopper + VSYNC) land at the *front*.
+    // So skip exactly (got - 8) leading bytes and pack the next 8.
+    uint32_t extras = (got > BYTES_PER_WORD) ? (got - BYTES_PER_WORD) : 0;
+    const uint8_t* base = DESC_GET_BUF(&s_desc) + extras;
 
-  const uint8_t* base = cam_rx + start;
-  uint32_t w = pack_word_lsn_first(base);
+    // Safety: if anything went odd (shouldn’t), clamp so we still read 8 bytes in-bounds
+    if (extras + BYTES_PER_WORD > got) {
+      base = DESC_GET_BUF(&s_desc);  // fall back to start
+    }
 
-  // Re-arm for next chunk
-  s_desc.owner  = 1;
-  s_desc.eof    = 0;
-  GDMA.channel[GDMA_CH].in.link.start = 1;
+    uint32_t w = pack_word_lsn_first(base);
 
-  // Throttled print
-  if ((++words_seen % word_print_every) == 0) {
-    Serial.printf("word[%lu]=0x%08X (got=%u)\n",
-      (unsigned long)words_seen, w, (unsigned)got);
+    if ((++words_seen % word_print_every) == 0) {
+      Serial.printf("word[%lu]=0x%08X (got=%u, skip=%u)\n",
+        (unsigned long)words_seen, w, got, extras);
+    }
   }
+
+  // Re-arm & restart (since cam_stop_en=1)
+  DESC_OWNER(&s_desc)   = 1;
+  DESC_SUC_EOF(&s_desc) = 0;
+  GDMA.channel[GDMA_CH].in.link.start = 1;
+  LCD_CAM.cam_ctrl1.cam_start = 1;
 }
 
 // ---------- Commands ----------
 static void cmd_process(String cmd) {
   cmd.trim(); cmd.toLowerCase();
   if (cmd == "lcam") {
-    Serial.println("Init + start LCD_CAM...");
+    Serial.println("Init + start LCD_CAM (VSYNC EOF, stop-on-EOF)...");
     if (setup_lcd_cam_once() != ESP_OK) { Serial.println("Setup failed"); return; }
     if (start_lcd_cam()      != ESP_OK) { Serial.println("Start failed"); return; }
 
-    // 5s smoke test
-    uint32_t t0 = millis(), w0 = words_seen;
-    while (millis() - t0 < 5000) { pump_once(); delay(1); }
-    uint32_t got = words_seen - w0;
-    Serial.printf("VSYNC-EOF test: %lu words in 5s\n", (unsigned long)got);
-    if (!got) {
-      Serial.println("FAIL: No words. Check PCLK and that VSYNC pulses once per word.");
+    uint32_t start = millis(), w0 = words_seen;
+    while (millis() - start < 5000) { pump_once(); delay(1); }
+    uint32_t gotw = words_seen - w0;
+    Serial.printf("VSYNC-EOF test: %lu words in 5s\n", (unsigned long)gotw);
+    if (!gotw) {
+      Serial.println("No words. Check that VSYNC pulses on nibble #8 and PCLK idles between packets.");
       print_status_line();
     }
   } else if (cmd == "stop") {
@@ -301,30 +308,19 @@ static void cmd_process(String cmd) {
     Serial.println("Stopped.");
   } else if (cmd == "status") {
     print_status_line();
-    // quick peek at GDMA link regs
-    Serial.printf("GDMA: sel=%u IN_ST=0x%08X INLINK=0x%08X\n",
-      (unsigned)GDMA.channel[GDMA_CH].in.peri_sel.sel,
-      (unsigned)GDMA.channel[GDMA_CH].in.int_st.val,
-      (unsigned)GDMA.channel[GDMA_CH].in.link.addr);
   } else if (cmd.startsWith("edge")) {
     int v = cmd.endsWith("1") ? 1 : 0;
     s_clk_inv = (uint8_t)v;
     LCD_CAM.cam_ctrl1.cam_clk_inv = s_clk_inv;
     LCD_CAM.cam_ctrl.cam_update   = 1;
     Serial.printf("cam_clk_inv=%u\n", s_clk_inv);
-  } else if (cmd.startsWith("deinv")) {
-    int v = cmd.endsWith("1") ? 1 : 0;
-    s_de_invert = (uint8_t)v;
-    LCD_CAM.cam_ctrl1.cam_de_inv = s_de_invert;
-    LCD_CAM.cam_ctrl.cam_update  = 1;
-    Serial.printf("cam_de_inv=%u\n", s_de_invert);
   } else if (cmd.startsWith("we ")) {
     long n = cmd.substring(3).toInt();
     if (n < 1) n = 1;
     word_print_every = (uint32_t)n;
     Serial.printf("word_print_every=%lu\n", (unsigned long)word_print_every);
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | edge 0/1 | deinv 0/1 | we N");
+    Serial.println("Commands: lcam | stop | status | edge 0/1 | we N");
   } else {
     Serial.printf("Unknown: %s\n", cmd.c_str());
   }
@@ -334,15 +330,15 @@ static void cmd_process(String cmd) {
 void setup() {
   Serial.begin(115200);
   delay(150);
-  Serial.println("ESP32-S3 LCD_CAM 4-bit capture (VSYNC->EOF, continuous)");
-  Serial.println("Commands: lcam | stop | status | edge 0/1 | deinv 0/1 | we N");
+  Serial.println("ESP32-S3 LCD_CAM 4-bit capture (VSYNC->EOF, stop-on-EOF, immediate restart)");
+  Serial.println("Commands: lcam | stop | status | edge 0/1 | we N");
 
-  pinMode(PIN_CAM_PCLK,  INPUT);
+  pinMode(PIN_CAM_PCLK, INPUT);
   pinMode(PIN_CAM_VSYNC, INPUT);
-  pinMode(PIN_CAM_D0,    INPUT);
-  pinMode(PIN_CAM_D1,    INPUT);
-  pinMode(PIN_CAM_D2,    INPUT);
-  pinMode(PIN_CAM_D3,    INPUT);
+  pinMode(PIN_CAM_D0, INPUT);
+  pinMode(PIN_CAM_D1, INPUT);
+  pinMode(PIN_CAM_D2, INPUT);
+  pinMode(PIN_CAM_D3, INPUT);
 }
 
 void loop() {

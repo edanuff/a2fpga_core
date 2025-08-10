@@ -12,27 +12,27 @@
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
   <Device Version>: A
-  <Created Time>:Fri Aug  8 20:06:56 2025
+  <Created Time>:Sun Aug 10 09:54:47 2025
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.949s, Elapsed time = 0h 0m 0.919s
-    Placement Phase 1: CPU time = 0h 0m 0.165s, Elapsed time = 0h 0m 0.155s
+    Placement Phase 0: CPU time = 0h 0m 0.796s, Elapsed time = 0h 0m 0.793s
+    Placement Phase 1: CPU time = 0h 0m 0.147s, Elapsed time = 0h 0m 0.148s
     Placement Phase 2: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
     Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
     Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.003s, Elapsed time = 0h 0m 0.003s
-    Routing Phase 1: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
-    Routing Phase 2: CPU time = 0h 0m 0.069s, Elapsed time = 0h 0m 0.062s
+    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
+    Routing Phase 1: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 4s
+    Routing Phase 2: CPU time = 0h 0m 0.085s, Elapsed time = 0h 0m 0.065s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+    Total Routing: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 4s
  Generate output files:
     CPU time = 0h 0m 2s, Elapsed time = 0h 0m 1s
 
- Total Time and Memory Usage: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 10s, Peak memory usage = 2436MB
+ Total Time and Memory Usage: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 10s, Peak memory usage = 1535MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 7993/23040                          |  35%
-    --LUT,ALU,ROM16           | 7993(6729 LUT, 1264 ALU, 0 ROM16)   | -
+  Logic                       | 7957/23040                          |  35%
+    --LUT,ALU,ROM16           | 7957(6693 LUT, 1264 ALU, 0 ROM16)   | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 4709/23280                          |  21%
+  Register                    | 4716/23280                          |  21%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 4679/23040                          |  21%
+    --Logic Register as FF    | 4686/23040                          |  21%
     --I/O Register as Latch   | 0/240                               |  0%
     --I/O Register as FF      | 30/240                              |  13%
-  CLS                         | 6283/11520                          |  55%
+  CLS                         | 6191/11520                          |  54%
   I/O Port                    | 63/86                               |  74%
   I/O Buf                     | 50                                  | -
     --Input Buf               | 23                                  | -
@@ -91,7 +91,7 @@
   Clock Resource| Usage         | Utilization 
   ------------------------------------------
   PRIMARY       | 6/8           | 75%
-  LW            | 8/8           | 100%
+  LW            | 7/8           | 88%
   GCLK_PIN      | 24/30         | 80%
   CLKDIV        | 1/16          | 7%
   PLLA          | 1/6           | 17%
@@ -107,15 +107,14 @@
   clk_pixel_w    | PRIMARY        |  TR TL BR BL
   clk_hdmi_w     | PRIMARY        |  BR
   clk_logic_w    | PRIMARY        |  TR TL BR BL
-  mockingboard/psg_right/n2554_6| PRIMARY        |  TL BL
-  audio_out/IIR_filter/n869_5| PRIMARY        |  BR
+  mockingboard/psg_right/n2554_7| PRIMARY        |  TL BL
+  audio_out/IIR_filter/n869_5| PRIMARY        |  TR
   system_reset_n_w| LW             |  -
   timer_a_count_15_7| LW             |  -
   supersprite/vdp/f18a_core/inst_cpu/reg50reboot| LW             |  -
   supersprite/ssp_psg/n2554_6| LW             |  -
   mockingboard/pb_l_o[2]| LW             |  -
   mockingboard/pb_r_o[2]| LW             |  -
-  mockingboard/psg_left/n2554_5| LW             |  -
   superserial/COM2/n67_5| LW             |  -
   clk_hdmi_w     | HCLK           | BANK2_BANK3_HCLK0
   ===========================================
