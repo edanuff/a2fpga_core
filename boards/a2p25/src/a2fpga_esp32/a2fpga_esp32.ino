@@ -3,11 +3,18 @@
  * Mode: VSYNC -> EOF, stop_on_eof, immediate re-arm (works with gated PCLK)
  *
  * Packet (FPGA):
- *   - 10 clocks per transfer
- *     nib 0..7 = data LSN-first, nib 8 = VSYNC, nib 9 = stopper
+ *   - 10 clocks per transfer:
+ *       nib 0..7 = data LSN-first, nib 8 = VSYNC (1 PCLK), nib 9 = stopper
  *
- * We pack the last 10 bytes of the completed DMA chunk, take the first 8 of those
- * (skip=2: VSYNC + stopper), and build a 32-bit word, nibble-order LSN-first.
+ * Processing (no heuristics):
+ *   - On EOF we read descriptor length "got".
+ *   - extras = got - 8; pack 8 data bytes from (base + extras).
+ *   - This cuts off exactly the VSYNC+stopper that the DMA wrote *ahead* of the data.
+ *
+ * ISR strategy:
+ *   - VSYNC GPIO ISR only sets a wake flag and bumps a counter.
+ *   - Foreground sees the flag, spins up to VSYNC_SPIN_US for GDMA EOF to appear,
+ *     then processes exactly one packet and immediately re-arms/start.
  *
  * Commands:
  *   lcam        -> init + start capture
@@ -15,12 +22,7 @@
  *   status      -> print GPIO + GDMA status
  *   edge 0/1    -> cam_clk_inv (0=rising, 1=falling)
  *   we N        -> print every N words
- *
- * Notes:
- * - No LCD_CAM .val writes (only bitfields changed).
- * - DE is forced HIGH via GPIO matrix constant if H_ENABLE is exposed; otherwise skipped.
- * - ISR path is disabled by default (polling is used). Enable by setting USE_GDMA_ISR 1
- *   but only if your core exposes a valid GDMA IRQ source.
+ *   spin N      -> set VSYNC spin wait in microseconds (default 40)
  */
 
 #include <Arduino.h>
@@ -34,9 +36,6 @@
 #include "soc/lcd_cam_reg.h"
 #include "soc/gdma_struct.h"
 #include "soc/gdma_reg.h"
-
-// ---------- Build-time options ----------
-#define USE_GDMA_ISR         0   // 0 = polling (stable across cores), 1 = try ISR
 
 // ---------- Pins (adjust to your wiring) ----------
 #define PIN_CAM_PCLK   13
@@ -53,8 +52,10 @@ static const int STOP_BYTES       = 2;   // VSYNC + stopper
 static const int PACK_BYTES       = BYTES_PER_WORD + STOP_BYTES;  // 10 total
 static const int CHUNK_BYTES      = 16;  // DMA chunk capacity (>= PACK_BYTES)
 static const int DESC_COUNT       = 2;   // ping-pong
-
 #define GDMA_CH                  0
+
+// VSYNC → EOF publish delay cushion (adjustable at runtime via "spin N")
+static volatile uint32_t VSYNC_SPIN_US = 40;
 
 // ---------- CAM signal macro compatibility ----------
 #ifndef CAM_PCLK_IDX
@@ -64,7 +65,6 @@ static const int DESC_COUNT       = 2;   // ping-pong
 #    error "CAM_PCLK_IDX / CAM_PCLK_IN_IDX not defined by this Arduino core."
 #  endif
 #endif
-
 #ifndef CAM_V_SYNC_IDX
 #  ifdef CAM_V_SYNC_IN_IDX
 #    define CAM_V_SYNC_IDX CAM_V_SYNC_IN_IDX
@@ -72,17 +72,14 @@ static const int DESC_COUNT       = 2;   // ping-pong
 #    error "CAM_V_SYNC_IDX / CAM_V_SYNC_IN_IDX not defined by this Arduino core."
 #  endif
 #endif
-
 #ifndef CAM_H_ENABLE_IDX
 #  ifdef CAM_H_ENABLE_IN_IDX
 #    define CAM_H_ENABLE_IDX CAM_H_ENABLE_IN_IDX
 #  endif
 #endif
-
 #ifndef CAM_DATA_IN0_IDX
 #  error "CAM_DATA_IN0_IDX..CAM_DATA_IN3_IDX not defined (S3 camera signals missing?)."
 #endif
-
 #ifndef GPIO_MATRIX_CONST_ONE_INPUT
 #  define GPIO_MATRIX_CONST_ONE_INPUT  0x38
 #endif
@@ -98,15 +95,12 @@ static const int DESC_COUNT       = 2;   // ping-pong
     memset(d, 0, sizeof(*d));
     d->buffer       = buf;
     d->dw0.size     = len;
-    d->dw0.length   = len;     // length field is updated by HW on RX EOF (many targets)
+    d->dw0.length   = len;     // updated by HW on RX EOF (common on S3)
     d->dw0.owner    = 1;
     d->dw0.suc_eof  = 0;
     d->next         = next;
   }
-  static inline void desc_rearm(DESC_T* d) {
-    d->dw0.owner   = 1;
-    d->dw0.suc_eof = 0;
-  }
+  static inline void desc_rearm(DESC_T* d) { d->dw0.owner = 1; d->dw0.suc_eof = 0; }
   static inline uint32_t desc_len(DESC_T* d) { return d->dw0.length; }
 #else
   // ROM fallback (layout compatible for simple RX)
@@ -131,10 +125,7 @@ static const int DESC_COUNT       = 2;   // ping-pong
     d->suc_eof  = 0;
     d->next     = next;
   }
-  static inline void desc_rearm(DESC_T* d) {
-    d->owner   = 1;
-    d->suc_eof = 0;
-  }
+  static inline void desc_rearm(DESC_T* d) { d->owner = 1; d->suc_eof = 0; }
   static inline uint32_t desc_len(DESC_T* d) { return d->length; }
 #endif
 
@@ -145,6 +136,9 @@ static uint32_t words_seen = 0;
 
 static uint8_t* s_buf      = nullptr;     // DESC_COUNT * CHUNK_BYTES
 static DESC_T*  s_desc     = nullptr;     // [DESC_COUNT], 16-byte aligned
+
+static volatile bool     s_vsync_wake = false;
+static volatile uint32_t s_vsync_isr_count = 0;
 
 // ---------- Small helpers ----------
 static inline void route_in(int gpio, int sig_idx, bool inv=false) {
@@ -174,9 +168,9 @@ static void print_status_line() {
     ((uint8_t)digitalRead(PIN_CAM_D2) << 2) |
     ((uint8_t)digitalRead(PIN_CAM_D1) << 1) |
     ((uint8_t)digitalRead(PIN_CAM_D0) << 0);
-  Serial.printf("CLK:%d VSYNC:%d D[3:0]=0x%X  edge=%u  chunks=%lu words=%lu\n",
+  Serial.printf("CLK:%d VSYNC:%d D[3:0]=0x%X  edge=%u  words=%lu vsync_isr=%lu spin=%luus\n",
     digitalRead(PIN_CAM_PCLK), digitalRead(PIN_CAM_VSYNC), d, s_clk_inv,
-    (unsigned long)GDMA.channel[GDMA_CH].in.int_st.in_suc_eof, (unsigned long)words_seen);
+    (unsigned long)words_seen, (unsigned long)s_vsync_isr_count, (unsigned long)VSYNC_SPIN_US);
   Serial.printf("GDMA: IN_ST=0x%08X INLINK=0x%08X EOF_DES=0x%08X\n",
     (unsigned)GDMA.channel[GDMA_CH].in.int_st.val,
     (unsigned)GDMA.channel[GDMA_CH].in.link.addr,
@@ -246,17 +240,17 @@ static esp_err_t setup_lcd_cam_once() {
   GDMA.channel[GDMA_CH].in.conf0.indscr_burst_en  = 1;
   GDMA.channel[GDMA_CH].in.conf0.in_data_burst_en = 1;
 
-  // Prepare ping-pong descriptors
+  // Prepare ping-pong descriptors (we stop on EOF and re-arm in SW)
   for (int i = 0; i < DESC_COUNT; ++i) {
     uint8_t* buf = s_buf + i * CHUNK_BYTES;
-    DESC_T*  nxt = (i+1 < DESC_COUNT) ? &s_desc[i+1] : nullptr;  // stop on EOF; we’ll re-arm
+    DESC_T*  nxt = (i+1 < DESC_COUNT) ? &s_desc[i+1] : nullptr;
     desc_prep(&s_desc[i], buf, CHUNK_BYTES, nxt);
   }
 
   // Hook GDMA to LCD_CAM
   GDMA.channel[GDMA_CH].in.peri_sel.sel = 5;      // 5 = LCD_CAM
 
-  // Link descriptors and enable EOF interrupt
+  // Link descriptors and enable EOF interrupt status
   GDMA.channel[GDMA_CH].in.int_ena.val = 0;
   GDMA.channel[GDMA_CH].in.int_ena.in_suc_eof = 1;
   GDMA.channel[GDMA_CH].in.link.addr  = (uint32_t)&s_desc[0];
@@ -264,39 +258,38 @@ static esp_err_t setup_lcd_cam_once() {
 
   // LCD_CAM control — VSYNC->EOF; STOP on EOF (we will immediately restart)
   LCD_CAM.cam_ctrl.cam_vs_eof_en         = 1;
-  LCD_CAM.cam_ctrl.cam_stop_en           = 1;   // <<< stop on EOF (descriptor completes)
+  LCD_CAM.cam_ctrl.cam_stop_en           = 1;   // stop on EOF; SW restarts
   LCD_CAM.cam_ctrl.cam_vsync_filter_thres= 0;
   LCD_CAM.cam_ctrl.cam_byte_order        = 0;
   LCD_CAM.cam_ctrl.cam_bit_order         = 0;
   LCD_CAM.cam_ctrl.cam_update            = 1;
 
-  // 8-bit mode, byte length big enough; DE-only gating disabled (we ignore DE)
+  // 8-bit mode, window big enough; not using DE gate
   LCD_CAM.cam_ctrl1.cam_2byte_en          = 0;                     // 8-bit
-  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen  = CHUNK_BYTES - 1;       // allow >10; EOF is VSYNC
+  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen  = CHUNK_BYTES - 1;       // EOF is VSYNC
   LCD_CAM.cam_ctrl1.cam_clk_inv           = s_clk_inv;
   LCD_CAM.cam_ctrl1.cam_de_inv            = 0;
-  LCD_CAM.cam_ctrl1.cam_vh_de_mode_en     = 0;                     // not using DE gating
+  LCD_CAM.cam_ctrl1.cam_vh_de_mode_en     = 0;                     // ignore DE
   LCD_CAM.cam_ctrl.cam_update             = 1;
 
-#if USE_GDMA_ISR
-  // We’ve had portability pain with the IRQ source symbol; polling is default.
-  // If you enable this, ensure your core has a valid GDMA interrupt source and
-  // install an ISR that does the same work as poll_once().
-# warning "USE_GDMA_ISR=1 requires a valid GDMA IRQ source in this Arduino core."
-#endif
+  // VSYNC GPIO ISR (rising edge)
+  attachInterrupt(digitalPinToInterrupt(PIN_CAM_VSYNC), [] IRAM_ATTR {
+    s_vsync_isr_count++;
+    s_vsync_wake = true;
+  }, RISING);
 
-  Serial.println("LCD_CAM + GDMA configured (VSYNC->EOF, stop-on-EOF, immediate restart)");
+  Serial.println("LCD_CAM + GDMA configured (VSYNC->EOF, stop-on-EOF, ISR-woken)");
   return ESP_OK;
 }
 
-static void lcdcam_restart_after_eof() {
+static inline void lcdcam_restart_after_eof() {
   // Re-arm all descriptors (owner=1) and relaunch link + cam_start
   for (int i = 0; i < DESC_COUNT; ++i) desc_rearm(&s_desc[i]);
   GDMA.channel[GDMA_CH].in.link.start = 1;
   LCD_CAM.cam_ctrl1.cam_start = 1;
 }
 
-// ---------- EOF processing (shared by ISR/poll) ----------
+// ---------- EOF processing ----------
 static void on_eof_process() {
   // Which descriptor completed?
   volatile DESC_T* vd = dma_eof_desc();
@@ -307,17 +300,10 @@ static void on_eof_process() {
   uint32_t got = desc_len(d);
   if (got == 0 || got > (uint32_t)CHUNK_BYTES) got = CHUNK_BYTES;
 
-  // We always want the 8 data bytes from the *current* packet.
-  // With your 10-clock packet (8 data + VSYNC + stopper) and stop-on-EOF,
-  // those 2 extras land at the *front* of the chunk that completed.
-  // So: skip exactly (got - 8) leading bytes and pack the next 8.
+  // Exact, non-heuristic skip: extras = got - 8
   const uint32_t extras = (got > (uint32_t)BYTES_PER_WORD) ? (got - (uint32_t)BYTES_PER_WORD) : 0;
-
-  // Safety clamp: if something odd happens (got < 8), fall back to start
   const uint8_t* p = base + extras;
-  if (extras + BYTES_PER_WORD > got) {
-    p = base;
-  }
+  if (extras + BYTES_PER_WORD > got) { p = base; } // safety (shouldn't happen)
 
   const uint32_t w = pack_word_lsn_first(p);
 
@@ -331,21 +317,27 @@ static void on_eof_process() {
   lcdcam_restart_after_eof();
 }
 
-// ---------- Polling path ----------
-static void poll_once() {
-  if (dma_eof()) {
-    on_eof_process();
+// Handle one VSYNC wake: wait briefly for EOF, then process once
+static void handle_vsync_wake_once() {
+  const uint32_t t0 = micros();
+  while (!dma_eof()) {
+    if ((micros() - t0) > VSYNC_SPIN_US) break;
   }
+  if (dma_eof()) on_eof_process();
 }
 
 // ---------- Commands ----------
 static void cmd_process(String cmd) {
   cmd.trim(); cmd.toLowerCase();
   if (cmd == "lcam") {
-    Serial.println("Init + start LCD_CAM (VSYNC EOF)...");
+    Serial.println("Init + start LCD_CAM (VSYNC EOF, ISR-woken)...");
     if (setup_lcd_cam_once() != ESP_OK) { Serial.println("Setup failed"); return; }
 
     // Start fresh
+    s_vsync_isr_count = 0;
+    s_vsync_wake      = false;
+    words_seen        = 0;
+
     GDMA.channel[GDMA_CH].in.int_clr.val = 0xFFFFFFFF;
     GDMA.channel[GDMA_CH].in.link.addr   = (uint32_t)&s_desc[0];
     GDMA.channel[GDMA_CH].in.link.start  = 1;
@@ -353,9 +345,15 @@ static void cmd_process(String cmd) {
     LCD_CAM.cam_ctrl.cam_update          = 1;
     LCD_CAM.cam_ctrl1.cam_start          = 1;
 
-    // 5s smoke test
+    // 5s smoke test (foreground reacts to ISR wakes)
     uint32_t start_ms = millis(), w0 = words_seen;
-    while (millis() - start_ms < 5000) { poll_once(); delay(1); }
+    while (millis() - start_ms < 5000) {
+      if (s_vsync_wake) {
+        s_vsync_wake = false;
+        handle_vsync_wake_once();
+      }
+      delay(1);
+    }
     uint32_t gotw = words_seen - w0;
     Serial.printf("VSYNC-EOF test: %lu words in 5s\n", (unsigned long)gotw);
     if (!gotw) {
@@ -364,6 +362,7 @@ static void cmd_process(String cmd) {
   } else if (cmd == "stop") {
     LCD_CAM.cam_ctrl1.cam_start = 0;
     GDMA.channel[GDMA_CH].in.link.stop = 1;
+    detachInterrupt(digitalPinToInterrupt(PIN_CAM_VSYNC));
     Serial.println("Stopped.");
   } else if (cmd == "status") {
     print_status_line();
@@ -378,8 +377,13 @@ static void cmd_process(String cmd) {
     if (n < 1) n = 1;
     word_print_every = (uint32_t)n;
     Serial.printf("word_print_every=%lu\n", (unsigned long)word_print_every);
+  } else if (cmd.startsWith("spin ")) {
+    long us = cmd.substring(5).toInt();
+    if (us < 0) us = 0;
+    VSYNC_SPIN_US = (uint32_t)us;
+    Serial.printf("VSYNC_SPIN_US=%lu\n", (unsigned long)VSYNC_SPIN_US);
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | edge 0/1 | we N");
+    Serial.println("Commands: lcam | stop | status | edge 0/1 | we N | spin us");
   } else {
     Serial.printf("Unknown: %s\n", cmd.c_str());
   }
@@ -389,8 +393,8 @@ static void cmd_process(String cmd) {
 void setup() {
   Serial.begin(115200);
   delay(150);
-  Serial.println("ESP32-S3 LCD_CAM 4-bit capture (VSYNC->EOF, stop-on-EOF, pack last 8)");
-  Serial.println("Commands: lcam | stop | status | edge 0/1 | we N");
+  Serial.println("ESP32-S3 LCD_CAM 4-bit capture (VSYNC->EOF, stop-on-EOF, ISR-woken, pack last 8)");
+  Serial.println("Commands: lcam | stop | status | edge 0/1 | we N | spin us");
 
   pinMode(PIN_CAM_PCLK, INPUT);
   pinMode(PIN_CAM_VSYNC, INPUT);
@@ -401,7 +405,12 @@ void setup() {
 }
 
 void loop() {
-  poll_once();
+  // React to VSYNC IRQ wakes with minimal latency
+  if (s_vsync_wake) {
+    s_vsync_wake = false;
+    handle_vsync_wake_once();
+  }
+
   if (Serial.available()) {
     String s = Serial.readStringUntil('\n');
     cmd_process(s);
