@@ -26,11 +26,22 @@
 #include "soc/lcd_cam_reg.h"
 #include "soc/gdma_struct.h"
 #include "soc/gdma_reg.h"
+#include "soc/usb_serial_jtag_reg.h" // JTAG WRITE_PERI_REG
 
 // ---------- Build-time options ----------
 #define USE_GDMA_ISR         0   // keep 0 unless your core exposes a reliable GDMA IRQ
+#define AUTOSTART 1      // set to 0 to disable
+#define SMOKE_MS 0       // 0 = don't block boot with the 5s smoke test
+#define USB_SERIAL_FORWARDING 0
 
 // ---------- Pins (adjust to your wiring) ----------
+#define PIN_LED0 1
+#define PIN_LED1 2
+
+#define LED_ON  HIGH
+#define LED_OFF LOW
+
+// CAM interface to the FPGA
 #define PIN_CAM_PCLK   13
 #define PIN_CAM_VSYNC  12
 #define PIN_CAM_D0     14
@@ -38,6 +49,22 @@
 #define PIN_CAM_D2     16
 #define PIN_CAM_D3     17
 #define PIN_DE_VIRT    10
+
+// JTAG interface to the FPGA
+#define PIN_TCK  40
+#define PIN_TMS  41
+#define PIN_TDI  42
+#define PIN_TDO  45
+#define PIN_SRST 7  // unused and unconnected, but required by the JTAG bridge
+
+// Serial interface to the FPGA
+#define PIN_RXD  44
+#define PIN_TXD  43
+#define BAUD 115200
+
+// Configuration done signal from the FPGA
+#define PIN_FPGA_DONE  48
+
 
 // ---------- Packet / DMA sizing ----------
 static const int BYTES_PER_WORD   = 8;   // 8 data nibbles => 8 bytes (low nibble used)
@@ -344,6 +371,39 @@ static void packet_task(void*){
   }
 }
 
+bool usb_was_connected = false;
+
+/* arguments are GPIO pin numbers like (1,2,3,4,5) */
+void route_usb_jtag_to_gpio()
+{
+  pinMode(PIN_TCK, OUTPUT);
+  pinMode(PIN_TMS, OUTPUT);
+  pinMode(PIN_TDI, OUTPUT);
+  pinMode(PIN_TDO, INPUT);
+  pinMode(PIN_SRST, OUTPUT);
+  WRITE_PERI_REG(USB_SERIAL_JTAG_CONF0_REG,
+    READ_PERI_REG(USB_SERIAL_JTAG_CONF0_REG)
+  | USB_SERIAL_JTAG_USB_JTAG_BRIDGE_EN);
+  // esp_rom_gpio_connect_out_signal(GPIO, IOMATRIX, false, false);
+  esp_rom_gpio_connect_out_signal(PIN_TCK,   USB_JTAG_TCK_IDX,  false, false);
+  esp_rom_gpio_connect_out_signal(PIN_TMS,   USB_JTAG_TMS_IDX,  false, false);
+  esp_rom_gpio_connect_out_signal(PIN_TDI,   USB_JTAG_TDI_IDX,  false, false);
+  esp_rom_gpio_connect_out_signal(PIN_SRST,  USB_JTAG_TRST_IDX, false, false);
+  esp_rom_gpio_connect_in_signal (PIN_TDO,   USB_JTAG_TDO_BRIDGE_IDX,  false);
+}
+
+void unroute_usb_jtag_to_gpio()
+{
+  WRITE_PERI_REG(USB_SERIAL_JTAG_CONF0_REG,
+    READ_PERI_REG(USB_SERIAL_JTAG_CONF0_REG)
+  & ~USB_SERIAL_JTAG_USB_JTAG_BRIDGE_EN);
+  pinMode(PIN_TCK,  INPUT);
+  pinMode(PIN_TMS,  INPUT);
+  pinMode(PIN_TDI,  INPUT);
+  pinMode(PIN_TDO,  INPUT);
+  pinMode(PIN_SRST, INPUT);
+}
+
 // ---------- Commands ----------
 static void cmd_process(String cmd) {
   cmd.trim(); cmd.toLowerCase();
@@ -359,12 +419,17 @@ static void cmd_process(String cmd) {
     LCD_CAM.cam_ctrl.cam_update          = 1;
     LCD_CAM.cam_ctrl1.cam_start          = 1;
 
-    // 5s smoke test (consumer counts)
+    // Optional smoke wait (no polling; ISR/re-arm will run if data arrives)
     uint32_t start_ms = millis(), w0 = words_seen;
-    while (millis() - start_ms < 5000) { vTaskDelay(10); }
+    if (SMOKE_MS) {
+      uint32_t until = start_ms + SMOKE_MS;
+      while ((int32_t)(millis() - until) < 0) {
+        delay(1);  // yield cooperatively
+      }
+    }
     uint32_t gotw = words_seen - w0;
-    Serial.printf("VSYNC-EOF test: %lu words in 5s\n", (unsigned long)gotw);
-    if (!gotw) {
+    Serial.printf("VSYNC-EOF test: %lu words in %ums\n", (unsigned long)gotw, (unsigned)SMOKE_MS);
+    if (!gotw && SMOKE_MS) {
       Serial.println("No words. Check PCLK burst (10 clocks/packet) and VSYNC on nibble 9.");
     }
   } else if (cmd == "stop") {
@@ -394,8 +459,11 @@ static void cmd_process(String cmd) {
 // ---------- Arduino sketch ----------
 void setup() {
   Serial.begin(115200);
-  delay(150);
-  Serial.println("ESP32-S3 LCD_CAM 4-bit capture (VSYNC->EOF, stop-on-EOF, SPSC queue)");
+  Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD); // hardware serial
+  delay(300);
+  Serial.println("A2FPGA ESP32-S3 Firmware");
+  Serial.println("USB Serial JTAG");
+  Serial.println("LCD_CAM 4-bit capture (VSYNC->EOF, stop-on-EOF, SPSC queue)");
   Serial.println("Commands: lcam | stop | status | edge 0/1 | we N");
 
   pinMode(PIN_CAM_PCLK, INPUT);
@@ -405,13 +473,39 @@ void setup() {
   pinMode(PIN_CAM_D2, INPUT);
   pinMode(PIN_CAM_D3, INPUT);
 
+  pinMode(PIN_FPGA_DONE, INPUT_PULLUP);
+  pinMode(PIN_LED0, OUTPUT);
+  pinMode(PIN_LED0, LED_OFF);
+
   // Start consumer first (prio > poller)
   xTaskCreatePinnedToCore(packet_task, "packet_task", 4096, nullptr, tskIDLE_PRIORITY + 2, &s_consumer_task, 1);
   // Start poller (prio lower)
   xTaskCreatePinnedToCore(poller_task, "eof_poller", 2048, nullptr, tskIDLE_PRIORITY + 1, &s_poller_task, 1);
+
+  #if AUTOSTART
+  cmd_process("lcam");
+  #endif
 }
 
 void loop() {
+
+  digitalWrite(PIN_LED0, digitalRead(PIN_FPGA_DONE)); // FPGA status
+
+  // USB serial forwarding (if enabled)
+  if(USB_SERIAL_FORWARDING) {
+    if(Serial.available())
+      Serial1.write(Serial.read());
+    if(Serial1.available())
+      Serial.write(Serial1.read());
+  }
+
+  bool usb_is_connected = usb_serial_jtag_is_connected();
+  if(usb_was_connected == false && usb_is_connected == true)
+    route_usb_jtag_to_gpio();
+  if(usb_was_connected == true && usb_is_connected == false)
+    unroute_usb_jtag_to_gpio();
+  usb_was_connected = usb_is_connected;
+
   // 🔧 Non-blocking serial command parser (the missing piece)
   if (Serial.available()) {
     String s = Serial.readStringUntil('\n');
