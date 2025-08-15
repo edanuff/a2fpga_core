@@ -475,7 +475,6 @@ void setup() {
 
   pinMode(PIN_FPGA_DONE, INPUT_PULLUP);
   pinMode(PIN_LED0, OUTPUT);
-  pinMode(PIN_LED0, LED_OFF);
 
   // Start consumer first (prio > poller)
   xTaskCreatePinnedToCore(packet_task, "packet_task", 4096, nullptr, tskIDLE_PRIORITY + 2, &s_consumer_task, 1);
