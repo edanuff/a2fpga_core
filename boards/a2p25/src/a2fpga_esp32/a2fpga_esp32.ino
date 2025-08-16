@@ -101,13 +101,6 @@ void setup() {
   pinMode(PIN_FPGA_DONE, INPUT_PULLUP);
   pinMode(PIN_LED0, OUTPUT);
 
-  // Start consumer first (prio > poller)
-  //xTaskCreatePinnedToCore(packet_task, "packet_task", 4096, nullptr, tskIDLE_PRIORITY + 2, &s_consumer_task, 1);
-  // Start poller (prio lower)
-  //xTaskCreatePinnedToCore(poller_task, "eof_poller", 2048, nullptr, tskIDLE_PRIORITY + 1, &s_poller_task, 1);
-
-  // LCD_CAM tasks will be started when lcam_start() is called
-
   #if AUTOSTART
   lcam_start();
   #endif
