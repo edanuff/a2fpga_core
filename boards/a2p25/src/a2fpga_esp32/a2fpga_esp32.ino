@@ -21,6 +21,7 @@
 #include "soc/usb_serial_jtag_reg.h" // JTAG WRITE_PERI_REG
 #include "a2fpga_lcam.h"
 #include "a2fpga_jtag.h"
+#include "a2fpga_spi_link.h"
 
 // ---------- Build-time options ----------
 #define USE_GDMA_ISR         0   // keep 0 unless your core exposes a reliable GDMA IRQ
@@ -59,6 +60,11 @@ const int PIN_TDI  = 42;
 const int PIN_TDO  = 45;
 const int PIN_SRST = 7;  // unused and unconnected, but required by the JTAG bridge
 
+// SPI interface to the FPGA
+static const int PIN_SCLK = 18;
+static const int PIN_MOSI = 9;
+static const int PIN_MISO = 10;
+static const int SPI_HZ   = 20 * 1000 * 1000;  // start at 20 MHz; tune as needed
 
 bool usb_was_connected = false;
 

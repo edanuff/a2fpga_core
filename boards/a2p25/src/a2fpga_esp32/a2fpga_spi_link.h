@@ -1,0 +1,29 @@
+// esp32_s3_spi_link.h
+#pragma once
+#include "driver/spi_master.h"
+#include <string.h>
+#include <stdbool.h>
+#include <stdint.h>
+
+typedef struct {
+    spi_device_handle_t dev;
+    bool use_sync;   // send A5 5A
+} spi_link_t;
+
+esp_err_t spi_link_init(spi_link_t *link,
+                        spi_host_device_t host, // SPI2_HOST is fine on S3
+                        int sclk_io, int mosi_io, int miso_io,
+                        int clock_hz);          // e.g., 20*1000*1000
+
+// --- register access (1 byte registers 0..126) ---
+esp_err_t spi_reg_write(spi_link_t *l, uint8_t reg, uint8_t val);
+esp_err_t spi_reg_read (spi_link_t *l, uint8_t reg, uint8_t *val);
+
+// --- variable-length XFER via reg 127 ---
+esp_err_t spi_xfer_write(spi_link_t *l,
+                         uint8_t space, uint32_t addr,
+                         const uint8_t *data, uint16_t len, bool inc_addr);
+
+esp_err_t spi_xfer_read (spi_link_t *l,
+                         uint8_t space, uint32_t addr,
+                         uint8_t *out, uint16_t len, bool inc_addr);

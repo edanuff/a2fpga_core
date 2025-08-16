@@ -15,9 +15,10 @@ FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,UploadMode=d
 
 # Source files
 SKETCH = a2fpga_esp32.ino
-CPP_FILES = a2fpga_lcam.cpp a2fpga_jtag.cpp
-HEADER_FILES = a2fpga_lcam.h a2fpga_jtag.h
-ALL_SOURCES = $(SKETCH) $(CPP_FILES) $(HEADER_FILES)
+CPP_FILES = a2fpga_lcam.cpp a2fpga_jtag.cpp es5503.cpp
+C_FILES = a2fpga_spi_link.c
+HEADER_FILES = a2fpga_lcam.h a2fpga_jtag.h a2fpga_spi_link.h es5503.h
+ALL_SOURCES = $(SKETCH) $(CPP_FILES) $(C_FILES) $(HEADER_FILES)
 
 # Default target
 .PHONY: all
