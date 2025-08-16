@@ -1,7 +1,7 @@
 // Using the Gowin IDE serializer
 `define GW_IDE
 // Invert the TMDS signals due to board design error
-`define GW_IDE_INVERTED
+`undef GW_IDE_INVERTED
 
 module serializer
 #(

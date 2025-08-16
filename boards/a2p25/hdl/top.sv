@@ -16,6 +16,8 @@
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
+`include "datetime.svh"
+
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
     parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
@@ -77,7 +79,11 @@ module top #(
     output [2:0] tmds_d_p,
     output [2:0] tmds_d_n,
 
-    output ESP32_GPIO_0,
+    output esp32_gpio_0,
+
+    output esp32_parl_frame,
+    output esp32_parl_clk,
+    output [3:0] esp32_parl_d,
 
     // uart
     output  uart_tx,
@@ -86,50 +92,55 @@ module top #(
 );
 
 
+
+    // Clocks
+
+    wire clk_logic_w;
+    wire clk_lock_w;
+    wire clk_pixel_w;
+    wire clk_hdmi_w;
+    wire clk_27m_w;
+
+    Gowin_PLL your_instance_name(
+        .lock(clk_lock_w), //output  lock
+        .clkout0(clk_27m_w), //output  clkout0
+        .clkout1(clk_hdmi_w), //output  clkout1
+        .clkout2(clk_logic_w), //output  clkout2
+        .clkin(clk), //input  clkin
+        .mdclk(clk) //input  mdclk
+    );
+
+    CLKDIV clkdiv_inst (
+        .HCLKIN(clk_hdmi_w),
+        .RESETN(clk_lock_w),
+        .CALIB(1'b0),
+        .CLKOUT(clk_pixel_w)
+    );
+    defparam clkdiv_inst.DIV_MODE="5";
+
     reg led_r;
     reg [25:0] led_counter_r;
+    reg rstn_r;
 
-    always @(posedge clk) begin
-        if (led_counter_r == 26'd24_999_999) begin
+    always @(posedge clk_logic_w) begin
+        if (led_counter_r == 26'd09_999_999) begin
             led_counter_r <= 0;
             led_r <= ~led_r;  // Toggle LED every 0.5s, so full blink is 1s
+            rstn_r <= 1'b1; // Release reset after 0.5s
         end else begin
             led_counter_r <= led_counter_r + 1;
         end
     end
 
-    assign ESP32_GPIO_0 = !led_r;
-
-
-    // Clocks
-
-    wire clk_lock_w;
-    wire clk_pixel_w;
-    wire clk_logic_w;
-    wire clk_hdmi_w;
-
-    Gowin_PLL your_instance_name(
-        .clkin(clk), //input  clkin
-        .clkout0(clk_pixel_w), //output  clkout0
-        .clkout1(clk_logic_w), //output  clkout1
-        .clkout2(clk_hdmi_w), //output  clkout2
-        .lock(clk_lock_w), //output  lock
-        .mdclk(clk), //input  mdclk
-        .reset(1'b0) //input  reset
-    );
+    assign esp32_gpio_0 = !led_r;
 
     // Reset
 
-    wire device_reset_n_w;
-    Reset_Sync u_Reset_Sync (
-		.resetn(device_reset_n_w),
-		.ext_reset(clk_lock_w),
-		.clk(clk_logic_w)
-	);
+    wire device_reset_n_w = rstn_r; // Use reset signal from LED logic
 
     //wire device_reset_n_w = ~rst;
 
-    wire system_reset_n_w = device_reset_n_w;
+    wire system_reset_n_w = device_reset_n_w & a2_reset_n;
 
     // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
     // delays Phi1 by 2 cycles = 40ns
@@ -176,7 +187,7 @@ module top #(
     // Buffer/level shifters are held in tri-state
     // during FPGA configuration to ensure no interference
     // with the Apple II bus.
-    assign a2_bus_oe = 1'b1;
+    assign a2_bus_oe = 1'b0;
 
     // Address bus is input-only unless performing DMA
     // 0 = from Apple II bus to FPGA, 1 = from FPGA to Apple II bus
@@ -207,8 +218,6 @@ module top #(
 
     wire sw_scanlines_w = '1;
     wire sw_apple_speaker_w = '1;
-    wire sw_slot_7_w = '0;
-    wire sw_gs_w = '0;
 
     wire [7:0] a2_d_buf_w;
     wire data_out_en_w;
@@ -280,6 +289,38 @@ module top #(
         .vgc_rd_i(vgc_rd_w),
         .vgc_data_o(vgc_data_w)
     );
+
+    // ESP32 QSPI Protocol Generator
+
+    reg [19:0] send_counter_r;  // Reduced from 26 bits to 20 bits for faster testing
+    wire send_strobe_w = (send_counter_r == 20'd0);
+    reg send_switch_r;
+    always @(posedge clk_logic_w) begin
+        send_counter_r <= send_counter_r + 1;
+        if (send_strobe_w) begin
+            send_switch_r <= ~send_switch_r;
+        end
+    end
+    wire [31:0] send_data_w = send_switch_r ? 32'hCAFEBABE : 32'h12345678;
+
+    wire [3:0] cam_data_w;
+    wire cam_sync_w;
+    wire cam_pclk_w;
+
+    cam_serializer qspi_serializer (
+        .clk_i(clk_logic_w),
+        .rst_n(system_reset_n_w),
+        .wr_i(send_strobe_w),
+        .data_i(send_data_w),
+        .cam_pclk(cam_pclk_w),
+        .cam_sync(cam_sync_w),
+        .cam_data(cam_data_w)
+    );
+
+    // Connect QSPI signals to ESP32 pins
+    assign esp32_parl_clk = cam_pclk_w;      // SCLK
+    assign esp32_parl_frame = cam_sync_w;     // CS (note: active low)
+    assign esp32_parl_d = cam_data_w;       // 4-bit parallel data
 
     // Slots
 
@@ -565,10 +606,49 @@ module top #(
 
     // HDMI
 
+    wire scanline_en = scanlines_w && hdmi_y[0];
+
+    wire show_debug_overlay_r = 1'b1;
+
+    wire [7:0] debug_r_w;
+    wire [7:0] debug_g_w;
+    wire [7:0] debug_b_w;
+    DebugOverlay #(
+        .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
+        .ENABLE(1'b1)
+    ) debug_overlay (
+        .clk_i          (clk_pixel_w),
+        .reset_n (device_reset_n_w),
+        .enable_i(show_debug_overlay_r),
+
+        .hex_values ({
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,
+            8'h0,
+            8'h0
+        }), 
+
+        .debug_bits_0_i ('0), 
+        .debug_bits_1_i ('0),
+
+        .screen_x_i     (hdmi_x),
+        .screen_y_i     (hdmi_y),
+
+        .r_i            (scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w),
+        .g_i            (scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w),
+        .b_i            (scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w),
+
+        .r_o            (debug_r_w),
+        .g_o            (debug_g_w),
+        .b_o            (debug_b_w)
+    );  
+
     logic [2:0] tmds;
     wire tmdsClk;
-
-    wire scanline_en = scanlines_w && hdmi_y[0];
 
     hdmi #(
         .VIDEO_ID_CODE(2),
@@ -587,9 +667,9 @@ module top #(
         .clk_pixel(clk_pixel_w),
         .clk_audio(clk_audio_w),
         .rgb({
-            scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w,
-            scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w,
-            scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w
+            debug_r_w,
+            debug_g_w,
+            debug_b_w
         }),
         /*
         .rgb({
@@ -644,24 +724,5 @@ module top #(
     end
     */
 
-
-endmodule
-
-module Reset_Sync (
-    input clk,
-    input ext_reset,
-    output resetn
-);
-
-    reg [3:0] reset_cnt = 0;
-
-    always @(posedge clk or negedge ext_reset) begin
-        if (~ext_reset)
-            reset_cnt <= 4'b0;
-        else
-            reset_cnt <= reset_cnt + !resetn;
-    end
-
-    assign resetn = &reset_cnt;
 
 endmodule
