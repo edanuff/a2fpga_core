@@ -34,6 +34,9 @@ DSTATUS disk_initialize (void);
 DRESULT disk_readp (BYTE*, DWORD, UINT, UINT);
 DRESULT disk_writep (const BYTE*, DWORD);
 
+/* SD Card Detection */
+DSTATUS sd_card_detect (void);
+
 
 #ifdef __cplusplus
 }

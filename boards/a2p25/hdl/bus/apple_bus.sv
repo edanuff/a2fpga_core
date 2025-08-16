@@ -76,11 +76,11 @@ module apple_bus #(
     assign a2bus_if.rw_n = rw_n_r;
 
     assign a2bus_if.sw_gs = 1'b0;
-    assign a2bus_if.m2sel_n = a2_m2sel_n; 
+    assign a2bus_if.m2sel_n = a2bus_if.sw_gs ? a2_m2sel_n : 1'b0; 
 
     reg m2b0_r;
 	always @(posedge a2bus_if.clk_logic) begin
-        if (a2bus_if.phi1 && clk_2m_negedge_i) m2b0_r <= a2_mb20;
+        if (a2bus_if.phi1 && clk_2m_negedge_i) m2b0_r <= a2bus_if.sw_gs ? a2_mb20 : 1'b0;
 	end
     assign a2bus_if.m2b0 = m2b0_r; 
 

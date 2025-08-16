@@ -53,7 +53,7 @@ firmware.bin: firmware.elf
 firmware.hex: $(FIRMWARE_DIR)/makehex.py firmware.bin
 	python3 $(FIRMWARE_DIR)/makehex.py firmware.bin 3584 > firmware.hex
 	@echo "Firmware size: $$(grep .. firmware.hex | wc -l) / $$(wc -l < firmware.hex)"
-	cp firmware.hex ../../../hdl/picosoc/
+	cp firmware.hex ../../../../hdl/picosoc/
 
 clean:
 	rm -f firmware.elf firmware.hex firmware.bin firmware.o firmware.map asm/*.s

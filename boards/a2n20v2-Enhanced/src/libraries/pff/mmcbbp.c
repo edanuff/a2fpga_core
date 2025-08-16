@@ -203,6 +203,31 @@ BYTE send_cmd (
 
 
 /*-----------------------------------------------------------------------*/
+/* Quick SD Card Detection                                               */
+/*-----------------------------------------------------------------------*/
+
+DSTATUS sd_card_detect (void)	/* 0:Card present, STA_NOINIT:No card */
+{
+	BYTE res;
+	
+	// Quick SPI interface setup
+	reg_sdcard_prescale = 16;
+	reg_sdcard_mode = 0;
+	
+	sdcard_cs(false);
+	skip_mmc(10);			/* Apply 80 dummy clocks */
+	
+	// Try CMD0 (GO_IDLE_STATE) - should return 0x01 if card present
+	res = send_cmd(CMD0, 0);
+	
+	release_spi();
+	
+	// Valid response (0x01) indicates card is present
+	return (res == 0x01) ? 0 : STA_NOINIT;
+}
+
+
+/*-----------------------------------------------------------------------*/
 /* Initialize Disk Drive                                                 */
 /*-----------------------------------------------------------------------*/
 

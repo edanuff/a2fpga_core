@@ -142,7 +142,7 @@ module vgc (
     wire PIX640 = scan_ctl_r[7];
     wire COLOR_FILL_MODE = scan_ctl_r[5];
 
-    reg [11:0] palette_rgb_r[15:0];
+    reg [11:0] palette_rgb_r[15:0] /* synthesis syn_ramstyle = "block_ram" */;
 
     wire [3:0] palette_load_i = {cycle_w[2:0] - 1'b1, 1'b0};
 

@@ -1,11 +1,11 @@
 //Copyright (C)2014-2025 Gowin Semiconductor Corporation.
 //All rights reserved.
 //File Title: IP file
-//Tool Version: V1.9.11.02
+//Tool Version: V1.9.11.03
 //Part Number: GW5A-LV25MG121NC1/I0
 //Device: GW5A-25
 //Device Version: B
-//Created Time: Wed Jun  4 14:41:41 2025
+//Created Time: Sat Jul 19 11:37:58 2025
 
 module Gowin_PLL_MOD (lock, clkout0, clkout1, clkout2, mdrdo, clkin, reset, mdclk, mdopc, mdainc, mdwdi);
 
