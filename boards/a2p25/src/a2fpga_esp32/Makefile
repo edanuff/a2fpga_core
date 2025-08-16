@@ -15,6 +15,9 @@ FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,UploadMode=d
 
 # Source files
 SKETCH = a2fpga_esp32.ino
+CPP_FILES = a2fpga_lcam.cpp a2fpga_jtag.cpp
+HEADER_FILES = a2fpga_lcam.h a2fpga_jtag.h
+ALL_SOURCES = $(SKETCH) $(CPP_FILES) $(HEADER_FILES)
 
 # Default target
 .PHONY: all
@@ -26,9 +29,10 @@ init:
 	$(ARDUINO_CLI) core update-index
 	$(ARDUINO_CLI) core install esp32:esp32
 
-# Compile the sketch
+# Compile the sketch and all source files
 .PHONY: compile
 compile:
+	@echo "Compiling $(PROJECT_NAME) with files: $(ALL_SOURCES)"
 	$(ARDUINO_CLI) compile --fqbn $(FQBN) --build-path ./build $(SKETCH)
 
 # Upload to ESP32
@@ -50,6 +54,20 @@ flash: upload monitor
 clean:
 	rm -rf build/
 
+# Check that all source files exist
+.PHONY: check-sources
+check-sources:
+	@echo "Checking source files..."
+	@for file in $(ALL_SOURCES); do \
+		if [ ! -f "$$file" ]; then \
+			echo "Error: Source file $$file not found"; \
+			exit 1; \
+		else \
+			echo "✓ $$file"; \
+		fi; \
+	done
+	@echo "All source files found."
+
 # List available ports
 .PHONY: ports
 ports:
@@ -70,11 +88,12 @@ install-libs:
 help:
 	@echo "Available targets:"
 	@echo "  init        - Initialize Arduino CLI and install ESP32 core"
-	@echo "  compile     - Compile the sketch"
+	@echo "  compile     - Compile the sketch and all C++ files"
 	@echo "  upload      - Upload to ESP32 (set PORT= to override)"
 	@echo "  monitor     - Monitor serial output"
 	@echo "  flash       - Upload and monitor"
 	@echo "  clean       - Clean build artifacts"
+	@echo "  check-sources - Verify all source files exist"
 	@echo "  ports       - List available serial ports"
 	@echo "  board-info  - Show ESP32-S3 board information"
 	@echo "  install-libs- Install required libraries"
