@@ -116,6 +116,7 @@ static inline void rb_reset(){ rb_head = rb_tail = 0; rb_drops = 0; }
 static uint8_t  s_clk_inv = 0;            // 0=rising, 1=falling
 static uint32_t word_print_every = 512;
 static volatile uint32_t words_seen = 0;   // bumped by consumer
+static volatile uint8_t s_log_level = 0;   // 0=off, 1=errors, 2=all
 
 static uint8_t* s_buf      = nullptr;     // DESC_COUNT * CHUNK_BYTES
 static DESC_T*  s_desc     = nullptr;     // [DESC_COUNT], 16-byte aligned
@@ -304,7 +305,7 @@ static void packet_task(void*){
     if (rb_pop(&w)) {
       local_count++;
       words_seen++;
-      if ((local_count % word_print_every) == 0) {
+      if ((s_log_level > 0) && (local_count % word_print_every) == 0) {
         Serial.printf("word[%lu]=0x%08X\n", (unsigned long)words_seen, w);
       }
       // TODO: your real processing here
@@ -395,4 +396,9 @@ void lcam_log_every_n_words(uint32_t n) {
   if (n < 1) n = 1;
   word_print_every = n;
   Serial.printf("word_print_every=%lu\n", (unsigned long)word_print_every);
+}
+
+void lcam_set_logging(uint8_t n) {
+  // Set logging level
+  s_log_level = n;  
 }

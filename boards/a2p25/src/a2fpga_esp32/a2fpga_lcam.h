@@ -20,6 +20,7 @@ void lcam_start();
 void lcam_stop();
 void lcam_log_every_n_words(uint32_t n);
 void lcam_print_status();
+void lcam_set_logging(uint8_t n);
 
 // Task management functions
 esp_err_t lcam_init_tasks();
