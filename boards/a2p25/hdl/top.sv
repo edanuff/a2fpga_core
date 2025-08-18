@@ -79,7 +79,9 @@ module top #(
     output [2:0] tmds_d_p,
     output [2:0] tmds_d_n,
 
-    output esp32_gpio_0,
+    input esp32_spi_sclk,
+    input esp32_spi_mosi,
+    output esp32_spi_miso,
 
     output esp32_parl_frame,
     output esp32_parl_clk,
@@ -131,8 +133,6 @@ module top #(
             led_counter_r <= led_counter_r + 1;
         end
     end
-
-    assign esp32_gpio_0 = !led_r;
 
     // Reset
 
@@ -321,6 +321,15 @@ module top #(
     assign esp32_parl_clk = cam_pclk_w;      // SCLK
     assign esp32_parl_frame = cam_sync_w;     // CS (note: active low)
     assign esp32_parl_d = cam_data_w;       // 4-bit parallel data
+
+
+    esp32_spi_connector esp32_spi_connector (
+        .clk(clk_logic_w),
+        .rst_n(system_reset_n_w),
+        .miso(esp32_spi_miso),
+        .mosi(esp32_spi_mosi),
+        .sclk(esp32_spi_sclk)
+    );
 
     // Slots
 

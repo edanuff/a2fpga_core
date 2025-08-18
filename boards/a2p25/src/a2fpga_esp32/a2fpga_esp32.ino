@@ -22,6 +22,7 @@
 #include "a2fpga_lcam.h"
 #include "a2fpga_jtag.h"
 #include "a2fpga_spi_link.h"
+#include "esp_err.h"
 
 // ---------- Build-time options ----------
 #define USE_GDMA_ISR         0   // keep 0 unless your core exposes a reliable GDMA IRQ
@@ -60,10 +61,10 @@ const int PIN_TDO  = 45;
 const int PIN_SRST = 7;  // unused and unconnected, but required by the JTAG bridge
 
 // SPI interface to the FPGA
-static const int PIN_SCLK = 18;
-static const int PIN_MOSI = 9;
+static const int PIN_SCLK = 9;
+static const int PIN_MOSI = 11;
 static const int PIN_MISO = 10;
-static const int SPI_HZ   = 20 * 1000 * 1000;  // start at 20 MHz; tune as needed
+static const int SPI_HZ   = 1 * 1000 * 1000;  // start at 20 MHz; tune as needed
 
 bool usb_was_connected = false;
 
@@ -86,13 +87,64 @@ static void cmd_process(String cmd) {
   } else if (cmd.startsWith("we ")) {
     long n = cmd.substring(3).toInt();
     lcam_log_every_n_words(n);
+  } else if (cmd.startsWith("spitest")) {
+    Serial.println("[SPI] spitest: begin");
+
+    spi_link_t link;
+    esp_err_t err = spi_link_init(&link, SPI2_HOST, /*SCLK*/ PIN_SCLK, /*MOSI*/ PIN_MOSI, /*MISO*/ PIN_MISO, SPI_HZ);
+    Serial.printf("[SPI] init SCLK=%d MOSI=%d MISO=%d @%d Hz -> %s\n",
+                  PIN_SCLK, PIN_MOSI, PIN_MISO, SPI_HZ, (err==ESP_OK?"OK":esp_err_to_name(err)));
+    if (err != ESP_OK) return;
+
+    auto print_status = [](uint8_t s){
+      uint8_t ver = (s >> 4) & 0xF;
+      uint8_t align = (s >> 3) & 1;
+      uint8_t crcerr = (s >> 2) & 1;
+      uint8_t busy = (s >> 1) & 1;
+      uint8_t ok = s & 1;
+      Serial.printf("[SPI] status=0x%02X ver=%u align=%u crcerr=%u busy=%u ok=%u\n", s, ver, align, crcerr, busy, ok);
+    };
+
+    // Register R/W
+    err = spi_reg_write(&link, 0x06, 0x55);
+    Serial.printf("[SPI] reg[0x06] <= 0x55 -> %s\n", (err==ESP_OK?"OK":esp_err_to_name(err)));
+
+    uint8_t proto = 0xFF, st = 0x00;
+    err = spi_reg_read_status(&link, 0x04, &proto, &st); // PROTO_VER from core
+    Serial.printf("[SPI] reg[0x04] (PROTO_VER) -> 0x%02X (%s)\n", proto, (err==ESP_OK?"OK":esp_err_to_name(err)));
+    print_status(st);
+
+    uint8_t echo = 0x00;
+    err = spi_reg_read_status(&link, 0x06, &echo, &st);
+    Serial.printf("[SPI] reg[0x06] readback -> 0x%02X (%s)\n", echo, (err==ESP_OK?"OK":esp_err_to_name(err)));
+    print_status(st);
+
+    // XFER to SPACE 0 (demo RAM in core)
+    uint8_t buf_w[4] = {1,2,3,4};
+    Serial.printf("[SPI] xfer-w space=0 addr=0x%02X len=%d data=", 0x20, 4);
+    for (int i=0;i<4;i++) Serial.printf("%s%02X", (i?" ":""), buf_w[i]);
+    Serial.println();
+    err = spi_xfer_write(&link, /*space*/0, /*addr*/0x20, buf_w, 4, /*inc*/true);
+    Serial.printf("[SPI] xfer-w -> %s\n", (err==ESP_OK?"OK":esp_err_to_name(err)));
+
+    uint8_t buf_r[4] = {0};
+    err = spi_xfer_read_status(&link, 0, 0x20, buf_r, 4, true, &st);
+    Serial.printf("[SPI] xfer-r -> %s, data=", (err==ESP_OK?"OK":esp_err_to_name(err)));
+    for (int i=0;i<4;i++) Serial.printf("%s%02X", (i?" ":""), buf_r[i]);
+    Serial.println();
+    print_status(st);
+
+    bool match = (memcmp(buf_w, buf_r, 4) == 0);
+    Serial.printf("[SPI] roundtrip %s\n", match?"MATCH":"MISMATCH");
+
+    Serial.println("[SPI] spitest: end");
   } else if (cmd == "exit") {
     cli_mode = false;
     lcam_set_logging(0);
     Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
     Serial.println("Use '+++' to enter CLI mode again.");
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | exit | we N");
+    Serial.println("Commands: lcam | stop | status | spitest | exit | we N");
     Serial.println("  exit - Return to serial forwarding mode");
   } else if (cmd.length()) {
     Serial.printf("Unknown: %s\n", cmd.c_str());
@@ -150,7 +202,8 @@ void setup() {
   Serial.begin(115200);
   Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD); // hardware serial
   delay(300);
-  Serial.println("A2FPGA ESP32-S3 Firmware");
+  Serial.printf("A2FPGA ESP32-S3 Firmware (%s %s)\n", __DATE__, __TIME__);
+
   Serial.println("Serial forwarding mode active. Use '+++' to enter CLI mode.");
   
   // Initialize in forwarding mode

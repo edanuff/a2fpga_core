@@ -59,6 +59,8 @@
         <File path="hdl/a2p25.sdc" type="file.sdc" enable="1"/>
         <File path="hdl/bus/apple_bus.sv" type="file.verilog" enable="1"/>
         <File path="hdl/esp32/cam_serializer.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/esp32/esp32_spi_connector.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/esp32/esp32_spi_proto_proc.sv" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/gowin_pll_mod.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/gowin_pll.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/pll_init.v" type="file.verilog" enable="1"/>

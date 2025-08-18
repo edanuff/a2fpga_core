@@ -152,10 +152,10 @@ void lcam_print_status() {
     ((uint8_t)digitalRead(PIN_CAM_D2) << 2) |
     ((uint8_t)digitalRead(PIN_CAM_D1) << 1) |
     ((uint8_t)digitalRead(PIN_CAM_D0) << 0);
-  Serial.printf("CLK:%d VSYNC:%d D[3:0]=0x%X  edge=%u  words=%lu drops=%lu\n",
+  Serial.printf("LCD_CAM CLK:%d VSYNC:%d D[3:0]=0x%X  edge=%u  words=%lu drops=%lu\n",
     digitalRead(PIN_CAM_PCLK), digitalRead(PIN_CAM_VSYNC), d, s_clk_inv,
     (unsigned long)words_seen, (unsigned long)rb_drops);
-  Serial.printf("GDMA: IN_ST=0x%08X INLINK=0x%08X EOF_DES=0x%08X\n",
+  Serial.printf("LCD_CAM GDMA: IN_ST=0x%08X INLINK=0x%08X EOF_DES=0x%08X\n",
     (unsigned)GDMA.channel[GDMA_CH].in.int_st.val,
     (unsigned)GDMA.channel[GDMA_CH].in.link.addr,
     (unsigned)GDMA.channel[GDMA_CH].in.suc_eof_des_addr);
@@ -166,13 +166,13 @@ static esp_err_t setup_lcd_cam_once() {
   if (!s_buf) {
     s_buf = (uint8_t*)heap_caps_aligned_alloc(16, DESC_COUNT * CHUNK_BYTES,
              MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!s_buf) { Serial.println("DMA buffer alloc failed"); return ESP_ERR_NO_MEM; }
+    if (!s_buf) { Serial.println("LCD_CAM DMA buffer alloc failed"); return ESP_ERR_NO_MEM; }
     memset(s_buf, 0xBB, DESC_COUNT * CHUNK_BYTES);
   }
   if (!s_desc) {
     s_desc = (DESC_T*)heap_caps_aligned_alloc(16, DESC_COUNT * sizeof(DESC_T),
               MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!s_desc) { Serial.println("Desc alloc failed"); return ESP_ERR_NO_MEM; }
+    if (!s_desc) { Serial.println("LCD_CAM Desc alloc failed"); return ESP_ERR_NO_MEM; }
     memset(s_desc, 0, DESC_COUNT * sizeof(DESC_T));
   }
 
@@ -244,7 +244,6 @@ static esp_err_t setup_lcd_cam_once() {
   LCD_CAM.cam_ctrl1.cam_vh_de_mode_en     = 0;
   LCD_CAM.cam_ctrl.cam_update             = 1;
 
-  Serial.println("LCD_CAM + GDMA configured (VSYNC->EOF, stop-on-EOF, immediate re-arm)");
   return ESP_OK;
 }
 
@@ -306,7 +305,7 @@ static void packet_task(void*){
       local_count++;
       words_seen++;
       if ((s_log_level > 0) && (local_count % word_print_every) == 0) {
-        Serial.printf("word[%lu]=0x%08X\n", (unsigned long)words_seen, w);
+        Serial.printf("LCD_CAM word[%lu]=0x%08X\n", (unsigned long)words_seen, w);
       }
       // TODO: your real processing here
     } else {
@@ -317,7 +316,7 @@ static void packet_task(void*){
 
 esp_err_t lcam_init_tasks() {
   if (s_poller_task != nullptr || s_consumer_task != nullptr) {
-    Serial.println("Tasks already running");
+    Serial.println("LCD_CAM tasks already running");
     return ESP_ERR_INVALID_STATE;
   }
 
@@ -327,12 +326,11 @@ esp_err_t lcam_init_tasks() {
   BaseType_t ret2 = xTaskCreatePinnedToCore(poller_task, "lcam_poll", 2048, nullptr, tskIDLE_PRIORITY + 1, &s_poller_task, 1);
 
   if (ret1 != pdPASS || ret2 != pdPASS) {
-    Serial.println("Failed to create tasks");
+    Serial.println("LCD_CAM failed to create tasks");
     lcam_cleanup_tasks();
     return ESP_FAIL;
   }
   
-  Serial.println("LCD_CAM tasks started (poller + consumer)");
   return ESP_OK;
 }
 
@@ -348,9 +346,8 @@ void lcam_cleanup_tasks() {
 }
 
 void lcam_start() {
-    Serial.println("Init + start LCD_CAM (VSYNC EOF, ISR-woken if available)...");
-
-    if (setup_lcd_cam_once() != ESP_OK) { Serial.println("Setup failed"); return; }
+    // Stop tasks first
+    if (setup_lcd_cam_once() != ESP_OK) { Serial.println("LCD_CAM setup failed"); return; }
 
     rb_reset(); words_seen = 0;
     GDMA.channel[GDMA_CH].in.int_clr.val = 0xFFFFFFFF;
@@ -362,7 +359,7 @@ void lcam_start() {
 
     // Start tasks
     if (lcam_init_tasks() != ESP_OK) {
-        Serial.println("Failed to start tasks");
+        Serial.println("LCD_CAM failed to start tasks");
         return;
     }
 
@@ -373,11 +370,11 @@ void lcam_start() {
       while ((int32_t)(millis() - until) < 0) {
         delay(1);  // yield cooperatively
       }
-    }
-    uint32_t gotw = words_seen - w0;
-    Serial.printf("VSYNC-EOF test: %lu words in %ums\n", (unsigned long)gotw, (unsigned)SMOKE_MS);
-    if (!gotw && SMOKE_MS) {
-      Serial.println("No words. Check PCLK burst (10 clocks/packet) and VSYNC on nibble 9.");
+      uint32_t gotw = words_seen - w0;
+      Serial.printf("LCD_CAM VSYNC-EOF test: %lu words in %ums\n", (unsigned long)gotw, (unsigned)SMOKE_MS);
+      if (!gotw) {
+        Serial.println("LCD_CAM capture failed: No words. Check PCLK burst (10 clocks/packet) and VSYNC on nibble 9.");
+      }
     }
 }
 
@@ -388,7 +385,7 @@ void lcam_stop() {
   // Stop the LCD_CAM and GDMA
   LCD_CAM.cam_ctrl1.cam_start = 0;
   GDMA.channel[GDMA_CH].in.link.stop = 1;
-  Serial.println("Stopped.");
+  Serial.println("LCD_CAM stopped.");
 }
 
 void lcam_log_every_n_words(uint32_t n) {
