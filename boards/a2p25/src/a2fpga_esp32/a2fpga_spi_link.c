@@ -18,6 +18,7 @@ esp_err_t spi_link_init(spi_link_t *l, spi_host_device_t host,
 {
     memset(l, 0, sizeof(*l));
     l->use_sync = true;
+    l->host = host;
 
     spi_bus_config_t bus = {
         .mosi_io_num = mosi_io,
@@ -30,9 +31,11 @@ esp_err_t spi_link_init(spi_link_t *l, spi_host_device_t host,
     esp_err_t err = spi_bus_initialize(host, &bus, SPI_DMA_CH_AUTO);
     if (err == ESP_ERR_INVALID_STATE) {
         // Bus already initialized; continue
+        l->bus_owner = false;
         ESP_LOGW(TAG, "bus already initialized; reusing");
     } else {
         ESP_RETURN_ON_ERROR(err, TAG, "bus init");
+        l->bus_owner = true;
     }
 
     spi_device_interface_config_t dev = {
@@ -44,6 +47,20 @@ esp_err_t spi_link_init(spi_link_t *l, spi_host_device_t host,
     };
     ESP_RETURN_ON_ERROR(spi_bus_add_device(host, &dev, &l->dev), TAG, "add dev");
     return ESP_OK;
+}
+
+esp_err_t spi_link_cleanup(spi_link_t *l) {
+    esp_err_t err = ESP_OK;
+    if (l->dev) {
+        err = spi_bus_remove_device(l->dev);
+        l->dev = NULL;
+    }
+    if (l->bus_owner) {
+        esp_err_t bus_err = spi_bus_free(l->host);
+        if (err == ESP_OK) err = bus_err;
+        l->bus_owner = false;
+    }
+    return err;
 }
 
 // Send a small buffer and optionally receive same length into rx (can be NULL).

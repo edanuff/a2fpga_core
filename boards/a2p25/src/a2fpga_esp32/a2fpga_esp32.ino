@@ -137,6 +137,7 @@ static void cmd_process(String cmd) {
     bool match = (memcmp(buf_w, buf_r, 4) == 0);
     Serial.printf("[SPI] roundtrip %s\n", match?"MATCH":"MISMATCH");
 
+    spi_link_cleanup(&link);
     Serial.println("[SPI] spitest: end");
   } else if (cmd == "exit") {
     cli_mode = false;

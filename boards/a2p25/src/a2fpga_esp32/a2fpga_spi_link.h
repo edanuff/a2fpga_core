@@ -11,13 +11,17 @@ extern "C" {
 
 typedef struct {
     spi_device_handle_t dev;
+    spi_host_device_t host;
     bool use_sync;   // send A5 5A
+    bool bus_owner;  // true if we initialized the bus
 } spi_link_t;
 
 esp_err_t spi_link_init(spi_link_t *link,
                         spi_host_device_t host, // SPI2_HOST is fine on S3
                         int sclk_io, int mosi_io, int miso_io,
                         int clock_hz);          // e.g., 20*1000*1000
+
+esp_err_t spi_link_cleanup(spi_link_t *link);
 
 
 // --- register access (1 byte registers 0..126) ---
