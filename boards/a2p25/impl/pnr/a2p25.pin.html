@@ -78,7 +78,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Sun Aug 17 16:30:54 2025
+<td>Mon Aug 18 22:31:12 2025
 </td>
 </tr>
 <tr>
@@ -804,6 +804,27 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>NONE</td>
 </tr>
 <tr>
+<td class="label">esp32_i2s_data</td>
+<td>-</td>
+<td>D1/5</td>
+<td>Y</td>
+<td>in</td>
+<td>IOB14[B]</td>
+<td>CLKHOLD_N/SSI3</td>
+<td>LVCMOS33</td>
+<td>OFF</td>
+<td>NONE</td>
+<td>OFF</td>
+<td>ON</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>3.3</td>
+<td>MEDIUM</td>
+<td>NONE</td>
+</tr>
+<tr>
 <td class="label">uart_rx</td>
 <td>-</td>
 <td>C3/4</td>
@@ -1189,6 +1210,48 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>out</td>
 <td>IOB24[A]</td>
 <td>-</td>
+<td>LVCMOS33</td>
+<td>8</td>
+<td>NONE</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>3.3</td>
+<td>MEDIUM</td>
+<td>NONE</td>
+</tr>
+<tr>
+<td class="label">esp32_i2s_bclk</td>
+<td>-</td>
+<td>L3/2</td>
+<td>Y</td>
+<td>out</td>
+<td>IOR31[B]</td>
+<td>GCLKC_4/RPLL1_C_FB1</td>
+<td>LVCMOS33</td>
+<td>8</td>
+<td>NONE</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>OFF</td>
+<td>3.3</td>
+<td>MEDIUM</td>
+<td>NONE</td>
+</tr>
+<tr>
+<td class="label">esp32_i2s_lrclk</td>
+<td>-</td>
+<td>E1/5</td>
+<td>Y</td>
+<td>out</td>
+<td>IOB12[B]</td>
+<td>GCLKC_10B/RDWR_B/LPLL1_C_IN1</td>
 <td>LVCMOS33</td>
 <td>8</td>
 <td>NONE</td>
@@ -2157,15 +2220,15 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">E1/5</td>
-<td>-</td>
-<td>in</td>
+<td>esp32_i2s_lrclk</td>
+<td>out</td>
 <td>IOB12[B]</td>
 <td>GCLKC_10B/RDWR_B/LPLL1_C_IN1</td>
 <td>LVCMOS33</td>
 <td>8</td>
-<td>DOWN</td>
+<td>NONE</td>
 <td>OFF</td>
-<td>ON</td>
+<td>OFF</td>
 <td>OFF</td>
 <td>OFF</td>
 <td>OFF</td>
@@ -2195,13 +2258,13 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">D1/5</td>
-<td>-</td>
+<td>esp32_i2s_data</td>
 <td>in</td>
 <td>IOB14[B]</td>
 <td>CLKHOLD_N/SSI3</td>
 <td>LVCMOS33</td>
-<td>8</td>
-<td>UP</td>
+<td>OFF</td>
+<td>NONE</td>
 <td>OFF</td>
 <td>ON</td>
 <td>OFF</td>
@@ -2993,15 +3056,15 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">L3/2</td>
-<td>-</td>
-<td>in</td>
+<td>esp32_i2s_bclk</td>
+<td>out</td>
 <td>IOR31[B]</td>
 <td>GCLKC_4/RPLL1_C_FB1</td>
 <td>LVCMOS33</td>
 <td>8</td>
-<td>UP</td>
+<td>NONE</td>
 <td>OFF</td>
-<td>ON</td>
+<td>OFF</td>
 <td>OFF</td>
 <td>OFF</td>
 <td>OFF</td>

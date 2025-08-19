@@ -66,6 +66,11 @@ static const int PIN_MOSI = 11;
 static const int PIN_MISO = 10;
 static const int SPI_HZ   = 1 * 1000 * 1000;  // start at 20 MHz; tune as needed
 
+// I2S interface to the FPGA
+const int PIN_I2S_BCLK = 18;
+const int PIN_I2S_LRCLK = 47;
+const int PIN_I2S_DATA = 33;
+
 bool usb_was_connected = false;
 
 // ---------- CLI Escape Sequence ----------

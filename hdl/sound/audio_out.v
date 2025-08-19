@@ -23,17 +23,42 @@ module audio_out
 
 	output audio_clk,
 	output [15:0] audio_l,
-	output [15:0] audio_r
+	output [15:0] audio_r,
+
+	output i2s_bclk,
+	output i2s_lrclk,
+	input i2s_data
 );
-    localparam AUDIO_CLK_COUNT = CLK_RATE / AUDIO_RATE;
+    localparam I2S_BCLK_COUNT = CLK_RATE / (AUDIO_RATE * 16 * 2) / 2; // 16 bits per channel, 2 channels (stereo), divide by 2 for toggle
+	localparam I2S_LRCLK_COUNT = I2S_BCLK_COUNT * 32; // 16 bits per channel * 2 clock toggles of bclk
+    localparam AUDIO_CLK_COUNT = I2S_LRCLK_COUNT * 2; // Complete sample period (left + right channels)
+    logic [$clog2(I2S_BCLK_COUNT)-1:0] i2s_bclk_counter_r;
+    logic [$clog2(I2S_LRCLK_COUNT)-1:0] i2s_lrclk_counter_r;
     logic [$clog2(AUDIO_CLK_COUNT)-1:0] audio_counter_r;
 	reg sample_ce;
-	always_ff @(posedge clk)
+	reg i2s_clk_r;
+	reg i2s_lrclk_r;
+	always_ff @(posedge clk, posedge reset)
     begin
-        audio_counter_r <= (audio_counter_r == AUDIO_CLK_COUNT) ? 1'd0 : audio_counter_r + 1'd1;
-        sample_ce <= audio_counter_r == AUDIO_CLK_COUNT;
+		if (reset) begin
+			i2s_bclk_counter_r <= 0;
+			i2s_lrclk_counter_r <= 0;
+			audio_counter_r <= 0;
+			sample_ce <= 0;
+			i2s_clk_r <= 0;
+		end
+		else begin
+			i2s_bclk_counter_r <= (i2s_bclk_counter_r == I2S_BCLK_COUNT-1) ? 1'd0 : i2s_bclk_counter_r + 1'd1;
+			i2s_lrclk_counter_r <= (i2s_lrclk_counter_r == I2S_LRCLK_COUNT-1) ? 1'd0 : i2s_lrclk_counter_r + 1'd1;
+			audio_counter_r <= (audio_counter_r == AUDIO_CLK_COUNT-1) ? 1'd0 : audio_counter_r + 1'd1;
+			sample_ce <= audio_counter_r == AUDIO_CLK_COUNT-1;
+			i2s_clk_r <= i2s_bclk_counter_r == I2S_BCLK_COUNT-1 ? ~i2s_clk_r : i2s_clk_r;
+			i2s_lrclk_r <= i2s_lrclk_counter_r == I2S_LRCLK_COUNT-1 ? ~i2s_lrclk_r : i2s_lrclk_r;
+		end
     end
 	assign audio_clk = sample_ce;
+	assign i2s_bclk = i2s_clk_r;
+	assign i2s_lrclk = i2s_lrclk_r;
 
 	reg flt_ce;
 	reg [31:0] cnt = 0;
