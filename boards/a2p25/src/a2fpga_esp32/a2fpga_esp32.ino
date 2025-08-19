@@ -89,6 +89,8 @@ static void cmd_process(String cmd) {
     lcam_log_every_n_words(n);
   } else if (cmd.startsWith("spitest")) {
     Serial.println("[SPI] spitest: begin");
+    // Small guard to ensure prior run is fully idle
+    vTaskDelay(2);
 
     spi_link_t link;
     esp_err_t err = spi_link_init(&link, SPI2_HOST, /*SCLK*/ PIN_SCLK, /*MOSI*/ PIN_MOSI, /*MISO*/ PIN_MISO, SPI_HZ);
