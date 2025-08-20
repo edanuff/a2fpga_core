@@ -37,7 +37,7 @@ module audio_out
 	audio_timing #(
         .CLK_RATE(CLK_RATE),
         .AUDIO_RATE(AUDIO_RATE)
-    ) dut (
+    ) audio_timing (
         .reset(reset),
         .clk(clk),
         .audio_clk(sample_ce),

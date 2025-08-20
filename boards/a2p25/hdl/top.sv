@@ -654,9 +654,9 @@ module top #(
         .audio_l(audio_sample_word[0]),
         .audio_r(audio_sample_word[1]),
 
-        .i2s_bclk(),
-        .i2s_lrclk(),
-        .i2s_data(1'b0)
+        .i2s_bclk(esp32_i2s_bclk),
+        .i2s_lrclk(esp32_i2s_lrclk),
+        .i2s_data(esp32_i2s_data)
     );
 
     // HDMI
