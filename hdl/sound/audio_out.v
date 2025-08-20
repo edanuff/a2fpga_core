@@ -29,36 +29,45 @@ module audio_out
 	output i2s_lrclk,
 	input i2s_data
 );
-    localparam I2S_BCLK_COUNT = CLK_RATE / (AUDIO_RATE * 16 * 2) / 2; // 16 bits per channel, 2 channels (stereo), divide by 2 for toggle
-	localparam I2S_LRCLK_COUNT = I2S_BCLK_COUNT * 32; // 16 bits per channel * 2 clock toggles of bclk
-    localparam AUDIO_CLK_COUNT = I2S_LRCLK_COUNT * 2; // Complete sample period (left + right channels)
-    logic [$clog2(I2S_BCLK_COUNT)-1:0] i2s_bclk_counter_r;
-    logic [$clog2(I2S_LRCLK_COUNT)-1:0] i2s_lrclk_counter_r;
-    logic [$clog2(AUDIO_CLK_COUNT)-1:0] audio_counter_r;
-	reg sample_ce;
-	reg i2s_clk_r;
-	reg i2s_lrclk_r;
-	always_ff @(posedge clk, posedge reset)
-    begin
-		if (reset) begin
-			i2s_bclk_counter_r <= 0;
-			i2s_lrclk_counter_r <= 0;
-			audio_counter_r <= 0;
-			sample_ce <= 0;
-			i2s_clk_r <= 0;
-		end
-		else begin
-			i2s_bclk_counter_r <= (i2s_bclk_counter_r == I2S_BCLK_COUNT-1) ? 1'd0 : i2s_bclk_counter_r + 1'd1;
-			i2s_lrclk_counter_r <= (i2s_lrclk_counter_r == I2S_LRCLK_COUNT-1) ? 1'd0 : i2s_lrclk_counter_r + 1'd1;
-			audio_counter_r <= (audio_counter_r == AUDIO_CLK_COUNT-1) ? 1'd0 : audio_counter_r + 1'd1;
-			sample_ce <= audio_counter_r == AUDIO_CLK_COUNT-1;
-			i2s_clk_r <= i2s_bclk_counter_r == I2S_BCLK_COUNT-1 ? ~i2s_clk_r : i2s_clk_r;
-			i2s_lrclk_r <= i2s_lrclk_counter_r == I2S_LRCLK_COUNT-1 ? ~i2s_lrclk_r : i2s_lrclk_r;
-		end
-    end
+
+	wire sample_ce;
+	wire i2s_data_shift_strobe;
+	wire i2s_data_load_strobe;
+
+	audio_timing #(
+        .CLK_RATE(CLK_RATE),
+        .AUDIO_RATE(AUDIO_RATE)
+    ) dut (
+        .reset(reset),
+        .clk(clk),
+        .audio_clk(sample_ce),
+        .i2s_bclk(i2s_bclk),
+        .i2s_lrclk(i2s_lrclk),
+        .i2s_data_shift_strobe(i2s_data_shift_strobe),
+        .i2s_data_load_strobe(i2s_data_load_strobe)
+    );
 	assign audio_clk = sample_ce;
-	assign i2s_bclk = i2s_clk_r;
-	assign i2s_lrclk = i2s_lrclk_r;
+
+	reg [15:0] data_shift  = 16'h0000;
+    reg [15:0] i2s_word_l = 16'h0000;
+    reg [15:0] i2s_word_r = 16'h0000;
+
+    always @(posedge clk) begin
+        if (i2s_data_shift_strobe) begin
+            data_shift <= {data_shift[14:0], i2s_data};
+        end
+    end
+
+    always @(posedge clk) begin
+        if (i2s_data_load_strobe) begin
+			// lrclk has already toggled at this point, so use opposite of i2s_lrclk
+			if (i2s_lrclk) i2s_word_l <= data_shift;
+			else i2s_word_r <= data_shift;
+        end
+    end
+
+
+
 
 	reg flt_ce;
 	reg [31:0] cnt = 0;
