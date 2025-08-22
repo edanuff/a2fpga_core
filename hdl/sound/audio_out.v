@@ -27,7 +27,8 @@ module audio_out
 
 	output i2s_bclk,
 	output i2s_lrclk,
-	input i2s_data
+	input i2s_data,
+	output [15:0] i2s_sample_word[1:0]
 );
 
 	wire sample_ce;
@@ -66,8 +67,8 @@ module audio_out
         end
     end
 
-
-
+	assign i2s_sample_word[0] = i2s_word_l;
+	assign i2s_sample_word[1] = i2s_word_r;
 
 	reg flt_ce;
 	reg [31:0] cnt = 0;

@@ -25,6 +25,7 @@
 #include "esp_err.h"
 #include <ctype.h>
 #include <stdlib.h>
+#include "driver/i2s_std.h"
 
 // ---------- Build-time options ----------
 #define USE_GDMA_ISR         0   // keep 0 unless your core exposes a reliable GDMA IRQ
@@ -74,6 +75,103 @@ const int PIN_I2S_LRCLK = 47;
 const int PIN_I2S_DATA = 33;
 
 bool usb_was_connected = false;
+
+// ---------- I2S (slave TX test pattern, 16-bit stereo) ----------
+static i2s_chan_handle_t s_i2s_tx = NULL;
+static TaskHandle_t s_i2s_task = NULL;
+static volatile bool s_i2s_run = false;
+
+static void i2s_tx_task(void *arg) {
+  // Prepare a small buffer of stereo 16-bit frames: L=0xCAFE, R=0xBABE
+  const size_t frames = 512; // number of stereo frames per write
+  static uint16_t buf[frames * 2];
+  for (size_t i = 0; i < frames; ++i) {
+    buf[2*i+0] = 0xCAFE; // Left
+    buf[2*i+1] = 0xBABE; // Right
+  }
+  while (s_i2s_run) {
+    size_t written = 0;
+    esp_err_t err = i2s_channel_write(s_i2s_tx, buf, sizeof(buf), &written, portMAX_DELAY);
+    if (err != ESP_OK) {
+      // Brief delay to avoid tight loop on error (e.g., no external clocks yet)
+      vTaskDelay(pdMS_TO_TICKS(5));
+    }
+  }
+  vTaskDelete(NULL);
+}
+
+static esp_err_t i2s_tx_setup_once() {
+  if (s_i2s_tx) return ESP_OK;
+
+  // Create TX channel in SLAVE role (external BCLK/LRCLK from FPGA)
+  i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_SLAVE);
+  i2s_chan_handle_t tx = NULL;
+  // Request a TX channel (2nd arg) only; RX handle is NULL
+  esp_err_t err = i2s_new_channel(&chan_cfg, &tx, NULL);
+  if (err != ESP_OK) return err;
+
+  i2s_std_gpio_config_t gpio_cfg = {
+    .mclk = I2S_GPIO_UNUSED,
+    .bclk = (gpio_num_t)PIN_I2S_BCLK,
+    .ws   = (gpio_num_t)PIN_I2S_LRCLK,
+    .dout = (gpio_num_t)PIN_I2S_DATA,
+    .din  = I2S_GPIO_UNUSED,
+    .invert_flags = {
+      .mclk_inv = false,
+      .bclk_inv = false,
+      .ws_inv   = false,
+    },
+  };
+
+  // Standard I2S (Philips) format, 16-bit samples, stereo.
+  i2s_std_config_t std_cfg = {
+    .clk_cfg = {
+      .sample_rate_hz = 48000,        // ignored in slave, ext clocks used
+      .clk_src = I2S_CLK_SRC_DEFAULT,
+      .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+    },
+    .slot_cfg = {
+      .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
+      .slot_bit_width = I2S_SLOT_BIT_WIDTH_16BIT,
+      .slot_mode = I2S_SLOT_MODE_STEREO,
+      .slot_mask = (i2s_std_slot_mask_t)(I2S_STD_SLOT_LEFT | I2S_STD_SLOT_RIGHT),
+      .ws_width = I2S_DATA_BIT_WIDTH_16BIT,  // one slot width
+      .ws_pol = false,                        // standard I2S: low=left
+      .bit_shift = true,                      // I2S compliant (one-bit delay)
+      .left_align = false,
+      .big_endian = false,
+      .bit_order_lsb = false,                 // MSB first
+    },
+    .gpio_cfg = gpio_cfg,
+  };
+
+  err = i2s_channel_init_std_mode(tx, &std_cfg);
+  if (err != ESP_OK) {
+    i2s_del_channel(tx);
+    return err;
+  }
+  s_i2s_tx = tx;
+  return ESP_OK;
+}
+
+static esp_err_t i2s_tx_start() {
+  esp_err_t err = i2s_tx_setup_once();
+  if (err != ESP_OK) return err;
+  err = i2s_channel_enable(s_i2s_tx);
+  if (err != ESP_OK) return err;
+  s_i2s_run = true;
+  if (!s_i2s_task) {
+    BaseType_t ok = xTaskCreatePinnedToCore(i2s_tx_task, "i2s_tx", 4096, NULL, 5, &s_i2s_task, 0);
+    if (ok != pdPASS) return ESP_ERR_NO_MEM;
+  }
+  return ESP_OK;
+}
+
+static void i2s_tx_stop() {
+  s_i2s_run = false;
+  if (s_i2s_task) { vTaskDelay(1); /* let task exit */ s_i2s_task = NULL; }
+  if (s_i2s_tx) { i2s_channel_disable(s_i2s_tx); }
+}
 
 // ---------- CLI Escape Sequence ----------
 const char* CLI_ESCAPE_SEQUENCE = "+++";  // Escape sequence to enter CLI mode
@@ -275,16 +373,25 @@ static void cmd_process(String cmd) {
       spi_link_cleanup(&link);
       free(buf);
     }
+  } else if (cmd == "i2sstart") {
+    esp_err_t err = i2s_tx_start();
+    if (err == ESP_OK) Serial.println("I2S slave-TX started: L=0xCAFE R=0xBABE (16-bit)");
+    else Serial.printf("I2S start error: %s\n", esp_err_to_name(err));
+  } else if (cmd == "i2sstop") {
+    i2s_tx_stop();
+    Serial.println("I2S stopped");
   } else if (cmd == "exit") {
     cli_mode = false;
     lcam_set_logging(0);
     Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
     Serial.println("Use '+++' to enter CLI mode again.");
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | exit | we N");
+    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | exit | we N");
     Serial.println("  spireg <reg> [val]       - read/write 1-byte register (0..126)");
     Serial.println("  spir <space> <addr> <len> [inc=1] - read bytes");
     Serial.println("  spiw <space> <addr> <inc|len> <b0> [b1 ...] - write bytes");
+    Serial.println("  i2sstart                  - start I2S slave-TX (ext BCLK/WS) sending L=0xCA, R=0xFE");
+    Serial.println("  i2sstop                   - stop I2S output");
     Serial.println("  exit - Return to serial forwarding mode");
   } else if (cmd.length()) {
     Serial.printf("Unknown: %s\n", cmd.c_str());

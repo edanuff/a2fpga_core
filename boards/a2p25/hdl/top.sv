@@ -305,7 +305,8 @@ module top #(
             send_switch_r <= ~send_switch_r;
         end
     end
-    wire [31:0] send_data_w = send_switch_r ? 32'hCAFEBABE : 32'h12345678;
+    //wire [31:0] send_data_w = send_switch_r ? 32'hCAFEBABE : 32'h12345678;
+    wire [31:0] send_data_w = send_switch_r ? {i2s_sample_word[1], i2s_sample_word[0]} : 32'h12345678;
 
     wire [3:0] cam_data_w;
     wire cam_sync_w;
@@ -629,6 +630,7 @@ module top #(
     localparam AUDIO_BIT_WIDTH = 16;
     wire clk_audio_w;
     wire [15:0] audio_sample_word[1:0];
+    wire [15:0] i2s_sample_word[1:0];
     audio_out #(
         .CLK_RATE(CLOCK_SPEED_HZ / 2),
         .AUDIO_RATE(AUDIO_RATE)
@@ -656,7 +658,8 @@ module top #(
 
         .i2s_bclk(esp32_i2s_bclk),
         .i2s_lrclk(esp32_i2s_lrclk),
-        .i2s_data(esp32_i2s_data)
+        .i2s_data(esp32_i2s_data),
+        .i2s_sample_word(i2s_sample_word) 
     );
 
     // HDMI
