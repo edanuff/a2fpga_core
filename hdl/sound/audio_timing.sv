@@ -47,7 +47,7 @@ module audio_timing
 			// Toggle i2s_clk and i2s_lrclk at the end of their respective counters
 			i2s_clk_r <= i2s_bclk_counter_r == I2S_BCLK_COUNT-1 ? ~i2s_clk_r : i2s_clk_r;
 			i2s_lrclk_r <= i2s_lrclk_counter_r == I2S_LRCLK_COUNT-1 ? ~i2s_lrclk_r : i2s_lrclk_r;
-			load_strobe_r <= i2s_lrclk_counter_r == 0 ? 1 : 0;
+			load_strobe_r <= i2s_lrclk_counter_r == (I2S_BCLK_COUNT * 2) ? 1 : 0;
 			prev_i2s_clk_r <= i2s_clk_r;
 		end
     end

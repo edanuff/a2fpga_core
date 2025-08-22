@@ -91,11 +91,14 @@ static void i2s_tx_task(void *arg) {
   }
   while (s_i2s_run) {
     size_t written = 0;
-    esp_err_t err = i2s_channel_write(s_i2s_tx, buf, sizeof(buf), &written, portMAX_DELAY);
+    // Short timeout to avoid hogging CPU if clocks/DMA not ready
+    esp_err_t err = i2s_channel_write(s_i2s_tx, buf, sizeof(buf), &written, pdMS_TO_TICKS(10));
     if (err != ESP_OK) {
       // Brief delay to avoid tight loop on error (e.g., no external clocks yet)
       vTaskDelay(pdMS_TO_TICKS(5));
     }
+    // Yield periodically to avoid starving other tasks (LCD_CAM)
+    taskYIELD();
   }
   vTaskDelete(NULL);
 }
@@ -104,7 +107,8 @@ static esp_err_t i2s_tx_setup_once() {
   if (s_i2s_tx) return ESP_OK;
 
   // Create TX channel in SLAVE role (external BCLK/LRCLK from FPGA)
-  i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_SLAVE);
+  // Use I2S_NUM_1 to avoid any potential contention
+  i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_SLAVE);
   i2s_chan_handle_t tx = NULL;
   // Request a TX channel (2nd arg) only; RX handle is NULL
   esp_err_t err = i2s_new_channel(&chan_cfg, &tx, NULL);
@@ -161,7 +165,8 @@ static esp_err_t i2s_tx_start() {
   if (err != ESP_OK) return err;
   s_i2s_run = true;
   if (!s_i2s_task) {
-    BaseType_t ok = xTaskCreatePinnedToCore(i2s_tx_task, "i2s_tx", 4096, NULL, 5, &s_i2s_task, 0);
+    // Lower priority and move to other core to reduce contention
+    BaseType_t ok = xTaskCreatePinnedToCore(i2s_tx_task, "i2s_tx", 4096, NULL, 3, &s_i2s_task, 1);
     if (ok != pdPASS) return ESP_ERR_NO_MEM;
   }
   return ESP_OK;
@@ -170,7 +175,11 @@ static esp_err_t i2s_tx_start() {
 static void i2s_tx_stop() {
   s_i2s_run = false;
   if (s_i2s_task) { vTaskDelay(1); /* let task exit */ s_i2s_task = NULL; }
-  if (s_i2s_tx) { i2s_channel_disable(s_i2s_tx); }
+  if (s_i2s_tx) {
+    i2s_channel_disable(s_i2s_tx);
+    i2s_del_channel(s_i2s_tx);
+    s_i2s_tx = NULL;
+  }
 }
 
 // ---------- CLI Escape Sequence ----------

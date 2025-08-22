@@ -15,7 +15,8 @@ static const int STOP_BYTES       = 2;   // VSYNC + stopper
 static const int PACK_BYTES       = BYTES_PER_WORD + STOP_BYTES;  // 10 total
 static const int CHUNK_BYTES      = 16;  // >= PACK_BYTES
 static const int DESC_COUNT       = 2;   // ping-pong
-#define GDMA_CH                  0
+// Use GDMA channel 2 to avoid conflicts with other peripherals (e.g., I2S)
+#define GDMA_CH                  2
 
 // ---------- CAM signal macro compatibility ----------
 #ifndef CAM_PCLK_IDX
@@ -282,9 +283,36 @@ static inline void on_eof_process() {
 // ---------- Poller task ----------
 #define POLL_SPIN_LOOPS  4096
 
+static inline bool gdma_link_down() {
+  return GDMA.channel[GDMA_CH].in.link.addr == 0;
+}
+
+static inline void lcdcam_recover_if_needed() {
+  // Recover if GDMA link pointer was cleared or EOF descriptor is zeroed
+  if (gdma_link_down() || GDMA.channel[GDMA_CH].in.suc_eof_des_addr == 0) {
+    // Re-arm GDMA channel config for LCD_CAM (I2S init may reset GDMA)
+    GDMA.channel[GDMA_CH].in.conf0.in_rst = 1;
+    GDMA.channel[GDMA_CH].in.conf0.in_rst = 0;
+    GDMA.channel[GDMA_CH].in.conf0.indscr_burst_en  = 1;
+    GDMA.channel[GDMA_CH].in.conf0.in_data_burst_en = 1;
+    GDMA.channel[GDMA_CH].in.peri_sel.sel = 5;      // 5 = LCD_CAM
+
+    // Re-arm descriptors and GDMA interrupts
+    for (int i = 0; i < DESC_COUNT; ++i) desc_rearm(&s_desc[i]);
+    GDMA.channel[GDMA_CH].in.int_clr.val = 0xFFFFFFFF;
+    GDMA.channel[GDMA_CH].in.int_ena.val = 0;               // ensure clean enable
+    GDMA.channel[GDMA_CH].in.int_ena.in_suc_eof = 1;
+    GDMA.channel[GDMA_CH].in.link.addr  = (uint32_t)&s_desc[0];
+    GDMA.channel[GDMA_CH].in.link.start = 1;
+    LCD_CAM.cam_ctrl1.cam_start         = 1;
+  }
+}
+
 static void poller_task(void*){
   for(;;){
     bool any = false;
+    // If another driver reset GDMA, recover the link
+    if (gdma_link_down()) lcdcam_recover_if_needed();
     for (int i = 0; i < POLL_SPIN_LOOPS; ++i) {
       if (dma_eof()) {
         on_eof_process();
