@@ -23,6 +23,8 @@
 #include "a2fpga_jtag.h"
 #include "a2fpga_spi_link.h"
 #include "esp_err.h"
+#include <ctype.h>
+#include <stdlib.h>
 
 // ---------- Build-time options ----------
 #define USE_GDMA_ISR         0   // keep 0 unless your core exposes a reliable GDMA IRQ
@@ -79,6 +81,33 @@ const int ESCAPE_TIMEOUT_MS = 1000;       // Timeout for escape sequence detecti
 bool cli_mode = false;                     // Current mode: false=forwarding, true=CLI
 String escape_buffer = "";                 // Buffer for escape sequence detection
 unsigned long last_char_time = 0;          // Time of last character for timeout
+
+// ---------- Helpers ----------
+static bool parse_u32(const String &s, uint32_t &out) {
+  // Supports decimal and 0x-prefixed hex
+  const char *c = s.c_str();
+  char *endp = nullptr;
+  unsigned long v = strtoul(c, &endp, 0);
+  if (endp == c) return false;
+  out = (uint32_t)v;
+  return true;
+}
+
+static int split_ws(const String &line, String *toks, int max_toks) {
+  int n = 0;
+  int i = 0;
+  while (i < (int)line.length() && n < max_toks) {
+    // skip spaces
+    while (i < (int)line.length() && isspace((int)line[i])) i++;
+    if (i >= (int)line.length()) break;
+    // start
+    int j = i;
+    while (j < (int)line.length() && !isspace((int)line[j])) j++;
+    toks[n++] = line.substring(i, j);
+    i = j;
+  }
+  return n;
+}
 
 // ---------- Commands ----------
 static void cmd_process(String cmd) {
@@ -146,13 +175,116 @@ static void cmd_process(String cmd) {
 
     spi_link_cleanup(&link);
     Serial.println("[SPI] spitest: end");
+  } else if (cmd.startsWith("spireg")) {
+    // Register access helper
+    // Usage:
+    //   spireg <reg>                -> read 1 byte
+    //   spireg <reg> <val>          -> write 1 byte
+    String toks[16]; int nt = split_ws(cmd, toks, 16);
+    if (nt < 2) {
+      Serial.println("Usage: spireg <reg> [value]");
+    } else {
+      uint32_t reg; if (!parse_u32(toks[1], reg) || reg > 126) {
+        Serial.println("spireg: invalid <reg> (0..126)");
+      } else if (nt == 2) {
+        spi_link_t link; uint8_t val = 0, st = 0; esp_err_t err;
+        err = spi_link_init(&link, SPI2_HOST, PIN_SCLK, PIN_MOSI, PIN_MISO, SPI_HZ);
+        if (err != ESP_OK) { Serial.printf("spireg: init error: %s\n", esp_err_to_name(err)); return; }
+        err = spi_reg_read_status(&link, (uint8_t)reg, &val, &st);
+        if (err == ESP_OK) Serial.printf("reg[0x%02X] -> 0x%02X (status=0x%02X)\n", (unsigned)reg, val, st);
+        else Serial.printf("spireg: read error: %s\n", esp_err_to_name(err));
+        spi_link_cleanup(&link);
+      } else {
+        uint32_t v; if (!parse_u32(toks[2], v) || v > 0xFF) {
+          Serial.println("spireg: invalid <value> (0..255)");
+        } else {
+          spi_link_t link; esp_err_t err;
+          err = spi_link_init(&link, SPI2_HOST, PIN_SCLK, PIN_MOSI, PIN_MISO, SPI_HZ);
+          if (err != ESP_OK) { Serial.printf("spireg: init error: %s\n", esp_err_to_name(err)); return; }
+          err = spi_reg_write(&link, (uint8_t)reg, (uint8_t)v);
+          if (err == ESP_OK) Serial.printf("reg[0x%02X] <= 0x%02X\n", (unsigned)reg, (unsigned)v);
+          else Serial.printf("spireg: write error: %s\n", esp_err_to_name(err));
+          spi_link_cleanup(&link);
+        }
+      }
+    }
+  } else if (cmd.startsWith("spir ")) {
+    // XFER read
+    // Usage: spir <space> <addr> <len> [inc=1]
+    String toks[16]; int nt = split_ws(cmd, toks, 16);
+    if (nt < 4) {
+      Serial.println("Usage: spir <space> <addr> <len> [inc=1]");
+    } else {
+      uint32_t space, addr, len; uint32_t inc = 1;
+      if (!parse_u32(toks[1], space) || space > 7) { Serial.println("spir: <space> 0..7"); return; }
+      if (!parse_u32(toks[2], addr)) { Serial.println("spir: invalid <addr>"); return; }
+      if (!parse_u32(toks[3], len) || len == 0 || len > 4096) { Serial.println("spir: <len> 1..4096"); return; }
+      if (nt >= 5) { if (!parse_u32(toks[4], inc)) { Serial.println("spir: invalid [inc]"); return; } }
+      spi_link_t link; esp_err_t err = spi_link_init(&link, SPI2_HOST, PIN_SCLK, PIN_MOSI, PIN_MISO, SPI_HZ);
+      if (err != ESP_OK) { Serial.printf("spir: init error: %s\n", esp_err_to_name(err)); return; }
+      uint8_t *buf = (uint8_t*)malloc(len);
+      if (!buf) { Serial.println("spir: OOM"); spi_link_cleanup(&link); return; }
+      uint8_t st = 0;
+      err = spi_xfer_read_status(&link, (uint8_t)space, addr, buf, (uint16_t)len, inc != 0, &st);
+      if (err == ESP_OK) {
+        Serial.printf("spir: space=%u addr=0x%06lX len=%lu inc=%u status=0x%02X\n", (unsigned)space, (unsigned long)addr, (unsigned long)len, (unsigned)(inc!=0), st);
+        for (uint32_t i = 0; i < len; i++) {
+          if ((i % 16) == 0) Serial.printf("%s%06lX:", (i?"\n":""), (unsigned long)(addr + i));
+          Serial.printf(" %02X", buf[i]);
+        }
+        Serial.println();
+      } else {
+        Serial.printf("spir: read error: %s\n", esp_err_to_name(err));
+      }
+      free(buf);
+      spi_link_cleanup(&link);
+    }
+  } else if (cmd.startsWith("spiw ")) {
+    // XFER write
+    // Usage: spiw <space> <addr> <inc> <b0> [b1 ...]
+    //        spiw <space> <addr> <len> <b0> [b1 ...]  (len must match data count)
+    String toks[64]; int nt = split_ws(cmd, toks, 64);
+    if (nt < 5) {
+      Serial.println("Usage: spiw <space> <addr> <inc> <b0> [b1 ...]");
+    } else {
+      uint32_t space, addr; uint32_t third;
+      if (!parse_u32(toks[1], space) || space > 7) { Serial.println("spiw: <space> 0..7"); return; }
+      if (!parse_u32(toks[2], addr)) { Serial.println("spiw: invalid <addr>"); return; }
+      if (!parse_u32(toks[3], third)) { Serial.println("spiw: invalid <inc>/<len>"); return; }
+      // Heuristic: if there are exactly 5 tokens, assume 'inc' and a single byte
+      // Otherwise if third <= 1 treat as 'inc' else treat as 'len'
+      bool has_len = false; uint32_t len = 0; bool inc = true; int data_start_idx = 4;
+      if (third <= 1) { inc = (third != 0); len = nt - data_start_idx; }
+      else { has_len = true; len = third; inc = true; }
+      if (len == 0 || len > 4096) { Serial.println("spiw: <len> 1..4096"); return; }
+      if ((uint32_t)(nt - data_start_idx) < len) { Serial.println("spiw: not enough data bytes"); return; }
+      uint8_t *buf = (uint8_t*)malloc(len);
+      if (!buf) { Serial.println("spiw: OOM"); return; }
+      for (uint32_t i = 0; i < len; i++) {
+        uint32_t v; if (!parse_u32(toks[data_start_idx + i], v) || v > 0xFF) {
+          Serial.printf("spiw: bad byte at %lu\n", (unsigned long)i);
+          free(buf); return;
+        }
+        buf[i] = (uint8_t)v;
+      }
+      spi_link_t link; esp_err_t err = spi_link_init(&link, SPI2_HOST, PIN_SCLK, PIN_MOSI, PIN_MISO, SPI_HZ);
+      if (err != ESP_OK) { Serial.printf("spiw: init error: %s\n", esp_err_to_name(err)); free(buf); return; }
+      err = spi_xfer_write(&link, (uint8_t)space, addr, buf, (uint16_t)len, inc);
+      if (err == ESP_OK) Serial.printf("spiw: wrote %lu bytes to space=%u addr=0x%06lX inc=%u\n", (unsigned long)len, (unsigned)space, (unsigned long)addr, (unsigned)inc);
+      else Serial.printf("spiw: write error: %s\n", esp_err_to_name(err));
+      spi_link_cleanup(&link);
+      free(buf);
+    }
   } else if (cmd == "exit") {
     cli_mode = false;
     lcam_set_logging(0);
     Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
     Serial.println("Use '+++' to enter CLI mode again.");
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | spitest | exit | we N");
+    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | exit | we N");
+    Serial.println("  spireg <reg> [val]       - read/write 1-byte register (0..126)");
+    Serial.println("  spir <space> <addr> <len> [inc=1] - read bytes");
+    Serial.println("  spiw <space> <addr> <inc|len> <b0> [b1 ...] - write bytes");
     Serial.println("  exit - Return to serial forwarding mode");
   } else if (cmd.length()) {
     Serial.printf("Unknown: %s\n", cmd.c_str());
