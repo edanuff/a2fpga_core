@@ -6,10 +6,10 @@ module a2bus_stream #(
 )(
     a2bus_if.slave a2bus_if,
     
-    // ESP32 Interface  
-    output logic        esp_qclk,
-    output logic        esp_frame,
-    output logic [3:0]  esp_qdata,
+    // CAM Interface  
+    output logic        cam_pclk,
+    output logic        cam_sync,
+    output logic [3:0]  cam_data,
     
     // Control and Status
     input  logic        capture_enable,
@@ -128,21 +128,21 @@ module a2bus_stream #(
         end
     end
 
-    // Direct connection to stream serializer - no FIFO needed!
-    // Stream serializer can keep up since: 32 clocks/packet < 47+ clocks/Apple II cycle
+    // Direct connection to cam serializer - no FIFO needed!
+    // Cam serializer can keep up since: 32 clocks/packet < 47+ clocks/Apple II cycle
     
-    wire stream_busy;
-    wire packet_accepted_w = packet_valid_r & !stream_busy;
+    wire cam_busy;
+    wire packet_accepted_w = packet_valid_r & !cam_busy;
     
-    stream_serializer stream_serializer_inst (
-        .clk(a2bus_if.clk_logic),
+    cam_serializer cam_serializer_inst (
+        .clk_i(a2bus_if.clk_logic),
         .rst_n(a2bus_if.system_reset_n),
         .wr_i(packet_accepted_w),
         .data_i(packet_data_r),
-        .qclk(esp_qclk),
-        .frame(esp_frame),
-        .qdata(esp_qdata),
-        .busy(stream_busy)
+        .cam_pclk(cam_pclk),
+        .cam_sync(cam_sync),
+        .cam_data(cam_data),
+        .busy(cam_busy)
     );
 
     // Activity detection
@@ -156,11 +156,11 @@ module a2bus_stream #(
     end
 
     // Status outputs
-    assign activity_led = bus_active_r | stream_busy;
-    assign overflow_led = packet_valid_r & stream_busy;  // Packet dropped due to busy serializer
+    assign activity_led = bus_active_r | cam_busy;
+    assign overflow_led = packet_valid_r & cam_busy;  // Packet dropped due to busy serializer
     assign debug_status = {
-        stream_busy,            // [7] Stream serializer busy
-        esp_frame,              // [6] Currently transmitting (frame signal)
+        cam_busy,               // [7] CAM serializer busy
+        cam_sync,               // [6] Currently transmitting (sync signal)
         capture_enable,         // [5]
         capture_mode,           // [4:2]
         packet_valid_r,         // [1]
@@ -178,7 +178,7 @@ module a2bus_stream #(
         end else begin
             if (packet_accepted_w)
                 packets_captured_r <= packets_captured_r + 1;
-            if (packet_valid_r & stream_busy)
+            if (packet_valid_r & cam_busy)
                 packets_dropped_r <= packets_dropped_r + 1;
         end
     end
