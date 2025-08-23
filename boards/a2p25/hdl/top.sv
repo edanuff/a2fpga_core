@@ -294,39 +294,47 @@ module top #(
         .vgc_data_o(vgc_data_w)
     );
 
-    // ESP32 QSPI Protocol Generator
-
-    reg [19:0] send_counter_r;  // Reduced from 26 bits to 20 bits for faster testing
-    wire send_strobe_w = (send_counter_r == 20'd0);
-    reg send_switch_r;
-    always @(posedge clk_logic_w) begin
-        send_counter_r <= send_counter_r + 1;
-        if (send_strobe_w) begin
-            send_switch_r <= ~send_switch_r;
-        end
-    end
-    //wire [31:0] send_data_w = send_switch_r ? 32'hCAFEBABE : 32'h12345678;
-    wire [31:0] send_data_w = send_switch_r ? {i2s_sample_word[1], i2s_sample_word[0]} : 32'h12345678;
+    // Apple II Bus Stream to ESP32 CAM Interface
 
     wire [3:0] cam_data_w;
     wire cam_sync_w;
     wire cam_pclk_w;
+    wire activity_led_w;
+    wire overflow_led_w;
+    wire [7:0] debug_status_w;
 
-    cam_serializer qspi_serializer (
-        .clk_i(clk_logic_w),
-        .rst_n(system_reset_n_w),
-        .wr_i(send_strobe_w),
-        .data_i(send_data_w),
+    // Heartbeat generator for testing when Apple II bus is inactive
+    reg [23:0] heartbeat_counter_r;  
+    wire heartbeat_pulse_w = (heartbeat_counter_r == 24'd0);
+    always @(posedge clk_logic_w) begin
+        if (!system_reset_n_w) begin
+            heartbeat_counter_r <= 24'd0;
+        end else begin
+            heartbeat_counter_r <= heartbeat_counter_r + 1;
+        end
+    end
+
+    a2bus_stream #(
+        .ENABLE(1'b1)
+    ) a2bus_stream (
+        .a2bus_if(a2bus_if),
+        
         .cam_pclk(cam_pclk_w),
         .cam_sync(cam_sync_w),
         .cam_data(cam_data_w),
-        .busy()
+        
+        .capture_enable(1'b1),           // Always enabled
+        .capture_mode(3'b000),           // Capture everything
+        .heartbeat_pulse(heartbeat_pulse_w),
+        .activity_led(activity_led_w),
+        .overflow_led(overflow_led_w),
+        .debug_status(debug_status_w)
     );
 
-    // Connect QSPI signals to ESP32 pins
-    assign esp32_parl_clk = cam_pclk_w;      // SCLK
-    assign esp32_parl_frame = cam_sync_w;     // CS (note: active low)
-    assign esp32_parl_d = cam_data_w;       // 4-bit parallel data
+    // Connect CAM interface signals to ESP32 pins
+    assign esp32_parl_clk = cam_pclk_w;      // CAM PCLK
+    assign esp32_parl_frame = cam_sync_w;    // CAM SYNC 
+    assign esp32_parl_d = cam_data_w;        // CAM 4-bit parallel data
 
 
     esp32_spi_connector esp32_spi_connector (
