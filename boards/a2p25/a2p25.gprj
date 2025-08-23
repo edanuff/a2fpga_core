@@ -41,6 +41,7 @@
         <File path="../../hdl/sound/apple_speaker.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/audio_out.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/audio_timing.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sound/i2s_receiver.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/ssc/ssc_rom.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/ssc/super_serial_card.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/supersprite/supersprite.sv" type="file.verilog" enable="1"/>

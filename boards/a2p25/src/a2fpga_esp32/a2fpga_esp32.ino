@@ -81,7 +81,7 @@ bool usb_was_connected = false;
 static ES5503* g_es5503 = nullptr;
 static TaskHandle_t s_es5503_task = NULL;
 static volatile bool s_es5503_run = false;
-static const uint32_t ES5503_SAMPLE_RATE = 48000;
+static const uint32_t ES5503_SAMPLE_RATE = 44100;
 static const uint32_t ES5503_CLOCK_RATE = 7159090; // Apple IIgs clock rate
 static const size_t AUDIO_BUFFER_FRAMES = 512;
 static int16_t s_audio_buffer[AUDIO_BUFFER_FRAMES * 2]; // stereo

@@ -637,8 +637,37 @@ module top #(
     localparam AUDIO_RATE = 44100;
     localparam AUDIO_BIT_WIDTH = 16;
     wire clk_audio_w;
+	wire i2s_data_shift_strobe;
+	wire i2s_data_load_strobe;
+    audio_timing #(
+        .CLK_RATE(CLOCK_SPEED_HZ / 2),
+        .AUDIO_RATE(AUDIO_RATE)
+    ) audio_timing (
+        .reset(~device_reset_n_w),
+        .clk(clk_pixel_w),
+        .audio_clk(clk_audio_w),
+        .i2s_bclk(esp32_i2s_bclk),
+        .i2s_lrclk(esp32_i2s_lrclk),
+        .i2s_data_shift_strobe(i2s_data_shift_strobe),
+        .i2s_data_load_strobe(i2s_data_load_strobe)
+    );
+
+    wire [15:0] i2s_sample_l;
+    wire [15:0] i2s_sample_r;
+    i2s_receiver i2s_receiver (
+        .reset(~device_reset_n_w),
+        .clk(clk_pixel_w),
+
+        .i2s_bclk(esp32_i2s_bclk),
+        .i2s_lrclk(esp32_i2s_lrclk),
+        .i2s_data(esp32_i2s_data),
+        .i2s_data_shift_strobe(i2s_data_shift_strobe),
+        .i2s_data_load_strobe(i2s_data_load_strobe),
+        .i2s_sample_l(i2s_sample_l),
+        .i2s_sample_r(i2s_sample_r)
+    );
+
     wire [15:0] audio_sample_word[1:0];
-    wire [15:0] i2s_sample_word[1:0];
     audio_out #(
         .CLK_RATE(CLOCK_SPEED_HZ / 2),
         .AUDIO_RATE(AUDIO_RATE)
@@ -657,17 +686,12 @@ module top #(
         .cy2(acy2),
 
         .is_signed(1'b1),
-        .core_l(cdc_audio_l),
-        .core_r(cdc_audio_r),
+        .core_l(cdc_audio_l + i2s_sample_l),
+        .core_r(cdc_audio_r + i2s_sample_r),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
-        .audio_r(audio_sample_word[1]),
-
-        .i2s_bclk(esp32_i2s_bclk),
-        .i2s_lrclk(esp32_i2s_lrclk),
-        .i2s_data(esp32_i2s_data),
-        .i2s_sample_word(i2s_sample_word) 
+        .audio_r(audio_sample_word[1])
     );
 
     // HDMI

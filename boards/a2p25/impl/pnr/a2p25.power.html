@@ -89,7 +89,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Fri Aug 22 00:05:05 2025
+<td>Fri Aug 22 23:16:11 2025
 </td>
 </tr>
 <tr>
@@ -161,7 +161,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <table class="summary_table">
 <tr>
 <td class="label">Total Power (mW)</td>
-<td>181.438</td>
+<td>181.469</td>
 </tr>
 <tr>
 <td class="label">Quiescent Power (mW)</td>
@@ -169,14 +169,14 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Dynamic Power (mW)</td>
-<td>127.967</td>
+<td>127.998</td>
 </tr>
 </table>
 <h2><a name="Thermal_Info">Thermal Information:</a></h2>
 <table class="summary_table">
 <tr>
 <td class="label">Junction Temperature</td>
-<td>31.133</td>
+<td>31.134</td>
 </tr>
 <tr>
 <td class="label">Theta JA</td>
@@ -184,7 +184,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Max Allowed Ambient Temperature</td>
-<td>78.867</td>
+<td>78.866</td>
 </tr>
 </table>
 <h2><a name="Supply_Summary">Supply Information:</a></h2>
@@ -199,9 +199,9 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <tr>
 <td>VCC</td>
 <td>0.900</td>
-<td>134.863</td>
+<td>134.897</td>
 <td>30.015</td>
-<td>148.390</td>
+<td>148.421</td>
 </tr>
 <tr>
 <td>VCCX</td>
@@ -236,9 +236,9 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td>Logic</td>
-<td>2.691</td>
+<td>2.722</td>
 <td>NA</td>
-<td>5.422</td>
+<td>5.429</td>
 </tr>
 <tr>
 <td>IO</td>
@@ -262,7 +262,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>DSP</td>
 <td>2.092
 <td>NA</td>
-<td>2.951
+<td>2.949
 </tr>
 </table>
 <h2><a name="By_Hierarchy">Power By Hierarchy:</a></h2>
@@ -274,8 +274,16 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td>top</td>
-<td>120.467</td>
-<td>120.467(120.316)</td>
+<td>120.498</td>
+<td>120.498(120.327)</td>
+<tr>
+<td>top/a2bus_stream/</td>
+<td>0.046</td>
+<td>0.046(0.027)</td>
+<tr>
+<td>top/a2bus_stream/cam_serializer_inst/</td>
+<td>0.027</td>
+<td>0.027(0.000)</td>
 <tr>
 <td>top/apple_bus/</td>
 <td>0.012</td>
@@ -302,8 +310,8 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>11.094(0.000)</td>
 <tr>
 <td>top/apple_speaker/</td>
-<td>0.009</td>
-<td>0.009(0.000)</td>
+<td>0.010</td>
+<td>0.010(0.000)</td>
 <tr>
 <td>top/apple_video/</td>
 <td>0.199</td>
@@ -318,12 +326,12 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>0.002(0.000)</td>
 <tr>
 <td>top/audio_out/</td>
-<td>1.730</td>
-<td>1.730(1.697)</td>
+<td>1.727</td>
+<td>1.727(1.693)</td>
 <tr>
 <td>top/audio_out/IIR_filter/</td>
-<td>1.500</td>
-<td>1.500(0.276)</td>
+<td>1.501</td>
+<td>1.501(0.276)</td>
 <tr>
 <td>top/audio_out/IIR_filter/iir_tap_0/</td>
 <td>0.119</td>
@@ -337,10 +345,6 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>0.062</td>
 <td>0.062(0.000)</td>
 <tr>
-<td>top/audio_out/audio_timing/</td>
-<td>0.005</td>
-<td>0.005(0.000)</td>
-<tr>
 <td>top/audio_out/dcb_l/</td>
 <td>0.096</td>
 <td>0.096(0.000)</td>
@@ -349,25 +353,29 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>0.096</td>
 <td>0.096(0.000)</td>
 <tr>
+<td>top/audio_timing/</td>
+<td>0.005</td>
+<td>0.005(0.000)</td>
+<tr>
 <td>top/cdc_phi1/</td>
 <td>0.001</td>
 <td>0.001(0.000)</td>
 <tr>
 <td>top/debug_overlay/</td>
-<td>0.041</td>
-<td>0.041(0.000)</td>
+<td>0.038</td>
+<td>0.038(0.000)</td>
 <tr>
 <td>top/esp32_spi_connector/</td>
 <td>2.873</td>
-<td>2.873(0.067)</td>
+<td>2.873(0.066)</td>
 <tr>
 <td>top/esp32_spi_connector/proto/</td>
-<td>0.067</td>
-<td>0.067(0.000)</td>
+<td>0.066</td>
+<td>0.066(0.000)</td>
 <tr>
 <td>top/hdmi/</td>
-<td>0.180</td>
-<td>0.180(0.163)</td>
+<td>0.178</td>
+<td>0.178(0.160)</td>
 <tr>
 <td>top/hdmi/tmds_gen[0].tmds_channel/</td>
 <td>0.018</td>
@@ -382,8 +390,8 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>0.017(0.000)</td>
 <tr>
 <td>top/hdmi/true_hdmi_output.packet_assembler/</td>
-<td>0.040</td>
-<td>0.040(0.000)</td>
+<td>0.037</td>
+<td>0.037(0.000)</td>
 <tr>
 <td>top/hdmi/true_hdmi_output.packet_picker/</td>
 <td>0.071</td>
@@ -393,29 +401,29 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>0.017</td>
 <td>0.017(0.000)</td>
 <tr>
+<td>top/i2s_receiver/</td>
+<td>0.003</td>
+<td>0.003(0.000)</td>
+<tr>
 <td>top/mockingboard/</td>
-<td>0.393</td>
-<td>0.393(0.392)</td>
+<td>0.390</td>
+<td>0.390(0.389)</td>
 <tr>
 <td>top/mockingboard/m6522_left/</td>
 <td>0.073</td>
 <td>0.073(0.000)</td>
 <tr>
 <td>top/mockingboard/m6522_right/</td>
-<td>0.074</td>
-<td>0.074(0.000)</td>
+<td>0.073</td>
+<td>0.073(0.000)</td>
 <tr>
 <td>top/mockingboard/psg_left/</td>
-<td>0.121</td>
-<td>0.121(0.000)</td>
+<td>0.122</td>
+<td>0.122(0.000)</td>
 <tr>
 <td>top/mockingboard/psg_right/</td>
-<td>0.124</td>
-<td>0.124(0.000)</td>
-<tr>
-<td>top/qspi_serializer/</td>
-<td>0.028</td>
-<td>0.028(0.000)</td>
+<td>0.121</td>
+<td>0.121(0.000)</td>
 <tr>
 <td>top/slotmaker/</td>
 <td>0.004</td>
@@ -442,20 +450,20 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>0.250(0.000)</td>
 <tr>
 <td>top/supersprite/</td>
-<td>21.076</td>
-<td>21.076(21.047)</td>
+<td>21.073</td>
+<td>21.073(21.044)</td>
 <tr>
 <td>top/supersprite/ssp_psg/</td>
 <td>0.121</td>
 <td>0.121(0.000)</td>
 <tr>
 <td>top/supersprite/vdp/</td>
-<td>20.926</td>
-<td>20.926(20.926)</td>
+<td>20.923</td>
+<td>20.923(20.923)</td>
 <tr>
 <td>top/supersprite/vdp/f18a_core/</td>
-<td>20.926</td>
-<td>20.926(20.925)</td>
+<td>20.923</td>
+<td>20.923(20.922)</td>
 <tr>
 <td>top/supersprite/vdp/f18a_core/inst_color/</td>
 <td>0.175</td>
@@ -466,16 +474,16 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>0.022(0.000)</td>
 <tr>
 <td>top/supersprite/vdp/f18a_core/inst_cpu/</td>
-<td>0.213</td>
-<td>0.213(0.000)</td>
+<td>0.211</td>
+<td>0.211(0.000)</td>
 <tr>
 <td>top/supersprite/vdp/f18a_core/inst_sprites/</td>
 <td>3.074</td>
 <td>3.074(0.000)</td>
 <tr>
 <td>top/supersprite/vdp/f18a_core/inst_tiles/</td>
-<td>6.746</td>
-<td>6.746(5.547)</td>
+<td>6.745</td>
+<td>6.745(5.547)</td>
 <tr>
 <td>top/supersprite/vdp/f18a_core/inst_tiles/inst_linebuf/</td>
 <td>5.547</td>
@@ -498,16 +506,16 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>1.476(0.000)</td>
 <tr>
 <td>top/your_instance_name/</td>
-<td>16.601</td>
-<td>16.601(16.601)</td>
+<td>16.600</td>
+<td>16.600(16.600)</td>
 <tr>
 <td>top/your_instance_name/u_pll/</td>
 <td>16.282</td>
 <td>16.282(0.000)</td>
 <tr>
 <td>top/your_instance_name/u_pll_init/</td>
-<td>0.319</td>
-<td>0.319(0.000)</td>
+<td>0.318</td>
+<td>0.318(0.000)</td>
 </table>
 <h2><a name="By_Clock_Domain">Power By Clock Domain:</a></h2>
 <table class="detail_table">
@@ -519,17 +527,17 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <tr>
 <td>clk_logic</td>
 <td>54.000</td>
-<td>100.200</td>
+<td>100.215</td>
 </tr>
 <tr>
 <td>clk_pixel</td>
 <td>27.000</td>
-<td>3.667</td>
+<td>3.683</td>
 </tr>
 <tr>
 <td>clk</td>
 <td>50.000</td>
-<td>16.601</td>
+<td>16.600</td>
 </tr>
 <tr>
 <td>NO CLOCK DOMAIN</td>
