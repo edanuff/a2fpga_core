@@ -26,6 +26,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include "driver/i2s_std.h"
+#include "es5503.h"
 
 // ---------- Build-time options ----------
 #define USE_GDMA_ISR         0   // keep 0 unless your core exposes a reliable GDMA IRQ
@@ -76,26 +77,52 @@ const int PIN_I2S_DATA = 33;
 
 bool usb_was_connected = false;
 
-// ---------- I2S (slave TX test pattern, 16-bit stereo) ----------
+// ---------- ES5503 Sound Chip ----------
+static ES5503* g_es5503 = nullptr;
+static TaskHandle_t s_es5503_task = NULL;
+static volatile bool s_es5503_run = false;
+static const uint32_t ES5503_SAMPLE_RATE = 48000;
+static const uint32_t ES5503_CLOCK_RATE = 7159090; // Apple IIgs clock rate
+static const size_t AUDIO_BUFFER_FRAMES = 512;
+static int16_t s_audio_buffer[AUDIO_BUFFER_FRAMES * 2]; // stereo
+
+// ES5503 audio generation task
+static void es5503_audio_task(void *arg) {
+  const TickType_t xFrequency = pdMS_TO_TICKS(1000 / (ES5503_SAMPLE_RATE / AUDIO_BUFFER_FRAMES));
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  
+  while (s_es5503_run && g_es5503) {
+    // Generate audio samples
+    g_es5503->generate_audio(s_audio_buffer, AUDIO_BUFFER_FRAMES);
+    
+    // Wait for next audio generation cycle
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
+  }
+  vTaskDelete(NULL);
+}
+
+// ---------- I2S (slave TX for ES5503 audio, 16-bit stereo) ----------
 static i2s_chan_handle_t s_i2s_tx = NULL;
 static TaskHandle_t s_i2s_task = NULL;
 static volatile bool s_i2s_run = false;
 
 static void i2s_tx_task(void *arg) {
-  // Prepare a small buffer of stereo 16-bit frames: L=0xCAFE, R=0xBABE
-  const size_t frames = 512; // number of stereo frames per write
-  static uint16_t buf[frames * 2];
-  for (size_t i = 0; i < frames; ++i) {
-    buf[2*i+0] = 0xCAFE; // Left
-    buf[2*i+1] = 0xBABE; // Right
-  }
   while (s_i2s_run) {
     size_t written = 0;
-    // Short timeout to avoid hogging CPU if clocks/DMA not ready
-    esp_err_t err = i2s_channel_write(s_i2s_tx, buf, sizeof(buf), &written, pdMS_TO_TICKS(10));
-    if (err != ESP_OK) {
-      // Brief delay to avoid tight loop on error (e.g., no external clocks yet)
-      vTaskDelay(pdMS_TO_TICKS(5));
+    // Use ES5503 audio buffer if available, otherwise silence
+    if (g_es5503 && s_es5503_run) {
+      esp_err_t err = i2s_channel_write(s_i2s_tx, s_audio_buffer, sizeof(s_audio_buffer), &written, pdMS_TO_TICKS(10));
+      if (err != ESP_OK) {
+        // Brief delay to avoid tight loop on error (e.g., no external clocks yet)
+        vTaskDelay(pdMS_TO_TICKS(5));
+      }
+    } else {
+      // Send silence if ES5503 not running
+      static int16_t silence_buffer[AUDIO_BUFFER_FRAMES * 2] = {0};
+      esp_err_t err = i2s_channel_write(s_i2s_tx, silence_buffer, sizeof(silence_buffer), &written, pdMS_TO_TICKS(10));
+      if (err != ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+      }
     }
     // Yield periodically to avoid starving other tasks (LCD_CAM)
     taskYIELD();
@@ -179,6 +206,101 @@ static void i2s_tx_stop() {
     i2s_channel_disable(s_i2s_tx);
     i2s_del_channel(s_i2s_tx);
     s_i2s_tx = NULL;
+  }
+}
+
+// ---------- ES5503 Control Functions ----------
+static esp_err_t es5503_init() {
+  if (g_es5503) return ESP_OK;  // Already initialized
+  
+  // Show memory info before allocation
+  size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  
+  g_es5503 = ES5503::create_with_memory(ES5503_CLOCK_RATE);
+  if (!g_es5503) {
+    Serial.println("Failed to create ES5503 instance");
+    return ESP_ERR_NO_MEM;
+  }
+  
+  g_es5503->set_channels(2);  // Stereo output
+  
+  // Show where memory was allocated
+  size_t psram_free_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  size_t internal_free_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  
+  Serial.println("ES5503 initialized with 65536 bytes wave memory");
+  if (psram_free != psram_free_after) {
+    Serial.printf("Wave memory allocated in PSRAM (%d bytes used)\n", (int)(psram_free - psram_free_after));
+  } else if (internal_free != internal_free_after) {
+    Serial.printf("Wave memory allocated in internal RAM (%d bytes used)\n", (int)(internal_free - internal_free_after));
+  }
+  
+  return ESP_OK;
+}
+
+static esp_err_t es5503_start() {
+  esp_err_t err = es5503_init();
+  if (err != ESP_OK) return err;
+  
+  s_es5503_run = true;
+  if (!s_es5503_task) {
+    BaseType_t ok = xTaskCreatePinnedToCore(es5503_audio_task, "es5503_audio", 8192, NULL, 5, &s_es5503_task, 0);
+    if (ok != pdPASS) return ESP_ERR_NO_MEM;
+  }
+  
+  Serial.println("ES5503 audio generation started");
+  return ESP_OK;
+}
+
+static void es5503_stop() {
+  s_es5503_run = false;
+  if (s_es5503_task) { vTaskDelay(1); s_es5503_task = NULL; }
+  Serial.println("ES5503 audio generation stopped");
+}
+
+static void es5503_cleanup() {
+  es5503_stop();
+  if (g_es5503) {
+    delete g_es5503;
+    g_es5503 = nullptr;
+    Serial.println("ES5503 cleaned up");
+  }
+}
+
+// Handle ES5503 register write from bus packet
+static void handle_es5503_write(uint16_t address, uint8_t data) {
+  if (!g_es5503) return;
+  
+  // Convert Apple IIgs address to ES5503 register offset
+  // Apple IIgs ES5503 is mapped at $C000-$C03F
+  if (address >= 0xC000 && address <= 0xC03F) {
+    uint16_t reg_offset = address - 0xC000;
+    g_es5503->write(reg_offset, data);
+    
+    // Optional: Log ES5503 register writes (enable for debugging)
+    if (false) {  // Set to true for debugging
+      Serial.printf("ES5503[0x%02X] <= 0x%02X (addr=0x%04X)\n", reg_offset, data, address);
+    }
+  }
+}
+
+// Process bus packet from FPGA
+void process_bus_packet(uint32_t packet) {
+  // Decode packet: [ADDR:16][DATA:8][FLAGS:8]
+  uint16_t address = (packet >> 16) & 0xFFFF;
+  uint8_t data = (packet >> 8) & 0xFF;
+  uint8_t flags = packet & 0xFF;
+  
+  bool rw_n = (flags >> 7) & 1;      // Read/Write (1=read, 0=write)
+  bool reset_indicator = flags & 1;   // Reset packet indicator
+  
+  // Skip reset packets and read operations
+  if (reset_indicator || rw_n) return;
+  
+  // Check if this is an ES5503 write
+  if (address >= 0xC000 && address <= 0xC03F) {
+    handle_es5503_write(address, data);
   }
 }
 
@@ -389,18 +511,133 @@ static void cmd_process(String cmd) {
   } else if (cmd == "i2sstop") {
     i2s_tx_stop();
     Serial.println("I2S stopped");
+  } else if (cmd == "es5503start") {
+    esp_err_t err = es5503_start();
+    if (err == ESP_OK) {
+      Serial.println("ES5503 started");
+    } else {
+      Serial.printf("ES5503 start failed: %s\n", esp_err_to_name(err));
+    }
+  } else if (cmd == "es5503stop") {
+    es5503_stop();
+  } else if (cmd == "es5503test") {
+    // Test ES5503 by writing some basic register values
+    if (!g_es5503) {
+      Serial.println("ES5503 not initialized. Use 'es5503start' first.");
+    } else {
+      Serial.println("Testing ES5503 - writing test oscillator settings...");
+      // Set up oscillator 0 with a basic tone
+      g_es5503->write(0x00, 0x00);    // freq lo = 0
+      g_es5503->write(0x20, 0x10);    // freq hi = 0x1000 (moderate frequency)
+      g_es5503->write(0x40, 0x80);    // volume = 0x80 (medium)
+      g_es5503->write(0x80, 0x00);    // wavetable pointer = 0x0000
+      g_es5503->write(0xC0, 0x00);    // wavetable size = 256, resolution = 0
+      g_es5503->write(0xA0, 0x00);    // control = 0x00 (start oscillator, channel 0)
+      g_es5503->write(0xE1, 0x00);    // enable 1 oscillator
+      Serial.println("ES5503 test registers written. Should hear audio if I2S is running.");
+    }
+  } else if (cmd.startsWith("es5503reg ")) {
+    // Direct ES5503 register access: es5503reg <reg> [value]
+    String toks[16]; int nt = split_ws(cmd, toks, 16);
+    if (!g_es5503) {
+      Serial.println("ES5503 not initialized. Use 'es5503start' first.");
+    } else if (nt < 2) {
+      Serial.println("Usage: es5503reg <reg> [value]");
+    } else {
+      uint32_t reg; if (!parse_u32(toks[1], reg) || reg > 0xFF) {
+        Serial.println("es5503reg: invalid <reg> (0..255)");
+      } else if (nt == 2) {
+        uint8_t val = g_es5503->read((uint16_t)reg);
+        Serial.printf("ES5503[0x%02X] -> 0x%02X\n", (unsigned)reg, val);
+      } else {
+        uint32_t v; if (!parse_u32(toks[2], v) || v > 0xFF) {
+          Serial.println("es5503reg: invalid <value> (0..255)");
+        } else {
+          g_es5503->write((uint16_t)reg, (uint8_t)v);
+          Serial.printf("ES5503[0x%02X] <= 0x%02X\n", (unsigned)reg, (unsigned)v);
+        }
+      }
+    }
+  } else if (cmd == "es5503debug") {
+    // Toggle ES5503 register write debugging
+    if (!g_es5503) {
+      Serial.println("ES5503 not initialized. Use 'es5503start' first.");
+    } else {
+      // This would need to be implemented by modifying the debug flag in handle_es5503_write
+      Serial.println("ES5503 debug toggle - modify handle_es5503_write() debug flag");
+    }
+  } else if (cmd == "fulltest") {
+    // Full audio pipeline test
+    Serial.println("Starting full ES5503 audio pipeline test...");
+    
+    // Initialize ES5503
+    esp_err_t err = es5503_start();
+    if (err != ESP_OK) {
+      Serial.printf("ES5503 start failed: %s\n", esp_err_to_name(err));
+      return;
+    }
+    Serial.println("ES5503 started");
+    
+    // Start I2S
+    err = i2s_tx_start();
+    if (err != ESP_OK) {
+      Serial.printf("I2S start failed: %s\n", esp_err_to_name(err));
+      return;
+    }
+    Serial.println("I2S started");
+    
+    // Write test ES5503 settings
+    Serial.println("Writing ES5503 test configuration...");
+    g_es5503->write(0x00, 0x00);    // freq lo = 0
+    g_es5503->write(0x20, 0x10);    // freq hi = 0x1000 (moderate frequency)
+    g_es5503->write(0x40, 0x80);    // volume = 0x80 (medium)
+    g_es5503->write(0x80, 0x00);    // wavetable pointer = 0x0000
+    g_es5503->write(0xC0, 0x00);    // wavetable size = 256, resolution = 0
+    g_es5503->write(0xA0, 0x00);    // control = 0x00 (start oscillator, channel 0)
+    g_es5503->write(0xE1, 0x00);    // enable 1 oscillator
+    
+    Serial.println("Full audio pipeline test complete. You should hear ES5503 audio if FPGA I2S clocks are present.");
+    Serial.println("Use 'lcam' to start bus capture if not already running.");
+    Serial.println("Set capture mode 7 (ES5503 only) for optimal ES5503 bus capture.");
+  } else if (cmd == "meminfo") {
+    // Show memory allocation information
+    size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t internal_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    
+    Serial.printf("Memory Information:\n");
+    Serial.printf("  PSRAM:    %d / %d bytes free (%.1f%% used)\n", 
+                  (int)psram_free, (int)psram_total, 
+                  100.0 * (psram_total - psram_free) / psram_total);
+    Serial.printf("  Internal: %d / %d bytes free (%.1f%% used)\n", 
+                  (int)internal_free, (int)internal_total,
+                  100.0 * (internal_total - internal_free) / internal_total);
+    
+    if (g_es5503) {
+      Serial.println("  ES5503 wave memory: 65536 bytes allocated");
+    } else {
+      Serial.println("  ES5503 not initialized");
+    }
   } else if (cmd == "exit") {
     cli_mode = false;
     lcam_set_logging(0);
     Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
     Serial.println("Use '+++' to enter CLI mode again.");
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | exit | we N");
-    Serial.println("  spireg <reg> [val]       - read/write 1-byte register (0..126)");
+    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | es5503start | es5503stop | es5503test | es5503reg | es5503debug | fulltest | meminfo | exit | we N");
+    Serial.println("  spireg <reg> [val]        - read/write 1-byte register (0..126)");
     Serial.println("  spir <space> <addr> <len> [inc=1] - read bytes");
     Serial.println("  spiw <space> <addr> <inc|len> <b0> [b1 ...] - write bytes");
-    Serial.println("  i2sstart                  - start I2S slave-TX (ext BCLK/WS) sending L=0xCA, R=0xFE");
+    Serial.println("  i2sstart                  - start I2S slave-TX (ext BCLK/WS)");
     Serial.println("  i2sstop                   - stop I2S output");
+    Serial.println("  es5503start               - initialize and start ES5503 audio generation");
+    Serial.println("  es5503stop                - stop ES5503 audio generation");
+    Serial.println("  es5503test                - write test registers to ES5503");
+    Serial.println("  es5503reg <reg> [val]     - read/write ES5503 register");
+    Serial.println("  es5503debug               - toggle ES5503 register write debugging");
+    Serial.println("  fulltest                  - complete ES5503 audio pipeline test");
+    Serial.println("  meminfo                   - show PSRAM and internal memory usage");
     Serial.println("  exit - Return to serial forwarding mode");
   } else if (cmd.length()) {
     Serial.printf("Unknown: %s\n", cmd.c_str());
@@ -458,9 +695,10 @@ void setup() {
   Serial.begin(115200);
   Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD); // hardware serial
   delay(300);
-  Serial.printf("A2FPGA ESP32-S3 Firmware (%s %s)\n", __DATE__, __TIME__);
+  Serial.printf("A2FPGA ESP32-S3 Firmware (%s %s) with ES5503 Audio\n", __DATE__, __TIME__);
 
   Serial.println("Serial forwarding mode active. Use '+++' to enter CLI mode.");
+  Serial.println("ES5503 Ensoniq DOC emulation integrated.");
   
   // Initialize in forwarding mode
   cli_mode = false;
@@ -478,6 +716,9 @@ void setup() {
   #if AUTOSTART
   lcam_start();
   #endif
+  
+  // Note: ES5503 will be initialized when first used via CLI commands
+  // or when bus packets are received that require ES5503 processing
 }
 
 void loop() {

@@ -1,4 +1,6 @@
 #include "a2fpga_lcam.h"
+// Forward declaration for bus packet processing
+extern void process_bus_packet(uint32_t packet);
 #include "driver/gpio.h"
 #include "driver/periph_ctrl.h"
 #include "esp_heap_caps.h"
@@ -335,7 +337,9 @@ static void packet_task(void*){
       if ((s_log_level > 0) && (local_count % word_print_every) == 0) {
         Serial.printf("LCD_CAM word[%lu]=0x%08X\n", (unsigned long)words_seen, w);
       }
-      // TODO: your real processing here
+      
+      // Process bus packet for ES5503 and other functionality
+      process_bus_packet(w);
     } else {
       vTaskDelay(1);
     }

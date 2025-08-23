@@ -14,6 +14,12 @@ public:
     // Construction
     ES5503(uint32_t clock_rate, uint8_t *wave_memory, uint32_t memory_size);
     
+    // Static factory method to create ES5503 with allocated wave memory
+    static ES5503* create_with_memory(uint32_t clock_rate, uint32_t memory_size = 65536);
+    
+    // Destructor to free wave memory if allocated internally
+    ~ES5503();
+    
     // Set number of output channels (must be a power of 2)
     void set_channels(int channels);
     
@@ -93,6 +99,7 @@ private:
     
     uint8_t *m_wave_memory;
     uint32_t m_memory_size;
+    bool m_memory_allocated;  // Track if we need to free memory
     
     // Constants
     static const uint16_t wavesizes[8];

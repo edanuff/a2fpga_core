@@ -1,7 +1,7 @@
 #include "es5503.h"
 #include <algorithm>
 #include <cstring>
-#include <iostream>
+#include "esp_heap_caps.h"
 
 // ES5503 - Standalone DOC implementation based on MAME's ES5503 emulator
 // Adapted from MAME's ES5503 implementation by R. Belmont
@@ -21,7 +21,8 @@ ES5503::ES5503(uint32_t clock_rate, uint8_t *wave_memory, uint32_t memory_size) 
     m_clock_rate(clock_rate),
     m_irq_active(false),
     m_wave_memory(wave_memory),
-    m_memory_size(memory_size)
+    m_memory_size(memory_size),
+    m_memory_allocated(false)
 {
     // Initialize oscillators
     reset();
@@ -31,6 +32,50 @@ ES5503::ES5503(uint32_t clock_rate, uint8_t *wave_memory, uint32_t memory_size) 
     
     // Allocate mix buffer (1/50th of a second at maximum)
     m_mix_buffer.resize((m_output_rate/50) * m_output_channels);
+}
+
+// Static factory method to create ES5503 with allocated wave memory
+ES5503* ES5503::create_with_memory(uint32_t clock_rate, uint32_t memory_size)
+{
+    // Allocate wave memory in PSRAM for large buffers
+    uint8_t* wave_memory = nullptr;
+    if (memory_size > 32768) {  // Use PSRAM for buffers larger than 32KB
+        wave_memory = (uint8_t*)heap_caps_malloc(memory_size, MALLOC_CAP_SPIRAM);
+        if (!wave_memory) {
+            // Fallback to internal RAM if PSRAM allocation fails
+            wave_memory = (uint8_t*)heap_caps_malloc(memory_size, MALLOC_CAP_INTERNAL);
+        }
+    } else {
+        // Use internal RAM for smaller buffers
+        wave_memory = (uint8_t*)heap_caps_malloc(memory_size, MALLOC_CAP_INTERNAL);
+    }
+    
+    if (!wave_memory) {
+        return nullptr;
+    }
+    
+    // Initialize wave memory with a simple test pattern
+    // This creates a basic sawtooth wave pattern
+    for (uint32_t i = 0; i < memory_size; i++) {
+        wave_memory[i] = (uint8_t)(i & 0xFF);
+    }
+    
+    ES5503* es5503 = new ES5503(clock_rate, wave_memory, memory_size);
+    if (es5503) {
+        es5503->m_memory_allocated = true;
+    } else {
+        heap_caps_free(wave_memory);
+    }
+    
+    return es5503;
+}
+
+// Destructor
+ES5503::~ES5503()
+{
+    if (m_memory_allocated && m_wave_memory) {
+        heap_caps_free(m_wave_memory);
+    }
 }
 
 // Set number of output channels
@@ -260,12 +305,6 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
     int osc, snum, i;
     uint32_t ramptr;
 
-    // Debug output
-    std::cout << "** ES5503::update_stream **" << std::endl;
-    std::cout << "Oscillators enabled: " << (int)m_oscsenabled << std::endl;
-    std::cout << "Output channels: " << m_output_channels << std::endl;
-    std::cout << "Number of samples to generate: " << num_samples << std::endl;
-
     // Make sure we have a big enough buffer
     if (num_samples * m_output_channels > (int)m_mix_buffer.size())
     {
@@ -277,18 +316,12 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
 
     for (int chan = 0; chan < m_output_channels; chan++)
     {
-        std::cout << "Processing channel " << chan << std::endl;
-        
         for (osc = 0; osc < m_oscsenabled; osc++)
         {
             ES5503Osc *pOsc = &m_oscillators[osc];
-            std::cout << "  Oscillator " << osc << ": control=0x" << std::hex << (int)pOsc->control 
-                      << " channel=" << ((pOsc->control >> 4) & 0xF) 
-                      << " halted=" << ((pOsc->control & 1) ? "yes" : "no") << std::dec << std::endl;
 
             if (!(pOsc->control & 1) && ((pOsc->control >> 4) & (m_output_channels - 1)) == chan)
             {
-                std::cout << "  Oscillator " << osc << " active for channel " << chan << std::endl;
                 uint32_t wtptr = pOsc->wavetblpointer & wavemasks[pOsc->wavetblsize], altram;
                 uint32_t acc = pOsc->accumulator;
                 const uint16_t wtsize = pOsc->wtsize - 1;
@@ -315,9 +348,6 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
                     uint8_t byte_value = read_byte(ramptr + wtptr);
                     if (byte_value == 0x00)
                     {
-                        std::cout << "    HALTING oscillator " << osc << " - found zero byte at address 0x" 
-                                  << std::hex << (ramptr + wtptr) << std::dec
-                                  << " (sample " << snum << ")" << std::endl;
                         halt_osc(osc, 1, &acc, resshift);
                     }
                     else
@@ -325,12 +355,6 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
                         if (mode != MODE_SYNCAM)
                         {
                             int value = data * vol;
-                            // Only log a few samples to avoid console spam
-                            if (snum < 10) {
-                                std::cout << "    Sample " << snum << ": data=" << (int)data 
-                                      << " vol=" << (int)vol << " value=" << value << std::endl;
-                            }
-                            
                             *mixp += value;
                             if (chan == (m_output_channels - 1))
                             {
@@ -386,8 +410,6 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
     }
 
     // Copy mix buffer to output buffer with appropriate scaling
-    std::cout << "Copying mix buffer to output (first 10 samples):" << std::endl;
-    
     for (int chan = 0; chan < m_output_channels; chan++)
     {
         mixp = &m_mix_buffer[0] + chan;
@@ -397,10 +419,6 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
             int32_t value = *mixp;
             int16_t scaled = (value * 8) >> 8;
             buffer[i * m_output_channels + chan] = scaled;
-            
-            if (i < 10) {
-                std::cout << "  Sample " << i << ": mix=" << value << " scaled=" << scaled << std::endl;
-            }
             
             mixp += m_output_channels;
         }
