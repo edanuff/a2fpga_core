@@ -520,6 +520,30 @@ static void cmd_process(String cmd) {
     }
   } else if (cmd == "es5503stop") {
     es5503_stop();
+  } else if (cmd == "audiostop") {
+    // Stop all audio generation by disabling all oscillators
+    if (!g_es5503) {
+      Serial.println("ES5503 not initialized. Use 'es5503start' first.");
+    } else {
+      g_es5503->write(0xE0, 0x00);  // Disable all oscillators globally
+      Serial.println("All ES5503 audio generation stopped (all oscillators disabled)");
+    }
+  } else if (cmd.startsWith("audiostart ")) {
+    // Enable audio generation with specified number of oscillators
+    String toks[16]; int nt = split_ws(cmd, toks, 16);
+    if (!g_es5503) {
+      Serial.println("ES5503 not initialized. Use 'es5503start' first.");
+    } else if (nt < 2) {
+      Serial.println("Usage: audiostart <num_oscillators> (1-32)");
+    } else {
+      long num_oscs = toks[1].toInt();
+      if (num_oscs < 1 || num_oscs > 32) {
+        Serial.println("Number of oscillators must be 1-32");
+      } else {
+        g_es5503->write(0xE0, (uint8_t)(num_oscs - 1));  // E0 register: num_oscs - 1
+        Serial.printf("ES5503 audio enabled with %ld oscillators\n", num_oscs);
+      }
+    }
   } else if (cmd == "es5503test") {
     // Test ES5503 by writing some basic register values
     if (!g_es5503) {
@@ -625,7 +649,7 @@ static void cmd_process(String cmd) {
     Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
     Serial.println("Use '+++' to enter CLI mode again.");
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | es5503start | es5503stop | es5503test | es5503reg | es5503debug | fulltest | meminfo | exit | we N");
+    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | es5503start | es5503stop | audiostop | audiostart | es5503test | es5503reg | es5503debug | fulltest | meminfo | exit | we N");
     Serial.println("  spireg <reg> [val]        - read/write 1-byte register (0..126)");
     Serial.println("  spir <space> <addr> <len> [inc=1] - read bytes");
     Serial.println("  spiw <space> <addr> <inc|len> <b0> [b1 ...] - write bytes");
@@ -633,6 +657,8 @@ static void cmd_process(String cmd) {
     Serial.println("  i2sstop                   - stop I2S output");
     Serial.println("  es5503start               - initialize and start ES5503 audio generation");
     Serial.println("  es5503stop                - stop ES5503 audio generation");
+    Serial.println("  audiostop                 - immediately silence all ES5503 audio (disable all oscillators)");
+    Serial.println("  audiostart <num>          - enable ES5503 audio with specified number of oscillators (1-32)");
     Serial.println("  es5503test                - write test registers to ES5503");
     Serial.println("  es5503reg <reg> [val]     - read/write ES5503 register");
     Serial.println("  es5503debug               - toggle ES5503 register write debugging");

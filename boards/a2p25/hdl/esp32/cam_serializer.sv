@@ -1,5 +1,5 @@
 module cam_serializer #(
-    parameter COUNT_WIDTH = 8
+    parameter COUNT_WIDTH = 2
 ) (
     input         clk_i,
     input         rst_n,

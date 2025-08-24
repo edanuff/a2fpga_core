@@ -20,6 +20,7 @@
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
+    parameter int PIXEL_SPEED_HZ = CLOCK_SPEED_HZ / 2,
     parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
 
     parameter bit SCANLINES_ENABLE = 0,
@@ -36,6 +37,7 @@ module top #(
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
+    parameter int GS = 0,                       // Apple IIgs mode
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
@@ -236,6 +238,7 @@ module top #(
     );
 
     apple_bus #(
+        .GS(GS),
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ)
     ) apple_bus (
         .a2bus_if(a2bus_if),
@@ -324,7 +327,7 @@ module top #(
         .cam_data(cam_data_w),
         
         .capture_enable(1'b1),           // Always enabled
-        .capture_mode(3'b000),           // Capture everything
+        .capture_mode(3'b111),           // Capture everything
         .heartbeat_pulse(heartbeat_pulse_w),
         .activity_led(activity_led_w),
         .overflow_led(overflow_led_w),
@@ -640,7 +643,7 @@ module top #(
 	wire i2s_data_shift_strobe;
 	wire i2s_data_load_strobe;
     audio_timing #(
-        .CLK_RATE(CLOCK_SPEED_HZ / 2),
+        .CLK_RATE(PIXEL_SPEED_HZ),
         .AUDIO_RATE(AUDIO_RATE)
     ) audio_timing (
         .reset(~device_reset_n_w),
@@ -652,8 +655,8 @@ module top #(
         .i2s_data_load_strobe(i2s_data_load_strobe)
     );
 
-    wire [15:0] i2s_sample_l;
-    wire [15:0] i2s_sample_r;
+    wire signed [15:0] i2s_sample_l;
+    wire signed [15:0] i2s_sample_r;
     i2s_receiver i2s_receiver (
         .reset(~device_reset_n_w),
         .clk(clk_pixel_w),
@@ -667,9 +670,13 @@ module top #(
         .i2s_sample_r(i2s_sample_r)
     );
 
+    wire signed [15:0] out_audio_l_w = $signed(cdc_audio_l) /* + i2s_sample_l */;
+    wire signed [15:0] out_audio_r_w = $signed(cdc_audio_r) /* + i2s_sample_r */;
+
     wire [15:0] audio_sample_word[1:0];
+    /*
     audio_out #(
-        .CLK_RATE(CLOCK_SPEED_HZ / 2),
+        .CLK_RATE(PIXEL_SPEED_HZ),
         .AUDIO_RATE(AUDIO_RATE)
     ) audio_out
     (
@@ -686,13 +693,16 @@ module top #(
         .cy2(acy2),
 
         .is_signed(1'b1),
-        .core_l(cdc_audio_l + i2s_sample_l),
-        .core_r(cdc_audio_r + i2s_sample_r),
+        .core_l(out_audio_l_w),
+        .core_r(out_audio_r_w),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
         .audio_r(audio_sample_word[1])
     );
+    */
+    assign audio_sample_word[0] = cdc_audio_l;
+    assign audio_sample_word[1] = cdc_audio_r;
 
     // HDMI
 

@@ -8,8 +8,8 @@ module i2s_receiver
 	input i2s_data,
     input i2s_data_shift_strobe,
     input i2s_data_load_strobe,
-	output [15:0] i2s_sample_l,
-	output [15:0] i2s_sample_r
+	output signed [15:0] i2s_sample_l,
+	output signed [15:0] i2s_sample_r
 );
 
 	reg [15:0] data_shift  = 16'h0000;

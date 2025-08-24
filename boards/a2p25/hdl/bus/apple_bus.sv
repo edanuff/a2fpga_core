@@ -25,6 +25,7 @@
 //
 
 module apple_bus #(
+    parameter int GS = 0,
     parameter int CLOCK_SPEED_HZ = 50_000_000,
     parameter int APPLE_HZ = 14_318_181,
     parameter int CPU_HZ = APPLE_HZ / 14,                   // 1_022_727
@@ -75,7 +76,7 @@ module apple_bus #(
     assign a2bus_if.data = data_r;
     assign a2bus_if.rw_n = rw_n_r;
 
-    assign a2bus_if.sw_gs = 1'b0;
+    assign a2bus_if.sw_gs = GS;
     assign a2bus_if.m2sel_n = a2bus_if.sw_gs ? a2_m2sel_n : 1'b0; 
 
     reg m2b0_r;

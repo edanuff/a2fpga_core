@@ -32,7 +32,7 @@ module a2bus_stream #(
     wire is_hires_page_w = (a2bus_if.addr[15:13] == 3'b001);       // $2000-$3FFF
     wire is_rom_access_w = (a2bus_if.addr[15:12] >= 4'hD);         // $D000-$FFFF
     wire is_speaker_w = (a2bus_if.addr == 16'hC030);               // Speaker
-    wire is_es5503_w = (a2bus_if.addr[15:6] == 10'b1100_0000_00);  // $C000-$C03F (ES5503)
+    wire is_es5503_w = (a2bus_if.addr[15:2] == 14'b1100_0000_0011_11);  // $C03C-$C03F (ES5503)
     
     // Capture mode filtering
     reg capture_this_cycle;

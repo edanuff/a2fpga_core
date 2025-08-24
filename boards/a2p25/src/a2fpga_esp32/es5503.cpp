@@ -54,11 +54,8 @@ ES5503* ES5503::create_with_memory(uint32_t clock_rate, uint32_t memory_size)
         return nullptr;
     }
     
-    // Initialize wave memory with a simple test pattern
-    // This creates a basic sawtooth wave pattern
-    for (uint32_t i = 0; i < memory_size; i++) {
-        wave_memory[i] = (uint8_t)(i & 0xFF);
-    }
+    // Initialize wave memory to zero for silent startup
+    memset(wave_memory, 0, memory_size);
     
     ES5503* es5503 = new ES5503(clock_rate, wave_memory, memory_size);
     if (es5503) {
