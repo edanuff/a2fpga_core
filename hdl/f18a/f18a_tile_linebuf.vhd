@@ -114,9 +114,9 @@ begin
          if we1 = '1' then
             linebuf1(to_integer(unsigned(addr1))) <= din1;
          end if;
+         dout1 <= linebuf1(to_integer(unsigned(addr1)));
       end if;
    end process;
-   dout1 <= linebuf1(to_integer(unsigned(addr1)));
 
    -- Line buffer 2
    process (clk)
@@ -125,8 +125,8 @@ begin
          if we2 = '1' then
             linebuf2(to_integer(unsigned(addr2))) <= din2;
          end if;
+         dout2 <= linebuf2(to_integer(unsigned(addr2)));
       end if;
    end process;
-   dout2 <= linebuf2(to_integer(unsigned(addr2)));
 
 end rtl;

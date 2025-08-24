@@ -132,15 +132,7 @@ module top #(
 
     // Reset
 
-
-    wire device_reset_n_w;
-    Reset_Sync u_Reset_Sync (
-		.resetn(device_reset_n_w),
-		.ext_reset(rstn_r & clk_lock_w),
-		.clk(clk_logic_w)
-	);
-
-    //wire device_reset_n_w = ~rst;
+    wire device_reset_n_w = rstn_r;
 
     wire system_reset_n_w = device_reset_n_w & a2_reset_n;
 
@@ -290,36 +282,6 @@ module top #(
         .vgc_address_i(vgc_address_w),
         .vgc_rd_i(vgc_rd_w),
         .vgc_data_o(vgc_data_w)
-    );
-
-    // ESP32 Bus Stream
-
-    // ESP32 Interface
-    logic esp_qclk,
-    logic esp_frame, 
-    logic [3:0]  esp_qdata,
-    
-    // Simple control (could be connected to DIP switches, etc.)
-    input logic capture_enable,
-    input logic [2:0]  capture_mode,
-    
-    // Status LEDs
-    logic activity_led,
-    logic overflow_led
-
-    a2bus_stream #(
-        .ENABLE(1'b1),
-        .FIFO_DEPTH(64)
-    ) capture (
-        .a2bus_if(a2bus_if),
-        .esp_qclk(esp_qclk),
-        .esp_frame(esp_frame),
-        .esp_qdata(esp_qdata),
-        .capture_enable(capture_enable),
-        .capture_mode(capture_mode),
-        .activity_led(activity_led),
-        .overflow_led(overflow_led),
-        .debug_status()  // Not connected in this simple example
     );
 
     // Slots
@@ -724,24 +686,5 @@ module top #(
     end
     */
 
-
-endmodule
-
-module Reset_Sync (
-    input clk,
-    input ext_reset,
-    output resetn
-);
-
-    reg [3:0] reset_cnt = 0;
-
-    always @(posedge clk or negedge ext_reset) begin
-        if (~ext_reset)
-            reset_cnt <= 4'b0;
-        else
-            reset_cnt <= reset_cnt + !resetn;
-    end
-
-    assign resetn = &reset_cnt;
 
 endmodule
