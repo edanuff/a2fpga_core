@@ -126,23 +126,36 @@ module top #(
     );
     defparam clkdiv_inst.DIV_MODE="5";
 
-    reg led_r;
-    reg [25:0] led_counter_r;
-    reg rstn_r;
+    // LED blinking logic
+    reg led_r = 1'b0;
+    reg [25:0] led_counter_r = 26'd0;
 
     always @(posedge clk_logic_w) begin
         if (led_counter_r == 26'd09_999_999) begin
             led_counter_r <= 0;
-            led_r <= ~led_r;  // Toggle LED every 0.5s, so full blink is 1s
-            rstn_r <= 1'b1; // Release reset after 0.5s
+            led_r <= ~led_r;  // Toggle LED every 0.5s
         end else begin
             led_counter_r <= led_counter_r + 1;
         end
     end
 
+    // Power-on reset generation
+    localparam RESET_CYCLES = 100;  // Number of clock cycles to hold reset
+    
+    reg rstn_r = 1'b0;
+    reg [$clog2(RESET_CYCLES+1)-1:0] reset_counter_r = '0;
+
+    always @(posedge clk_logic_w) begin
+        if (reset_counter_r == RESET_CYCLES) begin
+            rstn_r <= 1'b1;  // Release reset after RESET_CYCLES clocks
+        end else begin
+            reset_counter_r <= reset_counter_r + 1;
+        end
+    end
+
     // Reset
 
-    wire device_reset_n_w = rstn_r; // Use reset signal from LED logic
+    wire device_reset_n_w = rstn_r; // Use reset signal from power-on reset logic
 
     //wire device_reset_n_w = ~rst;
 
@@ -187,6 +200,20 @@ module top #(
         .o_posedge(clk_7m_posedge_w),
         .o_negedge(clk_7m_negedge_w)
     );
+
+    wire led_phi1_w;
+    reg [10:0]led_phi1_ctr_r;
+    always @(posedge clk_logic_w) begin
+        if (phi1_posedge) led_phi1_ctr_r <= led_phi1_ctr_r + 1;
+    end
+    assign led_phi1_w = led_phi1_ctr_r[10];
+
+    wire led_2m_w;
+    reg [10:0]led_2m_ctr_r;
+    always @(posedge clk_logic_w) begin
+        if (clk_2m_posedge_w) led_2m_ctr_r <= led_2m_ctr_r + 1;
+    end
+    assign led_2m_w = led_2m_ctr_r[10];
 
     // Interface to Apple II
 
@@ -266,6 +293,50 @@ module top #(
 
         .sleep_o(sleep_w)
     );
+
+    // Text memory write counter for bus diagnostics
+    // Counts writes to $0400-$07FF (Apple II text memory)
+    reg [15:0] text_write_counter_r = 16'h0000;
+    wire is_text_write_w = a2bus_if.data_in_strobe && 
+                          !a2bus_if.rw_n && 
+                          !a2bus_if.m2sel_n &&
+                          (a2bus_if.addr >= 16'h0400) && 
+                          (a2bus_if.addr <= 16'h07FF);
+    
+    always @(posedge clk_logic_w) begin
+        if (!system_reset_n_w) begin
+            text_write_counter_r <= 16'h0000;
+        end else if (is_text_write_w) begin
+            text_write_counter_r <= text_write_counter_r + 1;
+        end
+    end
+
+    // Video read counter for diagnostics
+    // Counts video subsystem reads from $0400-$07FF (text memory)
+    reg [15:0] video_read_counter_r = 16'h0000;
+    wire is_video_read_w = video_rd_w && 
+                          (video_address_w >= 16'h0400) && 
+                          (video_address_w <= 16'h07FF);
+    
+    always @(posedge clk_logic_w) begin
+        if (!system_reset_n_w) begin
+            video_read_counter_r <= 16'h0000;
+        end else if (is_video_read_w) begin
+            video_read_counter_r <= video_read_counter_r + 1;
+        end
+    end
+
+    // Reset and TEXT_COLOR diagnostics
+    reg reset_occurred_r = 1'b0;
+    reg device_reset_occurred_r = 1'b0;
+    always @(posedge clk_logic_w) begin
+        if (!system_reset_n_w) begin
+            reset_occurred_r <= 1'b1;  // Latch that system reset occurred
+        end
+        if (!device_reset_n_w) begin
+            device_reset_occurred_r <= 1'b1;  // Latch that device reset occurred
+        end
+    end
 
     // Memory
 
@@ -722,18 +793,18 @@ module top #(
         .enable_i(show_debug_overlay_r),
 
         .hex_values ({
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,
-            8'h0,
+            text_write_counter_r[15:8],  // High byte of text write counter
+            text_write_counter_r[7:0],   // Low byte of text write counter     
+            video_read_counter_r[15:8],  // High byte of video read counter
+            video_read_counter_r[7:0],   // Low byte of video read counter    
+            {4'b0, a2mem_if.TEXT_COLOR}, // Current TEXT_COLOR value (should be 0xF)
+            {4'b0, a2mem_if.BACKGROUND_COLOR}, // Current BACKGROUND_COLOR value     
+            {6'b0, device_reset_occurred_r, reset_occurred_r}, // Reset status flags
             8'h0
         }), 
 
-        .debug_bits_0_i ('0), 
-        .debug_bits_1_i ('0),
+        .debug_bits_0_i ({a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE, a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.STORE80, a2bus_if.system_reset_n, a2bus_if.device_reset_n}),
+        .debug_bits_1_i ({1'b0, 1'b0, 1'b0, 1'b0, 1'b0, led_2m_w, led_phi1_w, led_r}),
 
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),

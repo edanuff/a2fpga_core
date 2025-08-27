@@ -15,7 +15,8 @@ module audio_timing
 	output i2s_data_shift_strobe,
 	output i2s_data_load_strobe
 );
-    localparam I2S_BCLK_COUNT = CLK_RATE / (AUDIO_RATE * 16 * 2) / 2; // 16 bits per channel, 2 channels (stereo), divide by 2 for toggle
+	localparam divisor = AUDIO_RATE * 64;
+	localparam I2S_BCLK_COUNT = (CLK_RATE + divisor/2) / divisor;
 	localparam I2S_LRCLK_COUNT = I2S_BCLK_COUNT * 32; // 16 bits per channel * 2 clock toggles of bclk
     localparam AUDIO_CLK_COUNT = I2S_LRCLK_COUNT * 2; // Complete sample period (left + right channels)
     logic [$clog2(I2S_BCLK_COUNT)-1:0] i2s_bclk_counter_r;
