@@ -745,7 +745,7 @@ module top #(
     wire signed [15:0] out_audio_r_w = $signed(cdc_audio_r) /* + i2s_sample_r */;
 
     wire [15:0] audio_sample_word[1:0];
-    /*
+    
     audio_out #(
         .CLK_RATE(PIXEL_SPEED_HZ),
         .AUDIO_RATE(AUDIO_RATE)
@@ -764,16 +764,15 @@ module top #(
         .cy2(acy2),
 
         .is_signed(1'b1),
-        .core_l(out_audio_l_w),
-        .core_r(out_audio_r_w),
-
+        .core_l(cdc_audio_l),
+        .core_r(cdc_audio_r),
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
         .audio_r(audio_sample_word[1])
     );
-    */
-    assign audio_sample_word[0] = cdc_audio_l;
-    assign audio_sample_word[1] = cdc_audio_r;
+    
+    //assign audio_sample_word[0] = cdc_audio_l;
+    //assign audio_sample_word[1] = cdc_audio_r;
 
     // HDMI
 
