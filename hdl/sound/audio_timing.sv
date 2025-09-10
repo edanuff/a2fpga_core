@@ -15,13 +15,21 @@ module audio_timing
 	output i2s_data_shift_strobe,
 	output i2s_data_load_strobe
 );
-	localparam divisor = AUDIO_RATE * 64;
-	localparam I2S_BCLK_COUNT = (CLK_RATE + divisor/2) / divisor;
-	localparam I2S_LRCLK_COUNT = I2S_BCLK_COUNT * 32; // 16 bits per channel * 2 clock toggles of bclk
-    localparam AUDIO_CLK_COUNT = I2S_LRCLK_COUNT * 2; // Complete sample period (left + right channels)
-    logic [$clog2(I2S_BCLK_COUNT)-1:0] i2s_bclk_counter_r;
-    logic [$clog2(I2S_LRCLK_COUNT)-1:0] i2s_lrclk_counter_r;
+	// Must be as accurate as possible or HDMI audio will glitch
+    localparam AUDIO_CLK_COUNT = CLK_RATE / AUDIO_RATE;
     logic [$clog2(AUDIO_CLK_COUNT)-1:0] audio_counter_r;
+
+	localparam I2S_BCLK_COUNT = AUDIO_CLK_COUNT / 64;
+    logic [$clog2(I2S_BCLK_COUNT)-1:0] i2s_bclk_counter_r;
+	localparam I2S_ENABLE_WINDOW = I2S_BCLK_COUNT * 64;
+	// Depending on clock division, an I2S sample period may complete before
+	// the AUDIO_RATE sample period
+	// Disable the I2S clock when full I2S sample period is reached
+	wire i2s_enable = (AUDIO_CLK_COUNT > I2S_ENABLE_WINDOW) ? (audio_counter_r < I2S_ENABLE_WINDOW) : 1;
+
+	localparam I2S_LRCLK_COUNT = I2S_BCLK_COUNT * 32; // 16 bits per channel * 2 clock toggles of bclk
+    logic [$clog2(I2S_LRCLK_COUNT)-1:0] i2s_lrclk_counter_r;
+
 	reg sample_ce;
 	reg i2s_clk_r;
 	reg prev_i2s_clk_r;
@@ -43,12 +51,24 @@ module audio_timing
 		else begin
 			i2s_bclk_counter_r <= (i2s_bclk_counter_r == I2S_BCLK_COUNT-1) ? 1'd0 : i2s_bclk_counter_r + 1'd1;
 			i2s_lrclk_counter_r <= (i2s_lrclk_counter_r == I2S_LRCLK_COUNT-1) ? 1'd0 : i2s_lrclk_counter_r + 1'd1;
-			audio_counter_r <= (audio_counter_r == AUDIO_CLK_COUNT-1) ? 1'd0 : audio_counter_r + 1'd1;
+
+			if (audio_counter_r == AUDIO_CLK_COUNT-1) begin
+				audio_counter_r <= 0;
+				i2s_bclk_counter_r <= 0;
+				i2s_lrclk_counter_r <= 0;
+			end else begin
+				audio_counter_r <= audio_counter_r + 1'd1;
+			end
 			sample_ce <= audio_counter_r == AUDIO_CLK_COUNT-1;
+			
 			// Toggle i2s_clk and i2s_lrclk at the end of their respective counters
 			i2s_clk_r <= i2s_bclk_counter_r == I2S_BCLK_COUNT-1 ? ~i2s_clk_r : i2s_clk_r;
 			i2s_lrclk_r <= i2s_lrclk_counter_r == I2S_LRCLK_COUNT-1 ? ~i2s_lrclk_r : i2s_lrclk_r;
-			load_strobe_r <= i2s_lrclk_counter_r == (I2S_BCLK_COUNT * 2) ? 1 : 0;
+			if (!i2s_enable) begin
+				i2s_clk_r <= 0;
+				i2s_lrclk_r <= 0;
+			end
+			load_strobe_r <= i2s_enable & (i2s_lrclk_counter_r == (I2S_BCLK_COUNT * 2)) ? 1 : 0;
 			prev_i2s_clk_r <= i2s_clk_r;
 		end
     end

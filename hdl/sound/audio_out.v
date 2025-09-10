@@ -2,7 +2,8 @@
 module audio_out
 #(
 	parameter CLK_RATE = 24576000,
-	parameter AUDIO_RATE = 48000
+	parameter AUDIO_RATE = 48000,
+	parameter ENABLE = 1
 )
 (
 	input        reset,
@@ -121,8 +122,8 @@ module audio_out
 		.dout(adr)
 	);
 
-	assign audio_l = adl;
-	assign audio_r = adr;
+	assign audio_l = ENABLE ? adl : core_l;
+	assign audio_r = ENABLE ? adr : core_r;
 
 
 endmodule

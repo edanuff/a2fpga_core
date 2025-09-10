@@ -38,6 +38,9 @@ module top #(
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
     parameter int GS = 0,                       // Apple IIgs mode
+    parameter int ENABLE_ESP32_AUDIO = 0,       // Enable audio input from ESP32
+    parameter int ENABLE_FILTER = 0,            // Enable audio filtering
+    parameter int ENABLE_BUS_STREAM = 1,        // Enable bus streaming to ESP32
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
@@ -389,7 +392,7 @@ module top #(
     end
 
     a2bus_stream #(
-        .ENABLE(1'b1)
+        .ENABLE(ENABLE_BUS_STREAM)
     ) a2bus_stream (
         .a2bus_if(a2bus_if),
         
@@ -741,14 +744,15 @@ module top #(
         .i2s_sample_r(i2s_sample_r)
     );
 
-    wire signed [15:0] out_audio_l_w = $signed(cdc_audio_l) /* + i2s_sample_l */;
-    wire signed [15:0] out_audio_r_w = $signed(cdc_audio_r) /* + i2s_sample_r */;
+    wire signed [15:0] out_audio_l_w = $signed(cdc_audio_l) + (ENABLE_ESP32_AUDIO ? i2s_sample_l : 0);
+    wire signed [15:0] out_audio_r_w = $signed(cdc_audio_r) + (ENABLE_ESP32_AUDIO ? i2s_sample_r : 0);
 
     wire [15:0] audio_sample_word[1:0];
-    
+
     audio_out #(
         .CLK_RATE(PIXEL_SPEED_HZ),
-        .AUDIO_RATE(AUDIO_RATE)
+        .AUDIO_RATE(AUDIO_RATE),
+        .ENABLE(ENABLE_FILTER)
     ) audio_out
     (
         .reset(~device_reset_n_w),
@@ -764,8 +768,8 @@ module top #(
         .cy2(acy2),
 
         .is_signed(1'b1),
-        .core_l(cdc_audio_l),
-        .core_r(cdc_audio_r),
+        .core_l(out_audio_l_w),
+        .core_r(out_audio_r_w),
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
         .audio_r(audio_sample_word[1])

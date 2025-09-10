@@ -3,8 +3,10 @@
 module audio_timing_tb;
 
     // Parameters
-    parameter CLK_RATE = 24576000;
-    parameter AUDIO_RATE = 48000;
+    //parameter CLK_RATE = 24576000;
+    //parameter AUDIO_RATE = 48000;
+    parameter CLK_RATE = 27000000;
+    parameter AUDIO_RATE = 44100;
     parameter CLK_PERIOD = 1000000000.0 / CLK_RATE; // Period in ns
     
     // Calculate expected counts
