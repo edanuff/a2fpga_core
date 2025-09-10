@@ -1,81 +1,135 @@
+// audio_timing.sv
+// Fractional-N timing generator using $clog2-sized accumulators.
+// Generates exact-average AUDIO fs, I2S BCLK, and LRCLK from fast clk.
+// Bounded jitter: ±1 clk tick. No long-term drift.
 
-module audio_timing
-#(
-	parameter CLK_RATE = 24576000,
-	parameter AUDIO_RATE = 48000
-)
-(
-	input        reset,
-	input        clk,
+module audio_timing #(
+  parameter int unsigned CLK_RATE        = 24_576_000, // Hz of input clk
+  parameter int unsigned AUDIO_RATE      = 48_000,     // fs
+  parameter int unsigned BITS_PER_SAMPLE = 16,         // bits per channel
+  // Typically 2*BITS_PER_SAMPLE (stereo, left+right)
+  parameter int unsigned BCLK_PER_LRCLK  = (2 * BITS_PER_SAMPLE)
+)(
+  input  logic reset,
+  input  logic clk,
 
-	output audio_clk,
-
-	output i2s_bclk,
-	output i2s_lrclk,
-	output i2s_data_shift_strobe,
-	output i2s_data_load_strobe
+  output logic audio_clk,               // 1-cycle pulse at fs
+  output logic i2s_bclk,                // I2S bit clock
+  output logic i2s_lrclk,               // I2S left/right select (fs, ~50%)
+  output logic i2s_data_shift_strobe,   // pulse on BCLK falling edge
+  output logic i2s_data_load_strobe     // pulse one BCLK edge after LR edge
 );
-	// Must be as accurate as possible or HDMI audio will glitch
-    localparam AUDIO_CLK_COUNT = CLK_RATE / AUDIO_RATE;
-    logic [$clog2(AUDIO_CLK_COUNT)-1:0] audio_counter_r;
 
-	localparam I2S_BCLK_COUNT = AUDIO_CLK_COUNT / 64;
-    logic [$clog2(I2S_BCLK_COUNT)-1:0] i2s_bclk_counter_r;
-	localparam I2S_ENABLE_WINDOW = I2S_BCLK_COUNT * 64;
-	// Depending on clock division, an I2S sample period may complete before
-	// the AUDIO_RATE sample period
-	// Disable the I2S clock when full I2S sample period is reached
-	wire i2s_enable = (AUDIO_CLK_COUNT > I2S_ENABLE_WINDOW) ? (audio_counter_r < I2S_ENABLE_WINDOW) : 1;
+  // ----------------------------
+  // Derived frequencies
+  // ----------------------------
+  localparam int unsigned FS_HZ         = AUDIO_RATE;
+  localparam int unsigned LR_EDGE_HZ    = 2 * FS_HZ;                    // LR toggles each half-frame
+  localparam int unsigned BCLK_HZ       = FS_HZ * BCLK_PER_LRCLK;       // bit clock
+  localparam int unsigned BCLK_EDGE_HZ  = 2 * BCLK_HZ;                  // square wave edges
 
-	localparam I2S_LRCLK_COUNT = I2S_BCLK_COUNT * 32; // 16 bits per channel * 2 clock toggles of bclk
-    logic [$clog2(I2S_LRCLK_COUNT)-1:0] i2s_lrclk_counter_r;
+  // ----------------------------
+  // Accumulator width
+  // ----------------------------
+  localparam int unsigned ACC_WIDTH = $clog2(CLK_RATE);
+  typedef logic [ACC_WIDTH:0] acc_t; // +1 for overflow compare
 
-	reg sample_ce;
-	reg i2s_clk_r;
-	reg prev_i2s_clk_r;
-	reg i2s_lrclk_r;
-	reg load_strobe_r;
+  // Accumulators
+  acc_t acc_fs, acc_lr, acc_bedge;
+  acc_t acc_next;
 
-	always_ff @(posedge clk, posedge reset)
-    begin
-		if (reset) begin
-			i2s_bclk_counter_r <= 0;
-			i2s_lrclk_counter_r <= 0;
-			audio_counter_r <= 0;
-			sample_ce <= 0;
-			i2s_clk_r <= 0;
-			prev_i2s_clk_r <= 0;
-			i2s_lrclk_r <= 0;
-			load_strobe_r <= 0;
-		end
-		else begin
-			i2s_bclk_counter_r <= (i2s_bclk_counter_r == I2S_BCLK_COUNT-1) ? 1'd0 : i2s_bclk_counter_r + 1'd1;
-			i2s_lrclk_counter_r <= (i2s_lrclk_counter_r == I2S_LRCLK_COUNT-1) ? 1'd0 : i2s_lrclk_counter_r + 1'd1;
+  // State
+  logic fs_pulse_r;
+  logic lrclk_r, lrclk_prev;
+  logic bclk_r,  bclk_prev;
 
-			if (audio_counter_r == AUDIO_CLK_COUNT-1) begin
-				audio_counter_r <= 0;
-				i2s_bclk_counter_r <= 0;
-				i2s_lrclk_counter_r <= 0;
-			end else begin
-				audio_counter_r <= audio_counter_r + 1'd1;
-			end
-			sample_ce <= audio_counter_r == AUDIO_CLK_COUNT-1;
-			
-			// Toggle i2s_clk and i2s_lrclk at the end of their respective counters
-			i2s_clk_r <= i2s_bclk_counter_r == I2S_BCLK_COUNT-1 ? ~i2s_clk_r : i2s_clk_r;
-			i2s_lrclk_r <= i2s_lrclk_counter_r == I2S_LRCLK_COUNT-1 ? ~i2s_lrclk_r : i2s_lrclk_r;
-			if (!i2s_enable) begin
-				i2s_clk_r <= 0;
-				i2s_lrclk_r <= 0;
-			end
-			load_strobe_r <= i2s_enable & (i2s_lrclk_counter_r == (I2S_BCLK_COUNT * 2)) ? 1 : 0;
-			prev_i2s_clk_r <= i2s_clk_r;
-		end
+  // Edge flags
+  logic lr_edge_pulse;
+  logic b_edge_pulse;
+  logic b_fall_pulse;
+
+  // Load-strobe delay
+  logic load_pending;
+  logic load_strobe_r;
+
+  // ----------------------------
+  // Main sequential process
+  // ----------------------------
+  always_ff @(posedge clk or posedge reset) begin
+    if (reset) begin
+      acc_fs        <= '0;
+      acc_lr        <= '0;
+      acc_bedge     <= '0;
+      fs_pulse_r    <= 1'b0;
+      lrclk_r       <= 1'b0;
+      lrclk_prev    <= 1'b0;
+      bclk_r        <= 1'b0;
+      bclk_prev     <= 1'b0;
+      lr_edge_pulse <= 1'b0;
+      b_edge_pulse  <= 1'b0;
+      b_fall_pulse  <= 1'b0;
+      load_pending  <= 1'b0;
+      load_strobe_r <= 1'b0;
+    end else begin
+      // -------- fs pulse (sample_ce) --------
+      fs_pulse_r <= 1'b0;
+      acc_next   = acc_fs + FS_HZ;
+      if (acc_next >= CLK_RATE) begin
+        acc_fs     <= acc_next - CLK_RATE;
+        fs_pulse_r <= 1'b1;
+      end else begin
+        acc_fs <= acc_next;
+      end
+
+      // -------- LRCLK toggle edges --------
+      lr_edge_pulse <= 1'b0;
+      acc_next = acc_lr + LR_EDGE_HZ;
+      if (acc_next >= CLK_RATE) begin
+        acc_lr        <= acc_next - CLK_RATE;
+        lrclk_r       <= ~lrclk_r;
+        lr_edge_pulse <= 1'b1;
+      end else begin
+        acc_lr <= acc_next;
+      end
+
+      // -------- BCLK toggle edges --------
+      b_edge_pulse <= 1'b0;
+      acc_next = acc_bedge + BCLK_EDGE_HZ;
+      if (acc_next >= CLK_RATE) begin
+        acc_bedge     <= acc_next - CLK_RATE;
+        bclk_r        <= ~bclk_r;
+        b_edge_pulse  <= 1'b1;
+      end else begin
+        acc_bedge <= acc_next;
+      end
+
+      // Register previous values for edge detection
+      lrclk_prev <= lrclk_r;
+      bclk_prev  <= bclk_r;
+
+      // Falling edge of BCLK (for shift strobe)
+      b_fall_pulse <= (bclk_prev == 1'b1) && (bclk_r == 1'b0) && b_edge_pulse;
+
+      // Load strobe: arm on LR edge, fire on next BCLK edge
+      if (lr_edge_pulse) begin
+        load_pending  <= 1'b1;
+        load_strobe_r <= 1'b0;
+      end else if (load_pending && b_edge_pulse) begin
+        load_strobe_r <= 1'b1;   // one-cycle pulse
+        load_pending  <= 1'b0;
+      end else begin
+        load_strobe_r <= 1'b0;
+      end
     end
-	assign audio_clk = sample_ce;
-	assign i2s_bclk = i2s_clk_r;
-	assign i2s_lrclk = i2s_lrclk_r;
-	assign i2s_data_shift_strobe = !i2s_clk_r && prev_i2s_clk_r;
-	assign i2s_data_load_strobe = load_strobe_r;
+  end
+
+  // ----------------------------
+  // Outputs
+  // ----------------------------
+  assign audio_clk             = fs_pulse_r;
+  assign i2s_bclk              = bclk_r;
+  assign i2s_lrclk             = lrclk_r;
+  assign i2s_data_shift_strobe = b_fall_pulse; // change to rising if preferred
+  assign i2s_data_load_strobe  = load_strobe_r;
 
 endmodule
