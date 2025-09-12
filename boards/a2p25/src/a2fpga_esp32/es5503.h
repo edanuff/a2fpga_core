@@ -46,6 +46,9 @@ public:
     // Reset the chip
     void reset();
     
+    // Get wave memory pointer
+    uint8_t* get_wave_memory() const { return m_wave_memory; }
+    
 private:
     // Oscillator modes
     enum {

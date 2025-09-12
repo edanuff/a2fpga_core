@@ -413,8 +413,11 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
         for (i = 0; i < num_samples; i++)
         {
             // Scale appropriately and convert to 16-bit output
+            // Wave data is -128 to +127, volume is 0-255
+            // Max value after multiplication is about ±32640
+            // Scale to use more of the 16-bit range
             int32_t value = *mixp;
-            int16_t scaled = (value * 8) >> 8;
+            int16_t scaled = value >> 1;  // Divide by 2 to fit in 16-bit range
             buffer[i * m_output_channels + chan] = scaled;
             
             mixp += m_output_channels;

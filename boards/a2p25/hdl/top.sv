@@ -37,8 +37,8 @@ module top #(
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
-    parameter int GS = 0,                       // Apple IIgs mode
-    parameter int ENABLE_ESP32_AUDIO = 0,       // Enable audio input from ESP32
+    parameter int GS = 1,                       // Apple IIgs mode
+    parameter int ENABLE_ESP32_AUDIO = 1,       // Enable audio input from ESP32
     parameter int ENABLE_FILTER = 0,            // Enable audio filtering
     parameter int ENABLE_BUS_STREAM = 1,        // Enable bus streaming to ESP32
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
@@ -296,38 +296,6 @@ module top #(
 
         .sleep_o(sleep_w)
     );
-
-    // Text memory write counter for bus diagnostics
-    // Counts writes to $0400-$07FF (Apple II text memory)
-    reg [15:0] text_write_counter_r = 16'h0000;
-    wire is_text_write_w = a2bus_if.data_in_strobe && 
-                          !a2bus_if.rw_n && 
-                          !a2bus_if.m2sel_n &&
-                          (a2bus_if.addr >= 16'h0400) && 
-                          (a2bus_if.addr <= 16'h07FF);
-    
-    always @(posedge clk_logic_w) begin
-        if (!system_reset_n_w) begin
-            text_write_counter_r <= 16'h0000;
-        end else if (is_text_write_w) begin
-            text_write_counter_r <= text_write_counter_r + 1;
-        end
-    end
-
-    // Video read counter for diagnostics
-    // Counts video subsystem reads from $0400-$07FF (text memory)
-    reg [15:0] video_read_counter_r = 16'h0000;
-    wire is_video_read_w = video_rd_w && 
-                          (video_address_w >= 16'h0400) && 
-                          (video_address_w <= 16'h07FF);
-    
-    always @(posedge clk_logic_w) begin
-        if (!system_reset_n_w) begin
-            video_read_counter_r <= 16'h0000;
-        end else if (is_video_read_w) begin
-            video_read_counter_r <= video_read_counter_r + 1;
-        end
-    end
 
     // Reset and TEXT_COLOR diagnostics
     reg reset_occurred_r = 1'b0;
@@ -796,10 +764,10 @@ module top #(
         .enable_i(show_debug_overlay_r),
 
         .hex_values ({
-            text_write_counter_r[15:8],  // High byte of text write counter
-            text_write_counter_r[7:0],   // Low byte of text write counter     
-            video_read_counter_r[15:8],  // High byte of video read counter
-            video_read_counter_r[7:0],   // Low byte of video read counter    
+            i2s_sample_l[15:8],            // Current audio left sample value
+            i2s_sample_l[7:0],             // Current audio left sample value
+            i2s_sample_r[15:8],            // Current audio right sample value
+            i2s_sample_r[7:0],             // Current audio right sample value
             {4'b0, a2mem_if.TEXT_COLOR}, // Current TEXT_COLOR value (should be 0xF)
             {4'b0, a2mem_if.BACKGROUND_COLOR}, // Current BACKGROUND_COLOR value     
             {6'b0, device_reset_occurred_r, reset_occurred_r}, // Reset status flags

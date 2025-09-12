@@ -17,6 +17,8 @@
  */
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include "Audio.h"
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h" // JTAG WRITE_PERI_REG
 #include "a2fpga_lcam.h"
@@ -86,6 +88,45 @@ static const uint32_t ES5503_CLOCK_RATE = 7159090; // Apple IIgs clock rate
 static const size_t AUDIO_BUFFER_FRAMES = 512;
 static int16_t s_audio_buffer[AUDIO_BUFFER_FRAMES * 2]; // stereo
 
+// I2S test mode
+static volatile bool s_i2s_test_mode = false;
+static int16_t s_test_buffer[AUDIO_BUFFER_FRAMES * 2]; // stereo test pattern
+
+// Internet Radio streaming
+static Audio* radio_audio = nullptr;
+static volatile bool s_radio_active = false;
+static TaskHandle_t s_radio_task = NULL;
+
+// Audio library event callbacks (these are optional callbacks that the library calls)
+void audio_info(const char *info) {
+    Serial.printf("[AUDIO INFO] %s\n", info);
+}
+
+void audio_id3data(const char *info) {
+    Serial.printf("[AUDIO ID3] %s\n", info);
+}
+
+void audio_eof_mp3(const char *info) {
+    Serial.printf("[AUDIO EOF] %s\n", info);
+    s_radio_active = false;
+}
+
+// Dedicated radio task
+static void radio_task(void *arg) {
+  while (s_radio_active && radio_audio) {
+    radio_audio->loop();
+    vTaskDelay(1);  // Small delay to prevent watchdog issues
+  }
+  s_radio_active = false;
+  vTaskDelete(NULL);
+}
+
+// Helper to access ES5503 wave memory (for testing only!)
+uint8_t* es5503_get_wave_memory(ES5503* es) {
+  if (!es) return nullptr;
+  return es->get_wave_memory();
+}
+
 // ES5503 audio generation task
 static void es5503_audio_task(void *arg) {
   const TickType_t xFrequency = pdMS_TO_TICKS(1000 / (ES5503_SAMPLE_RATE / AUDIO_BUFFER_FRAMES));
@@ -106,11 +147,28 @@ static i2s_chan_handle_t s_i2s_tx = NULL;
 static TaskHandle_t s_i2s_task = NULL;
 static volatile bool s_i2s_run = false;
 
+bool i2s_tx_is_running() {
+  return (s_i2s_tx != NULL && s_i2s_run);
+}
+
 static void i2s_tx_task(void *arg) {
   while (s_i2s_run) {
     size_t written = 0;
-    // Use ES5503 audio buffer if available, otherwise silence
-    if (g_es5503 && s_es5503_run) {
+    // Radio mode - dedicated radio task handles this now
+    if (s_radio_active) {
+      // Just yield while radio is active
+      vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    // Use test pattern if in test mode
+    else if (s_i2s_test_mode) {
+      esp_err_t err = i2s_channel_write(s_i2s_tx, s_test_buffer, sizeof(s_test_buffer), &written, pdMS_TO_TICKS(10));
+      if (err != ESP_OK) {
+        // Brief delay to avoid tight loop on error (e.g., no external clocks yet)
+        vTaskDelay(pdMS_TO_TICKS(5));
+      }
+    }
+    // Otherwise use ES5503 audio buffer if available
+    else if (g_es5503 && s_es5503_run) {
       esp_err_t err = i2s_channel_write(s_i2s_tx, s_audio_buffer, sizeof(s_audio_buffer), &written, pdMS_TO_TICKS(10));
       if (err != ESP_OK) {
         // Brief delay to avoid tight loop on error (e.g., no external clocks yet)
@@ -168,7 +226,7 @@ static esp_err_t i2s_tx_setup_once() {
       .slot_mask = (i2s_std_slot_mask_t)(I2S_STD_SLOT_LEFT | I2S_STD_SLOT_RIGHT),
       .ws_width = I2S_DATA_BIT_WIDTH_16BIT,  // one slot width
       .ws_pol = false,                        // standard I2S: low=left
-      .bit_shift = true,                      // I2S compliant (one-bit delay)
+      .bit_shift = false,                     // No bit delay (left-justified)
       .left_align = false,
       .big_endian = false,
       .bit_order_lsb = false,                 // MSB first
@@ -268,19 +326,81 @@ static void es5503_cleanup() {
   }
 }
 
-// Handle ES5503 register write from bus packet
+// Sound GLU state
+static struct {
+  uint8_t control_reg;     // $C03C - Sound Control register
+  uint16_t address_ptr;     // $C03E-$C03F - Address pointer
+  bool doc_access;          // false = RAM, true = DOC registers
+  bool auto_increment;      // Auto-increment address after access
+  uint8_t volume;           // Volume control (bits 3-0)
+} s_glu = {0};
+
+// Track ES5503 wave memory writes
+static uint32_t s_wave_memory_writes = 0;
+static bool s_es5503_debug = false;
+
+// Handle Sound GLU and ES5503 writes from bus packet
 static void handle_es5503_write(uint16_t address, uint8_t data) {
   if (!g_es5503) return;
   
-  // Convert Apple IIgs address to ES5503 register offset
-  // Apple IIgs ES5503 is mapped at $C000-$C03F
-  if (address >= 0xC000 && address <= 0xC03F) {
-    uint16_t reg_offset = address - 0xC000;
-    g_es5503->write(reg_offset, data);
+  // Sound GLU registers at $C03C-$C03F
+  if (address == 0xC03C) {
+    // Sound Control Register
+    s_glu.control_reg = data;
+    s_glu.doc_access = !(data & 0x40);  // Bit 6: 0=DOC, 1=RAM
+    s_glu.auto_increment = (data & 0x20);  // Bit 5: auto-increment
+    s_glu.volume = data & 0x0F;  // Bits 3-0: volume
     
-    // Optional: Log ES5503 register writes (enable for debugging)
-    if (false) {  // Set to true for debugging
-      Serial.printf("ES5503[0x%02X] <= 0x%02X (addr=0x%04X)\n", reg_offset, data, address);
+    if (s_es5503_debug) {
+      Serial.printf("GLU Control: 0x%02X (access=%s, auto_inc=%d, vol=%d)\n", 
+                    data, s_glu.doc_access ? "DOC" : "RAM", 
+                    s_glu.auto_increment ? 1 : 0, s_glu.volume);
+    }
+  }
+  else if (address == 0xC03D) {
+    // Data Register - write to DOC or RAM based on control register
+    if (s_glu.doc_access) {
+      // Write to DOC register (low byte of address pointer is register number)
+      uint8_t reg = s_glu.address_ptr & 0xFF;
+      g_es5503->write(reg, data);
+      
+      if (s_es5503_debug) {
+        Serial.printf("DOC[0x%02X] <= 0x%02X\n", reg, data);
+      }
+    } else {
+      // Write to wave RAM at address pointer
+      uint8_t* wave_mem = es5503_get_wave_memory(g_es5503);
+      if (wave_mem && (s_glu.address_ptr < 65536)) {
+        wave_mem[s_glu.address_ptr] = data;
+        s_wave_memory_writes++;
+        
+        if (s_es5503_debug) {
+          // Show first few writes and then every 256th
+          if (s_wave_memory_writes <= 10 || (s_wave_memory_writes % 256 == 0)) {
+            Serial.printf("Wave RAM[0x%04X] <= 0x%02X (total writes: %lu)\n", 
+                          s_glu.address_ptr, data, s_wave_memory_writes);
+          }
+        }
+      }
+    }
+    
+    // Auto-increment address if enabled
+    if (s_glu.auto_increment) {
+      s_glu.address_ptr++;
+    }
+  }
+  else if (address == 0xC03E) {
+    // Address Pointer Low
+    s_glu.address_ptr = (s_glu.address_ptr & 0xFF00) | data;
+    if (s_es5503_debug) {
+      Serial.printf("GLU Addr Low: 0x%02X (ptr=0x%04X)\n", data, s_glu.address_ptr);
+    }
+  }
+  else if (address == 0xC03F) {
+    // Address Pointer High
+    s_glu.address_ptr = (s_glu.address_ptr & 0x00FF) | (data << 8);
+    if (s_es5503_debug) {
+      Serial.printf("GLU Addr High: 0x%02X (ptr=0x%04X)\n", data, s_glu.address_ptr);
     }
   }
 }
@@ -299,7 +419,7 @@ void process_bus_packet(uint32_t packet) {
   if (reset_indicator || rw_n) return;
   
   // Check if this is an ES5503 write
-  if (address >= 0xC000 && address <= 0xC03F) {
+  if (address >= 0xC03C && address <= 0xC03F) {
     handle_es5503_write(address, data);
   }
 }
@@ -510,7 +630,35 @@ static void cmd_process(String cmd) {
     else Serial.printf("I2S start error: %s\n", esp_err_to_name(err));
   } else if (cmd == "i2sstop") {
     i2s_tx_stop();
+    s_i2s_test_mode = false;  // Clear test mode
     Serial.println("I2S stopped");
+  } else if (cmd == "i2stest") {
+    // Fill test buffer with 0xCAFE (left) and 0xBABE (right)
+    for (int i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
+      s_test_buffer[i * 2] = (int16_t)0xCAFE;      // Left channel
+      s_test_buffer[i * 2 + 1] = (int16_t)0xBABE;  // Right channel
+    }
+    s_i2s_test_mode = true;
+    
+    // Debug: show actual byte values being sent
+    uint8_t* byte_ptr = (uint8_t*)s_test_buffer;
+    Serial.printf("First 8 bytes in buffer: %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                  byte_ptr[0], byte_ptr[1], byte_ptr[2], byte_ptr[3],
+                  byte_ptr[4], byte_ptr[5], byte_ptr[6], byte_ptr[7]);
+    Serial.printf("As int16_t values: L=0x%04X R=0x%04X\n", 
+                  (uint16_t)s_test_buffer[0], (uint16_t)s_test_buffer[1]);
+    
+    // Start I2S if not already running
+    if (!i2s_tx_is_running()) {
+      esp_err_t err = i2s_tx_start();
+      if (err != ESP_OK) {
+        Serial.printf("I2S start error: %s\n", esp_err_to_name(err));
+        s_i2s_test_mode = false;
+        return;
+      }
+    }
+    Serial.println("I2S test mode: sending L=0xCAFE R=0xBABE continuously");
+    Serial.println("Use 'i2sstop' to stop the test");
   } else if (cmd == "es5503start") {
     esp_err_t err = es5503_start();
     if (err == ESP_OK) {
@@ -521,12 +669,16 @@ static void cmd_process(String cmd) {
   } else if (cmd == "es5503stop") {
     es5503_stop();
   } else if (cmd == "audiostop") {
-    // Stop all audio generation by disabling all oscillators
+    // Stop all audio generation by halting all oscillators
     if (!g_es5503) {
       Serial.println("ES5503 not initialized. Use 'es5503start' first.");
     } else {
-      g_es5503->write(0xE0, 0x00);  // Disable all oscillators globally
-      Serial.println("All ES5503 audio generation stopped (all oscillators disabled)");
+      // Halt all 32 oscillators by setting their control bit 0 to 1
+      for (int osc = 0; osc < 32; osc++) {
+        uint8_t current_control = g_es5503->read(0xA0 + osc);
+        g_es5503->write(0xA0 + osc, current_control | 0x01);  // Set halt bit
+      }
+      Serial.println("All ES5503 audio generation stopped (all oscillators halted)");
     }
   } else if (cmd.startsWith("audiostart ")) {
     // Enable audio generation with specified number of oscillators
@@ -545,20 +697,75 @@ static void cmd_process(String cmd) {
       }
     }
   } else if (cmd == "es5503test") {
-    // Test ES5503 by writing some basic register values
+    // Test ES5503 by loading waveform and writing test register values
     if (!g_es5503) {
       Serial.println("ES5503 not initialized. Use 'es5503start' first.");
     } else {
-      Serial.println("Testing ES5503 - writing test oscillator settings...");
-      // Set up oscillator 0 with a basic tone
-      g_es5503->write(0x00, 0x00);    // freq lo = 0
-      g_es5503->write(0x20, 0x10);    // freq hi = 0x1000 (moderate frequency)
-      g_es5503->write(0x40, 0x80);    // volume = 0x80 (medium)
+      Serial.println("Testing ES5503 - loading test waveform and setting up oscillator...");
+      
+      // First load a sine wave into wave memory
+      uint8_t* wave_mem = g_es5503->get_wave_memory();
+      if (wave_mem) {
+        // Generate a 256-sample sine wave
+        // ES5503 expects unsigned 8-bit (0-255) where 128 is zero
+        for (int i = 0; i < 256; i++) {
+          float angle = (2.0f * 3.14159f * i) / 256.0f;
+          // Generate signed value (-127 to +127), then shift to unsigned (0-255)
+          int16_t sample = (int16_t)(127.0f * sinf(angle)) + 128;
+          wave_mem[i] = (uint8_t)sample;
+        }
+        Serial.println("Sine wave loaded into wave memory");
+        
+        // Debug: show a few samples
+        Serial.printf("Sample values: [0]=0x%02X [64]=0x%02X [128]=0x%02X [192]=0x%02X\n",
+                      wave_mem[0], wave_mem[64], wave_mem[128], wave_mem[192]);
+      }
+      
+      // Set up oscillator 0 for A440 (440 Hz)
+      // ES5503 frequency calculation: freq_reg = (target_freq * 65536) / sample_rate
+      // For 440 Hz at 22050 Hz sample rate: (440 * 65536) / 22050 = 1309 = 0x051D
+      g_es5503->write(0x00, 0x1D);    // freq lo = 0x1D
+      g_es5503->write(0x20, 0x05);    // freq hi = 0x05 (0x051D = A440)
+      g_es5503->write(0x40, 0x60);    // volume = 0x60 (medium-low)
       g_es5503->write(0x80, 0x00);    // wavetable pointer = 0x0000
       g_es5503->write(0xC0, 0x00);    // wavetable size = 256, resolution = 0
       g_es5503->write(0xA0, 0x00);    // control = 0x00 (start oscillator, channel 0)
       g_es5503->write(0xE1, 0x00);    // enable 1 oscillator
-      Serial.println("ES5503 test registers written. Should hear audio if I2S is running.");
+      Serial.println("ES5503 configured with sine wave. Should hear clean tone.");
+    }
+  } else if (cmd == "es5503wave") {
+    // Generate a test waveform in ES5503 wave memory
+    if (!g_es5503) {
+      Serial.println("ES5503 not initialized. Use 'es5503start' first.");
+    } else {
+      Serial.println("Loading test sawtooth waveform (256 samples at address 0)...");
+      // Direct access to wave memory for testing - this is a hack!
+      // Normally wave memory is loaded via GLU at $C03C-$C03F
+      extern uint8_t* es5503_get_wave_memory(ES5503* es);
+      uint8_t* wave_mem = es5503_get_wave_memory(g_es5503);
+      if (wave_mem) {
+        for (int i = 0; i < 256; i++) {
+          wave_mem[i] = (uint8_t)i;  // Simple sawtooth 0-255
+        }
+        Serial.println("Test waveform loaded. Run 'es5503test' to play it.");
+      } else {
+        Serial.println("Wave memory not accessible");
+      }
+    }
+  } else if (cmd == "i2sstatus") {
+    // Show I2S status and statistics
+    extern bool i2s_tx_is_running();
+    Serial.println("I2S Status:");
+    Serial.printf("  I2S transmit: %s\n", i2s_tx_is_running() ? "RUNNING" : "STOPPED");
+    Serial.printf("  BCLK on pin %d\n", PIN_I2S_BCLK);
+    Serial.printf("  LRCLK on pin %d\n", PIN_I2S_LRCLK); 
+    Serial.printf("  DATA on pin %d\n", PIN_I2S_DATA);
+    if (i2s_tx_is_running()) {
+      Serial.println("  Output: ES5503 audio samples");
+    }
+    if (g_es5503) {
+      uint8_t num_osc = g_es5503->read(0xE1);
+      Serial.printf("  ES5503: %d oscillators enabled\n", (num_osc/2) + 1);
     }
   } else if (cmd.startsWith("es5503reg ")) {
     // Direct ES5503 register access: es5503reg <reg> [value]
@@ -584,11 +791,151 @@ static void cmd_process(String cmd) {
     }
   } else if (cmd == "es5503debug") {
     // Toggle ES5503 register write debugging
+    s_es5503_debug = !s_es5503_debug;
+    Serial.printf("ES5503 debug %s\n", s_es5503_debug ? "enabled" : "disabled");
+  } else if (cmd == "es5503info") {
+    // Display ES5503 oscillator information in human-readable format
     if (!g_es5503) {
       Serial.println("ES5503 not initialized. Use 'es5503start' first.");
     } else {
-      // This would need to be implemented by modifying the debug flag in handle_es5503_write
-      Serial.println("ES5503 debug toggle - modify handle_es5503_write() debug flag");
+      Serial.println("ES5503 Oscillator Status:");
+      Serial.println("Osc | Freq(Hz) | Vol | Wave  | Size | Control | Status");
+      Serial.println("----|----------|-----|-------|------|---------|------------------");
+      
+      // Get number of enabled oscillators
+      uint8_t num_enabled = ((g_es5503->read(0xE1) >> 1) & 0x1F) + 1;
+      
+      for (int osc = 0; osc < 32; osc++) {
+        // Read oscillator registers
+        uint8_t freq_lo = g_es5503->read(0x00 + osc);
+        uint8_t freq_hi = g_es5503->read(0x20 + osc);
+        uint8_t volume = g_es5503->read(0x40 + osc);
+        uint8_t data = g_es5503->read(0x60 + osc);
+        uint8_t wave_ptr_hi = g_es5503->read(0x80 + osc);
+        uint8_t control = g_es5503->read(0xA0 + osc);
+        uint8_t config = g_es5503->read(0xC0 + osc);
+        
+        // Calculate frequency
+        uint16_t freq_reg = (freq_hi << 8) | freq_lo;
+        float frequency = 0;
+        if (freq_reg > 0) {
+          // Frequency = (freq_reg * sample_rate) / 65536
+          // Sample rate for ES5503 is typically 26320 Hz (7159090 / 8 / 34)
+          // But we're using 22050 Hz in our implementation
+          frequency = (float)(freq_reg * 22050) / 65536.0f;
+        }
+        
+        // Decode control bits
+        bool halted = (control & 0x01) != 0;
+        int mode = (control >> 1) & 0x03;
+        bool irq_enabled = (control & 0x08) != 0;
+        int channel = (control >> 4) & 0x0F;
+        
+        // Decode config bits
+        bool bank = (config & 0x40) != 0;
+        int wave_size_idx = (config >> 3) & 0x07;
+        int resolution = config & 0x07;
+        
+        // Wave sizes: 256, 512, 1024, 2048, 4096, 8192, 16384, 32768
+        const int wave_sizes[] = {256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
+        int wave_size = wave_sizes[wave_size_idx];
+        
+        // Wave pointer
+        uint32_t wave_ptr = (wave_ptr_hi << 8);
+        if (bank) wave_ptr |= 0x10000;
+        
+        // Mode names
+        const char* mode_names[] = {"FREE", "ONCE", "SYNC", "SWAP"};
+        
+        // Status string
+        char status[32];
+        if (osc >= num_enabled) {
+          snprintf(status, sizeof(status), "DISABLED");
+        } else if (halted) {
+          snprintf(status, sizeof(status), "HALTED");
+        } else {
+          snprintf(status, sizeof(status), "%s Ch%d%s", 
+                   mode_names[mode], channel, irq_enabled ? " IRQ" : "");
+        }
+        
+        // Print oscillator info
+        Serial.printf("%2d  | %8.1f | %3d | %05X | %4d | %02X      | %s\n",
+                      osc, frequency, volume, wave_ptr, wave_size, control, status);
+        
+        // Show only enabled oscillators unless verbose
+        if (osc >= num_enabled && osc >= 3) {
+          Serial.printf("... (%d oscillators disabled)\n", 32 - num_enabled);
+          break;
+        }
+      }
+      
+      Serial.printf("\nEnabled oscillators: %d/32\n", num_enabled);
+      Serial.printf("Wave memory writes: %lu\n", s_wave_memory_writes);
+    }
+  } else if (cmd.startsWith("es5503mem ")) {
+    // Examine ES5503 wave memory
+    // Format: es5503mem <addr> [length]
+    String toks[16]; int nt = split_ws(cmd, toks, 16);
+    if (!g_es5503) {
+      Serial.println("ES5503 not initialized. Use 'es5503start' first.");
+    } else if (nt < 2) {
+      Serial.println("Usage: es5503mem <addr> [length]");
+      Serial.println("  addr: hex address (0-FFFF)");
+      Serial.println("  length: number of bytes to display (default 256)");
+    } else {
+      uint32_t addr = strtoul(toks[1].c_str(), NULL, 16);
+      uint32_t len = (nt >= 3) ? strtoul(toks[2].c_str(), NULL, 10) : 256;
+      
+      if (addr >= 65536) {
+        Serial.printf("Address 0x%04X out of range (max 0xFFFF)\n", addr);
+        return;
+      }
+      
+      uint8_t* wave_mem = g_es5503->get_wave_memory();
+      if (!wave_mem) {
+        Serial.println("Wave memory not accessible");
+        return;
+      }
+      
+      // Limit length to avoid excessive output
+      if (len > 512) len = 512;
+      if (addr + len > 65536) len = 65536 - addr;
+      
+      Serial.printf("ES5503 memory at 0x%04X:\n", addr);
+      
+      // Display in hex dump format
+      for (uint32_t i = 0; i < len; i += 16) {
+        Serial.printf("%04X: ", addr + i);
+        
+        // Hex bytes
+        for (int j = 0; j < 16 && (i + j) < len; j++) {
+          Serial.printf("%02X ", wave_mem[addr + i + j]);
+          if (j == 7) Serial.print(" ");
+        }
+        
+        // Pad if less than 16 bytes on last line
+        for (int j = (len - i); j < 16; j++) {
+          Serial.print("   ");
+          if (j == 7) Serial.print(" ");
+        }
+        
+        Serial.print(" |");
+        
+        // ASCII representation
+        for (int j = 0; j < 16 && (i + j) < len; j++) {
+          uint8_t b = wave_mem[addr + i + j];
+          Serial.printf("%c", (b >= 32 && b < 127) ? b : '.');
+        }
+        
+        Serial.println("|");
+      }
+      
+      // Show summary of non-zero regions
+      uint32_t non_zero_count = 0;
+      for (uint32_t i = 0; i < len; i++) {
+        if (wave_mem[addr + i] != 0) non_zero_count++;
+      }
+      Serial.printf("Non-zero bytes: %d/%d\n", non_zero_count, len);
     }
   } else if (cmd == "fulltest") {
     // Full audio pipeline test
@@ -643,27 +990,206 @@ static void cmd_process(String cmd) {
     } else {
       Serial.println("  ES5503 not initialized");
     }
+  } else if (cmd == "radiostatus") {
+    // Show radio streaming status
+    if (s_radio_active && radio_audio) {
+      Serial.printf("Radio active: %s\n", s_radio_active ? "YES" : "NO");
+      Serial.printf("Audio running: %s\n", radio_audio->isRunning() ? "YES" : "NO");
+      Serial.printf("I2S task running: %s\n", s_i2s_run ? "YES" : "NO");
+      Serial.printf("Audio object: %p\n", radio_audio);
+    } else {
+      Serial.println("Radio not active");
+    }
+  } else if (cmd.startsWith("radio ")) {
+    // Stream internet radio using ESP32-audioI2S library
+    // Format: radio <url> or radio stop
+    String toks[16]; int nt = split_ws(cmd, toks, 16);
+    if (nt < 2) {
+      Serial.println("Usage: radio <url>  or  radio stop");
+      Serial.println("Example URLs (use HTTP, not HTTPS):");
+      Serial.println("  http://ice1.somafm.com/defcon-128-mp3  (SomaFM DEF CON)");
+      Serial.println("  http://ice1.somafm.com/groovesalad-128-mp3  (SomaFM Groove Salad)");
+      Serial.println("  http://stream.radioparadise.com/mp3-32  (Radio Paradise MP3)");
+      Serial.println("  http://streams.radiobob.de/bob-acdc/mp3-192/mediaplayer  (Radio BOB AC/DC)");
+      Serial.println("Note: HTTPS streams may not work reliably - prefer HTTP URLs");
+    } else if (toks[1] == "stop") {
+      if (s_radio_active && radio_audio) {
+        Serial.println("Stopping radio stream...");
+        s_radio_active = false;
+        
+        // Wait for radio task to finish
+        if (s_radio_task) {
+          vTaskDelay(pdMS_TO_TICKS(100));
+          s_radio_task = NULL;
+        }
+        
+        radio_audio->stopSong();
+        delete radio_audio;
+        radio_audio = nullptr;
+        
+        // Give audio library time to clean up
+        vTaskDelay(pdMS_TO_TICKS(200));
+        
+        // Restart our I2S system
+        esp_err_t err = i2s_tx_start();
+        if (err == ESP_OK) {
+          Serial.println("I2S restarted successfully");
+        } else {
+          Serial.printf("I2S restart failed: %s\n", esp_err_to_name(err));
+        }
+        
+        Serial.println("Radio stopped");
+      } else {
+        Serial.println("Radio not playing");
+      }
+    } else {
+      if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("Error: WiFi not connected. Use 'wifi' command first.");
+        return;
+      }
+      
+      String url = toks[1];
+      Serial.printf("Starting radio stream: %s\n", url.c_str());
+      
+      // Stop any existing radio stream
+      if (s_radio_active && radio_audio) {
+        s_radio_active = false;
+        radio_audio->stopSong();
+        delete radio_audio;
+        radio_audio = nullptr;
+      }
+      
+      // Stop other audio sources
+      s_i2s_test_mode = false;
+      if (g_es5503) {
+        for (int osc = 0; osc < 32; osc++) {
+          uint8_t ctrl = g_es5503->read(0xA0 + osc);
+          g_es5503->write(0xA0 + osc, ctrl | 0x01);  // Halt oscillator
+        }
+      }
+      
+      // Completely stop our I2S system
+      i2s_tx_stop();
+      
+      // Stop our I2S task completely during radio
+      s_i2s_run = false;
+      if (s_i2s_task) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        s_i2s_task = NULL;
+      }
+      
+      // Create Audio object with I2S output
+      radio_audio = new Audio();
+      
+      // Configure I2S pins (same as our setup)  
+      radio_audio->setPinout(PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DATA);
+      radio_audio->setVolume(8);   // Lower volume to reduce potential distortion
+      
+      // Try to configure I2S format to match our setup (no bit shift)
+      // Note: This library may not support our exact I2S format
+      radio_audio->forceMono(false);  // Ensure stereo output
+      
+      Serial.printf("Audio library I2S config: BCLK=%d, LRCLK=%d, DATA=%d\n", 
+                    PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DATA);
+      Serial.println("WARNING: Audio library uses standard I2S format with 1-bit shift");
+      
+      Serial.println("Connecting to stream...");
+      
+      // Connect to the stream
+      if (radio_audio->connecttohost(url.c_str())) {
+        s_radio_active = true;
+        Serial.println("Radio stream connected!");
+        Serial.printf("Radio status: connected=%d, running=%d\n", 
+                      radio_audio->isRunning(), s_radio_active);
+        Serial.println("Use 'radio stop' to stop streaming");
+        
+        // Start dedicated radio task with moderate priority
+        BaseType_t ok = xTaskCreatePinnedToCore(radio_task, "radio", 8192, NULL, 4, &s_radio_task, 0);
+        if (ok != pdPASS) {
+          Serial.println("Failed to start radio task");
+          s_radio_active = false;
+          radio_audio->stopSong();
+          delete radio_audio;
+          radio_audio = nullptr;
+          return;
+        }
+      } else {
+        Serial.println("Failed to connect to radio stream");
+        delete radio_audio;
+        radio_audio = nullptr;
+        // Restore normal I2S
+        i2s_tx_start();
+      }
+    }
+  } else if (cmd.startsWith("wifi ")) {
+    // Connect to WiFi network
+    // Format: wifi <ssid> <password>
+    String toks[16]; int nt = split_ws(cmd, toks, 16);
+    if (nt < 3) {
+      Serial.println("Usage: wifi <ssid> <password>");
+    } else {
+      String ssid = toks[1];
+      String password = toks[2];
+      
+      Serial.printf("Connecting to WiFi network: %s\n", ssid.c_str());
+      
+      // Disconnect if already connected
+      if (WiFi.status() == WL_CONNECTED) {
+        WiFi.disconnect();
+        delay(100);
+      }
+      
+      WiFi.begin(ssid.c_str(), password.c_str());
+      
+      // Wait up to 30 seconds for connection
+      int timeout = 60; // 30 seconds (500ms * 60)
+      Serial.print("Connecting");
+      while (WiFi.status() != WL_CONNECTED && timeout > 0) {
+        delay(500);
+        Serial.print(".");
+        timeout--;
+      }
+      Serial.println();
+      
+      if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("WiFi connected successfully!\n");
+        Serial.printf("IP address: %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("MAC address: %s\n", WiFi.macAddress().c_str());
+        Serial.printf("Signal strength: %d dBm\n", WiFi.RSSI());
+      } else {
+        Serial.println("WiFi connection failed or timed out");
+        Serial.printf("Status: %d\n", WiFi.status());
+      }
+    }
   } else if (cmd == "exit") {
     cli_mode = false;
     lcam_set_logging(0);
     Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
     Serial.println("Use '+++' to enter CLI mode again.");
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | es5503start | es5503stop | audiostop | audiostart | es5503test | es5503reg | es5503debug | fulltest | meminfo | exit | we N");
+    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | i2stest | i2sstatus | es5503start | es5503stop | es5503wave | audiostop | audiostart | es5503test | es5503reg | es5503debug | es5503info | es5503mem | fulltest | meminfo | wifi | radio | exit | we N");
     Serial.println("  spireg <reg> [val]        - read/write 1-byte register (0..126)");
     Serial.println("  spir <space> <addr> <len> [inc=1] - read bytes");
     Serial.println("  spiw <space> <addr> <inc|len> <b0> [b1 ...] - write bytes");
     Serial.println("  i2sstart                  - start I2S slave-TX (ext BCLK/WS)");
     Serial.println("  i2sstop                   - stop I2S output");
+    Serial.println("  i2stest                   - send test pattern L=0xCAFE R=0xBABE");
+    Serial.println("  i2sstatus                 - show I2S status and pin configuration");
     Serial.println("  es5503start               - initialize and start ES5503 audio generation");
     Serial.println("  es5503stop                - stop ES5503 audio generation");
+    Serial.println("  es5503wave                - load test sawtooth waveform into wave memory");
     Serial.println("  audiostop                 - immediately silence all ES5503 audio (disable all oscillators)");
     Serial.println("  audiostart <num>          - enable ES5503 audio with specified number of oscillators (1-32)");
     Serial.println("  es5503test                - write test registers to ES5503");
     Serial.println("  es5503reg <reg> [val]     - read/write ES5503 register");
     Serial.println("  es5503debug               - toggle ES5503 register write debugging");
+    Serial.println("  es5503info                - display oscillator status (frequencies, volumes, etc.)");
+    Serial.println("  es5503mem <addr> [len]    - examine ES5503 wave memory (hex dump)");
     Serial.println("  fulltest                  - complete ES5503 audio pipeline test");
     Serial.println("  meminfo                   - show PSRAM and internal memory usage");
+    Serial.println("  wifi <ssid> <password>    - connect to WiFi network");
+    Serial.println("  radio <url>               - stream internet radio (MP3/AAC)");
+    Serial.println("  radio stop                - stop radio streaming");
     Serial.println("  exit - Return to serial forwarding mode");
   } else if (cmd.length()) {
     Serial.printf("Unknown: %s\n", cmd.c_str());
