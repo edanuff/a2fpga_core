@@ -11,7 +11,7 @@ PROJECT_NAME = a2fpga_esp32
 ARDUINO_CLI = arduino-cli
 
 # Board FQBN with specific settings from main.ino comments
-FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,UploadMode=default
+FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,UploadMode=default,PartitionScheme=no_ota
 
 # Source files
 SKETCH = a2fpga_esp32.ino

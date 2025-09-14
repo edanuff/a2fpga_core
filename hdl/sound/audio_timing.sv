@@ -8,7 +8,8 @@ module audio_timing #(
   parameter int unsigned AUDIO_RATE      = 48_000,     // fs
   parameter int unsigned BITS_PER_SAMPLE = 16,         // bits per channel
   // Typically 2*BITS_PER_SAMPLE (stereo, left+right)
-  parameter int unsigned BCLK_PER_LRCLK  = (2 * BITS_PER_SAMPLE)
+  parameter int unsigned BCLK_PER_LRCLK  = (2 * BITS_PER_SAMPLE),
+  parameter bit          I2S_STANDARD    = 1'b0        // 0=left-justified, 1=standard I2S (1-bit delay)
 )(
   input  logic reset,
   input  logic clk,
@@ -49,7 +50,9 @@ module audio_timing #(
   logic b_fall_pulse;
 
   // Load-strobe delay
-  logic load_pending;
+  logic load_pending_std;      // For standard I2S delay counting
+  logic [1:0] delay_counter;   // For standard I2S 1-bit delay
+  logic load_pending_lj;       // For left-justified immediate load  
   logic load_strobe_r;
 
   // ----------------------------
@@ -68,7 +71,9 @@ module audio_timing #(
       lr_edge_pulse <= 1'b0;
       b_edge_pulse  <= 1'b0;
       b_fall_pulse  <= 1'b0;
-      load_pending  <= 1'b0;
+      load_pending_std <= 1'b0;
+      delay_counter <= 2'b00;
+      load_pending_lj <= 1'b0;
       load_strobe_r <= 1'b0;
     end else begin
       // -------- fs pulse (sample_ce) --------
@@ -110,15 +115,36 @@ module audio_timing #(
       // Falling edge of BCLK (for shift strobe)
       b_fall_pulse <= (bclk_prev == 1'b1) && (bclk_r == 1'b0) && b_edge_pulse;
 
-      // Load strobe: arm on LR edge, fire on next BCLK edge
-      if (lr_edge_pulse) begin
-        load_pending  <= 1'b1;
-        load_strobe_r <= 1'b0;
-      end else if (load_pending && b_edge_pulse) begin
-        load_strobe_r <= 1'b1;   // one-cycle pulse
-        load_pending  <= 1'b0;
+      // Load strobe: format-dependent timing
+      if (I2S_STANDARD) begin
+        // Standard I2S: load after 1-bit delay (one extra BCLK cycle)
+        if (lr_edge_pulse) begin
+          load_pending_std <= 1'b1;
+          delay_counter <= 2'b00;
+          load_strobe_r <= 1'b0;
+        end else if (load_pending_std && b_edge_pulse) begin
+          delay_counter <= delay_counter + 1;
+          if (delay_counter == 2'b01) begin  // After 2 BCLK edges (1-bit delay)
+            load_strobe_r <= 1'b1;   // Fire after delay
+            load_pending_std <= 1'b0;
+            delay_counter <= 2'b00;
+          end else begin
+            load_strobe_r <= 1'b0;
+          end
+        end else begin
+          load_strobe_r <= 1'b0;
+        end
       end else begin
-        load_strobe_r <= 1'b0;
+        // Left-justified: load immediately after LR edge (original behavior)
+        if (lr_edge_pulse) begin
+          load_pending_lj <= 1'b1;
+          load_strobe_r <= 1'b0;
+        end else if (load_pending_lj && b_edge_pulse) begin
+          load_strobe_r <= 1'b1;   // one-cycle pulse
+          load_pending_lj <= 1'b0;
+        end else begin
+          load_strobe_r <= 1'b0;
+        end
       end
     end
   end

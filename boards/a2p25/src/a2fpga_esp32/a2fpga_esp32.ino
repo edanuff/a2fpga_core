@@ -160,7 +160,7 @@ static void i2s_tx_task(void *arg) {
       vTaskDelay(pdMS_TO_TICKS(100));
     }
     // Use test pattern if in test mode
-    else if (s_i2s_test_mode) {
+    else if (s_i2s_test_mode && s_i2s_tx) {
       esp_err_t err = i2s_channel_write(s_i2s_tx, s_test_buffer, sizeof(s_test_buffer), &written, pdMS_TO_TICKS(10));
       if (err != ESP_OK) {
         // Brief delay to avoid tight loop on error (e.g., no external clocks yet)
@@ -168,23 +168,29 @@ static void i2s_tx_task(void *arg) {
       }
     }
     // Otherwise use ES5503 audio buffer if available
-    else if (g_es5503 && s_es5503_run) {
+    else if (g_es5503 && s_es5503_run && s_i2s_tx) {
       esp_err_t err = i2s_channel_write(s_i2s_tx, s_audio_buffer, sizeof(s_audio_buffer), &written, pdMS_TO_TICKS(10));
       if (err != ESP_OK) {
         // Brief delay to avoid tight loop on error (e.g., no external clocks yet)
         vTaskDelay(pdMS_TO_TICKS(5));
       }
-    } else {
+    } else if (s_i2s_tx) {
       // Send silence if ES5503 not running
       static int16_t silence_buffer[AUDIO_BUFFER_FRAMES * 2] = {0};
       esp_err_t err = i2s_channel_write(s_i2s_tx, silence_buffer, sizeof(silence_buffer), &written, pdMS_TO_TICKS(10));
       if (err != ESP_OK) {
         vTaskDelay(pdMS_TO_TICKS(5));
       }
+    } else {
+      // No I2S channel, just wait
+      vTaskDelay(pdMS_TO_TICKS(10));
     }
     // Yield periodically to avoid starving other tasks (LCD_CAM)
     taskYIELD();
   }
+  
+  // Clear task handle before deleting
+  s_i2s_task = NULL;
   vTaskDelete(NULL);
 }
 
@@ -226,7 +232,7 @@ static esp_err_t i2s_tx_setup_once() {
       .slot_mask = (i2s_std_slot_mask_t)(I2S_STD_SLOT_LEFT | I2S_STD_SLOT_RIGHT),
       .ws_width = I2S_DATA_BIT_WIDTH_16BIT,  // one slot width
       .ws_pol = false,                        // standard I2S: low=left
-      .bit_shift = false,                     // No bit delay (left-justified)
+      .bit_shift = false,                     // Left-justified I2S (no delay)
       .left_align = false,
       .big_endian = false,
       .bit_order_lsb = false,                 // MSB first
@@ -258,13 +264,11 @@ static esp_err_t i2s_tx_start() {
 }
 
 static void i2s_tx_stop() {
-  s_i2s_run = false;
-  if (s_i2s_task) { vTaskDelay(1); /* let task exit */ s_i2s_task = NULL; }
-  if (s_i2s_tx) {
-    i2s_channel_disable(s_i2s_tx);
-    i2s_del_channel(s_i2s_tx);
-    s_i2s_tx = NULL;
-  }
+  // Just stop test mode - keep I2S running but send silence
+  s_i2s_test_mode = false;
+  
+  // Don't tear down the I2S channel - just let it send silence
+  // This avoids the crash in i2s_del_channel()
 }
 
 // ---------- ES5503 Control Functions ----------
@@ -630,8 +634,7 @@ static void cmd_process(String cmd) {
     else Serial.printf("I2S start error: %s\n", esp_err_to_name(err));
   } else if (cmd == "i2sstop") {
     i2s_tx_stop();
-    s_i2s_test_mode = false;  // Clear test mode
-    Serial.println("I2S stopped");
+    Serial.println("I2S test pattern stopped (I2S channel still active)");
   } else if (cmd == "i2stest") {
     // Fill test buffer with 0xCAFE (left) and 0xBABE (right)
     for (int i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
