@@ -682,7 +682,7 @@ module top #(
     localparam AUDIO_RATE = 44100;
     localparam AUDIO_BIT_WIDTH = 16;
     // I2S format: 0=left-justified (ES5503/test), 1=standard I2S (ESP32-audioI2S library)
-    localparam I2S_FORMAT = 1'b0;  // Use left-justified I2S for ES5503/test compatibility
+    localparam I2S_FORMAT = 1'b0;  // Use left-justified I2S (working format)
     wire clk_audio_w;
 	wire i2s_data_shift_strobe;
 	wire i2s_data_load_strobe;

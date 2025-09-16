@@ -1086,15 +1086,16 @@ static void cmd_process(String cmd) {
       
       // Configure I2S pins (same as our setup)  
       radio_audio->setPinout(PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DATA);
-      radio_audio->setVolume(8);   // Lower volume to reduce potential distortion
       
-      // Try to configure I2S format to match our setup (no bit shift)
-      // Note: This library may not support our exact I2S format
+      // Try LSB format which might be closer to left-justified
+      radio_audio->setI2SCommFMT_LSB(true);  // Try LSB justified format
+      
+      radio_audio->setVolume(8);   // Lower volume to reduce potential distortion
       radio_audio->forceMono(false);  // Ensure stereo output
       
       Serial.printf("Audio library I2S config: BCLK=%d, LRCLK=%d, DATA=%d\n", 
                     PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DATA);
-      Serial.println("WARNING: Audio library uses standard I2S format with 1-bit shift");
+      Serial.println("INFO: Trying LSB justified format (might work with left-justified FPGA)");
       
       Serial.println("Connecting to stream...");
       

@@ -9,7 +9,7 @@ module audio_timing #(
   parameter int unsigned BITS_PER_SAMPLE = 16,         // bits per channel
   // Typically 2*BITS_PER_SAMPLE (stereo, left+right)
   parameter int unsigned BCLK_PER_LRCLK  = (2 * BITS_PER_SAMPLE),
-  parameter bit          I2S_STANDARD    = 1'b0        // 0=left-justified, 1=standard I2S (1-bit delay)
+  parameter bit          I2S_STANDARD    = 1'b1        // 0=left-justified, 1=standard I2S (1-bit delay)
 )(
   input  logic reset,
   input  logic clk,
@@ -92,7 +92,7 @@ module audio_timing #(
       if (acc_next >= CLK_RATE) begin
         acc_lr        <= acc_next - CLK_RATE;
         lrclk_r       <= ~lrclk_r;
-        lr_edge_pulse <= 1'b1;
+        lr_edge_pulse <= lrclk_r;
       end else begin
         acc_lr <= acc_next;
       end
@@ -124,7 +124,7 @@ module audio_timing #(
           load_strobe_r <= 1'b0;
         end else if (load_pending_std && b_edge_pulse) begin
           delay_counter <= delay_counter + 1;
-          if (delay_counter == 2'b01) begin  // After 2 BCLK edges (1-bit delay)
+          if (delay_counter == 2'b10) begin  // After 2 BCLK edges (1-bit delay)
             load_strobe_r <= 1'b1;   // Fire after delay
             load_pending_std <= 1'b0;
             delay_counter <= 2'b00;
