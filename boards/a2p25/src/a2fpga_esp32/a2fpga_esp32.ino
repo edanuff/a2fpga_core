@@ -18,7 +18,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include "Audio.h"
+#include "a2fpga_radio.h"
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h" // JTAG WRITE_PERI_REG
 #include "a2fpga_lcam.h"
@@ -92,34 +92,7 @@ static int16_t s_audio_buffer[AUDIO_BUFFER_FRAMES * 2]; // stereo
 static volatile bool s_i2s_test_mode = false;
 static int16_t s_test_buffer[AUDIO_BUFFER_FRAMES * 2]; // stereo test pattern
 
-// Internet Radio streaming
-static Audio* radio_audio = nullptr;
-static volatile bool s_radio_active = false;
-static TaskHandle_t s_radio_task = NULL;
-
-// Audio library event callbacks (these are optional callbacks that the library calls)
-void audio_info(const char *info) {
-    Serial.printf("[AUDIO INFO] %s\n", info);
-}
-
-void audio_id3data(const char *info) {
-    Serial.printf("[AUDIO ID3] %s\n", info);
-}
-
-void audio_eof_mp3(const char *info) {
-    Serial.printf("[AUDIO EOF] %s\n", info);
-    s_radio_active = false;
-}
-
-// Dedicated radio task
-static void radio_task(void *arg) {
-  while (s_radio_active && radio_audio) {
-    radio_audio->loop();
-    vTaskDelay(1);  // Small delay to prevent watchdog issues
-  }
-  s_radio_active = false;
-  vTaskDelete(NULL);
-}
+// Internet Radio streaming - using new radio module
 
 // Helper to access ES5503 wave memory (for testing only!)
 uint8_t* es5503_get_wave_memory(ES5503* es) {
@@ -154,10 +127,20 @@ bool i2s_tx_is_running() {
 static void i2s_tx_task(void *arg) {
   while (s_i2s_run) {
     size_t written = 0;
-    // Radio mode - dedicated radio task handles this now
-    if (s_radio_active) {
-      // Just yield while radio is active
-      vTaskDelay(pdMS_TO_TICKS(100));
+    // Radio mode - check for PCM data from radio module
+    if (A2FPGARadio::isActive()) {
+      // Get PCM data from radio module and send to I2S
+      static int16_t radio_buffer[AUDIO_BUFFER_FRAMES * 2];
+      size_t samples_read = A2FPGARadio::readPCMSamples(radio_buffer, AUDIO_BUFFER_FRAMES * 2);
+      
+      if (samples_read > 0 && s_i2s_tx) {
+        esp_err_t err = i2s_channel_write(s_i2s_tx, radio_buffer, sizeof(radio_buffer), &written, pdMS_TO_TICKS(10));
+        if (err != ESP_OK) {
+          vTaskDelay(pdMS_TO_TICKS(5));
+        }
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(100));
+      }
     }
     // Use test pattern if in test mode
     else if (s_i2s_test_mode && s_i2s_tx) {
@@ -995,52 +978,32 @@ static void cmd_process(String cmd) {
     }
   } else if (cmd == "radiostatus") {
     // Show radio streaming status
-    if (s_radio_active && radio_audio) {
-      Serial.printf("Radio active: %s\n", s_radio_active ? "YES" : "NO");
-      Serial.printf("Audio running: %s\n", radio_audio->isRunning() ? "YES" : "NO");
+    if (A2FPGARadio::isActive()) {
+      Serial.printf("Radio active: YES\n");
+      Serial.printf("Current URL: %s\n", A2FPGARadio::getCurrentURL().c_str());
+      Serial.printf("Prebuffered: %s\n", A2FPGARadio::isPrebuffered() ? "YES" : "NO");
+      Serial.printf("Grace cycles: %d\n", A2FPGARadio::getGracePeriodCycles());
+      size_t available, total;
+      A2FPGARadio::getBufferStatus(&available, &total);
+      Serial.printf("Buffer: %d/%d samples\n", available, total);
       Serial.printf("I2S task running: %s\n", s_i2s_run ? "YES" : "NO");
-      Serial.printf("Audio object: %p\n", radio_audio);
     } else {
       Serial.println("Radio not active");
     }
   } else if (cmd.startsWith("radio ")) {
-    // Stream internet radio using ESP32-audioI2S library
+    // Stream internet radio using radio module
     // Format: radio <url> or radio stop
     String toks[16]; int nt = split_ws(cmd, toks, 16);
     if (nt < 2) {
       Serial.println("Usage: radio <url>  or  radio stop");
-      Serial.println("Example URLs (use HTTP, not HTTPS):");
+      Serial.println("Example URLs:");
       Serial.println("  http://ice1.somafm.com/defcon-128-mp3  (SomaFM DEF CON)");
       Serial.println("  http://ice1.somafm.com/groovesalad-128-mp3  (SomaFM Groove Salad)");
       Serial.println("  http://stream.radioparadise.com/mp3-32  (Radio Paradise MP3)");
-      Serial.println("  http://streams.radiobob.de/bob-acdc/mp3-192/mediaplayer  (Radio BOB AC/DC)");
-      Serial.println("Note: HTTPS streams may not work reliably - prefer HTTP URLs");
     } else if (toks[1] == "stop") {
-      if (s_radio_active && radio_audio) {
+      if (A2FPGARadio::isActive()) {
         Serial.println("Stopping radio stream...");
-        s_radio_active = false;
-        
-        // Wait for radio task to finish
-        if (s_radio_task) {
-          vTaskDelay(pdMS_TO_TICKS(100));
-          s_radio_task = NULL;
-        }
-        
-        radio_audio->stopSong();
-        delete radio_audio;
-        radio_audio = nullptr;
-        
-        // Give audio library time to clean up
-        vTaskDelay(pdMS_TO_TICKS(200));
-        
-        // Restart our I2S system
-        esp_err_t err = i2s_tx_start();
-        if (err == ESP_OK) {
-          Serial.println("I2S restarted successfully");
-        } else {
-          Serial.printf("I2S restart failed: %s\n", esp_err_to_name(err));
-        }
-        
+        A2FPGARadio::stop();
         Serial.println("Radio stopped");
       } else {
         Serial.println("Radio not playing");
@@ -1054,14 +1017,6 @@ static void cmd_process(String cmd) {
       String url = toks[1];
       Serial.printf("Starting radio stream: %s\n", url.c_str());
       
-      // Stop any existing radio stream
-      if (s_radio_active && radio_audio) {
-        s_radio_active = false;
-        radio_audio->stopSong();
-        delete radio_audio;
-        radio_audio = nullptr;
-      }
-      
       // Stop other audio sources
       s_i2s_test_mode = false;
       if (g_es5503) {
@@ -1071,58 +1026,23 @@ static void cmd_process(String cmd) {
         }
       }
       
-      // Completely stop our I2S system
-      i2s_tx_stop();
+      // Initialize radio module if not already done
+      A2FPGARadio::begin();
       
-      // Stop our I2S task completely during radio
-      s_i2s_run = false;
-      if (s_i2s_task) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-        s_i2s_task = NULL;
+      // Start I2S to consume radio PCM data
+      esp_err_t err = i2s_tx_start();
+      if (err != ESP_OK) {
+        Serial.printf("Failed to start I2S for radio: %s\n", esp_err_to_name(err));
+        return;
       }
       
-      // Create Audio object with I2S output
-      radio_audio = new Audio();
-      
-      // Configure I2S pins (same as our setup)  
-      radio_audio->setPinout(PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DATA);
-      
-      // Try LSB format which might be closer to left-justified
-      radio_audio->setI2SCommFMT_LSB(true);  // Try LSB justified format
-      
-      radio_audio->setVolume(8);   // Lower volume to reduce potential distortion
-      radio_audio->forceMono(false);  // Ensure stereo output
-      
-      Serial.printf("Audio library I2S config: BCLK=%d, LRCLK=%d, DATA=%d\n", 
-                    PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DATA);
-      Serial.println("INFO: Trying LSB justified format (might work with left-justified FPGA)");
-      
-      Serial.println("Connecting to stream...");
-      
-      // Connect to the stream
-      if (radio_audio->connecttohost(url.c_str())) {
-        s_radio_active = true;
-        Serial.println("Radio stream connected!");
-        Serial.printf("Radio status: connected=%d, running=%d\n", 
-                      radio_audio->isRunning(), s_radio_active);
+      // Start radio streaming
+      if (A2FPGARadio::start(url)) {
+        Serial.println("Radio stream started!");
         Serial.println("Use 'radio stop' to stop streaming");
-        
-        // Start dedicated radio task with moderate priority
-        BaseType_t ok = xTaskCreatePinnedToCore(radio_task, "radio", 8192, NULL, 4, &s_radio_task, 0);
-        if (ok != pdPASS) {
-          Serial.println("Failed to start radio task");
-          s_radio_active = false;
-          radio_audio->stopSong();
-          delete radio_audio;
-          radio_audio = nullptr;
-          return;
-        }
+        Serial.println("Use 'radiostatus' to check buffer status");
       } else {
-        Serial.println("Failed to connect to radio stream");
-        delete radio_audio;
-        radio_audio = nullptr;
-        // Restore normal I2S
-        i2s_tx_start();
+        Serial.println("Failed to start radio stream");
       }
     }
   } else if (cmd.startsWith("wifi ")) {

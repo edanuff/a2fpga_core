@@ -679,10 +679,10 @@ module top #(
     localparam [23:0] acy1 =  24'd6143386;
     localparam [23:0] acy2 = -24'd2023767;
 
-    localparam AUDIO_RATE = 44100;
+    localparam AUDIO_RATE = 44100;  // Match MP3 stream sample rate
     localparam AUDIO_BIT_WIDTH = 16;
     // I2S format: 0=left-justified (ES5503/test), 1=standard I2S (ESP32-audioI2S library)
-    localparam I2S_FORMAT = 1'b0;  // Use left-justified I2S (working format)
+    localparam I2S_FORMAT = 1'b1;  // Use standard I2S (now fixed)
     wire clk_audio_w;
 	wire i2s_data_shift_strobe;
 	wire i2s_data_load_strobe;

@@ -92,7 +92,7 @@ module audio_timing #(
       if (acc_next >= CLK_RATE) begin
         acc_lr        <= acc_next - CLK_RATE;
         lrclk_r       <= ~lrclk_r;
-        lr_edge_pulse <= lrclk_r;
+        lr_edge_pulse <= 1'b1;
       end else begin
         acc_lr <= acc_next;
       end
