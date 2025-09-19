@@ -19,6 +19,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include "a2fpga_radio.h"
+#include "a2fpga_tone.h"
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h" // JTAG WRITE_PERI_REG
 #include "a2fpga_lcam.h"
@@ -81,8 +82,7 @@ bool usb_was_connected = false;
 
 // ---------- ES5503 Sound Chip ----------
 static ES5503* g_es5503 = nullptr;
-static TaskHandle_t s_es5503_task = NULL;
-static volatile bool s_es5503_run = false;
+static volatile bool s_es5503_run = false; // Simple flag to enable/disable ES5503
 static const uint32_t ES5503_SAMPLE_RATE = 44100;
 static const uint32_t ES5503_CLOCK_RATE = 7159090; // Apple IIgs clock rate
 static const size_t AUDIO_BUFFER_FRAMES = 512;
@@ -100,20 +100,7 @@ uint8_t* es5503_get_wave_memory(ES5503* es) {
   return es->get_wave_memory();
 }
 
-// ES5503 audio generation task
-static void es5503_audio_task(void *arg) {
-  const TickType_t xFrequency = pdMS_TO_TICKS(1000 / (ES5503_SAMPLE_RATE / AUDIO_BUFFER_FRAMES));
-  TickType_t xLastWakeTime = xTaskGetTickCount();
-  
-  while (s_es5503_run && g_es5503) {
-    // Generate audio samples
-    g_es5503->generate_audio(s_audio_buffer, AUDIO_BUFFER_FRAMES);
-    
-    // Wait for next audio generation cycle
-    vTaskDelayUntil(&xLastWakeTime, xFrequency);
-  }
-  vTaskDelete(NULL);
-}
+// ES5503 direct generation (no buffering - generate on-demand in I2S task)
 
 // ---------- I2S (slave TX for ES5503 audio, 16-bit stereo) ----------
 static i2s_chan_handle_t s_i2s_tx = NULL;
@@ -127,8 +114,29 @@ bool i2s_tx_is_running() {
 static void i2s_tx_task(void *arg) {
   while (s_i2s_run) {
     size_t written = 0;
+    // Tone generator mode (highest priority for debugging)
+    if (A2FPGATone::isActive()) {
+      static int16_t mono_buffer[AUDIO_BUFFER_FRAMES];
+      static int16_t stereo_buffer[AUDIO_BUFFER_FRAMES * 2];
+      
+      // Generate mono tone samples
+      A2FPGATone::generateSamples(mono_buffer, AUDIO_BUFFER_FRAMES);
+      
+      // Convert mono to stereo (duplicate each sample to L+R)
+      for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
+        stereo_buffer[i * 2] = mono_buffer[i];     // Left channel
+        stereo_buffer[i * 2 + 1] = mono_buffer[i]; // Right channel  
+      }
+      
+      if (s_i2s_tx) {
+        esp_err_t err = i2s_channel_write(s_i2s_tx, stereo_buffer, sizeof(stereo_buffer), &written, pdMS_TO_TICKS(10));
+        if (err != ESP_OK) {
+          vTaskDelay(pdMS_TO_TICKS(5));
+        }
+      }
+    }
     // Radio mode - check for PCM data from radio module
-    if (A2FPGARadio::isActive()) {
+    else if (A2FPGARadio::isActive()) {
       // Get PCM data from radio module and send to I2S
       static int16_t radio_buffer[AUDIO_BUFFER_FRAMES * 2];
       size_t samples_read = A2FPGARadio::readPCMSamples(radio_buffer, AUDIO_BUFFER_FRAMES * 2);
@@ -150,11 +158,34 @@ static void i2s_tx_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(5));
       }
     }
-    // Otherwise use ES5503 audio buffer if available
+    // ES5503 direct generation (like tone generator)
     else if (g_es5503 && s_es5503_run && s_i2s_tx) {
-      esp_err_t err = i2s_channel_write(s_i2s_tx, s_audio_buffer, sizeof(s_audio_buffer), &written, pdMS_TO_TICKS(10));
+      static int16_t mono_buffer[AUDIO_BUFFER_FRAMES]; // mono generation buffer
+      static int16_t stereo_buffer[AUDIO_BUFFER_FRAMES * 2]; // stereo output buffer
+      
+      // Generate ES5503 mono audio directly on-demand
+      g_es5503->generate_audio(mono_buffer, AUDIO_BUFFER_FRAMES);
+      
+      // Debug: Check if ES5503 is generating non-zero samples
+      static int debug_count = 0;
+      if (++debug_count % 100 == 0) {
+        int non_zero_count = 0;
+        for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
+          if (mono_buffer[i] != 0) non_zero_count++;
+        }
+        Serial.printf("ES5503 direct: %d/%d non-zero samples (range: %d to %d)\n", 
+                      non_zero_count, AUDIO_BUFFER_FRAMES,
+                      mono_buffer[0], mono_buffer[AUDIO_BUFFER_FRAMES-1]);
+      }
+      
+      // Convert mono to stereo (duplicate each mono sample to L+R)
+      for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
+        stereo_buffer[i * 2] = mono_buffer[i];     // Left channel
+        stereo_buffer[i * 2 + 1] = mono_buffer[i]; // Right channel
+      }
+      
+      esp_err_t err = i2s_channel_write(s_i2s_tx, stereo_buffer, sizeof(stereo_buffer), &written, pdMS_TO_TICKS(10));
       if (err != ESP_OK) {
-        // Brief delay to avoid tight loop on error (e.g., no external clocks yet)
         vTaskDelay(pdMS_TO_TICKS(5));
       }
     } else if (s_i2s_tx) {
@@ -268,7 +299,7 @@ static esp_err_t es5503_init() {
     return ESP_ERR_NO_MEM;
   }
   
-  g_es5503->set_channels(2);  // Stereo output
+  g_es5503->set_channels(1);  // Mono output (avoid stereo channel assignment issues)
   
   // Show where memory was allocated
   size_t psram_free_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
@@ -289,19 +320,13 @@ static esp_err_t es5503_start() {
   if (err != ESP_OK) return err;
   
   s_es5503_run = true;
-  if (!s_es5503_task) {
-    BaseType_t ok = xTaskCreatePinnedToCore(es5503_audio_task, "es5503_audio", 8192, NULL, 5, &s_es5503_task, 0);
-    if (ok != pdPASS) return ESP_ERR_NO_MEM;
-  }
-  
-  Serial.println("ES5503 audio generation started");
+  Serial.println("ES5503 direct audio generation enabled");
   return ESP_OK;
 }
 
 static void es5503_stop() {
   s_es5503_run = false;
-  if (s_es5503_task) { vTaskDelay(1); s_es5503_task = NULL; }
-  Serial.println("ES5503 audio generation stopped");
+  Serial.println("ES5503 direct audio generation disabled");
 }
 
 static void es5503_cleanup() {
@@ -649,6 +674,16 @@ static void cmd_process(String cmd) {
     esp_err_t err = es5503_start();
     if (err == ESP_OK) {
       Serial.println("ES5503 started");
+      
+      // Auto-start I2S for audio output
+      if (!i2s_tx_is_running()) {
+        esp_err_t i2s_err = i2s_tx_start();
+        if (i2s_err != ESP_OK) {
+          Serial.printf("Failed to start I2S for ES5503: %s\n", esp_err_to_name(i2s_err));
+        } else {
+          Serial.println("I2S started automatically for ES5503 audio");
+        }
+      }
     } else {
       Serial.printf("ES5503 start failed: %s\n", esp_err_to_name(err));
     }
@@ -666,6 +701,37 @@ static void cmd_process(String cmd) {
       }
       Serial.println("All ES5503 audio generation stopped (all oscillators halted)");
     }
+  } else if (cmd == "starttone" || cmd.startsWith("starttone ")) {
+    // Start tone generator for audio debugging
+    float frequency = 440.0f; // Default frequency
+    
+    String toks[16]; int nt = split_ws(cmd, toks, 16);
+    if (nt >= 2) {
+      frequency = toks[1].toFloat();
+      if (frequency <= 0.0f || frequency > 22050.0f) {
+        Serial.println("Frequency must be between 0.1 and 22050 Hz");
+        return;
+      }
+    }
+    
+    if (A2FPGATone::start(frequency)) {
+      // Auto-start I2S for audio output
+      if (!i2s_tx_is_running()) {
+        esp_err_t i2s_err = i2s_tx_start();
+        if (i2s_err != ESP_OK) {
+          Serial.printf("Failed to start I2S for tone: %s\n", esp_err_to_name(i2s_err));
+          A2FPGATone::stop();
+        } else {
+          Serial.println("I2S started automatically for tone generator");
+        }
+      }
+      Serial.printf("Tone generator started at %.1fHz\n", frequency);
+    } else {
+      Serial.println("Failed to start tone generator");
+    }
+  } else if (cmd == "stoptone") {
+    A2FPGATone::stop();
+    Serial.println("Tone generator stopped");
   } else if (cmd.startsWith("audiostart ")) {
     // Enable audio generation with specified number of oscillators
     String toks[16]; int nt = split_ws(cmd, toks, 16);
@@ -687,37 +753,68 @@ static void cmd_process(String cmd) {
     if (!g_es5503) {
       Serial.println("ES5503 not initialized. Use 'es5503start' first.");
     } else {
+      // Ensure I2S is running for audio output
+      if (!i2s_tx_is_running()) {
+        esp_err_t err = i2s_tx_start();
+        if (err != ESP_OK) {
+          Serial.printf("Failed to start I2S for ES5503: %s\n", esp_err_to_name(err));
+          return;
+        }
+        Serial.println("I2S started automatically for ES5503 test");
+      }
       Serial.println("Testing ES5503 - loading test waveform and setting up oscillator...");
       
-      // First load a sine wave into wave memory
+      // First load a high-quality sine wave into wave memory
       uint8_t* wave_mem = g_es5503->get_wave_memory();
       if (wave_mem) {
-        // Generate a 256-sample sine wave
+        // Generate a 4096-sample sine wave for high quality
         // ES5503 expects unsigned 8-bit (0-255) where 128 is zero
-        for (int i = 0; i < 256; i++) {
-          float angle = (2.0f * 3.14159f * i) / 256.0f;
-          // Generate signed value (-127 to +127), then shift to unsigned (0-255)
-          int16_t sample = (int16_t)(127.0f * sinf(angle)) + 128;
-          wave_mem[i] = (uint8_t)sample;
-        }
-        Serial.println("Sine wave loaded into wave memory");
+        const int WAVE_SIZE = 4096;
+        Serial.printf("Generating %d-sample high-quality sine wave...\n", WAVE_SIZE);
         
-        // Debug: show a few samples
-        Serial.printf("Sample values: [0]=0x%02X [64]=0x%02X [128]=0x%02X [192]=0x%02X\n",
-                      wave_mem[0], wave_mem[64], wave_mem[128], wave_mem[192]);
+        for (int i = 0; i < WAVE_SIZE; i++) {
+          float angle = (2.0f * 3.14159265359f * i) / (float)WAVE_SIZE;
+          // Generate signed value, avoid 0x00 which stops the oscillator!
+          // Use range 1-255 (avoiding 0) for ES5503 compatibility
+          float sample_f = 127.0f * sinf(angle) + 128.0f;
+          uint8_t sample = (uint8_t)(sample_f + 0.5f); // Round to nearest
+          
+          // Clamp to avoid 0x00 (oscillator stop command)
+          if (sample == 0) sample = 1;
+          if (sample > 255) sample = 255;
+          
+          wave_mem[i] = sample;
+        }
+        Serial.printf("High-quality %d-sample sine wave loaded into wave memory\n", WAVE_SIZE);
+        
+        // Debug: show samples at key points (0°, 90°, 180°, 270°)
+        Serial.printf("Sample values: [0]=0x%02X [%d]=0x%02X [%d]=0x%02X [%d]=0x%02X\n",
+                      wave_mem[0], WAVE_SIZE/4, wave_mem[WAVE_SIZE/4], 
+                      WAVE_SIZE/2, wave_mem[WAVE_SIZE/2], 3*WAVE_SIZE/4, wave_mem[3*WAVE_SIZE/4]);
+        Serial.printf("Expected: 128 (0°), 255 (90°), 128 (180°), 1 (270° - avoiding 0x00!)\n");
       }
       
       // Set up oscillator 0 for A440 (440 Hz)
       // ES5503 frequency calculation: freq_reg = (target_freq * 65536) / sample_rate
-      // For 440 Hz at 22050 Hz sample rate: (440 * 65536) / 22050 = 1309 = 0x051D
-      g_es5503->write(0x00, 0x1D);    // freq lo = 0x1D
-      g_es5503->write(0x20, 0x05);    // freq hi = 0x05 (0x051D = A440)
-      g_es5503->write(0x40, 0x60);    // volume = 0x60 (medium-low)
+      // For 440 Hz at 44100 Hz sample rate: (440 * 65536) / 44100 = 654 = 0x028E
+      g_es5503->write(0x00, 0x8E);    // freq lo = 0x8E
+      g_es5503->write(0x20, 0x02);    // freq hi = 0x02 (0x028E = A440 @ 44.1kHz)
+      g_es5503->write(0x40, 0x80);    // volume = 0x80 (medium)
       g_es5503->write(0x80, 0x00);    // wavetable pointer = 0x0000
-      g_es5503->write(0xC0, 0x00);    // wavetable size = 256, resolution = 0
-      g_es5503->write(0xA0, 0x00);    // control = 0x00 (start oscillator, channel 0)
-      g_es5503->write(0xE1, 0x00);    // enable 1 oscillator
-      Serial.println("ES5503 configured with sine wave. Should hear clean tone.");
+      g_es5503->write(0xC0, 0x20);    // wavetable size = 4096 (bits 5-3 = 100), resolution = 0
+      g_es5503->write(0xE1, 0x01);    // enable 1 oscillator (E1 = number of oscillators)
+      g_es5503->write(0xA0, 0x00);    // control = 0x00 (FREE mode, channel 0, running, explicit)
+      
+      // Verify the oscillator configuration
+      uint8_t control_readback = g_es5503->read(0xA0);
+      uint8_t mode = control_readback & 0x03;
+      uint8_t channel = (control_readback >> 4) & 0x0F;
+      bool halted = control_readback & 0x01;
+      
+      const char* mode_names[] = {"FREE", "ONCE", "SYNC", "SWAP"};
+      Serial.printf("ES5503 Oscillator 0: mode=%s, channel=%d, halted=%s, control=0x%02X\n", 
+                    mode_names[mode], channel, halted ? "YES" : "NO", control_readback);
+      Serial.println("ES5503 configured with high-quality 4096-sample sine wave @ 440Hz.");
     }
   } else if (cmd == "es5503wave") {
     // Generate a test waveform in ES5503 wave memory
@@ -935,21 +1032,54 @@ static void cmd_process(String cmd) {
     }
     Serial.println("ES5503 started");
     
-    // Start I2S
-    err = i2s_tx_start();
-    if (err != ESP_OK) {
-      Serial.printf("I2S start failed: %s\n", esp_err_to_name(err));
+    // Start I2S if not already running
+    if (!i2s_tx_is_running()) {
+      err = i2s_tx_start();
+      if (err != ESP_OK) {
+        Serial.printf("I2S start failed: %s\n", esp_err_to_name(err));
+        return;
+      }
+      Serial.println("I2S started");
+    } else {
+      Serial.println("I2S already running");
+    }
+    
+    // Load high-quality sine wave into wave memory
+    Serial.println("Loading high-quality sine wave into wave memory...");
+    uint8_t* wave_mem = g_es5503->get_wave_memory();
+    if (!wave_mem) {
+      Serial.println("ERROR: Cannot access ES5503 wave memory");
       return;
     }
-    Serial.println("I2S started");
+    
+    // Generate a 4096-sample sine wave for high quality  
+    const int WAVE_SIZE = 4096;
+    Serial.printf("Generating %d-sample high-quality sine wave...\n", WAVE_SIZE);
+    
+    for (int i = 0; i < WAVE_SIZE; i++) {
+      float angle = (2.0f * 3.14159265359f * i) / (float)WAVE_SIZE;
+      // Generate signed value, avoid 0x00 which stops the oscillator!
+      // Use range 1-255 (avoiding 0) for ES5503 compatibility
+      float sample_f = 127.0f * sinf(angle) + 128.0f;
+      uint8_t sample = (uint8_t)(sample_f + 0.5f); // Round to nearest
+      
+      // Clamp to avoid 0x00 (oscillator stop command)
+      if (sample == 0) sample = 1;
+      if (sample > 255) sample = 255;
+      
+      wave_mem[i] = sample;
+    }
+    Serial.printf("High-quality %d-sample sine wave loaded into wave memory\n", WAVE_SIZE);
     
     // Write test ES5503 settings
     Serial.println("Writing ES5503 test configuration...");
-    g_es5503->write(0x00, 0x00);    // freq lo = 0
-    g_es5503->write(0x20, 0x10);    // freq hi = 0x1000 (moderate frequency)
+    // Use frequency value that should produce ~440Hz
+    // Original 0x1000 was high-pitched but audible, try 0x0800 (half that)
+    g_es5503->write(0x00, 0x00);    // freq lo = 0x00 (low byte)  
+    g_es5503->write(0x20, 0x08);    // freq hi = 0x08 (high byte) → 0x0800 total  
     g_es5503->write(0x40, 0x80);    // volume = 0x80 (medium)
     g_es5503->write(0x80, 0x00);    // wavetable pointer = 0x0000
-    g_es5503->write(0xC0, 0x00);    // wavetable size = 256, resolution = 0
+    g_es5503->write(0xC0, 0x20);    // wavetable size = 4096 samples, resolution = 0
     g_es5503->write(0xA0, 0x00);    // control = 0x00 (start oscillator, channel 0)
     g_es5503->write(0xE1, 0x00);    // enable 1 oscillator
     
@@ -1192,6 +1322,9 @@ void setup() {
   #if AUTOSTART
   lcam_start();
   #endif
+  
+  // Initialize tone generator for audio debugging
+  A2FPGATone::begin();
   
   // Note: ES5503 will be initialized when first used via CLI commands
   // or when bus packets are received that require ES5503 processing
