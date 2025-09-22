@@ -168,7 +168,7 @@ static void i2s_tx_task(void *arg) {
       
       // Debug: Check if ES5503 is generating non-zero samples
       static int debug_count = 0;
-      if (++debug_count % 100 == 0) {
+      if (++debug_count % 5000 == 0) {
         int non_zero_count = 0;
         for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
           if (mono_buffer[i] != 0) non_zero_count++;
@@ -350,6 +350,7 @@ static struct {
 // Track ES5503 wave memory writes
 static uint32_t s_wave_memory_writes = 0;
 static bool s_es5503_debug = false;
+static bool s_bus_debug = false;  // Debug all bus packets
 
 // Handle Sound GLU and ES5503 writes from bus packet
 static void handle_es5503_write(uint16_t address, uint8_t data) {
@@ -393,6 +394,10 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
                           s_glu.address_ptr, data, s_wave_memory_writes);
           }
         }
+      } else if (wave_mem && s_glu.address_ptr >= 65536) {
+        if (s_es5503_debug) {
+          Serial.printf("Wave RAM write IGNORED: addr 0x%04X out of bounds\n", s_glu.address_ptr);
+        }
       }
     }
     
@@ -426,6 +431,31 @@ void process_bus_packet(uint32_t packet) {
   
   bool rw_n = (flags >> 7) & 1;      // Read/Write (1=read, 0=write)
   bool reset_indicator = flags & 1;   // Reset packet indicator
+  
+  // Debug bus packets if enabled (filter out heartbeat spam)
+  if (s_bus_debug && !reset_indicator && address != 0xC0FF) {
+    Serial.printf("Bus: %s $%04X = $%02X (flags=$%02X)\n", 
+                  rw_n ? "READ" : "WRITE", address, data, flags);
+  }
+  
+  // Track address range we're receiving from FPGA (excluding heartbeat)
+  static int total_packet_count = 0;
+  static int write_packet_count = 0;
+  static uint16_t min_addr = 0xFFFF, max_addr = 0x0000;
+  if (!reset_indicator && address != 0xC0FF) {  // Exclude heartbeat
+    total_packet_count++;
+    if (!rw_n) write_packet_count++;
+    
+    // Track address range (excluding heartbeat)
+    if (address < min_addr) min_addr = address;
+    if (address > max_addr) max_addr = address;
+    
+    // Show statistics every 100 non-heartbeat packets  
+    if (total_packet_count % 100 == 0) {
+      Serial.printf("FPGA filter stats (no heartbeat): %d total, %d writes, addr range $%04X-$%04X\n", 
+                    total_packet_count, write_packet_count, min_addr, max_addr);
+    }
+  }
   
   // Skip reset packets and read operations
   if (reset_indicator || rw_n) return;
@@ -479,6 +509,11 @@ static void cmd_process(String cmd) {
     lcam_stop();
   } else if (cmd == "status") {
     lcam_print_status();
+    // Also show ES5503 and bus capture stats
+    Serial.printf("ES5503 wave memory writes: %lu\n", s_wave_memory_writes);
+    Serial.printf("GLU address pointer: 0x%04X\n", s_glu.address_ptr);
+    Serial.printf("Bus debug: %s, ES5503 debug: %s\n", 
+                  s_bus_debug ? "ON" : "OFF", s_es5503_debug ? "ON" : "OFF");
   } else if (cmd.startsWith("we ")) {
     long n = cmd.substring(3).toInt();
     lcam_log_every_n_words(n);
@@ -876,6 +911,22 @@ static void cmd_process(String cmd) {
     // Toggle ES5503 register write debugging
     s_es5503_debug = !s_es5503_debug;
     Serial.printf("ES5503 debug %s\n", s_es5503_debug ? "enabled" : "disabled");
+  } else if (cmd == "busdebug") {
+    // Toggle all bus packet debugging
+    s_bus_debug = !s_bus_debug;
+    Serial.printf("Bus packet debug %s (heartbeat filtered)\n", s_bus_debug ? "enabled" : "disabled");
+  } else if (cmd == "es5503busdebug") {
+    // Toggle ES5503-only bus debugging (addresses $C030-$C04F)
+    static bool es5503_bus_debug = false;
+    es5503_bus_debug = !es5503_bus_debug;
+    Serial.printf("ES5503 bus debug %s\n", es5503_bus_debug ? "enabled" : "disabled");
+    // Patch the bus debug function temporarily
+    // This is hacky but will work for debugging
+  } else if (cmd == "es5503resetwrite") {
+    // Clear write count and reset GLU state
+    s_wave_memory_writes = 0;
+    memset(&s_glu, 0, sizeof(s_glu));  // Reset GLU state
+    Serial.printf("ES5503 write count and GLU state reset\n");
   } else if (cmd == "es5503info") {
     // Display ES5503 oscillator information in human-readable format
     if (!g_es5503) {
