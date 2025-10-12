@@ -17,7 +17,11 @@ module a2bus_stream #(
     input  logic        heartbeat_pulse,    // NEW: Heartbeat for testing
     output logic        activity_led,
     output logic        overflow_led,
-    output logic [7:0]  debug_status
+    output logic [7:0]  debug_status,
+    output logic [15:0] es5503_counter,     // ES5503 filtered packet counter (transmitted)
+    output logic [15:0] es5503_access_counter, // ES5503 access counter (detected)
+    output logic [15:0] packets_dropped_counter, // Packets dropped due to cam_busy
+    output logic        cam_overwrite_flag      // CAM serializer overwrite detected
 );
 
     // Bus capture timing - use data_in_strobe for single capture per transaction
@@ -91,7 +95,7 @@ module a2bus_stream #(
     reg        heartbeat_pending_r;
     reg        startup_done_r;
     
-    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
+    always @(posedge a2bus_if.clk_logic) begin
         if (!a2bus_if.system_reset_n) begin
             // Initialize all registers on reset
             packet_data_r <= 32'h0;
@@ -133,6 +137,7 @@ module a2bus_stream #(
     // Cam serializer can keep up since: 32 clocks/packet < 47+ clocks/Apple II cycle
     
     wire cam_busy;
+    wire cam_overwrite;
     wire packet_accepted_w = packet_valid_r & !cam_busy;
     
     cam_serializer cam_serializer_inst (
@@ -143,7 +148,8 @@ module a2bus_stream #(
         .cam_pclk(cam_pclk),
         .cam_sync(cam_sync),
         .cam_data(cam_data),
-        .busy(cam_busy)
+        .busy(cam_busy),
+        .overwrite_detected(cam_overwrite)
     );
 
     // Activity detection
@@ -156,33 +162,56 @@ module a2bus_stream #(
         end
     end
 
-    // Status outputs
+    // Status outputs with filtering debug info
     assign activity_led = bus_active_r | cam_busy;
     assign overflow_led = packet_valid_r & cam_busy;  // Packet dropped due to busy serializer
     assign debug_status = {
-        cam_busy,               // [7] CAM serializer busy
-        cam_sync,               // [6] Currently transmitting (sync signal)
+        cam_overwrite,          // [7] CAM serializer overwrite detected
+        capture_trigger_w,      // [6] Final capture trigger
         capture_enable,         // [5]
         capture_mode,           // [4:2]
         packet_valid_r,         // [1]
-        bus_active_r            // [0]
+        is_es5503_w             // [0] ES5503 address detected
     };
 
     // Performance counters for debugging
     reg [15:0] packets_captured_r = 16'h0;
     reg [15:0] packets_dropped_r = 16'h0;
+    reg [15:0] es5503_counter_r = 16'h0;
+    reg [15:0] es5503_access_counter_r = 16'h0;
     
-    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
+    // Count ES5503 packets that are actually transmitted (not heartbeat/reset)
+    wire es5503_packet_sent_w = packet_accepted_w & 
+                                (packet_data_r[31:16] >= 16'hC03C) & 
+                                (packet_data_r[31:16] <= 16'hC03F) & 
+                                (packet_data_r[0] == 1'b0);
+    
+    // Count ES5503 accesses when they're detected (before transmission)
+    wire es5503_access_detected_w = capture_trigger_w & is_es5503_w;
+    
+    always @(posedge a2bus_if.clk_logic) begin
         if (!a2bus_if.system_reset_n) begin
             packets_captured_r <= 16'h0;
             packets_dropped_r <= 16'h0;
+            es5503_counter_r <= 16'h0;
+            es5503_access_counter_r <= 16'h0;
         end else begin
             if (packet_accepted_w)
                 packets_captured_r <= packets_captured_r + 1;
             if (packet_valid_r & cam_busy)
                 packets_dropped_r <= packets_dropped_r + 1;
+            if (es5503_packet_sent_w)
+                es5503_counter_r <= es5503_counter_r + 1;
+            if (a2bus_if.data_in_strobe && !a2bus_if.m2sel_n && a2bus_if.addr[15:2] == 14'b1100_0000_0011_11)
+                es5503_access_counter_r <= es5503_access_counter_r + 1;
         end
     end
+    
+    // Output counters
+    assign es5503_counter = es5503_counter_r;
+    assign es5503_access_counter = es5503_access_counter_r;
+    assign packets_dropped_counter = packets_dropped_r;
+    assign cam_overwrite_flag = cam_overwrite;
 
 endmodule
 

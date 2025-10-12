@@ -129,14 +129,29 @@ module top #(
     );
     defparam clkdiv_inst.DIV_MODE="5";
 
-    // LED blinking logic
+    // LED blinking logic with ES5503 counter indication
     reg led_r = 1'b0;
     reg [25:0] led_counter_r = 26'd0;
+    reg [15:0] prev_es5503_counter_r = 16'd0;
+    reg        es5503_activity_r = 1'b0;
 
     always @(posedge clk_logic_w) begin
+        // Track ES5503 counter changes for activity indication
+        prev_es5503_counter_r <= es5503_counter_w;
+        if (es5503_counter_w != prev_es5503_counter_r) begin
+            es5503_activity_r <= 1'b1;
+        end
+        
         if (led_counter_r == 26'd09_999_999) begin
             led_counter_r <= 0;
-            led_r <= ~led_r;  // Toggle LED every 0.5s
+            // If ES5503 is active, use fast blink (counter value dependent)
+            // Otherwise use slow heartbeat blink
+            if (es5503_activity_r) begin
+                led_r <= es5503_counter_w[8];  // Blink based on counter bit 8 for ES5503 activity
+                es5503_activity_r <= 1'b0;    // Clear activity flag
+            end else begin
+                led_r <= ~led_r;  // Normal heartbeat every 0.5s
+            end
         end else begin
             led_counter_r <= led_counter_r + 1;
         end
@@ -347,6 +362,10 @@ module top #(
     wire activity_led_w;
     wire overflow_led_w;
     wire [7:0] debug_status_w;
+    wire [15:0] es5503_counter_w;
+    wire [15:0] es5503_access_counter_w;
+    wire [15:0] packets_dropped_counter_w;
+    wire        cam_overwrite_flag_w;
 
     // Heartbeat generator for testing when Apple II bus is inactive
     reg [23:0] heartbeat_counter_r;  
@@ -369,11 +388,15 @@ module top #(
         .cam_data(cam_data_w),
         
         .capture_enable(1'b1),           // Always enabled
-        .capture_mode(3'b111),           // Capture everything
+        .capture_mode(3'b111),           // ES5503 only (changed from speaker)
         .heartbeat_pulse(heartbeat_pulse_w),
         .activity_led(activity_led_w),
         .overflow_led(overflow_led_w),
-        .debug_status(debug_status_w)
+        .debug_status(debug_status_w),
+        .es5503_counter(es5503_counter_w),
+        .es5503_access_counter(es5503_access_counter_w),
+        .packets_dropped_counter(packets_dropped_counter_w),
+        .cam_overwrite_flag(cam_overwrite_flag_w)
     );
 
     // Connect CAM interface signals to ESP32 pins
@@ -767,14 +790,14 @@ module top #(
         .enable_i(show_debug_overlay_r),
 
         .hex_values ({
-            i2s_sample_l[15:8],            // Current audio left sample value
-            i2s_sample_l[7:0],             // Current audio left sample value
-            i2s_sample_r[15:8],            // Current audio right sample value
-            i2s_sample_r[7:0],             // Current audio right sample value
-            {4'b0, a2mem_if.TEXT_COLOR}, // Current TEXT_COLOR value (should be 0xF)
-            {4'b0, a2mem_if.BACKGROUND_COLOR}, // Current BACKGROUND_COLOR value     
-            {6'b0, device_reset_occurred_r, reset_occurred_r}, // Reset status flags
-            8'h0
+            es5503_access_counter_w[15:8], // ES5503 access counter high byte (detected)
+            es5503_access_counter_w[7:0],  // ES5503 access counter low byte (detected)
+            es5503_counter_w[15:8],        // ES5503 transmission counter high byte (sent)
+            es5503_counter_w[7:0],         // ES5503 transmission counter low byte (sent)
+            packets_dropped_counter_w[15:8], // Packets dropped counter high byte
+            packets_dropped_counter_w[7:0],  // Packets dropped counter low byte
+            {7'b0, cam_overwrite_flag_w}, // CAM overwrite flag (should be 0 if no overwrites)
+            {4'b0, a2mem_if.BACKGROUND_COLOR} // Current BACKGROUND_COLOR value     
         }), 
 
         .debug_bits_0_i ({a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE, a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.STORE80, a2bus_if.system_reset_n, a2bus_if.device_reset_n}),

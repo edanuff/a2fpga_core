@@ -8,18 +8,30 @@ module cam_serializer #(
     output        cam_pclk,
     output        cam_sync,
     output [3:0]  cam_data,
-    output        busy 
+    output        busy,
+    output        overwrite_detected 
 );
 
     // ----------------------------
     // Write queue (1-deep)
     // ----------------------------
     reg [31:0] pending_data_r;
+    reg        overwrite_detected_r;
+    
+    // Detect overwrite condition
+    wire packet_overwrite_w = wr_i & packet_pending_r;
+    
     always @(posedge clk_i or negedge rst_n) begin
         if (!rst_n) begin
             pending_data_r <= 32'h0;
-        end else if (wr_i) begin
-            pending_data_r <= data_i;    // last write wins
+            overwrite_detected_r <= 1'b0;
+        end else begin
+            if (wr_i) begin
+                pending_data_r <= data_i;    // last write wins
+                if (packet_pending_r) begin
+                    overwrite_detected_r <= 1'b1; // Sticky flag - indicates overwrite occurred
+                end
+            end
         end
     end
 
@@ -63,6 +75,9 @@ module cam_serializer #(
 
     // busy = active OR queued
     assign busy = packet_active_r | packet_pending_r;
+    
+    // Output overwrite detection (sticky flag)
+    assign overwrite_detected = overwrite_detected_r;
 
     // Serializer / flow
     always @(posedge clk_i or negedge rst_n) begin

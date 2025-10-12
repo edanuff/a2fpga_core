@@ -265,14 +265,33 @@ static inline void on_eof_process() {
   uint32_t got = desc_len(d);
   if (got == 0 || got > (uint32_t)CHUNK_BYTES) got = CHUNK_BYTES;
 
-  // Correct: extras (VSYNC+stopper) are at the *front* of the chunk.
-  // Skip exactly (got - BYTES_PER_WORD) leading bytes, then pack 8.
-  uint32_t extras = (got > (uint32_t)BYTES_PER_WORD) ? (got - (uint32_t)BYTES_PER_WORD) : 0;
-  const uint8_t* p = base + extras;
+  // Debug: log buffer lengths to understand the pattern
+  static uint32_t debug_count = 0;
+  debug_count++;
+  if ((debug_count % 1000) == 1) {  // Log every 1000th buffer
+    Serial.printf("LCAM debug: got=%lu bytes (PACK_BYTES=%d)\n", (unsigned long)got, PACK_BYTES);
+  }
 
-  // Safety clamp in case something unexpected happens
-  if (extras + BYTES_PER_WORD > got) p = base;
-
+  // Original comment: "extras (VSYNC+stopper) are at the *front* of the chunk"  
+  // So we need to skip the leading VSYNC+stopper bytes to get to the 8 data bytes
+  // Fix the original calculation to be safe
+  
+  uint32_t skip_bytes;
+  if (got == 10) {
+    // Perfect case: exactly 10 bytes, skip 2 (VSYNC + stopper)
+    skip_bytes = 2;
+  } else if (got == 9) {
+    // Common case: 9 bytes, skip 1 (missing one byte, but pattern shifted)  
+    skip_bytes = 1;
+  } else if (got >= BYTES_PER_WORD) {
+    // Other cases: ensure we have 8 bytes of data to read
+    skip_bytes = got - BYTES_PER_WORD;
+  } else {
+    // Degenerate case: not enough data
+    skip_bytes = 0;
+  }
+  
+  const uint8_t* p = base + skip_bytes;
   const uint32_t w = pack_word_lsn_first(p);
 
   // Push to SPSC ring (drop if full)
@@ -430,4 +449,13 @@ void lcam_log_every_n_words(uint32_t n) {
 void lcam_set_logging(uint8_t n) {
   // Set logging level
   s_log_level = n;  
+}
+
+// Debug/stats functions
+uint32_t lcam_get_words_seen() {
+  return words_seen;
+}
+
+uint32_t lcam_get_ring_drops() {
+  return rb_drops;
 }

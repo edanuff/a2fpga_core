@@ -352,6 +352,17 @@ static uint32_t s_wave_memory_writes = 0;
 static bool s_es5503_debug = false;
 static bool s_bus_debug = false;  // Debug all bus packets
 
+// Bus packet statistics (global for reset)
+static int s_total_packet_count = 0;
+static int s_write_packet_count = 0;
+static int s_es5503_packet_count = 0;      // Packets in ES5503 range
+static int s_corrupted_packet_count = 0;   // Packets outside ES5503 range (excluding heartbeat)
+static uint32_t s_last_packet_time_us = 0; // For timing analysis
+static uint32_t s_total_packet_time_us = 0;
+static uint32_t s_max_packet_gap_us = 0;
+static uint32_t s_min_packet_gap_us = UINT32_MAX;
+static uint16_t s_min_addr = 0xFFFF, s_max_addr = 0x0000;
+
 // Handle Sound GLU and ES5503 writes from bus packet
 static void handle_es5503_write(uint16_t address, uint8_t data) {
   if (!g_es5503) return;
@@ -429,6 +440,14 @@ void process_bus_packet(uint32_t packet) {
   uint8_t data = (packet >> 8) & 0xFF;
   uint8_t flags = packet & 0xFF;
   
+  // Debug packet format for first few packets
+  static int packet_debug_count = 0;
+  if (packet_debug_count < 10) {
+    packet_debug_count++;
+    Serial.printf("Raw packet: 0x%08X → addr=$%04X data=$%02X flags=$%02X\n", 
+                  packet, address, data, flags);
+  }
+  
   bool rw_n = (flags >> 7) & 1;      // Read/Write (1=read, 0=write)
   bool reset_indicator = flags & 1;   // Reset packet indicator
   
@@ -439,21 +458,35 @@ void process_bus_packet(uint32_t packet) {
   }
   
   // Track address range we're receiving from FPGA (excluding heartbeat)
-  static int total_packet_count = 0;
-  static int write_packet_count = 0;
-  static uint16_t min_addr = 0xFFFF, max_addr = 0x0000;
   if (!reset_indicator && address != 0xC0FF) {  // Exclude heartbeat
-    total_packet_count++;
-    if (!rw_n) write_packet_count++;
+    s_total_packet_count++;
+    if (!rw_n) s_write_packet_count++;
+    
+    // Timing analysis - measure gaps between packets
+    uint32_t now_us = micros();
+    if (s_last_packet_time_us > 0) {
+      uint32_t gap_us = now_us - s_last_packet_time_us;
+      s_total_packet_time_us += gap_us;
+      if (gap_us > s_max_packet_gap_us) s_max_packet_gap_us = gap_us;
+      if (gap_us < s_min_packet_gap_us) s_min_packet_gap_us = gap_us;
+    }
+    s_last_packet_time_us = now_us;
+    
+    // Count ES5503 vs corrupted packets
+    if (address >= 0xC03C && address <= 0xC03F) {
+      s_es5503_packet_count++;
+    } else {
+      s_corrupted_packet_count++;
+    }
     
     // Track address range (excluding heartbeat)
-    if (address < min_addr) min_addr = address;
-    if (address > max_addr) max_addr = address;
+    if (address < s_min_addr) s_min_addr = address;
+    if (address > s_max_addr) s_max_addr = address;
     
     // Show statistics every 100 non-heartbeat packets  
-    if (total_packet_count % 100 == 0) {
-      Serial.printf("FPGA filter stats (no heartbeat): %d total, %d writes, addr range $%04X-$%04X\n", 
-                    total_packet_count, write_packet_count, min_addr, max_addr);
+    if (s_total_packet_count % 100 == 0) {
+      Serial.printf("FPGA filter stats (no heartbeat): %d total, %d writes, ES5503: %d, corrupted: %d, addr range $%04X-$%04X\n", 
+                    s_total_packet_count, s_write_packet_count, s_es5503_packet_count, s_corrupted_packet_count, s_min_addr, s_max_addr);
     }
   }
   
@@ -927,6 +960,50 @@ static void cmd_process(String cmd) {
     s_wave_memory_writes = 0;
     memset(&s_glu, 0, sizeof(s_glu));  // Reset GLU state
     Serial.printf("ES5503 write count and GLU state reset\n");
+  } else if (cmd == "stats") {
+    // Display current bus packet statistics
+    Serial.printf("Bus packet statistics:\n");
+    Serial.printf("  Total packets: %d\n", s_total_packet_count);
+    Serial.printf("  Write packets: %d\n", s_write_packet_count);
+    Serial.printf("  Read packets: %d\n", s_total_packet_count - s_write_packet_count);
+    Serial.printf("  ES5503 packets: %d (correct)\n", s_es5503_packet_count);
+    Serial.printf("  Corrupted packets: %d (wrong address)\n", s_corrupted_packet_count);
+    if (s_total_packet_count > 0) {
+      Serial.printf("  Address range: $%04X-$%04X\n", s_min_addr, s_max_addr);
+      Serial.printf("  Corruption rate: %.1f%%\n", (100.0 * s_corrupted_packet_count) / s_total_packet_count);
+      
+      // Timing analysis
+      if (s_total_packet_count > 1) {
+        uint32_t avg_gap_us = s_total_packet_time_us / (s_total_packet_count - 1);
+        Serial.printf("  Timing: avg=%lu us, min=%lu us, max=%lu us\n", 
+                      (unsigned long)avg_gap_us, (unsigned long)s_min_packet_gap_us, (unsigned long)s_max_packet_gap_us);
+      }
+    } else {
+      Serial.printf("  Address range: (no packets received)\n");
+    }
+    
+    // LCD_CAM ring buffer stats
+    uint32_t lcam_words = lcam_get_words_seen();
+    uint32_t lcam_drops = lcam_get_ring_drops();
+    Serial.printf("LCD_CAM statistics:\n");
+    Serial.printf("  Words received: %lu\n", (unsigned long)lcam_words);
+    Serial.printf("  Ring buffer drops: %lu\n", (unsigned long)lcam_drops);
+    if (lcam_words > 0) {
+      Serial.printf("  Drop rate: %.1f%%\n", (100.0 * lcam_drops) / (lcam_words + lcam_drops));
+    }
+  } else if (cmd == "resetstats") {
+    // Reset bus packet statistics
+    s_total_packet_count = 0;
+    s_write_packet_count = 0;
+    s_es5503_packet_count = 0;
+    s_corrupted_packet_count = 0;
+    s_min_addr = 0xFFFF;
+    s_max_addr = 0x0000;
+    s_last_packet_time_us = 0;
+    s_total_packet_time_us = 0;
+    s_max_packet_gap_us = 0;
+    s_min_packet_gap_us = UINT32_MAX;
+    Serial.println("Bus packet statistics reset");
   } else if (cmd == "es5503info") {
     // Display ES5503 oscillator information in human-readable format
     if (!g_es5503) {
