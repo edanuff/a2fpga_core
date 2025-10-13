@@ -547,6 +547,11 @@ static void cmd_process(String cmd) {
     Serial.printf("GLU address pointer: 0x%04X\n", s_glu.address_ptr);
     Serial.printf("Bus debug: %s, ES5503 debug: %s\n", 
                   s_bus_debug ? "ON" : "OFF", s_es5503_debug ? "ON" : "OFF");
+    // LCD_CAM mode/config
+    uint16_t aw_min=0, aw_max=0; lcam_get_addr_window(&aw_min, &aw_max);
+    Serial.printf("LCD_CAM mode: %s-EOF, addr window: $%04X-$%04X\n",
+                  lcam_get_vsync_eof()?"VSYNC":"LEN",
+                  aw_min, aw_max);
   } else if (cmd.startsWith("we ")) {
     long n = cmd.substring(3).toInt();
     lcam_log_every_n_words(n);
@@ -984,12 +989,18 @@ static void cmd_process(String cmd) {
     
     // LCD_CAM ring buffer stats
     uint32_t lcam_words = lcam_get_words_seen();
+    uint32_t lcam_captured = lcam_get_words_captured();
     uint32_t lcam_drops = lcam_get_ring_drops();
     Serial.printf("LCD_CAM statistics:\n");
-    Serial.printf("  Words received: %lu\n", (unsigned long)lcam_words);
+    Serial.printf("  Words captured: %lu (total by LCD_CAM)\n", (unsigned long)lcam_captured);
+    Serial.printf("  Words received: %lu (non-heartbeat only)\n", (unsigned long)lcam_words);
     Serial.printf("  Ring buffer drops: %lu\n", (unsigned long)lcam_drops);
     if (lcam_words > 0) {
-      Serial.printf("  Drop rate: %.1f%%\n", (100.0 * lcam_drops) / (lcam_words + lcam_drops));
+    Serial.printf("  Drop rate: %.1f%%\n", (100.0 * lcam_drops) / (lcam_words + lcam_drops));
+    uint16_t aw_min=0, aw_max=0; lcam_get_addr_window(&aw_min, &aw_max);
+    Serial.printf("  LCD_CAM mode: %s-EOF, addr window: $%04X-$%04X\n",
+                  lcam_get_vsync_eof()?"VSYNC":"LEN",
+                  aw_min, aw_max);
     }
   } else if (cmd == "resetstats") {
     // Reset bus packet statistics
@@ -1003,7 +1014,39 @@ static void cmd_process(String cmd) {
     s_total_packet_time_us = 0;
     s_max_packet_gap_us = 0;
     s_min_packet_gap_us = UINT32_MAX;
+    
+    // Reset LCD_CAM statistics too
+    lcam_reset_stats();
+    
     Serial.println("Bus packet statistics reset");
+  } else if (cmd.startsWith("lcammode")) {
+    // Usage: lcammode len|vs
+    String toks[8]; int nt = split_ws(cmd, toks, 8);
+    if (nt < 2) {
+      Serial.println("Usage: lcammode len|vs");
+    } else {
+      if (toks[1] == "len") { lcam_set_vsync_eof(false); Serial.println("LCD_CAM: length-EOF mode"); }
+      else if (toks[1] == "vs") { lcam_set_vsync_eof(true); Serial.println("LCD_CAM: VSYNC-EOF mode (requires gated VSYNC in FPGA)"); }
+      else Serial.println("lcammode: expected 'len' or 'vs'");
+    }
+  } else if (cmd.startsWith("addrwin")) {
+    // Usage: addrwin <min> <max>  (hex like $C03C or 0xC03C ok)
+    String toks[8]; int nt = split_ws(cmd, toks, 8);
+    if (nt < 3) {
+      Serial.println("Usage: addrwin <min> <max>");
+    } else {
+      auto parse_hex = [](const String& s, uint32_t& out)->bool{
+        String t = s; t.trim();
+        if (t.startsWith("$")) t = String("0x") + t.substring(1);
+        return parse_u32(t, out);
+      };
+      uint32_t minv=0, maxv=0; if (!parse_hex(toks[1], minv) || !parse_hex(toks[2], maxv) || minv>0xFFFF || maxv>0xFFFF) {
+        Serial.println("addrwin: invalid <min>/<max> (16-bit hex)");
+      } else {
+        lcam_set_addr_window((uint16_t)minv, (uint16_t)maxv);
+        Serial.printf("Address window set to $%04X-$%04X\n", (unsigned)minv, (unsigned)maxv);
+      }
+    }
   } else if (cmd == "es5503info") {
     // Display ES5503 oscillator information in human-readable format
     if (!g_es5503) {

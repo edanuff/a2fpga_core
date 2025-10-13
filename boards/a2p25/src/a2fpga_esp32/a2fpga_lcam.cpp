@@ -5,18 +5,40 @@ extern void process_bus_packet(uint32_t packet);
 #include "driver/periph_ctrl.h"
 #include "esp_heap_caps.h"
 #include "esp_rom_gpio.h"
+#include "esp_timer.h"
 #include "soc/gpio_sig_map.h"
 #include "soc/lcd_cam_struct.h"
 #include "soc/lcd_cam_reg.h"
 #include "soc/gdma_struct.h"
 #include "soc/gdma_reg.h"
 
+// -----------------------------------------------------------------------------
+// High-speed LCD_CAM capture strategy for Apple II bus packets
+//
+// Summary:
+// - Capture 4-bit packet stream (10 nibbles/packet) via LCD_CAM in 8-bit mode
+//   using GDMA circular descriptors.
+// - Avoid per-packet VSYNC→EOF (which causes ~1.35M EOFs/s) by default; instead
+//   use length-based EOF every CHUNK_BYTES bytes (4 KB) to keep EOF rate low and
+//   prevent AFIFO/GDMA thrash during bursts.
+// - Because EOF no longer equals packet boundary, implement a fast per-buffer
+//   stream alignment detector that identifies the correct 10-byte phase by
+//   scoring candidate offsets against an expected address window.
+// - Parsed 32-bit words are enqueued in a lock-free ring for downstream use.
+//
+// Optional:
+// - VSYNC→EOF can be enabled at runtime for diagnostics, but requires gating
+//   VSYNC in FPGA (e.g., every ~400 packets) to avoid reintroducing packet loss.
+// -----------------------------------------------------------------------------
+
 // ---------- Packet / DMA sizing ----------
 static const int BYTES_PER_WORD   = 8;   // 8 data nibbles => 8 bytes (low nibble used)
 static const int STOP_BYTES       = 2;   // VSYNC + stopper
 static const int PACK_BYTES       = BYTES_PER_WORD + STOP_BYTES;  // 10 total
-static const int CHUNK_BYTES      = 16;  // >= PACK_BYTES
-static const int DESC_COUNT       = 2;   // ping-pong
+// Increase DMA chunk size and descriptor ring to reduce EOF churn
+// Note: GDMA descriptor length fields are 12-bit (max 4095). Use 4092 for alignment.
+static const int CHUNK_BYTES      = 4092; // Large buffer for batch processing (~409 packets)
+static const int DESC_COUNT       = 8;    // Larger ring for continuous capture
 // Use GDMA channel 2 to avoid conflicts with other peripherals (e.g., I2S)
 #define GDMA_CH                  2
 
@@ -46,6 +68,12 @@ static const int DESC_COUNT       = 2;   // ping-pong
 #ifndef GPIO_MATRIX_CONST_ONE_INPUT
 #  define GPIO_MATRIX_CONST_ONE_INPUT  0x38
 #endif
+
+// ---------- Runtime capture configuration ----------
+// Default to length-based EOF and ES5503/heartbeat address window.
+static volatile bool     s_use_vsync_eof = false;  // true: VSYNC→EOF; false: length-EOF
+static volatile uint16_t s_addr_min = 0xC000;      // alignment scoring window (min)
+static volatile uint16_t s_addr_max = 0xC0FF;      // alignment scoring window (max)
 
 // ---------- DMA descriptor compatibility ----------
 #if __has_include("hal/dma_types.h")
@@ -91,7 +119,54 @@ static const int DESC_COUNT       = 2;   // ping-pong
   static inline uint32_t  desc_len(DESC_T* d){ return d->length; }
 #endif
 
-// ---------- Lock-free SPSC ring ----------
+// ---------- Large Buffer Processing ----------
+// Process enough packets to drain a full buffer in one go
+static const uint32_t BATCH_PROCESS_SIZE = 1024;  // Max packets to process per batch
+
+// Streaming alignment: in length-EOF mode, buffers may start at any nibble in the
+// 10-nibble packet cycle. We auto-detect the offset that yields valid addresses.
+static int s_stream_offset_mod10 = -1;  // -1 = unknown; else 0..9 where data nibble 0 starts
+
+static inline uint32_t pack_word_from_8(const uint8_t* p) {
+  // Fast pack of 8 low-nibble bytes into a 32-bit LSN-first word
+  return  (p[0] & 0x0F) |
+         ((uint32_t)(p[1] & 0x0F) << 4) |
+         ((uint32_t)(p[2] & 0x0F) << 8) |
+         ((uint32_t)(p[3] & 0x0F) << 12) |
+         ((uint32_t)(p[4] & 0x0F) << 16) |
+         ((uint32_t)(p[5] & 0x0F) << 20) |
+         ((uint32_t)(p[6] & 0x0F) << 24) |
+         ((uint32_t)(p[7] & 0x0F) << 28);
+}
+
+static inline bool addr_is_plausible_es5503(uint16_t addr) {
+  // Expected address window (configurable). Defaults cover $C03C-$C03F and $C0FF heartbeat.
+  uint16_t minv = s_addr_min, maxv = s_addr_max;
+  return (addr >= minv && addr <= maxv);
+}
+
+static int detect_stream_offset(const uint8_t* buf, uint32_t len) {
+  // Try all 10 possible offsets; score by how many plausible addresses in a small window
+  const uint32_t window_bytes = (len < 800) ? len : 800; // ~80 packets window
+  int best_off = 0; int best_score = -1;
+  for (int off = 0; off < 10; ++off) {
+    int score = 0;
+    // walk in 10-byte strides, reading 8 bytes of data starting at 'off'
+    for (uint32_t pos = off; pos + 7 < window_bytes; pos += 10) {
+      uint32_t w = pack_word_from_8(buf + pos);
+      uint16_t a = (w >> 16) & 0xFFFF;
+      if (addr_is_plausible_es5503(a)) score++;
+    }
+    if (score > best_score) { best_score = score; best_off = off; }
+  }
+  // Heuristic: require some minimum confidence (at least 50% of samples plausible)
+  int max_samples = (int)(window_bytes / 10);
+  if (best_score >= (max_samples / 2)) return best_off;
+  return best_off; // still return best guess; consumer will adapt next buffer
+}
+static const uint32_t BUFFER_TIMEOUT_US = 1000; // Timeout for partial buffers (1ms)
+
+// ---------- Lock-free SPSC ring (for processed packets) ----------
 static const uint32_t RB_SIZE = 1024;      // power of two
 static uint32_t       rb_data[RB_SIZE];
 static volatile uint32_t rb_head = 0;      // producer writes
@@ -115,10 +190,16 @@ static inline bool rb_pop(uint32_t* out) {
 }
 static inline void rb_reset(){ rb_head = rb_tail = 0; rb_drops = 0; }
 
+// ---------- Buffer State Management ----------
+static volatile uint32_t s_current_buffer = 0;  // Which buffer is currently being filled
+static volatile bool s_buffer_ready[DESC_COUNT] = {false, false, false}; // Which buffers are ready to process
+static volatile uint32_t s_buffer_timeout_start[DESC_COUNT] = {0, 0, 0}; // Timeout tracking per buffer
+
 // ---------- Runtime state ----------
 static uint8_t  s_clk_inv = 0;            // 0=rising, 1=falling
 static uint32_t word_print_every = 512;
-static volatile uint32_t words_seen = 0;   // bumped by consumer
+static volatile uint32_t words_seen = 0;   // bumped by consumer (non-heartbeat only)
+static volatile uint32_t words_captured = 0; // total words captured by LCD_CAM (including heartbeat)
 static volatile uint8_t s_log_level = 0;   // 0=off, 1=errors, 2=all
 
 static uint8_t* s_buf      = nullptr;     // DESC_COUNT * CHUNK_BYTES
@@ -126,6 +207,10 @@ static DESC_T*  s_desc     = nullptr;     // [DESC_COUNT], 16-byte aligned
 
 static TaskHandle_t s_poller_task   = nullptr;
 static TaskHandle_t s_consumer_task = nullptr;
+static esp_timer_handle_t s_timeout_timer = nullptr;
+static volatile uint32_t s_last_capture_time_us = 0;
+
+// Runtime configuration
 
 // ---------- Helpers ----------
 static inline void route_in(int gpio, int sig_idx, bool inv=false) {
@@ -147,6 +232,86 @@ static inline uint32_t pack_word_lsn_first(const uint8_t *b) {
     w |= ((uint32_t)nib) << (4*i);
   }
   return w;
+}
+
+// ---------- Large Buffer Batch Processing ---------- 
+static void process_large_buffer(uint8_t* buffer, uint32_t buffer_length) {
+  uint32_t processed_count = 0;
+
+  // Determine or update stream alignment for this buffer
+  int off = s_stream_offset_mod10;
+  if (off < 0) off = detect_stream_offset(buffer, buffer_length);
+  else {
+    // Light-weight recheck on each buffer start to handle descriptor boundary phase shifts
+    int new_off = detect_stream_offset(buffer, buffer_length);
+    off = new_off;
+  }
+  s_stream_offset_mod10 = off;
+
+  // Walk the buffer using the detected alignment
+  for (uint32_t pos = (uint32_t)off; pos + BYTES_PER_WORD <= buffer_length && processed_count < BATCH_PROCESS_SIZE; pos += 10) {
+    const uint8_t* p = buffer + pos;
+    uint32_t w = pack_word_from_8(p);
+
+    // Push to ring buffer
+    if (rb_push(w)) {
+      uint16_t address = (w >> 16) & 0xFFFF;
+      if (address != 0xC0FF) {  // Exclude heartbeat packets
+        words_seen++;
+      }
+      processed_count++;
+    } else {
+      break; // Ring full
+    }
+  }
+}
+
+// ----------------------------
+// Public configuration APIs
+// ----------------------------
+void lcam_set_vsync_eof(bool enable) {
+  s_use_vsync_eof = enable;
+  // Applied at next lcam_start(); changing on-the-fly would require pausing GDMA safely.
+}
+
+bool lcam_get_vsync_eof() {
+  return s_use_vsync_eof;
+}
+
+void lcam_set_addr_window(uint16_t min_addr, uint16_t max_addr) {
+  s_addr_min = min_addr;
+  s_addr_max = max_addr;
+}
+
+void lcam_get_addr_window(uint16_t* min_addr, uint16_t* max_addr) {
+  if (min_addr) *min_addr = s_addr_min;
+  if (max_addr) *max_addr = s_addr_max;
+}
+
+// ---------- Timer Callback (Hardware Timer Context) ----------
+static void IRAM_ATTR timeout_callback(void* arg) {
+  uint32_t now_us = esp_timer_get_time();
+  bool needs_processing = false;
+  
+  // Check for timed-out buffers with partial data
+  for (int i = 0; i < DESC_COUNT; i++) {
+    if (!s_buffer_ready[i] && s_buffer_timeout_start[i] > 0) {
+      if (now_us - s_buffer_timeout_start[i] >= BUFFER_TIMEOUT_US) {
+        s_buffer_ready[i] = true;  // Mark as ready for timeout processing
+        s_buffer_timeout_start[i] = 0;
+        needs_processing = true;
+      }
+    }
+  }
+  
+  if (needs_processing) {
+    // Signal poller task to process timed-out buffers
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(s_poller_task, &xHigherPriorityTaskWoken);
+    if (xHigherPriorityTaskWoken) {
+      portYIELD_FROM_ISR();
+    }
+  }
 }
 
 void lcam_print_status() {
@@ -193,7 +358,7 @@ static esp_err_t setup_lcd_cam_once() {
   LCD_CAM.cam_ctrl.cam_clk_sel        = 2;    // 160MHz/4 = 40MHz base
   LCD_CAM.cam_ctrl.cam_clkm_div_a     = 0;
   LCD_CAM.cam_ctrl.cam_clkm_div_b     = 0;
-  LCD_CAM.cam_ctrl.cam_clkm_div_num   = 4;
+  LCD_CAM.cam_ctrl.cam_clkm_div_num   = 2;    // 40MHz ÷ 2 = 20MHz effective (>13.5MHz FPGA rate)
   LCD_CAM.cam_ctrl.cam_update         = 1;
 
   gpio_set_direction((gpio_num_t)PIN_CAM_PCLK,  GPIO_MODE_INPUT);
@@ -221,7 +386,7 @@ static esp_err_t setup_lcd_cam_once() {
 
   for (int i = 0; i < DESC_COUNT; ++i) {
     uint8_t* buf = s_buf + i * CHUNK_BYTES;
-    DESC_T*  nxt = (i+1 < DESC_COUNT) ? &s_desc[i+1] : nullptr;  // stop on EOF; we'll re-arm
+    DESC_T*  nxt = (i+1 < DESC_COUNT) ? &s_desc[i+1] : &s_desc[0];  // Circular for continuous capture
     desc_prep(&s_desc[i], buf, CHUNK_BYTES, nxt);
   }
 
@@ -232,73 +397,67 @@ static esp_err_t setup_lcd_cam_once() {
   GDMA.channel[GDMA_CH].in.link.addr  = (uint32_t)&s_desc[0];
   GDMA.channel[GDMA_CH].in.link.start = 1;
 
-  // VSYNC -> EOF; STOP on EOF (we will immediately restart)
-  LCD_CAM.cam_ctrl.cam_vs_eof_en         = 1;
-  LCD_CAM.cam_ctrl.cam_stop_en           = 1;
+  // Use length-based EOF by default; optionally VSYNC->EOF if enabled at runtime
+  LCD_CAM.cam_ctrl.cam_vs_eof_en         = s_use_vsync_eof ? 1 : 0;
+  LCD_CAM.cam_ctrl.cam_stop_en           = 0;  // Continuous capture into descriptor ring
   LCD_CAM.cam_ctrl.cam_vsync_filter_thres= 0;
   LCD_CAM.cam_ctrl.cam_byte_order        = 0;
   LCD_CAM.cam_ctrl.cam_bit_order         = 0;
   LCD_CAM.cam_ctrl.cam_update            = 1;
 
   LCD_CAM.cam_ctrl1.cam_2byte_en          = 0;                     // 8-bit
-  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen  = CHUNK_BYTES - 1;       // allow >10; EOF is VSYNC
+  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen  = CHUNK_BYTES - 1;       // Large buffer for batch capture
   LCD_CAM.cam_ctrl1.cam_clk_inv           = s_clk_inv;
   LCD_CAM.cam_ctrl1.cam_de_inv            = 0;
-  LCD_CAM.cam_ctrl1.cam_vh_de_mode_en     = 0;
+  LCD_CAM.cam_ctrl1.cam_vh_de_mode_en     = 0;   // DE-qualify disabled; capture on PCLK only
   LCD_CAM.cam_ctrl.cam_update             = 1;
 
   return ESP_OK;
 }
 
-static void lcdcam_restart_after_eof() {
-  for (int i = 0; i < DESC_COUNT; ++i) desc_rearm(&s_desc[i]);
-  GDMA.channel[GDMA_CH].in.link.start = 1;
-  LCD_CAM.cam_ctrl1.cam_start = 1;
-}
+// Continuous capture - no restart needed
 
-// ---------- EOF processing (producer) ----------
-static inline void on_eof_process() {
+// ---------- EOF processing (Triple Buffer Management) ----------
+static inline void IRAM_ATTR on_eof_process() {
   volatile DESC_T* vd = dma_eof_desc();
   DESC_T* d = (DESC_T*)vd;
-  uint8_t* base = desc_get_buf(d);
-
+  uint8_t* buffer = desc_get_buf(d);
   uint32_t got = desc_len(d);
+  
   if (got == 0 || got > (uint32_t)CHUNK_BYTES) got = CHUNK_BYTES;
-
-  // Debug: log buffer lengths to understand the pattern
-  static uint32_t debug_count = 0;
-  debug_count++;
-  if ((debug_count % 1000) == 1) {  // Log every 1000th buffer
-    Serial.printf("LCAM debug: got=%lu bytes (PACK_BYTES=%d)\n", (unsigned long)got, PACK_BYTES);
-  }
-
-  // Original comment: "extras (VSYNC+stopper) are at the *front* of the chunk"  
-  // So we need to skip the leading VSYNC+stopper bytes to get to the 8 data bytes
-  // Fix the original calculation to be safe
   
-  uint32_t skip_bytes;
-  if (got == 10) {
-    // Perfect case: exactly 10 bytes, skip 2 (VSYNC + stopper)
-    skip_bytes = 2;
-  } else if (got == 9) {
-    // Common case: 9 bytes, skip 1 (missing one byte, but pattern shifted)  
-    skip_bytes = 1;
-  } else if (got >= BYTES_PER_WORD) {
-    // Other cases: ensure we have 8 bytes of data to read
-    skip_bytes = got - BYTES_PER_WORD;
-  } else {
-    // Degenerate case: not enough data
-    skip_bytes = 0;
+  // Always count buffers processed by LCD_CAM (raw buffer count)
+  words_captured++;
+  
+  // Find which buffer this EOF corresponds to
+  uint32_t buffer_idx = 0;
+  for (int i = 0; i < DESC_COUNT; i++) {
+    if (desc_get_buf(&s_desc[i]) == buffer) {
+      buffer_idx = i;
+      break;
+    }
   }
   
-  const uint8_t* p = base + skip_bytes;
-  const uint32_t w = pack_word_lsn_first(p);
-
-  // Push to SPSC ring (drop if full)
-  rb_push(w);
+  // Mark buffer as ready for processing if it has data
+  if (got > 0 && !s_buffer_ready[buffer_idx]) {
+    s_buffer_ready[buffer_idx] = true;
+    s_buffer_timeout_start[buffer_idx] = 0; // Clear timeout since buffer is full
+    
+    // Signal processing task immediately for full buffers
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(s_poller_task, &xHigherPriorityTaskWoken);
+    if (xHigherPriorityTaskWoken) {
+      portYIELD_FROM_ISR();
+    }
+  } else if (got > 0 && got < CHUNK_BYTES) {
+    // Start timeout for partial buffer
+    if (s_buffer_timeout_start[buffer_idx] == 0) {
+      s_buffer_timeout_start[buffer_idx] = esp_timer_get_time();
+    }
+  }
 
   dma_ack_eof();
-  lcdcam_restart_after_eof();
+  // Continuous capture - DMA continues automatically with circular descriptors
 }
 
 // ---------- Poller task ----------
@@ -319,7 +478,11 @@ static inline void lcdcam_recover_if_needed() {
     GDMA.channel[GDMA_CH].in.peri_sel.sel = 5;      // 5 = LCD_CAM
 
     // Re-arm descriptors and GDMA interrupts
-    for (int i = 0; i < DESC_COUNT; ++i) desc_rearm(&s_desc[i]);
+    for (int i = 0; i < DESC_COUNT; ++i) {
+      desc_rearm(&s_desc[i]);
+      s_buffer_ready[i] = false;
+      s_buffer_timeout_start[i] = 0;
+    }
     GDMA.channel[GDMA_CH].in.int_clr.val = 0xFFFFFFFF;
     GDMA.channel[GDMA_CH].in.int_ena.val = 0;               // ensure clean enable
     GDMA.channel[GDMA_CH].in.int_ena.in_suc_eof = 1;
@@ -332,15 +495,45 @@ static inline void lcdcam_recover_if_needed() {
 static void poller_task(void*){
   for(;;){
     bool any = false;
+    
     // If another driver reset GDMA, recover the link
     if (gdma_link_down()) lcdcam_recover_if_needed();
-    for (int i = 0; i < POLL_SPIN_LOOPS; ++i) {
+    
+    // Fast polling for EOF events
+    for (int i = 0; i < POLL_SPIN_LOOPS && !any; ++i) {
       if (dma_eof()) {
         on_eof_process();
         any = true;
-        i = -1; // keep spinning while busy
       }
     }
+    
+    // Process any ready buffers
+    for (int buf_idx = 0; buf_idx < DESC_COUNT; buf_idx++) {
+      if (s_buffer_ready[buf_idx]) {
+        // Process this buffer
+        uint8_t* buffer = desc_get_buf(&s_desc[buf_idx]);
+        uint32_t buffer_length = desc_len(&s_desc[buf_idx]);
+        if (buffer_length > CHUNK_BYTES) buffer_length = CHUNK_BYTES;
+        
+        // Process the large buffer in batches
+        process_large_buffer(buffer, buffer_length);
+        
+        // Mark buffer as processed and re-arm descriptor
+        s_buffer_ready[buf_idx] = false;
+        s_buffer_timeout_start[buf_idx] = 0;
+        desc_rearm(&s_desc[buf_idx]);
+        
+        any = true;
+      }
+    }
+    
+    // Wait for notification from EOF or timeout
+    if (!any) {
+      // Wait for notification with timeout
+      ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2));
+    }
+    
+    // Brief yield if no activity
     if (!any) vTaskDelay(1);
   }
 }
@@ -352,9 +545,8 @@ static void packet_task(void*){
     uint32_t w;
     if (rb_pop(&w)) {
       local_count++;
-      words_seen++;
       if ((s_log_level > 0) && (local_count % word_print_every) == 0) {
-        Serial.printf("LCD_CAM word[%lu]=0x%08X\n", (unsigned long)words_seen, w);
+        Serial.printf("LCD_CAM word[%lu]=0x%08X\n", (unsigned long)local_count, w);
       }
       
       // Process bus packet for ES5503 and other functionality
@@ -400,7 +592,17 @@ void lcam_start() {
     // Stop tasks first
     if (setup_lcd_cam_once() != ESP_OK) { Serial.println("LCD_CAM setup failed"); return; }
 
-    rb_reset(); words_seen = 0;
+    rb_reset(); 
+    words_seen = 0;
+    words_captured = 0;
+    
+    // Initialize buffer state
+    s_current_buffer = 0;
+    for (int i = 0; i < DESC_COUNT; i++) {
+      s_buffer_ready[i] = false;
+      s_buffer_timeout_start[i] = 0;
+    }
+    
     GDMA.channel[GDMA_CH].in.int_clr.val = 0xFFFFFFFF;
     GDMA.channel[GDMA_CH].in.link.addr   = (uint32_t)&s_desc[0];
     GDMA.channel[GDMA_CH].in.link.start  = 1;
@@ -413,6 +615,22 @@ void lcam_start() {
         Serial.println("LCD_CAM failed to start tasks");
         return;
     }
+
+    // Reset stream alignment
+    s_stream_offset_mod10 = -1;
+
+    // Create timer for timeout handling
+    if (!s_timeout_timer) {
+        esp_timer_create_args_t timer_args = {};
+        timer_args.callback = timeout_callback;
+        timer_args.arg = nullptr;
+        timer_args.dispatch_method = ESP_TIMER_TASK;
+        timer_args.name = "lcam_timeout";
+        esp_timer_create(&timer_args, &s_timeout_timer);
+    }
+    
+    // Start periodic timer for timeout checking
+    esp_timer_start_periodic(s_timeout_timer, BUFFER_TIMEOUT_US / 2);  // Check twice as often as timeout
 
     // Optional smoke wait (no polling; ISR/re-arm will run if data arrives)
     uint32_t start_ms = millis(), w0 = words_seen;
@@ -430,7 +648,12 @@ void lcam_start() {
 }
 
 void lcam_stop() {
-  // Stop tasks first
+  // Stop timer first
+  if (s_timeout_timer) {
+    esp_timer_stop(s_timeout_timer);
+  }
+  
+  // Stop tasks
   lcam_cleanup_tasks();
   
   // Stop the LCD_CAM and GDMA
@@ -458,4 +681,21 @@ uint32_t lcam_get_words_seen() {
 
 uint32_t lcam_get_ring_drops() {
   return rb_drops;
+}
+
+uint32_t lcam_get_words_captured() {
+  return words_captured;
+}
+
+void lcam_reset_stats() {
+  words_seen = 0;
+  words_captured = 0;
+  rb_drops = 0;
+  s_stream_offset_mod10 = -1;
+  
+  // Reset buffer state
+  for (int i = 0; i < DESC_COUNT; i++) {
+    s_buffer_ready[i] = false;
+    s_buffer_timeout_start[i] = 0;
+  }
 }

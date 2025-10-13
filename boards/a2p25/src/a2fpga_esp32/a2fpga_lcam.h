@@ -25,6 +25,20 @@ void lcam_set_logging(uint8_t n);
 // Debug/stats functions
 uint32_t lcam_get_words_seen();
 uint32_t lcam_get_ring_drops();
+uint32_t lcam_get_words_captured();
+void lcam_reset_stats();
+
+// Capture configuration
+// - VSYNC EOF mode: when true, LCD_CAM generates EOF on VSYNC (requires gated VSYNC in FPGA).
+//   When false, LCD_CAM uses length-based EOF every N bytes (preferred for high-rate bursts).
+void lcam_set_vsync_eof(bool enable);
+bool lcam_get_vsync_eof();
+
+// Expected address window used by the stream alignment heuristic. The parser
+// scores 10-byte phase candidates by how many addresses fall inside this range.
+// Defaults to [$C000..$C0FF] to include ES5503 and heartbeat test packets.
+void lcam_set_addr_window(uint16_t min_addr, uint16_t max_addr);
+void lcam_get_addr_window(uint16_t* min_addr, uint16_t* max_addr);
 
 // Task management functions
 esp_err_t lcam_init_tasks();

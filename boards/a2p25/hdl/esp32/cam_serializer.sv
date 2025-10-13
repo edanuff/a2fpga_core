@@ -1,5 +1,8 @@
 module cam_serializer #(
-    parameter COUNT_WIDTH = 2
+    parameter COUNT_WIDTH = 2,
+    // Assert VSYNC (cam_sync) only once every N packets to lower EOF rate on ESP32.
+    // Set to 1 for legacy behavior (VSYNC every packet).
+    parameter int SYNC_EVERY_PKTS = 400
 ) (
     input         clk_i,
     input         rst_n,
@@ -58,20 +61,22 @@ module cam_serializer #(
     // Clock active during transmission, otherwise halted
     // Packet consists of 10 4-bit nibbles
     // Send 32-bit data word, one nibble at a time on nibbles 0 to 7
-    // Raise SYNC bit on nibble 8
+    // Raise SYNC bit on nibble 8 (gated by SYNC_EVERY_PKTS)
     // Empty pad on nibble 9
     // ----------------------------
     reg         packet_pending_r;
     reg         packet_active_r;
     reg  [31:0] packet_data_r;
     reg  [3:0]  nibble_count_r;
+    reg  [15:0] packet_count_r;
+    reg         sync_this_packet_r;
 
     // Drive outputs
     assign cam_data = packet_data_r[3:0];
     assign cam_pclk = packet_active_r ? cam_pclk_w : 1'b0;
 
-    // VSYNC at end-of-word (nibble 8) and only while active
-    assign cam_sync = packet_active_r && (nibble_count_r == 4'd8);
+    // VSYNC at end-of-word (nibble 8) and only while active, gated by SYNC cadence
+    assign cam_sync = packet_active_r && (nibble_count_r == 4'd8) && sync_this_packet_r;
 
     // busy = active OR queued
     assign busy = packet_active_r | packet_pending_r;
@@ -82,10 +87,12 @@ module cam_serializer #(
     // Serializer / flow
     always @(posedge clk_i or negedge rst_n) begin
         if (!rst_n) begin
-            nibble_count_r  <= 4'd0;
-            packet_active_r <= 1'b0;
-            packet_data_r   <= '0;
+            nibble_count_r   <= 4'd0;
+            packet_active_r  <= 1'b0;
+            packet_data_r    <= '0;
             packet_pending_r <= 1'b0;
+            packet_count_r   <= 16'd0;
+            sync_this_packet_r <= 1'b0;
         end else begin
             if (wr_i) begin
                 packet_pending_r <= 1'b1;
@@ -93,23 +100,45 @@ module cam_serializer #(
             if (cam_pclk_falling_w) begin
                 // Start a new word exactly after finishing one, if something is pending
                 if (packet_active_r && (nibble_count_r == 4'd9)) begin
-                    if (packet_pending_r) begin
-                        packet_data_r   <= pending_data_r;
-                        packet_active_r <= 1'b1;      // stay active (back-to-back)
-                        nibble_count_r  <= 4'd0;
-                        packet_pending_r <= 1'b0;
+                    // Finished a packet: advance or wrap the VSYNC gating counter
+                    if (SYNC_EVERY_PKTS <= 1) begin
+                        packet_count_r <= 16'd0;
+                    end else if (sync_this_packet_r) begin
+                        packet_count_r <= 16'd0; // just emitted gated VSYNC
+                    end else if (packet_count_r == SYNC_EVERY_PKTS-1) begin
+                        packet_count_r <= 16'd0;
                     end else begin
-                        packet_data_r   <= '0;        // idle pattern
-                        packet_active_r <= 1'b0;      // gate off PCLK
-                        nibble_count_r  <= 4'd0;
+                        packet_count_r <= packet_count_r + 16'd1;
+                    end
+
+                    if (packet_pending_r) begin
+                        packet_data_r    <= pending_data_r;
+                        packet_active_r  <= 1'b1;      // stay active (back-to-back)
+                        nibble_count_r   <= 4'd0;
+                        packet_pending_r <= 1'b0;
+                        // Latch whether this new packet should assert VSYNC at nibble 8
+                        if (SYNC_EVERY_PKTS <= 1)
+                            sync_this_packet_r <= 1'b1;  // legacy behavior
+                        else
+                            sync_this_packet_r <= (packet_count_r == SYNC_EVERY_PKTS-1);
+                    end else begin
+                        packet_data_r    <= '0;        // idle pattern
+                        packet_active_r  <= 1'b0;      // gate off PCLK
+                        nibble_count_r   <= 4'd0;
+                        sync_this_packet_r <= 1'b0;
                     end
                 end
                 // If idle and we have a packet queued, launch it
                 else if (!packet_active_r && packet_pending_r) begin
-                    packet_data_r   <= pending_data_r;
-                    packet_active_r <= 1'b1;
-                    nibble_count_r  <= 4'd0;
+                    packet_data_r    <= pending_data_r;
+                    packet_active_r  <= 1'b1;
+                    nibble_count_r   <= 4'd0;
                     packet_pending_r <= 1'b0;
+                    // Latch whether this new packet should assert VSYNC at nibble 8
+                    if (SYNC_EVERY_PKTS <= 1)
+                        sync_this_packet_r <= 1'b1;  // legacy behavior
+                    else
+                        sync_this_packet_r <= (packet_count_r == SYNC_EVERY_PKTS-1);
                 end
 
                 // SHIFT & COUNT only when active, on the PCLK falling edge
