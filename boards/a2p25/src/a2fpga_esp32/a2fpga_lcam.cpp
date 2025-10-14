@@ -36,8 +36,10 @@ static const int BYTES_PER_WORD   = 8;   // 8 data nibbles => 8 bytes (low nibbl
 static const int STOP_BYTES       = 2;   // VSYNC + stopper
 static const int PACK_BYTES       = BYTES_PER_WORD + STOP_BYTES;  // 10 total
 // Increase DMA chunk size and descriptor ring to reduce EOF churn
-// Note: GDMA descriptor length fields are 12-bit (max 4095). Use 4092 for alignment.
-static const int CHUNK_BYTES      = 4092; // Large buffer for batch processing (~409 packets)
+// Note: GDMA descriptor length fields are 12-bit (max 4095).
+// Choose a multiple of 10 to align with packet length (10 bytes/packet) and avoid
+// systematic loss at descriptor boundaries. 4090 fits within the 12-bit limit.
+static const int CHUNK_BYTES      = 4090; // 409 packets per buffer (exact)
 static const int DESC_COUNT       = 8;    // Larger ring for continuous capture
 // Use GDMA channel 2 to avoid conflicts with other peripherals (e.g., I2S)
 #define GDMA_CH                  2
@@ -126,6 +128,8 @@ static const uint32_t BATCH_PROCESS_SIZE = 1024;  // Max packets to process per 
 // Streaming alignment: in length-EOF mode, buffers may start at any nibble in the
 // 10-nibble packet cycle. We auto-detect the offset that yields valid addresses.
 static int s_stream_offset_mod10 = -1;  // -1 = unknown; else 0..9 where data nibble 0 starts
+static uint8_t s_tail_bytes[9];          // last up to 9 bytes from previous buffer
+static uint8_t s_tail_len = 0;
 
 static inline uint32_t pack_word_from_8(const uint8_t* p) {
   // Fast pack of 8 low-nibble bytes into a 32-bit LSN-first word
@@ -248,6 +252,27 @@ static void process_large_buffer(uint8_t* buffer, uint32_t buffer_length) {
   }
   s_stream_offset_mod10 = off;
 
+  // Stitch-and-recover: if the buffer did not start at nibble0 (off != 0), there is up to
+  // one packet that straddles the previous buffer end and this buffer start. Reconstruct it
+  // using the saved tail bytes from the previous buffer plus the first bytes from this one.
+  if (off != 0 && s_tail_len > 0 && processed_count < BATCH_PROCESS_SIZE) {
+    uint8_t tail_bytes = (uint8_t)min(8, 10 - off);
+    uint8_t head_bytes = (uint8_t)(8 - tail_bytes);
+    if (s_tail_len >= tail_bytes && buffer_length >= head_bytes) {
+      uint8_t tmp[8];
+      // Copy last 'tail_bytes' from s_tail_bytes
+      if (tail_bytes > 0) memcpy(tmp, &s_tail_bytes[s_tail_len - tail_bytes], tail_bytes);
+      // Copy first 'head_bytes' from current buffer
+      if (head_bytes > 0) memcpy(tmp + tail_bytes, buffer, head_bytes);
+      uint32_t w = pack_word_from_8(tmp);
+      if (rb_push(w)) {
+        uint16_t address = (w >> 16) & 0xFFFF;
+        if (address != 0xC0FF) words_seen++;
+        processed_count++;
+      }
+    }
+  }
+
   // Walk the buffer using the detected alignment
   for (uint32_t pos = (uint32_t)off; pos + BYTES_PER_WORD <= buffer_length && processed_count < BATCH_PROCESS_SIZE; pos += 10) {
     const uint8_t* p = buffer + pos;
@@ -264,6 +289,10 @@ static void process_large_buffer(uint8_t* buffer, uint32_t buffer_length) {
       break; // Ring full
     }
   }
+
+  // Save last up to 9 bytes from this buffer for cross-boundary reconstruction next time
+  s_tail_len = (uint8_t)min<uint32_t>(9, buffer_length);
+  if (s_tail_len > 0) memcpy(s_tail_bytes, buffer + buffer_length - s_tail_len, s_tail_len);
 }
 
 // ----------------------------
@@ -618,6 +647,7 @@ void lcam_start() {
 
     // Reset stream alignment
     s_stream_offset_mod10 = -1;
+    s_tail_len = 0;
 
     // Create timer for timeout handling
     if (!s_timeout_timer) {
@@ -692,6 +722,7 @@ void lcam_reset_stats() {
   words_captured = 0;
   rb_drops = 0;
   s_stream_offset_mod10 = -1;
+  s_tail_len = 0;
   
   // Reset buffer state
   for (int i = 0; i < DESC_COUNT; i++) {
