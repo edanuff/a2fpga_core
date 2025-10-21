@@ -140,7 +140,10 @@ module a2bus_stream #(
     wire cam_overwrite;
     wire packet_accepted_w = packet_valid_r & !cam_busy;
     
-    cam_serializer cam_serializer_inst (
+    cam_serializer #(
+        .SYNC_EVERY_PKTS(409),
+        .IDLE_FLUSH_CYCLES(13500)
+    ) cam_serializer_inst (
         .clk_i(a2bus_if.clk_logic),
         .rst_n(a2bus_if.system_reset_n),
         .wr_i(packet_accepted_w),
@@ -214,4 +217,3 @@ module a2bus_stream #(
     assign cam_overwrite_flag = cam_overwrite;
 
 endmodule
-

@@ -1443,6 +1443,7 @@ String check_escape_sequence(char c) {
     escape_buffer = "";
     cli_mode = true;
     Serial.println("\nEntering CLI mode. Type 'help' for commands or 'exit' to return to forwarding.");
+    Serial.printf("A2FPGA ESP32-S3 Firmware (%s %s) with ES5503 Audio\n", __DATE__, __TIME__);
     lcam_set_logging(2);
     return "";  // Don't forward anything
   }

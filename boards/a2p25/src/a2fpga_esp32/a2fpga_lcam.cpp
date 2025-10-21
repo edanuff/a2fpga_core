@@ -73,7 +73,7 @@ static const int DESC_COUNT       = 8;    // Larger ring for continuous capture
 
 // ---------- Runtime capture configuration ----------
 // Default to length-based EOF and ES5503/heartbeat address window.
-static volatile bool     s_use_vsync_eof = false;  // true: VSYNC→EOF; false: length-EOF
+static volatile bool     s_use_vsync_eof = true;   // true: VSYNC→EOF (default); false: length-EOF
 static volatile uint16_t s_addr_min = 0xC000;      // alignment scoring window (min)
 static volatile uint16_t s_addr_max = 0xC0FF;      // alignment scoring window (max)
 
@@ -241,39 +241,38 @@ static inline uint32_t pack_word_lsn_first(const uint8_t *b) {
 // ---------- Large Buffer Batch Processing ---------- 
 static void process_large_buffer(uint8_t* buffer, uint32_t buffer_length) {
   uint32_t processed_count = 0;
+  
+  // In VSYNC-EOF mode, each buffer begins on a packet boundary; no alignment or stitch needed.
+  // In LEN-EOF mode, detect the 10-byte phase and stitch cross-boundary packet.
+  int off = 0;
+  if (!s_use_vsync_eof) {
+    off = s_stream_offset_mod10;
+    if (off < 0) off = detect_stream_offset(buffer, buffer_length);
+    else {
+      int new_off = detect_stream_offset(buffer, buffer_length);
+      off = new_off;
+    }
+    s_stream_offset_mod10 = off;
 
-  // Determine or update stream alignment for this buffer
-  int off = s_stream_offset_mod10;
-  if (off < 0) off = detect_stream_offset(buffer, buffer_length);
-  else {
-    // Light-weight recheck on each buffer start to handle descriptor boundary phase shifts
-    int new_off = detect_stream_offset(buffer, buffer_length);
-    off = new_off;
-  }
-  s_stream_offset_mod10 = off;
-
-  // Stitch-and-recover: if the buffer did not start at nibble0 (off != 0), there is up to
-  // one packet that straddles the previous buffer end and this buffer start. Reconstruct it
-  // using the saved tail bytes from the previous buffer plus the first bytes from this one.
-  if (off != 0 && s_tail_len > 0 && processed_count < BATCH_PROCESS_SIZE) {
-    uint8_t tail_bytes = (uint8_t)min(8, 10 - off);
-    uint8_t head_bytes = (uint8_t)(8 - tail_bytes);
-    if (s_tail_len >= tail_bytes && buffer_length >= head_bytes) {
-      uint8_t tmp[8];
-      // Copy last 'tail_bytes' from s_tail_bytes
-      if (tail_bytes > 0) memcpy(tmp, &s_tail_bytes[s_tail_len - tail_bytes], tail_bytes);
-      // Copy first 'head_bytes' from current buffer
-      if (head_bytes > 0) memcpy(tmp + tail_bytes, buffer, head_bytes);
-      uint32_t w = pack_word_from_8(tmp);
-      if (rb_push(w)) {
-        uint16_t address = (w >> 16) & 0xFFFF;
-        if (address != 0xC0FF) words_seen++;
-        processed_count++;
+    // Cross-boundary stitch (LEN-EOF only)
+    if (off != 0 && s_tail_len > 0 && processed_count < BATCH_PROCESS_SIZE) {
+      uint8_t tail_bytes = (uint8_t)min(8, 10 - off);
+      uint8_t head_bytes = (uint8_t)(8 - tail_bytes);
+      if (s_tail_len >= tail_bytes && buffer_length >= head_bytes) {
+        uint8_t tmp[8];
+        if (tail_bytes > 0) memcpy(tmp, &s_tail_bytes[s_tail_len - tail_bytes], tail_bytes);
+        if (head_bytes > 0) memcpy(tmp + tail_bytes, buffer, head_bytes);
+        uint32_t w = pack_word_from_8(tmp);
+        if (rb_push(w)) {
+          uint16_t address = (w >> 16) & 0xFFFF;
+          if (address != 0xC0FF) words_seen++;
+          processed_count++;
+        }
       }
     }
   }
 
-  // Walk the buffer using the detected alignment
+  // Walk the buffer using the chosen alignment
   for (uint32_t pos = (uint32_t)off; pos + BYTES_PER_WORD <= buffer_length && processed_count < BATCH_PROCESS_SIZE; pos += 10) {
     const uint8_t* p = buffer + pos;
     uint32_t w = pack_word_from_8(p);
@@ -290,9 +289,13 @@ static void process_large_buffer(uint8_t* buffer, uint32_t buffer_length) {
     }
   }
 
-  // Save last up to 9 bytes from this buffer for cross-boundary reconstruction next time
-  s_tail_len = (uint8_t)min<uint32_t>(9, buffer_length);
-  if (s_tail_len > 0) memcpy(s_tail_bytes, buffer + buffer_length - s_tail_len, s_tail_len);
+  // Save last up to 9 bytes only in LEN-EOF mode (used for cross-boundary reconstruction)
+  if (!s_use_vsync_eof) {
+    s_tail_len = (uint8_t)min<uint32_t>(9, buffer_length);
+    if (s_tail_len > 0) memcpy(s_tail_bytes, buffer + buffer_length - s_tail_len, s_tail_len);
+  } else {
+    s_tail_len = 0;
+  }
 }
 
 // ----------------------------
@@ -429,7 +432,7 @@ static esp_err_t setup_lcd_cam_once() {
   // Use length-based EOF by default; optionally VSYNC->EOF if enabled at runtime
   LCD_CAM.cam_ctrl.cam_vs_eof_en         = s_use_vsync_eof ? 1 : 0;
   LCD_CAM.cam_ctrl.cam_stop_en           = 0;  // Continuous capture into descriptor ring
-  LCD_CAM.cam_ctrl.cam_vsync_filter_thres= 0;
+  LCD_CAM.cam_ctrl.cam_vsync_filter_thres= 1;   // Filter very short VSYNC glitches
   LCD_CAM.cam_ctrl.cam_byte_order        = 0;
   LCD_CAM.cam_ctrl.cam_bit_order         = 0;
   LCD_CAM.cam_ctrl.cam_update            = 1;
@@ -455,9 +458,6 @@ static inline void IRAM_ATTR on_eof_process() {
   
   if (got == 0 || got > (uint32_t)CHUNK_BYTES) got = CHUNK_BYTES;
   
-  // Always count buffers processed by LCD_CAM (raw buffer count)
-  words_captured++;
-  
   // Find which buffer this EOF corresponds to
   uint32_t buffer_idx = 0;
   for (int i = 0; i < DESC_COUNT; i++) {
@@ -471,6 +471,8 @@ static inline void IRAM_ATTR on_eof_process() {
   if (got > 0 && !s_buffer_ready[buffer_idx]) {
     s_buffer_ready[buffer_idx] = true;
     s_buffer_timeout_start[buffer_idx] = 0; // Clear timeout since buffer is full
+    // Count only when we actually queue a new buffer for processing
+    words_captured++;
     
     // Signal processing task immediately for full buffers
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;

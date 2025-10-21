@@ -2,7 +2,11 @@ module cam_serializer #(
     parameter COUNT_WIDTH = 2,
     // Assert VSYNC (cam_sync) only once every N packets to lower EOF rate on ESP32.
     // Set to 1 for legacy behavior (VSYNC every packet).
-    parameter int SYNC_EVERY_PKTS = 400
+    parameter int SYNC_EVERY_PKTS = 409,
+    // Idle flush: when no writes for this many clk_i cycles and a partial frame
+    // is in progress (packet_count_r != 0), inject one dummy packet and assert
+    // VSYNC to force an EOF on the receiver.
+    parameter int IDLE_FLUSH_CYCLES = 13500  // ~250us at 54MHz
 ) (
     input         clk_i,
     input         rst_n,
@@ -70,6 +74,8 @@ module cam_serializer #(
     reg  [3:0]  nibble_count_r;
     reg  [15:0] packet_count_r;
     reg         sync_this_packet_r;
+    reg         force_sync_next_r;
+    reg  [31:0] idle_count_r;
 
     // Drive outputs
     assign cam_data = packet_data_r[3:0];
@@ -87,16 +93,36 @@ module cam_serializer #(
     // Serializer / flow
     always @(posedge clk_i or negedge rst_n) begin
         if (!rst_n) begin
-            nibble_count_r   <= 4'd0;
-            packet_active_r  <= 1'b0;
-            packet_data_r    <= '0;
-            packet_pending_r <= 1'b0;
-            packet_count_r   <= 16'd0;
+            nibble_count_r     <= 4'd0;
+            packet_active_r    <= 1'b0;
+            packet_data_r      <= '0;
+            packet_pending_r   <= 1'b0;
+            packet_count_r     <= 16'd0;
             sync_this_packet_r <= 1'b0;
+            force_sync_next_r  <= 1'b0;
+            idle_count_r       <= 32'd0;
         end else begin
             if (wr_i) begin
                 packet_pending_r <= 1'b1;
             end
+
+            // Idle counter (no activity)
+            if (!packet_active_r && !wr_i) begin
+                if (idle_count_r != 32'hFFFF_FFFF)
+                    idle_count_r <= idle_count_r + 1;
+            end else begin
+                idle_count_r <= 32'd0;
+            end
+
+            // If idle timeout and partial frame exists, inject one dummy packet with forced VSYNC
+            if (!packet_active_r && !packet_pending_r && (packet_count_r != 16'd0) &&
+                (idle_count_r >= IDLE_FLUSH_CYCLES)) begin
+                packet_pending_r   <= 1'b1;
+                pending_data_r     <= 32'hC0FF_0000;  // heartbeat-like dummy
+                force_sync_next_r  <= 1'b1;
+                idle_count_r       <= 32'd0;
+            end
+
             if (cam_pclk_falling_w) begin
                 // Start a new word exactly after finishing one, if something is pending
                 if (packet_active_r && (nibble_count_r == 4'd9)) begin
@@ -119,8 +145,12 @@ module cam_serializer #(
                         // Latch whether this new packet should assert VSYNC at nibble 8
                         if (SYNC_EVERY_PKTS <= 1)
                             sync_this_packet_r <= 1'b1;  // legacy behavior
-                        else
+                        else if (force_sync_next_r) begin
+                            sync_this_packet_r <= 1'b1;
+                            force_sync_next_r  <= 1'b0;
+                        end else begin
                             sync_this_packet_r <= (packet_count_r == SYNC_EVERY_PKTS-1);
+                        end
                     end else begin
                         packet_data_r    <= '0;        // idle pattern
                         packet_active_r  <= 1'b0;      // gate off PCLK
@@ -137,8 +167,12 @@ module cam_serializer #(
                     // Latch whether this new packet should assert VSYNC at nibble 8
                     if (SYNC_EVERY_PKTS <= 1)
                         sync_this_packet_r <= 1'b1;  // legacy behavior
-                    else
+                    else if (force_sync_next_r) begin
+                        sync_this_packet_r <= 1'b1;
+                        force_sync_next_r  <= 1'b0;
+                    end else begin
                         sync_this_packet_r <= (packet_count_r == SYNC_EVERY_PKTS-1);
+                    end
                 end
 
                 // SHIFT & COUNT only when active, on the PCLK falling edge
