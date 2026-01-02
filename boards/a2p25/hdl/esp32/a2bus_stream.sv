@@ -142,7 +142,9 @@ module a2bus_stream #(
     
     cam_serializer #(
         .SYNC_EVERY_PKTS(409),
-        .IDLE_FLUSH_CYCLES(13500)
+        .IDLE_FLUSH_CYCLES(13500),
+        .PAD_MODE(1'b0),
+        .PAD_COUNT(409)
     ) cam_serializer_inst (
         .clk_i(a2bus_if.clk_logic),
         .rst_n(a2bus_if.system_reset_n),

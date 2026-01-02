@@ -6,6 +6,7 @@
     <Device name="GW5AT-60B" pn="GW5AT-LV60PG484AC1/I0">gw5at60b-002</Device>
     <FileList>
         <File path="../../hdl/bus/a2bus_if.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/debug/debugoverlay.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/f18a/f18a_color.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/f18a/f18a_core.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/f18a/f18a_counters.vhd" type="file.vhdl" enable="1"/>
@@ -43,6 +44,7 @@
         <File path="../../hdl/ssc/super_serial_card.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/supersprite/supersprite.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc_denoise.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/support/cdc_sampling.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/iir_filter.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/sdpram32.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_6551.v" type="file.verilog" enable="1"/>

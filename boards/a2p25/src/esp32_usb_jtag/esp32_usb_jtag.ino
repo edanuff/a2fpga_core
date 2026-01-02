@@ -136,6 +136,7 @@ void setup()
   Serial.begin(); // usb-serial
   Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD); // hardware serial
 
+  Serial.println("ESP32-USB-JTAG Bridge");
   Serial.println("Setup complete");
 }
 

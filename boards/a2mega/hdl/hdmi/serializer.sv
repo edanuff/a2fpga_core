@@ -115,6 +115,11 @@ module serializer
             endgenerate
         `endif
     `elsif GW_IDE_INVERTED
+
+        wire gwSer0_reset = 1'b0;
+        wire gwSer1_reset = 1'b0;
+        wire gwSer2_reset = 1'b0;
+
         OSER10 gwSer0( 
             .Q( tmds[ 0 ] ),
             .D0( ~tmds_internal[ 0 ][ 0 ] ),
@@ -129,7 +134,7 @@ module serializer
             .D9( ~tmds_internal[ 0 ][ 9 ] ),
             .PCLK( clk_pixel ),
             .FCLK( clk_pixel_x5 ),
-            .RESET( reset ) );
+            .RESET( gwSer0_reset ) );
 
         OSER10 gwSer1( 
           .Q( tmds[ 1 ] ),
@@ -145,7 +150,7 @@ module serializer
           .D9( ~tmds_internal[ 1 ][ 9 ] ),
           .PCLK( clk_pixel ),
           .FCLK( clk_pixel_x5 ),
-          .RESET( reset ) );
+          .RESET( gwSer1_reset ) );
 
         OSER10 gwSer2( 
           .Q( tmds[ 2 ] ),
@@ -161,7 +166,7 @@ module serializer
           .D9( ~tmds_internal[ 2 ][ 9 ] ),
           .PCLK( clk_pixel ),
           .FCLK( clk_pixel_x5 ),
-          .RESET( reset ) );
+          .RESET( gwSer2_reset ) );
           
         assign tmds_clock = ~clk_pixel;
   

@@ -1,5 +1,9 @@
 // Mega 60K A2FPGA Pin Constraints File
 
+//CLOCK_LOC "clk_hdmi_w" BUFG[0] = CLK;
+//CLOCK_LOC "clk_pixel_w" BUFG[1] = CLK;
+//CLOCK_LOC "rstn_r" BUFG[0] = SR;
+//CLOCK_LOC "reset_x5_w" BUFG[1] = SR;
 
 // Clock & Reset/Button S1
 

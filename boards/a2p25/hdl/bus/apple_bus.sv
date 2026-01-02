@@ -1,4 +1,4 @@
-// A2N9 - Apple II Bus Interface
+// A2P25 - Apple II Bus Interface
 //
 // (c) 2023,2024 Ed Anuff <ed@a2fpga.com> 
 //

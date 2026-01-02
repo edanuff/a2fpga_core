@@ -917,7 +917,7 @@ wire picosoc_led;
         }), 
 
         .debug_bits_0_i (doc_osc_halt_w), 
-        .debug_bits_1_i ('0),
+        .debug_bits_1_i ({1'b0, 1'b0, a2mem_if.TEXT_MODE, a2mem_if.SHRG_MODE, a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.AN3, a2mem_if.STORE80}),
 
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),

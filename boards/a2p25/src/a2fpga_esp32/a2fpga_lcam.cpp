@@ -72,7 +72,7 @@ static const int DESC_COUNT       = 8;    // Larger ring for continuous capture
 #endif
 
 // ---------- Runtime capture configuration ----------
-// Default to length-based EOF and ES5503/heartbeat address window.
+// Default to VSYNC→EOF for compatibility with gated VSYNC in FPGA.
 static volatile bool     s_use_vsync_eof = true;   // true: VSYNC→EOF (default); false: length-EOF
 static volatile uint16_t s_addr_min = 0xC000;      // alignment scoring window (min)
 static volatile uint16_t s_addr_max = 0xC0FF;      // alignment scoring window (max)

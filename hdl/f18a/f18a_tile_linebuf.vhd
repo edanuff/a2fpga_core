@@ -109,24 +109,32 @@ begin
 
    -- Line buffer 1
    process (clk)
+   variable a : integer;
    begin
-      if rising_edge(clk) then
-         if we1 = '1' then
-            linebuf1(to_integer(unsigned(addr1))) <= din1;
-         end if;
-         dout1 <= linebuf1(to_integer(unsigned(addr1)));
+   if rising_edge(clk) then
+      a := to_integer(unsigned(addr1));
+      if we1 = '1' then
+         linebuf1(a) <= din1;
+         dout1 <= din1;            -- write-through (supported)
+      else
+         dout1 <= linebuf1(a);
       end if;
+   end if;
    end process;
 
    -- Line buffer 2
    process (clk)
+   variable a : integer;
    begin
-      if rising_edge(clk) then
-         if we2 = '1' then
-            linebuf2(to_integer(unsigned(addr2))) <= din2;
-         end if;
-         dout2 <= linebuf2(to_integer(unsigned(addr2)));
+   if rising_edge(clk) then
+      a := to_integer(unsigned(addr2));
+      if we2 = '1' then
+         linebuf2(a) <= din2;
+         dout2 <= din2;            -- write-through (supported)
+      else
+         dout2 <= linebuf2(a);
       end if;
+   end if;
    end process;
 
 end rtl;
