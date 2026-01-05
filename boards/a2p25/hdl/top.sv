@@ -112,7 +112,7 @@ module top #(
     wire clk_hdmi_w;
     wire clk_27m_w;
 
-    Gowin_PLL your_instance_name(
+    Gowin_PLL clocks_pll (
         .lock(clk_lock_w), //output  lock
         .clkout0(clk_27m_w), //output  clkout0
         .clkout1(clk_hdmi_w), //output  clkout1

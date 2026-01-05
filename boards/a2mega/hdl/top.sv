@@ -38,6 +38,7 @@ module top #(
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
     parameter int GS = 0,                       // Apple IIgs mode
+    parameter int ENABLE_FILTER = 0,            // Enable audio filtering
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
@@ -651,7 +652,8 @@ module top #(
     wire [15:0] audio_sample_word[1:0];
     audio_out #(
         .CLK_RATE(PIXEL_SPEED_HZ),
-        .AUDIO_RATE(AUDIO_RATE)
+        .AUDIO_RATE(AUDIO_RATE),
+        .ENABLE(ENABLE_FILTER)
     ) audio_out
     (
         .reset(~device_reset_n_w),

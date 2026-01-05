@@ -83,7 +83,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Thu Jan  1 22:45:42 2026
+<td>Fri Jan  2 22:54:46 2026
 </td>
 </tr>
 <tr>
@@ -97,24 +97,24 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <tr>
 <td class="label">Place & Route Process</td>
 <td>Running placement:
-   Placement Phase 0: CPU time = 0h 0m 0.855s, Elapsed time = 0h 0m 0.827s
-   Placement Phase 1: CPU time = 0h 0m 0.293s, Elapsed time = 0h 0m 0.283s
+   Placement Phase 0: CPU time = 0h 0m 0.733s, Elapsed time = 0h 0m 0.691s
+   Placement Phase 1: CPU time = 0h 0m 0.303s, Elapsed time = 0h 0m 0.282s
    Placement Phase 2: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-   Placement Phase 3: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-   Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
+   Placement Phase 3: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 1s
+   Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 4s
 Running routing:
    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
-   Routing Phase 1: CPU time = 0h 0m 31s, Elapsed time = 0h 0m 30s
-   Routing Phase 2: CPU time = 0h 0m 0.112s, Elapsed time = 0h 0m 0.082s
+   Routing Phase 1: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 11s
+   Routing Phase 2: CPU time = 0h 0m 0.117s, Elapsed time = 0h 0m 0.075s
    Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-   Total Routing: CPU time = 0h 0m 31s, Elapsed time = 0h 0m 30s
+   Total Routing: CPU time = 0h 0m 12s, Elapsed time = 0h 0m 11s
 Generate output files:
-   CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+   CPU time = 0h 0m 4s, Elapsed time = 0h 0m 3s
 </td>
 </tr>
 <tr>
 <td class="label">Total Time and Memory Usage</td>
-<td>CPU time = 0h 0m 39s, Elapsed time = 0h 0m 39s, Peak memory usage = 3759MB</td>
+<td>CPU time = 0h 0m 20s, Elapsed time = 0h 0m 19s, Peak memory usage = 3166MB</td>
 </tr>
 </table>
 <br/>
@@ -129,12 +129,12 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Logic</td>
-<td>7981/59904</td>
-<td>14%</td>
+<td>6919/59904</td>
+<td>12%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --LUT,ALU,ROM16</td>
-<td>7981(6744 LUT, 1237 ALU, 0 ROM16)</td>
+<td>6919(6331 LUT, 588 ALU, 0 ROM16)</td>
 <td>-</td>
 </tr>
 <tr>
@@ -144,8 +144,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Register</td>
-<td>4655/60780</td>
-<td>8%</td>
+<td>4069/60780</td>
+<td>7%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as Latch</td>
@@ -154,8 +154,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as FF</td>
-<td>4628/59904</td>
-<td>8%</td>
+<td>4042/59904</td>
+<td>7%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --I/O Register as Latch</td>
@@ -169,8 +169,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">CLS</td>
-<td>6187/29952</td>
-<td>21%</td>
+<td>5351/29952</td>
+<td>18%</td>
 </tr>
 <tr>
 <td class="label">I/O Port</td>
@@ -209,7 +209,7 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">DSP</td>
-<td>8 MULT12X12<br/>7 MULT27X36<br/></td><td>16%</td>
+<td>8 MULT12X12<br/></td><td>4%</td>
 </tr>
 </table>
 <h2><a name="I/O_Bank_Usage_Summary">I/O Bank Usage Summary:</a></h2>
@@ -277,8 +277,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">PRIMARY</td>
-<td>6/8</td>
-<td>75%</td>
+<td>3/8</td>
+<td>38%</td>
 </tr>
 <tr>
 <td class="label">LW</td>
@@ -312,27 +312,12 @@ Generate output files:
 <tr>
 <td class="label">clk_pixel_w</td>
 <td>PRIMARY</td>
-<td> PTR1 PTR2 PTR3 PBR1 PBR2</td>
+<td> PTR1 PTR2 PTR3</td>
 </tr>
 <tr>
 <td class="label">clk_logic_w</td>
 <td>PRIMARY</td>
-<td> PTR1 PTR2 PTR3 PBR0 PBR1 PBR2 PBR3</td>
-</tr>
-<tr>
-<td class="label">mockingboard/pb_r_o[2]</td>
-<td>PRIMARY</td>
-<td> PTR1 PTR2</td>
-</tr>
-<tr>
-<td class="label">superserial/COM2/n67_7</td>
-<td>PRIMARY</td>
-<td> PBR1</td>
-</tr>
-<tr>
-<td class="label">hdmi/true_hdmi_output.packet_picker/n4077_4</td>
-<td>PRIMARY</td>
-<td> PTR1 PBR1</td>
+<td> PTR1 PTR2 PTR3 PBR1 PBR2 PBR3</td>
 </tr>
 <tr>
 <td class="label">rstn_r</td>
@@ -341,11 +326,6 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">n29_11</td>
-<td>LW</td>
-<td> -</td>
-</tr>
-<tr>
-<td class="label">clk_audio_w</td>
 <td>LW</td>
 <td> -</td>
 </tr>
@@ -365,12 +345,17 @@ Generate output files:
 <td> -</td>
 </tr>
 <tr>
-<td class="label">audio_out/IIR_filter/out_l_15_7</td>
+<td class="label">mockingboard/pb_r_o[2]</td>
 <td>LW</td>
 <td> -</td>
 </tr>
 <tr>
-<td class="label">audio_out/IIR_filter/n869_5</td>
+<td class="label">superserial/COM2/n67_7</td>
+<td>LW</td>
+<td> -</td>
+</tr>
+<tr>
+<td class="label">hdmi/true_hdmi_output.packet_picker/n4077_4</td>
 <td>LW</td>
 <td> -</td>
 </tr>
