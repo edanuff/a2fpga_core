@@ -829,6 +829,12 @@ module top #(
         .o_negedge()
     );
 
+    // ESP32 control interfaces
+    slotmaker_config_if esp_slotmaker_config_if();
+    f18a_gpu_if esp_f18a_gpu_if();
+    video_control_if esp_video_control_if();
+    drive_volume_if esp_volumes[2]();
+
     // Octal SPI connector instance
     esp32_ospi_connector #(
         .USE_SYNC(1),
@@ -840,8 +846,19 @@ module top #(
         .sclk(esp_sclk_sync),
         .data_i(esp_data_i),
         .data_o(esp_data_o),
-        .data_oe(esp_data_oe)
+        .data_oe(esp_data_oe),
+        .slotmaker_config_if(esp_slotmaker_config_if),
+        .f18a_gpu_if(esp_f18a_gpu_if),
+        .video_control_if(esp_video_control_if),
+        .volumes(esp_volumes)
     );
+
+    // Note: These interfaces are currently independent of the main system.
+    // Future integration:
+    // - esp_slotmaker_config_if can be muxed with slotmaker_config_if
+    // - esp_f18a_gpu_if can replace f18a_gpu_if when ESP32 controls VDP
+    // - esp_video_control_if can replace video_control_if for OSD
+    // - esp_volumes can be connected to disk drive infrastructure
 
 endmodule
 
