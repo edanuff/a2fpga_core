@@ -98,7 +98,11 @@ module top #(
 
     // uart
     output  uart_tx,
-    input  uart_rx
+    input  uart_rx,
+
+    // ESP32 Octal SPI interface
+    input         esp_sclk,
+    inout  [7:0]  esp_data
 
 );
 
@@ -789,7 +793,7 @@ module top #(
     */
 
     /*
-    always @(posedge clk_logic_w) begin 
+    always @(posedge clk_logic_w) begin
         if (!button) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
@@ -798,6 +802,46 @@ module top #(
     end
     */
 
+    // =========================================================================
+    // ESP32 Octal SPI Interface
+    // =========================================================================
+
+    wire [7:0] esp_data_i;
+    wire [7:0] esp_data_o;
+    wire       esp_data_oe;
+
+    // Bidirectional I/O buffers for Octal SPI data lines
+    IOBUF esp_data_iobuf[7:0] (
+        .O  (esp_data_i),       // Input from pads
+        .IO (esp_data),         // Bidirectional pads
+        .I  (esp_data_o),       // Output to pads
+        .OEN(!esp_data_oe)      // Output enable (active low for IOBUF)
+    );
+
+    // Synchronize SCLK to logic clock domain
+    wire esp_sclk_sync;
+    cdc_denoise cdc_esp_sclk (
+        .clk(clk_logic_w),
+        .i(esp_sclk),
+        .o(esp_sclk_sync),
+        .o_n(),
+        .o_posedge(),
+        .o_negedge()
+    );
+
+    // Octal SPI connector instance
+    esp32_ospi_connector #(
+        .USE_SYNC(1),
+        .USE_CRC(0),
+        .IDLE_TO_CYC(5_400_000)  // ~100ms at 54MHz
+    ) esp32_ospi (
+        .clk(clk_logic_w),
+        .rst_n(device_reset_n_w),
+        .sclk(esp_sclk_sync),
+        .data_i(esp_data_i),
+        .data_o(esp_data_o),
+        .data_oe(esp_data_oe)
+    );
 
 endmodule
 
