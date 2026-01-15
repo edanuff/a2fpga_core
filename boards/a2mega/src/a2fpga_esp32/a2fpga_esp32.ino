@@ -52,7 +52,7 @@ const int PIN_TCK  = 40;
 const int PIN_TMS  = 41;
 const int PIN_TDI  = 42;
 const int PIN_TDO  = 45;
-const int PIN_SRST = 7;  // unused and unconnected, but required by the JTAG bridge
+const int PIN_SRST = 3;  // unused and unconnected, but required by the JTAG bridge
 
 // Octal SPI interface to the FPGA
 static const ospi_pins_t OSPI_PINS = {
