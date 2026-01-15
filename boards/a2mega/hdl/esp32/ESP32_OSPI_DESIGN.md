@@ -210,3 +210,42 @@ TX: A5 5A 7F 11 00 00 00 00 01 [256 data bytes]
 
 5. **F18A Integration**: The GPU interface signals are directly exposed. The ESP32
    can read/write VRAM, palette, and registers, and control GPU execution.
+
+6. **No Chip Select**: The protocol uses sync patterns (0xA5 0x5A) for framing instead
+   of a CS line. This frees up the CS pin for other uses. Idle timeout (~100ms) handles
+   automatic reframing if communication is lost.
+
+---
+
+## Future Enhancements
+
+### Interrupt Line (FPGA → ESP32)
+
+Since the CS pin is not used for SPI framing, it can be repurposed as an interrupt
+output from the FPGA to the ESP32. This would allow the FPGA to signal events without
+the ESP32 needing to poll registers.
+
+**Proposed interrupt sources:**
+- Drive volume read/write request pending (`volumes[x].rd` or `.wr` asserted)
+- VDP vertical blank interrupt
+- Apple II bus activity (specific address access)
+- Any other condition requiring ESP32 attention
+
+**Implementation:**
+- Add `esp_irq_n` output to `esp32_ospi_connector.sv`
+- Active-low, directly usable as GPIO interrupt on ESP32
+- Add interrupt status/mask registers (e.g., 0x08-0x09) to identify source
+- ESP32 configures GPIO for falling-edge interrupt, reads status register to determine cause
+
+**Proposed registers:**
+| Addr | Name | R/W | Description |
+|------|------|-----|-------------|
+| 0x08 | IRQ_STATUS | R | Pending interrupt flags (read clears) |
+| 0x09 | IRQ_MASK | R/W | Interrupt enable mask |
+
+**IRQ_STATUS / IRQ_MASK bits:**
+- [0] VOL0_CMD - Drive 0 has pending read/write
+- [1] VOL1_CMD - Drive 1 has pending read/write
+- [2] VDP_VBLANK - VDP vertical blank
+- [3] VDP_SPRITE - VDP sprite collision
+- [4-7] Reserved
