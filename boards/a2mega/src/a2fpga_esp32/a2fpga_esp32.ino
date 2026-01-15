@@ -54,18 +54,17 @@ const int PIN_TDI  = 42;
 const int PIN_TDO  = 45;
 const int PIN_SRST = 7;  // unused and unconnected, but required by the JTAG bridge
 
-// Octal SPI interface to the FPGA (DUMMY pins - replace with actual)
-// These pins need to be assigned based on the actual hardware design
+// Octal SPI interface to the FPGA
 static const ospi_pins_t OSPI_PINS = {
-    .sclk = 9,      // SPI Clock
-    .d0   = 10,     // Data bit 0 (MOSI in standard SPI mode)
-    .d1   = 11,     // Data bit 1 (MISO in standard SPI mode)
-    .d2   = 12,     // Data bit 2
-    .d3   = 13,     // Data bit 3
-    .d4   = 14,     // Data bit 4
-    .d5   = 15,     // Data bit 5
-    .d6   = 16,     // Data bit 6
-    .d7   = 17,     // Data bit 7
+    .sclk = 47,      // SPI Clock
+    .d0   = 1,     // Data bit 0 (MOSI in standard SPI mode)
+    .d1   = 2,     // Data bit 1 (MISO in standard SPI mode)
+    .d2   = 4,     // Data bit 2
+    .d3   = 5,     // Data bit 3
+    .d4   = 6,     // Data bit 4
+    .d5   = 7,     // Data bit 5
+    .d6   = 8,     // Data bit 6
+    .d7   = 9,     // Data bit 7
     .cs   = -1,     // Chip select (-1 if directly controlled)
 };
 
