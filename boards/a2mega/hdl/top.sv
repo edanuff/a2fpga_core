@@ -860,6 +860,26 @@ module top #(
     // - esp_video_control_if can replace video_control_if for OSD
     // - esp_volumes can be connected to disk drive infrastructure
 
+    /*
+    // Data bus IOBUF instantiation
+    wire [7:0] cpu_data_in;
+    wire [7:0] cpu_data_out;
+    wire       cpu_data_oe;
+    
+    // Gowin IOBUF primitive - adjust to match your library
+    genvar i;
+    generate
+        for (i = 0; i < 8; i = i + 1) begin : data_iobuf
+            IOBUF data_buf (
+                .O  (cpu_data_in[i]),
+                .IO (DATA[i]),
+                .I  (cpu_data_out[i]),
+                .OEN(~cpu_data_oe)      // Gowin OEN is active low
+            );
+        end
+    endgenerate
+    */
+
 endmodule
 
 module reset_sync (
