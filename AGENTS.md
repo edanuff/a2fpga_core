@@ -8,6 +8,22 @@
 
 ## Build, Test, and Development Commands
 - Build (Gowin IDE): Open `boards/<board>/<board>.gprj`, then synthesize, PnR, and generate bitstream. Output: `boards/<board>/impl/pnr/<board>.fs`.
+- Build (Command Line): Use `gw_sh` for headless builds. See `tools/README.md` for full details.
+  ```bash
+  # macOS path to gw_sh:
+  /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh
+
+  # Synthesis only:
+  cd boards/<board>
+  echo 'open_project <board>.gprj
+  run syn
+  exit' | /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh
+
+  # Full build (synthesis + place & route):
+  echo 'open_project <board>.gprj
+  run all
+  exit' | /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh
+  ```
 - Flash (examples):
   - A2N20v2: `openfpgaloader -b tangnano20k -f boards/a2n20v2/impl/pnr/a2n20v2.fs`
   - A2N9: `openfpgaloader -b tangnano9k -f boards/a2n9/impl/pnr/a2n9.fs`
