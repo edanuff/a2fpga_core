@@ -1,4 +1,4 @@
-// A2N9 - Apple II Bus Interface
+// A2P25 - Apple II Bus Interface
 //
 // (c) 2023,2024 Ed Anuff <ed@a2fpga.com> 
 //
@@ -25,6 +25,7 @@
 //
 
 module apple_bus #(
+    parameter int GS = 0,
     parameter int CLOCK_SPEED_HZ = 50_000_000,
     parameter int APPLE_HZ = 14_318_181,
     parameter int CPU_HZ = APPLE_HZ / 14,                   // 1_022_727
@@ -75,12 +76,13 @@ module apple_bus #(
     assign a2bus_if.data = data_r;
     assign a2bus_if.rw_n = rw_n_r;
 
-    assign a2bus_if.sw_gs = 1'b0;
-    assign a2bus_if.m2sel_n = a2_m2sel_n; 
+    wire a2_gs = GS;
+    assign a2bus_if.sw_gs = a2_gs;
+    assign a2bus_if.m2sel_n = a2_gs ? a2_m2sel_n : 1'b0;
 
     reg m2b0_r;
 	always @(posedge a2bus_if.clk_logic) begin
-        if (a2bus_if.phi1 && clk_2m_negedge_i) m2b0_r <= a2_mb20;
+        if (a2bus_if.phi1 && clk_2m_negedge_i) m2b0_r <= a2_gs ? a2_mb20 : 1'b0;
 	end
     assign a2bus_if.m2b0 = m2b0_r; 
 

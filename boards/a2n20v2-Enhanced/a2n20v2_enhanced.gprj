@@ -55,6 +55,7 @@
         <File path="../../hdl/picosoc/picosoc.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/apple_speaker.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/audio_out.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sound/audio_timing.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sdram/sdram_if_mux.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sdram/sdram_port_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sdram/sdram_ports.sv" type="file.verilog" enable="1"/>

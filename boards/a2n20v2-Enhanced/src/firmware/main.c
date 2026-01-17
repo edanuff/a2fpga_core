@@ -9,6 +9,7 @@
 #include <a2mem/a2mem.h>
 #include <a2disk/a2disk.h>
 #include <pff/pff.h>		/* Declarations of FatFs API */
+#include <pff/diskio.h>		/* SD card detection */
 
 //
 // A2FPGA Firmware
@@ -188,6 +189,61 @@ bool check_hotkey()
 	return hotkey_pressed;
 }
 
+void handle_cli_key(uint8_t c)
+{
+    screen_putchar(c);
+}
+
+void handle_cli() {
+    xputs("\nEntering command line...\n>");
+    uint8_t c;
+    while ((c = wait_for_char()) != ESC_KEY) {
+        handle_cli_key(c);
+    }
+    xputs("\nExiting command line...\n");
+}
+
+void cli_event_loop(bool skip_reset_wait) {
+
+    while (1) {
+
+        bool hotkey_pressed = false;
+        if (skip_reset_wait) {
+            hotkey_pressed = true;
+        } else {
+            wait_for_a2reset();
+
+            for (int i = 0; i < 500; i++)
+            {
+                uint8_t c = reg_a2fpga_keycode & 0x1F;
+                if (c == HOT_KEY) {
+                    hotkey_pressed = true;
+                    break;
+                } else if (c) {
+                    break;
+                }
+            }
+        }
+        skip_reset_wait = false;
+
+        reg_a2fpga_keycode = 0;
+
+        if (hotkey_pressed)
+        {
+            reg_a2fpga_reset = 0;
+            reg_a2fpga_video_enable = 1;
+
+            handle_cli();
+        }
+
+        reg_a2fpga_reset = 0;
+        reg_a2fpga_video_enable = 0;
+
+        reg_a2fpga_cardrom_release = 1;
+    }
+
+}
+
 void main() {
 	// set UART clock divider for 115200 baud
     reg_uart_clkdiv = 468; // 54000000 / 115200
@@ -241,7 +297,27 @@ void main() {
 	UINT bw, br, i;
 	uint32_t *buff=(uint32_t *)0x04400000;
 
-	xputs("\n\nMounting SDCard\n");
+	xputs("\n\nChecking for SDCard...\n");
+
+	DSTATUS sd_status = sd_card_detect();
+	if (sd_status != 0) {
+		xputs("No SD card detected!\n");
+		reg_a2fpga_a2bus_ready = 1;
+		reg_a2fpga_video_enable = 0;
+		reg_a2fpga_cardrom_release = 1;
+		reg_ws2812 = 0x000000FF;  // Blue LED to indicate no SD card
+		
+		// Continue running without SD card instead of dying
+		cli_event_loop(hotkey_pressed);
+		/*
+		while (1) {
+			wait_for_a2reset();
+			reg_a2fpga_cardrom_release = 1;
+		}
+		*/
+	}
+
+	xputs("SD card detected, mounting...\n");
 
 	FRESULT rc = pf_mount(&fatfs);
 	if (rc) die(rc);

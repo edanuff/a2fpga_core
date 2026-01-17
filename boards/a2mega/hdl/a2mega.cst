@@ -1,5 +1,9 @@
 // Mega 60K A2FPGA Pin Constraints File
 
+//CLOCK_LOC "clk_hdmi_w" BUFG[0] = CLK;
+//CLOCK_LOC "clk_pixel_w" BUFG[1] = CLK;
+//CLOCK_LOC "rstn_r" BUFG[0] = SR;
+//CLOCK_LOC "reset_x5_w" BUFG[1] = SR;
 
 // Clock & Reset/Button S1
 
@@ -223,3 +227,34 @@ IO_PORT "a2_a[14]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
 IO_LOC  "a2_a[15]" G17;
 IO_PORT "a2_a[15]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
 
+// ESP32-S3 OSPI Lines
+
+IO_LOC  "esp_data[0]" E13;
+IO_PORT "esp_data[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+IO_LOC  "esp_data[1]" E14;
+IO_PORT "esp_data[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+IO_LOC  "esp_data[2]" C14;
+IO_PORT "esp_data[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+IO_LOC  "esp_data[3]" C15;
+IO_PORT "esp_data[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+IO_LOC  "esp_data[4]" C13;
+IO_PORT "esp_data[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+IO_LOC  "esp_data[5]" B13;
+IO_PORT "esp_data[5]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+IO_LOC  "esp_data[6]" A13;
+IO_PORT "esp_data[6]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+IO_LOC  "esp_data[7]" A14;
+IO_PORT "esp_data[7]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+IO_LOC  "esp_sclk" B20;
+IO_PORT "esp_sclk" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+//IO_LOC  "esp_cs" A19;
+//IO_PORT "esp_cs" IO_TYPE=LVCMOS33 PULL_MODE=NONE;

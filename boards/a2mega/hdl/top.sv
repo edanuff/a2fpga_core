@@ -16,8 +16,11 @@
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
+`include "datetime.svh"
+
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
+    parameter int PIXEL_SPEED_HZ = CLOCK_SPEED_HZ / 2,
     parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
 
     parameter bit SCANLINES_ENABLE = 0,
@@ -34,6 +37,8 @@ module top #(
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
+    parameter int GS = 0,                       // Apple IIgs mode
+    parameter int ENABLE_FILTER = 0,            // Enable audio filtering
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
@@ -93,27 +98,17 @@ module top #(
 
     // uart
     output  uart_tx,
-    input  uart_rx
+    input  uart_rx,
+
+    // ESP32 Octal SPI interface
+    input         esp_sclk,
+    inout  [7:0]  esp_data
 
 );
 
     assign hdmi_scl = 1'b1;
     assign hdmi_sda = 1'b1;
     assign hdmi_cec = 1'b0;
-
-    reg led_r;
-    reg [25:0] led_counter_r;
-
-    always @(posedge clk) begin
-        if (led_counter_r == 26'd24_999_999) begin
-            led_counter_r <= 0;
-            led_r <= ~led_r;  // Toggle LED every 0.5s, so full blink is 1s
-        end else begin
-            led_counter_r <= led_counter_r + 1;
-        end
-    end
-
-    assign led[0] = !led_r;
 
     // Clocks
 
@@ -123,14 +118,15 @@ module top #(
     wire clk_hdmi_w;
     wire clk_27m_w;
 
-    clk_pll your_instance_name(
+    clk_pll clocks_pll (
         .lock(clk_lock_w), //output lock
-        .clkout0(clk_27m_w), //output clkout0
+        .clkout0(clk_pixel_w), //output clkout0
         .clkout1(clk_hdmi_w), //output clkout1
         .clkout2(clk_logic_w), //output clkout2
         .clkin(clk) //input clkin
     );
 
+    /*
     CLKDIV clkdiv_inst (
         .HCLKIN(clk_hdmi_w),
         .RESETN(clk_lock_w),
@@ -138,23 +134,49 @@ module top #(
         .CLKOUT(clk_pixel_w)
     );
     defparam clkdiv_inst.DIV_MODE="5";
+    */
+
+    // LED blinking logic with ES5503 counter indication
+    reg led_r = 1'b0;
+    reg [25:0] led_counter_r = 26'd0;
+
+    always @(posedge clk_logic_w) begin
+
+        
+        if (led_counter_r == 26'd09_999_999) begin
+            led_counter_r <= 0;
+
+            led_r <= ~led_r;  // Normal heartbeat every 0.5s
+        end else begin
+            led_counter_r <= led_counter_r + 1;
+        end
+    end
+    assign led[0] = !led_r;
+
+    // Power-on reset generation
+    localparam RESET_CYCLES = 100;  // Number of clock cycles to hold reset
+    
+    reg rstn_r = 1'b0;
+    reg [$clog2(RESET_CYCLES+1)-1:0] reset_counter_r = '0;
+
+    always @(posedge clk_logic_w) begin
+        if (reset_counter_r == RESET_CYCLES) begin
+            rstn_r <= 1'b1;  // Release reset after RESET_CYCLES clocks
+        end else begin
+            reset_counter_r <= reset_counter_r + 1;
+        end
+    end
 
     // Reset
 
+    wire device_reset_n_w = rstn_r; // Use reset signal from power-on reset logic
 
-    wire device_reset_n_w;
-    Reset_Sync u_Reset_Sync (
-		.resetn(device_reset_n_w),
-		.ext_reset(!rst & clk_lock_w),
-		.clk(clk_logic_w)
-	);
+    wire reset_x5_w;
+    reset_sync reset_sync_x5 (.clk(clk_hdmi_w), .arst(~device_reset_n_w), .srst(reset_x5_w));
 
     //wire device_reset_n_w = ~rst;
 
-    assign led[1] = device_reset_n_w;
-
-
-    wire system_reset_n_w = device_reset_n_w;
+    wire system_reset_n_w = device_reset_n_w & a2_reset_n;
 
     // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
     // delays Phi1 by 2 cycles = 40ns
@@ -196,12 +218,26 @@ module top #(
         .o_negedge(clk_7m_negedge_w)
     );
 
+    wire led_phi1_w;
+    reg [10:0]led_phi1_ctr_r;
+    always @(posedge clk_logic_w) begin
+        if (phi1_posedge) led_phi1_ctr_r <= led_phi1_ctr_r + 1;
+    end
+    assign led_phi1_w = led_phi1_ctr_r[10];
+
+    wire led_2m_w;
+    reg [10:0]led_2m_ctr_r;
+    always @(posedge clk_logic_w) begin
+        if (clk_2m_posedge_w) led_2m_ctr_r <= led_2m_ctr_r + 1;
+    end
+    assign led_2m_w = led_2m_ctr_r[10];
+
     // Interface to Apple II
 
     // Buffer/level shifters are held in tri-state
     // during FPGA configuration to ensure no interference
     // with the Apple II bus.
-    assign a2_bus_oe = 1'b1;
+    assign a2_bus_oe = 1'b0;
 
     // Address bus is input-only unless performing DMA
     // 0 = from Apple II bus to FPGA, 1 = from FPGA to Apple II bus
@@ -248,6 +284,7 @@ module top #(
     );
 
     apple_bus #(
+        .GS(GS),
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ)
     ) apple_bus (
         .a2bus_if(a2bus_if),
@@ -414,7 +451,7 @@ module top #(
     wire vdp_transparent;
     wire vdp_ext_video;
     wire vdp_irq_n;
-    wire [15:0] ssp_audio_w;
+    wire [9:0] ssp_audio_w;
     wire vdp_unlocked_w;
     wire [3:0] vdp_gmode_w;
     wire scanlines_w;
@@ -549,6 +586,43 @@ module top #(
         .speaker_o(speaker_audio_w)
     );
 
+    // Extend all the unsigned audio signals to 13 bits
+    wire [12:0] speaker_audio_ext_w = {speaker_audio_w, 12'b0};
+    wire [12:0] ssp_audio_ext_w = {ssp_audio_w, 3'b0};
+    wire [12:0] mb_audio_l_ext_w = {mb_audio_l, 3'b0};
+    wire [12:0] mb_audio_r_ext_w = {mb_audio_r, 3'b0};
+
+    wire signed [15:0] core_audio_l_w;
+    wire signed [15:0] core_audio_r_w;
+    // Combine all the audio sources into a single 16-bit signed audio signal
+    assign core_audio_l_w = ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
+    assign core_audio_r_w = ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
+
+    // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
+
+    wire [15:0] cdc_audio_l;
+    wire [15:0] cdc_audio_r;
+
+    cdc_sampling #(
+        .WIDTH(16)
+    ) audio_cdc_left (
+        .rst_n(device_reset_n_w),
+        .clk_fast(clk_logic_w),
+        .clk_slow(clk_pixel_w),
+        .data_in(core_audio_l_w),
+        .data_out(cdc_audio_l)
+    );
+
+    cdc_sampling #(
+        .WIDTH(16)
+    ) audio_cdc_right (
+        .rst_n(device_reset_n_w),
+        .clk_fast(clk_logic_w),
+        .clk_slow(clk_pixel_w),
+        .data_in(core_audio_r_w),
+        .data_out(cdc_audio_r)
+    );
+
     localparam [31:0] aflt_rate = 7_056_000;
     localparam [39:0] acx  = 4258969;
     localparam  [7:0] acx0 = 3;
@@ -558,13 +632,32 @@ module top #(
     localparam [23:0] acy1 =  24'd6143386;
     localparam [23:0] acy2 = -24'd2023767;
 
-    localparam AUDIO_RATE = 44100;
+    localparam AUDIO_RATE = 44100;  // Match MP3 stream sample rate
     localparam AUDIO_BIT_WIDTH = 16;
+    // I2S format: 0=left-justified (ES5503/test), 1=standard I2S (ESP32-audioI2S library)
+    localparam I2S_FORMAT = 1'b1;  // Use standard I2S (now fixed)
     wire clk_audio_w;
+
+    audio_timing #(
+        .CLK_RATE(PIXEL_SPEED_HZ),
+        .AUDIO_RATE(AUDIO_RATE),
+        .I2S_STANDARD(I2S_FORMAT)
+    ) audio_timing (
+        .reset(~device_reset_n_w),
+        .clk(clk_pixel_w),
+        .audio_clk(clk_audio_w),
+        .i2s_bclk(),
+        .i2s_lrclk(),
+        .i2s_data_shift_strobe(),
+        .i2s_data_load_strobe()
+    );
+
+
     wire [15:0] audio_sample_word[1:0];
     audio_out #(
-        .CLK_RATE(CLOCK_SPEED_HZ / 2),
-        .AUDIO_RATE(AUDIO_RATE)
+        .CLK_RATE(PIXEL_SPEED_HZ),
+        .AUDIO_RATE(AUDIO_RATE),
+        .ENABLE(ENABLE_FILTER)
     ) audio_out
     (
         .reset(~device_reset_n_w),
@@ -579,9 +672,9 @@ module top #(
         .cy1(acy1),
         .cy2(acy2),
 
-        .is_signed(1'b0),
-        .core_l(ssp_audio_w + {mb_audio_l, 5'b00} + {speaker_audio_w, 13'b0}),
-        .core_r(ssp_audio_w + {mb_audio_r, 5'b00} + {speaker_audio_w, 13'b0}),
+        .is_signed(1'b1),
+        .core_l(cdc_audio_l),
+        .core_r(cdc_audio_r),
 
         .audio_clk(clk_audio_w),
         .audio_l(audio_sample_word[0]),
@@ -590,10 +683,49 @@ module top #(
 
     // HDMI
 
+    wire scanline_en = scanlines_w && hdmi_y[0];
+
+    wire show_debug_overlay_r = 1'b1;
+
+    wire [7:0] debug_r_w;
+    wire [7:0] debug_g_w;
+    wire [7:0] debug_b_w;
+    DebugOverlay #(
+        .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
+        .ENABLE(1'b1)
+    ) debug_overlay (
+        .clk_i          (clk_pixel_w),
+        .reset_n (device_reset_n_w),
+        .enable_i(show_debug_overlay_r),
+
+        .hex_values ({
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0,       
+            8'h0
+        }), 
+
+        .debug_bits_0_i ({a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE, a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.STORE80, a2bus_if.system_reset_n, a2bus_if.device_reset_n}),
+        .debug_bits_1_i ({1'b0, 1'b0, 1'b0, 1'b0, 1'b0, led_2m_w, led_phi1_w, led_r}),
+
+        .screen_x_i     (hdmi_x),
+        .screen_y_i     (hdmi_y),
+
+        .r_i            (scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w),
+        .g_i            (scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w),
+        .b_i            (scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w),
+
+        .r_o            (debug_r_w),
+        .g_o            (debug_g_w),
+        .b_o            (debug_b_w)
+    );  
+
     logic [2:0] tmds;
     wire tmdsClk;
-
-    wire scanline_en = scanlines_w && hdmi_y[0];
 
     hdmi #(
         .VIDEO_ID_CODE(2),
@@ -612,9 +744,9 @@ module top #(
         .clk_pixel(clk_pixel_w),
         .clk_audio(clk_audio_w),
         .rgb({
-            scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w,
-            scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w,
-            scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w
+            debug_r_w,
+            debug_g_w,
+            debug_b_w
         }),
         /*
         .rgb({
@@ -624,6 +756,7 @@ module top #(
         }),
         */
         .reset(!device_reset_n_w),
+        //.reset_x5(reset_x5_w),
         .audio_sample_word(audio_sample_word),
         .tmds(tmds),
         .tmds_clock(tmdsClk),
@@ -660,7 +793,7 @@ module top #(
     */
 
     /*
-    always @(posedge clk_logic_w) begin 
+    always @(posedge clk_logic_w) begin
         if (!button) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
         //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
@@ -669,24 +802,99 @@ module top #(
     end
     */
 
+    // =========================================================================
+    // ESP32 Octal SPI Interface
+    // =========================================================================
+
+    wire [7:0] esp_data_i;
+    wire [7:0] esp_data_o;
+    wire       esp_data_oe;
+
+    // Bidirectional I/O buffers for Octal SPI data lines
+    IOBUF esp_data_iobuf[7:0] (
+        .O  (esp_data_i),       // Input from pads
+        .IO (esp_data),         // Bidirectional pads
+        .I  (esp_data_o),       // Output to pads
+        .OEN(!esp_data_oe)      // Output enable (active low for IOBUF)
+    );
+
+    // Synchronize SCLK to logic clock domain
+    wire esp_sclk_sync;
+    cdc_denoise cdc_esp_sclk (
+        .clk(clk_logic_w),
+        .i(esp_sclk),
+        .o(esp_sclk_sync),
+        .o_n(),
+        .o_posedge(),
+        .o_negedge()
+    );
+
+    // ESP32 control interfaces
+    slotmaker_config_if esp_slotmaker_config_if();
+    f18a_gpu_if esp_f18a_gpu_if();
+    video_control_if esp_video_control_if();
+    drive_volume_if esp_volumes[2]();
+
+    // Octal SPI connector instance
+    esp32_ospi_connector #(
+        .USE_SYNC(1),
+        .USE_CRC(0),
+        .IDLE_TO_CYC(5_400_000)  // ~100ms at 54MHz
+    ) esp32_ospi (
+        .clk(clk_logic_w),
+        .rst_n(device_reset_n_w),
+        .sclk(esp_sclk_sync),
+        .data_i(esp_data_i),
+        .data_o(esp_data_o),
+        .data_oe(esp_data_oe),
+        .slotmaker_config_if(esp_slotmaker_config_if),
+        .f18a_gpu_if(esp_f18a_gpu_if),
+        .video_control_if(esp_video_control_if),
+        .volumes(esp_volumes)
+    );
+
+    // Note: These interfaces are currently independent of the main system.
+    // Future integration:
+    // - esp_slotmaker_config_if can be muxed with slotmaker_config_if
+    // - esp_f18a_gpu_if can replace f18a_gpu_if when ESP32 controls VDP
+    // - esp_video_control_if can replace video_control_if for OSD
+    // - esp_volumes can be connected to disk drive infrastructure
+
+    /*
+    // Data bus IOBUF instantiation
+    wire [7:0] cpu_data_in;
+    wire [7:0] cpu_data_out;
+    wire       cpu_data_oe;
+    
+    // Gowin IOBUF primitive - adjust to match your library
+    genvar i;
+    generate
+        for (i = 0; i < 8; i = i + 1) begin : data_iobuf
+            IOBUF data_buf (
+                .O  (cpu_data_in[i]),
+                .IO (DATA[i]),
+                .I  (cpu_data_out[i]),
+                .OEN(~cpu_data_oe)      // Gowin OEN is active low
+            );
+        end
+    endgenerate
+    */
 
 endmodule
 
-module Reset_Sync (
-    input clk,
-    input ext_reset,
-    output resetn
+module reset_sync (
+  input  wire clk,
+  input  wire arst,   // async reset in, active-high
+  output wire srst    // sync reset out, active-high
 );
+  reg [1:0] ff;
 
-    reg [3:0] reset_cnt = 0;
+  always @(posedge clk or posedge arst) begin
+    if (arst)
+      ff <= 2'b11;          // assert immediately (async)
+    else
+      ff <= {ff[0], 1'b0};  // deassert cleanly (sync)
+  end
 
-    always @(posedge clk or negedge ext_reset) begin
-        if (~ext_reset)
-            reset_cnt <= 4'b0;
-        else
-            reset_cnt <= reset_cnt + !resetn;
-    end
-
-    assign resetn = &reset_cnt;
-
+  assign srst = ff[1];
 endmodule

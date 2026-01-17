@@ -537,6 +537,19 @@ module top #(
     localparam AUDIO_RATE = 44100;
     localparam AUDIO_BIT_WIDTH = 16;
     wire clk_audio_w;
+    audio_timing #(
+        .CLK_RATE(CLOCK_SPEED_HZ / 2),
+        .AUDIO_RATE(AUDIO_RATE)
+    ) audio_timing (
+        .reset(~device_reset_n_w),
+        .clk(clk_pixel_w),
+        .audio_clk(clk_audio_w),
+        .i2s_bclk(),
+        .i2s_lrclk(),
+        .i2s_data_shift_strobe(),
+        .i2s_data_load_strobe()
+    );
+
     wire [15:0] audio_sample_word[1:0];
     audio_out #(
         .CLK_RATE(CLOCK_SPEED_HZ / 2),
