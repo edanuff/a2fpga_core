@@ -74,14 +74,52 @@ exit' | /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh
 
 ### Output Files
 
-After synthesis:
-- `impl/gwsynthesis/<board>.vg` - Synthesized netlist
-- `impl/gwsynthesis/<board>_syn.rpt.html` - Synthesis report
+After synthesis (`impl/gwsynthesis/`):
+- `<board>.vg` - Synthesized netlist
+- `<board>.log` - Full synthesis log with warnings/errors
+- `<board>_syn.rpt.html` - Synthesis report
+- `<board>_syn_resource.html` - Detailed resource breakdown
 
-After place & route:
-- `impl/pnr/<board>.fs` - Bitstream file for programming
-- `impl/pnr/<board>.rpt.html` - Place & route report
-- `impl/pnr/<board>.tr.html` - Timing report
+After place & route (`impl/pnr/`):
+- `<board>.fs` - Bitstream file for programming
+- `<board>.rpt.txt` - **Comprehensive text report** with resource usage, I/O banks, clocks, and pinout
+- `<board>.rpt.html` - Place & route report (HTML version)
+- `<board>.log` - P&R log
+- `<board>.power.html` - Power analysis report
+- `<board>.pin.html` - Pin assignment details
+- `<board>.tr.html` / `<board>_tr_content.html` - Timing reports
+
+**Tip:** The `.rpt.txt` file is particularly useful for quick command-line review of resource utilization.
+
+### Checking Timing Results (Important!)
+
+After place & route, **always check the timing report for violations**. The detailed timing analysis is in `impl/pnr/<board>_tr_content.html`.
+
+Key sections to review in the timing report:
+
+1. **Timing Summaries** - Look for:
+   - `Numbers of Setup Violated Endpoints` - must be 0
+   - `Numbers of Hold Violated Endpoints` - must be 0
+
+2. **Max Frequency Summary** - Shows actual vs. constrained frequency:
+   ```
+   Clock Name    | Constraint    | Actual Fmax
+   clk_logic     | 54.000(MHz)   | 69.279(MHz)   <- Good: Fmax > Constraint
+   ```
+   If Actual Fmax is less than Constraint, timing is violated.
+
+3. **Total Negative Slack (TNS)** - Should be 0.000 for all clocks. Any negative value indicates timing violations.
+
+Example: checking for violations from command line:
+```bash
+# Look for violation counts and frequency summary
+grep -E "Violated|Fmax" boards/<board>/impl/pnr/<board>_tr_content.html | head -20
+```
+
+A healthy timing report shows:
+- Zero violated endpoints (setup and hold)
+- Actual Fmax >= Constraint for all clocks
+- TNS of 0.000 for all clock domains
 
 ### Using a Tcl Script
 
