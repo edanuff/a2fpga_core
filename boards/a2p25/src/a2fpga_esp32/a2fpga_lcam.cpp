@@ -205,6 +205,12 @@ static uint32_t word_print_every = 512;
 static volatile uint32_t words_seen = 0;   // bumped by consumer (non-heartbeat only)
 static volatile uint32_t words_captured = 0; // total words captured by LCD_CAM (including heartbeat)
 static volatile uint8_t s_log_level = 0;   // 0=off, 1=errors, 2=all
+static volatile uint32_t s_buf_seq = 0;    // processed buffer sequence number
+static volatile int      s_last_logged_off = -2; // for change-detection logging
+static volatile uint32_t s_log_every_buffers = 64; // periodic log cadence when level>=1
+static volatile uint32_t s_log_min_interval_us = 500000; // min time between logs (except burst)
+static volatile uint64_t s_last_log_us = 0; // last emitted log time
+static volatile uint32_t s_debug_burst_remaining = 0; // if >0, log every buffer and decrement
 
 static uint8_t* s_buf      = nullptr;     // DESC_COUNT * CHUNK_BYTES
 static DESC_T*  s_desc     = nullptr;     // [DESC_COUNT], 16-byte aligned
@@ -242,19 +248,19 @@ static inline uint32_t pack_word_lsn_first(const uint8_t *b) {
 static void process_large_buffer(uint8_t* buffer, uint32_t buffer_length) {
   uint32_t processed_count = 0;
   
-  // In VSYNC-EOF mode, each buffer begins on a packet boundary; no alignment or stitch needed.
-  // In LEN-EOF mode, detect the 10-byte phase and stitch cross-boundary packet.
-  int off = 0;
-  if (!s_use_vsync_eof) {
-    off = s_stream_offset_mod10;
-    if (off < 0) off = detect_stream_offset(buffer, buffer_length);
-    else {
-      int new_off = detect_stream_offset(buffer, buffer_length);
-      off = new_off;
-    }
+  // Detect the 10-byte phase at start of each buffer.
+  // Note: Even in VSYNC-EOF mode, LCD_CAM EOF is asserted on VSYNC (nibble 8),
+  // so the next buffer typically begins at nibble 9, not data nibble 0.
+  // Therefore, run alignment detection for both modes. Only stitch/save tail in LEN-EOF.
+  int off = s_stream_offset_mod10;
+  {
+    int new_off = detect_stream_offset(buffer, buffer_length);
+    off = new_off;
     s_stream_offset_mod10 = off;
+  }
 
-    // Cross-boundary stitch (LEN-EOF only)
+  // Cross-boundary stitch (LEN-EOF only)
+  if (!s_use_vsync_eof) {
     if (off != 0 && s_tail_len > 0 && processed_count < BATCH_PROCESS_SIZE) {
       uint8_t tail_bytes = (uint8_t)min(8, 10 - off);
       uint8_t head_bytes = (uint8_t)(8 - tail_bytes);
@@ -296,6 +302,40 @@ static void process_large_buffer(uint8_t* buffer, uint32_t buffer_length) {
   } else {
     s_tail_len = 0;
   }
+
+  // Low-noise debug logging: print when offset changes or every N buffers, or always at level>=2
+  s_buf_seq++;
+  {
+    bool burst = (s_debug_burst_remaining > 0);
+    bool changed = (off != s_last_logged_off);
+    bool periodic = ((s_buf_seq % s_log_every_buffers) == 0);
+    bool base_wants_log = burst || (s_log_level >= 2) || (s_log_level >= 1 && (changed || periodic));
+    // Throttle frequency unless in burst mode
+    uint64_t now_us = (uint64_t)esp_timer_get_time();
+    bool allowed_by_time = burst || (s_last_log_us == 0 || (now_us - s_last_log_us) >= s_log_min_interval_us);
+    bool should_log = base_wants_log && allowed_by_time;
+    if (should_log) {
+      // preview first word's address from this buffer for quick sanity
+      uint16_t a0 = 0xFFFF;
+      if (buffer_length >= (uint32_t)off + BYTES_PER_WORD) {
+        uint32_t w0 = pack_word_from_8(buffer + off);
+        a0 = (w0 >> 16) & 0xFFFF;
+      }
+      Serial.printf("[LCAM] buf#%lu mode=%s len=%lu off=%d proc=%lu seen=%lu cap=%lu drop=%lu a0=$%04X\n",
+                    (unsigned long)s_buf_seq,
+                    s_use_vsync_eof?"VSYNC":"LEN",
+                    (unsigned long)buffer_length,
+                    off, (unsigned long)processed_count,
+                    (unsigned long)words_seen, (unsigned long)words_captured,
+                    (unsigned long)rb_drops, a0);
+      s_last_logged_off = off;
+      s_last_log_us = now_us;
+      if (burst) {
+        // Decrement after emitting the log line
+        if (s_debug_burst_remaining > 0) s_debug_burst_remaining--;
+      }
+    }
+  }
 }
 
 // ----------------------------
@@ -308,6 +348,14 @@ void lcam_set_vsync_eof(bool enable) {
 
 bool lcam_get_vsync_eof() {
   return s_use_vsync_eof;
+}
+
+int lcam_get_current_offset() {
+  return s_stream_offset_mod10;
+}
+
+void lcam_debug_burst(uint32_t count) {
+  s_debug_burst_remaining = count;
 }
 
 void lcam_set_addr_window(uint16_t min_addr, uint16_t max_addr) {
@@ -438,7 +486,10 @@ static esp_err_t setup_lcd_cam_once() {
   LCD_CAM.cam_ctrl.cam_update            = 1;
 
   LCD_CAM.cam_ctrl1.cam_2byte_en          = 0;                     // 8-bit
-  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen  = CHUNK_BYTES - 1;       // Large buffer for batch capture
+  // In VSYNC-EOF mode, avoid length-based EOF interfering with VSYNC cadence:
+  // set rec_data_bytelen to max (4095) so EOF comes from VSYNC only.
+  // In length-EOF mode, use CHUNK_BYTES-1 to generate EOF per chunk.
+  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen  = s_use_vsync_eof ? 4095 : (CHUNK_BYTES - 1);
   LCD_CAM.cam_ctrl1.cam_clk_inv           = s_clk_inv;
   LCD_CAM.cam_ctrl1.cam_de_inv            = 0;
   LCD_CAM.cam_ctrl1.cam_vh_de_mode_en     = 0;   // DE-qualify disabled; capture on PCLK only
@@ -702,8 +753,20 @@ void lcam_log_every_n_words(uint32_t n) {
 }
 
 void lcam_set_logging(uint8_t n) {
-  // Set logging level
-  s_log_level = n;  
+  // Set logging level (clamped to 0..2)
+  if (n > 2) n = 2;
+  s_log_level = n;
+}
+
+void lcam_set_log_every(uint32_t n) {
+  if (n == 0) n = 1;
+  s_log_every_buffers = n;
+}
+
+void lcam_set_log_rate_ms(uint32_t ms) {
+  if (ms < 10) ms = 10;            // sane floor
+  if (ms > 60000) ms = 60000;      // sane ceiling
+  s_log_min_interval_us = (uint32_t)ms * 1000U;
 }
 
 // Debug/stats functions
@@ -725,6 +788,10 @@ void lcam_reset_stats() {
   rb_drops = 0;
   s_stream_offset_mod10 = -1;
   s_tail_len = 0;
+  s_buf_seq = 0;
+  s_last_logged_off = -2;
+  s_debug_burst_remaining = 0;
+  s_last_log_us = 0;
   
   // Reset buffer state
   for (int i = 0; i < DESC_COUNT; i++) {

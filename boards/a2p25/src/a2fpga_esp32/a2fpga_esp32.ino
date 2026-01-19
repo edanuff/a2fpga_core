@@ -1001,6 +1001,10 @@ static void cmd_process(String cmd) {
     Serial.printf("  LCD_CAM mode: %s-EOF, addr window: $%04X-$%04X\n",
                   lcam_get_vsync_eof()?"VSYNC":"LEN",
                   aw_min, aw_max);
+    if (lcam_get_vsync_eof() && lcam_captured > 0) {
+      double ppe = (double)lcam_words / (double)lcam_captured;
+      Serial.printf("  Packets per EOF (approx): %.1f (expected ~409)\n", ppe);
+    }
     }
   } else if (cmd == "resetstats") {
     // Reset bus packet statistics
@@ -1019,6 +1023,14 @@ static void cmd_process(String cmd) {
     lcam_reset_stats();
     
     Serial.println("Bus packet statistics reset");
+  } else if (cmd == "statsbrief") {
+    // Compact summary for quick direction
+    Serial.printf("LCAM: mode=%s off=%d words=%lu cap=%lu drops=%lu\n",
+                  lcam_get_vsync_eof()?"VSYNC":"LEN",
+                  lcam_get_current_offset(),
+                  (unsigned long)lcam_get_words_seen(),
+                  (unsigned long)lcam_get_words_captured(),
+                  (unsigned long)lcam_get_ring_drops());
   } else if (cmd.startsWith("lcammode")) {
     // Usage: lcammode len|vs
     String toks[8]; int nt = split_ws(cmd, toks, 8);
@@ -1028,6 +1040,46 @@ static void cmd_process(String cmd) {
       if (toks[1] == "len") { lcam_set_vsync_eof(false); Serial.println("LCD_CAM: length-EOF mode"); }
       else if (toks[1] == "vs") { lcam_set_vsync_eof(true); Serial.println("LCD_CAM: VSYNC-EOF mode (requires gated VSYNC in FPGA)"); }
       else Serial.println("lcammode: expected 'len' or 'vs'");
+    }
+  } else if (cmd == "lcamlog" || cmd.startsWith("lcamlog ")) {
+    // Usage: lcamlog <level> (0=off, 1=changes/periodic, 2=every buffer)
+    String toks[3]; int n = split_ws(cmd, toks, 3);
+    if (n < 2) {
+      Serial.println("Usage: lcamlog <level>");
+    } else {
+      uint32_t level=0;
+      if (parse_u32(toks[1], level)) { lcam_set_logging((uint8_t)level); Serial.printf("LCAM log level=%lu\n", (unsigned long)level); }
+      else Serial.println("lcamlog: invalid level");
+    }
+  } else if (cmd.startsWith("lcamdebug")) {
+    // Usage: lcamdebug <count> (log next <count> buffers), or 0 to cancel
+    String toks[3]; int n = split_ws(cmd, toks, 3);
+    if (n < 2) {
+      Serial.println("Usage: lcamdebug <count>");
+    } else {
+      uint32_t count=0;
+      if (parse_u32(toks[1], count)) { lcam_debug_burst(count); Serial.printf("LCAM debug burst=%lu\n", (unsigned long)count); }
+      else Serial.println("lcamdebug: invalid count");
+    }
+  } else if (cmd.startsWith("lcamlogevery")) {
+    // Usage: lcamlogevery <N> (for level>=1, emit log every N buffers unless changed)
+    String toks[3]; int n = split_ws(cmd, toks, 3);
+    if (n < 2) {
+      Serial.println("Usage: lcamlogevery <N>");
+    } else {
+      uint32_t every=0;
+      if (parse_u32(toks[1], every)) { lcam_set_log_every(every); Serial.printf("LCAM log every=%lu buffers\n", (unsigned long)every); }
+      else Serial.println("lcamlogevery: invalid N");
+    }
+  } else if (cmd.startsWith("lcamlograte")) {
+    // Usage: lcamlograte <ms> (minimum time between logs; burst unaffected)
+    String toks[3]; int n = split_ws(cmd, toks, 3);
+    if (n < 2) {
+      Serial.println("Usage: lcamlograte <ms>");
+    } else {
+      uint32_t ms=0;
+      if (parse_u32(toks[1], ms)) { lcam_set_log_rate_ms(ms); Serial.printf("LCAM log min interval=%lums\n", (unsigned long)ms); }
+      else Serial.println("lcamlograte: invalid ms");
     }
   } else if (cmd.startsWith("addrwin")) {
     // Usage: addrwin <min> <max>  (hex like $C03C or 0xC03C ok)

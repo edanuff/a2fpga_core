@@ -21,6 +21,8 @@ void lcam_stop();
 void lcam_log_every_n_words(uint32_t n);
 void lcam_print_status();
 void lcam_set_logging(uint8_t n);
+void lcam_set_log_every(uint32_t n);
+void lcam_set_log_rate_ms(uint32_t ms);
 
 // Debug/stats functions
 uint32_t lcam_get_words_seen();
@@ -33,6 +35,8 @@ void lcam_reset_stats();
 //   When false, LCD_CAM uses length-based EOF every N bytes (preferred for high-rate bursts).
 void lcam_set_vsync_eof(bool enable);
 bool lcam_get_vsync_eof();
+int  lcam_get_current_offset();
+void lcam_debug_burst(uint32_t count);
 
 // Expected address window used by the stream alignment heuristic. The parser
 // scores 10-byte phase candidates by how many addresses fall inside this range.
