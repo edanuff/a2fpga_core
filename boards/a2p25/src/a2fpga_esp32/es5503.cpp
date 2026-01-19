@@ -313,7 +313,10 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
 
     for (int chan = 0; chan < m_output_channels; chan++)
     {
-        for (osc = 0; osc < m_oscsenabled; osc++)
+        // Mix across all oscillators; some IIgs software may program voices
+        // before updating E1 (enabled count). This ensures we don't miss sound
+        // from higher-numbered oscillators that are already configured.
+        for (osc = 0; osc < 32; osc++)
         {
             ES5503Osc *pOsc = &m_oscillators[osc];
 

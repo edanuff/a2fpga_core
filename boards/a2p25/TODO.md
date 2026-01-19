@@ -7,7 +7,7 @@
 ## High Priority
 
 - [x] Eliminate LCAM packet loss during IIgs burst transfers (confirmed 32,768/32,768, 0 corrupted, 0 drops)
-- [ ] Complete the ES5503 code which runs on the ESP32-S3
+- [ ] ES5503 audio bring‑up: generate sound on ESP32‑S3 and play via FPGA I2S
 
 ## Medium Priority
 
@@ -70,18 +70,52 @@ the 65816 and allows us to see error rates with the current ESP32-S3 LCAM code.
 In order for the A2P25 to be viable for IIgs use, we must be able to handle memory transfers
 with zero packet loss since the A2P25 requires ES5503 sound generation to occur on the ESP32-S3.
 
+## ES5503 Audio Bring‑Up Plan
+
+Goals
+- End‑to‑end: IIgs writes ES5503 regs/wave RAM → ESP32 emulates ES5503 → I2S slave‑TX to FPGA → audible output.
+- No packet loss (maintained), glitch‑free audio, minimal setup (use presets/quiet logging).
+
+Plan of Attack
+- [ ] Bus→Emulator wiring
+  - [ ] Verify handle_es5503_write() updates emulator regs and wave RAM on ES5503 address range ($C03C–$C03F).
+  - [ ] Add counters/CLI to confirm write counts and last N writes for quick sanity.
+- [ ] ES5503 core completeness
+  - [ ] Implement/verify oscillator stepping at 7.15909 MHz base, phase accumulators, sample fetch, loop/stop behavior.
+  - [ ] Implement envelope/volume/pan per oscillator; 8/32‑voice mode as targeted (document chosen voice count).
+  - [ ] Generate mono/stereo frames at 44.1 kHz (or FPGA‑provided LRCLK) using fixed‑point math.
+- [ ] I2S pipeline to FPGA
+  - [ ] Confirm FPGA provides BCLK/LRCLK and pin mapping; keep ESP32 in SLAVE TX as implemented.
+  - [ ] Tone smoke test (existing tone/radio paths) to validate physical link and FPGA playback.
+  - [ ] Swap I2S task source to ES5503 generate path (guarded by CLI `es5503start/stop`).
+- [ ] Mixer/integration
+  - [ ] Mix enabled oscillators with proper gain to avoid clipping; add soft‑clip or headroom.
+  - [ ] Expose CLI to mute/solo voices and print minimal status (active voices, peak meter).
+- [ ] Performance/robustness
+  - [ ] Ensure i2s_tx_task keeps up without starving LCD_CAM (already mitigated by GDMA_CH=2 and yields).
+  - [ ] Optimize hot paths (IRAM attributes, fixed‑point) if CPU > 50%.
+- [ ] Validation
+  - [ ] Use IIgs demos that write ES5503 wave RAM/regs; expect audible output on FPGA audio.
+  - [ ] Confirm zero LCAM drops during audio playback and no audible underruns.
+
+Nice‑to‑Haves
+- [ ] Add a test preset: `es5503preset demo` to load a simple patch/wave and play a reference pattern.
+- [ ] Optional resampling path if LRCLK ≠ 44.1 kHz (simple linear at first).
+
 ## Current Status (2026‑01‑18)
 
 - IIgs burst capture (32,768 writes to $C03D): PASS — Words received 32768, Corruption 0.0%, Ring drops 0, Address range $C03D–$C03D.
 - Default mode: VSYNC‑EOF with gated VSYNC every 409 packets in HDL; ESP32 sets `cam_rec_data_bytelen=4095` in VSYNC‑EOF and `CHUNK_BYTES=4090` in length‑EOF.
 - Diagnostics & CLI: Added `statsbrief`, throttled per‑buffer logs (`lcamlog`, `lcamlogevery`, `lcamlograte`), and one‑shot `lcamdebug N`. Parsing fixes applied.
 - I2S concurrency: LCD_CAM capture sustained with GDMA_CH=2 and background recovery.
+- ES5503: Recognizable audio achieved from IIgs app; added ES write mirror totals (ESP32) that align with OSD delta per playback; improved CLI (`es5503info`, `es5503reg`, `es5503mem`, `es5503resetwrite`).
 
 ## Next Actions
 
 - [ ] Optional: Add de‑noised VSYNC cadence metric and warn if deviates >±10% from target (409) in VSYNC‑EOF.
 - [ ] Optional: Add a test preset to temporarily switch to length‑EOF for canonical runs (pretty EOF stats) and switch back to VSYNC‑EOF for normal operation.
 - [ ] Document field checklist for verifying capture (expected stats, CLI snippets) in the firmware README (linked below).
+- [ ] ES5503: Add voice activity + peak meter to `es5503info`; optional compat toggle to ignore 0x00 halts during bring‑up; validate multi‑voice mixing, pan/volume, and headroom; confirm E1 sequencing with IIgs programs.
 
 Further Reading / Playbook
 - Full session knowledge and procedures: `boards/a2p25/LCAM_SESSION_NOTES.md`

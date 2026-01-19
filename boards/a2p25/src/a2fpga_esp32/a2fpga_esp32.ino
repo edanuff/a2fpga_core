@@ -320,7 +320,15 @@ static esp_err_t es5503_start() {
   if (err != ESP_OK) return err;
   
   s_es5503_run = true;
-  Serial.println("ES5503 direct audio generation enabled");
+  // Ensure I2S is running to play ES5503 audio
+  if (!i2s_tx_is_running()) {
+    err = i2s_tx_start();
+    if (err != ESP_OK) {
+      Serial.printf("I2S start failed: %s\n", esp_err_to_name(err));
+      return err;
+    }
+  }
+  Serial.println("ES5503 audio generation enabled (I2S active)");
   return ESP_OK;
 }
 
@@ -349,6 +357,20 @@ static struct {
 
 // Track ES5503 wave memory writes
 static uint32_t s_wave_memory_writes = 0;
+static uint32_t s_es5503_reg_writes = 0;
+static uint32_t s_glu_ctrl_writes = 0;
+static uint32_t s_glu_addr_writes = 0;
+// Mirror of FPGA-side ES write counter and breakdown (since last reset)
+static uint32_t s_es_total_writes = 0;     // $C03C..$C03F (non-reset) total
+static uint32_t s_es_w_c03c = 0;           // GLU control writes
+static uint32_t s_es_w_c03d_doc = 0;       // DOC register writes via GLU
+static uint32_t s_es_w_c03d_ram = 0;       // Wave RAM writes via GLU
+static uint32_t s_es_w_c03e = 0;           // Address low
+static uint32_t s_es_w_c03f = 0;           // Address high
+// Last-N write log for quick sanity (ring buffer)
+static const int ES_LOG_N = 16;
+static struct { uint16_t addr; uint8_t data; bool doc; uint8_t reg; } s_es_last[ES_LOG_N];
+static uint32_t s_es_last_idx = 0;
 static bool s_es5503_debug = false;
 static bool s_bus_debug = false;  // Debug all bus packets
 
@@ -374,6 +396,9 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
     s_glu.doc_access = !(data & 0x40);  // Bit 6: 0=DOC, 1=RAM
     s_glu.auto_increment = (data & 0x20);  // Bit 5: auto-increment
     s_glu.volume = data & 0x0F;  // Bits 3-0: volume
+    s_glu_ctrl_writes++;
+    s_es_last[s_es_last_idx % ES_LOG_N] = {address, data, false, 0xFF};
+    s_es_last_idx++;
     
     if (s_es5503_debug) {
       Serial.printf("GLU Control: 0x%02X (access=%s, auto_inc=%d, vol=%d)\n", 
@@ -387,6 +412,9 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
       // Write to DOC register (low byte of address pointer is register number)
       uint8_t reg = s_glu.address_ptr & 0xFF;
       g_es5503->write(reg, data);
+      s_es5503_reg_writes++;
+      s_es_last[s_es_last_idx % ES_LOG_N] = {address, data, true, reg};
+      s_es_last_idx++;
       
       if (s_es5503_debug) {
         Serial.printf("DOC[0x%02X] <= 0x%02X\n", reg, data);
@@ -397,6 +425,8 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
       if (wave_mem && (s_glu.address_ptr < 65536)) {
         wave_mem[s_glu.address_ptr] = data;
         s_wave_memory_writes++;
+        s_es_last[s_es_last_idx % ES_LOG_N] = {address, data, false, 0xFF};
+        s_es_last_idx++;
         
         if (s_es5503_debug) {
           // Show first few writes and then every 256th
@@ -420,6 +450,9 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
   else if (address == 0xC03E) {
     // Address Pointer Low
     s_glu.address_ptr = (s_glu.address_ptr & 0xFF00) | data;
+    s_glu_addr_writes++;
+    s_es_last[s_es_last_idx % ES_LOG_N] = {address, data, false, 0xFF};
+    s_es_last_idx++;
     if (s_es5503_debug) {
       Serial.printf("GLU Addr Low: 0x%02X (ptr=0x%04X)\n", data, s_glu.address_ptr);
     }
@@ -427,6 +460,9 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
   else if (address == 0xC03F) {
     // Address Pointer High
     s_glu.address_ptr = (s_glu.address_ptr & 0x00FF) | (data << 8);
+    s_glu_addr_writes++;
+    s_es_last[s_es_last_idx % ES_LOG_N] = {address, data, false, 0xFF};
+    s_es_last_idx++;
     if (s_es5503_debug) {
       Serial.printf("GLU Addr High: 0x%02X (ptr=0x%04X)\n", data, s_glu.address_ptr);
     }
@@ -495,6 +531,13 @@ void process_bus_packet(uint32_t packet) {
   
   // Check if this is an ES5503 write
   if (address >= 0xC03C && address <= 0xC03F) {
+    // Mirror the FPGA-side ES write counter breakdown
+    s_es_total_writes++;
+    if (address == 0xC03C) s_es_w_c03c++;
+    else if (address == 0xC03D) {
+      if (s_glu.doc_access) s_es_w_c03d_doc++; else s_es_w_c03d_ram++;
+    } else if (address == 0xC03E) s_es_w_c03e++;
+    else if (address == 0xC03F) s_es_w_c03f++;
     handle_es5503_write(address, data);
   }
 }
@@ -931,13 +974,21 @@ static void cmd_process(String cmd) {
     } else if (nt < 2) {
       Serial.println("Usage: es5503reg <reg> [value]");
     } else {
-      uint32_t reg; if (!parse_u32(toks[1], reg) || reg > 0xFF) {
+      auto normalize_hex = [](String s)->String{
+        s.trim();
+        if (s.startsWith("$")) return String("0x") + s.substring(1);
+        if (s.startsWith("0x") || s.startsWith("0X")) return s;
+        bool all_hex=true; for (size_t i=0;i<s.length();++i){ char c=s[i]; if (!isxdigit((unsigned char)c)) { all_hex=false; break; } }
+        if (all_hex) return String("0x") + s; // bare hex like E1
+        return s; // decimal or invalid
+      };
+      uint32_t reg; String regS = normalize_hex(toks[1]); if (!parse_u32(regS, reg) || reg > 0xFF) {
         Serial.println("es5503reg: invalid <reg> (0..255)");
       } else if (nt == 2) {
         uint8_t val = g_es5503->read((uint16_t)reg);
         Serial.printf("ES5503[0x%02X] -> 0x%02X\n", (unsigned)reg, val);
       } else {
-        uint32_t v; if (!parse_u32(toks[2], v) || v > 0xFF) {
+        uint32_t v; String valS = normalize_hex(toks[2]); if (!parse_u32(valS, v) || v > 0xFF) {
           Serial.println("es5503reg: invalid <value> (0..255)");
         } else {
           g_es5503->write((uint16_t)reg, (uint8_t)v);
@@ -963,6 +1014,11 @@ static void cmd_process(String cmd) {
   } else if (cmd == "es5503resetwrite") {
     // Clear write count and reset GLU state
     s_wave_memory_writes = 0;
+    s_es5503_reg_writes = 0;
+    s_glu_ctrl_writes = 0;
+    s_glu_addr_writes = 0;
+    s_es_total_writes = 0;
+    s_es_w_c03c = 0; s_es_w_c03d_doc = 0; s_es_w_c03d_ram = 0; s_es_w_c03e = 0; s_es_w_c03f = 0;
     memset(&s_glu, 0, sizeof(s_glu));  // Reset GLU state
     Serial.printf("ES5503 write count and GLU state reset\n");
   } else if (cmd == "stats") {
@@ -1081,6 +1137,35 @@ static void cmd_process(String cmd) {
       if (parse_u32(toks[1], ms)) { lcam_set_log_rate_ms(ms); Serial.printf("LCAM log min interval=%lums\n", (unsigned long)ms); }
       else Serial.println("lcamlograte: invalid ms");
     }
+  } else if (cmd.startsWith("lcampreset")) {
+    // Usage: lcampreset normal|canon
+    String toks[3]; int n = split_ws(cmd, toks, 3);
+    if (n < 2) {
+      Serial.println("Usage: lcampreset normal|canon");
+    } else {
+      String which = toks[1]; which.toLowerCase();
+      if (which == "normal") {
+        lcam_stop();
+        lcam_set_vsync_eof(true);
+        lcam_set_logging(0);
+        lcam_set_log_every(200);
+        lcam_set_log_rate_ms(1000);
+        lcam_reset_stats();
+        lcam_start();
+        Serial.println("LCAM preset: normal (VSYNC-EOF, quiet logging)");
+      } else if (which == "canon") {
+        lcam_stop();
+        lcam_set_vsync_eof(false);
+        lcam_set_logging(0);
+        lcam_set_log_every(200);
+        lcam_set_log_rate_ms(1000);
+        lcam_reset_stats();
+        lcam_start();
+        Serial.println("LCAM preset: canon (length-EOF, quiet logging). Ensure sender pads to CHUNK_BYTES boundary for exact EOF count.");
+      } else {
+        Serial.println("lcampreset: expected 'normal' or 'canon'");
+      }
+    }
   } else if (cmd.startsWith("addrwin")) {
     // Usage: addrwin <min> <max>  (hex like $C03C or 0xC03C ok)
     String toks[8]; int nt = split_ws(cmd, toks, 8);
@@ -1176,7 +1261,27 @@ static void cmd_process(String cmd) {
       }
       
       Serial.printf("\nEnabled oscillators: %d/32\n", num_enabled);
-      Serial.printf("Wave memory writes: %lu\n", s_wave_memory_writes);
+      Serial.printf("Wave memory writes: %lu, DOC reg writes: %lu, GLU ctrl: %lu, GLU addr: %lu\n", 
+                    s_wave_memory_writes, s_es5503_reg_writes, s_glu_ctrl_writes, s_glu_addr_writes);
+      Serial.printf("ES writes (FPGA-mirror): total=%lu  C03C=%lu C03D{DOC=%lu,RAM=%lu} C03E=%lu C03F=%lu\n",
+                    (unsigned long)s_es_total_writes,
+                    (unsigned long)s_es_w_c03c,
+                    (unsigned long)s_es_w_c03d_doc,
+                    (unsigned long)s_es_w_c03d_ram,
+                    (unsigned long)s_es_w_c03e,
+                    (unsigned long)s_es_w_c03f);
+      // Print last few writes (most recent last)
+      Serial.println("Recent GLU writes (addr=data [DOC reg])...");
+      uint32_t start = (s_es_last_idx > ES_LOG_N) ? (s_es_last_idx - ES_LOG_N) : 0;
+      for (uint32_t i = start; i < s_es_last_idx; i++) {
+        auto e = s_es_last[i % ES_LOG_N];
+        if (e.addr) {
+          if (e.doc)
+            Serial.printf("  $%04X <= $%02X [DOC %02X]\n", e.addr, e.data, e.reg);
+          else
+            Serial.printf("  $%04X <= $%02X\n", e.addr, e.data);
+        }
+      }
     }
   } else if (cmd.startsWith("es5503mem ")) {
     // Examine ES5503 wave memory
@@ -1589,6 +1694,8 @@ void loop() {
     }
     
     // Always forward Serial1 to Serial
+// Mirror of FPGA-side ES write counter and breakdown (since last reset)
+// duplicate declarations removed (moved to top)
     if (Serial1.available()) {
       Serial.write(Serial1.read());
     }

@@ -10,6 +10,16 @@ Console Commands (type +++ to enter)
 - `lcammode vs` | `lcammode len`: select VSYNC‑EOF or length‑EOF mode
 - `i2sstart` | `i2sstop`: enable/disable slave‑TX (for concurrency testing)
 - `addrwin $C000-$C0FF`: set alignment scoring window (length‑EOF only)
+- `lcampreset normal|canon`: presets (normal = VSYNC‑EOF, quiet logs; canon = length‑EOF, quiet logs)
+- ES5503 audio:
+  - `es5503start` / `es5503stop`: enable/disable ES5503 audio (auto‑starts I2S on start)
+  - `audiostop`: halt all ES5503 oscillators (silence)
+  - `es5503info`: show oscillators + GLU counters + ES write mirror totals
+  - `es5503reg <reg> [val]`: read/write ES5503 register (accepts $E1, 0xE1, or E1)
+  - `es5503mem <addr> [len]`: dump ES5503 wave RAM
+  - `es5503resetwrite`: reset GLU/ES write counters (does not clear wave RAM)
+  - `fulltest`: load sine and play via ES5503
+  - `starttone` / `stoptone`: simple I2S tone generator (path sanity)
 
 Recommended Defaults
 - Mode: VSYNC‑EOF (requires FPGA gated VSYNC every 409 packets and final VSYNC at end‑of‑burst)
@@ -106,6 +116,16 @@ Common Pitfalls and Quick Fixes
 - LCD_CAM stops after `i2sstart`:
   - Confirm `GDMA_CH=2` for LCD_CAM; background recovery should re‑arm inlink automatically.
   - Try `i2sstop` then `i2sstart` and recheck `status`.
+
+ES5503 Bring‑Up Tips
+- Silence with running voice: wave bytes are 0x80 (DC zero). Voice won’t halt, but outputs 0. Ensure non‑0x80 content in the voice’s wave region.
+- Immediate halt: a 0x00 byte halts the voice; ensure first non‑zero sample after key‑on.
+- E1 enables voices: set `E1=(N-1)<<1` to enable N voices.
+- Compare ES bytes with OSD: `es5503resetwrite` → playback → `es5503info` → “ES writes (FPGA‑mirror): total=…”. This matches OSD delta per playback.
+
+Presets for Speed
+- `lcampreset normal`: VSYNC‑EOF + quiet logging. Use for most runs.
+- `lcampreset canon`: length‑EOF + quiet logging. Use for "pretty" EOF stats; sender should pad to CHUNK_BYTES boundary.
 
 Mode Selection Guide
 - Prefer VSYNC‑EOF if FPGA can provide gated VSYNC every 409 packets plus a final VSYNC; yields lowest CPU overhead and natural alignment.

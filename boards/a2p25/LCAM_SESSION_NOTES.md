@@ -62,6 +62,9 @@ Troubleshooting
   - Confirm PCLK is 13.5 MHz and serializer nibble order matches parser expectations.
 - LCD_CAM stalls after starting I2S:
   - Verify `GDMA_CH=2`, background recovery enabled, and `i2sstop`/`i2sstart` do not reset GDMA link persistently.
+- Guru Meditation (stack canary) in `lcam_poll`:
+  - Cause: poller task stack too small under heavy logging/printf.
+  - Fix: increased `lcam_poll` stack to 4096 bytes. Keep logging throttled (`lcamlog 1`, `lcamlogevery 200`, `lcamlograte 1000`).
 
 Notes
 - Using length‑EOF with alignment/stitching yields 0.0% corruption and near‑perfect counts; adding a sender‑side tail flush guarantees exact 32768.
@@ -114,9 +117,10 @@ Debug Logging Usage
  - Set level: `lcamlog 1` (changes/periodic) or `lcamlog 2` (every buffer). Disable: `lcamlog 0`. Levels >2 are clamped to 2.
 - Quick summary: `statsbrief` prints `mode/off/words/cap/drops`.
 - One‑shot burst: `lcamdebug N` logs the next N buffers regardless of level (useful to capture a transition), `lcamdebug 0` cancels.
-- Throttle/ cadence:
+ - Throttle/ cadence (defaults set):
+  - Default: level=1, every=200 buffers, rate=1000 ms (safe, low-noise).
   - `lcamlogevery N` emits at most one log every N buffers (level≥1; still logs when offset changes).
-  - `lcamlograte ms` enforces a minimum wall‑time between logs (burst unaffected). Default ~500 ms.
+  - `lcamlograte ms` enforces a minimum wall‑time between logs (burst unaffected).
 - Log line format:
   `[LCAM] buf#<n> mode=<VSYNC|LEN> len=<bytes> off=<0..9> proc=<packets> seen=<words> cap=<bufs> drop=<ring> a0=$<addr>`
   - `off`: detected 10‑byte phase (expect stable non‑zero in VSYNC‑EOF; 0 in length‑EOF if flush/pad aligns).
@@ -128,3 +132,44 @@ Stats Interpretation Notes
 - Accounting: `words received` excludes heartbeat (`$C0FF`) but may include the single reset indicator packet (address `$0000`), so it can be +1 vs ES5503 packet count; bus stats exclude reset packets by design.
 - VSYNC cadence sanity: In VSYNC‑EOF, derive cadence as `words_received / words_captured` (printed by `stats`). Expect ~409 with current gating; large deviations suggest an old bitstream or unintended VSYNC sources.
   - If you observe ~250–350 instead of ~409, length‑based EOF is also firing (rec_data_bytelen not disabled). Firmware sets `cam_rec_data_bytelen=4095` in VSYNC‑EOF to suppress length EOF; ensure you reflashed after this change.
+
+Presets
+- `lcampreset normal`: VSYNC‑EOF, quiet logging (no extra setup, good default).
+- `lcampreset canon`: length‑EOF, quiet logging (for canonical pretty EOF stats; requires sender padding).
+
+---
+
+ES5503 Bring‑Up Notes
+
+Overview
+- Path: IIgs writes $C03C–$C03F → ESP32 GLU interprets (DOC registers vs wave RAM) → ES5503 emulation generates samples → I2S slave‑TX to FPGA.
+- Status: Recognizable audio achieved from IIgs program; tone/fulltest confirm I2S; capture integrity maintained.
+
+Key Behaviors & Gotchas
+- Sample encoding: ES5503 uses unsigned bytes; mixer converts via `sample ^ 0x80`.
+  - 0x80 = DC zero (silence). A region of 0x80 will be silent (no halt).
+  - 0x00 halts the oscillator (end marker). Ensure first non‑zero sample to avoid immediate halt.
+- Oscillator enable (E1): Value is `(num_osc - 1) << 1`. e.g., `E1=0x02` enables 2 voices.
+- Control (A#): bit0=halt; modes include FREE(0), ONCE(1), SYNC(2), SWAP(3). Pairing matters in SWAP.
+- Mixer coverage: Emulator updated to scan all 32 oscillators so voices configured before E1 aren’t missed.
+
+ESP32 Counters & Mirrors
+- GLU counters: `Wave memory writes` (C03D RAM), `DOC reg writes` (C03D DOC), `GLU ctrl` (C03C), `GLU addr` (C03E/F).
+- ES writes (FPGA‑mirror): ESP32-side mirror of total writes to $C03C–$C03F since reset, with breakdown.
+  - Usage: `es5503resetwrite` → playback → `es5503info` → compare `total` with OSD delta; `total ≈ RAM bytes + control/address/DOC writes`.
+
+CLI (Audio)
+- Start/stop: `es5503start` / `es5503stop` (auto‑starts I2S on start), `audiostop` (halt all voices), `i2sstop`.
+- Diagnostics: `es5503info` (osc table + counters + ES write mirror), `es5503reg <reg> [val]` (accepts $E1/0xE1/E1), `es5503mem <addr> [len]`.
+- Tests: `fulltest` (load sine & play), `starttone`/`stoptone` (I2S route check).
+- Resets: `es5503resetwrite` (GLU/ES write counters), `resetstats` (bus/LCD_CAM stats).
+
+Typical Flow
+1) `lcampreset normal` → verify capture (`stats`).
+2) `es5503start` → run IIgs program → `es5503info`.
+3) If silent: check voice halt bits (A#), E1 value, and wave region (non‑0x80). Unhalt voice once RAM filled.
+4) Correlate ES bytes: `es5503resetwrite` before playback; `es5503info` after → ES writes total should match manual OSD delta per playback.
+
+Next Steps
+- Add voice activity + peak meter to `es5503info`.
+- Optional compat toggle to ignore 0x00 halts during bring‑up (off by default).

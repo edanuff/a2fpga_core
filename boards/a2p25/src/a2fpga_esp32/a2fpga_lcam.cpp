@@ -204,12 +204,16 @@ static uint8_t  s_clk_inv = 0;            // 0=rising, 1=falling
 static uint32_t word_print_every = 512;
 static volatile uint32_t words_seen = 0;   // bumped by consumer (non-heartbeat only)
 static volatile uint32_t words_captured = 0; // total words captured by LCD_CAM (including heartbeat)
-static volatile uint8_t s_log_level = 0;   // 0=off, 1=errors, 2=all
+// Default to safe, low-noise logging: level 1 with throttling
+static volatile uint8_t s_log_level = 1;   // 0=off, 1=changes/periodic, 2=every buffer
 static volatile uint32_t s_buf_seq = 0;    // processed buffer sequence number
 static volatile int      s_last_logged_off = -2; // for change-detection logging
-static volatile uint32_t s_log_every_buffers = 64; // periodic log cadence when level>=1
-static volatile uint32_t s_log_min_interval_us = 500000; // min time between logs (except burst)
+static volatile uint32_t s_log_every_buffers = 200; // periodic log cadence when level>=1
+static volatile uint32_t s_log_min_interval_us = 1000000; // min time between logs (except burst)
 static volatile uint64_t s_last_log_us = 0; // last emitted log time
+// Additional idle suppression: heartbeat-only buffers are logged at most every N ms
+static volatile uint32_t s_log_idle_interval_us = 5000000; // 5s for heartbeat-only logs
+static volatile uint64_t s_last_idle_log_us = 0;
 static volatile uint32_t s_debug_burst_remaining = 0; // if >0, log every buffer and decrement
 
 static uint8_t* s_buf      = nullptr;     // DESC_COUNT * CHUNK_BYTES
@@ -309,18 +313,30 @@ static void process_large_buffer(uint8_t* buffer, uint32_t buffer_length) {
     bool burst = (s_debug_burst_remaining > 0);
     bool changed = (off != s_last_logged_off);
     bool periodic = ((s_buf_seq % s_log_every_buffers) == 0);
+    // Preview first word address for heartbeat detection
+    uint16_t a0 = 0xFFFF;
+    if (buffer_length >= (uint32_t)off + BYTES_PER_WORD) {
+      uint32_t w0 = pack_word_from_8(buffer + off);
+      a0 = (w0 >> 16) & 0xFFFF;
+    }
+    bool heartbeat_only = (a0 == 0xC0FF);
+    // Ignore noisy 'changed' due to VSYNC-EOF idle off toggling when only heartbeats
+    if (heartbeat_only && s_log_level == 1 && !burst) {
+      changed = false;
+    }
     bool base_wants_log = burst || (s_log_level >= 2) || (s_log_level >= 1 && (changed || periodic));
-    // Throttle frequency unless in burst mode
+    // Throttle frequency unless in burst mode; apply stricter idle gating for heartbeat-only buffers
     uint64_t now_us = (uint64_t)esp_timer_get_time();
-    bool allowed_by_time = burst || (s_last_log_us == 0 || (now_us - s_last_log_us) >= s_log_min_interval_us);
+    bool allowed_by_time = false;
+    if (burst) {
+      allowed_by_time = true;
+    } else if (heartbeat_only) {
+      allowed_by_time = (s_last_idle_log_us == 0 || (now_us - s_last_idle_log_us) >= s_log_idle_interval_us);
+    } else {
+      allowed_by_time = (s_last_log_us == 0 || (now_us - s_last_log_us) >= s_log_min_interval_us);
+    }
     bool should_log = base_wants_log && allowed_by_time;
     if (should_log) {
-      // preview first word's address from this buffer for quick sanity
-      uint16_t a0 = 0xFFFF;
-      if (buffer_length >= (uint32_t)off + BYTES_PER_WORD) {
-        uint32_t w0 = pack_word_from_8(buffer + off);
-        a0 = (w0 >> 16) & 0xFFFF;
-      }
       Serial.printf("[LCAM] buf#%lu mode=%s len=%lu off=%d proc=%lu seen=%lu cap=%lu drop=%lu a0=$%04X\n",
                     (unsigned long)s_buf_seq,
                     s_use_vsync_eof?"VSYNC":"LEN",
@@ -330,6 +346,7 @@ static void process_large_buffer(uint8_t* buffer, uint32_t buffer_length) {
                     (unsigned long)rb_drops, a0);
       s_last_logged_off = off;
       s_last_log_us = now_us;
+      if (heartbeat_only) s_last_idle_log_us = now_us;
       if (burst) {
         // Decrement after emitting the log line
         if (s_debug_burst_remaining > 0) s_debug_burst_remaining--;
@@ -486,10 +503,8 @@ static esp_err_t setup_lcd_cam_once() {
   LCD_CAM.cam_ctrl.cam_update            = 1;
 
   LCD_CAM.cam_ctrl1.cam_2byte_en          = 0;                     // 8-bit
-  // In VSYNC-EOF mode, avoid length-based EOF interfering with VSYNC cadence:
-  // set rec_data_bytelen to max (4095) so EOF comes from VSYNC only.
-  // In length-EOF mode, use CHUNK_BYTES-1 to generate EOF per chunk.
-  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen  = s_use_vsync_eof ? 4095 : (CHUNK_BYTES - 1);
+  // Ensure periodic length-based EOF per descriptor; VSYNC can add extra EOFs.
+  LCD_CAM.cam_ctrl1.cam_rec_data_bytelen  = (CHUNK_BYTES - 1);
   LCD_CAM.cam_ctrl1.cam_clk_inv           = s_clk_inv;
   LCD_CAM.cam_ctrl1.cam_de_inv            = 0;
   LCD_CAM.cam_ctrl1.cam_vh_de_mode_en     = 0;   // DE-qualify disabled; capture on PCLK only
@@ -647,8 +662,8 @@ esp_err_t lcam_init_tasks() {
 
   // Start consumer first (prio > poller)
   BaseType_t ret1 = xTaskCreatePinnedToCore(packet_task, "lcam_packet", 4096, nullptr, tskIDLE_PRIORITY + 2, &s_consumer_task, 1);
-  // Start poller (prio lower)
-  BaseType_t ret2 = xTaskCreatePinnedToCore(poller_task, "lcam_poll", 2048, nullptr, tskIDLE_PRIORITY + 1, &s_poller_task, 1);
+  // Start poller (prio lower). Increase stack to avoid canary trips during logging.
+  BaseType_t ret2 = xTaskCreatePinnedToCore(poller_task, "lcam_poll", 4096, nullptr, tskIDLE_PRIORITY + 1, &s_poller_task, 1);
 
   if (ret1 != pdPASS || ret2 != pdPASS) {
     Serial.println("LCD_CAM failed to create tasks");
@@ -714,6 +729,15 @@ void lcam_start() {
     
     // Start periodic timer for timeout checking
     esp_timer_start_periodic(s_timeout_timer, BUFFER_TIMEOUT_US / 2);  // Check twice as often as timeout
+
+    // Announce logging defaults and mode for quick visibility
+    Serial.printf(
+      "LCAM started: mode=%s log: level=%u, every=%lu, rate=%lums\n",
+      s_use_vsync_eof ? "VSYNC" : "LEN",
+      (unsigned)s_log_level,
+      (unsigned long)s_log_every_buffers,
+      (unsigned long)(s_log_min_interval_us/1000)
+    );
 
     // Optional smoke wait (no polling; ISR/re-arm will run if data arrives)
     uint32_t start_ms = millis(), w0 = words_seen;
