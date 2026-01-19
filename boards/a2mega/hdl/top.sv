@@ -100,6 +100,23 @@ module top #(
     output  uart_tx,
     input  uart_rx,
 
+    // ddr3 interface
+    output [15:0] ddr_addr, //ROW_WIDTH=16
+	output [2:0] ddr_bank, //BANK_WIDTH=3
+	output ddr_cs,
+	output ddr_ras,
+	output ddr_cas,
+	output ddr_we,
+	output ddr_ck,
+	output ddr_ck_n,
+	output ddr_cke,
+	output ddr_odt,
+	output ddr_reset_n,
+	output [1:0] ddr_dm, //DM_WIDTH=4
+	inout  [15:0] ddr_dq, //DQ_WIDTH=32
+	inout  [1:0] ddr_dqs, //DQS_WIDTH=4
+	inout  [1:0] ddr_dqs_n, //DQS_WIDTH=4
+
     // ESP32 Octal SPI interface
     input         esp_sclk,
     inout  [7:0]  esp_data
@@ -231,6 +248,68 @@ module top #(
         if (clk_2m_posedge_w) led_2m_ctr_r <= led_2m_ctr_r + 1;
     end
     assign led_2m_w = led_2m_ctr_r[10];
+
+    // DDR3 Interface
+
+    assign ddr_bank = '0;
+    assign ddr_addr = '0;
+    assign ddr_cs = 1'b0;
+    assign ddr_ras = 1'b0;
+    assign ddr_cas = 1'b0;
+    assign ddr_we = 1'b0;
+    assign ddr_ck = 1'b0;
+    assign ddr_ck_n = 1'b1;
+    assign ddr_cke = 1'b0;
+    assign ddr_odt = 1'b0;
+    assign ddr_reset_n = 1'b1;
+    assign ddr_dq = 'z;
+    assign ddr_dqs = 'z;
+    assign ddr_dqs_n = 'z;
+
+    /*
+    DDR3 ddr_ram (
+		.clk(clk), //input clk
+		.pll_stop(pll_stop), //output pll_stop
+		.memory_clk(memory_clk), //input memory_clk
+		.pll_lock(pll_lock), //input pll_lock
+		.rst_n(rst_n), //input rst_n
+		.clk_out(clk_out), //output clk_out
+		.ddr_rst(ddr_rst), //output ddr_rst
+		.init_calib_complete(init_calib_complete), //output init_calib_complete
+		.cmd_ready(cmd_ready), //output cmd_ready
+		.cmd(cmd), //input [2:0] cmd
+		.cmd_en(cmd_en), //input cmd_en
+		.addr(addr), //input [28:0] addr
+		.wr_data_rdy(wr_data_rdy), //output wr_data_rdy
+		.wr_data(wr_data), //input [127:0] wr_data
+		.wr_data_en(wr_data_en), //input wr_data_en
+		.wr_data_end(wr_data_end), //input wr_data_end
+		.wr_data_mask(wr_data_mask), //input [15:0] wr_data_mask
+		.rd_data(rd_data), //output [127:0] rd_data
+		.rd_data_valid(rd_data_valid), //output rd_data_valid
+		.rd_data_end(rd_data_end), //output rd_data_end
+		.sr_req(sr_req), //input sr_req
+		.ref_req(ref_req), //input ref_req
+		.sr_ack(sr_ack), //output sr_ack
+		.ref_ack(ref_ack), //output ref_ack
+		.burst(burst), //input burst
+		.O_ddr_addr(O_ddr_addr), //output [14:0] O_ddr_addr
+		.O_ddr_ba(O_ddr_ba), //output [2:0] O_ddr_ba
+		.O_ddr_cs_n(O_ddr_cs_n), //output O_ddr_cs_n
+		.O_ddr_ras_n(O_ddr_ras_n), //output O_ddr_ras_n
+		.O_ddr_cas_n(O_ddr_cas_n), //output O_ddr_cas_n
+		.O_ddr_we_n(O_ddr_we_n), //output O_ddr_we_n
+		.O_ddr_clk(O_ddr_clk), //output O_ddr_clk
+		.O_ddr_clk_n(O_ddr_clk_n), //output O_ddr_clk_n
+		.O_ddr_cke(O_ddr_cke), //output O_ddr_cke
+		.O_ddr_odt(O_ddr_odt), //output O_ddr_odt
+		.O_ddr_reset_n(O_ddr_reset_n), //output O_ddr_reset_n
+		.O_ddr_dqm(O_ddr_dqm), //output [1:0] O_ddr_dqm
+		.IO_ddr_dq(IO_ddr_dq), //inout [15:0] IO_ddr_dq
+		.IO_ddr_dqs(IO_ddr_dqs), //inout [1:0] IO_ddr_dqs
+		.IO_ddr_dqs_n(IO_ddr_dqs_n) //inout [1:0] IO_ddr_dqs_n
+	);
+    */
 
     // Interface to Apple II
 

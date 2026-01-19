@@ -16,6 +16,8 @@
 - [ ] Complete the FAT32 SD Card support
 - [ ] Enable configuration through a web-based UX rather than OSD
 - [ ] Investigate using the PPO interface to treat the FPGA as an LCD display
+- [ ] Investigate implementing IIgs acceleration (similar to Transwarp GS)
+- [ ] Implement and test SDRAM support
 
 ## Low Priority / Future
 
