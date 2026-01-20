@@ -185,7 +185,7 @@ module top #(
     wire phi0;
     wire phi1_posedge;
     wire phi1_negedge;
-    cdc_denoise cdc_phi1 (
+    cdc cdc_phi1 (
         .clk(clk_logic_w),
         .i(a2_phi1),
         .o(phi1),
@@ -197,7 +197,7 @@ module top #(
     wire clk_2m_w;
     wire clk_2m_posedge_w;
     wire clk_2m_negedge_w;
-    cdc_denoise cdc_2m (
+    cdc cdc_2m (
         .clk(clk_logic_w),
         .i(a2_q3),
         .o(clk_2m_w),
@@ -210,7 +210,7 @@ module top #(
     wire clk_7m_posedge_w;
     wire clk_7m_negedge_w;
     wire clk_14m_posedge_w = clk_7m_posedge_w | clk_7m_negedge_w;
-    cdc_denoise cdc_7m (
+    cdc cdc_7m (
         .clk(clk_logic_w),
         .i(a2_7M),
         .o(clk_7m_w),

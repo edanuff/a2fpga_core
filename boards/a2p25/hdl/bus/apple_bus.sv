@@ -26,13 +26,14 @@
 
 module apple_bus #(
     parameter int GS = 0,
-    parameter int CLOCK_SPEED_HZ = 50_000_000,
+    parameter int CLOCK_SPEED_HZ = 54_000_000,                      // 18.52 ns
     parameter int APPLE_HZ = 14_318_181,
-    parameter int CPU_HZ = APPLE_HZ / 14,                   // 1_022_727
-    parameter int CYCLE_COUNT = CLOCK_SPEED_HZ / CPU_HZ,    // 49
-    parameter int PHASE_COUNT = CYCLE_COUNT / 2,            // 24
-    parameter int READ_COUNT = CYCLE_COUNT / 3,             // 16
-    parameter int WRITE_COUNT = CYCLE_COUNT / 5             // 10
+    parameter int CYCLE_COUNT = CLOCK_SPEED_HZ / (APPLE_HZ / 14),   // 52
+    parameter int PHASE_COUNT = CYCLE_COUNT / 2,                    // 26
+    parameter int READ_COUNT = CYCLE_COUNT / 3,                     // 17
+    parameter int WRITE_COUNT = CYCLE_COUNT / 5,                    // 10
+    parameter int ADDR_COUNT = 18,                                  // 333ns from Phi1 rising edge
+    parameter int DATA_COUNT = 5                                   // 419ns from Phi0 rising edge
 ) (
     a2bus_if.master a2bus_if,
 
@@ -109,8 +110,8 @@ module apple_bus #(
 
     // tuned bus timings
 
-    // sample address from bus at 350ns from Phi1 rising edge
-    wire a2_addr_in_start_w = a2bus_if.phi1 && (phase_cycles_r == 18);
+    // Per Gaylor timing diagrams, sample address from bus at 350ns from Phi1 rising edge
+    wire a2_addr_in_start_w = a2bus_if.phi1 && (phase_cycles_r == ADDR_COUNT);
 
     always @(posedge a2bus_if.clk_logic) begin
 
@@ -121,10 +122,10 @@ module apple_bus #(
 
     end
 
-    // sample data from bus at 419ns from Phi0 rising edge
+    // Per Gaylor timing diagrams, sample data from bus at 419ns from Phi0 rising edge
     // /CAS goes high
     // tuned to 300ns from Phi0 rising edge (15 cycles)
-    wire a2_data_in_valid_w = a2bus_if.phi0 && (phase_cycles_r == 15);
+    wire a2_data_in_valid_w = a2bus_if.phi0 && (phase_cycles_r == DATA_COUNT);
     //wire a2_data_in_start_w = a2_data_in_valid_w && !rw_n_r;
     reg data_in_strobe_r;
 
