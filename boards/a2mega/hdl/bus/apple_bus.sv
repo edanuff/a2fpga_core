@@ -26,21 +26,29 @@
 
 module apple_bus #(
     parameter int GS = 0,
-    parameter int CLOCK_SPEED_HZ = 50_000_000,
+    parameter int CLOCK_SPEED_HZ = 54_000_000,                      // 18.52 ns
     parameter int APPLE_HZ = 14_318_181,
-    parameter int CPU_HZ = APPLE_HZ / 14,                   // 1_022_727
-    parameter int CYCLE_COUNT = CLOCK_SPEED_HZ / CPU_HZ,    // 49
-    parameter int PHASE_COUNT = CYCLE_COUNT / 2,            // 24
-    parameter int READ_COUNT = CYCLE_COUNT / 3,             // 16
-    parameter int WRITE_COUNT = CYCLE_COUNT / 5             // 10
+    parameter bit ENABLE_DENOISE = 0,
+    parameter int CYCLE_COUNT = CLOCK_SPEED_HZ / (APPLE_HZ / 14),   // 52
+    parameter int PHASE_COUNT = CYCLE_COUNT / 2,                    // 26
+    parameter int READ_COUNT = CYCLE_COUNT / 3,                     // 17
+    parameter int WRITE_COUNT = CYCLE_COUNT / 5,                    // 10
+    parameter int ADDR_COUNT = 18,                                  // 333ns from Phi1 rising edge
+    parameter int DATA_COUNT = 15                                   // 419ns from Phi0 rising edge
 ) (
+    input clk_logic_i,
+    input clk_pixel_i,
+    input system_reset_n_i,
+    input device_reset_n_i,
+    input a2_phi1_i,
+    input a2_q3_i,
+    input a2_7M_i,
+
     a2bus_if.master a2bus_if,
 
     input [15:0] a2_a_i,
     input [7:0] a2_d_i,
     input a2_rw_n_i,
-
-    input clk_2m_negedge_i,
 
     input  a2_inh_n,
     input  a2_rdy_n,
@@ -64,8 +72,40 @@ module apple_bus #(
 
     assign a2_dma_out_n = a2_dma_in_n;
     assign a2_int_out_n = a2_int_in_n;
-
     assign a2_res_out_n = 1'b0;
+    
+    assign a2bus_if.clk_logic = clk_logic_i;
+    assign a2bus_if.clk_pixel = clk_pixel_i;
+    assign a2bus_if.system_reset_n = system_reset_n_i;
+    assign a2bus_if.device_reset_n = device_reset_n_i;
+
+    a2bus_timing #(
+        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
+        .ENABLE_DENOISE(ENABLE_DENOISE)
+    ) a2bus_timing_inst(
+        .clk_logic_i(clk_logic_i),
+        .a2_phi1_i(a2_phi1_i),
+        .a2_q3_i(a2_q3_i),
+        .a2_7M_i(a2_7M_i),
+
+        .phi0_o(a2bus_if.phi0),
+        .phi0_posedge_o(a2bus_if.phi0_posedge),
+        .phi0_negedge_o(a2bus_if.phi0_negedge),
+        
+        .phi1_o(a2bus_if.phi1),
+        .phi1_posedge_o(a2bus_if.phi1_posedge),
+        .phi1_negedge_o(a2bus_if.phi1_negedge),
+        
+        .q3_o(a2bus_if.clk_q3),
+        .q3_posedge_o(a2bus_if.clk_q3_posedge),
+        .q3_negedge_o(a2bus_if.clk_q3_negedge),
+        
+        .clk_7M_o(a2bus_if.clk_7M),
+        .clk_7M_posedge_o(a2bus_if.clk_7M_posedge),
+        .clk_7M_negedge_o(a2bus_if.clk_7M_negedge),
+        
+        .clk_14M_posedge_o(a2bus_if.clk_14M_posedge)
+    );
 
     // data and address latches on input
     reg [15:0] addr_r;
@@ -82,7 +122,7 @@ module apple_bus #(
 
     reg m2b0_r;
 	always @(posedge a2bus_if.clk_logic) begin
-        if (a2bus_if.phi1 && clk_2m_negedge_i) m2b0_r <= a2_gs ? a2_mb20 : 1'b0;
+        if (a2bus_if.phi1 && a2bus_if.clk_q3_negedge) m2b0_r <= a2_gs ? a2_mb20 : 1'b0;
 	end
     assign a2bus_if.m2b0 = m2b0_r; 
 
@@ -109,8 +149,8 @@ module apple_bus #(
 
     // tuned bus timings
 
-    // sample address from bus at 350ns from Phi1 rising edge
-    wire a2_addr_in_start_w = a2bus_if.phi1 && (phase_cycles_r == 18);
+    // Per Gaylor timing diagrams, sample address from bus at 350ns from Phi1 rising edge
+    wire a2_addr_in_start_w = a2bus_if.phi1 && (phase_cycles_r == ADDR_COUNT);
 
     always @(posedge a2bus_if.clk_logic) begin
 
@@ -121,10 +161,10 @@ module apple_bus #(
 
     end
 
-    // sample data from bus at 419ns from Phi0 rising edge
+    // Per Gaylor timing diagrams, sample data from bus at 419ns from Phi0 rising edge
     // /CAS goes high
     // tuned to 300ns from Phi0 rising edge (15 cycles)
-    wire a2_data_in_valid_w = a2bus_if.phi0 && (phase_cycles_r == 15);
+    wire a2_data_in_valid_w = a2bus_if.phi0 && (phase_cycles_r == DATA_COUNT);
     //wire a2_data_in_start_w = a2_data_in_valid_w && !rw_n_r;
     reg data_in_strobe_r;
 

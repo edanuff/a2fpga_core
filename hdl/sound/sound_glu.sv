@@ -194,7 +194,7 @@ module sound_glu #(
     ) doc5503 (
         .clk_i(a2bus_if.clk_logic),
         .reset_n_i(a2bus_if.system_reset_n),
-        .clk_en_i(a2bus_if.clk_7m_posedge),
+        .clk_en_i(a2bus_if.clk_7M_posedge),
         .cs_n_i(~doc_wr_r),
         .we_n_i(1'b0),
         .addr_i(doc_addr_r),

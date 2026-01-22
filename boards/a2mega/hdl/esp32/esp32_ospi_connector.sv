@@ -182,17 +182,17 @@ module esp32_ospi_connector #(
     reg        gpu_rwe_r;
 
     // =========================================================================
-    // Memory Spaces
+    // Memory Spaces - using Gowin BSRAM inference pattern
     // =========================================================================
 
-    // Space 0: Test memory (256 bytes)
-    reg [7:0] mem0 [0:255];
+    // Space 0: Test memory (2KB)
+    reg [7:0] mem0 [0:2047] /* synthesis syn_ramstyle = "block_ram" */;
 
     // Space 1: Text VRAM Bank 0 (2KB)
-    reg [7:0] text_vram0 [0:2047];
+    reg [7:0] text_vram0 [0:2047] /* synthesis syn_ramstyle = "block_ram" */;
 
     // Space 2: Text VRAM Bank 1 (2KB)
-    reg [7:0] text_vram1 [0:2047];
+    reg [7:0] text_vram1 [0:2047] /* synthesis syn_ramstyle = "block_ram" */;
 
     // =========================================================================
     // Video Control Interface Outputs
@@ -445,37 +445,73 @@ module esp32_ospi_connector #(
     end
 
     // =========================================================================
-    // Memory Write Logic
+    // Memory Write Logic - separate always blocks for BRAM inference
     // =========================================================================
+    wire mem0_wr_en = mem_wr_en && (mem_space == 3'd0);
+    wire vram0_wr_en = mem_wr_en && (mem_space == 3'd1);
+    wire vram1_wr_en = mem_wr_en && (mem_space == 3'd2);
+
     always @(posedge clk) begin
-        if (mem_wr_en) begin
-            case (mem_space)
-                3'd0: mem0[mem_wr_addr[7:0]] <= mem_wr_data;
-                3'd1: text_vram0[mem_wr_addr[10:0]] <= mem_wr_data;
-                3'd2: text_vram1[mem_wr_addr[10:0]] <= mem_wr_data;
-                default: ;
-            endcase
-        end
+        if (mem0_wr_en)
+            mem0[mem_wr_addr[10:0]] <= mem_wr_data;
+    end
+
+    always @(posedge clk) begin
+        if (vram0_wr_en)
+            text_vram0[mem_wr_addr[10:0]] <= mem_wr_data;
+    end
+
+    always @(posedge clk) begin
+        if (vram1_wr_en)
+            text_vram1[mem_wr_addr[10:0]] <= mem_wr_data;
     end
 
     // =========================================================================
-    // Memory Read Logic (1-cycle latency)
+    // Memory Read Logic - separate registered reads for BRAM inference
     // =========================================================================
+    reg [7:0] mem0_rd_data;
+    reg [7:0] vram0_rd_data;
+    reg [7:0] vram1_rd_data;
+    reg [2:0] mem_rd_space_r;
+
+    always @(posedge clk) begin
+        mem0_rd_data <= mem0[mem_rd_addr[10:0]];
+    end
+
+    always @(posedge clk) begin
+        vram0_rd_data <= text_vram0[mem_rd_addr[10:0]];
+    end
+
+    always @(posedge clk) begin
+        vram1_rd_data <= text_vram1[mem_rd_addr[10:0]];
+    end
+
+    // Pipeline the request and space selection to match BRAM latency
+    reg mem_rd_req_r;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            mem_rd_req_r <= 1'b0;
+            mem_rd_space_r <= 3'd0;
+        end else begin
+            mem_rd_req_r <= mem_rd_req;
+            mem_rd_space_r <= mem_rd_space;
+        end
+    end
+
+    // Output mux (after BRAM read latency)
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             mem_rd_valid <= 1'b0;
             mem_rd_data <= 8'hFF;
         end else begin
-            mem_rd_valid <= 1'b0;
-            if (mem_rd_req) begin
-                mem_rd_valid <= 1'b1;
-                case (mem_rd_space)
-                    3'd0: mem_rd_data <= mem0[mem_rd_addr[7:0]];
-                    3'd1: mem_rd_data <= text_vram0[mem_rd_addr[10:0]];
-                    3'd2: mem_rd_data <= text_vram1[mem_rd_addr[10:0]];
-                    default: mem_rd_data <= 8'hFF;
-                endcase
-            end
+            mem_rd_valid <= mem_rd_req_r;
+            case (mem_rd_space_r)
+                3'd0: mem_rd_data <= mem0_rd_data;
+                3'd1: mem_rd_data <= vram0_rd_data;
+                3'd2: mem_rd_data <= vram1_rd_data;
+                default: mem_rd_data <= 8'hFF;
+            endcase
         end
     end
 

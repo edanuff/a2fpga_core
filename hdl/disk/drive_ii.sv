@@ -62,7 +62,7 @@ module drive_ii (
         automatic logic [3:0] rel_phase_temp;
         if (!a2bus_if.system_reset_n) phase_r <= 70;
         else begin
-            if (a2bus_if.clk_14m_posedge) begin
+            if (a2bus_if.clk_14M_posedge) begin
                 if (drive_active) begin
                     phase_change_temp = 0;
                     new_phase_temp = phase_r;
@@ -131,7 +131,7 @@ module drive_ii (
             track_we_r <= 1'b0;
             track_rd_r <= 1'b0;
 
-            if (a2bus_if.clk_2m_posedge & volume_if.ready & drive_active) begin
+            if (a2bus_if.clk_q3_posedge & volume_if.ready & drive_active) begin
                 byte_delay_r = 6'(byte_delay_r - 1);
 
                 if (!write_mode_i) begin

@@ -133,7 +133,7 @@ module top #(
     wire clk_lock_w;
     wire clk_pixel_w;
     wire clk_hdmi_w;
-    wire clk_27m_w;
+    wire clk_27M_w;
 
     clk_pll clocks_pll (
         .lock(clk_lock_w), //output lock
@@ -195,59 +195,6 @@ module top #(
 
     wire system_reset_n_w = device_reset_n_w & a2_reset_n;
 
-    // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
-    // delays Phi1 by 2 cycles = 40ns
-    wire phi1;
-    wire phi0;
-    wire phi1_posedge;
-    wire phi1_negedge;
-    cdc_denoise cdc_phi1 (
-        .clk(clk_logic_w),
-        .i(a2_phi1),
-        .o(phi1),
-        .o_n(phi0),
-        .o_posedge(phi1_posedge),
-        .o_negedge(phi1_negedge)
-    );
-
-    wire clk_2m_w;
-    wire clk_2m_posedge_w;
-    wire clk_2m_negedge_w;
-    cdc_denoise cdc_2m (
-        .clk(clk_logic_w),
-        .i(a2_q3),
-        .o(clk_2m_w),
-        .o_n(),
-        .o_posedge(clk_2m_posedge_w),
-        .o_negedge(clk_2m_negedge_w)
-    );
-
-    wire clk_7m_w;
-    wire clk_7m_posedge_w;
-    wire clk_7m_negedge_w;
-    wire clk_14m_posedge_w = clk_7m_posedge_w | clk_7m_negedge_w;
-    cdc_denoise cdc_7m (
-        .clk(clk_logic_w),
-        .i(a2_7M),
-        .o(clk_7m_w),
-        .o_n(),
-        .o_posedge(clk_7m_posedge_w),
-        .o_negedge(clk_7m_negedge_w)
-    );
-
-    wire led_phi1_w;
-    reg [10:0]led_phi1_ctr_r;
-    always @(posedge clk_logic_w) begin
-        if (phi1_posedge) led_phi1_ctr_r <= led_phi1_ctr_r + 1;
-    end
-    assign led_phi1_w = led_phi1_ctr_r[10];
-
-    wire led_2m_w;
-    reg [10:0]led_2m_ctr_r;
-    always @(posedge clk_logic_w) begin
-        if (clk_2m_posedge_w) led_2m_ctr_r <= led_2m_ctr_r + 1;
-    end
-    assign led_2m_w = led_2m_ctr_r[10];
 
     // DDR3 Interface
 
@@ -324,21 +271,7 @@ module top #(
 
     // data and address latches on input
 
-    a2bus_if a2bus_if (
-        .clk_logic(clk_logic_w),
-        .clk_pixel(clk_pixel_w),
-        .system_reset_n(system_reset_n_w),
-        .device_reset_n(device_reset_n_w),
-        .phi0(phi0),
-        .phi1(phi1),
-        .phi1_posedge(phi1_posedge),
-        .phi1_negedge(phi1_negedge),
-        .clk_2m_posedge(clk_2m_posedge_w),
-        .clk_7m(clk_7m_w),
-        .clk_7m_posedge(clk_7m_posedge_w),
-        .clk_7m_negedge(clk_7m_negedge_w),
-        .clk_14m_posedge(clk_14m_posedge_w)
-    );
+    a2bus_if a2bus_if ();
 
     wire sleep_w;
 
@@ -366,13 +299,19 @@ module top #(
         .GS(GS),
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ)
     ) apple_bus (
+        .clk_logic_i(clk_logic_w),
+        .clk_pixel_i(clk_pixel_w),
+        .system_reset_n_i(system_reset_n_w),
+        .device_reset_n_i(device_reset_n_w),
+        .a2_phi1_i(a2_phi1),
+        .a2_q3_i(a2_q3),
+        .a2_7M_i(a2_7M),
+
         .a2bus_if(a2bus_if),
 
         .a2_a_i(a2_a),
         .a2_d_i(a2_d_buf_w),
         .a2_rw_n_i(a2_rw_n),
-
-        .clk_2m_negedge_i(clk_2m_negedge_w),
         
         .a2_inh_n(a2_inh_n),
         .a2_rdy_n(a2_rdy_n),
@@ -391,6 +330,23 @@ module top #(
 
         .sleep_o(sleep_w)
     );
+
+    // LED indicators for phi1 and 2M clock
+    
+    wire led_phi1_w;
+    reg [10:0]led_phi1_ctr_r;
+    always @(posedge clk_logic_w) begin
+        if (a2bus_if.phi1_posedge) led_phi1_ctr_r <= led_phi1_ctr_r + 1;
+    end
+    assign led_phi1_w = led_phi1_ctr_r[10];
+
+    wire led_2m_w;
+    reg [10:0]led_2m_ctr_r;
+    always @(posedge clk_logic_w) begin
+        if (a2bus_if.clk_q3_posedge) led_2m_ctr_r <= led_2m_ctr_r + 1;
+    end
+    assign led_2m_w = led_2m_ctr_r[10];
+
 
     // Memory
 
@@ -733,6 +689,7 @@ module top #(
 
 
     wire [15:0] audio_sample_word[1:0];
+
     audio_out #(
         .CLK_RATE(PIXEL_SPEED_HZ),
         .AUDIO_RATE(AUDIO_RATE),

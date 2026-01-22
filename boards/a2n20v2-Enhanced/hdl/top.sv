@@ -173,35 +173,6 @@ module top #(
 
     wire system_reset_n_w = device_reset_n_w & a2_reset_cdc_w;
 
-    // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
-    // delays Phi1 by 2 cycles = 40ns
-    wire phi1;
-    wire phi0;
-    wire phi1_posedge;
-    wire phi1_negedge;
-    wire clk_2m_posedge_w = phi1_posedge | phi1_negedge;
-    cdc_denoise cdc_phi1 (
-        .clk(clk_logic_w),
-        .i(a2_phi1),
-        .o(phi1),
-        .o_n(phi0),
-        .o_posedge(phi1_posedge),
-        .o_negedge(phi1_negedge)
-    );
-
-    wire clk_7m_w;
-    wire clk_7m_posedge_w;
-    wire clk_7m_negedge_w;
-    wire clk_14m_posedge_w = clk_7m_posedge_w | clk_7m_negedge_w;
-    cdc_denoise cdc_7m (
-        .clk(clk_logic_w),
-        .i(a2_7M),
-        .o(clk_7m_w),
-        .o_n(),
-        .o_posedge(clk_7m_posedge_w),
-        .o_negedge(clk_7m_negedge_w)
-    );
-
     // SDRAM Controller signals
     wire sdram_init_complete;
 
@@ -288,21 +259,7 @@ module top #(
 
     // data and address latches on input
 
-    a2bus_if a2bus_if (
-        .clk_logic(clk_logic_w),
-        .clk_pixel(clk_pixel_w),
-        .system_reset_n(system_reset_n_w),
-        .device_reset_n(device_reset_n_w),
-        .phi0(phi0),
-        .phi1(phi1),
-        .phi1_posedge(phi1_posedge),
-        .phi1_negedge(phi1_negedge),
-        .clk_2m_posedge(clk_2m_posedge_w),
-        .clk_7m(clk_7m_w),
-        .clk_7m_posedge(clk_7m_posedge_w),
-        .clk_7m_negedge(clk_7m_negedge_w),
-        .clk_14m_posedge(clk_14m_posedge_w)
-    );
+    a2bus_if a2bus_if ();
 
     a2bus_control_if a2bus_control_if();
 
@@ -338,6 +295,14 @@ module top #(
         .BUS_DATA_OUT_ENABLE(BUS_DATA_OUT_ENABLE),
         .IRQ_OUT_ENABLE(IRQ_OUT_ENABLE)
     ) apple_bus (
+        .clk_logic_i(clk_logic_w),
+        .clk_pixel_i(clk_pixel_w),
+        .system_reset_n_i(system_reset_n_w),
+        .device_reset_n_i(device_reset_n_w),
+        .a2_phi1_i(a2_phi1),
+        .a2_q3_i(1'b0),
+        .a2_7M_i(a2_7M),
+
         .a2bus_if(a2bus_if),
         .a2bus_control_if(a2bus_control_if),
 
