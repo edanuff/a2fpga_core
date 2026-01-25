@@ -373,6 +373,16 @@ static struct { uint16_t addr; uint8_t data; bool doc; uint8_t reg; } s_es_last[
 static uint32_t s_es_last_idx = 0;
 static bool s_es5503_debug = false;
 static bool s_bus_debug = false;  // Debug all bus packets
+static bool s_es5503_mon = false; // Compact oscillator monitor mode
+static uint32_t s_es5503_mon_last_ms = 0;
+static uint32_t s_es5503_mon_interval_ms = 100; // Update every 100ms
+static uint32_t s_es5503_mon_wave_writes_last = 0;
+static uint32_t s_es5503_mon_reg_writes_last = 0;
+static uint32_t s_osc_starts[32] = {0};  // Track oscillator starts (key-on events)
+static uint8_t s_prev_control[32] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // Previous control values
 
 // Bus packet statistics (global for reset)
 static int s_total_packet_count = 0;
@@ -384,6 +394,56 @@ static uint32_t s_total_packet_time_us = 0;
 static uint32_t s_max_packet_gap_us = 0;
 static uint32_t s_min_packet_gap_us = UINT32_MAX;
 static uint16_t s_min_addr = 0xFFFF, s_max_addr = 0x0000;
+
+// Compact oscillator monitor - prints single line status
+// Format: [DOC] XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX E:NN W:+NNNN R:+NNNN
+// Each char: . = disabled, - = halted, F/O/S/X = running mode
+static void es5503_print_monitor() {
+  if (!g_es5503 || !s_es5503_mon) return;
+
+  uint32_t now = millis();
+  if (now - s_es5503_mon_last_ms < s_es5503_mon_interval_ms) return;
+
+  // Check if any oscillators are running
+  uint8_t num_enabled = ((g_es5503->read(0xE1) >> 1) & 0x1F) + 1;
+  int running_count = 0;
+  char status[33];
+  status[32] = '\0';
+
+  for (int osc = 0; osc < 32; osc++) {
+    if (osc >= num_enabled) {
+      status[osc] = '.';  // Disabled
+    } else {
+      uint8_t control = g_es5503->read(0xA0 + osc);
+      bool halted = (control & 0x01) != 0;
+      int mode = (control >> 1) & 0x03;
+
+      if (halted) {
+        status[osc] = '-';  // Halted
+      } else {
+        running_count++;
+        // Mode: 0=FREE, 1=ONESHOT, 2=SYNC, 3=SWAP
+        const char mode_chars[] = "FOSX";
+        status[osc] = mode_chars[mode];
+      }
+    }
+  }
+
+  // Only print if oscillators are running (or just transitioned to all halted)
+  static int last_running = 0;
+  if (running_count > 0 || last_running > 0) {
+    uint32_t wave_delta = s_wave_memory_writes - s_es5503_mon_wave_writes_last;
+    uint32_t reg_delta = s_es5503_reg_writes - s_es5503_mon_reg_writes_last;
+
+    Serial.printf("[DOC] %s E:%02d W:+%-5lu R:+%-4lu\n",
+                  status, num_enabled, wave_delta, reg_delta);
+
+    s_es5503_mon_wave_writes_last = s_wave_memory_writes;
+    s_es5503_mon_reg_writes_last = s_es5503_reg_writes;
+  }
+  last_running = running_count;
+  s_es5503_mon_last_ms = now;
+}
 
 // Handle Sound GLU and ES5503 writes from bus packet
 static void handle_es5503_write(uint16_t address, uint8_t data) {
@@ -411,11 +471,31 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
     if (s_glu.doc_access) {
       // Write to DOC register (low byte of address pointer is register number)
       uint8_t reg = s_glu.address_ptr & 0xFF;
+
+      // Track control register writes (0xA0-0xBF) for key-on detection
+      if (reg >= 0xA0 && reg <= 0xBF) {
+        int osc = reg & 0x1F;
+        uint8_t prev = s_prev_control[osc];
+        bool prev_halted = (prev & 0x01) != 0;
+        bool now_halted = (data & 0x01) != 0;
+
+        // Key-on: halt bit going from 1 to 0 (via bus write)
+        if (prev_halted && !now_halted) {
+          s_osc_starts[osc]++;
+          int mode = (data >> 1) & 0x03;
+          const char* mode_names[] = {"FREE", "ONCE", "SYNC", "SWAP"};
+          if (s_es5503_mon) {
+            Serial.printf("[KEY] Osc %d START mode=%s (bus write)\n", osc, mode_names[mode]);
+          }
+        }
+        s_prev_control[osc] = data;
+      }
+
       g_es5503->write(reg, data);
       s_es5503_reg_writes++;
       s_es_last[s_es_last_idx % ES_LOG_N] = {address, data, true, reg};
       s_es_last_idx++;
-      
+
       if (s_es5503_debug) {
         Serial.printf("DOC[0x%02X] <= 0x%02X\n", reg, data);
       }
@@ -1000,6 +1080,32 @@ static void cmd_process(String cmd) {
     // Toggle ES5503 register write debugging
     s_es5503_debug = !s_es5503_debug;
     Serial.printf("ES5503 debug %s\n", s_es5503_debug ? "enabled" : "disabled");
+  } else if (cmd == "es5503mon") {
+    // Toggle compact oscillator monitor (disables other debug output)
+    s_es5503_mon = !s_es5503_mon;
+    if (s_es5503_mon) {
+      // Disable other debug output for clean monitor display
+      s_es5503_debug = false;
+      s_bus_debug = false;
+      s_es5503_mon_wave_writes_last = s_wave_memory_writes;
+      s_es5503_mon_reg_writes_last = s_es5503_reg_writes;
+      Serial.println("ES5503 monitor ON (other debug disabled)");
+      Serial.println("[DOC] 0         1         2         3   E:NN W:+NNNNN R:+NNNN");
+      Serial.println("[DOC] 01234567890123456789012345678901");
+      Serial.println("      . = disabled, - = halted, F/O/S/X = FREE/ONCE/SYNC/SWAP");
+    } else {
+      Serial.println("ES5503 monitor OFF");
+    }
+  } else if (cmd.startsWith("es5503mon ")) {
+    // Set monitor interval: es5503mon <ms>
+    String arg = cmd.substring(10);
+    long ms = arg.toInt();
+    if (ms >= 10 && ms <= 10000) {
+      s_es5503_mon_interval_ms = ms;
+      Serial.printf("ES5503 monitor interval set to %ld ms\n", ms);
+    } else {
+      Serial.println("Usage: es5503mon <10-10000> (interval in ms)");
+    }
   } else if (cmd == "busdebug") {
     // Toggle all bus packet debugging
     s_bus_debug = !s_bus_debug;
@@ -1549,7 +1655,7 @@ static void cmd_process(String cmd) {
     Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
     Serial.println("Use '+++' to enter CLI mode again.");
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | i2stest | i2sstatus | es5503start | es5503stop | es5503wave | audiostop | audiostart | es5503test | es5503reg | es5503debug | es5503info | es5503mem | fulltest | meminfo | wifi | radio | exit | we N");
+    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | i2stest | i2sstatus | es5503start | es5503stop | es5503wave | audiostop | audiostart | es5503test | es5503reg | es5503debug | es5503mon | es5503info | es5503mem | fulltest | meminfo | wifi | radio | exit | we N");
     Serial.println("  spireg <reg> [val]        - read/write 1-byte register (0..126)");
     Serial.println("  spir <space> <addr> <len> [inc=1] - read bytes");
     Serial.println("  spiw <space> <addr> <inc|len> <b0> [b1 ...] - write bytes");
@@ -1565,6 +1671,8 @@ static void cmd_process(String cmd) {
     Serial.println("  es5503test                - write test registers to ES5503");
     Serial.println("  es5503reg <reg> [val]     - read/write ES5503 register");
     Serial.println("  es5503debug               - toggle ES5503 register write debugging");
+    Serial.println("  es5503mon                 - toggle compact oscillator monitor (auto-disables other debug)");
+    Serial.println("  es5503mon <ms>            - set monitor update interval (10-10000 ms, default 100)");
     Serial.println("  es5503info                - display oscillator status (frequencies, volumes, etc.)");
     Serial.println("  es5503mem <addr> [len]    - examine ES5503 wave memory (hex dump)");
     Serial.println("  fulltest                  - complete ES5503 audio pipeline test");
@@ -1672,6 +1780,9 @@ void loop() {
 
   // Check escape sequence timeout
   check_escape_timeout();
+
+  // ES5503 compact oscillator monitor
+  es5503_print_monitor();
 
   if (cli_mode) {
     // CLI Mode: Process commands

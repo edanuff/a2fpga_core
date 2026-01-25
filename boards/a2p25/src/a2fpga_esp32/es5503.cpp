@@ -356,7 +356,8 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
                         {
                             int value = data * vol;
                             *mixp += value;
-                            if (chan == (m_output_channels - 1))
+                            // Uppermost enabled oscillator gets triple gain (hardware quirk)
+                            if (osc == (m_oscsenabled - 1))
                             {
                                 *mixp += value;
                                 *mixp += value;
@@ -379,7 +380,8 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
                             else    // hard sync, both oscillators play?
                             {
                                 *mixp += data * vol;
-                                if (chan == (m_output_channels - 1))
+                                // Uppermost enabled oscillator gets triple gain (hardware quirk)
+                                if (osc == (m_oscsenabled - 1))
                                 {
                                     *mixp += data * vol;
                                     *mixp += data * vol;
