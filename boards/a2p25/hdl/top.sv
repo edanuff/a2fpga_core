@@ -195,7 +195,7 @@ module top #(
     wire sleep_w;
 
     wire irq_n_w;
-    assign a2_irq_n = IRQ_OUT_ENABLE ? irq_n_w : 1'b1;
+    assign a2_irq_n = IRQ_OUT_ENABLE && !irq_n_w ? 1'b0 : 1'bz;
 
     wire sw_scanlines_w = '1;
     wire sw_apple_speaker_w = '1;
