@@ -307,6 +307,8 @@ module top #(
         .a2_q3_i(a2_q3),
         .a2_7M_i(a2_7M),
 
+        .sw_gs_i(!dip_switches_n[3]),
+
         .a2bus_if(a2bus_if),
 
         .a2_a_i(a2_a),
@@ -746,7 +748,7 @@ module top #(
         }), 
 
         .debug_bits_0_i ({a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE, a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.STORE80, a2bus_if.system_reset_n, a2bus_if.device_reset_n}),
-        .debug_bits_1_i ({1'b0, 1'b0, 1'b0, 1'b0, 1'b0, led_2m_w, led_phi1_w, led_r}),
+        .debug_bits_1_i ({led_2m_w, led_phi1_w, led_r, 1'b0, ~dip_switches_n}),
 
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),

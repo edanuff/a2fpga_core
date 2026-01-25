@@ -44,6 +44,8 @@ module apple_bus #(
     input a2_q3_i,
     input a2_7M_i,
 
+    input sw_gs_i,
+
     a2bus_if.master a2bus_if,
 
     input [15:0] a2_a_i,
@@ -116,7 +118,7 @@ module apple_bus #(
     assign a2bus_if.data = data_r;
     assign a2bus_if.rw_n = rw_n_r;
 
-    wire a2_gs = GS;
+    wire a2_gs = GS | sw_gs_i;
     assign a2bus_if.sw_gs = a2_gs;
     assign a2bus_if.m2sel_n = a2_gs ? a2_m2sel_n : 1'b0;
 
