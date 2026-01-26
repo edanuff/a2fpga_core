@@ -246,7 +246,7 @@ static esp_err_t i2s_tx_setup_once() {
       .slot_mask = (i2s_std_slot_mask_t)(I2S_STD_SLOT_LEFT | I2S_STD_SLOT_RIGHT),
       .ws_width = I2S_DATA_BIT_WIDTH_16BIT,  // one slot width
       .ws_pol = false,                        // standard I2S: low=left
-      .bit_shift = false,                     // Left-justified I2S (no delay)
+      .bit_shift = false,                     // Left-justified (no delay, matches FPGA)
       .left_align = false,
       .big_endian = false,
       .bit_order_lsb = false,                 // MSB first
@@ -865,7 +865,51 @@ static void cmd_process(String cmd) {
       }
     }
     Serial.println("I2S test mode: sending L=0xCAFE R=0xBABE continuously");
-    Serial.println("Use 'i2sstop' to stop the test");
+    Serial.println("Use 'i2scheck' to verify FPGA reception, 'i2sstop' to stop");
+  } else if (cmd == "i2scheck") {
+    // Read I2S debug registers from FPGA via SPI
+    // reg6: I2S_L high byte, reg7: I2S_L low byte
+    // reg8: I2S_R high byte, reg9: I2S_R low byte
+    // reg10: I2S status (bit0=locked, bits 1-7=match_count)
+    spi_link_t link;
+    esp_err_t err = spi_link_init(&link, SPI2_HOST, PIN_SCLK, PIN_MOSI, PIN_MISO, SPI_HZ);
+    if (err != ESP_OK) {
+      Serial.printf("i2scheck: SPI init error: %s\n", esp_err_to_name(err));
+      return;
+    }
+
+    uint8_t reg6, reg7, reg8, reg9, reg10, st;
+    spi_reg_read_status(&link, 6, &reg6, &st);
+    spi_reg_read_status(&link, 7, &reg7, &st);
+    spi_reg_read_status(&link, 8, &reg8, &st);
+    spi_reg_read_status(&link, 9, &reg9, &st);
+    spi_reg_read_status(&link, 10, &reg10, &st);
+    spi_link_cleanup(&link);
+
+    uint16_t sample_l = ((uint16_t)reg6 << 8) | reg7;
+    uint16_t sample_r = ((uint16_t)reg8 << 8) | reg9;
+    bool locked = (reg10 & 0x01) != 0;
+    uint8_t match_count = (reg10 >> 1) & 0x7F;
+
+    Serial.printf("I2S FPGA Reception:\n");
+    Serial.printf("  Sent:     L=0xCAFE R=0xBABE\n");
+    Serial.printf("  Received: L=0x%04X R=0x%04X\n", sample_l, sample_r);
+    Serial.printf("  Status:   locked=%d match_count=%d\n", locked ? 1 : 0, match_count);
+
+    if (sample_l == 0xCAFE && sample_r == 0xBABE) {
+      Serial.println("  Result:   PASS - I2S data path verified!");
+    } else {
+      Serial.println("  Result:   FAIL - Data mismatch!");
+      // Show bit differences
+      uint16_t diff_l = sample_l ^ 0xCAFE;
+      uint16_t diff_r = sample_r ^ 0xBABE;
+      Serial.printf("  L diff:   0x%04X (bits: ", diff_l);
+      for (int i = 15; i >= 0; i--) Serial.print((diff_l >> i) & 1);
+      Serial.println(")");
+      Serial.printf("  R diff:   0x%04X (bits: ", diff_r);
+      for (int i = 15; i >= 0; i--) Serial.print((diff_r >> i) & 1);
+      Serial.println(")");
+    }
   } else if (cmd == "es5503start") {
     esp_err_t err = es5503_start();
     if (err == ESP_OK) {
@@ -1662,6 +1706,7 @@ static void cmd_process(String cmd) {
     Serial.println("  i2sstart                  - start I2S slave-TX (ext BCLK/WS)");
     Serial.println("  i2sstop                   - stop I2S output");
     Serial.println("  i2stest                   - send test pattern L=0xCAFE R=0xBABE");
+    Serial.println("  i2scheck                  - verify FPGA I2S reception via SPI readback");
     Serial.println("  i2sstatus                 - show I2S status and pin configuration");
     Serial.println("  es5503start               - initialize and start ES5503 audio generation");
     Serial.println("  es5503stop                - stop ES5503 audio generation");

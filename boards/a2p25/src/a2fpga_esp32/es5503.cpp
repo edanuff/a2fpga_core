@@ -419,12 +419,18 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
         {
             // Scale appropriately and convert to 16-bit output
             // Wave data is -128 to +127, volume is 0-255
-            // Max value after multiplication is about ±32640
-            // Scale to use more of the 16-bit range
+            // Per-oscillator max: ~32640, with triple gain: ~97920
+            // Multiple oscillators can easily exceed 16-bit range
+            // Use larger divisor (>>3 = /8) and clamp to prevent overflow distortion
             int32_t value = *mixp;
-            int16_t scaled = value >> 1;  // Divide by 2 to fit in 16-bit range
-            buffer[i * m_output_channels + chan] = scaled;
-            
+            int32_t scaled = value >> 3;  // Divide by 8 to handle multiple oscillators
+
+            // Clamp to 16-bit range to prevent wrap-around distortion
+            if (scaled > 32767) scaled = 32767;
+            else if (scaled < -32768) scaled = -32768;
+
+            buffer[i * m_output_channels + chan] = (int16_t)scaled;
+
             mixp += m_output_channels;
         }
     }

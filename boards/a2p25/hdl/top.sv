@@ -362,7 +362,9 @@ module top #(
         .rst_n(system_reset_n_w),
         .miso(esp32_spi_miso),
         .mosi(esp32_spi_mosi),
-        .sclk(esp32_spi_sclk)
+        .sclk(esp32_spi_sclk),
+        .i2s_sample_l(i2s_sample_l),
+        .i2s_sample_r(i2s_sample_r)
     );
 
     // Slots
@@ -656,8 +658,8 @@ module top #(
 
     localparam AUDIO_RATE = 44100;  // Match MP3 stream sample rate
     localparam AUDIO_BIT_WIDTH = 16;
-    // I2S format: 0=left-justified (ES5503/test), 1=standard I2S (ESP32-audioI2S library)
-    localparam I2S_FORMAT = 1'b1;  // Use standard I2S (now fixed)
+    // I2S format: 0=left-justified, 1=standard I2S (1-bit delay)
+    localparam I2S_FORMAT = 1'b0;  // Use left-justified (simpler timing)
     wire clk_audio_w;
 	wire i2s_data_shift_strobe;
 	wire i2s_data_load_strobe;

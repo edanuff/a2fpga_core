@@ -8,7 +8,10 @@ module esp32_spi_connector #(
   input  wire rst_n,
   input  wire sclk,
   input  wire mosi,
-  output wire miso
+  output wire miso,
+  // I2S debug inputs (directly exposed via registers)
+  input  wire signed [15:0] i2s_sample_l,
+  input  wire signed [15:0] i2s_sample_r
 );
 
   // Registers (16 x 8-bit)
@@ -16,6 +19,39 @@ module esp32_spi_connector #(
   localparam [7:0] DEVICE_ID0="A", DEVICE_ID1="2", DEVICE_ID2="F", DEVICE_ID3="P";
   localparam [7:0] PROTO_VER=8'h01;
   wire [7:0] CAP0 = {6'b0, USE_CRC[0], 1'b1};
+
+  // I2S debug: pattern detection for 0xCAFE (left) / 0xBABE (right)
+  localparam [15:0] I2S_TEST_PATTERN_L = 16'hCAFE;
+  localparam [15:0] I2S_TEST_PATTERN_R = 16'hBABE;
+  reg [7:0] i2s_match_count;
+  reg i2s_locked;
+
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      i2s_match_count <= 8'd0;
+      i2s_locked <= 1'b0;
+    end else begin
+      // Check for pattern match
+      if (i2s_sample_l == $signed(I2S_TEST_PATTERN_L) &&
+          i2s_sample_r == $signed(I2S_TEST_PATTERN_R)) begin
+        if (i2s_match_count < 8'd255) i2s_match_count <= i2s_match_count + 1;
+        if (i2s_match_count >= 8'd16) i2s_locked <= 1'b1;  // Lock after 16 consecutive matches
+      end else begin
+        i2s_match_count <= 8'd0;
+        i2s_locked <= 1'b0;
+      end
+    end
+  end
+
+  // I2S debug registers (directly mapped, no writes allowed)
+  // reg6: I2S_L high byte, reg7: I2S_L low byte
+  // reg8: I2S_R high byte, reg9: I2S_R low byte
+  // reg10: I2S status (bit0=locked, bit1-7=match_count[6:0])
+  wire [7:0] i2s_reg6 = i2s_sample_l[15:8];
+  wire [7:0] i2s_reg7 = i2s_sample_l[7:0];
+  wire [7:0] i2s_reg8 = i2s_sample_r[15:8];
+  wire [7:0] i2s_reg9 = i2s_sample_r[7:0];
+  wire [7:0] i2s_reg10 = {i2s_match_count[6:0], i2s_locked};
 
   // 256B memory (SPACE 0), synchronous read (1-cycle latency)
   reg [7:0] mem [0:255];
@@ -26,12 +62,12 @@ module esp32_spi_connector #(
   wire        mem_wr_en; wire [2:0] mem_space; wire [23:0] mem_wr_addr; wire [7:0] mem_wr_data;
   wire        mem_rd_req; wire [2:0] mem_rd_space; wire [23:0] mem_rd_addr; wire mem_rd_valid; wire [7:0] mem_rd_data;
 
-  // Register read mux
+  // Register read mux (regs 6-10 are I2S debug, read-only)
   always @* begin
     case (reg_idx[3:0])
       4'h0: reg_rdata = reg0;  4'h1: reg_rdata = reg1;   4'h2: reg_rdata = reg2;   4'h3: reg_rdata = reg3;
-      4'h4: reg_rdata = reg4;  4'h5: reg_rdata = reg5;   4'h6: reg_rdata = reg6;   4'h7: reg_rdata = reg7;
-      4'h8: reg_rdata = reg8;  4'h9: reg_rdata = reg9;   4'hA: reg_rdata = reg10;  4'hB: reg_rdata = reg11;
+      4'h4: reg_rdata = reg4;  4'h5: reg_rdata = reg5;   4'h6: reg_rdata = i2s_reg6;  4'h7: reg_rdata = i2s_reg7;
+      4'h8: reg_rdata = i2s_reg8;  4'h9: reg_rdata = i2s_reg9;   4'hA: reg_rdata = i2s_reg10;  4'hB: reg_rdata = reg11;
       4'hC: reg_rdata = reg12; 4'hD: reg_rdata = reg13;  4'hE: reg_rdata = reg14;  default: reg_rdata = reg15;
     endcase
   end
