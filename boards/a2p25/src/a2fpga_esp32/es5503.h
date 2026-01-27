@@ -22,6 +22,9 @@ public:
     
     // Set number of output channels (must be a power of 2)
     void set_channels(int channels);
+
+    // Set target output sample rate (for rate conversion)
+    void set_output_sample_rate(uint32_t rate);
     
     // Read from register
     uint8_t read(uint16_t offset);
@@ -48,6 +51,12 @@ public:
     
     // Get wave memory pointer
     uint8_t* get_wave_memory() const { return m_wave_memory; }
+
+    // Get current output sample rate (for sample rate conversion)
+    uint32_t get_output_rate() const { return m_output_rate; }
+
+    // Get number of enabled oscillators
+    int get_oscsenabled() const { return m_oscsenabled; }
     
 private:
     // Oscillator modes
@@ -91,7 +100,8 @@ private:
     uint8_t m_channel_strobe;
     
     int m_output_channels;
-    uint32_t m_output_rate;
+    uint32_t m_output_rate;          // ES5503 native rate based on clock and oscillators
+    uint32_t m_target_sample_rate;   // Target output rate (e.g., 44100 Hz for I2S)
     
     uint32_t m_clock_rate;
     

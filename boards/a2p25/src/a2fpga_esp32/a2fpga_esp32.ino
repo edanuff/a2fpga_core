@@ -100,7 +100,11 @@ uint8_t* es5503_get_wave_memory(ES5503* es) {
   return es->get_wave_memory();
 }
 
-// ES5503 direct generation (no buffering - generate on-demand in I2S task)
+// ES5503 direct generation with sample rate conversion
+// ES5503 native rate: ~26,320 Hz (7159090 / 8 / 34 for 32 oscillators)
+// I2S output rate: 48,000 Hz (FPGA audio_timing module)
+// We must upsample ES5503 output to match I2S rate
+static const uint32_t I2S_OUTPUT_RATE = 48000;  // FPGA I2S sample rate
 
 // ---------- I2S (slave TX for ES5503 audio, 16-bit stereo) ----------
 static i2s_chan_handle_t s_i2s_tx = NULL;
@@ -158,32 +162,66 @@ static void i2s_tx_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(5));
       }
     }
-    // ES5503 direct generation (like tone generator)
+    // ES5503 with sample rate conversion via sample duplication (zero-order hold)
+    // ES5503 rate: 26,320 Hz, I2S rate: 48,000 Hz
+    // Generate at ES5503 native rate, then stretch by duplicating samples
     else if (g_es5503 && s_es5503_run && s_i2s_tx) {
-      static int16_t mono_buffer[AUDIO_BUFFER_FRAMES]; // mono generation buffer
-      static int16_t stereo_buffer[AUDIO_BUFFER_FRAMES * 2]; // stereo output buffer
-      
-      // Generate ES5503 mono audio directly on-demand
-      g_es5503->generate_audio(mono_buffer, AUDIO_BUFFER_FRAMES);
-      
-      // Debug: Check if ES5503 is generating non-zero samples
-      static int debug_count = 0;
-      if (++debug_count % 5000 == 0) {
-        int non_zero_count = 0;
-        for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
-          if (mono_buffer[i] != 0) non_zero_count++;
-        }
-        Serial.printf("ES5503 direct: %d/%d non-zero samples (range: %d to %d)\n", 
-                      non_zero_count, AUDIO_BUFFER_FRAMES,
-                      mono_buffer[0], mono_buffer[AUDIO_BUFFER_FRAMES-1]);
+      static int16_t stereo_buffer[AUDIO_BUFFER_FRAMES * 2];
+      static int16_t es5503_temp[AUDIO_BUFFER_FRAMES];  // More than we need
+
+      // ES5503 generates at its native rate. For correct timing:
+      // - I2S buffer: 512 samples at 48kHz = 10.67ms
+      // - ES5503 samples needed: 10.67ms * 26320Hz = 281 samples
+      // - Each ES5503 sample maps to ~1.82 output samples
+
+      // IIgs always uses 32 oscillators, giving rate = 7159090/8/34 = 26320 Hz
+      // The ES5503 oscs register may not be set correctly via FPGA packets,
+      // so we hardcode the expected rate for now
+      uint32_t es5503_rate = ES5503_CLOCK_RATE / 8 / 34;  // 26320 Hz for 32 oscillators
+
+      // Calculate ES5503 samples needed for this output buffer
+      // es5503_samples = output_samples * es5503_rate / output_rate
+      uint32_t es5503_samples = ((uint64_t)AUDIO_BUFFER_FRAMES * es5503_rate) / I2S_OUTPUT_RATE;
+      es5503_samples += 1;  // Round up to ensure we have enough
+      if (es5503_samples > AUDIO_BUFFER_FRAMES) es5503_samples = AUDIO_BUFFER_FRAMES;
+
+      // Generate ES5503 samples at native rate
+      g_es5503->generate_audio(es5503_temp, es5503_samples);
+
+      // Debug - count non-zero samples AFTER upsampling to verify ZOH worked
+      static int debug_interval = 0;
+      static int total_buffers = 0;
+      static int active_buffers = 0;
+      total_buffers++;
+
+      int input_nz = 0;
+      for (uint32_t j = 0; j < es5503_samples; j++) {
+        if (es5503_temp[j] != 0) input_nz++;
       }
-      
-      // Convert mono to stereo (duplicate each mono sample to L+R)
+      if (input_nz > 0) active_buffers++;
+
+      // Upsample via zero-order hold (sample duplication)
+      // For output sample i, use ES5503 sample at index (i * es5503_samples / AUDIO_BUFFER_FRAMES)
       for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
-        stereo_buffer[i * 2] = mono_buffer[i];     // Left channel
-        stereo_buffer[i * 2 + 1] = mono_buffer[i]; // Right channel
+        // Calculate which ES5503 sample to use
+        uint32_t es5503_idx = (i * es5503_samples) / AUDIO_BUFFER_FRAMES;
+        if (es5503_idx >= es5503_samples) es5503_idx = es5503_samples - 1;
+
+        int16_t sample = es5503_temp[es5503_idx];
+        stereo_buffer[i * 2] = sample;
+        stereo_buffer[i * 2 + 1] = sample;
       }
-      
+
+      // Log rate and sample counts periodically
+      if (++debug_interval >= 50) {
+        int oscs = g_es5503->get_oscsenabled();
+        Serial.printf("ES5503: rate=%lu oscs=%d gen=%lu active=%d/%d\n",
+                      es5503_rate, oscs, es5503_samples, active_buffers, total_buffers);
+        debug_interval = 0;
+        total_buffers = 0;
+        active_buffers = 0;
+      }
+
       esp_err_t err = i2s_channel_write(s_i2s_tx, stereo_buffer, sizeof(stereo_buffer), &written, pdMS_TO_TICKS(10));
       if (err != ESP_OK) {
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -300,7 +338,8 @@ static esp_err_t es5503_init() {
   }
   
   g_es5503->set_channels(1);  // Mono output (avoid stereo channel assignment issues)
-  
+  g_es5503->set_output_sample_rate(ES5503_SAMPLE_RATE);  // Set I2S output rate for correct pitch
+
   // Show where memory was allocated
   size_t psram_free_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   size_t internal_free_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -599,11 +638,11 @@ void process_bus_packet(uint32_t packet) {
     if (address < s_min_addr) s_min_addr = address;
     if (address > s_max_addr) s_max_addr = address;
     
-    // Show statistics every 100 non-heartbeat packets  
-    if (s_total_packet_count % 100 == 0) {
-      Serial.printf("FPGA filter stats (no heartbeat): %d total, %d writes, ES5503: %d, corrupted: %d, addr range $%04X-$%04X\n", 
-                    s_total_packet_count, s_write_packet_count, s_es5503_packet_count, s_corrupted_packet_count, s_min_addr, s_max_addr);
-    }
+    // Show statistics every 100 non-heartbeat packets (disabled - too noisy)
+    // if (s_total_packet_count % 100 == 0) {
+    //   Serial.printf("FPGA filter stats (no heartbeat): %d total, %d writes, ES5503: %d, corrupted: %d, addr range $%04X-$%04X\n",
+    //                 s_total_packet_count, s_write_packet_count, s_es5503_packet_count, s_corrupted_packet_count, s_min_addr, s_max_addr);
+    // }
   }
   
   // Skip reset packets and read operations
@@ -1754,7 +1793,7 @@ String check_escape_sequence(char c) {
     cli_mode = true;
     Serial.println("\nEntering CLI mode. Type 'help' for commands or 'exit' to return to forwarding.");
     Serial.printf("A2FPGA ESP32-S3 Firmware (%s %s) with ES5503 Audio\n", __DATE__, __TIME__);
-    lcam_set_logging(2);
+    lcam_set_logging(0);
     return "";  // Don't forward anything
   }
   
@@ -1784,6 +1823,7 @@ void setup() {
   Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD); // hardware serial
   delay(300);
   Serial.printf("A2FPGA ESP32-S3 Firmware (%s %s) with ES5503 Audio\n", __DATE__, __TIME__);
+  Serial.println("*** ES5503 Sample Rate Conversion v2 (26kHz->48kHz) ***");
 
   Serial.println("Serial forwarding mode active. Use '+++' to enter CLI mode.");
   Serial.println("ES5503 Ensoniq DOC emulation integrated.");

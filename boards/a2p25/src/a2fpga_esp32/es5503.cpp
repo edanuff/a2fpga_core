@@ -19,6 +19,7 @@ ES5503::ES5503(uint32_t clock_rate, uint8_t *wave_memory, uint32_t memory_size) 
     m_channel_strobe(0),
     m_output_channels(2),
     m_clock_rate(clock_rate),
+    m_target_sample_rate(44100),  // Default to 44.1kHz I2S output
     m_irq_active(false),
     m_wave_memory(wave_memory),
     m_memory_size(memory_size),
@@ -26,10 +27,10 @@ ES5503::ES5503(uint32_t clock_rate, uint8_t *wave_memory, uint32_t memory_size) 
 {
     // Initialize oscillators
     reset();
-    
+
     // Calculate output rate
     m_output_rate = (m_clock_rate / 8) / (m_oscsenabled + 2);
-    
+
     // Allocate mix buffer (1/50th of a second at maximum)
     m_mix_buffer.resize((m_output_rate/50) * m_output_channels);
 }
@@ -81,6 +82,12 @@ void ES5503::set_channels(int channels)
     m_output_channels = channels;
 }
 
+// Set target output sample rate (for rate conversion)
+void ES5503::set_output_sample_rate(uint32_t rate)
+{
+    m_target_sample_rate = rate;
+}
+
 // Reset the chip
 void ES5503::reset()
 {
@@ -102,9 +109,12 @@ void ES5503::reset()
         m_oscillators[i].irqpend = 0;
     }
 
-    m_oscsenabled = 1;
-    
-    // Recalculate output rate
+    // Default to 32 oscillators (IIgs Sound Manager standard)
+    // The IIgs writes to $E1 at boot to set this, but that write often
+    // happens before ESP32/LCAM capture is ready, so we default to 32.
+    m_oscsenabled = 32;
+
+    // Recalculate output rate: 7159090 / 8 / 34 = 26320 Hz
     m_output_rate = (m_clock_rate / 8) / (m_oscsenabled + 2);
 }
 
@@ -332,6 +342,8 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
                 const int resshift = resshifts[pOsc->resolution] - pOsc->wavetblsize;
                 const uint32_t sizemask = accmasks[pOsc->wavetblsize];
                 const int mode = (pOsc->control>>1) & 3;
+
+                // Start from sample 0 (original MAME behavior)
                 mixp = &m_mix_buffer[0] + chan;
 
                 for (snum = 0; snum < num_samples; snum++)
@@ -423,7 +435,7 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
             // Multiple oscillators can easily exceed 16-bit range
             // Use larger divisor (>>3 = /8) and clamp to prevent overflow distortion
             int32_t value = *mixp;
-            int32_t scaled = value >> 3;  // Divide by 8 to handle multiple oscillators
+            int32_t scaled = value >> 1;  // Divide by 8 to handle multiple oscillators
 
             // Clamp to 16-bit range to prevent wrap-around distortion
             if (scaled > 32767) scaled = 32767;
@@ -478,7 +490,7 @@ void ES5503::halt_osc(int onum, int type, uint32_t *accumulator, int resshift)
     if (mode == MODE_SWAP)
     {
         pPartner->control &= ~1;    // clear the halt bit
-        pPartner->accumulator = 0;  // and make sure it starts from the top (does this also need phase preservation?)
+        pPartner->accumulator = 0;  // and make sure it starts from the top
     }
     else
     {
@@ -493,7 +505,7 @@ void ES5503::halt_osc(int onum, int type, uint32_t *accumulator, int resshift)
             *accumulator -= (wtsize << resshift);
         }
     }
-    
+
     // IRQ enabled for this voice?
     if (pOsc->control & 0x08)
     {
