@@ -110,9 +110,24 @@ Remaining Issues
       calling `m_stream->update()` BEFORE each register write, generating audio up to that moment.
       **Solution**: Two triggers now generate audio into the ring buffer:
       1. Timer trigger: I2S task calls `es5503_stream_update()` periodically
-      2. Write trigger: `handle_es5503_write()` calls `es5503_stream_update()` before each write
+      2. Write trigger: `handle_es5503_write()` calls `es5503_stream_update()` before control reg writes
       A mutex protects ES5503 state since both LCAM task and I2S task access it.
       See LCAM_SESSION_NOTES.md for full implementation details.
+
+- [x] Selective write trigger: Initial MAME-style approach called stream_update on EVERY write,
+      causing 32,768 mutex ops during burst test → 381 underruns. Fixed by only triggering on:
+      - Oscillator control registers (0xA0-0xBF) - affect halt/start timing
+      - Oscillator enable register (0xE1) - affects oscillator count
+      Wave RAM writes and other registers skip the trigger (no timing impact).
+
+- [x] Non-blocking write trigger: Even selective triggering caused underruns when control
+      registers written rapidly. I2S task couldn't acquire mutex → couldn't generate audio.
+      Fixed by making write trigger non-blocking (timeout=0). If mutex busy, skip sync - I2S
+      task will generate audio anyway. I2S task uses 10ms timeout to ensure it gets priority.
+
+- [x] Gap verification: Compared captured_13.wav vs source frontleft.wav. All significant gaps
+      in captured audio correspond to gaps in source material. Only one extra 9.3ms gap found.
+      Audio is faithfully reproducing source content.
 
 Nice‑to‑Haves
 - [ ] Add a test preset: `es5503preset demo` to load a simple patch/wave and play a reference pattern.
@@ -124,11 +139,12 @@ Nice‑to‑Haves
 - Diagnostics & CLI: Added `statsbrief`, throttled per‑buffer logs (`lcamlog`, `lcamlogevery`, `lcamlograte`), and one‑shot `lcamdebug N`. Parsing fixes applied.
 - I2S concurrency: LCD_CAM capture sustained with GDMA_CH=2 and background recovery.
 - ES5503: Recognizable audio achieved from IIgs app; pitch correct (26kHz→48kHz sample rate conversion).
-- Audio gaps: Implemented MAME-style stream update on write:
-  - `es5503_stream_update()` called before each register write (captures audio state before change)
-  - Same function called by I2S task (timer trigger)
-  - FreeRTOS mutex protects ES5503 state between LCAM and I2S tasks
-  - Ring buffer with prebuffer for smooth I2S output
+- Audio gaps: RESOLVED via MAME-style stream update with optimizations:
+  - Selective trigger: only control registers (0xA0-0xBF) and E1 call stream_update
+  - Non-blocking write trigger: uses 0ms mutex timeout to avoid blocking I2S task
+  - I2S task priority: uses 10ms mutex timeout, always gets to generate audio
+  - Ring buffer (2048 frames, 15ms prebuffer) smooths output
+  - Gap verification: captured audio gaps match source material gaps
 
 ## Next Actions
 

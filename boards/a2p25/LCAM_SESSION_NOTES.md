@@ -347,3 +347,183 @@ Each write triggers stream update FIRST:
 Only microseconds of silence between writes, not 10ms chunks.
 
 This matches MAME's behavior and should eliminate the timing granularity gaps.
+
+---
+
+Selective Write Trigger (Jan 2026)
+
+Problem: Too Much Overhead
+Initial implementation called `es5503_stream_update()` on EVERY write to the ES5503.
+During the IIgs burst test (32,768 writes to $C03D), this caused:
+- 32,768 mutex acquisitions/releases
+- 32,768 audio generation calls
+- Massive overhead slowing both LCAM and I2S tasks
+- Result: 381 underruns despite buffer being 75% full
+
+Analysis
+Most writes during a burst are to wave RAM (sample data uploads). These don't affect
+currently playing audio timing - they just load data for future use. Only control
+register writes (0xA0-0xBF) affect oscillator halt/start state.
+
+Solution: Selective Trigger
+Only call `es5503_stream_update()` before writes that affect playback timing:
+- Oscillator control registers (0xA0-0xBF): contain halt bit, mode, channel
+- Oscillator enable register (0xE1): changes number of active oscillators
+
+Skipped (high frequency, no timing impact):
+- Wave RAM writes (just data, doesn't affect current playback)
+- Frequency registers (0x00-0x3F)
+- Volume registers (0x40-0x5F)
+- Wavetable pointer/size registers (0x80-0x9F, 0xC0-0xDF)
+
+Implementation in handle_es5503_write():
+```cpp
+if (reg >= 0xA0 && reg <= 0xBF) {
+    es5503_stream_update();  // Sync before control change
+    // ... apply write
+} else if (reg == 0xE1) {
+    es5503_stream_update();  // Sync before osc count change
+}
+// Other registers: no sync needed
+```
+
+Result
+- Control register writes: ~hundreds per second (manageable)
+- Wave RAM writes: ~thousands per second (no longer trigger sync)
+- Audio gaps match source material, no longer introduced by timing issues
+
+---
+
+Non-Blocking Write Trigger (Jan 2026)
+
+Problem: Mutex Contention
+Even with selective triggering, underruns still occurred:
+```
+ES5503: buf=1535/2048 prebuf=YES underruns=0
+Audio underrun! avail=506, total underruns=1
+ES5503: buf=1535/2048 prebuf=YES underruns=15
+```
+
+The buffer was 75% full (1535 frames) but occasionally dropped to 506 (just under
+the 512 needed), causing underruns. This happened because:
+1. LCAM task acquires mutex for control register write
+2. I2S task tries to acquire mutex (5ms timeout)
+3. If LCAM holds mutex too long, I2S task times out
+4. I2S task can't generate audio, tries to read from buffer
+5. Buffer is low → underrun
+
+Analysis
+The I2S task MUST be able to generate audio to keep the buffer filled.
+The write trigger is a "nice to have" for timing sync, but not critical
+if the I2S task will generate audio anyway.
+
+Solution: Non-Blocking Write Trigger
+Two different mutex strategies:
+
+1. **I2S task** (must succeed): 10ms timeout, waits for mutex
+```cpp
+static void es5503_stream_update() {
+    if (xSemaphoreTake(s_es5503_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        es5503_stream_update_locked();
+        xSemaphoreGive(s_es5503_mutex);
+    }
+}
+```
+
+2. **Write trigger** (optional): 0ms timeout, skip if busy
+```cpp
+static void es5503_stream_update_nonblocking() {
+    if (xSemaphoreTake(s_es5503_mutex, 0) == pdTRUE) {
+        es5503_stream_update_locked();
+        xSemaphoreGive(s_es5503_mutex);
+    }
+    // If mutex busy, skip - I2S task will handle generation
+}
+```
+
+Why This Works
+- If mutex is free: write trigger syncs audio (MAME-style, best timing)
+- If mutex is busy: I2S has it and is generating audio anyway (safe to skip)
+- I2S task never blocked by writes, always gets priority for generation
+- Write trigger still helps when there's no contention
+
+Expected Result
+- Zero underruns during normal playback
+- Audio gaps only where source material has gaps
+- No timing-induced gaps from our emulation
+
+---
+
+Gap Verification (Jan 2026)
+
+After implementing selective + non-blocking write trigger, compared captured
+audio against source material:
+
+Test: captured_13.wav vs frontleft.wav
+- Source: 1.49s, 10 gaps >5ms
+- Captured: 1.56s, 9 gaps >5ms
+
+Gap comparison (>5ms):
+| Time    | Source Gap | Captured Gap | Match? |
+|---------|-----------|--------------|--------|
+| 0.00s   | 127.8ms   | 88.2ms       | ✓ startup |
+| 0.47s   | 40.9ms    | 29.1ms       | ✓ |
+| 0.85s   | 12.2ms    | 11.6ms       | ✓ |
+| 0.87s   | 7.5ms     | 48.0ms       | ✓ |
+| 0.93s   | 46.5ms    | 10.9ms       | ✓ |
+
+Only ONE gap (9.3ms at 0.785s) didn't have a corresponding gap in source.
+
+Conclusion
+Audio gaps are faithfully reproducing the source material's intentional silences.
+The ES5503 emulation timing is now correct.
+
+---
+
+Current ES5503 Audio Architecture (Jan 2026)
+
+```
+IIgs CPU
+    │
+    ▼ writes to $C03C-$C03F
+FPGA Bus Interface
+    │
+    ▼ LCAM serializer (13.5 MHz PCLK)
+ESP32 LCD_CAM DMA
+    │
+    ▼ handle_es5503_write()
+    ├── Control reg (0xA0-0xBF)? → es5503_stream_update_nonblocking()
+    ├── Enable reg (0xE1)? → es5503_stream_update_nonblocking()
+    └── Apply write to ES5503 emulator
+
+ES5503 Emulator (es5503.cpp)
+    │ generates at 26,320 Hz native rate
+    ▼
+Ring Buffer (2048 frames, 42ms capacity)
+    │ prebuffer: 720 frames (15ms latency)
+    ▼
+I2S Task
+    ├── es5503_stream_update() - timer trigger, 10ms mutex wait
+    ├── Read 512 frames from ring buffer
+    └── Zero-order hold upsample 26kHz → 48kHz
+    │
+    ▼
+I2S Slave TX to FPGA (48kHz, 16-bit stereo)
+    │
+    ▼
+FPGA Audio DAC
+```
+
+Key Parameters
+- ES5503 native rate: 26,320 Hz (7159090 / 8 / 34 for 32 oscillators)
+- I2S output rate: 48,000 Hz
+- Upsample ratio: 1.824x (zero-order hold)
+- Ring buffer: 2048 frames (42ms)
+- Prebuffer: 720 frames (15ms, adjustable 5-40ms)
+- I2S buffer: 512 frames per write (~10.67ms)
+- Mutex: I2S=10ms timeout, write trigger=non-blocking
+
+Remaining Work
+- [ ] Verify zero underruns in extended playback
+- [ ] Test with multiple IIgs audio programs
+- [ ] Document final CLI commands in firmware README

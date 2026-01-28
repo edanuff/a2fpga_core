@@ -229,12 +229,24 @@ static void es5503_stream_update_locked() {
 }
 
 // Public function: generate audio up to now (acquires mutex)
+// Used by I2S task - waits for mutex since I2S needs audio
 static void es5503_stream_update() {
   if (!s_es5503_mutex) return;
-  if (xSemaphoreTake(s_es5503_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+  if (xSemaphoreTake(s_es5503_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
     es5503_stream_update_locked();
     xSemaphoreGive(s_es5503_mutex);
   }
+}
+
+// Non-blocking version for write trigger - skip if mutex busy
+// If I2S task has mutex, it will generate audio anyway
+static void es5503_stream_update_nonblocking() {
+  if (!s_es5503_mutex) return;
+  if (xSemaphoreTake(s_es5503_mutex, 0) == pdTRUE) {
+    es5503_stream_update_locked();
+    xSemaphoreGive(s_es5503_mutex);
+  }
+  // If mutex busy, skip - I2S task will handle generation
 }
 
 // ---------- I2S (slave TX for ES5503 audio, 16-bit stereo) ----------
@@ -657,7 +669,8 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
       // This ensures we capture the audio state before halt/start transitions
       if (reg >= 0xA0 && reg <= 0xBF) {
         // Generate audio before control register change (MAME-style sync)
-        es5503_stream_update();
+        // Use non-blocking version to avoid starving I2S task
+        es5503_stream_update_nonblocking();
 
         int osc = reg & 0x1F;
         uint8_t prev = s_prev_control[osc];
@@ -677,7 +690,7 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
       }
       // Also sync before oscillator enable register changes (affects timing)
       else if (reg == 0xE1) {
-        es5503_stream_update();
+        es5503_stream_update_nonblocking();
       }
 
       g_es5503->write(reg, data);
