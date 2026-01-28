@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstring>
 #include "esp_heap_caps.h"
+#include <Arduino.h>  // for millis()
 
 // ES5503 - Standalone DOC implementation based on MAME's ES5503 emulator
 // Adapted from MAME's ES5503 implementation by R. Belmont
@@ -107,6 +108,8 @@ void ES5503::reset()
         m_oscillators[i].resolution = 0;
         m_oscillators[i].accumulator = 0;
         m_oscillators[i].irqpend = 0;
+        m_oscillators[i].last_active_ms = 0;
+        m_oscillators[i].was_generating = false;
     }
 
     // Default to 32 oscillators (IIgs Sound Manager standard)
@@ -312,6 +315,13 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
     int osc, snum, i;
     uint32_t ramptr;
 
+    // Grace period: continue generating from recently-active oscillators even if
+    // briefly halted. This avoids 10ms gaps caused by timing granularity - on a real
+    // ES5503, a brief halt would only cause ~100us of silence, but since we generate
+    // in ~10ms chunks, a halt during generation causes 10ms of silence.
+    const uint32_t GRACE_PERIOD_MS = 20;  // Continue generating for up to 20ms after halt
+    uint32_t now_ms = millis();
+
     // Make sure we have a big enough buffer
     if (num_samples * m_output_channels > (int)m_mix_buffer.size())
     {
@@ -330,7 +340,16 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
         {
             ES5503Osc *pOsc = &m_oscillators[osc];
 
-            if (!(pOsc->control & 1) && ((pOsc->control >> 4) & (m_output_channels - 1)) == chan)
+            // Check if oscillator should generate audio:
+            // 1. Not halted (control bit 0 clear), OR
+            // 2. Was recently generating (within grace period) - to smooth over brief halts
+            bool is_halted = (pOsc->control & 1);
+            bool in_grace_period = pOsc->was_generating &&
+                                   (now_ms - pOsc->last_active_ms) < GRACE_PERIOD_MS;
+            bool should_generate = (!is_halted || in_grace_period) &&
+                                   ((pOsc->control >> 4) & (m_output_channels - 1)) == chan;
+
+            if (should_generate)
             {
                 uint32_t wtptr = pOsc->wavetblpointer & wavemasks[pOsc->wavetblsize], altram;
                 uint32_t acc = pOsc->accumulator;
@@ -419,6 +438,18 @@ void ES5503::update_stream(int16_t *buffer, int num_samples)
                 pOsc->control = ctrl;
                 pOsc->accumulator = acc;
                 pOsc->data = data ^ 0x80;
+
+                // Update grace period tracking - this oscillator was generating
+                pOsc->last_active_ms = now_ms;
+                pOsc->was_generating = true;
+            }
+            else
+            {
+                // Oscillator not generating - clear grace period if expired
+                if (pOsc->was_generating && (now_ms - pOsc->last_active_ms) >= GRACE_PERIOD_MS)
+                {
+                    pOsc->was_generating = false;
+                }
             }
         }
     }

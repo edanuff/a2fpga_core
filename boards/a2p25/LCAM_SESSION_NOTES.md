@@ -173,3 +173,177 @@ Typical Flow
 Next Steps
 - Add voice activity + peak meter to `es5503info`.
 - Optional compat toggle to ignore 0x00 halts during bring‑up (off by default).
+
+---
+
+ES5503 Sample Rate Conversion (Jan 2026)
+
+Problem
+- ES5503 native sample rate: `clock / 8 / (oscsenabled + 2)` = 7159090 / 8 / 34 = **26,320 Hz** (for 32 oscillators)
+- FPGA I2S output rate: **48,000 Hz**
+- Without conversion, audio plays 1.82x too fast ("chipmunk" effect)
+
+Solution: Zero-Order Hold Upsampling
+- Generate 281 ES5503 samples per 512-sample I2S buffer (281/26320 ≈ 512/48000 ≈ 10.67ms)
+- Upsample via sample duplication: output[i] = es5503[i * 281 / 512]
+- Each ES5503 sample is repeated ~1.82 times on average
+
+Key Learnings
+1. **Oscillator count default**: IIgs writes register 0xE1 at boot to set 32 oscillators, but this
+   happens before ESP32/LCAM capture is ready. Default m_oscsenabled to 32 in es5503.cpp reset().
+
+2. **Rate calculation**: With oscs=1 (wrong), rate = 298,295 Hz. With oscs=32 (correct), rate = 26,320 Hz.
+   The gen=281 sample count was correct, but wrong oscs broke everything else.
+
+3. **SWAP mode tracking**: Attempted to track where partner oscillators should start in the buffer
+   to avoid overlap. This caused gaps instead because when odd oscillators (1,3,5...) trigger even
+   partners (0,2,4...), the even ones were already processed earlier in the oscillator loop.
+   Reverted to original MAME behavior (partners start from sample 0, slight overlap is acceptable).
+
+4. **Audio gaps root cause**: ~10ms gaps occurred because register writes from IIgs arrive AFTER the
+   I2S task has already generated silence for that time period. The timeline was:
+   - T=0: IIgs writes register to start oscillator
+   - T=0-10ms: LCAM packet in transit, I2S outputs silence (oscillator not started yet)
+   - T=10ms: Register write arrives, oscillator starts
+   - Result: 10ms gap at start of each note
+
+5. **Prebuffer solution**: Added a ring buffer that delays audio output by ~15ms. Now the timeline is:
+   - T=0: IIgs writes register
+   - T=10ms: Register write arrives, oscillator starts generating into ring buffer
+   - T=15ms: Audio output begins (prebuffer has filled)
+   - Result: No gap because register writes arrive before we need the audio
+
+Verified Result
+- Pitch is now correct (audio plays at proper speed)
+- Gaps addressed via two mechanisms: prebuffer + grace period (see below)
+
+---
+
+Audio Prebuffer Implementation (Jan 2026)
+
+Problem
+- IIgs register writes travel: CPU → FPGA → LCAM serializer → DMA → ESP32 → ES5503 emulator
+- This path has ~10ms latency
+- Without prebuffering, I2S outputs silence while waiting for register writes to arrive
+- Result: audible ~10ms gap at the start of every note
+
+Solution: Ring Buffer with Prebuffer
+- Added 2048-frame ring buffer (~42ms capacity at 48kHz)
+- ES5503 generates samples into the ring buffer (producer)
+- I2S reads from ring buffer with 15ms delay (consumer)
+- Buffer must fill to 720 frames (~15ms) before output starts
+
+Implementation Details
+- Buffer size: 2048 stereo frames (4096 int16_t values)
+- Default prebuffer: 720 frames = 15ms (adjustable 5-40ms)
+- Single producer (ES5503 generation), single consumer (I2S output)
+- No locks needed (volatile read/write positions suffice)
+- Underrun handling: output silence, log warning, continue
+
+CLI Commands
+- `i2sstatus` - shows ring buffer status, prebuffer state, underrun count, gaps detected
+- `prebuffer <ms>` - adjust prebuffer latency (5-40ms)
+- `es5503start` - resets ring buffer and starts fresh
+
+Finding: Prebuffer Alone Didn't Fix Gaps
+- Testing showed 0 underruns but gaps still present
+- Gap logging revealed transitions from active→silent→active in ES5503 generation itself
+- Gaps were 11ms, 49ms durations - occurring DURING audio generation, not I2S output
+- Conclusion: gaps were baked into generated audio, prebuffer only delays output
+
+---
+
+Oscillator Grace Period (Jan 2026)
+
+Problem: Timing Granularity Mismatch
+- Real ES5503 generates audio continuously at 26kHz (one sample every ~38μs)
+- Our emulator generates in ~10ms chunks (281 samples at a time)
+- When IIgs software briefly halts an oscillator (to update wave table, change parameters):
+  - Real ES5503: ~100μs of silence = imperceptible
+  - Our emulator: if halt happens during our chunk, entire 10ms chunk = silence = very noticeable
+
+Diagnostic Evidence
+```
+ES5503: rate=26320 oscs=32 buf=512/2048 prebuf=YES active=26/50 gaps=0
+[GAP] #1 duration=11ms
+[GAP] #2 duration=49ms
+ES5503: rate=26320 oscs=32 buf=512/2048 prebuf=YES active=45/50 gaps=2
+```
+- 0 underruns = ring buffer working fine
+- gaps detected = ES5503 emulator itself transitioning between audio and silence
+- Gap durations (11ms, 49ms) match our chunk timing
+
+Solution: Grace Period for Halted Oscillators
+- Track when each oscillator was last generating audio (`last_active_ms`, `was_generating`)
+- When oscillator is halted (control bit 0 set), check if it was recently active
+- If halted for less than GRACE_PERIOD_MS (20ms), continue generating audio from it
+- Only truly stopped oscillators (halted >20ms) go silent
+
+Implementation in es5503.cpp:
+```cpp
+bool is_halted = (pOsc->control & 1);
+bool in_grace_period = pOsc->was_generating &&
+                       (now_ms - pOsc->last_active_ms) < GRACE_PERIOD_MS;
+bool should_generate = (!is_halted || in_grace_period) && channel_matches;
+```
+
+Why This Works
+- IIgs software typically halts oscillators briefly (<1ms) to update parameters
+- Our 20ms grace period bridges these brief halts
+- Audio continues smoothly instead of having 10ms gaps
+- Oscillators that are truly stopped (user stops playback) will halt after 20ms
+
+Tradeoffs
+- Sounds may continue for up to 20ms after software halts them
+- For music/sound effects, this is imperceptible
+- If issues arise, grace period can be reduced to 10ms
+
+---
+
+MAME-Style Stream Update (Jan 2026)
+
+After reviewing MAME's ES5503 source code, we discovered the proper solution.
+
+MAME's Approach (from es5503.cpp)
+```cpp
+void es5503_device::write(offs_t offset, u8 data)
+{
+    m_stream->update();  // Generate audio up to NOW before applying write
+    // ... then apply register changes
+}
+```
+
+Every register write first generates all pending audio samples, THEN applies the change.
+This ensures audio state is captured BEFORE the register modification takes effect.
+
+Our Implementation
+Two triggers generate audio into the ring buffer:
+1. **Timer trigger**: I2S task calls `es5503_stream_update()` when it needs samples
+2. **Write trigger**: `handle_es5503_write()` calls `es5503_stream_update()` before applying each register write
+
+Both use a shared timestamp (`s_last_update_us`) to know how many samples to generate.
+
+Key Components
+- `s_es5503_mutex`: FreeRTOS mutex protects ES5503 state (LCAM task + I2S task)
+- `s_last_update_us`: Timestamp of last audio generation (microseconds)
+- `es5503_stream_update()`: Generates samples since last update, pushes to ring buffer
+- Ring buffer: Same prebuffer infrastructure, now fed by both triggers
+
+Why This Works
+When IIgs software does:
+```
+1. Halt oscillator (to change settings)
+2. Update wave pointer
+3. Update frequency
+4. Restart oscillator
+```
+
+Each write triggers stream update FIRST:
+- Write 1: Generate audio (oscillator running), then apply halt
+- Writes 2-3: Generate tiny amount (halted), apply changes
+- Write 4: Generate tiny amount (halted), restart oscillator
+- Next timer: Generate audio (oscillator running)
+
+Only microseconds of silence between writes, not 10ms chunks.
+
+This matches MAME's behavior and should eliminate the timing granularity gaps.

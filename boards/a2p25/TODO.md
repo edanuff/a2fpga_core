@@ -7,7 +7,9 @@
 ## High Priority
 
 - [x] Eliminate LCAM packet loss during IIgs burst transfers (confirmed 32,768/32,768, 0 corrupted, 0 drops)
-- [ ] ES5503 audio bring‑up: generate sound on ESP32‑S3 and play via FPGA I2S
+- [x] ES5503 audio bring‑up: generate sound on ESP32‑S3 and play via FPGA I2S
+- [x] ES5503 sample rate conversion: correct pitch (26,320 Hz → 48,000 Hz via zero-order hold)
+- [x] ES5503 audio gaps: MAME-style stream update on write + prebuffer ring buffer
 
 ## Medium Priority
 
@@ -77,38 +79,56 @@ Goals
 - No packet loss (maintained), glitch‑free audio, minimal setup (use presets/quiet logging).
 
 Plan of Attack
-- [ ] Bus→Emulator wiring
-  - [ ] Verify handle_es5503_write() updates emulator regs and wave RAM on ES5503 address range ($C03C–$C03F).
-  - [ ] Add counters/CLI to confirm write counts and last N writes for quick sanity.
-- [ ] ES5503 core completeness
-  - [ ] Implement/verify oscillator stepping at 7.15909 MHz base, phase accumulators, sample fetch, loop/stop behavior.
-  - [ ] Implement envelope/volume/pan per oscillator; 8/32‑voice mode as targeted (document chosen voice count).
-  - [ ] Generate mono/stereo frames at 44.1 kHz (or FPGA‑provided LRCLK) using fixed‑point math.
-- [ ] I2S pipeline to FPGA
-  - [ ] Confirm FPGA provides BCLK/LRCLK and pin mapping; keep ESP32 in SLAVE TX as implemented.
-  - [ ] Tone smoke test (existing tone/radio paths) to validate physical link and FPGA playback.
-  - [ ] Swap I2S task source to ES5503 generate path (guarded by CLI `es5503start/stop`).
-- [ ] Mixer/integration
-  - [ ] Mix enabled oscillators with proper gain to avoid clipping; add soft‑clip or headroom.
-  - [ ] Expose CLI to mute/solo voices and print minimal status (active voices, peak meter).
-- [ ] Performance/robustness
-  - [ ] Ensure i2s_tx_task keeps up without starving LCD_CAM (already mitigated by GDMA_CH=2 and yields).
-  - [ ] Optimize hot paths (IRAM attributes, fixed‑point) if CPU > 50%.
-- [ ] Validation
-  - [ ] Use IIgs demos that write ES5503 wave RAM/regs; expect audible output on FPGA audio.
-  - [ ] Confirm zero LCAM drops during audio playback and no audible underruns.
+- [x] Bus→Emulator wiring
+  - [x] Verify handle_es5503_write() updates emulator regs and wave RAM on ES5503 address range ($C03C–$C03F).
+  - [x] Add counters/CLI to confirm write counts and last N writes for quick sanity.
+- [x] ES5503 core completeness
+  - [x] Implement/verify oscillator stepping at 7.15909 MHz base, phase accumulators, sample fetch, loop/stop behavior.
+  - [x] Implement envelope/volume/pan per oscillator; 32‑voice mode (IIgs standard).
+  - [x] Generate mono/stereo frames at native ES5503 rate (26,320 Hz for 32 oscillators).
+- [x] I2S pipeline to FPGA
+  - [x] Confirm FPGA provides BCLK/LRCLK and pin mapping; keep ESP32 in SLAVE TX as implemented.
+  - [x] Tone smoke test (existing tone/radio paths) to validate physical link and FPGA playback.
+  - [x] Swap I2S task source to ES5503 generate path (guarded by CLI `es5503start/stop`).
+- [x] Sample rate conversion (26,320 Hz → 48,000 Hz)
+  - [x] Zero-order hold upsampling: generate 281 ES5503 samples, duplicate to fill 512-sample I2S buffer.
+  - [x] Default oscillator count to 32 (IIgs boot writes 0xE1 before ESP32 ready).
+  - [x] Verified: pitch is now correct (no chipmunk/fast playback).
+- [x] Mixer/integration
+  - [x] Mix enabled oscillators with proper gain to avoid clipping; add soft‑clip or headroom.
+  - [x] Expose CLI to mute/solo voices and print minimal status (active voices, peak meter).
+- [x] Performance/robustness
+  - [x] Ensure i2s_tx_task keeps up without starving LCD_CAM (already mitigated by GDMA_CH=2 and yields).
+- [x] Validation
+  - [x] Use IIgs demos that write ES5503 wave RAM/regs; expect audible output on FPGA audio.
+  - [x] Confirm zero LCAM drops during audio playback and no audible underruns.
+
+Remaining Issues
+- [x] Audio gaps (~10ms): Fixed via MAME-style stream update on write.
+      **Root cause**: Our emulator generated audio in ~10ms chunks. If an oscillator was briefly
+      halted when we generated, we'd output 10ms silence instead of ~100μs. MAME avoids this by
+      calling `m_stream->update()` BEFORE each register write, generating audio up to that moment.
+      **Solution**: Two triggers now generate audio into the ring buffer:
+      1. Timer trigger: I2S task calls `es5503_stream_update()` periodically
+      2. Write trigger: `handle_es5503_write()` calls `es5503_stream_update()` before each write
+      A mutex protects ES5503 state since both LCAM task and I2S task access it.
+      See LCAM_SESSION_NOTES.md for full implementation details.
 
 Nice‑to‑Haves
 - [ ] Add a test preset: `es5503preset demo` to load a simple patch/wave and play a reference pattern.
-- [ ] Optional resampling path if LRCLK ≠ 44.1 kHz (simple linear at first).
 
-## Current Status (2026‑01‑18)
+## Current Status (2026‑01‑27)
 
 - IIgs burst capture (32,768 writes to $C03D): PASS — Words received 32768, Corruption 0.0%, Ring drops 0, Address range $C03D–$C03D.
 - Default mode: VSYNC‑EOF with gated VSYNC every 409 packets in HDL; ESP32 sets `cam_rec_data_bytelen=4095` in VSYNC‑EOF and `CHUNK_BYTES=4090` in length‑EOF.
 - Diagnostics & CLI: Added `statsbrief`, throttled per‑buffer logs (`lcamlog`, `lcamlogevery`, `lcamlograte`), and one‑shot `lcamdebug N`. Parsing fixes applied.
 - I2S concurrency: LCD_CAM capture sustained with GDMA_CH=2 and background recovery.
-- ES5503: Recognizable audio achieved from IIgs app; added ES write mirror totals (ESP32) that align with OSD delta per playback; improved CLI (`es5503info`, `es5503reg`, `es5503mem`, `es5503resetwrite`).
+- ES5503: Recognizable audio achieved from IIgs app; pitch correct (26kHz→48kHz sample rate conversion).
+- Audio gaps: Implemented MAME-style stream update on write:
+  - `es5503_stream_update()` called before each register write (captures audio state before change)
+  - Same function called by I2S task (timer trigger)
+  - FreeRTOS mutex protects ES5503 state between LCAM and I2S tasks
+  - Ring buffer with prebuffer for smooth I2S output
 
 ## Next Actions
 

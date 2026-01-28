@@ -77,9 +77,14 @@ private:
         uint32_t wavetblpointer;
         uint8_t  wavetblsize;
         uint8_t  resolution;
-        
+
         uint32_t accumulator;
         uint8_t  irqpend;
+
+        // Grace period tracking: continue generating from recently-active oscillators
+        // even if briefly halted, to avoid 10ms gaps from timing granularity
+        uint32_t last_active_ms;  // millis() when oscillator was last running
+        bool was_generating;      // was this oscillator generating audio last call?
     };
     
     // Halt an oscillator

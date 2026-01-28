@@ -100,11 +100,142 @@ uint8_t* es5503_get_wave_memory(ES5503* es) {
   return es->get_wave_memory();
 }
 
-// ES5503 direct generation with sample rate conversion
-// ES5503 native rate: ~26,320 Hz (7159090 / 8 / 34 for 32 oscillators)
-// I2S output rate: 48,000 Hz (FPGA audio_timing module)
-// We must upsample ES5503 output to match I2S rate
+// ES5503 Sample Rate Conversion
+// ==============================
+// ES5503 native rate formula: clock / 8 / (oscsenabled + 2)
+//   - With 32 oscillators: 7159090 / 8 / 34 = 26,320 Hz
+//   - With 1 oscillator:   7159090 / 8 / 3  = 298,295 Hz (WRONG - causes chipmunk audio)
+// I2S output rate: 48,000 Hz (set by FPGA audio_timing module)
+//
+// Solution: Zero-order hold (sample duplication) upsampling
+//   - Generate 281 ES5503 samples per 512-sample I2S buffer
+//   - Each ES5503 sample repeated ~1.82x (48000/26320)
+//   - Timing: 281/26320 ≈ 512/48000 ≈ 10.67ms per buffer
+//
+// IMPORTANT: IIgs writes register 0xE1 at boot to set oscillator count,
+// but this happens before ESP32/LCAM is ready. ES5503 defaults to 32 oscillators.
 static const uint32_t I2S_OUTPUT_RATE = 48000;  // FPGA I2S sample rate
+
+// ---------- Audio Prebuffer (Ring Buffer) ----------
+// Purpose: Delay audio output by ~15ms to absorb LCAM latency.
+// Without this, register writes from IIgs arrive AFTER we've already
+// output silence for that time period, causing ~10ms gaps at note starts.
+//
+// Buffer size: 2048 stereo frames = ~42ms at 48kHz (plenty of headroom)
+// Prebuffer target: 720 stereo frames = 15ms (must fill before output starts)
+//
+static const size_t AUDIO_RING_SIZE = 2048;      // stereo frames (2048 * 2 = 4096 int16_t)
+static size_t s_audio_prebuffer_frames = 720;    // ~15ms at 48kHz (adjustable via CLI)
+#define AUDIO_PREBUFFER_FRAMES s_audio_prebuffer_frames
+static int16_t s_audio_ring[AUDIO_RING_SIZE * 2]; // stereo samples
+static volatile size_t s_ring_write_pos = 0;      // next write position (in stereo frames)
+static volatile size_t s_ring_read_pos = 0;       // next read position (in stereo frames)
+static volatile bool s_ring_prebuffered = false;  // true once prebuffer threshold reached
+static volatile size_t s_ring_underruns = 0;      // count of underrun events
+static volatile uint32_t s_audio_gap_count = 0;   // count of silence gaps detected
+
+// Ring buffer helpers (single producer, single consumer - no locks needed)
+static inline size_t ring_available() {
+  size_t w = s_ring_write_pos;
+  size_t r = s_ring_read_pos;
+  if (w >= r) return w - r;
+  return AUDIO_RING_SIZE - r + w;
+}
+
+static inline size_t ring_free() {
+  return AUDIO_RING_SIZE - 1 - ring_available();  // -1 to distinguish full from empty
+}
+
+static void ring_write_stereo(int16_t left, int16_t right) {
+  size_t pos = s_ring_write_pos;
+  s_audio_ring[pos * 2] = left;
+  s_audio_ring[pos * 2 + 1] = right;
+  s_ring_write_pos = (pos + 1) % AUDIO_RING_SIZE;
+}
+
+static bool ring_read_stereo(int16_t *left, int16_t *right) {
+  if (ring_available() == 0) return false;
+  size_t pos = s_ring_read_pos;
+  *left = s_audio_ring[pos * 2];
+  *right = s_audio_ring[pos * 2 + 1];
+  s_ring_read_pos = (pos + 1) % AUDIO_RING_SIZE;
+  return true;
+}
+
+static void ring_reset() {
+  s_ring_write_pos = 0;
+  s_ring_read_pos = 0;
+  s_ring_prebuffered = false;
+  memset(s_audio_ring, 0, sizeof(s_audio_ring));
+}
+
+// ---------- ES5503 Stream Update (MAME-style) ----------
+// Two triggers call es5503_stream_update():
+// 1. Timer trigger: I2S task needs audio (periodic)
+// 2. Write trigger: Register write arrived (before applying write)
+// Both generate samples since last update into the ring buffer.
+// This ensures audio state is captured BEFORE register changes take effect.
+
+#include "freertos/semphr.h"
+static SemaphoreHandle_t s_es5503_mutex = NULL;
+static volatile uint64_t s_last_update_us = 0;  // micros() of last stream update
+static const uint32_t ES5503_RATE = 26320;      // 7159090 / 8 / 34 for 32 oscillators
+
+// Generate audio from last update until now, push to ring buffer
+// Called with mutex held
+static void es5503_stream_update_locked() {
+  if (!g_es5503 || !s_es5503_run) return;
+
+  uint64_t now_us = micros();
+  uint64_t elapsed_us = now_us - s_last_update_us;
+
+  // Avoid generating too much at once (cap at 50ms = ~2400 samples at 48kHz)
+  if (elapsed_us > 50000) elapsed_us = 50000;
+
+  // Calculate samples to generate at ES5503 rate
+  // samples = elapsed_us * rate / 1000000
+  uint32_t es5503_samples = (elapsed_us * ES5503_RATE) / 1000000;
+  if (es5503_samples == 0) return;
+
+  // Cap to avoid overflow
+  if (es5503_samples > 512) es5503_samples = 512;
+
+  // Check ring buffer space (need ~1.82x for upsampling)
+  uint32_t output_samples = (es5503_samples * I2S_OUTPUT_RATE) / ES5503_RATE;
+  if (output_samples > ring_free()) {
+    output_samples = ring_free();
+    es5503_samples = (output_samples * ES5503_RATE) / I2S_OUTPUT_RATE;
+  }
+  if (es5503_samples == 0) return;
+
+  // Generate ES5503 samples
+  static int16_t es5503_temp[512];
+  g_es5503->generate_audio(es5503_temp, es5503_samples);
+
+  // Upsample and push to ring buffer
+  for (uint32_t i = 0; i < output_samples; i++) {
+    uint32_t es5503_idx = (i * es5503_samples) / output_samples;
+    if (es5503_idx >= es5503_samples) es5503_idx = es5503_samples - 1;
+    int16_t sample = es5503_temp[es5503_idx];
+    ring_write_stereo(sample, sample);
+  }
+
+  // Check prebuffer threshold
+  if (!s_ring_prebuffered && ring_available() >= AUDIO_PREBUFFER_FRAMES) {
+    s_ring_prebuffered = true;
+  }
+
+  s_last_update_us = now_us;
+}
+
+// Public function: generate audio up to now (acquires mutex)
+static void es5503_stream_update() {
+  if (!s_es5503_mutex) return;
+  if (xSemaphoreTake(s_es5503_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+    es5503_stream_update_locked();
+    xSemaphoreGive(s_es5503_mutex);
+  }
+}
 
 // ---------- I2S (slave TX for ES5503 audio, 16-bit stereo) ----------
 static i2s_chan_handle_t s_i2s_tx = NULL;
@@ -162,69 +293,66 @@ static void i2s_tx_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(5));
       }
     }
-    // ES5503 with sample rate conversion via sample duplication (zero-order hold)
-    // ES5503 rate: 26,320 Hz, I2S rate: 48,000 Hz
-    // Generate at ES5503 native rate, then stretch by duplicating samples
+    // ES5503 with MAME-style stream update
+    // Audio is generated by two triggers:
+    // 1. Timer trigger (here): periodic generation when I2S needs samples
+    // 2. Write trigger: es5503_stream_update() called before each register write
+    // Both push to the same ring buffer, ensuring audio state is captured before changes
     else if (g_es5503 && s_es5503_run && s_i2s_tx) {
       static int16_t stereo_buffer[AUDIO_BUFFER_FRAMES * 2];
-      static int16_t es5503_temp[AUDIO_BUFFER_FRAMES];  // More than we need
-
-      // ES5503 generates at its native rate. For correct timing:
-      // - I2S buffer: 512 samples at 48kHz = 10.67ms
-      // - ES5503 samples needed: 10.67ms * 26320Hz = 281 samples
-      // - Each ES5503 sample maps to ~1.82 output samples
-
-      // IIgs always uses 32 oscillators, giving rate = 7159090/8/34 = 26320 Hz
-      // The ES5503 oscs register may not be set correctly via FPGA packets,
-      // so we hardcode the expected rate for now
-      uint32_t es5503_rate = ES5503_CLOCK_RATE / 8 / 34;  // 26320 Hz for 32 oscillators
-
-      // Calculate ES5503 samples needed for this output buffer
-      // es5503_samples = output_samples * es5503_rate / output_rate
-      uint32_t es5503_samples = ((uint64_t)AUDIO_BUFFER_FRAMES * es5503_rate) / I2S_OUTPUT_RATE;
-      es5503_samples += 1;  // Round up to ensure we have enough
-      if (es5503_samples > AUDIO_BUFFER_FRAMES) es5503_samples = AUDIO_BUFFER_FRAMES;
-
-      // Generate ES5503 samples at native rate
-      g_es5503->generate_audio(es5503_temp, es5503_samples);
-
-      // Debug - count non-zero samples AFTER upsampling to verify ZOH worked
       static int debug_interval = 0;
-      static int total_buffers = 0;
-      static int active_buffers = 0;
-      total_buffers++;
 
-      int input_nz = 0;
-      for (uint32_t j = 0; j < es5503_samples; j++) {
-        if (es5503_temp[j] != 0) input_nz++;
+      // Timer trigger: generate audio up to now
+      es5503_stream_update();
+
+      // Read from ring buffer and output to I2S
+      if (s_ring_prebuffered) {
+        size_t avail = ring_available();
+        if (avail >= AUDIO_BUFFER_FRAMES) {
+          // Read from ring buffer
+          for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
+            int16_t left, right;
+            ring_read_stereo(&left, &right);
+            stereo_buffer[i * 2] = left;
+            stereo_buffer[i * 2 + 1] = right;
+          }
+
+          esp_err_t err = i2s_channel_write(s_i2s_tx, stereo_buffer, sizeof(stereo_buffer), &written, pdMS_TO_TICKS(10));
+          if (err != ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+          }
+        } else {
+          // Underrun - not enough data in ring buffer
+          s_ring_underruns++;
+          memset(stereo_buffer, 0, sizeof(stereo_buffer));
+          esp_err_t err = i2s_channel_write(s_i2s_tx, stereo_buffer, sizeof(stereo_buffer), &written, pdMS_TO_TICKS(10));
+          if (err != ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+          }
+          // Log underrun periodically
+          static uint32_t last_underrun_log = 0;
+          uint32_t now = millis();
+          if (now - last_underrun_log > 1000) {
+            Serial.printf("Audio underrun! avail=%d, total underruns=%d\n", (int)avail, (int)s_ring_underruns);
+            last_underrun_log = now;
+          }
+        }
+      } else {
+        // Not yet prebuffered - output silence while filling buffer
+        memset(stereo_buffer, 0, sizeof(stereo_buffer));
+        esp_err_t err = i2s_channel_write(s_i2s_tx, stereo_buffer, sizeof(stereo_buffer), &written, pdMS_TO_TICKS(10));
+        if (err != ESP_OK) {
+          vTaskDelay(pdMS_TO_TICKS(5));
+        }
       }
-      if (input_nz > 0) active_buffers++;
 
-      // Upsample via zero-order hold (sample duplication)
-      // For output sample i, use ES5503 sample at index (i * es5503_samples / AUDIO_BUFFER_FRAMES)
-      for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
-        // Calculate which ES5503 sample to use
-        uint32_t es5503_idx = (i * es5503_samples) / AUDIO_BUFFER_FRAMES;
-        if (es5503_idx >= es5503_samples) es5503_idx = es5503_samples - 1;
-
-        int16_t sample = es5503_temp[es5503_idx];
-        stereo_buffer[i * 2] = sample;
-        stereo_buffer[i * 2 + 1] = sample;
-      }
-
-      // Log rate and sample counts periodically
+      // Debug logging
       if (++debug_interval >= 50) {
         int oscs = g_es5503->get_oscsenabled();
-        Serial.printf("ES5503: rate=%lu oscs=%d gen=%lu active=%d/%d\n",
-                      es5503_rate, oscs, es5503_samples, active_buffers, total_buffers);
+        Serial.printf("ES5503: buf=%d/%d prebuf=%s underruns=%lu\n",
+                      (int)ring_available(), (int)AUDIO_RING_SIZE,
+                      s_ring_prebuffered ? "YES" : "NO", (unsigned long)s_ring_underruns);
         debug_interval = 0;
-        total_buffers = 0;
-        active_buffers = 0;
-      }
-
-      esp_err_t err = i2s_channel_write(s_i2s_tx, stereo_buffer, sizeof(stereo_buffer), &written, pdMS_TO_TICKS(10));
-      if (err != ESP_OK) {
-        vTaskDelay(pdMS_TO_TICKS(5));
       }
     } else if (s_i2s_tx) {
       // Send silence if ES5503 not running
@@ -357,7 +485,20 @@ static esp_err_t es5503_init() {
 static esp_err_t es5503_start() {
   esp_err_t err = es5503_init();
   if (err != ESP_OK) return err;
-  
+
+  // Initialize mutex for ES5503 thread safety (write handler + I2S task)
+  if (!s_es5503_mutex) {
+    s_es5503_mutex = xSemaphoreCreateMutex();
+    if (!s_es5503_mutex) {
+      Serial.println("Failed to create ES5503 mutex");
+      return ESP_ERR_NO_MEM;
+    }
+  }
+
+  // Reset the audio ring buffer and timing
+  ring_reset();
+  s_last_update_us = micros();
+
   s_es5503_run = true;
   // Ensure I2S is running to play ES5503 audio
   if (!i2s_tx_is_running()) {
@@ -487,7 +628,7 @@ static void es5503_print_monitor() {
 // Handle Sound GLU and ES5503 writes from bus packet
 static void handle_es5503_write(uint16_t address, uint8_t data) {
   if (!g_es5503) return;
-  
+
   // Sound GLU registers at $C03C-$C03F
   if (address == 0xC03C) {
     // Sound Control Register
@@ -512,7 +653,12 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
       uint8_t reg = s_glu.address_ptr & 0xFF;
 
       // Track control register writes (0xA0-0xBF) for key-on detection
+      // MAME-style: generate audio UP TO NOW before applying control changes
+      // This ensures we capture the audio state before halt/start transitions
       if (reg >= 0xA0 && reg <= 0xBF) {
+        // Generate audio before control register change (MAME-style sync)
+        es5503_stream_update();
+
         int osc = reg & 0x1F;
         uint8_t prev = s_prev_control[osc];
         bool prev_halted = (prev & 0x01) != 0;
@@ -528,6 +674,10 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
           }
         }
         s_prev_control[osc] = data;
+      }
+      // Also sync before oscillator enable register changes (affects timing)
+      else if (reg == 0xE1) {
+        es5503_stream_update();
       }
 
       g_es5503->write(reg, data);
@@ -1120,7 +1270,7 @@ static void cmd_process(String cmd) {
     Serial.println("I2S Status:");
     Serial.printf("  I2S transmit: %s\n", i2s_tx_is_running() ? "RUNNING" : "STOPPED");
     Serial.printf("  BCLK on pin %d\n", PIN_I2S_BCLK);
-    Serial.printf("  LRCLK on pin %d\n", PIN_I2S_LRCLK); 
+    Serial.printf("  LRCLK on pin %d\n", PIN_I2S_LRCLK);
     Serial.printf("  DATA on pin %d\n", PIN_I2S_DATA);
     if (i2s_tx_is_running()) {
       Serial.println("  Output: ES5503 audio samples");
@@ -1129,6 +1279,44 @@ static void cmd_process(String cmd) {
       uint8_t num_osc = g_es5503->read(0xE1);
       Serial.printf("  ES5503: %d oscillators enabled\n", (num_osc/2) + 1);
     }
+    // Ring buffer status
+    Serial.println("  Audio Ring Buffer:");
+    Serial.printf("    Size: %d frames (%dms capacity)\n",
+                  (int)AUDIO_RING_SIZE, (int)(AUDIO_RING_SIZE * 1000 / I2S_OUTPUT_RATE));
+    Serial.printf("    Prebuffer: %d frames (%dms latency)\n",
+                  (int)AUDIO_PREBUFFER_FRAMES, (int)(AUDIO_PREBUFFER_FRAMES * 1000 / I2S_OUTPUT_RATE));
+    Serial.printf("    Available: %d frames\n", (int)ring_available());
+    Serial.printf("    Prebuffered: %s\n", s_ring_prebuffered ? "YES" : "NO");
+    Serial.printf("    Underruns: %d\n", (int)s_ring_underruns);
+    Serial.printf("    Gaps detected: %lu\n", (unsigned long)s_audio_gap_count);
+  } else if (cmd.startsWith("prebuffer ")) {
+    // Adjust audio prebuffer size: prebuffer <ms>
+    String toks[8]; int nt = split_ws(cmd, toks, 8);
+    if (nt < 2) {
+      Serial.println("Usage: prebuffer <ms>  (5-40ms, default 15)");
+      Serial.printf("Current: %dms (%d frames)\n",
+                    (int)(s_audio_prebuffer_frames * 1000 / I2S_OUTPUT_RATE),
+                    (int)s_audio_prebuffer_frames);
+    } else {
+      long ms = toks[1].toInt();
+      if (ms < 5 || ms > 40) {
+        Serial.println("Prebuffer must be 5-40ms");
+      } else {
+        size_t frames = (ms * I2S_OUTPUT_RATE) / 1000;
+        if (frames >= AUDIO_RING_SIZE - 512) {
+          frames = AUDIO_RING_SIZE - 512;  // Leave room for generation
+        }
+        s_audio_prebuffer_frames = frames;
+        ring_reset();  // Reset buffer to apply new setting
+        Serial.printf("Prebuffer set to %ldms (%d frames). Ring buffer reset.\n",
+                      ms, (int)frames);
+      }
+    }
+  } else if (cmd == "prebuffer") {
+    Serial.println("Usage: prebuffer <ms>  (5-40ms, default 15)");
+    Serial.printf("Current: %dms (%d frames)\n",
+                  (int)(s_audio_prebuffer_frames * 1000 / I2S_OUTPUT_RATE),
+                  (int)s_audio_prebuffer_frames);
   } else if (cmd.startsWith("es5503reg ")) {
     // Direct ES5503 register access: es5503reg <reg> [value]
     String toks[16]; int nt = split_ws(cmd, toks, 16);
@@ -1738,7 +1926,7 @@ static void cmd_process(String cmd) {
     Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
     Serial.println("Use '+++' to enter CLI mode again.");
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | i2stest | i2sstatus | es5503start | es5503stop | es5503wave | audiostop | audiostart | es5503test | es5503reg | es5503debug | es5503mon | es5503info | es5503mem | fulltest | meminfo | wifi | radio | exit | we N");
+    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | i2stest | i2sstatus | prebuffer | es5503start | es5503stop | es5503wave | audiostop | audiostart | es5503test | es5503reg | es5503debug | es5503mon | es5503info | es5503mem | fulltest | meminfo | wifi | radio | exit | we N");
     Serial.println("  spireg <reg> [val]        - read/write 1-byte register (0..126)");
     Serial.println("  spir <space> <addr> <len> [inc=1] - read bytes");
     Serial.println("  spiw <space> <addr> <inc|len> <b0> [b1 ...] - write bytes");
@@ -1747,6 +1935,7 @@ static void cmd_process(String cmd) {
     Serial.println("  i2stest                   - send test pattern L=0xCAFE R=0xBABE");
     Serial.println("  i2scheck                  - verify FPGA I2S reception via SPI readback");
     Serial.println("  i2sstatus                 - show I2S status and pin configuration");
+    Serial.println("  prebuffer <ms>            - set audio prebuffer latency (5-40ms, default 15)");
     Serial.println("  es5503start               - initialize and start ES5503 audio generation");
     Serial.println("  es5503stop                - stop ES5503 audio generation");
     Serial.println("  es5503wave                - load test sawtooth waveform into wave memory");
