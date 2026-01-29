@@ -364,7 +364,10 @@ module top #(
         .mosi(esp32_spi_mosi),
         .sclk(esp32_spi_sclk),
         .i2s_sample_l(i2s_sample_l),
-        .i2s_sample_r(i2s_sample_r)
+        .i2s_sample_r(i2s_sample_r),
+        .es5503_access_counter(es5503_access_counter_w),
+        .es5503_tx_counter(es5503_counter_w),
+        .cam_overwrite_flag(cam_overwrite_flag_w)
     );
 
     // Slots

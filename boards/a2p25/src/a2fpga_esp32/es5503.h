@@ -57,6 +57,12 @@ public:
 
     // Get number of enabled oscillators
     int get_oscsenabled() const { return m_oscsenabled; }
+
+    // Get oscillator control register (for firmware-level key-on compensation)
+    uint8_t get_osc_control(int osc) const { return m_oscillators[osc].control; }
+
+    // Force oscillator halt bit (firmware compensates for clock domain mismatch)
+    void force_osc_halt(int osc) { m_oscillators[osc].control |= 1; }
     
 private:
     // Oscillator modes

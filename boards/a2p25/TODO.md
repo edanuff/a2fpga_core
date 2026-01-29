@@ -11,6 +11,10 @@
 - [x] ES5503 sample rate conversion: correct pitch (26,320 Hz → 48,000 Hz via zero-order hold)
 - [x] ES5503 audio gaps: MAME-style stream update on write + prebuffer ring buffer
 - [x] ES5503 audio quality: clock drift fix, cubic interpolation, biquad anti-aliasing
+- [x] GLU address pointer desync: track auto-increment on $C03D reads (was only tracking writes)
+- [x] FPGA serialization verified: zero packet loss (fpgastats CLI command added, SPI regs 11-15)
+- [x] ES5503 write/generate race condition: mutex now protects g_es5503->write()
+- [ ] ES5503 key-on timing mismatch: always reset accumulator on halt=0 write (pending test)
 
 ## Medium Priority
 
@@ -168,9 +172,16 @@ Nice‑to‑Haves
   - Gap verification: captured audio gaps match source material gaps
 - Clock drift: RESOLVED — direct I2S generation (512 frames/iteration) eliminates clock domain mismatch. Zero underruns achieved.
 - Audio quality: Catmull-Rom cubic interpolation + 2-pole Butterworth biquad LPF (fc=10kHz, 12dB/oct). Pending final listening test.
+- GLU desync: FIXED — auto-increment on $C03D reads was not tracked, causing DOC register writes to target wrong oscillators. This explained tones not stopping, sounds not playing, and strange audio during game play.
+- Ring buffer: Increased from 1024 to 4096 entries to prevent overflow during heavy bus traffic.
+- Diagnostics: Added `s_glu_read_auto_inc` and `s_read_packet_count` counters to `stats` output.
+- FPGA serialization: Verified zero packet loss via `fpgastats` (34,952/34,952, 0 dropped, overwrite flag clear). Counters wired to SPI regs 11-15.
+- ES5503 write/generate race: FIXED — `g_es5503->write()` was unprotected by mutex while I2S task's `update_stream()` reads/writes back `pOsc->control`. Fix: mutex now wraps all DOC register writes (50ms timeout), with MAME-style stream update in same critical section. Diagnostic counters (`s_mutex_ok_count`, `s_mutex_fail_count`) added to `stats` output.
+- ES5503 key-on timing mismatch: FOUND — MAME's key-on check (halt=1→halt=0 transition) fails when our shadow hasn't halted yet due to clock domain mismatch (ESP32 micros() vs IIgs crystal). Fix: always reset accumulator when halt=0 is written, since IIgs Sound Manager pattern is always: program note → write control with halt=0.
 
 ## Next Actions
 
+- [ ] **CRITICAL**: Test both fixes (mutex + key-on timing) with games — verify sounds start/stop correctly, tones end properly, no dropped notes.
 - [ ] Optional: Add de‑noised VSYNC cadence metric and warn if deviates >±10% from target (409) in VSYNC‑EOF.
 - [ ] Optional: Add a test preset to temporarily switch to length‑EOF for canonical runs (pretty EOF stats) and switch back to VSYNC‑EOF for normal operation.
 - [ ] Document field checklist for verifying capture (expected stats, CLI snippets) in the firmware README (linked below).

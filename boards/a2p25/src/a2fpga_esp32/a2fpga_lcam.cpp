@@ -171,7 +171,7 @@ static int detect_stream_offset(const uint8_t* buf, uint32_t len) {
 static const uint32_t BUFFER_TIMEOUT_US = 1000; // Timeout for partial buffers (1ms)
 
 // ---------- Lock-free SPSC ring (for processed packets) ----------
-static const uint32_t RB_SIZE = 1024;      // power of two
+static const uint32_t RB_SIZE = 4096;      // power of two (was 1024, increased for game bus traffic)
 static uint32_t       rb_data[RB_SIZE];
 static volatile uint32_t rb_head = 0;      // producer writes
 static volatile uint32_t rb_tail = 0;      // consumer writes

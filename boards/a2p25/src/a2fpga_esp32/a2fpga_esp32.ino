@@ -682,8 +682,12 @@ static uint8_t s_prev_control[32] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0
 // Bus packet statistics (global for reset)
 static int s_total_packet_count = 0;
 static int s_write_packet_count = 0;
+static int s_read_packet_count = 0;
 static int s_es5503_packet_count = 0;      // Packets in ES5503 range
 static int s_corrupted_packet_count = 0;   // Packets outside ES5503 range (excluding heartbeat)
+static uint32_t s_glu_read_auto_inc = 0;   // GLU address auto-increments triggered by reads
+static uint32_t s_mutex_ok_count = 0;      // DOC writes that acquired mutex
+static uint32_t s_mutex_fail_count = 0;    // DOC writes that hit fallback (unprotected)
 static uint32_t s_last_packet_time_us = 0; // For timing analysis
 static uint32_t s_total_packet_time_us = 0;
 static uint32_t s_max_packet_gap_us = 0;
@@ -767,14 +771,22 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
       // Write to DOC register (low byte of address pointer is register number)
       uint8_t reg = s_glu.address_ptr & 0xFF;
 
-      // Track control register writes (0xA0-0xBF) for key-on detection
-      // MAME-style: generate audio UP TO NOW before applying control changes
-      // This ensures we capture the audio state before halt/start transitions
-      if (reg >= 0xA0 && reg <= 0xBF) {
-        // Generate audio before control register change (MAME-style sync)
-        // Use non-blocking version to avoid starving I2S task
-        es5503_stream_update_nonblocking();
+      // CRITICAL: All g_es5503->write() calls MUST be protected by the ES5503
+      // mutex. Without this, update_stream() in the I2S task can read
+      // pOsc->control into a local 'ctrl' variable, then we write a new value
+      // via g_es5503->write(), then update_stream() writes back its stale 'ctrl'
+      // — overwriting our change. This causes:
+      //   - Un-halts overwritten → sounds don't play
+      //   - Halts overwritten → tones don't stop
+      //
+      // For control registers (0xA0-0xBF) and E1, we also do the MAME-style
+      // stream update inside the same critical section so the audio state is
+      // captured BEFORE the register change, atomically.
 
+      bool needs_sync = (reg >= 0xA0 && reg <= 0xBF) || (reg == 0xE1);
+
+      // Track key-on events (outside mutex - just bookkeeping)
+      if (reg >= 0xA0 && reg <= 0xBF) {
         int osc = reg & 0x1F;
         uint8_t prev = s_prev_control[osc];
         bool prev_halted = (prev & 0x01) != 0;
@@ -791,12 +803,53 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
         }
         s_prev_control[osc] = data;
       }
-      // Also sync before oscillator enable register changes (affects timing)
-      else if (reg == 0xE1) {
-        es5503_stream_update_nonblocking();
+
+      // Acquire mutex: stream update (if needed) + write are atomic.
+      // Use generous timeout (50ms). The I2S task holds the mutex for ~1ms.
+      // If we can't get it in 50ms, something is very wrong, but we still
+      // apply the write rather than permanently desyncing the shadow.
+      if (s_es5503_mutex && xSemaphoreTake(s_es5503_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (needs_sync) {
+          es5503_stream_update_locked();
+        }
+
+        // Targeted force-halt for clock domain mismatch compensation.
+        // Problem: MAME's key-on check (halt=1→halt=0) requires the shadow
+        // oscillator to have halted before the restart write arrives. Our
+        // shadow may lag due to ESP32/IIgs clock domain mismatch, so a
+        // ONESHOT or SWAP oscillator that halted on the real chip may still
+        // show halt=0 in our shadow → MAME check misses the key-on.
+        // Fix: for ONESHOT/SWAP modes, if both old and new have halt=0,
+        // force the halt bit so the MAME check triggers. This is safe
+        // because these modes halt at end-of-wavetable by design — if the
+        // IIgs ISR is writing halt=0, the real chip already halted.
+        // FREE-RUN and SYNC modes loop and are never force-halted.
+        if (reg >= 0xA0 && reg <= 0xBF && !(data & 1)) {
+          int osc = reg & 0x1F;
+          uint8_t cur_ctrl = g_es5503->get_osc_control(osc);
+          if (!(cur_ctrl & 1)) {
+            // Both shadow and new data have halt=0 — MAME check will miss this.
+            int mode = (cur_ctrl >> 1) & 3;
+            if (mode == 1 || mode == 3) {  // ONESHOT or SWAP
+              g_es5503->force_osc_halt(osc);
+              if (s_es5503_mon) {
+                Serial.printf("[KEY-FIX] Osc %d force-halt (mode=%s, shadow lagged)\n",
+                              osc, mode == 1 ? "ONCE" : "SWAP");
+              }
+            }
+          }
+        }
+
+        g_es5503->write(reg, data);
+        xSemaphoreGive(s_es5503_mutex);
+        s_mutex_ok_count++;
+      } else {
+        // Mutex unavailable after 50ms — still apply the write. A brief race
+        // is better than permanently losing a register write.
+        g_es5503->write(reg, data);
+        s_mutex_fail_count++;
       }
 
-      g_es5503->write(reg, data);
       s_es5503_reg_writes++;
       s_es_last[s_es_last_idx % ES_LOG_N] = {address, data, true, reg};
       s_es_last_idx++;
@@ -911,9 +964,29 @@ void process_bus_packet(uint32_t packet) {
     // }
   }
   
-  // Skip reset packets and read operations
-  if (reset_indicator || rw_n) return;
-  
+  // Skip reset packets
+  if (reset_indicator) return;
+
+  // Handle reads that affect GLU state before skipping
+  // CRITICAL: The IIgs GLU auto-increments the address pointer on BOTH reads
+  // and writes to $C03D. Without tracking reads, our address pointer desyncs
+  // from the real GLU, causing subsequent DOC register writes to target the
+  // wrong oscillator. This explains: tones that don't stop (halt goes to wrong
+  // osc), sounds that don't play (start goes to wrong osc), strange audio.
+  if (rw_n) {
+    if (address == 0xC03D && s_glu.auto_increment) {
+      s_glu.address_ptr++;
+      s_glu_read_auto_inc++;
+      if (s_es5503_debug) {
+        uint8_t reg = s_glu.address_ptr - 1;  // Show the register that was read
+        Serial.printf("GLU Read $C03D auto-inc: was=0x%02X now ptr=0x%04X\n",
+                      reg, s_glu.address_ptr);
+      }
+    }
+    s_read_packet_count++;
+    return;
+  }
+
   // Check if this is an ES5503 write
   if (address >= 0xC03C && address <= 0xC03F) {
     // Mirror the FPGA-side ES write counter breakdown
@@ -1214,6 +1287,45 @@ static void cmd_process(String cmd) {
       Serial.printf("  R diff:   0x%04X (bits: ", diff_r);
       for (int i = 15; i >= 0; i--) Serial.print((diff_r >> i) & 1);
       Serial.println(")");
+    }
+  } else if (cmd == "fpgastats") {
+    // Read FPGA diagnostic counters via SPI registers 11-15
+    // reg11: es5503_access_counter high byte (all bus events detected)
+    // reg12: es5503_access_counter low byte
+    // reg13: es5503_tx_counter high byte (packets transmitted)
+    // reg14: es5503_tx_counter low byte
+    // reg15: {7'b0, cam_overwrite_flag}
+    spi_link_t link;
+    esp_err_t err = spi_link_init(&link, SPI2_HOST, PIN_SCLK, PIN_MOSI, PIN_MISO, SPI_HZ);
+    if (err != ESP_OK) {
+      Serial.printf("fpgastats: SPI init error: %s\n", esp_err_to_name(err));
+      return;
+    }
+
+    uint8_t reg11, reg12, reg13, reg14, reg15, st;
+    spi_reg_read_status(&link, 11, &reg11, &st);
+    spi_reg_read_status(&link, 12, &reg12, &st);
+    spi_reg_read_status(&link, 13, &reg13, &st);
+    spi_reg_read_status(&link, 14, &reg14, &st);
+    spi_reg_read_status(&link, 15, &reg15, &st);
+    spi_link_cleanup(&link);
+
+    uint16_t access_count = ((uint16_t)reg11 << 8) | reg12;
+    uint16_t tx_count = ((uint16_t)reg13 << 8) | reg14;
+    bool overwrite = (reg15 & 0x01) != 0;
+    int16_t dropped = (int16_t)access_count - (int16_t)tx_count;
+
+    Serial.println("FPGA ES5503 Serialization Counters:");
+    Serial.printf("  Bus events detected:   %u\n", access_count);
+    Serial.printf("  Packets transmitted:   %u\n", tx_count);
+    Serial.printf("  Dropped (detected-tx): %d%s\n", dropped,
+                  (dropped > 0) ? " *** PACKET LOSS ***" : "");
+    Serial.printf("  CAM overwrite flag:    %s\n",
+                  overwrite ? "SET (serializer overflow detected!)" : "clear");
+    if (dropped > 0 || overwrite) {
+      Serial.println("  >>> FPGA is dropping packets! Consider adding a FIFO to a2bus_stream.");
+    } else {
+      Serial.println("  >>> No FPGA-level packet loss detected.");
     }
   } else if (cmd == "es5503start") {
     esp_err_t err = es5503_start();
@@ -1520,9 +1632,13 @@ static void cmd_process(String cmd) {
     Serial.printf("Bus packet statistics:\n");
     Serial.printf("  Total packets: %d\n", s_total_packet_count);
     Serial.printf("  Write packets: %d\n", s_write_packet_count);
-    Serial.printf("  Read packets: %d\n", s_total_packet_count - s_write_packet_count);
+    Serial.printf("  Read packets: %d\n", s_read_packet_count);
     Serial.printf("  ES5503 packets: %d (correct)\n", s_es5503_packet_count);
     Serial.printf("  Corrupted packets: %d (wrong address)\n", s_corrupted_packet_count);
+    Serial.printf("  GLU read auto-inc: %lu (addr ptr bumps from $C03D reads)\n", (unsigned long)s_glu_read_auto_inc);
+    Serial.printf("  DOC write mutex: %lu ok, %lu failed%s\n",
+                  (unsigned long)s_mutex_ok_count, (unsigned long)s_mutex_fail_count,
+                  s_mutex_fail_count > 0 ? " *** RACE RISK ***" : "");
     if (s_total_packet_count > 0) {
       Serial.printf("  Address range: $%04X-$%04X\n", s_min_addr, s_max_addr);
       Serial.printf("  Corruption rate: %.1f%%\n", (100.0 * s_corrupted_packet_count) / s_total_packet_count);
@@ -1560,8 +1676,12 @@ static void cmd_process(String cmd) {
     // Reset bus packet statistics
     s_total_packet_count = 0;
     s_write_packet_count = 0;
+    s_read_packet_count = 0;
     s_es5503_packet_count = 0;
     s_corrupted_packet_count = 0;
+    s_glu_read_auto_inc = 0;
+    s_mutex_ok_count = 0;
+    s_mutex_fail_count = 0;
     s_min_addr = 0xFFFF;
     s_max_addr = 0x0000;
     s_last_packet_time_us = 0;
@@ -2043,7 +2163,7 @@ static void cmd_process(String cmd) {
     Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
     Serial.println("Use '+++' to enter CLI mode again.");
   } else if (cmd == "help") {
-    Serial.println("Commands: lcam | stop | status | spitest | spireg | spir | spiw | i2sstart | i2sstop | i2stest | i2sstatus | prebuffer | es5503start | es5503stop | es5503wave | audiostop | audiostart | es5503test | es5503reg | es5503debug | es5503mon | es5503info | es5503mem | fulltest | meminfo | wifi | radio | exit | we N");
+    Serial.println("Commands: lcam | stop | status | fpgastats | spitest | spireg | spir | spiw | i2sstart | i2sstop | i2stest | i2sstatus | prebuffer | es5503start | es5503stop | es5503wave | audiostop | audiostart | es5503test | es5503reg | es5503debug | es5503mon | es5503info | es5503mem | fulltest | meminfo | wifi | radio | exit | we N");
     Serial.println("  spireg <reg> [val]        - read/write 1-byte register (0..126)");
     Serial.println("  spir <space> <addr> <len> [inc=1] - read bytes");
     Serial.println("  spiw <space> <addr> <inc|len> <b0> [b1 ...] - write bytes");
@@ -2052,6 +2172,7 @@ static void cmd_process(String cmd) {
     Serial.println("  i2stest                   - send test pattern L=0xCAFE R=0xBABE");
     Serial.println("  i2scheck                  - verify FPGA I2S reception via SPI readback");
     Serial.println("  i2sstatus                 - show I2S status and pin configuration");
+    Serial.println("  fpgastats                 - read FPGA ES5503 serialization counters (detect packet loss)");
     Serial.println("  prebuffer <ms>            - set audio prebuffer latency (5-40ms, default 15)");
     Serial.println("  es5503start               - initialize and start ES5503 audio generation");
     Serial.println("  es5503stop                - stop ES5503 audio generation");

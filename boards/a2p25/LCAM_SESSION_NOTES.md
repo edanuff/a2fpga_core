@@ -632,8 +632,230 @@ Audio Quality Test Results
 - captured_16.wav: Better with 1-pole LPF, but 2748 large jumps remain (insufficient rolloff)
 - captured_17.wav: Pending test with cubic interpolation + biquad LPF
 
+---
+
+GLU Address Pointer Desync Fix (Jan 2026)
+
+Problem: Sporadic Register Write Misdirection
+User reported: sound not playing, tones not ending, strange audio during games.
+Hypothesis: sporadic register write drops.
+
+Investigation
+Traced the full pipeline from LCAM packet to ES5503 write. Found three issues:
+
+**Issue 1 (CRITICAL): GLU Address Pointer Desync from Reads**
+
+The Apple IIgs Sound GLU auto-increments the address pointer on BOTH reads
+and writes to $C03D. Our code skipped ALL read packets:
+```cpp
+// OLD (broken):
+if (reset_indicator || rw_n) return;  // All reads skipped entirely
+```
+
+When IIgs software reads $C03D with auto-increment enabled (very common during
+interrupt handling - reading interrupt status at DOC register $E0), the real GLU
+increments the pointer but our ESP32 mirror doesn't. All subsequent writes via
+$C03D then target the WRONG DOC register.
+
+Example sequence (IIgs IRQ handler):
+1. Write $C03E/$C03F: set address to $E0 (interrupt status register)
+2. Read $C03D: read interrupt status → real GLU increments to $E1
+3. Our mirror: still at $E0 (didn't track read)
+4. Write $C03D: intended for $E1 but goes to $E0 → WRONG REGISTER
+
+This directly explains:
+- **Tones that don't stop**: halt command (control reg) goes to wrong oscillator
+- **Sounds that don't play**: start command goes to wrong oscillator
+- **Strange audio**: frequency/volume written to wrong oscillator
+
+Fix:
+```cpp
+// NEW (fixed):
+if (reset_indicator) return;
+
+if (rw_n) {
+    // Track auto-increment on $C03D reads (IIgs GLU increments on both R and W)
+    if (address == 0xC03D && s_glu.auto_increment) {
+        s_glu.address_ptr++;
+        s_glu_read_auto_inc++;
+    }
+    return;
+}
+```
+
+**Issue 2: Ring Buffer Overflow**
+LCAM ring buffer was 1024 entries. During game play, heavy bus traffic (video,
+keyboard, disk I/O, plus ES5503) could overflow the buffer, dropping packets.
+Increased to 4096 entries (16KB, from 4KB). RAM usage: 32% → 35%.
+
+**Issue 3: Consumer Task Latency**
+Consumer calls `vTaskDelay(1)` when buffer empty, creating 1ms gaps. Could
+interact with Issue 2 during bursty traffic. Lower priority fix for now.
+
+Diagnostics Added
+- `s_glu_read_auto_inc` counter: tracks how often reads triggered auto-increment
+- `s_read_packet_count` counter: tracks total read packets processed
+- Both shown in `stats` output and cleared by `resetstats`
+
+---
+
+FPGA Serialization Pipeline Analysis (2026-01-28)
+
+**Problem**: GLU desync fix improved matters but sporadic register write drops
+still occur during game play. Investigated whether the FPGA serializer itself
+could be dropping packets before they reach the ESP32.
+
+**Pipeline**: IIgs bus → `a2bus_stream.sv` (capture) → `cam_serializer.sv`
+(10-nibble packets) → ESP32 LCD_CAM DMA → ring buffer → packet_task
+
+**Critical Finding: 1-Deep Packet Buffer in a2bus_stream.sv**
+
+The capture logic at line 129:
+```verilog
+else if (capture_trigger_w && !packet_valid_r) begin
+    packet_data_r <= packet_data_w;
+    packet_valid_r <= 1'b1;
+end
+```
+If `packet_valid_r` is already high (previous packet not consumed by serializer),
+a new bus event is **silently dropped**. No FIFO — single register.
+
+**When drops occur — Heartbeat interference**:
+- Serializer takes ~32 FPGA clocks per 10-nibble packet
+- IIgs bus cycle at 1 MHz ≈ 50 FPGA clocks (at 50 MHz)
+- If serializer is mid-heartbeat ($C0FF) when ES5503 event arrives:
+  1. Event captured into packet_data_r, packet_valid_r = 1
+  2. Serializer busy with heartbeat, can't consume
+  3. Second ES5503 event arrives → DROPPED (gate is !packet_valid_r)
+- cam_serializer also has 1-deep pending queue (last-write-wins overwrite)
+
+**Built-in FPGA Counters**:
+| Counter | What it counts |
+|---|---|
+| `es5503_access_counter` | ALL bus events at address-decode (before gate) |
+| `es5503_counter` | Successfully transmitted packets only |
+| `cam_overwrite_flag` | Sticky: serializer pending queue overwritten |
+| `packets_dropped_counter` | Cycles where packet_valid_r & cam_busy |
+
+If `es5503_access_counter > es5503_counter`, packets are being dropped at FPGA level.
+
+**Fix Applied**: Wired FPGA counters to SPI registers 11-15 so ESP32 can read them:
+- reg11/12: es5503_access_counter (16-bit, all events detected)
+- reg13/14: es5503_tx_counter (16-bit, packets transmitted)
+- reg15: {7'b0, cam_overwrite_flag}
+
+Added `fpgastats` CLI command to read and display these values.
+
+**Result**: `fpgastats` confirmed **zero FPGA-level packet loss** (34,952 detected =
+34,952 transmitted, 0 dropped, overwrite flag clear). FPGA serializer is not the
+cause of the audio issues.
+
+---
+
+ES5503 Write/Generate Race Condition (2026-01-28)
+
+**Root Cause Found**: `g_es5503->write()` in `handle_es5503_write()` was called
+WITHOUT holding `s_es5503_mutex`, while the I2S task holds the mutex during
+`generate_audio()` → `update_stream()`.
+
+**The Race**: `update_stream()` copies `pOsc->control` into a local `ctrl` variable
+at the start of generation, then writes it back at the end (`pOsc->control = ctrl`).
+If `g_es5503->write()` modifies `pOsc->control` in between (from the packet task),
+the writeback OVERWRITES the change:
+
+1. I2S task reads `ctrl = pOsc->control` (e.g., halted=1)
+2. Packet task calls `g_es5503->write(0xA0+osc, data)` — clears halt, resets accumulator
+3. I2S task writes back `pOsc->control = ctrl` — **overwrites the un-halt!**
+
+Result: oscillator stays halted → **sound doesn't play**
+
+Reverse: un-halt can overwrite a halt → **tone that doesn't end**
+
+This exactly matches the user's symptoms: sporadic sounds not playing, tones that
+don't stop, strange audio during games.
+
+**Fix**: Wrap `g_es5503->write()` in the same `s_es5503_mutex` that protects
+`generate_audio()`. For control registers (0xA0-0xBF) and E1, the MAME-style
+stream update and the register write are now inside the same critical section,
+making the operation atomic from the I2S task's perspective.
+
+```cpp
+if (s_es5503_mutex && xSemaphoreTake(s_es5503_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+    if (needs_sync) es5503_stream_update_locked();
+    g_es5503->write(reg, data);
+    xSemaphoreGive(s_es5503_mutex);
+} else {
+    // Fallback: unprotected write (brief race < permanent desync from drop)
+    g_es5503->write(reg, data);
+}
+```
+
+The 5ms timeout ensures we don't block the packet consumer for too long. If the
+mutex is unavailable (I2S task is mid-generation), we still apply the write rather
+than losing it — a brief race is better than permanently desyncing the shadow ES5503.
+
+Wave RAM writes (`wave_mem[addr] = data`) are not affected — they don't go through
+`g_es5503->write()` and single-byte writes are atomic on ESP32.
+
+Mutex timeout increased from 5ms to 50ms (I2S task holds mutex ~1ms). Added
+`s_mutex_ok_count` and `s_mutex_fail_count` diagnostic counters to `stats` output.
+
+Testing showed: race condition fix "significantly improved" but didn't fully resolve.
+This confirmed a SECOND independent bug exists.
+
+---
+
+Key-On Timing Mismatch Fix (2026-01-28)
+
+**Root Cause**: The MAME key-on check only resets the accumulator on a halt=1 → halt=0
+transition. This works in MAME because `m_stream->update()` is cycle-accurate to the
+emulated CPU — the oscillator state always matches the real chip at write time.
+
+Our shadow can't be cycle-accurate (ESP32 `micros()` vs IIgs crystal clock — different
+clock domains). So we may not have halted an oscillator yet when the real chip did.
+
+**The Failure Scenario**:
+1. Real ES5503 osc N reaches end of wavetable → halts (halt=1) → IRQ
+2. IIgs ISR programs new note (freq, wavetable, vol), writes control with halt=0
+3. Our shadow hasn't generated enough samples → osc N still running (halt=0)
+4. Control write arrives: old halt=0, new halt=0 → MAME check MISSES key-on
+5. No accumulator reset → osc continues from stale position
+6. Osc eventually reaches end of wavetable → halts on its own
+7. IIgs won't send another restart → **note dropped permanently**
+
+The reverse causes stuck tones: our shadow halts before the real chip, the IIgs
+writes to a "running" oscillator (from the real chip's perspective), but our shadow
+sees halt=1 → halt=0 and does an extra restart that keeps the oscillator going.
+
+**Fix** (`es5503.cpp` line 249): Always reset accumulator when halt=0 is written:
+```cpp
+// Before (MAME original):
+if ((m_oscillators[osc].control & 1) && (!(data&1)))
+    m_oscillators[osc].accumulator = 0;
+
+// After (shadow-safe):
+if (!(data & 1))
+    m_oscillators[osc].accumulator = 0;
+```
+
+The IIgs Sound Manager pattern is always "program → write control (halt=0)". A halt=0
+write always intends a fresh start. The only cost: if IIgs software writes control with
+halt=0 to change mode on a running oscillator without intending a restart, we'd get
+an unnecessary phase reset. This is rare in practice and produces only a brief click.
+
+**Combined Fix Summary (both bugs)**:
+1. **Mutex race** (es5503_stream_update + write atomic): prevents `update_stream()` from
+   overwriting bus-initiated control changes via its `pOsc->control = ctrl` writeback
+2. **Key-on timing** (always-reset accumulator): compensates for clock domain mismatch
+   that prevents our shadow from reaching halt points at the same time as the real chip
+
+---
+
 Remaining Work
+- [ ] Test combined fixes with games (dropped notes + stuck tones should be resolved)
+- [ ] Check `stats` output: `DOC write mutex` should show 0 failures
 - [ ] Test cubic + biquad combination (captured_17.wav)
-- [ ] Verify zero underruns maintained with cubic interpolation CPU load
+- [ ] Verify zero underruns maintained
 - [ ] Test with multiple IIgs audio programs
+- [ ] Consider consumer task notification wakeup (replace vTaskDelay with ulTaskNotifyTake)
 - [ ] Document final CLI commands in firmware README

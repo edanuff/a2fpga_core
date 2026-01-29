@@ -245,7 +245,10 @@ void ES5503::write(uint16_t offset, uint8_t data)
                 break;
 
             case 0xa0:  // oscillator control
-                // key on?
+                // MAME key-on detection: reset accumulator on halt=1 → halt=0 transition.
+                // This is cycle-accurate in MAME. For our shadow, the firmware applies
+                // a targeted force-halt for ONESHOT/SWAP modes before calling write()
+                // to compensate for clock domain mismatch (see handle_es5503_write).
                 if ((m_oscillators[osc].control & 1) && (!(data&1)))
                 {
                     m_oscillators[osc].accumulator = 0;

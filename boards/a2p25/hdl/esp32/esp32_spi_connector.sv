@@ -11,7 +11,11 @@ module esp32_spi_connector #(
   output wire miso,
   // I2S debug inputs (directly exposed via registers)
   input  wire signed [15:0] i2s_sample_l,
-  input  wire signed [15:0] i2s_sample_r
+  input  wire signed [15:0] i2s_sample_r,
+  // FPGA diagnostic counters (read-only via reg11-reg15)
+  input  wire [15:0] es5503_access_counter,  // All ES5503 bus events detected
+  input  wire [15:0] es5503_tx_counter,      // ES5503 packets transmitted
+  input  wire        cam_overwrite_flag       // Sticky: serializer overwrite detected
 );
 
   // Registers (16 x 8-bit)
@@ -53,6 +57,18 @@ module esp32_spi_connector #(
   wire [7:0] i2s_reg9 = i2s_sample_r[7:0];
   wire [7:0] i2s_reg10 = {i2s_match_count[6:0], i2s_locked};
 
+  // FPGA diagnostic registers (read-only)
+  // reg11: es5503_access_counter high byte (all bus events detected)
+  // reg12: es5503_access_counter low byte
+  // reg13: es5503_tx_counter high byte (packets transmitted)
+  // reg14: es5503_tx_counter low byte
+  // reg15: {7'b0, cam_overwrite_flag}
+  wire [7:0] diag_reg11 = es5503_access_counter[15:8];
+  wire [7:0] diag_reg12 = es5503_access_counter[7:0];
+  wire [7:0] diag_reg13 = es5503_tx_counter[15:8];
+  wire [7:0] diag_reg14 = es5503_tx_counter[7:0];
+  wire [7:0] diag_reg15 = {7'b0, cam_overwrite_flag};
+
   // 256B memory (SPACE 0), synchronous read (1-cycle latency)
   reg [7:0] mem [0:255];
   reg [7:0] mem_rd_data_q; reg mem_rd_valid_q;
@@ -62,13 +78,13 @@ module esp32_spi_connector #(
   wire        mem_wr_en; wire [2:0] mem_space; wire [23:0] mem_wr_addr; wire [7:0] mem_wr_data;
   wire        mem_rd_req; wire [2:0] mem_rd_space; wire [23:0] mem_rd_addr; wire mem_rd_valid; wire [7:0] mem_rd_data;
 
-  // Register read mux (regs 6-10 are I2S debug, read-only)
+  // Register read mux (regs 6-10 are I2S debug, regs 11-15 are FPGA diagnostics, all read-only)
   always @* begin
     case (reg_idx[3:0])
       4'h0: reg_rdata = reg0;  4'h1: reg_rdata = reg1;   4'h2: reg_rdata = reg2;   4'h3: reg_rdata = reg3;
       4'h4: reg_rdata = reg4;  4'h5: reg_rdata = reg5;   4'h6: reg_rdata = i2s_reg6;  4'h7: reg_rdata = i2s_reg7;
-      4'h8: reg_rdata = i2s_reg8;  4'h9: reg_rdata = i2s_reg9;   4'hA: reg_rdata = i2s_reg10;  4'hB: reg_rdata = reg11;
-      4'hC: reg_rdata = reg12; 4'hD: reg_rdata = reg13;  4'hE: reg_rdata = reg14;  default: reg_rdata = reg15;
+      4'h8: reg_rdata = i2s_reg8;  4'h9: reg_rdata = i2s_reg9;   4'hA: reg_rdata = i2s_reg10;  4'hB: reg_rdata = diag_reg11;
+      4'hC: reg_rdata = diag_reg12; 4'hD: reg_rdata = diag_reg13;  4'hE: reg_rdata = diag_reg14;  default: reg_rdata = diag_reg15;
     endcase
   end
 
