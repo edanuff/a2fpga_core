@@ -250,6 +250,14 @@ void ES5503::write(uint16_t offset, uint8_t data)
                 {
                     m_oscillators[osc].accumulator = 0;
                 }
+
+                // The Ensoniq data sheet says that if the low bit of the mode is set,
+                // then halting either internally or from the CPU will reset the oscillator.
+                // In practice, this means in swap mode that we will also do the swap.
+                if (!(m_oscillators[osc].control & 1) && ((data & 1)) && ((data >> 1) & 1))
+                {
+                    halt_osc(osc, 0, &m_oscillators[osc].accumulator, resshifts[m_oscillators[osc].resolution]);
+                }
                 m_oscillators[osc].control = data;
                 break;
 
@@ -513,8 +521,18 @@ void ES5503::halt_osc(int onum, int type, uint32_t *accumulator, int resshift)
     }
     else    // preserve the relative phase of the oscillator when looping
     {
-        uint16_t wtsize = pOsc->wtsize - 1;
-        *accumulator -= (wtsize << resshift);
+        const uint16_t wtsize = pOsc->wtsize;
+        // For the ideal case, the accumulator is greater than or equal to the wave table size.
+        // Unfortunately degenerate cases can occur on this chip (especially with SoundSmith on
+        // the IIgs), so in those cases just zero the integer part of the accumulator.
+        if ((*accumulator >> resshift) < wtsize)
+        {
+            *accumulator -= ((*accumulator >> resshift) << resshift);
+        }
+        else    // Ideal case.  Just subtract the wave table size from the integer part.
+        {
+            *accumulator -= (wtsize << resshift);
+        }
     }
 
     // if we're in swap mode, start the partner
