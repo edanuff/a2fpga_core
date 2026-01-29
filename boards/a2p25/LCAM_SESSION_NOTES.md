@@ -183,10 +183,13 @@ Problem
 - FPGA I2S output rate: **48,000 Hz**
 - Without conversion, audio plays 1.82x too fast ("chipmunk" effect)
 
-Solution: Zero-Order Hold Upsampling
-- Generate 281 ES5503 samples per 512-sample I2S buffer (281/26320 ≈ 512/48000 ≈ 10.67ms)
-- Upsample via sample duplication: output[i] = es5503[i * 281 / 512]
-- Each ES5503 sample is repeated ~1.82 times on average
+Solution (evolution):
+1. **Zero-Order Hold** (initial): Generate 281 ES5503 samples per 512-sample I2S buffer,
+   duplicate each ~1.82x. Correct pitch but tinny distortion from staircased waveform.
+2. **Linear interpolation**: 8.8 fixed-point interpolation between adjacent samples.
+   Better but angular "jags" at sample boundaries.
+3. **Catmull-Rom cubic + biquad LPF** (current): C1-continuous curves through sample
+   points eliminate jags at source. 2-pole Butterworth at 10kHz removes residual aliases.
 
 Key Learnings
 1. **Oscillator count default**: IIgs writes register 0xE1 at boot to set 32 oscillators, but this
@@ -480,6 +483,102 @@ The ES5503 emulation timing is now correct.
 
 ---
 
+Clock Drift Fix: Direct I2S Generation (Jan 2026)
+
+Problem: Steady Buffer Drain
+After implementing the MAME-style stream update, the ring buffer steadily drained
+~0.7 samples per I2S cycle, causing underruns every ~2.7 seconds:
+```
+ES5503: buf=1535/2048 underruns=0
+ES5503: buf=1520/2048 underruns=0
+ES5503: buf=1505/2048 underruns=0
+... (steadily draining)
+Audio underrun! avail=506, total underruns=1
+```
+
+Root Cause: Clock Domain Mismatch
+The ring buffer was filled based on ESP32 `micros()` (CPU clock), but drained by I2S
+hardware running at the FPGA's clock rate. These two clocks don't track perfectly.
+Integer truncation in `(elapsed_us * ES5503_RATE) / 1000000` lost ~0.83 samples per cycle.
+
+Attempted Fix: Fractional Accumulator
+Added `s_es5503_frac_acc` to carry sub-sample remainders across cycles. This slowed
+the drain (20 cycles between underruns vs 9) but couldn't eliminate it because the
+fundamental clock domain mismatch persists regardless of accumulator precision.
+
+Solution: Direct I2S Generation
+Redesigned the I2S task to generate audio directly instead of relying on the time-based
+ring buffer:
+
+1. **Ring buffer now only for write triggers**: Pre-write audio from MAME-style sync
+   goes into the ring buffer (small amounts, microseconds of audio)
+2. **I2S task generates directly**: Each iteration produces exactly AUDIO_BUFFER_FRAMES
+   (512) output samples. First drains ring buffer, then generates remainder directly.
+3. **No clock drift**: I2S hardware pulls buffers at its own rate. We generate exactly
+   what's needed per buffer, with a fractional accumulator for the ES5503→output ratio.
+
+Implementation:
+```
+I2S task iteration:
+1. Drain ring buffer → stereo_buffer[0..from_ring]
+2. remaining = 512 - from_ring
+3. es5503_needed = remaining * 26320 / 44100 (with fractional accumulator)
+4. generate_audio(es5503_temp, es5503_needed)
+5. Upsample es5503_temp → stereo_buffer[from_ring..512]
+6. Write 512 frames to I2S (always exact, never under/over)
+```
+
+Result: Zero underruns. Buffer drain eliminated.
+
+---
+
+Audio Quality: Interpolation & Filtering (Jan 2026)
+
+Problem: Tinny Distortion
+After achieving zero underruns, captured audio had tinny distortion with visible
+"jags" in the waveform at ES5503 sample boundaries (every ~1.82 output samples).
+
+Evolution of fixes:
+1. **Zero-order hold** (initial): Sample duplication creates staircased waveform.
+   Sounds very tinny - high-frequency energy from rectangular steps.
+2. **Linear interpolation**: Connects samples with straight lines. Much better,
+   but creates angular "corners" at each sample boundary. Still tinny.
+3. **Linear + 1-pole IIR LPF** (alpha=0.8, ~12.3kHz cutoff): Smoothed slightly,
+   but only 6dB/octave rolloff - insufficient to remove the angular artifacts.
+   captured_16.wav analysis showed 2748 large jumps, mean run length 1.16
+   (expected 1.82 from upsampling ratio).
+
+Solution: Cubic Interpolation + Biquad LPF
+
+**Catmull-Rom Cubic Interpolation** (replaces linear):
+- Fits C1-continuous curves through sample points (smooth first derivative)
+- Uses 4 neighboring samples (ym1, y0, y1, y2) per output point
+- Horner's method with 8.8 fixed-point fractional position
+- Cross-chunk continuity via `s_ring_prev_sample` / `s_direct_prev_sample`
+- Eliminates angular transitions at source: no corners to filter out
+
+```cpp
+// Catmull-Rom: 0.5*(2*y0 + (-ym1+y1)*t + (2*ym1-5*y0+4*y1-y2)*t² + (-ym1+3*y0-3*y1+y2)*t³)
+int32_t r = c3;
+r = c2 + ((r * (int32_t)t) >> 8);
+r = c1 + ((r * (int32_t)t) >> 8);
+r = c0 + ((r * (int32_t)t) >> 8);
+r >>= 1;
+```
+
+**2-Pole Biquad LPF** (replaces 1-pole IIR):
+- 2nd-order Butterworth, fc=10kHz at 44.1kHz sample rate
+- 12dB/octave rolloff (vs 6dB for 1-pole) - double the alias rejection rate
+- ES5503 Nyquist is 13.16kHz; biquad provides ~6dB there, ~12dB at first image
+- Q14 fixed-point coefficients: b=[4101, 8201, 4101], a=[1, -2882, 2901]
+- Precomputed via bilinear transform of analog Butterworth prototype
+
+Applied to both audio paths:
+1. Ring buffer path (es5503_stream_update_locked) - write trigger audio
+2. Direct generation path (I2S task) - main audio output
+
+---
+
 Current ES5503 Audio Architecture (Jan 2026)
 
 ```
@@ -495,17 +594,18 @@ ESP32 LCD_CAM DMA
     ├── Control reg (0xA0-0xBF)? → es5503_stream_update_nonblocking()
     ├── Enable reg (0xE1)? → es5503_stream_update_nonblocking()
     └── Apply write to ES5503 emulator
-
-ES5503 Emulator (es5503.cpp)
-    │ generates at 26,320 Hz native rate
+                                          ┌──────────────────────┐
+ES5503 Emulator (es5503.cpp)              │ Write trigger path:  │
+    │ generates at 26,320 Hz native rate  │ Pre-write audio →    │
+    ▼                                     │ ring buffer (small)  │
+Ring Buffer (2048 frames, 42ms capacity)  └──────────────────────┘
+    │ only for write-trigger audio
     ▼
-Ring Buffer (2048 frames, 42ms capacity)
-    │ prebuffer: 720 frames (15ms latency)
-    ▼
-I2S Task
-    ├── es5503_stream_update() - timer trigger, 10ms mutex wait
-    ├── Read 512 frames from ring buffer
-    └── Zero-order hold upsample 26kHz → 48kHz
+I2S Task (direct generation)
+    ├── Step 1: Drain ring buffer (pre-write audio, typically 0-few frames)
+    ├── Step 2: Generate remaining 512 frames directly (no clock drift)
+    ├── Catmull-Rom cubic interpolation (26kHz → 44.1kHz)
+    └── 2-pole Butterworth biquad LPF (fc=10kHz, 12dB/oct)
     │
     ▼
 I2S Slave TX to FPGA (48kHz, 16-bit stereo)
@@ -516,14 +616,24 @@ FPGA Audio DAC
 
 Key Parameters
 - ES5503 native rate: 26,320 Hz (7159090 / 8 / 34 for 32 oscillators)
-- I2S output rate: 48,000 Hz
-- Upsample ratio: 1.824x (zero-order hold)
-- Ring buffer: 2048 frames (42ms)
+- I2S output rate: 44,100 Hz (I2S_OUTPUT_RATE constant)
+- FPGA I2S clock: 48,000 Hz (slave mode, FPGA provides BCLK/LRCLK)
+- Upsample ratio: ~1.676x (44100/26320) with Catmull-Rom cubic interpolation
+- Anti-aliasing: 2-pole Butterworth biquad LPF, fc=10kHz, 12dB/octave
+- Ring buffer: 2048 frames (42ms) - now only for write-trigger audio
 - Prebuffer: 720 frames (15ms, adjustable 5-40ms)
 - I2S buffer: 512 frames per write (~10.67ms)
 - Mutex: I2S=10ms timeout, write trigger=non-blocking
+- Interpolation: Catmull-Rom with cross-chunk boundary bridging
+
+Audio Quality Test Results
+- captured_14.wav: Zero dropouts, visually matches source, slight tinny distortion (linear interp)
+- captured_15.wav: Zero underruns, correct pitch, some waveform jags (linear interp artifacts)
+- captured_16.wav: Better with 1-pole LPF, but 2748 large jumps remain (insufficient rolloff)
+- captured_17.wav: Pending test with cubic interpolation + biquad LPF
 
 Remaining Work
-- [ ] Verify zero underruns in extended playback
+- [ ] Test cubic + biquad combination (captured_17.wav)
+- [ ] Verify zero underruns maintained with cubic interpolation CPU load
 - [ ] Test with multiple IIgs audio programs
 - [ ] Document final CLI commands in firmware README

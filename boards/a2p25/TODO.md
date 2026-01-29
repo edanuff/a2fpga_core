@@ -10,6 +10,7 @@
 - [x] ES5503 audio bring‑up: generate sound on ESP32‑S3 and play via FPGA I2S
 - [x] ES5503 sample rate conversion: correct pitch (26,320 Hz → 48,000 Hz via zero-order hold)
 - [x] ES5503 audio gaps: MAME-style stream update on write + prebuffer ring buffer
+- [x] ES5503 audio quality: clock drift fix, cubic interpolation, biquad anti-aliasing
 
 ## Medium Priority
 
@@ -129,10 +130,30 @@ Remaining Issues
       in captured audio correspond to gaps in source material. Only one extra 9.3ms gap found.
       Audio is faithfully reproducing source content.
 
+- [x] Clock drift / buffer drain: Ring buffer steadily drained ~0.7 samples/cycle due to clock
+      domain mismatch between ESP32 micros() and FPGA I2S clock. Fractional accumulator slowed
+      drain but couldn't eliminate it. Fixed by redesigning I2S task to generate audio directly
+      (512 frames per iteration) instead of relying on time-based ring buffer. Ring buffer now
+      only used for write-trigger (MAME-style) audio. Result: zero underruns.
+
+- [x] Tinny distortion (ZOH → linear interpolation): Zero-order hold (sample duplication)
+      created staircased waveforms with high-frequency artifacts. Replaced with linear
+      interpolation using 8.8 fixed-point math. Improved but angular "jags" remained at
+      ES5503 sample boundaries (every ~1.82 output samples).
+
+- [x] Resampling jags (linear → cubic + biquad): Linear interpolation creates angular corners
+      at each ES5503 sample point. Analysis of captured_16.wav showed 2748 large jumps with
+      mean run length 1.16 (expected 1.82). Fixed with two improvements:
+      1. **Catmull-Rom cubic interpolation**: C1-continuous curves through sample points,
+         no angular transitions. Uses 4 neighboring samples with Horner's method in 8.8
+         fixed-point. Cross-chunk boundary bridging via static prev_sample variables.
+      2. **2-pole Butterworth biquad LPF** (fc=10kHz, 12dB/oct): Replaces 1-pole IIR
+         (alpha=0.8, 6dB/oct) with steeper rolloff. Q14 fixed-point coefficients.
+
 Nice‑to‑Haves
 - [ ] Add a test preset: `es5503preset demo` to load a simple patch/wave and play a reference pattern.
 
-## Current Status (2026‑01‑27)
+## Current Status (2026‑01‑28)
 
 - IIgs burst capture (32,768 writes to $C03D): PASS — Words received 32768, Corruption 0.0%, Ring drops 0, Address range $C03D–$C03D.
 - Default mode: VSYNC‑EOF with gated VSYNC every 409 packets in HDL; ESP32 sets `cam_rec_data_bytelen=4095` in VSYNC‑EOF and `CHUNK_BYTES=4090` in length‑EOF.
@@ -145,6 +166,8 @@ Nice‑to‑Haves
   - I2S task priority: uses 10ms mutex timeout, always gets to generate audio
   - Ring buffer (2048 frames, 15ms prebuffer) smooths output
   - Gap verification: captured audio gaps match source material gaps
+- Clock drift: RESOLVED — direct I2S generation (512 frames/iteration) eliminates clock domain mismatch. Zero underruns achieved.
+- Audio quality: Catmull-Rom cubic interpolation + 2-pole Butterworth biquad LPF (fc=10kHz, 12dB/oct). Pending final listening test.
 
 ## Next Actions
 
