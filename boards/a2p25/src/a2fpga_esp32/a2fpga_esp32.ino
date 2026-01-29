@@ -341,6 +341,7 @@ static void i2s_tx_task(void *arg) {
       static int debug_interval = 0;
       static uint32_t s_i2s_es_frac = 0;  // Fractional ES5503 sample accumulator for I2S
       static size_t s_last_from_ring = 0;  // For debug logging
+      static int32_t s_lpf_state = 0;  // Anti-aliasing low-pass filter state
 
       if (xSemaphoreTake(s_es5503_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         // Step 1: Drain any write-trigger samples from ring buffer
@@ -403,6 +404,22 @@ static void i2s_tx_task(void *arg) {
       } else {
         // Couldn't acquire mutex - output silence
         memset(stereo_buffer, 0, sizeof(stereo_buffer));
+      }
+
+      // Anti-aliasing low-pass filter to smooth interpolation artifacts
+      // 1-pole IIR: y[n] = alpha * x[n] + (1-alpha) * y[n-1]
+      // alpha ≈ 0.8 (cutoff ~12.3 kHz at 48 kHz) - above all audio content,
+      // below ES5503 Nyquist (13.16 kHz), eliminates resampling jags
+      {
+        const int32_t ALPHA = 205;  // 0.8 * 256
+        const int32_t BETA = 51;    // 0.2 * 256
+        for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
+          int32_t l = stereo_buffer[i * 2];
+          int32_t r = stereo_buffer[i * 2 + 1];
+          s_lpf_state = (ALPHA * l + BETA * s_lpf_state) >> 8;
+          stereo_buffer[i * 2] = (int16_t)s_lpf_state;
+          stereo_buffer[i * 2 + 1] = (int16_t)s_lpf_state;  // Mono: same for both channels
+        }
       }
 
       // Always write to I2S (exactly AUDIO_BUFFER_FRAMES - no underruns possible)
