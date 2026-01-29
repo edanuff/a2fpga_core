@@ -107,9 +107,10 @@ uint8_t* es5503_get_wave_memory(ES5503* es) {
 //   - With 1 oscillator:   7159090 / 8 / 3  = 298,295 Hz (WRONG - causes chipmunk audio)
 // I2S output rate: 48,000 Hz (set by FPGA audio_timing module)
 //
-// Solution: Zero-order hold (sample duplication) upsampling
-//   - Generate 281 ES5503 samples per 512-sample I2S buffer
-//   - Each ES5503 sample repeated ~1.82x (48000/26320)
+// Solution: Catmull-Rom cubic interpolation upsampling
+//   - Generate ~281 ES5503 samples per 512-sample I2S buffer
+//   - Cubic spline through sample points (C1-continuous, no angular jags)
+//   - 2-pole Butterworth LPF at 10kHz removes residual aliasing (12dB/oct)
 //   - Timing: 281/26320 ≈ 512/48000 ≈ 10.67ms per buffer
 //
 // IMPORTANT: IIgs writes register 0xE1 at boot to set oscillator count,
@@ -169,6 +170,28 @@ static void ring_reset() {
   memset(s_audio_ring, 0, sizeof(s_audio_ring));
 }
 
+// ---------- Catmull-Rom Cubic Interpolation ----------
+// Produces C1-continuous curves through sample points (no angular "jags")
+// Linear interpolation connects samples with straight lines → corners at each sample point
+// Cubic interpolation fits smooth curves → no corners, much less high-frequency aliasing
+// ym1, y0, y1, y2: four consecutive samples; t: fractional position 0-255 between y0 and y1
+static inline int16_t catmull_rom_interp(int32_t ym1, int32_t y0, int32_t y1, int32_t y2, uint32_t t) {
+    // Catmull-Rom: 0.5*(2*y0 + (-ym1+y1)*t + (2*ym1-5*y0+4*y1-y2)*t² + (-ym1+3*y0-3*y1+y2)*t³)
+    // Horner's form with t in 0-255 (8.8 fixed point fractional part):
+    int32_t c0 = 2 * y0;
+    int32_t c1 = -ym1 + y1;
+    int32_t c2 = 2*ym1 - 5*y0 + 4*y1 - y2;
+    int32_t c3 = -ym1 + 3*y0 - 3*y1 + y2;
+    int32_t r = c3;
+    r = c2 + ((r * (int32_t)t) >> 8);
+    r = c1 + ((r * (int32_t)t) >> 8);
+    r = c0 + ((r * (int32_t)t) >> 8);
+    r >>= 1;  // divide by 2 (from the 0.5 factor)
+    if (r > 32767) r = 32767;
+    if (r < -32768) r = -32768;
+    return (int16_t)r;
+}
+
 // ---------- ES5503 Stream Update (MAME-style) ----------
 // Two triggers call es5503_stream_update():
 // 1. Timer trigger: I2S task needs audio (periodic)
@@ -224,27 +247,26 @@ static void es5503_stream_update_locked() {
   static int16_t es5503_temp[512];
   g_es5503->generate_audio(es5503_temp, es5503_samples);
 
-  // Upsample with linear interpolation to reduce aliasing artifacts
-  // Linear interpolation smooths transitions between samples, reducing "tinny" sound
+  // Upsample with Catmull-Rom cubic interpolation for smooth curves through sample points
+  // Cubic interpolation eliminates the angular "jags" at ES5503 sample boundaries
+  // that linear interpolation creates (connects with straight lines → corners)
+  static int16_t s_ring_prev_sample = 0;  // Last ES5503 sample from previous chunk
   for (uint32_t i = 0; i < output_samples; i++) {
-    // Calculate position in ES5503 sample array with fractional part
     uint32_t pos_fixed = (i * es5503_samples * 256) / output_samples;  // 8.8 fixed point
-    uint32_t es5503_idx = pos_fixed >> 8;  // Integer part
-    uint32_t frac = pos_fixed & 0xFF;      // Fractional part (0-255)
-
+    uint32_t es5503_idx = pos_fixed >> 8;
+    uint32_t frac = pos_fixed & 0xFF;
     if (es5503_idx >= es5503_samples) es5503_idx = es5503_samples - 1;
 
-    int16_t sample;
-    if (es5503_idx + 1 < es5503_samples && frac > 0) {
-      // Linear interpolation between adjacent samples
-      int32_t s0 = es5503_temp[es5503_idx];
-      int32_t s1 = es5503_temp[es5503_idx + 1];
-      sample = (int16_t)((s0 * (256 - frac) + s1 * frac) >> 8);
-    } else {
-      sample = es5503_temp[es5503_idx];
-    }
+    // Four samples for cubic interpolation: ym1, y0, y1, y2
+    int32_t ym1 = (es5503_idx > 0) ? es5503_temp[es5503_idx - 1] : s_ring_prev_sample;
+    int32_t y0  = es5503_temp[es5503_idx];
+    int32_t y1  = (es5503_idx + 1 < es5503_samples) ? es5503_temp[es5503_idx + 1] : y0;
+    int32_t y2  = (es5503_idx + 2 < es5503_samples) ? es5503_temp[es5503_idx + 2] : y1;
+
+    int16_t sample = catmull_rom_interp(ym1, y0, y1, y2, frac);
     ring_write_stereo(sample, sample);
   }
+  if (es5503_samples > 0) s_ring_prev_sample = es5503_temp[es5503_samples - 1];
 
   // Check prebuffer threshold
   if (!s_ring_prebuffered && ring_available() >= AUDIO_PREBUFFER_FRAMES) {
@@ -341,7 +363,6 @@ static void i2s_tx_task(void *arg) {
       static int debug_interval = 0;
       static uint32_t s_i2s_es_frac = 0;  // Fractional ES5503 sample accumulator for I2S
       static size_t s_last_from_ring = 0;  // For debug logging
-      static int32_t s_lpf_state = 0;  // Anti-aliasing low-pass filter state
 
       if (xSemaphoreTake(s_es5503_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         // Step 1: Drain any write-trigger samples from ring buffer
@@ -367,24 +388,25 @@ static void i2s_tx_task(void *arg) {
             static int16_t es5503_temp[512];
             g_es5503->generate_audio(es5503_temp, es5503_needed);
 
-            // Upsample with linear interpolation
+            // Upsample with Catmull-Rom cubic interpolation
+            static int16_t s_direct_prev_sample = 0;
             for (uint32_t i = 0; i < remaining; i++) {
               uint32_t pos_fixed = (i * es5503_needed * 256) / remaining;
               uint32_t idx = pos_fixed >> 8;
               uint32_t frac = pos_fixed & 0xFF;
               if (idx >= es5503_needed) idx = es5503_needed - 1;
-              int16_t sample;
-              if (idx + 1 < es5503_needed && frac > 0) {
-                int32_t s0 = es5503_temp[idx];
-                int32_t s1 = es5503_temp[idx + 1];
-                sample = (int16_t)((s0 * (256 - frac) + s1 * frac) >> 8);
-              } else {
-                sample = es5503_temp[idx];
-              }
+
+              int32_t ym1 = (idx > 0) ? es5503_temp[idx - 1] : s_direct_prev_sample;
+              int32_t y0  = es5503_temp[idx];
+              int32_t y1  = (idx + 1 < es5503_needed) ? es5503_temp[idx + 1] : y0;
+              int32_t y2  = (idx + 2 < es5503_needed) ? es5503_temp[idx + 2] : y1;
+
+              int16_t sample = catmull_rom_interp(ym1, y0, y1, y2, frac);
               size_t buf_idx = (from_ring + i) * 2;
               stereo_buffer[buf_idx] = sample;
               stereo_buffer[buf_idx + 1] = sample;
             }
+            s_direct_prev_sample = es5503_temp[es5503_needed - 1];
           } else if (es5503_needed == 0) {
             // Fractional accumulator hasn't reached a whole sample yet - fill with last value
             int16_t fill = (from_ring > 0) ? stereo_buffer[(from_ring - 1) * 2] : 0;
@@ -406,19 +428,29 @@ static void i2s_tx_task(void *arg) {
         memset(stereo_buffer, 0, sizeof(stereo_buffer));
       }
 
-      // Anti-aliasing low-pass filter to smooth interpolation artifacts
-      // 1-pole IIR: y[n] = alpha * x[n] + (1-alpha) * y[n-1]
-      // alpha ≈ 0.8 (cutoff ~12.3 kHz at 48 kHz) - above all audio content,
-      // below ES5503 Nyquist (13.16 kHz), eliminates resampling jags
+      // Anti-aliasing 2-pole biquad LPF (Butterworth, fc=10kHz at 44.1kHz)
+      // 12dB/octave rolloff (vs 6dB for 1-pole) - much better alias rejection
+      // ES5503 Nyquist is 13.16kHz; this filter removes spectral images from upsampling
+      // while preserving all audible content below 10kHz
+      // Q14 fixed-point coefficients (precomputed from bilinear transform):
+      //   b = [0.25029, 0.50058, 0.25029], a = [1, -0.17595, 0.17709]
       {
-        const int32_t ALPHA = 205;  // 0.8 * 256
-        const int32_t BETA = 51;    // 0.2 * 256
+        static const int32_t B0 = 4101, B1 = 8201, B2 = 4101;  // Q14
+        static const int32_t A1 = -2882, A2 = 2901;             // Q14
+        static int32_t bq_x1 = 0, bq_x2 = 0;  // input history
+        static int32_t bq_y1 = 0, bq_y2 = 0;  // output history
+
         for (size_t i = 0; i < AUDIO_BUFFER_FRAMES; i++) {
-          int32_t l = stereo_buffer[i * 2];
-          int32_t r = stereo_buffer[i * 2 + 1];
-          s_lpf_state = (ALPHA * l + BETA * s_lpf_state) >> 8;
-          stereo_buffer[i * 2] = (int16_t)s_lpf_state;
-          stereo_buffer[i * 2 + 1] = (int16_t)s_lpf_state;  // Mono: same for both channels
+          int32_t x0 = stereo_buffer[i * 2];  // mono - both channels identical
+          // y[n] = (b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]) >> 14
+          int32_t y0 = (B0*x0 + B1*bq_x1 + B2*bq_x2 - A1*bq_y1 - A2*bq_y2) >> 14;
+          bq_x2 = bq_x1;
+          bq_x1 = x0;
+          bq_y2 = bq_y1;
+          bq_y1 = y0;
+          int16_t out = (y0 > 32767) ? 32767 : (y0 < -32768) ? -32768 : (int16_t)y0;
+          stereo_buffer[i * 2] = out;
+          stereo_buffer[i * 2 + 1] = out;
         }
       }
 
