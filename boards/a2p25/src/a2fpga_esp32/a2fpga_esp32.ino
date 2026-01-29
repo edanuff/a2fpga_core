@@ -114,7 +114,7 @@ uint8_t* es5503_get_wave_memory(ES5503* es) {
 //
 // IMPORTANT: IIgs writes register 0xE1 at boot to set oscillator count,
 // but this happens before ESP32/LCAM is ready. ES5503 defaults to 32 oscillators.
-static const uint32_t I2S_OUTPUT_RATE = 48000;  // FPGA I2S sample rate
+static const uint32_t I2S_OUTPUT_RATE = 44100;  // FPGA I2S sample rate
 
 // ---------- Audio Prebuffer (Ring Buffer) ----------
 // Purpose: Delay audio output by ~15ms to absorb LCAM latency.
