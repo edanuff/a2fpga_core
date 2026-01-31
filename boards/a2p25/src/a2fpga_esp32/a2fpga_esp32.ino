@@ -688,6 +688,18 @@ static int s_corrupted_packet_count = 0;   // Packets outside ES5503 range (excl
 static uint32_t s_glu_read_auto_inc = 0;   // GLU address auto-increments triggered by reads
 static uint32_t s_mutex_ok_count = 0;      // DOC writes that acquired mutex
 static uint32_t s_mutex_fail_count = 0;    // DOC writes that hit fallback (unprotected)
+
+// Control register write diagnostics (0xA0-0xBF)
+static uint32_t s_ctrl_write_count = 0;    // Total control register writes
+static uint32_t s_ctrl_h0_to_h0 = 0;      // halt=0 → halt=0 (no transition, potential missed key-on)
+static uint32_t s_ctrl_h0_to_h1 = 0;      // halt=0 → halt=1 (explicit stop)
+static uint32_t s_ctrl_h1_to_h0 = 0;      // halt=1 → halt=0 (key-on, MAME check handles this)
+static uint32_t s_ctrl_h1_to_h1 = 0;      // halt=1 → halt=1 (param change while halted)
+static uint32_t s_ctrl_mode_free = 0;     // Writes with current mode = FREE
+static uint32_t s_ctrl_mode_once = 0;     // Writes with current mode = ONCE
+static uint32_t s_ctrl_mode_sync = 0;     // Writes with current mode = SYNC
+static uint32_t s_ctrl_mode_swap = 0;     // Writes with current mode = SWAP
+static uint32_t s_force_halt_count = 0;   // Times force-halt triggered
 static uint32_t s_last_packet_time_us = 0; // For timing analysis
 static uint32_t s_total_packet_time_us = 0;
 static uint32_t s_max_packet_gap_us = 0;
@@ -813,28 +825,40 @@ static void handle_es5503_write(uint16_t address, uint8_t data) {
           es5503_stream_update_locked();
         }
 
-        // Targeted force-halt for clock domain mismatch compensation.
-        // Problem: MAME's key-on check (halt=1→halt=0) requires the shadow
-        // oscillator to have halted before the restart write arrives. Our
-        // shadow may lag due to ESP32/IIgs clock domain mismatch, so a
-        // ONESHOT or SWAP oscillator that halted on the real chip may still
-        // show halt=0 in our shadow → MAME check misses the key-on.
-        // Fix: for ONESHOT/SWAP modes, if both old and new have halt=0,
-        // force the halt bit so the MAME check triggers. This is safe
-        // because these modes halt at end-of-wavetable by design — if the
-        // IIgs ISR is writing halt=0, the real chip already halted.
-        // FREE-RUN and SYNC modes loop and are never force-halted.
-        if (reg >= 0xA0 && reg <= 0xBF && !(data & 1)) {
+        // Diagnostic: track control register write transitions and modes.
+        // This tells us what modes the IIgs uses and whether key-on
+        // detection works correctly.
+        if (reg >= 0xA0 && reg <= 0xBF) {
           int osc = reg & 0x1F;
           uint8_t cur_ctrl = g_es5503->get_osc_control(osc);
-          if (!(cur_ctrl & 1)) {
-            // Both shadow and new data have halt=0 — MAME check will miss this.
-            int mode = (cur_ctrl >> 1) & 3;
-            if (mode == 1 || mode == 3) {  // ONESHOT or SWAP
+          bool cur_halt = (cur_ctrl & 1);
+          bool new_halt = (data & 1);
+          int cur_mode = (cur_ctrl >> 1) & 3;
+
+          s_ctrl_write_count++;
+          // Track transition type (using actual emulator state, not s_prev_control)
+          if (!cur_halt && !new_halt) s_ctrl_h0_to_h0++;
+          else if (!cur_halt && new_halt) s_ctrl_h0_to_h1++;
+          else if (cur_halt && !new_halt) s_ctrl_h1_to_h0++;
+          else s_ctrl_h1_to_h1++;
+          // Track mode of oscillator at time of write
+          switch (cur_mode) {
+            case 0: s_ctrl_mode_free++; break;
+            case 1: s_ctrl_mode_once++; break;
+            case 2: s_ctrl_mode_sync++; break;
+            case 3: s_ctrl_mode_swap++; break;
+          }
+
+          // Targeted force-halt for clock domain mismatch compensation.
+          // For ONESHOT/SWAP: if both shadow and new have halt=0, force halt
+          // so MAME key-on check (halt=1→halt=0) triggers correctly.
+          if (!new_halt && !cur_halt) {
+            if (cur_mode == 1 || cur_mode == 3) {  // ONESHOT or SWAP
               g_es5503->force_osc_halt(osc);
+              s_force_halt_count++;
               if (s_es5503_mon) {
                 Serial.printf("[KEY-FIX] Osc %d force-halt (mode=%s, shadow lagged)\n",
-                              osc, mode == 1 ? "ONCE" : "SWAP");
+                              osc, cur_mode == 1 ? "ONCE" : "SWAP");
               }
             }
           }
@@ -1639,6 +1663,17 @@ static void cmd_process(String cmd) {
     Serial.printf("  DOC write mutex: %lu ok, %lu failed%s\n",
                   (unsigned long)s_mutex_ok_count, (unsigned long)s_mutex_fail_count,
                   s_mutex_fail_count > 0 ? " *** RACE RISK ***" : "");
+    if (s_ctrl_write_count > 0) {
+      Serial.printf("  Control reg writes: %lu (h0→h0:%lu h0→h1:%lu h1→h0:%lu h1→h1:%lu)\n",
+                    (unsigned long)s_ctrl_write_count,
+                    (unsigned long)s_ctrl_h0_to_h0, (unsigned long)s_ctrl_h0_to_h1,
+                    (unsigned long)s_ctrl_h1_to_h0, (unsigned long)s_ctrl_h1_to_h1);
+      Serial.printf("  Control modes: FREE:%lu ONCE:%lu SYNC:%lu SWAP:%lu\n",
+                    (unsigned long)s_ctrl_mode_free, (unsigned long)s_ctrl_mode_once,
+                    (unsigned long)s_ctrl_mode_sync, (unsigned long)s_ctrl_mode_swap);
+      Serial.printf("  Force-halt triggers: %lu (ONCE/SWAP shadow lag compensation)\n",
+                    (unsigned long)s_force_halt_count);
+    }
     if (s_total_packet_count > 0) {
       Serial.printf("  Address range: $%04X-$%04X\n", s_min_addr, s_max_addr);
       Serial.printf("  Corruption rate: %.1f%%\n", (100.0 * s_corrupted_packet_count) / s_total_packet_count);
@@ -1682,6 +1717,16 @@ static void cmd_process(String cmd) {
     s_glu_read_auto_inc = 0;
     s_mutex_ok_count = 0;
     s_mutex_fail_count = 0;
+    s_ctrl_write_count = 0;
+    s_ctrl_h0_to_h0 = 0;
+    s_ctrl_h0_to_h1 = 0;
+    s_ctrl_h1_to_h0 = 0;
+    s_ctrl_h1_to_h1 = 0;
+    s_ctrl_mode_free = 0;
+    s_ctrl_mode_once = 0;
+    s_ctrl_mode_sync = 0;
+    s_ctrl_mode_swap = 0;
+    s_force_halt_count = 0;
     s_min_addr = 0xFFFF;
     s_max_addr = 0x0000;
     s_last_packet_time_us = 0;

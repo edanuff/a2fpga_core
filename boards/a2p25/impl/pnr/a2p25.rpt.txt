@@ -12,27 +12,27 @@
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
   <Device Version>: A
-  <Created Time>:Wed Jan 28 23:01:18 2026
+  <Created Time>:Thu Jan 29 22:41:47 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.85s, Elapsed time = 0h 0m 0.856s
-    Placement Phase 1: CPU time = 0h 0m 0.172s, Elapsed time = 0h 0m 0.174s
-    Placement Phase 2: CPU time = 0h 0m 9s, Elapsed time = 0h 0m 11s
-    Placement Phase 3: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 6s
-    Total Placement: CPU time = 0h 0m 15s, Elapsed time = 0h 0m 18s
+    Placement Phase 0: CPU time = 0h 0m 0.963s, Elapsed time = 0h 0m 0.888s
+    Placement Phase 1: CPU time = 0h 0m 0.22s, Elapsed time = 0h 0m 0.191s
+    Placement Phase 2: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+    Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.007s, Elapsed time = 0h 0m 0.01s
-    Routing Phase 1: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 13s
-    Routing Phase 2: CPU time = 0h 0m 0.194s, Elapsed time = 0h 0m 0.248s
+    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
+    Routing Phase 1: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+    Routing Phase 2: CPU time = 0h 0m 0.076s, Elapsed time = 0h 0m 0.064s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 13s
+    Total Routing: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
  Generate output files:
-    CPU time = 0h 0m 5s, Elapsed time = 0h 0m 6s
+    CPU time = 0h 0m 2s, Elapsed time = 0h 0m 1s
 
- Total Time and Memory Usage: CPU time = 0h 0m 30s, Elapsed time = 0h 0m 37s, Peak memory usage = 1048MB
+ Total Time and Memory Usage: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 11s, Peak memory usage = 1743MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 7861/23040                          |  35%
-    --LUT,ALU,ROM16           | 7861(7110 LUT, 751 ALU, 0 ROM16)    | -
+  Logic                       | 8069/23040                          |  36%
+    --LUT,ALU,ROM16           | 8069(7314 LUT, 755 ALU, 0 ROM16)    | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 4727/23280                          |  21%
+  Register                    | 4730/23280                          |  21%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 4690/23040                          |  21%
+    --Logic Register as FF    | 4692/23040                          |  21%
     --I/O Register as Latch   | 0/240                               |  0%
-    --I/O Register as FF      | 37/240                              |  16%
-  CLS                         | 5977/11520                          |  52%
+    --I/O Register as FF      | 38/240                              |  16%
+  CLS                         | 6216/11520                          |  54%
   I/O Port                    | 68/86                               |  80%
   I/O Buf                     | 58                                  | -
     --Input Buf               | 29                                  | -
@@ -107,8 +107,8 @@
   a2bus_if.clk_pixel| PRIMARY        |  TR TL BR BL
   clk_hdmi_w     | PRIMARY        |  BR
   a2bus_if.clk_logic| PRIMARY        |  TR TL BR BL
-  supersprite/ssp_psg/n2554_7| PRIMARY        |  TL
-  mockingboard/psg_left/n2554_7| PRIMARY        |  TR BR
+  supersprite/ssp_psg/n2554_6| PRIMARY        |  TL BL
+  mockingboard/psg_left/n2554_6| PRIMARY        |  BR
   a2bus_if.device_reset_n| LW             |  -
   n29_11         | LW             |  -
   timer_a_count_15_9| LW             |  -
@@ -133,7 +133,7 @@ a2_reset_n        | -         | A10/6         | Y          | in    | IOL14[B] | 
 a2_rdy_n          | -         | D11/6         | Y          | in    | IOL9[A]  | -               | LVCMOS33   | OFF   | UP        | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE         
 a2_dma_n          | -         | C11/6         | Y          | in    | IOL5[A]  | GCLKT_13/LPLL0_T_IN1 | LVCMOS33   | OFF   | UP        | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE         
 a2_nmi_n          | -         | C10/6         | Y          | in    | IOL5[B]  | GCLKC_13/LPLL0_C_FB1 | LVCMOS33   | OFF   | UP        | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE         
-a2_mb20           | -         | G10/7         | Y          | in    | IOT7[B]  | -               | LVCMOS33   | OFF   | DOWN      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE         
+a2_mb20           | -         | G10/7         | Y          | in    | IOT7[B]  | -               | LVCMOS33   | OFF   | NONE      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE         
 a2_sync_n         | -         | B11/6         | Y          | in    | IOL12[A] | -               | LVCMOS33   | OFF   | NONE      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE         
 a2_m2sel_n        | -         | J10/7         | Y          | in    | IOT1[B]  | GCLKC_15        | LVCMOS33   | OFF   | UP        | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE         
 a2_int_in_n       | -         | H4/3          | Y          | in    | IOB89[B] | GCLKC_7         | LVCMOS33   | OFF   | UP        | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE         
@@ -209,7 +209,7 @@ J10/7    | a2_m2sel_n        | in    | IOT1[B]  | GCLKC_15        | LVCMOS33 | O
 H11/7    | a2_phi1           | in    | IOT3[A]  | GCLKT_16        | LVCMOS33 | OFF   | NONE      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE         
 H10/7    | a2_q3             | in    | IOT3[B]  | GCLKC_16        | LVCMOS33 | OFF   | NONE      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE         
 G11/7    | a2_7M             | in    | IOT7[A]  | -               | LVCMOS33 | OFF   | NONE      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE         
-G10/7    | a2_mb20           | in    | IOT7[B]  | -               | LVCMOS33 | OFF   | DOWN      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE         
+G10/7    | a2_mb20           | in    | IOT7[B]  | -               | LVCMOS33 | OFF   | NONE      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE         
 K11/7    | a2_a[14]          | in    | IOT11[A] | -               | LVCMOS33 | OFF   | NONE      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE         
 L11/7    | a2_a[15]          | in    | IOT11[B] | -               | LVCMOS33 | OFF   | NONE      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE         
 L10/7    | a2_a[12]          | in    | IOT15[A] | -               | LVCMOS33 | OFF   | NONE      | OFF       | ON         | OFF        | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE         

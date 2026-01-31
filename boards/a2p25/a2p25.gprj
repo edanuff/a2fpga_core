@@ -46,6 +46,7 @@
         <File path="../../hdl/ssc/super_serial_card.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/supersprite/supersprite.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/support/cdc_2ff.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc_denoise.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc_sampling.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/sdpram32.sv" type="file.verilog" enable="1"/>
