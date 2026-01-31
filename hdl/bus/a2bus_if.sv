@@ -46,6 +46,10 @@ interface a2bus_if (
 
     logic clk_14M_posedge;
 
+    logic timing_lock;
+    logic timing_error;
+    logic cycle_extended;
+
     logic rw_n;
     logic [15:0] addr;
     logic m2sel_n;
@@ -84,7 +88,11 @@ interface a2bus_if (
         output clk_7M_negedge,
 
         output clk_14M_posedge,
-        
+
+        output timing_lock,
+        output timing_error,
+        output cycle_extended,
+
         output rw_n,
         output addr,
         output m2sel_n,
@@ -124,7 +132,11 @@ interface a2bus_if (
         input clk_7M_negedge,
 
         input clk_14M_posedge,
-        
+
+        input timing_lock,
+        input timing_error,
+        input cycle_extended,
+
         input rw_n,
         input addr,
         input m2sel_n,

@@ -73,12 +73,16 @@ module apple_bus #(
 
     a2bus_timing #(
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
+        .APPLE_HZ(APPLE_HZ),
         .ENABLE_DENOISE(ENABLE_DENOISE)
     ) a2bus_timing_inst(
         .clk_logic_i(clk_logic_i),
         .a2_phi1_i(a2_phi1_i),
         .a2_q3_i(a2_q3_i),
         .a2_7M_i(a2_7M_i),
+
+        .lock(a2bus_if.timing_lock),
+        .error(a2bus_if.timing_error),
 
         .phi0_o(a2bus_if.phi0),
         .phi0_posedge_o(a2bus_if.phi0_posedge),
@@ -87,7 +91,9 @@ module apple_bus #(
         .phi1_o(a2bus_if.phi1),
         .phi1_posedge_o(a2bus_if.phi1_posedge),
         .phi1_negedge_o(a2bus_if.phi1_negedge),
-        
+
+        .cycle_extended(a2bus_if.cycle_extended),
+
         .q3_o(a2bus_if.clk_q3),
         .q3_posedge_o(a2bus_if.clk_q3_posedge),
         .q3_negedge_o(a2bus_if.clk_q3_negedge),

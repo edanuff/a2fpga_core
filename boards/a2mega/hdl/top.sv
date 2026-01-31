@@ -20,6 +20,7 @@
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
+    parameter int APPLE_HZ = 14_318_181,                   // Apple II master clock (NTSC)
     parameter int PIXEL_SPEED_HZ = CLOCK_SPEED_HZ / 2,
     parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
 
@@ -297,7 +298,8 @@ module top #(
 
     apple_bus #(
         .GS(GS),
-        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ)
+        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
+        .APPLE_HZ(APPLE_HZ)
     ) apple_bus (
         .clk_logic_i(clk_logic_w),
         .clk_pixel_i(clk_pixel_w),

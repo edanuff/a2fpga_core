@@ -18,6 +18,7 @@
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
+    parameter int APPLE_HZ = 14_318_181,                   // Apple II master clock (NTSC)
     parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
 
     parameter bit SCANLINES_ENABLE = 1,
@@ -189,6 +190,7 @@ module top #(
 
     apple_bus #(
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
+        .APPLE_HZ(APPLE_HZ),
         .BUS_DATA_OUT_ENABLE(BUS_DATA_OUT_ENABLE),
         .IRQ_OUT_ENABLE(IRQ_OUT_ENABLE)
     ) apple_bus (
