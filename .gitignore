@@ -37,3 +37,7 @@ src/cardrom/cardrom_Output.txt
 src/cardrom/_FileInformation.txt
 src/cardrom/cardrom
 /.claude
+*.d
+/boards/a2p25/src/a2fpga_esp32/build
+*.m4a
+*.wav
