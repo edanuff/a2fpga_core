@@ -332,7 +332,7 @@ module a2bus_timing_tb;
     // =========================================================================
 
     initial begin
-        $dumpfile("a2bus_timing_tb.vcd");
+        $dumpfile("tests/bus/timing/a2bus_timing_tb.vcd");
         $dumpvars(0, a2bus_timing_tb);
 
         $display("================================================================");
