@@ -344,6 +344,18 @@ module a2bus_timing #(
     // =========================================================================
     // Phase Lock Controller
     // =========================================================================
+    //
+    // Uses Phi1 posedge as the tracking reference instead of 7M. Phi1 occurs
+    // once per CPU cycle (~53 FPGA clocks), giving much better resolution
+    // for phase comparison than 7M (~3.77 FPGA clocks per half-period, which
+    // is too short relative to CDC latency for meaningful discrimination).
+    //
+    // Tracking approach:
+    //   - Count FPGA clocks since the predicted Phi1 posedge
+    //   - When CDC'd Phi1 posedge arrives, check offset against CDC_LATENCY
+    //   - If offset < CDC_LATENCY: predicted edge was late → speed up
+    //   - If offset > CDC_LATENCY: predicted edge was early → slow down
+    //   - If offset ≈ CDC_LATENCY: on time, no correction needed
 
     // Lock state machine
     localparam [1:0] ST_UNLOCKED  = 2'd0;
@@ -356,41 +368,40 @@ module a2bus_timing #(
     logic       lock_r;
     logic       error_r;
 
-    // Track time since last predicted 7M rising edge for acceptance window
-    logic [5:0] ticks_since_7m_edge_r;
+    // Track time since last predicted Phi1 posedge for phase comparison
+    // CPU cycle is ~53 FPGA clocks, so 7 bits is plenty
+    logic [6:0] ticks_since_phi1_edge_r;
 
     always_ff @(posedge clk_logic_i) begin
-        if (pred_7m_posedge_w)
-            ticks_since_7m_edge_r <= 6'd0;
-        else if (ticks_since_7m_edge_r != 6'h3F)
-            ticks_since_7m_edge_r <= ticks_since_7m_edge_r + 6'd1;
+        if (pred_phi1_posedge_w)
+            ticks_since_phi1_edge_r <= 7'd0;
+        else if (ticks_since_phi1_edge_r != 7'h7F)
+            ticks_since_phi1_edge_r <= ticks_since_phi1_edge_r + 7'd1;
     end
 
-    // A CDC'd 7M rising edge is "valid" if it arrives within a reasonable
-    // window around the predicted edge. Since the predicted output is
-    // approximately aligned to real input timing (via accumulator pre-load),
-    // the CDC'd edge arrives roughly CDC_LATENCY clocks after the predicted
-    // edge. However, fractional-N jitter means the predicted 7M period
-    // alternates between floor and ceil of the true period (~7 and ~8 clocks
-    // at 54MHz). An edge arriving at ticks_since near 0 (just after the
-    // predicted edge) or near the period length (just before the NEXT
-    // predicted edge) are both valid.
-    //
-    // The 7M half-period in logic clocks:
-    //   CLOCK_SPEED_HZ / APPLE_HZ * 2 ≈ 7.54 for 54M/14.318M
-    // Accept edges within ACCEPT_WINDOW of 0 or within ACCEPT_WINDOW of the
-    // predicted period boundary.
-    localparam int unsigned TICKS_PER_7M_HALF = (2 * CLOCK_SPEED_HZ + APPLE_HZ - 1) / APPLE_HZ; // ceil ≈ 8
-    wire [5:0] edge_offset_w = ticks_since_7m_edge_r;
-    wire edge_near_current_w = (edge_offset_w <= (CDC_LATENCY + ACCEPT_WINDOW));
-    wire edge_near_next_w    = (edge_offset_w >= (TICKS_PER_7M_HALF - ACCEPT_WINDOW));
-    wire edge_in_window_w    = cdc_7m_posedge_w && (edge_near_current_w || edge_near_next_w);
+    // CPU cycle period in FPGA clocks (for acceptance window sizing)
+    // Normal: 14 * (54M/14.318M) ≈ 52.8 clocks
+    localparam int unsigned TICKS_PER_CPU_CYCLE = (CLOCK_SPEED_HZ * 14 + APPLE_HZ - 1) / APPLE_HZ; // ceil ≈ 53
 
-    // A CDC'd 7M rising edge is "unexpected" if it arrives outside the window
-    wire edge_outside_window_w = cdc_7m_posedge_w && !edge_in_window_w;
+    // Acceptance window: CDC'd Phi1 posedge should arrive CDC_LATENCY clocks
+    // after predicted Phi1 posedge, ±ACCEPT_WINDOW for jitter tolerance.
+    // With ~53 clocks per cycle, a ±2 window around offset 3 (CDC_LATENCY)
+    // is well-resolved: valid range is [1..5], clearly distinguishable from
+    // "near next cycle" at ~50+.
+    wire [6:0] phi1_offset_w = ticks_since_phi1_edge_r;
 
-    // Phase correction cooldown to prevent oscillation
-    logic [5:0] correction_cooldown_r;
+    // Valid edge: arrives within CDC_LATENCY ± ACCEPT_WINDOW of predicted edge
+    wire phi1_near_current_w = (phi1_offset_w <= (CDC_LATENCY + ACCEPT_WINDOW));
+    // Also accept edges that arrive near the NEXT predicted Phi1 posedge
+    // (generator drifted almost a full cycle — edge is "early" for next cycle)
+    wire phi1_near_next_w    = (phi1_offset_w >= (TICKS_PER_CPU_CYCLE - ACCEPT_WINDOW));
+    wire phi1_in_window_w    = cdc_phi1_posedge_w && (phi1_near_current_w || phi1_near_next_w);
+
+    // Unexpected edge: outside both windows
+    wire phi1_outside_window_w = cdc_phi1_posedge_w && !phi1_in_window_w;
+
+    // Phase correction cooldown to prevent oscillation (one correction per CPU cycle)
+    logic [6:0] correction_cooldown_r;
 
     // Snap and correction output signals (directly wired to tick generator)
     logic snap_phase_r;
@@ -405,7 +416,7 @@ module a2bus_timing #(
 
     // Phase snap uses Phi1 posedge as the primary reference because it's
     // unambiguous — Phi1 rises exactly once per CPU cycle at phase 0.
-    // After snapping to phase 0 on Phi1 posedge, subsequent 7M edges
+    // After snapping to phase 0 on Phi1 posedge, subsequent Phi1 posedges
     // are used for fine tracking and lock verification.
 
     always_ff @(posedge clk_logic_i) begin
@@ -414,8 +425,8 @@ module a2bus_timing #(
         apply_correction_slow_r <= 1'b0;
         apply_correction_fast_r <= 1'b0;
 
-        if (correction_cooldown_r != 6'd0)
-            correction_cooldown_r <= correction_cooldown_r - 6'd1;
+        if (correction_cooldown_r != 7'd0)
+            correction_cooldown_r <= correction_cooldown_r - 7'd1;
 
         case (lock_state_r)
 
@@ -423,10 +434,9 @@ module a2bus_timing #(
                 lock_r <= 1'b0;
                 good_edge_count_r <= 4'd0;
                 miss_edge_count_r <= 4'd0;
-                correction_cooldown_r <= 6'd0;
+                correction_cooldown_r <= 7'd0;
 
                 // Snap on Phi1 posedge (unambiguous phase 0 reference).
-                // Then use 7M edges for lock verification.
                 if (cdc_phi1_posedge_w) begin
                     snap_phase_r <= 1'b1;
                     snap_phase_value_r <= 4'd0;
@@ -438,7 +448,7 @@ module a2bus_timing #(
             ST_ACQUIRING: begin
                 lock_r <= 1'b0;
 
-                if (edge_in_window_w) begin
+                if (phi1_in_window_w) begin
                     good_edge_count_r <= good_edge_count_r + 4'd1;
                     miss_edge_count_r <= 4'd0;
                     if (good_edge_count_r >= LOCK_THRESHOLD - 1) begin
@@ -446,7 +456,7 @@ module a2bus_timing #(
                         lock_r <= 1'b1;
                         error_r <= 1'b0;  // clear error on lock
                     end
-                end else if (edge_outside_window_w) begin
+                end else if (phi1_outside_window_w) begin
                     miss_edge_count_r <= miss_edge_count_r + 4'd1;
                     good_edge_count_r <= 4'd0;
                     if (miss_edge_count_r >= UNLOCK_THRESHOLD - 1) begin
@@ -458,28 +468,32 @@ module a2bus_timing #(
             ST_LOCKED: begin
                 lock_r <= 1'b1;
 
-                if (edge_in_window_w) begin
+                if (phi1_in_window_w) begin
                     miss_edge_count_r <= 4'd0;
 
-                    // Fine phase correction: nudge accumulator if the CDC'd edge
-                    // is slightly early or late relative to the predicted edge.
-                    // Edges near 0 arrived just after the predicted edge (on time
-                    // or generator slightly fast). Edges near the period boundary
-                    // arrived just before the next predicted edge (generator
-                    // slightly slow). Only correct if clearly off-center.
-                    if (correction_cooldown_r == 6'd0) begin
-                        if (edge_near_next_w && !edge_near_current_w)
-                            // CDC edge arrived late (near next predicted edge)
+                    // Fine phase correction using Phi1 edge offset.
+                    // Expected offset is CDC_LATENCY clocks.
+                    // With ~53 clocks per CPU cycle, we have good resolution.
+                    if (correction_cooldown_r == 7'd0) begin
+                        if (phi1_near_next_w && !phi1_near_current_w) begin
+                            // CDC edge arrived near next predicted edge
                             // → generator is too slow, speed up
                             apply_correction_fast_r <= 1'b1;
-                        else if (edge_near_current_w && edge_offset_w > CDC_LATENCY[5:0])
+                            correction_cooldown_r <= TICKS_PER_CPU_CYCLE[6:0];
+                        end else if (phi1_near_current_w && phi1_offset_w > CDC_LATENCY[6:0]) begin
                             // CDC edge arrived later than expected CDC latency
                             // → generator is slightly fast, slow down
                             apply_correction_slow_r <= 1'b1;
-                        if (edge_near_next_w || edge_offset_w > CDC_LATENCY[5:0])
-                            correction_cooldown_r <= 6'd8;
+                            correction_cooldown_r <= TICKS_PER_CPU_CYCLE[6:0];
+                        end else if (phi1_near_current_w && phi1_offset_w < CDC_LATENCY[6:0]) begin
+                            // CDC edge arrived earlier than expected CDC latency
+                            // → generator is slightly slow, speed up
+                            apply_correction_fast_r <= 1'b1;
+                            correction_cooldown_r <= TICKS_PER_CPU_CYCLE[6:0];
+                        end
+                        // If offset == CDC_LATENCY exactly, no correction needed
                     end
-                end else if (edge_outside_window_w) begin
+                end else if (phi1_outside_window_w) begin
                     miss_edge_count_r <= miss_edge_count_r + 4'd1;
                     good_edge_count_r <= 4'd0;
                     error_r <= 1'b1;  // sticky error

@@ -293,6 +293,41 @@ module a2bus_timing_tb;
     end
 
     // =========================================================================
+    // Phase drift monitor
+    // =========================================================================
+    //
+    // Measures the time offset between input a2_phi1 rising edge and
+    // output phi1_o rising edge. If drift accumulates, this will show
+    // a growing offset over time.
+
+    reg drift_monitor_enable = 0;
+    realtime last_input_phi1_rise = 0;
+    realtime last_output_phi1_rise = 0;
+    reg prev_a2_phi1 = 0;
+    realtime drift_offset_ns = 0;
+    realtime max_drift_ns = 0;
+    realtime min_drift_ns = 1000.0;
+    integer drift_sample_count = 0;
+
+    always @(posedge clk_logic) begin
+        if (drift_monitor_enable) begin
+            // Detect input Phi1 rising edge (using CDC'd version for fair comparison)
+            prev_a2_phi1 <= a2_phi1;
+            if (a2_phi1 && !prev_a2_phi1)
+                last_input_phi1_rise = $realtime;
+
+            // Detect output Phi1 rising edge and measure offset
+            if (phi1_posedge_o && last_input_phi1_rise > 0) begin
+                last_output_phi1_rise = $realtime;
+                drift_offset_ns = (last_output_phi1_rise - last_input_phi1_rise) / 1000.0;
+                drift_sample_count = drift_sample_count + 1;
+                if (drift_offset_ns > max_drift_ns) max_drift_ns = drift_offset_ns;
+                if (drift_offset_ns < min_drift_ns) min_drift_ns = drift_offset_ns;
+            end
+        end
+    end
+
+    // =========================================================================
     // Test Sequence
     // =========================================================================
 
@@ -561,6 +596,39 @@ module a2bus_timing_tb;
         $display("  Lock status: %s", lock ? "LOCKED" : "UNLOCKED");
 
         // =====================================================================
+        // Test 7: Phase Drift / Alignment Stability
+        // =====================================================================
+        $display("\n--- Test 7: Phase Drift / Alignment Stability ---");
+        $display("  Running 100 CPU cycles and measuring input-to-output Phi1 offset...");
+
+        // Reset drift monitor
+        drift_monitor_enable = 1;
+        drift_sample_count = 0;
+        max_drift_ns = 0;
+        min_drift_ns = 1000.0;
+        last_input_phi1_rise = 0;
+
+        #(APPLE_CPU_PERIOD * 100);
+
+        drift_monitor_enable = 0;
+
+        $display("  Drift samples: %0d", drift_sample_count);
+        $display("  Last offset:  %0.1f ns", drift_offset_ns);
+        $display("  Min offset:   %0.1f ns", min_drift_ns);
+        $display("  Max offset:   %0.1f ns", max_drift_ns);
+        $display("  Drift range:  %0.1f ns (max - min)", max_drift_ns - min_drift_ns);
+
+        // The offset should be bounded. With 54MHz clock (18.5ns period),
+        // a well-locked PLL should keep drift within a few clock periods.
+        // Allow up to 5 FPGA clock periods (~93ns) of drift range.
+        if ((max_drift_ns - min_drift_ns) < 93.0)
+            $display("  [PASS] Phase drift bounded (range < 93 ns / 5 FPGA clocks)");
+        else
+            $display("  [FAIL] Excessive phase drift: %0.1f ns range", max_drift_ns - min_drift_ns);
+
+        $display("  Lock status: %s", lock ? "LOCKED" : "UNLOCKED");
+
+        // =====================================================================
         // Summary
         // =====================================================================
         $display("\n================================================================");
@@ -580,7 +648,7 @@ module a2bus_timing_tb;
     // =========================================================================
 
     initial begin
-        #(APPLE_CPU_PERIOD * 400);  // 400 CPU cycles max (need room for 65-cycle pattern test)
+        #(APPLE_CPU_PERIOD * 500);  // 500 CPU cycles max (room for 65-cycle pattern + drift test)
         $display("\nERROR: Simulation timeout at %t!", $realtime);
         $finish;
     end
