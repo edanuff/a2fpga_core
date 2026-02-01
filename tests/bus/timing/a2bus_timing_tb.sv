@@ -51,7 +51,7 @@ module a2bus_timing_tb;
     // Phase:  0  1  2  3  4  5  6  7  8  9 10 11 12 13
     // 7M:     0  1  0  1  0  1  0  1  0  1  0  1  0  1
     // Phi1:   1  1  1  1  1  1  1  0  0  0  0  0  0  0
-    // Q3:     0  0  0  0  1  1  1  1  0  0  0  0  1  1
+    // Q3:     1  1  1  1  0  0  0  1  1  1  1  0  0  0
 
     integer apple_phase = 0;
     reg noise_enable = 0;
@@ -70,8 +70,8 @@ module a2bus_timing_tb;
                 // Phi1: high for phases 0-6, low for phases 7-13
                 a2_phi1 = (i < 7) ? 1'b1 : 1'b0;
 
-                // Q3: high for phases 4-7 and 12-13
-                a2_q3 = ((i >= 4 && i <= 7) || (i >= 12)) ? 1'b1 : 1'b0;
+                // Q3: high for phases 0-3 and 7-10 (rises with Phi1 transitions)
+                a2_q3 = ((i <= 3) || (i >= 7 && i <= 10)) ? 1'b1 : 1'b0;
 
                 // Inject noise on Phi1 if enabled.
                 // The noise glitch is injected *within* the 14M period so that
@@ -103,15 +103,17 @@ module a2bus_timing_tb;
     //   Phase:  0  1  2  3  4  5  6  7  8  9 10 11 12 13
     //   7M:     0  1  0  1  0  1  0  1  0  1  0  1  0  1
     //   Phi1:   1  1  1  1  1  1  1  0  0  0  0  0  0  0
+    //   Q3:     1  1  1  1  0  0  0  1  1  1  1  0  0  0
     //
     // Extended cycle (16 ticks):
     //   Phase:  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
     //   7M:     0  1  0  1  0  1  0  1  0  1  0  1  0  1  0  1
     //   Phi1:   1  1  1  1  1  1  1  1  1  0  0  0  0  0  0  0
-    //   Q3:     0  0  0  0  1  1  1  1  1  1  0  0  0  0  1  1
+    //   Q3:     1  1  1  1  0  0  0  0  0  1  1  1  1  0  0  0
     //
-    // The 2 extra ticks (phases 7-8) extend Phi1 HIGH and Q3 HIGH.
-    // Phi1 falls at phase 9 instead of 7. Q3 pattern shifts accordingly.
+    // The 2 extra ticks (phases 7-8) extend Phi1 HIGH and Q3 LOW.
+    // Phi1 falls at phase 9 instead of 7. Q3 rises with Phi1 falling
+    // at phase 9 instead of 7. Q3 falls at phase 13 instead of 11.
     task automatic apple_extended_cycle;
         integer i;
         begin
@@ -120,8 +122,8 @@ module a2bus_timing_tb;
                 a2_7M = i[0];
                 // Phi1: high for phases 0-8 (9 ticks), low for phases 9-15 (7 ticks)
                 a2_phi1 = (i < 9) ? 1'b1 : 1'b0;
-                // Q3: high for phases 4-9, high for phases 14-15
-                a2_q3 = ((i >= 4 && i <= 9) || (i >= 14)) ? 1'b1 : 1'b0;
+                // Q3: high for phases 0-3 and 9-12 (rises with Phi1 transitions)
+                a2_q3 = ((i <= 3) || (i >= 9 && i <= 12)) ? 1'b1 : 1'b0;
                 #(APPLE_14M_PERIOD);
             end
         end

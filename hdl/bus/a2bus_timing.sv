@@ -133,13 +133,16 @@ module a2bus_timing #(
     // The Apple II 14M oscillator feeds a divide-by-14 counter in the IOU/MMU.
     // 7M toggles every 14M tick. Phi1 and Q3 have specific transition points.
     //
+    // From the Apple IIe HAL timing diagram and Apple II+ 74S195 shift register:
+    //
     // Phase:  0  1  2  3  4  5  6  7  8  9 10 11 12 13
     // 7M:     0  1  0  1  0  1  0  1  0  1  0  1  0  1
     // Phi1:   1  1  1  1  1  1  1  0  0  0  0  0  0  0
-    // Q3:     0  0  0  0  1  1  1  1  0  0  0  0  1  1
+    // Q3:     1  1  1  1  0  0  0  1  1  1  1  0  0  0
     //
-    // Phi1 rises at phase 0, falls at phase 7
-    // Q3 rises at phase 4, falls at phase 8, rises at phase 12, falls at phase 0
+    // Q3 rises with Phi1 rising (phase 0) and Phi1 falling (phase 7).
+    // Q3 falls at phase 4 and phase 11.
+    // Q3 has a 4-high/3-low/4-high/3-low asymmetric pattern per CPU cycle.
     // 7M = phase[0] (least significant bit of phase counter)
 
     // Output state lookup indexed by phase counter
@@ -147,20 +150,20 @@ module a2bus_timing #(
     logic [2:0] PHASE_MAP [0:13];
     initial begin
         //              7M  Phi1  Q3
-        PHASE_MAP[0]  = 3'b010;  // 7M=0, Phi1=1, Q3=0  (Phi1 rises, Q3 falls)
-        PHASE_MAP[1]  = 3'b110;  // 7M=1, Phi1=1, Q3=0
-        PHASE_MAP[2]  = 3'b010;  // 7M=0, Phi1=1, Q3=0
-        PHASE_MAP[3]  = 3'b110;  // 7M=1, Phi1=1, Q3=0
-        PHASE_MAP[4]  = 3'b011;  // 7M=0, Phi1=1, Q3=1  (Q3 rises)
-        PHASE_MAP[5]  = 3'b111;  // 7M=1, Phi1=1, Q3=1
-        PHASE_MAP[6]  = 3'b011;  // 7M=0, Phi1=1, Q3=1
-        PHASE_MAP[7]  = 3'b101;  // 7M=1, Phi1=0, Q3=1  (Phi1 falls)
-        PHASE_MAP[8]  = 3'b000;  // 7M=0, Phi1=0, Q3=0  (Q3 falls)
-        PHASE_MAP[9]  = 3'b100;  // 7M=1, Phi1=0, Q3=0
-        PHASE_MAP[10] = 3'b000;  // 7M=0, Phi1=0, Q3=0
-        PHASE_MAP[11] = 3'b100;  // 7M=1, Phi1=0, Q3=0
-        PHASE_MAP[12] = 3'b001;  // 7M=0, Phi1=0, Q3=1  (Q3 rises)
-        PHASE_MAP[13] = 3'b101;  // 7M=1, Phi1=0, Q3=1
+        PHASE_MAP[0]  = 3'b011;  // 7M=0, Phi1=1, Q3=1  (Phi1 rises, Q3 rises)
+        PHASE_MAP[1]  = 3'b111;  // 7M=1, Phi1=1, Q3=1
+        PHASE_MAP[2]  = 3'b011;  // 7M=0, Phi1=1, Q3=1
+        PHASE_MAP[3]  = 3'b111;  // 7M=1, Phi1=1, Q3=1
+        PHASE_MAP[4]  = 3'b010;  // 7M=0, Phi1=1, Q3=0  (Q3 falls)
+        PHASE_MAP[5]  = 3'b110;  // 7M=1, Phi1=1, Q3=0
+        PHASE_MAP[6]  = 3'b010;  // 7M=0, Phi1=1, Q3=0
+        PHASE_MAP[7]  = 3'b101;  // 7M=1, Phi1=0, Q3=1  (Phi1 falls, Q3 rises)
+        PHASE_MAP[8]  = 3'b001;  // 7M=0, Phi1=0, Q3=1
+        PHASE_MAP[9]  = 3'b101;  // 7M=1, Phi1=0, Q3=1
+        PHASE_MAP[10] = 3'b001;  // 7M=0, Phi1=0, Q3=1
+        PHASE_MAP[11] = 3'b100;  // 7M=1, Phi1=0, Q3=0  (Q3 falls)
+        PHASE_MAP[12] = 3'b000;  // 7M=0, Phi1=0, Q3=0
+        PHASE_MAP[13] = 3'b100;  // 7M=1, Phi1=0, Q3=0
     end
 
     // =========================================================================
