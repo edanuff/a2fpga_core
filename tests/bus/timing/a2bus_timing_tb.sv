@@ -33,6 +33,7 @@ module a2bus_timing_tb;
     wire q3_o, q3_posedge_o, q3_negedge_o;
     wire clk_7M_o, clk_7M_posedge_o, clk_7M_negedge_o;
     wire clk_14M_posedge_o;
+    wire m2b0_ready_o;
 
     // =========================================================================
     // Clock Generation - 54 MHz FPGA logic clock
@@ -189,7 +190,8 @@ module a2bus_timing_tb;
         .clk_7M_posedge_o(clk_7M_posedge_o),
         .clk_7M_negedge_o(clk_7M_negedge_o),
 
-        .clk_14M_posedge_o(clk_14M_posedge_o)
+        .clk_14M_posedge_o(clk_14M_posedge_o),
+        .m2b0_ready_o(m2b0_ready_o)
     );
 
     // =========================================================================

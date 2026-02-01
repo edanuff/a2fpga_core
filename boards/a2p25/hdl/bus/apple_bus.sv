@@ -109,7 +109,8 @@ module apple_bus #(
         .clk_7M_posedge_o(a2bus_if.clk_7M_posedge),
         .clk_7M_negedge_o(a2bus_if.clk_7M_negedge),
         
-        .clk_14M_posedge_o(a2bus_if.clk_14M_posedge)
+        .clk_14M_posedge_o(a2bus_if.clk_14M_posedge),
+        .m2b0_ready_o(a2bus_if.m2b0_ready)
     );
 
     // data and address latches on input
@@ -159,10 +160,10 @@ module apple_bus #(
     // We need to account for delays due to CDC delays and actual bus signal setup times
 
     // Apple TN# 68 - Tips for I/O Expansion Slot Card Design
-    // We're seeing the falling edge of Q3 too late, need to sample earlier
-    wire a2_m2b0_start_w = a2bus_if.phi1 && (phase_cycles_r == M2B0_COUNT);
+    // M2B0 goes active 140ns after PH0 falls (Phi1 rises), stays active 140ns.
+    // m2b0_ready strobes at the middle of this window (~210ns after Phi1 posedge).
     always @(posedge a2bus_if.clk_logic) begin
-        if (a2bus_if.phi1 && a2_m2b0_start_w) m2b0_r <= a2_m2b0_w;
+        if (a2bus_if.m2b0_ready) m2b0_r <= a2_m2b0_w;
 	end
 
     // Per Gaylor timing diagrams, sample address from bus at 350ns from Phi1 rising edge

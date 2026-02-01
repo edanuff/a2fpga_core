@@ -112,7 +112,8 @@ module apple_bus #(
         .clk_7M_posedge_o(a2bus_if.clk_7M_posedge),
         .clk_7M_negedge_o(a2bus_if.clk_7M_negedge),
         
-        .clk_14M_posedge_o(a2bus_if.clk_14M_posedge)
+        .clk_14M_posedge_o(a2bus_if.clk_14M_posedge),
+        .m2b0_ready_o(a2bus_if.m2b0_ready)
     );
 
     // data and address latches on input
@@ -130,9 +131,9 @@ module apple_bus #(
 
     reg m2b0_r;
 	always @(posedge a2bus_if.clk_logic) begin
-        if (a2bus_if.phi1 && a2bus_if.clk_q3_negedge) m2b0_r <= a2_gs ? a2_mb20 : 1'b0;
+        if (a2bus_if.m2b0_ready) m2b0_r <= a2_gs ? a2_mb20 : 1'b0;
 	end
-    assign a2bus_if.m2b0 = m2b0_r; 
+    assign a2bus_if.m2b0 = m2b0_r;
 
     assign a2bus_if.control_inh_n = a2_inh_n;
     assign a2bus_if.control_irq_n = 1'b1;

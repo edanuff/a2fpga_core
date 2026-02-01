@@ -49,6 +49,7 @@ interface a2bus_if (
     logic timing_lock;
     logic timing_error;
     logic cycle_extended;
+    logic m2b0_ready;
 
     logic rw_n;
     logic [15:0] addr;
@@ -92,6 +93,7 @@ interface a2bus_if (
         output timing_lock,
         output timing_error,
         output cycle_extended,
+        output m2b0_ready,
 
         output rw_n,
         output addr,
@@ -136,6 +138,7 @@ interface a2bus_if (
         input timing_lock,
         input timing_error,
         input cycle_extended,
+        input m2b0_ready,
 
         input rw_n,
         input addr,

@@ -85,7 +85,9 @@ module a2bus_timing #(
     output clk_7M_posedge_o,
     output clk_7M_negedge_o,
 
-    output clk_14M_posedge_o
+    output clk_14M_posedge_o,
+
+    output m2b0_ready_o
 );
 
     // =========================================================================
@@ -635,6 +637,27 @@ module a2bus_timing #(
                            && (extend_hold_count_r < 2'd2) && lock_r;
 
     // =========================================================================
+    // M2B0 Sample Strobe
+    // =========================================================================
+    //
+    // Per Apple TN#68, the Mega II bank 0 signal (M2B0) goes active 140ns
+    // after PH0 falls (= Phi1 rises) and stays active for 140ns. The valid
+    // window is therefore 140-280ns after Phi1 posedge.
+    //
+    // At 54 MHz (18.52 ns/clock), the middle of this window is:
+    //   210 ns / 18.52 ns ≈ 11.3 FPGA clocks after Phi1 posedge
+    //
+    // In the predictive engine, Phi1 posedge occurs at phase 0 and each
+    // phase tick averages ~3.77 FPGA clocks. Phase 3 corresponds to
+    // ~11.3 FPGA clocks after phase 0, landing squarely in the middle of
+    // the M2B0 valid window. We generate a one-clock pulse when the phase
+    // counter transitions to phase 3.
+
+    localparam int unsigned M2B0_SAMPLE_PHASE = 3;
+
+    wire pred_m2b0_ready_w = (phase_r != prev_phase_r) && (phase_r == M2B0_SAMPLE_PHASE[3:0]);
+
+    // =========================================================================
     // Output Assignments
     // =========================================================================
 
@@ -659,5 +682,7 @@ module a2bus_timing #(
     assign lock            = lock_r;
     assign error           = error_r;
     assign cycle_extended  = cycle_extended_r;
+
+    assign m2b0_ready_o    = pred_m2b0_ready_w;
 
 endmodule

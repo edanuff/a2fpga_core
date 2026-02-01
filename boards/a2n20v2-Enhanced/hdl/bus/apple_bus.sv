@@ -110,7 +110,8 @@ module apple_bus #(
         .clk_7M_posedge_o(a2bus_if.clk_7M_posedge),
         .clk_7M_negedge_o(a2bus_if.clk_7M_negedge),
         
-        .clk_14M_posedge_o(a2bus_if.clk_14M_posedge)
+        .clk_14M_posedge_o(a2bus_if.clk_14M_posedge),
+        .m2b0_ready_o(a2bus_if.m2b0_ready)
     );
 
     // data and address latches on input
