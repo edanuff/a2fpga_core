@@ -126,6 +126,20 @@ module a2bus_timing #(
     localparam int unsigned EXTENDED_PERIOD_CLKS = (CLOCK_SPEED_HZ * 16 + APPLE_HZ - 1) / APPLE_HZ;  // ceil(54M*16/14.318M) ≈ 61
     localparam int unsigned EXTENDED_THRESHOLD = (NORMAL_PERIOD_CLKS + EXTENDED_PERIOD_CLKS) / 2;     // midpoint ≈ 57
 
+    // Extended cycle output reproduction: when an extended input cycle is
+    // detected (at output phase 9, CDC'd Phi1 still HIGH), the phase counter
+    // holds at phase 13 for 2 extra ticks before wrapping to phase 0.
+    // This inserts the extra time at the end of the cycle (Phi1 LOW, Q3 LOW),
+    // extending the total output period from 14 to 16 ticks to match input.
+    //
+    // Note: the extension time is placed in the Phi1 LOW portion of the cycle
+    // rather than extending Phi1 HIGH, because we cannot reliably detect the
+    // extended cycle before phase 7 (where Phi1 normally falls). At output
+    // phase 6, cdc_phi1_w is HIGH for both normal and extended cycles since
+    // the real Phi1 hasn't fallen yet in either case. The distinction only
+    // becomes clear at phase 9+ when normal cycles have cdc_phi1_w LOW but
+    // extended cycles still have it HIGH.
+
     // =========================================================================
     // Apple II Phase Map
     // =========================================================================
@@ -236,6 +250,7 @@ module a2bus_timing #(
     logic [3:0] snap_phase_value_w;  // phase value to snap to
     logic apply_correction_slow_w;   // nudge accumulator: slow down (generator too fast)
     logic apply_correction_fast_w;   // nudge accumulator: speed up (generator too slow)
+    logic extend_hold_w;             // hold phase counter for extended cycle output
 
     // =========================================================================
     // Fractional-N 14M Tick Generator + Phase Counter
@@ -288,7 +303,16 @@ module a2bus_timing #(
             if (next_acc_w >= CLOCK_SPEED_HZ) begin
                 next_acc_w   = next_acc_w - CLOCK_SPEED_HZ;
                 next_tick_w  = 1'b1;
-                next_phase_w = (phase_r == 4'd13) ? 4'd0 : phase_r + 4'd1;
+                // Extended cycle hold: when phase is 13 and we've detected
+                // an extended cycle, hold at phase 13 instead of wrapping
+                // to phase 0. The accumulator still advances (tick fires)
+                // but the phase counter stays put, effectively inserting
+                // extra 14M ticks at the end of the cycle to match the
+                // IIgs 16-tick extended cycle period.
+                if (extend_hold_w && phase_r == 4'd13)
+                    next_phase_w = 4'd13;  // hold: don't wrap to phase 0
+                else
+                    next_phase_w = (phase_r == 4'd13) ? 4'd0 : phase_r + 4'd1;
             end
         end
     end
@@ -512,8 +536,23 @@ module a2bus_timing #(
     end
 
     // =========================================================================
-    // Phi1 Cross-check and Extended Cycle Detection
+    // Extended Cycle Detection and Output Reproduction
     // =========================================================================
+    //
+    // Two functions:
+    //   1. Detect extended cycles (for the cycle_extended status flag)
+    //   2. Reproduce extended cycles in output to prevent drift
+    //
+    // Detection (status flag): measure FPGA clocks between CDC'd Phi1
+    // posedges. If the period exceeds EXTENDED_THRESHOLD, flag it.
+    //
+    // Output reproduction: detect mid-cycle at output phase 9 by checking
+    // if cdc_phi1_w is still HIGH (normal cycles have it LOW by then).
+    // When detected, hold the phase counter at phase 13 for 2 extra ticks
+    // before wrapping to phase 0. This extends the total output cycle
+    // from 14 to 16 ticks, matching the IIgs extended cycle period and
+    // preventing cumulative drift (2 ticks per extended cycle, every 65th
+    // cycle on IIgs).
 
     logic [6:0] phi1_period_counter_r;
     logic       cycle_extended_r;
@@ -530,6 +569,70 @@ module a2bus_timing #(
             phi1_period_counter_r <= phi1_period_counter_r + 7'd1;
         end
     end
+
+    // Extended cycle output reproduction
+    //
+    // Detect extended cycles mid-cycle by counting FPGA clocks after the
+    // predicted Phi1 negedge and checking if cdc_phi1_w is still HIGH.
+    //
+    // After the predicted Phi1 negedge (phase 7):
+    //   - Normal cycle: real Phi1 fell at input phase 7 (approximately
+    //     simultaneous with predicted). CDC propagation takes CDC_LATENCY
+    //     clocks. So cdc_phi1_w goes LOW about CDC_LATENCY clocks later.
+    //   - Extended cycle: real Phi1 stays HIGH for 2 more ticks after
+    //     input phase 7 (falls at phase 9). cdc_phi1_w stays HIGH for
+    //     2*3.77 + CDC_LATENCY ≈ 10.5 clocks after predicted negedge.
+    //
+    // Check point: CDC_LATENCY + ACCEPT_WINDOW + 1 clocks after predicted
+    // negedge. At this point:
+    //   - Normal: cdc_phi1_w has been LOW for ~ACCEPT_WINDOW+1 clocks
+    //   - Extended: cdc_phi1_w is still HIGH (~7+ clocks until it goes LOW)
+    //
+    // This gives reliable discrimination with good margin.
+    //
+    // Compensation: hold at phase 13 for 2 extra ticks. This inserts
+    // the extra time in the Phi1 LOW / Q3 LOW portion of the cycle.
+    // Total output cycle = 14 + 2 = 16 ticks, matching IIgs timing.
+
+    localparam int unsigned EXTEND_CHECK_DELAY = CDC_LATENCY + ACCEPT_WINDOW + 2;  // ~7 clocks
+
+    logic current_cycle_extended_r;
+    logic [1:0] extend_hold_count_r;
+    logic [3:0] clks_after_phi1_negedge_r;
+    logic       phi1_negedge_seen_r;
+
+    always_ff @(posedge clk_logic_i) begin
+        if (pred_phi1_posedge_w) begin
+            // New cycle (Phi1 just rose): reset state for this cycle
+            current_cycle_extended_r <= 1'b0;
+            extend_hold_count_r <= 2'd0;
+            phi1_negedge_seen_r <= 1'b0;
+            clks_after_phi1_negedge_r <= 4'd0;
+        end else begin
+            // Track clocks since predicted Phi1 negedge
+            if (pred_phi1_negedge_w) begin
+                phi1_negedge_seen_r <= 1'b1;
+                clks_after_phi1_negedge_r <= 4'd0;
+            end else if (phi1_negedge_seen_r && clks_after_phi1_negedge_r < 4'd15) begin
+                clks_after_phi1_negedge_r <= clks_after_phi1_negedge_r + 4'd1;
+            end
+
+            // Detect extended cycle: check cdc_phi1_w at the check point
+            if (phi1_negedge_seen_r &&
+                clks_after_phi1_negedge_r == EXTEND_CHECK_DELAY[3:0] &&
+                cdc_phi1_w && lock_r && !current_cycle_extended_r)
+                current_cycle_extended_r <= 1'b1;
+
+            // Count hold ticks when holding at phase 13
+            if (next_tick_w && extend_hold_w)
+                extend_hold_count_r <= extend_hold_count_r + 2'd1;
+        end
+    end
+
+    // Hold signal: active when extended cycle detected, at phase 13,
+    // with hold budget remaining (max 2 extra ticks).
+    assign extend_hold_w = current_cycle_extended_r && (phase_r == 4'd13)
+                           && (extend_hold_count_r < 2'd2) && lock_r;
 
     // =========================================================================
     // Output Assignments

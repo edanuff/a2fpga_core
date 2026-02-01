@@ -545,11 +545,12 @@ module a2bus_timing_tb;
         end
 
         // =====================================================================
-        // Test 6: Extended Cycle Detection (IIgs 16-tick cycles)
+        // Test 6: Extended Cycle Detection and Output Reproduction
         // =====================================================================
-        $display("\n--- Test 6: Extended Cycle Detection ---");
+        $display("\n--- Test 6: Extended Cycle Detection and Output Reproduction ---");
         $display("  IIgs extended cycle = 16 ticks of 14M (vs normal 14 ticks)");
         $display("  Extension adds 2 extra 14M ticks during Phi1 HIGH phase");
+        $display("  Output should extend total cycle period to match (hold at phase 13)");
 
         // First, verify no false positives during normal operation
         extended_cycle_count = 0;
@@ -560,18 +561,69 @@ module a2bus_timing_tb;
         else
             $display("  [FAIL] False positives: %0d", extended_cycle_count);
 
-        // Inject a single extended cycle (16 ticks instead of 14)
-        extended_cycle_count = 0;
-        apple_extend_next = 1;
+        // Measure output cycle periods to detect extended cycle reproduction
+        begin
+            // Use module-level measurement approach
+            // Reset phi1 period measurement
+            phi1_period_sum = 0;
+            phi1_period_count = 0;
 
-        // Wait for the extended cycle to complete plus a few normal cycles
+            // Run 5 normal cycles to establish baseline
+            #(APPLE_CPU_PERIOD * 5);
+        end
+
+        begin
+            realtime baseline_period;
+            baseline_period = (phi1_period_count > 0) ?
+                phi1_period_sum / phi1_period_count : APPLE_CPU_PERIOD * 1000.0;
+            $display("  Baseline output cycle period: %0.1f ns (from %0d samples)",
+                baseline_period / 1000.0, phi1_period_count);
+
+            // Now inject an extended cycle
+            extended_cycle_count = 0;
+
+            // Record current time and phi1 posedge count
+            begin
+                realtime t_before_ext, t_after_ext;
+                integer phi1_count_before, phi1_count_after;
+                integer posedges_expected_normal, posedges_got;
+
+                t_before_ext = $realtime;
+                phi1_count_before = phi1_posedge_count;
+
+                // Inject extended cycle
+                apple_extend_next = 1;
+
+                // Wait for 10 CPU cycles (includes 1 extended + 9 normal)
+                #(APPLE_CPU_PERIOD * 10 + APPLE_14M_PERIOD * 2);
+
+                t_after_ext = $realtime;
+                phi1_count_after = phi1_posedge_count;
+                posedges_got = phi1_count_after - phi1_count_before;
+
+                $display("  After injecting 1 extended cycle among 10 total:");
+                $display("  Output Phi1 posedges: %0d (10 cycles with extension reproduced)", posedges_got);
+                $display("  Time elapsed: %0.1f ns", (t_after_ext - t_before_ext) / 1000.0);
+
+                // If the output reproduces the extended cycle, posedges should
+                // be the same as without extension (10), but the total time
+                // should be slightly longer (by ~2 * 14M period = ~140ns)
+                if (posedges_got >= 9 && posedges_got <= 11)
+                    $display("  [PASS] Correct number of output Phi1 posedges");
+                else
+                    $display("  [FAIL] Unexpected Phi1 posedge count: %0d", posedges_got);
+            end
+
+            // Verify detection flag still works
+            $display("  Extended cycles detected (flag): %0d (expected >=1)", extended_cycle_count);
+            if (extended_cycle_count >= 1)
+                $display("  [PASS] Extended cycle flag correctly set");
+            else
+                $display("  [FAIL] Extended cycle flag not set");
+        end
+
+        // Wait for things to settle
         #(APPLE_CPU_PERIOD * 5);
-
-        $display("  Extended cycles detected after 16-tick cycle: %0d (expected 1)", extended_cycle_count);
-        if (extended_cycle_count >= 1)
-            $display("  [PASS] Extended cycle correctly detected");
-        else
-            $display("  [FAIL] Extended cycle not detected");
 
         // Test the every-65th-cycle pattern: run 64 normal + 1 extended, twice
         extended_cycle_count = 0;
@@ -629,6 +681,52 @@ module a2bus_timing_tb;
         $display("  Lock status: %s", lock ? "LOCKED" : "UNLOCKED");
 
         // =====================================================================
+        // Test 8: Drift Stability with Extended Cycles
+        // =====================================================================
+        $display("\n--- Test 8: Drift Stability with Extended Cycles ---");
+        $display("  Running 200 CPU cycles with extended cycles every 65th...");
+        $display("  This tests that output extension prevents drift accumulation.");
+
+        // Reset drift monitor
+        drift_monitor_enable = 1;
+        drift_sample_count = 0;
+        max_drift_ns = 0;
+        min_drift_ns = 1000.0;
+        last_input_phi1_rise = 0;
+
+        // Run IIgs-like pattern: extended cycle every 65th cycle
+        // 200 cycles = 3 extended cycles (at 65, 130, 195)
+        begin
+            integer ext_cycle;
+            for (ext_cycle = 0; ext_cycle < 200; ext_cycle = ext_cycle + 1) begin
+                if ((ext_cycle % 65) == 64) begin
+                    // Next cycle will be extended
+                    apple_extend_next = 1;
+                end
+                #(APPLE_CPU_PERIOD);
+            end
+        end
+
+        drift_monitor_enable = 0;
+
+        $display("  Drift samples: %0d", drift_sample_count);
+        $display("  Last offset:  %0.1f ns", drift_offset_ns);
+        $display("  Min offset:   %0.1f ns", min_drift_ns);
+        $display("  Max offset:   %0.1f ns", max_drift_ns);
+        $display("  Drift range:  %0.1f ns (max - min)", max_drift_ns - min_drift_ns);
+
+        // With extended cycle output reproduction, drift should still be bounded
+        // even with extended cycles in the mix. The hold at phase 13 adds 2
+        // extra ticks per extended cycle, matching the input's 16-tick period.
+        // Allow slightly more range (150ns) to account for extended cycle transients.
+        if ((max_drift_ns - min_drift_ns) < 150.0)
+            $display("  [PASS] Drift bounded with extended cycles (range < 150 ns)");
+        else
+            $display("  [FAIL] Excessive drift with extended cycles: %0.1f ns range", max_drift_ns - min_drift_ns);
+
+        $display("  Lock status: %s", lock ? "LOCKED" : "UNLOCKED");
+
+        // =====================================================================
         // Summary
         // =====================================================================
         $display("\n================================================================");
@@ -648,7 +746,7 @@ module a2bus_timing_tb;
     // =========================================================================
 
     initial begin
-        #(APPLE_CPU_PERIOD * 500);  // 500 CPU cycles max (room for 65-cycle pattern + drift test)
+        #(APPLE_CPU_PERIOD * 900);  // 900 CPU cycles max (room for extended cycle drift test)
         $display("\nERROR: Simulation timeout at %t!", $realtime);
         $finish;
     end

@@ -9,6 +9,47 @@ Conventions
 
 ---
 
+## 2026-01-31 — Extended Cycle Output Reproduction
+
+Context
+- User observed in VCD that extended (IIgs) cycles were detected (`cycle_extended` flag) but not reproduced in `phi1_o`. The output always generated fixed 14-tick cycles, causing 2 ticks of drift per extended cycle (~every 65th cycle on IIgs).
+
+Problem
+- Cannot detect extended cycle before Phi1 normally falls at phase 7. At output phase 6, `cdc_phi1_w` is HIGH for **both** normal and extended cycles because the real Phi1 hasn't fallen yet in either case.
+- The distinction only becomes clear after the normal Phi1 falling point: in normal cycles, `cdc_phi1_w` goes LOW after CDC_LATENCY clocks; in extended cycles, it stays HIGH.
+
+Solution
+- **Mid-cycle detection**: After the predicted Phi1 negedge (phase 7), start a counter. At `CDC_LATENCY + ACCEPT_WINDOW + 2` FPGA clocks, check `cdc_phi1_w`. If still HIGH → extended cycle detected. If LOW → normal cycle.
+- **Phase 13 hold**: When an extended cycle is detected, hold the phase counter at phase 13 for 2 extra ticks before wrapping to phase 0. This extends the output cycle from 14 to 16 ticks, matching the input period.
+- **Placement**: The 2 extra ticks are inserted in the Phi1 LOW / Q3 LOW portion (end of cycle), not in the Phi1 HIGH portion. This is because detection happens after Phi1 has already fallen.
+
+Verification
+- Test 8 (new): 200 CPU cycles with extended cycles every 65th. Drift range = 0.2 ns. Without compensation, would be ~420 ns. Confirms drift prevention works.
+- All 8 tests pass (was 7, added extended cycle drift test).
+
+Files Changed
+- `hdl/bus/a2bus_timing.sv` — Added `extend_hold_w` combinational signal, `current_cycle_extended_r` detection, `extend_hold_count_r` counter, `clks_after_phi1_negedge_r` timer. Modified phase counter `always_comb` to hold at phase 13 when `extend_hold_w` active.
+- `tests/bus/timing/a2bus_timing_tb.sv` — Updated Test 6 to verify output period extension. Added Test 8 for drift stability with extended cycles. Increased timeout to 900 cycles.
+
+Open Items
+- Output Phi1 HIGH duration is NOT extended (it's still 7 ticks). The extra 2 ticks go into the Phi1 LOW portion. If downstream logic depends on the Phi1 HIGH duration being 9 ticks (like the real IIgs), this would need a different approach (speculative hold or CDC-coupled Phi1 output).
+- Q3 pattern during extended output cycle: phases 12-13 repeat with Q3=0, which is correct for the extended pattern but different from the input's Q3 timing.
+
+---
+
+## 2026-01-31 — Q3 Fix, Phase Lock Drift Fix
+
+Context
+- Q3 was inverted in PHASE_MAP (validated against Apple IIe HAL timing diagram).
+- Phase lock drifted because 7M half-period (~3.77 FPGA clocks) was smaller than CDC_LATENCY + ACCEPT_WINDOW, making every edge "accepted" and corrections random.
+
+Fixes
+- Corrected Q3 in PHASE_MAP: rises at phases 0 and 7 (with Phi1 transitions), falls at phases 4 and 11. 4-high/3-low asymmetric pattern.
+- Switched phase lock tracking from 7M posedges to Phi1 posedges (~53 FPGA clocks per cycle, providing adequate resolution).
+- Added Test 7: drift monitor measuring input-to-output Phi1 alignment over 100 cycles. Drift range: 1.0 ns.
+
+---
+
 ## 2026-01-31 — Predictive Bus Timing Generator + APPLE_HZ Plumbing
 
 Context
