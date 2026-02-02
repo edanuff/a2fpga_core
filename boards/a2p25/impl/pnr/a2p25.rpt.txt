@@ -12,27 +12,27 @@
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
   <Device Version>: A
-  <Created Time>:Thu Jan 29 22:41:47 2026
+  <Created Time>:Sat Jan 31 20:54:46 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.963s, Elapsed time = 0h 0m 0.888s
-    Placement Phase 1: CPU time = 0h 0m 0.22s, Elapsed time = 0h 0m 0.191s
-    Placement Phase 2: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+    Placement Phase 0: CPU time = 0h 0m 0.764s, Elapsed time = 0h 0m 0.727s
+    Placement Phase 1: CPU time = 0h 0m 0.178s, Elapsed time = 0h 0m 0.153s
+    Placement Phase 2: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
     Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
-    Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
+    Total Placement: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
  Running routing:
     Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
-    Routing Phase 1: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
-    Routing Phase 2: CPU time = 0h 0m 0.076s, Elapsed time = 0h 0m 0.064s
+    Routing Phase 1: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+    Routing Phase 2: CPU time = 0h 0m 0.068s, Elapsed time = 0h 0m 0.054s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+    Total Routing: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
  Generate output files:
     CPU time = 0h 0m 2s, Elapsed time = 0h 0m 1s
 
- Total Time and Memory Usage: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 11s, Peak memory usage = 1743MB
+ Total Time and Memory Usage: CPU time = 0h 0m 9s, Elapsed time = 0h 0m 8s, Peak memory usage = 1758MB
 
 
 3. Resource Usage Summary
@@ -40,18 +40,18 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 8069/23040                          |  36%
-    --LUT,ALU,ROM16           | 8069(7314 LUT, 755 ALU, 0 ROM16)    | -
+  Logic                       | 6800/23040                          |  30%
+    --LUT,ALU,ROM16           | 6800(6139 LUT, 661 ALU, 0 ROM16)    | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 4730/23280                          |  21%
+  Register                    | 4002/23280                          |  18%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 4692/23040                          |  21%
+    --Logic Register as FF    | 3964/23040                          |  18%
     --I/O Register as Latch   | 0/240                               |  0%
     --I/O Register as FF      | 38/240                              |  16%
-  CLS                         | 6216/11520                          |  54%
+  CLS                         | 5128/11520                          |  45%
   I/O Port                    | 68/86                               |  80%
-  I/O Buf                     | 58                                  | -
-    --Input Buf               | 29                                  | -
+  I/O Buf                     | 57                                  | -
+    --Input Buf               | 28                                  | -
     --Output Buf              | 21                                  | -
     --Inout Buf               | 8                                   | -
   IOLOGIC                     | 6/80                                | 8%
@@ -90,8 +90,8 @@
   ------------------------------------------
   Clock Resource| Usage         | Utilization 
   ------------------------------------------
-  PRIMARY       | 6/8           | 75%
-  LW            | 8/8           | 100%
+  PRIMARY       | 4/8           | 50%
+  LW            | 6/8           | 75%
   GCLK_PIN      | 28/30         | 94%
   CLKDIV        | 1/16          | 7%
   PLLA          | 1/6           | 17%
@@ -107,16 +107,12 @@
   a2bus_if.clk_pixel| PRIMARY        |  TR TL BR BL
   clk_hdmi_w     | PRIMARY        |  BR
   a2bus_if.clk_logic| PRIMARY        |  TR TL BR BL
-  supersprite/ssp_psg/n2554_6| PRIMARY        |  TL BL
-  mockingboard/psg_left/n2554_6| PRIMARY        |  BR
   a2bus_if.device_reset_n| LW             |  -
   n29_11         | LW             |  -
-  timer_a_count_15_9| LW             |  -
   supersprite/vdp/f18a_core/reset_n_r| LW             |  -
   supersprite/vdp/f18a_core/inst_cpu/n931_6| LW             |  -
-  mockingboard/pb_l_o[2]| LW             |  -
-  mockingboard/pb_r_o[2]| LW             |  -
-  superserial/COM2/n67_7| LW             |  -
+  supersprite/ssp_psg/n2554_5| LW             |  -
+  hdmi/true_hdmi_output.packet_picker/n4077_4| LW             |  -
   clk_hdmi_w     | HCLK           | BANK2_BANK3_HCLK0
   ===========================================
 
