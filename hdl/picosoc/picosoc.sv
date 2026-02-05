@@ -51,7 +51,7 @@ module picosoc #(
     slotmaker_config_if.controller slotmaker_config_if,
     f18a_gpu_if.slave f18a_gpu_if,
     video_control_if.control video_control_if,
-    sdram_port_if.client mem_if,
+    mem_port_if.client mem_if,
     drive_volume_if.volume volumes[2]
 );
 

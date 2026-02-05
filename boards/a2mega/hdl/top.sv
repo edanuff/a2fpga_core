@@ -24,7 +24,7 @@ module top #(
     parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
 
     parameter bit SCANLINES_ENABLE = 0,
-    parameter bit APPLE_SPEAKER_ENABLE = 0,
+    parameter bit APPLE_SPEAKER_ENABLE = 1,
 
     parameter bit SUPERSPRITE_ENABLE = 1,
     parameter bit [7:0] SUPERSPRITE_ID = 1,
@@ -36,6 +36,9 @@ module top #(
     parameter bit SUPERSERIAL_ENABLE = 1,
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
+
+    parameter bit ENSONIQ_ENABLE = 1,
+    parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
     parameter int GS = 0,                       // Apple IIgs mode
     parameter int ENABLE_FILTER = 0,            // Enable audio filtering
@@ -476,6 +479,59 @@ module top #(
         .vgc_data_i(vgc_data_w)
     );
 
+    // Ensoniq DOC5503 Sound
+
+    wire [15:0] sg_audio_l;
+    wire [15:0] sg_audio_r;
+
+    wire [7:0] sg_d_w;
+    wire sg_rd_w;
+    wire [7:0] doc_osc_en_w;
+    wire [1:0] doc_osc_mode_w[8];
+    wire [7:0] doc_osc_halt_w;
+
+    // 64KB sound RAM backed by blockram via mem_port_if
+    mem_port_if #(
+        .PORT_ADDR_WIDTH(21),
+        .DATA_WIDTH(32),
+        .DQM_WIDTH(4),
+        .PORT_OUTPUT_WIDTH(32)
+    ) glu_mem_if();
+
+    mem_port_if #(
+        .PORT_ADDR_WIDTH(21),
+        .DATA_WIDTH(32),
+        .DQM_WIDTH(4),
+        .PORT_OUTPUT_WIDTH(32)
+    ) doc_mem_if();
+
+    mem_port_bram #(
+        .ADDR_WIDTH(14)  // 16K words x 4 bytes = 64KB
+    ) sound_ram (
+        .clk(clk_logic_w),
+        .write_port(glu_mem_if),
+        .read_port(doc_mem_if)
+    );
+
+    sound_glu #(
+        .ENABLE(ENSONIQ_ENABLE),
+        .MONO_MIX(ENSONIQ_MONO_MIX)
+    ) sg (
+        .a2bus_if(a2bus_if),
+        .data_o(sg_d_w),
+        .rd_en_o(sg_rd_w),
+
+        .audio_l_o(sg_audio_l),
+        .audio_r_o(sg_audio_r),
+
+        .debug_osc_en_o(doc_osc_en_w),
+        .debug_osc_mode_o(doc_osc_mode_w),
+        .debug_osc_halt_o(doc_osc_halt_w),
+
+        .glu_mem_if(glu_mem_if),
+        .doc_mem_if(doc_mem_if)
+    );
+
     // SuperSprite
 
     wire VDP_OVERLAY_SW;
@@ -605,8 +661,8 @@ module top #(
     assign data_out_en_w = ssp_rd || mb_rd || ssc_rd;
 
     assign data_out_w = ssc_rd ? ssc_d_w :
-        ssp_rd ? ssp_d_w : 
-        mb_rd ? mb_d_w : 
+        ssp_rd ? ssp_d_w :
+        mb_rd ? mb_d_w :
         a2bus_if.data;
 
     // Interrupts
@@ -632,8 +688,9 @@ module top #(
     wire signed [15:0] core_audio_l_w;
     wire signed [15:0] core_audio_r_w;
     // Combine all the audio sources into a single 16-bit signed audio signal
-    assign core_audio_l_w = ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
-    assign core_audio_r_w = ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
+    // This could theoretically overflow by 1 bit and clip, but unlikely
+    assign core_audio_l_w = sg_audio_l + ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
+    assign core_audio_r_w = sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
 
     // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
 
@@ -674,7 +731,6 @@ module top #(
     // I2S format: 0=left-justified (ES5503/test), 1=standard I2S (ESP32-audioI2S library)
     localparam I2S_FORMAT = 1'b1;  // Use standard I2S (now fixed)
     wire clk_audio_w;
-
     audio_timing #(
         .CLK_RATE(PIXEL_SPEED_HZ),
         .AUDIO_RATE(AUDIO_RATE),
@@ -688,7 +744,6 @@ module top #(
         .i2s_data_shift_strobe(),
         .i2s_data_load_strobe()
     );
-
 
     wire [15:0] audio_sample_word[1:0];
 
@@ -737,18 +792,18 @@ module top #(
         .enable_i(show_debug_overlay_r),
 
         .hex_values ({
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,       
+            {2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]},
+            {2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]},
+            {2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]},
+            {2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]},
+            8'h0,
+            8'h0,
+            8'h0,
             8'h0
-        }), 
+        }),
 
-        .debug_bits_0_i ({a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE, a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.STORE80, a2bus_if.system_reset_n, a2bus_if.device_reset_n}),
-        .debug_bits_1_i ({led_2m_w, led_phi1_w, led_r, 1'b0, ~dip_switches_n}),
+        .debug_bits_0_i (doc_osc_halt_w),
+        .debug_bits_1_i ({1'b0, 1'b0, a2mem_if.TEXT_MODE, a2mem_if.SHRG_MODE, a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.AN3, a2mem_if.STORE80}),
 
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),

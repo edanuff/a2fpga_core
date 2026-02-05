@@ -26,8 +26,8 @@ module apple_memory #(
     a2bus_if.slave a2bus_if,
     a2mem_if.master a2mem_if,
     
-    sdram_port_if.client main_mem_if,
-    sdram_port_if.client video_mem_if,
+    mem_port_if.client main_mem_if,
+    mem_port_if.client video_mem_if,
     
     input [15:0] video_address_i,
     input video_bank_i,

@@ -1,7 +1,7 @@
 //
-// SDRAM port mux
+// Memory port mux
 //
-// (c) 2023,2024 Ed Anuff <ed@a2fpga.com> 
+// (c) 2023,2024 Ed Anuff <ed@a2fpga.com>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted, provided that the above
@@ -17,14 +17,14 @@
 //
 // Description:
 //
-// Multiplexes two SDRAM ports to a single controller port
+// Multiplexes two memory ports to a single controller port
 //
 
-module sdram_if_mux (
+module mem_if_mux (
     input switch,
-    sdram_port_if.client controller,
-    sdram_port_if.controller client_0,
-    sdram_port_if.controller client_1
+    mem_port_if.client controller,
+    mem_port_if.controller client_0,
+    mem_port_if.controller client_1
 );
 
     always @* begin : mux
@@ -55,6 +55,6 @@ module sdram_if_mux (
             client_0.available = 1'b0;
             client_0.ready = 1'b0;
         end
-    end    
+    end
 
 endmodule

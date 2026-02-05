@@ -88,7 +88,7 @@ module sdram_ports #(
     output wire init_complete,  // SDRAM is done initializing
 
     // Ports
-    sdram_port_if.controller ports[NUM_PORTS-1:0],
+    mem_port_if.controller ports[NUM_PORTS-1:0],
 
     inout  wire [DATA_WIDTH-1:0] SDRAM_DQ,    // Bidirectional data bus
     output reg  [ ROW_WIDTH-1:0] SDRAM_A,     // Address bus

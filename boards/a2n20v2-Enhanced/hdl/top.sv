@@ -213,7 +213,7 @@ module top #(
     localparam PORT_OUTPUT_WIDTH = 32;
 
     // Signals for the multiple ports
-    sdram_port_if #(
+    mem_port_if #(
         .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
         .DATA_WIDTH(DATA_WIDTH),
         .DQM_WIDTH(DQM_WIDTH),
@@ -618,7 +618,7 @@ wire picosoc_led;
 
         .audio_l_o(sg_audio_l),               
         .audio_r_o(sg_audio_r),
-        
+
         .debug_osc_en_o(doc_osc_en_w),   // Capture oscillator enable register value
         .debug_osc_mode_o(doc_osc_mode_w), // Capture oscillator mode register values
         .debug_osc_halt_o(doc_osc_halt_w), // Capture oscillator halt register value
@@ -761,7 +761,7 @@ wire picosoc_led;
     // Interrupts
 
     assign irq_n_w = mb_irq_n && vdp_irq_n && ssc_irq_n;
-        
+
     // Audio
 
     wire speaker_audio_w;

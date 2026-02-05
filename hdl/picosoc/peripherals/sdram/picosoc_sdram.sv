@@ -31,7 +31,7 @@ module picosoc_sdram
 	input [31:0] iomem_wdata,
     input iomem_instr,
 	input [31:0] iomem_la_addr,
-    sdram_port_if.client mem_if
+    mem_port_if.client mem_if
 );
 
     wire cache_hit;

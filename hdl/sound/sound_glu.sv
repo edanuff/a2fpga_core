@@ -36,8 +36,8 @@ module sound_glu #(
     output [1:0] debug_osc_mode_o[8], // Debug output for oscillator mode register;
     output [7:0] debug_osc_halt_o, // Debug output for oscillator halt register
 
-    sdram_port_if.client glu_mem_if,
-    sdram_port_if.client doc_mem_if
+    mem_port_if.client glu_mem_if,
+    mem_port_if.client doc_mem_if
     
 );
 
@@ -232,11 +232,11 @@ module sound_glu #(
         //audio_r_reg <= right_mix_w >>> volume_shift_w;
 
         if (MONO_MIX) begin
-            audio_l_reg <= mono_mix_w;
-            audio_r_reg <= mono_mix_w; 
+            audio_l_reg <= mono_mix_w <<< 1;
+            audio_r_reg <= mono_mix_w <<< 1; 
         end else begin
-            audio_l_reg <= left_mix_w;
-            audio_r_reg <= right_mix_w;
+            audio_l_reg <= left_mix_w <<< 1;
+            audio_r_reg <= right_mix_w <<< 1;
         end
 
     end

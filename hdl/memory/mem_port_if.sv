@@ -1,7 +1,7 @@
 //
-// SystemVerilog interface for a SDRAM port
+// SystemVerilog interface for a memory port
 //
-// (c) 2023,2024 Ed Anuff <ed@a2fpga.com> 
+// (c) 2023,2024 Ed Anuff <ed@a2fpga.com>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted, provided that the above
@@ -17,10 +17,10 @@
 //
 // Description:
 //
-// SystemVerilog interface for a SDRAM port
+// SystemVerilog interface for a memory port
 //
 
-interface sdram_port_if #(
+interface mem_port_if #(
     parameter PORT_ADDR_WIDTH = 12,
     parameter DATA_WIDTH = 16,
     parameter DQM_WIDTH = 2,
@@ -64,4 +64,4 @@ interface sdram_port_if #(
         input ready
     );
 
-endinterface: sdram_port_if
+endinterface: mem_port_if

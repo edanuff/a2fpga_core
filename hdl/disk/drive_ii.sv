@@ -29,7 +29,7 @@ module drive_ii (
     input read_disk_i,
     input write_reg_i,
 
-    sdram_port_if.client ram_disk_if
+    mem_port_if.client ram_disk_if
 );
 
     assign volume_if.active = drive_active;
