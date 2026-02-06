@@ -83,7 +83,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Sat Jan 24 23:23:07 2026
+<td>Thu Feb  5 19:01:24 2026
 </td>
 </tr>
 <tr>
@@ -97,24 +97,24 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <tr>
 <td class="label">Place & Route Process</td>
 <td>Running placement:
-   Placement Phase 0: CPU time = 0h 0m 0.93s, Elapsed time = 0h 0m 0.952s
-   Placement Phase 1: CPU time = 0h 0m 0.318s, Elapsed time = 0h 0m 0.328s
-   Placement Phase 2: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-   Placement Phase 3: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 1s
-   Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
+   Placement Phase 0: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+   Placement Phase 1: CPU time = 0h 0m 0.352s, Elapsed time = 0h 0m 0.324s
+   Placement Phase 2: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+   Placement Phase 3: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+   Total Placement: CPU time = 0h 0m 9s, Elapsed time = 0h 0m 9s
 Running routing:
-   Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
-   Routing Phase 1: CPU time = 0h 0m 14s, Elapsed time = 0h 0m 13s
-   Routing Phase 2: CPU time = 0h 0m 0.127s, Elapsed time = 0h 0m 0.079s
+   Routing Phase 0: CPU time = 0h 0m 0.003s, Elapsed time = 0h 0m 0.003s
+   Routing Phase 1: CPU time = 0h 0m 14s, Elapsed time = 0h 0m 14s
+   Routing Phase 2: CPU time = 0h 0m 0.153s, Elapsed time = 0h 0m 0.104s
    Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-   Total Routing: CPU time = 0h 0m 14s, Elapsed time = 0h 0m 13s
+   Total Routing: CPU time = 0h 0m 15s, Elapsed time = 0h 0m 14s
 Generate output files:
    CPU time = 0h 0m 4s, Elapsed time = 0h 0m 3s
 </td>
 </tr>
 <tr>
 <td class="label">Total Time and Memory Usage</td>
-<td>CPU time = 0h 0m 23s, Elapsed time = 0h 0m 22s, Peak memory usage = 3024MB</td>
+<td>CPU time = 0h 0m 27s, Elapsed time = 0h 0m 26s, Peak memory usage = 2874MB</td>
 </tr>
 </table>
 <br/>
@@ -129,12 +129,12 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Logic</td>
-<td>7370/59904</td>
-<td>13%</td>
+<td>9552/59904</td>
+<td>16%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --LUT,ALU,ROM16</td>
-<td>7370(6784 LUT, 586 ALU, 0 ROM16)</td>
+<td>9552(8866 LUT, 686 ALU, 0 ROM16)</td>
 <td>-</td>
 </tr>
 <tr>
@@ -144,8 +144,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Register</td>
-<td>4461/60780</td>
-<td>8%</td>
+<td>7263/60780</td>
+<td>12%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as Latch</td>
@@ -154,8 +154,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as FF</td>
-<td>4424/59904</td>
-<td>8%</td>
+<td>7224/59904</td>
+<td>13%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --I/O Register as Latch</td>
@@ -164,13 +164,13 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --I/O Register as FF</td>
-<td>37/876</td>
+<td>39/876</td>
 <td>5%</td>
 </tr>
 <tr>
 <td class="label">CLS</td>
-<td>5769/29952</td>
-<td>20%</td>
+<td>8536/29952</td>
+<td>29%</td>
 </tr>
 <tr>
 <td class="label">I/O Port</td>
@@ -179,12 +179,12 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">I/O Buf</td>
-<td>114</td>
+<td>113</td>
 <td>-</td>
 </tr>
 <tr>
 <td class="label"> &nbsp &nbsp --Input Buf</td>
-<td>31</td>
+<td>30</td>
 <td>-</td>
 </tr>
 <tr>
@@ -204,12 +204,12 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">BSRAM</td>
-<td>2 SP<br/>32 SDPB<br/>8 DPB<br/>2 DPX9B<br/>2 pROM<br/></td>
-<td>39%</td>
+<td>2 SP<br/>64 SDPB<br/>8 DPB<br/>2 DPX9B<br/>2 pROM<br/></td>
+<td>67%</td>
 </tr>
 <tr>
 <td class="label">DSP</td>
-<td>8 MULT12X12<br/></td><td>4%</td>
+<td>9 MULT12X12<br/></td><td>4%</td>
 </tr>
 </table>
 <h2><a name="I/O_Bank_Usage_Summary">I/O Bank Usage Summary:</a></h2>
@@ -317,7 +317,7 @@ Generate output files:
 <tr>
 <td class="label">a2bus_if.clk_logic</td>
 <td>PRIMARY</td>
-<td> PTR1 PTR2 PTR3 PBR1 PBR2 PBR3</td>
+<td> PTR0 PTR1 PTR2 PTR3 PBR0 PBR1 PBR2 PBR3</td>
 </tr>
 <tr>
 <td class="label">a2bus_if.device_reset_n</td>
@@ -325,7 +325,7 @@ Generate output files:
 <td> -</td>
 </tr>
 <tr>
-<td class="label">n29_11</td>
+<td class="label">n29_13</td>
 <td>LW</td>
 <td> -</td>
 </tr>
