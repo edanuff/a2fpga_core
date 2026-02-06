@@ -93,7 +93,25 @@ module top #(
 
     // uart
     output  uart_tx,
-    input  uart_rx
+    input  uart_rx,
+
+    // DDR3 physical interface - directly driven by Gowin DDR3 controller IP
+    // Pin assignments are managed by the DDR3 IP core configuration
+    output [14:0] O_ddr_addr,
+    output [2:0]  O_ddr_ba,
+    output        O_ddr_cs_n,
+    output        O_ddr_ras_n,
+    output        O_ddr_cas_n,
+    output        O_ddr_we_n,
+    output        O_ddr_clk,
+    output        O_ddr_clk_n,
+    output        O_ddr_cke,
+    output        O_ddr_odt,
+    output        O_ddr_reset_n,
+    output [1:0]  O_ddr_dqm,
+    inout  [15:0] IO_ddr_dq,
+    inout  [1:0]  IO_ddr_dqs,
+    inout  [1:0]  IO_ddr_dqs_n
 
 );
 
@@ -155,6 +173,126 @@ module top #(
 
 
     wire system_reset_n_w = device_reset_n_w;
+
+    // DDR3 Memory Controller
+    //
+    // The Gowin DDR3 controller IP generates clk_out from the memory clock.
+    // With DDR3.ipc configured for MEMORY_CLK=400 and CLK_RATIO=1:4,
+    // clk_out will be 100 MHz.
+    //
+    // A PLL is required to generate the 400 MHz memory_clk from the 27 MHz
+    // input clock. This PLL must be created using the Gowin IDE (IP Core Generator)
+    // and should support the pll_stop signal from the DDR3 controller for
+    // calibration. See nand2mario/ddr3_framebuffer_gowin for reference.
+
+    wire ddr3_memory_clk_w;
+    wire ddr3_pll_lock_w;
+    wire ddr3_pll_stop_w;
+    wire ddr3_clk_out_w;         // User clock output from DDR3 controller
+    wire ddr3_rst_w;             // Reset synchronized to ddr3_clk_out_w
+    wire ddr3_init_complete_w;
+
+    // DDR3 controller command/data interface signals
+    wire        ddr3_cmd_ready_w;
+    wire [2:0]  ddr3_cmd_w;
+    wire        ddr3_cmd_en_w;
+    wire [28:0] ddr3_addr_w;
+    wire        ddr3_wr_data_rdy_w;
+    wire [127:0] ddr3_wr_data_w;
+    wire        ddr3_wr_data_en_w;
+    wire        ddr3_wr_data_end_w;
+    wire [15:0] ddr3_wr_data_mask_w;
+    wire [127:0] ddr3_rd_data_w;
+    wire        ddr3_rd_data_valid_w;
+    wire        ddr3_rd_data_end_w;
+    wire        ddr3_sr_ack_w;
+    wire        ddr3_ref_ack_w;
+
+    // DDR3 Memory PLL - generates memory_clk from 27 MHz input
+    // NOTE: This PLL IP must be created using the Gowin IDE IP Core Generator.
+    // Configure it to output 400 MHz (or appropriate frequency matching DDR3.ipc)
+    // from the 27 MHz input clock. It must support the pll_stop signal.
+    // See nand2mario/ddr3_framebuffer_gowin pll_ddr3 for reference.
+    //
+    // For Tang Mega 60K, use the Gowin PLL IP with:
+    //   - Input: clk_27m_w (27 MHz)
+    //   - Output: ddr3_memory_clk_w (400 MHz for DDR3-800)
+    //   - Lock: ddr3_pll_lock_w
+    //   - pll_stop support for DDR3 calibration
+    //
+    // Uncomment and configure once the PLL IP is generated:
+    //
+    // pll_ddr3 pll_ddr3_inst (
+    //     .lock(ddr3_pll_lock_w),
+    //     .clkout2(ddr3_memory_clk_w),
+    //     .clkin(clk_27m_w),
+    //     .reset(~clk_lock_w),
+    //     .mdclk(clk),              // Reference clock for mDRP
+    //     .mdopc(),                  // mDRP operation
+    //     .mdainc(),                 // mDRP address increment
+    //     .mdwdi(),                  // mDRP write data
+    //     .mdrdo()                   // mDRP read data
+    // );
+
+    // Temporary: tie off DDR3 PLL signals until PLL IP is generated
+    assign ddr3_memory_clk_w = 1'b0;
+    assign ddr3_pll_lock_w = 1'b0;
+
+    // Gowin DDR3 Memory Controller IP
+    DDR3 ddr3_ctrl (
+        .clk(clk),                                  // Reference clock input
+        .pll_stop(ddr3_pll_stop_w),                  // PLL stop control output
+        .memory_clk(ddr3_memory_clk_w),              // Memory clock from PLL
+        .pll_lock(ddr3_pll_lock_w),                  // PLL lock status input
+        .rst_n(device_reset_n_w),                    // Active-low reset
+        .clk_out(ddr3_clk_out_w),                    // User clock output
+        .ddr_rst(ddr3_rst_w),                        // Reset for clk_out domain
+        .init_calib_complete(ddr3_init_complete_w),   // Calibration done
+
+        // User command interface
+        .cmd_ready(ddr3_cmd_ready_w),
+        .cmd(ddr3_cmd_w),
+        .cmd_en(ddr3_cmd_en_w),
+        .addr(ddr3_addr_w),
+
+        // Write data interface
+        .wr_data_rdy(ddr3_wr_data_rdy_w),
+        .wr_data(ddr3_wr_data_w),
+        .wr_data_en(ddr3_wr_data_en_w),
+        .wr_data_end(ddr3_wr_data_end_w),
+        .wr_data_mask(ddr3_wr_data_mask_w),
+
+        // Read data interface
+        .rd_data(ddr3_rd_data_w),
+        .rd_data_valid(ddr3_rd_data_valid_w),
+        .rd_data_end(ddr3_rd_data_end_w),
+
+        // Self-refresh and refresh
+        .sr_req(1'b0),
+        .ref_req(1'b0),
+        .sr_ack(ddr3_sr_ack_w),
+        .ref_ack(ddr3_ref_ack_w),
+
+        // Burst mode
+        .burst(1'b1),
+
+        // Physical DDR3 interface
+        .O_ddr_addr(O_ddr_addr),
+        .O_ddr_ba(O_ddr_ba),
+        .O_ddr_cs_n(O_ddr_cs_n),
+        .O_ddr_ras_n(O_ddr_ras_n),
+        .O_ddr_cas_n(O_ddr_cas_n),
+        .O_ddr_we_n(O_ddr_we_n),
+        .O_ddr_clk(O_ddr_clk),
+        .O_ddr_clk_n(O_ddr_clk_n),
+        .O_ddr_cke(O_ddr_cke),
+        .O_ddr_odt(O_ddr_odt),
+        .O_ddr_reset_n(O_ddr_reset_n),
+        .O_ddr_dqm(O_ddr_dqm),
+        .IO_ddr_dq(IO_ddr_dq),
+        .IO_ddr_dqs(IO_ddr_dqs),
+        .IO_ddr_dqs_n(IO_ddr_dqs_n)
+    );
 
     // Translate Phi1 into the clk_logic clock domain and derive Phi0 and edges
     // delays Phi1 by 2 cycles = 40ns
@@ -279,6 +417,91 @@ module top #(
     // Memory
 
     a2mem_if a2mem_if();
+
+    // DDR3 SDRAM Controller and Port Infrastructure
+    //
+    // The DDR3 port interface uses sdram_port_if, identical to the standard
+    // SDRAM interface used by a2n20v2-Enhanced. This allows client modules
+    // (apple_memory, sound_glu, picosoc, DiskII, etc.) to use the same
+    // sdram_port_if.client interface regardless of the underlying memory type.
+    //
+    // The DDR3 controller runs on ddr3_clk_out_w (generated by the Gowin DDR3 IP).
+    // For client modules running on clk_logic_w, use sdram_if_cdc to bridge
+    // clock domains.
+
+    // DDR3 SDRAM port configuration - matching Enhanced board interface widths
+    localparam DDR3_PORT_ADDR_WIDTH = 29;
+    localparam DDR3_DATA_WIDTH = 32;
+    localparam DDR3_DQM_WIDTH = 4;
+    localparam DDR3_PORT_OUTPUT_WIDTH = 32;
+    localparam DDR3_NUM_PORTS = 2;
+
+    // SDRAM port interfaces - same type used by sdram_ports.sv on other boards
+    sdram_port_if #(
+        .PORT_ADDR_WIDTH(DDR3_PORT_ADDR_WIDTH),
+        .DATA_WIDTH(DDR3_DATA_WIDTH),
+        .DQM_WIDTH(DDR3_DQM_WIDTH),
+        .PORT_OUTPUT_WIDTH(DDR3_PORT_OUTPUT_WIDTH)
+    ) ddr3_mem_ports[DDR3_NUM_PORTS-1:0]();
+
+    // DDR3 port wrapper - presents sdram_port_if interfaces to client modules
+    // while internally managing DDR3 controller commands
+    wire ddr3_ports_init_complete_w;
+
+    ddr3_ports #(
+        .NUM_PORTS(DDR3_NUM_PORTS),
+        .PORT_ADDR_WIDTH(DDR3_PORT_ADDR_WIDTH),
+        .DATA_WIDTH(DDR3_DATA_WIDTH),
+        .DQM_WIDTH(DDR3_DQM_WIDTH),
+        .PORT_OUTPUT_WIDTH(DDR3_PORT_OUTPUT_WIDTH),
+        .DDR_ADDR_WIDTH(29),
+        .DDR_DATA_WIDTH(128)
+    ) ddr3_ports (
+        .clk(ddr3_clk_out_w),
+        .reset(ddr3_rst_w),
+        .init_complete(ddr3_ports_init_complete_w),
+
+        .ports(ddr3_mem_ports),
+
+        // DDR3 controller interface
+        .init_calib_complete(ddr3_init_complete_w),
+        .cmd_ready(ddr3_cmd_ready_w),
+        .cmd(ddr3_cmd_w),
+        .cmd_en(ddr3_cmd_en_w),
+        .addr(ddr3_addr_w),
+        .wr_data_rdy(ddr3_wr_data_rdy_w),
+        .wr_data(ddr3_wr_data_w),
+        .wr_data_en(ddr3_wr_data_en_w),
+        .wr_data_end(ddr3_wr_data_end_w),
+        .wr_data_mask(ddr3_wr_data_mask_w),
+        .rd_data(ddr3_rd_data_w),
+        .rd_data_valid(ddr3_rd_data_valid_w),
+        .rd_data_end(ddr3_rd_data_end_w)
+    );
+
+    // CDC-bridged port interfaces for modules running on clk_logic_w
+    // These bridge the clock domain from ddr3_clk_out_w to clk_logic_w
+    // using the existing sdram_if_cdc module pattern.
+    //
+    // Usage example (uncomment when connecting client modules):
+    //
+    // sdram_port_if #(
+    //     .PORT_ADDR_WIDTH(DDR3_PORT_ADDR_WIDTH),
+    //     .DATA_WIDTH(DDR3_DATA_WIDTH),
+    //     .DQM_WIDTH(DDR3_DQM_WIDTH),
+    //     .PORT_OUTPUT_WIDTH(DDR3_PORT_OUTPUT_WIDTH)
+    // ) mem_ports_cdc[DDR3_NUM_PORTS-1:0]();
+    //
+    // generate
+    //     for (genvar i = 0; i < DDR3_NUM_PORTS; i++) begin : cdc_loop
+    //         sdram_if_cdc #(.N(3)) mem_cdc (
+    //             .clk_controller(ddr3_clk_out_w),
+    //             .clk_client(clk_logic_w),
+    //             .controller(ddr3_mem_ports[i]),
+    //             .client(mem_ports_cdc[i])
+    //         );
+    //     end
+    // endgenerate
 
     wire [15:0] video_address_w;
     wire video_bank_w;
