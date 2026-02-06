@@ -31,8 +31,7 @@ module apple_bus #(
     parameter bit ENABLE_DENOISE = 0,
     parameter int CYCLE_COUNT = CLOCK_SPEED_HZ / (APPLE_HZ / 14),   // 52
     parameter int PHASE_COUNT = CYCLE_COUNT / 2,                    // 26
-    parameter int READ_COUNT = CYCLE_COUNT / 3,                     // 17
-    parameter int WRITE_COUNT = CYCLE_COUNT / 5,                    // 10
+    parameter int M2B0_COUNT = 19,
     parameter int ADDR_COUNT = 18,                                  // 333ns from Phi1 rising edge
     parameter int DATA_COUNT = 15                                   // 419ns from Phi0 rising edge
 ) (
@@ -113,6 +112,7 @@ module apple_bus #(
     reg [15:0] addr_r;
     reg [7:0] data_r;
     reg rw_n_r;
+    reg m2sel_n_r;
 
     assign a2bus_if.addr = addr_r;
     assign a2bus_if.data = data_r;
@@ -120,7 +120,7 @@ module apple_bus #(
 
     wire a2_gs = GS | sw_gs_i;
     assign a2bus_if.sw_gs = a2_gs;
-    assign a2bus_if.m2sel_n = a2_gs ? a2_m2sel_n : 1'b0;
+    assign a2bus_if.m2sel_n = a2_gs ? m2sel_n_r : 1'b0;
 
     reg m2b0_r;
 	always @(posedge a2bus_if.clk_logic) begin
@@ -159,6 +159,7 @@ module apple_bus #(
         if (a2_addr_in_start_w) begin
             addr_r <= a2_a_i;
             rw_n_r <= a2_rw_n_i;
+            m2sel_n_r <= a2_m2sel_n;
         end
 
     end
