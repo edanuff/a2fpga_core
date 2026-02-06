@@ -42,6 +42,7 @@ module top #(
 
     parameter int GS = 0,                       // Apple IIgs mode
     parameter int ENABLE_FILTER = 0,            // Enable audio filtering
+    parameter int ENABLE_DENOISE = 0,           // Enable denoise of clocks
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
@@ -300,7 +301,8 @@ module top #(
 
     apple_bus #(
         .GS(GS),
-        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ)
+        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
+        .ENABLE_DENOISE(ENABLE_DENOISE)
     ) apple_bus (
         .clk_logic_i(clk_logic_w),
         .clk_pixel_i(clk_pixel_w),
