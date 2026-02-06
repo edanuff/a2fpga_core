@@ -50,6 +50,7 @@
         <File path="../../hdl/support/cdc_denoise.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc_sampling.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/sdpram32.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/support/sustained_high.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_6551.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_rx.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_tx.v" type="file.verilog" enable="1"/>
