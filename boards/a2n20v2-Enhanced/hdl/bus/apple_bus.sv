@@ -36,7 +36,8 @@ module apple_bus #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
     parameter int APPLE_HZ = 14_318_181,
     parameter int CPU_HZ = APPLE_HZ / 14,                   // 1_022_727
-    parameter int CYCLE_COUNT = CLOCK_SPEED_HZ / CPU_HZ,    // 52
+    parameter int CYCLE_COUNT = CLOCK_SPEED_HZ * 14 / APPLE_HZ,     // 52
+    parameter int APPLE_14M_CYCLE_COUNT = CLOCK_SPEED_HZ / APPLE_HZ, // 3
     parameter int PHASE_COUNT = CYCLE_COUNT / 2,            // 26
     parameter int READ_COUNT = CYCLE_COUNT / 3,             // 17
     parameter int WRITE_COUNT = CYCLE_COUNT / 5             // 10
@@ -155,6 +156,23 @@ module apple_bus #(
             phase_cycles_r <= 6'b0;
         end else if (phase_cycles_r != 6'b111111) begin
             phase_cycles_r <= phase_cycles_r + 1'b1;
+        end
+
+    end
+
+    reg [6:0] cycle_timer_r = 0;
+    reg extended_cycle_r = 0;
+    assign a2bus_if.extended_cycle = extended_cycle_r;
+    always @(posedge a2bus_if.clk_logic) begin
+        extended_cycle_r <= 0;
+        cycle_timer_r <= cycle_timer_r + 1'b1;
+        // capture cycle transitions and count cycles
+        if (a2bus_if.phi1_posedge) begin
+            cycle_timer_r <= 7'b0;
+            // check if last cycle was extended duration
+            if (cycle_timer_r >= (CYCLE_COUNT + APPLE_14M_CYCLE_COUNT)) begin
+                extended_cycle_r <= 1'b1;
+            end
         end
 
     end

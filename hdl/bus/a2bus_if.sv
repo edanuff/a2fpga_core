@@ -53,6 +53,7 @@ interface a2bus_if (
     logic [7:0] data;
     logic data_in_strobe;
     logic sw_gs;
+    logic extended_cycle;
 
     logic control_inh_n;
     logic control_irq_n;
@@ -92,6 +93,7 @@ interface a2bus_if (
         output data,
         output data_in_strobe,
         output sw_gs,
+        output extended_cycle,
 
         output control_inh_n,
         output control_irq_n,
@@ -132,6 +134,7 @@ interface a2bus_if (
         input data,
         input data_in_strobe,
         input sw_gs,
+        input extended_cycle,
 
         input control_inh_n,
         input control_irq_n,
