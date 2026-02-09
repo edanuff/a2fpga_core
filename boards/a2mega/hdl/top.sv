@@ -192,30 +192,9 @@ module top #(
 
     wire device_reset_n_w = rstn_r; // Use reset signal from power-on reset logic
 
-    wire reset_x5_w;
-    reset_sync reset_sync_x5 (.clk(clk_hdmi_w), .arst(~device_reset_n_w), .srst(reset_x5_w));
-
     //wire device_reset_n_w = ~rst;
 
     wire system_reset_n_w = device_reset_n_w & a2_reset_n;
-
-
-    // DDR3 Interface
-
-    assign ddr_bank = '0;
-    assign ddr_addr = '0;
-    assign ddr_cs = 1'b0;
-    assign ddr_ras = 1'b0;
-    assign ddr_cas = 1'b0;
-    assign ddr_we = 1'b0;
-    assign ddr_ck = 1'b0;
-    assign ddr_ck_n = 1'b1;
-    assign ddr_cke = 1'b0;
-    assign ddr_odt = 1'b0;
-    assign ddr_reset_n = 1'b1;
-    assign ddr_dq = 'z;
-    assign ddr_dqs = 'z;
-    assign ddr_dqs_n = 'z;
 
     // Interface to Apple II
 
@@ -378,63 +357,72 @@ module top #(
     assign video_control_if.MONOCHROME_DHIRES_MODE = 1'b0;
     assign video_control_if.SHRG_MODE = 1'b0;
 
-    wire [9:0] hdmi_x;
-    wire [9:0] hdmi_y;
-    wire apple_vga_active;
-    wire [7:0] apple_vga_r;
-    wire [7:0] apple_vga_g;
-    wire [7:0] apple_vga_b;
+    // Scan timer outputs — forward-declared for apple_video_fb
+    wire [8:0] scanline_w;
+    wire hsync_w;
+    wire vsync_w;
+    wire [9:0] pixel_w;
 
-    apple_video apple_video (
+    // Apple II video → DDR3 framebuffer renderer
+    wire fb_we_w;
+    wire [17:0] fb_data_w;
+    wire fb_vsync_w;
+
+    apple_video_fb apple_video_fb (
         .a2bus_if(a2bus_if),
         .a2mem_if(a2mem_if),
 
         .video_control_if(video_control_if),
-
-        .screen_x_i(hdmi_x),
-        .screen_y_i(hdmi_y),
 
         .video_address_o(video_address_w),
         .video_bank_o(video_bank_w),
         .video_rd_o(video_rd_w),
         .video_data_i(video_data_w),
 
-        .video_active_o(apple_vga_active),
-        .video_r_o(apple_vga_r),
-        .video_g_o(apple_vga_g),
-        .video_b_o(apple_vga_b)
+        .scanline_i(scanline_w),
+        .hsync_i(hsync_w),
+        .vsync_i(vsync_w),
+
+        .fb_we_o(fb_we_w),
+        .fb_data_o(fb_data_w),
+        .fb_vsync_o(fb_vsync_w)
     );
 
-    wire [7:0] vgc_vga_r;
-    wire [7:0] vgc_vga_g;
-    wire [7:0] vgc_vga_b;
+    // VGC framebuffer renderer — IIgs Super Hi-Res modes
+    wire vgc_fb_we_w;
+    wire [17:0] vgc_fb_data_w;
+    wire vgc_fb_vsync_w;
 
-    vgc vgc (
+    vgc_fb vgc_fb (
         .a2bus_if(a2bus_if),
         .a2mem_if(a2mem_if),
 
         .video_control_if(video_control_if),
 
-        .cx_i(hdmi_x),
-        .cy_i(hdmi_y),
-
-        .apple_vga_r_i(apple_vga_r),
-        .apple_vga_g_i(apple_vga_g),
-        .apple_vga_b_i(apple_vga_b),
-
-        .vgc_vga_r_o(vgc_vga_r),
-        .vgc_vga_g_o(vgc_vga_g),
-        .vgc_vga_b_o(vgc_vga_b),
-
-        .R_o(),
-        .G_o(),
-        .B_o(),
-
         .vgc_active_o(vgc_active_w),
         .vgc_address_o(vgc_address_w),
         .vgc_rd_o(vgc_rd_w),
-        .vgc_data_i(vgc_data_w)
+        .vgc_data_i(vgc_data_w),
+
+        .scanline_i(scanline_w),
+        .hsync_i(hsync_w),
+        .vsync_i(vsync_w),
+
+        .fb_we_o(vgc_fb_we_w),
+        .fb_data_o(vgc_fb_data_w),
+        .fb_vsync_o(vgc_fb_vsync_w)
     );
+
+    // Framebuffer output mux — select apple_video_fb or vgc_fb based on SHRG_MODE
+    // Latched at frame boundary for clean transitions
+    reg use_vgc_r;
+    always @(posedge clk_logic_w) begin
+        if (vsync_w) use_vgc_r <= a2mem_if.SHRG_MODE;
+    end
+
+    wire fb_we_mux_w          = use_vgc_r ? vgc_fb_we_w    : fb_we_w;
+    wire [17:0] fb_data_mux_w = use_vgc_r ? vgc_fb_data_w  : fb_data_w;
+    wire fb_vsync_mux_w       = use_vgc_r ? vgc_fb_vsync_w : fb_vsync_w;
 
     // Ensoniq DOC5503 Sound
 
@@ -649,208 +637,104 @@ module top #(
     assign core_audio_l_w = sg_audio_l + ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
     assign core_audio_r_w = sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
 
-    // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
+    // =========================================================================
+    // DDR3 Framebuffer + HDMI Output
+    // =========================================================================
+    //
+    // The ddr3_framebuffer module handles:
+    //   - DDR3 controller + memory interface
+    //   - HDMI encoder + TMDS output (720p60)
+    //   - Audio CDC (2-stage sync from clk_logic to internal 74.25 MHz)
+    //   - Upscaling from framebuffer resolution to 720p
+    //
+    // Audio is fed directly from the clk_logic domain — no external CDC needed.
+    // The old hdmi encoder, ELVDS_OBUF, audio_timing, audio_out, and cdc_sampling
+    // modules are replaced by ddr3_framebuffer's internal equivalents.
 
-    wire [15:0] cdc_audio_l;
-    wire [15:0] cdc_audio_r;
+    // Scan timer — authoritative Apple II scanline timing (kept for future use)
+    // Wire declarations are forward-declared near apple_video_fb instantiation
 
-    cdc_sampling #(
-        .WIDTH(16)
-    ) audio_cdc_left (
-        .rst_n(device_reset_n_w),
-        .clk_fast(clk_logic_w),
-        .clk_slow(clk_pixel_w),
-        .data_in(core_audio_l_w),
-        .data_out(cdc_audio_l)
+    scan_timer scan_timer (
+        .a2bus_if(a2bus_if),
+        .scanline_o(scanline_w),
+        .hsync_o(hsync_w),
+        .vsync_o(vsync_w),
+        .pixel_o(pixel_w)
     );
 
-    cdc_sampling #(
-        .WIDTH(16)
-    ) audio_cdc_right (
-        .rst_n(device_reset_n_w),
-        .clk_fast(clk_logic_w),
-        .clk_slow(clk_pixel_w),
-        .data_in(core_audio_r_w),
-        .data_out(cdc_audio_r)
+    // Framebuffer dynamic dimensions — switch at frame boundary
+    localparam [10:0] APPLE_FB_WIDTH  = 11'd560;
+    localparam [9:0]  APPLE_FB_HEIGHT = 10'd192;
+    localparam [10:0] VGC_FB_WIDTH    = 11'd640;
+    localparam [9:0]  VGC_FB_HEIGHT   = 10'd200;
+    localparam [10:0] FB_DISP_WIDTH   = 11'd960;  // 4:3 in 1280-wide 720p frame
+
+    wire [10:0] fb_width_w  = use_vgc_r ? VGC_FB_WIDTH  : APPLE_FB_WIDTH;
+    wire [9:0]  fb_height_w = use_vgc_r ? VGC_FB_HEIGHT : APPLE_FB_HEIGHT;
+
+    wire init_calib_complete_w;
+    wire ddr_rst_w;
+
+    // DDR3 framebuffer — drives DDR3 and HDMI output
+    wire [13:0] ddr_addr_fb;
+
+    ddr3_framebuffer #(
+        .WIDTH(640),                   // max of 560 (Apple II) and 640 (SHR)
+        .HEIGHT(200),                  // max of 192 (Apple II) and 200 (SHR)
+        .COLOR_BITS(18)
+    ) u_ddr3_fb (
+        // Clock inputs
+        .clk_27(clk_pixel_w),          // 27 MHz from existing PLL
+        .clk_g(clk),                   // 50 MHz board crystal (same pin as PLL clkin)
+        .pll_lock_27(clk_lock_w),
+        .rst_n(1'b1),
+        .clk_out(),                    // 74.25 MHz output — unused externally
+        .ddr_rst(ddr_rst_w),
+        .init_calib_complete(init_calib_complete_w),
+
+        // Framebuffer write interface — on clk_logic (54 MHz), muxed between apple_video_fb and vgc_fb
+        .clk(clk_logic_w),
+        .fb_width(fb_width_w),
+        .fb_height(fb_height_w),
+        .disp_width(FB_DISP_WIDTH),
+        .fb_vsync(fb_vsync_mux_w),
+        .fb_we(fb_we_mux_w),
+        .fb_data(fb_data_mux_w),
+
+        // Audio — CDC'd internally via 2-stage sync
+        .sound_left(core_audio_l_w),
+        .sound_right(core_audio_r_w),
+
+        // DDR3 pins
+        .ddr_addr(ddr_addr_fb),
+        .ddr_bank(ddr_bank),
+        .ddr_cs(ddr_cs),
+        .ddr_ras(ddr_ras),
+        .ddr_cas(ddr_cas),
+        .ddr_we(ddr_we),
+        .ddr_ck(ddr_ck),
+        .ddr_ck_n(ddr_ck_n),
+        .ddr_cke(ddr_cke),
+        .ddr_odt(ddr_odt),
+        .ddr_reset_n(ddr_reset_n),
+        .ddr_dm(ddr_dm),
+        .ddr_dq(ddr_dq),
+        .ddr_dqs(ddr_dqs),
+        .ddr_dqs_n(ddr_dqs_n),
+
+        // HDMI TMDS output
+        .tmds_clk_p(tmds_clk_p),
+        .tmds_clk_n(tmds_clk_n),
+        .tmds_d_p(tmds_d_p),
+        .tmds_d_n(tmds_d_n)
     );
 
-    localparam [31:0] aflt_rate = 7_056_000;
-    localparam [39:0] acx  = 4258969;
-    localparam  [7:0] acx0 = 3;
-    localparam  [7:0] acx1 = 3;
-    localparam  [7:0] acx2 = 1;
-    localparam [23:0] acy0 = -24'd6216759;
-    localparam [23:0] acy1 =  24'd6143386;
-    localparam [23:0] acy2 = -24'd2023767;
+    // DDR3 address: framebuffer uses 14 bits, top port has 16 bits
+    assign ddr_addr[13:0] = ddr_addr_fb;
+    assign ddr_addr[15:14] = 2'b0;
 
-    localparam AUDIO_RATE = 44100;  // Match MP3 stream sample rate
-    localparam AUDIO_BIT_WIDTH = 16;
-    // I2S format: 0=left-justified (ES5503/test), 1=standard I2S (ESP32-audioI2S library)
-    localparam I2S_FORMAT = 1'b1;  // Use standard I2S (now fixed)
-    wire clk_audio_w;
-    audio_timing #(
-        .CLK_RATE(PIXEL_SPEED_HZ),
-        .AUDIO_RATE(AUDIO_RATE),
-        .I2S_STANDARD(I2S_FORMAT)
-    ) audio_timing (
-        .reset(~device_reset_n_w),
-        .clk(clk_pixel_w),
-        .audio_clk(clk_audio_w),
-        .i2s_bclk(),
-        .i2s_lrclk(),
-        .i2s_data_shift_strobe(),
-        .i2s_data_load_strobe()
-    );
-
-    wire [15:0] audio_sample_word[1:0];
-
-    audio_out #(
-        .CLK_RATE(PIXEL_SPEED_HZ),
-        .AUDIO_RATE(AUDIO_RATE),
-        .ENABLE(ENABLE_FILTER)
-    ) audio_out
-    (
-        .reset(~device_reset_n_w),
-        .clk(clk_pixel_w),
-
-        .flt_rate(aflt_rate),
-        .cx(acx),
-        .cx0(acx0),
-        .cx1(acx1),
-        .cx2(acx2),
-        .cy0(acy0),
-        .cy1(acy1),
-        .cy2(acy2),
-
-        .is_signed(1'b1),
-        .core_l(cdc_audio_l),
-        .core_r(cdc_audio_r),
-
-        .audio_clk(clk_audio_w),
-        .audio_l(audio_sample_word[0]),
-        .audio_r(audio_sample_word[1])
-    );
-
-    // HDMI
-
-    wire scanline_en = scanlines_w && hdmi_y[0];
-
-    wire show_debug_overlay_r = 1'b1;
-
-    wire [7:0] debug_r_w;
-    wire [7:0] debug_g_w;
-    wire [7:0] debug_b_w;
-    DebugOverlay #(
-        .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
-        .ENABLE(1'b1)
-    ) debug_overlay (
-        .clk_i          (clk_pixel_w),
-        .reset_n (device_reset_n_w),
-        .enable_i(show_debug_overlay_r),
-
-        .hex_values ({
-            {2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]},
-            {2'b0, doc_osc_mode_w[2], 2'b0, doc_osc_mode_w[3]},
-            {2'b0, doc_osc_mode_w[4], 2'b0, doc_osc_mode_w[5]},
-            {2'b0, doc_osc_mode_w[6], 2'b0, doc_osc_mode_w[7]},
-            8'h0,
-            8'h0,
-            8'h0,
-            8'h0
-        }),
-
-        .debug_bits_0_i (doc_osc_halt_w),
-        .debug_bits_1_i ({1'b0, 1'b0, a2mem_if.TEXT_MODE, a2mem_if.SHRG_MODE, a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.AN3, a2mem_if.STORE80}),
-
-        .screen_x_i     (hdmi_x),
-        .screen_y_i     (hdmi_y),
-
-        .r_i            (scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w),
-        .g_i            (scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w),
-        .b_i            (scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w),
-
-        .r_o            (debug_r_w),
-        .g_o            (debug_g_w),
-        .b_o            (debug_b_w)
-    );  
-
-    logic [2:0] tmds;
-    wire tmdsClk;
-
-    hdmi #(
-        .VIDEO_ID_CODE(2),
-        .DVI_OUTPUT(0),
-        .VIDEO_REFRESH_RATE(59.94),
-        .IT_CONTENT(1),
-        .AUDIO_RATE(AUDIO_RATE),
-        .AUDIO_BIT_WIDTH(AUDIO_BIT_WIDTH),
-        .VENDOR_NAME({"Unknown", 8'd0}),  // Must be 8 bytes null-padded 7-bit ASCII
-        .PRODUCT_DESCRIPTION({"FPGA", 96'd0}),  // Must be 16 bytes null-padded 7-bit ASCII
-        .SOURCE_DEVICE_INFORMATION(8'h00), // See README.md or CTA-861-G for the list of valid codes
-        .START_X(0),
-        .START_Y(0)
-    ) hdmi (
-        .clk_pixel_x5(clk_hdmi_w),
-        .clk_pixel(clk_pixel_w),
-        .clk_audio(clk_audio_w),
-        .rgb({
-            debug_r_w,
-            debug_g_w,
-            debug_b_w
-        }),
-        /*
-        .rgb({
-            8'hFF,
-            8'h00,
-            8'h00
-        }),
-        */
-        .reset(!device_reset_n_w),
-        //.reset_x5(reset_x5_w),
-        .audio_sample_word(audio_sample_word),
-        .tmds(tmds),
-        .tmds_clock(tmdsClk),
-        .cx(hdmi_x),
-        .cy(hdmi_y),
-        .frame_width(),
-        .frame_height(),
-        .screen_width(),
-        .screen_height()
-    );
-
-    // Gowin LVDS output buffer
-    /*
-    ELVDS_TBUF tmds_bufds[3:0] (
-        .I({clk_pixel_w, tmds}),
-        .O({tmds_clk_p, tmds_d_p}),
-        .OB({tmds_clk_n, tmds_d_n}),
-        .OEN(sleep_w && HDMI_SLEEP_ENABLE)
-    );
-    */
-
-    ELVDS_OBUF tmds_bufds[3:0] (
-        .I({clk_pixel_w, tmds}),
-        .O({tmds_clk_p, tmds_d_p}),
-        .OB({tmds_clk_n, tmds_d_n})
-    );
-
-    /*
-    ELVDS_OBUF tmds_bufds[3:0] (
-        .I({clk_pixel_w, tmds}),
-        .O({tmds_clk_p, tmds_d_n}),
-        .OB({tmds_clk_n, tmds_d_p})
-    );
-    */
-
-    /*
-    always @(posedge clk_logic_w) begin
-        if (!button) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.SHRG_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
-        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.RAMWRT, !a2mem_if.STORE80};
-        //if (!s2) led <= {!a2mem_if.TEXT_MODE, !a2mem_if.MIXED_MODE, !a2mem_if.HIRES_MODE, !a2mem_if.AN3, !a2mem_if.STORE80};
-        else led <= {!vdp_unlocked_w, ~vdp_gmode_w};
-        //else led <= {!vdp_unlocked_w, dip_switches_n_w};
-    end
-    */
+    // DDR3 calibration status on LED[1]
+    assign led[1] = !init_calib_complete_w;
 
     // =========================================================================
     // ESP32 Octal SPI Interface

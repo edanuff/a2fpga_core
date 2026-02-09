@@ -60,7 +60,7 @@
         <File path="../../hdl/support/via6522.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/support/YM2149.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/apple_video.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/video/vgc.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/video/vgc_fb.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/video_control_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/video.hex" type="file.other" enable="1"/>
         <File path="hdl/a2mega.cst" type="file.cst" enable="1"/>
@@ -71,14 +71,12 @@
         <File path="hdl/gowin/ddr3_memory_interface/ddr3_memory_interface.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/clk_pll.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/pll_ddr3.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/pll_ddr3_mod.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/pll_hdmi.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/pll_hdmi_mod.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/pll_init.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/pll_mDRP_intf.v" type="file.verilog" enable="1"/>
         <File path="hdl/hdmi/serializer.sv" type="file.verilog" enable="1"/>
         <File path="hdl/sound/iir_filter.v" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/video/apple_video_fb.sv" type="file.verilog" enable="1"/>
         <File path="hdl/video/ddr3_framebuffer.v" type="file.verilog" enable="1"/>
         <File path="hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>
     </FileList>

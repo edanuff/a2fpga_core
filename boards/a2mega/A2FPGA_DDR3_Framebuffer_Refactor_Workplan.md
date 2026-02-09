@@ -809,6 +809,42 @@ ddr3_framebuffer #(
 
 ---
 
+## Implementation Status & Bug Fix Log
+
+### Phase 2 Status: `apple_video_fb.sv` — COMPLETE
+
+The `apple_video_fb.sv` renderer is fully implemented and tested. All conventional Apple II video modes render correctly: TEXT40, TEXT80, HGR (with artifact colors), and LORES40.
+
+**Architecture implemented:** The renderer operates on `clk_logic` (54 MHz) with Apple II timing enables. Instead of being driven by HDMI beam position (`screen_x_i`/`screen_y_i`), it self-renders each scanline triggered by `hsync_i` (derived from `a2bus_if.extended_cycle`). Pixels are written directly to the `fb_*` framebuffer interface. A `ddr3_framebuffer` module handles DDR3 storage and HDMI output independently.
+
+**Key implementation details:**
+- `WARMUP_PIXELS = 4`: Pipeline runs 4 pixel cycles to prime `pix_history_r` before enabling `fb_we_o`
+- `pix_history_r` is reset to zeros at each scanline start (no carry-over between lines)
+- Inline combinational color computation (no extra registered pipeline stage for color)
+- Step counters (`pix_step4_r`, `pix_step7_r`) advance every pixel cycle including warmup
+
+### Bugs Found & Fixed During Development
+
+| # | Issue | Symptom | Root Cause | Fix | File:Lines |
+|---|-------|---------|-----------|-----|------------|
+| 1 | **Pixel wrap-around** | ~2 pixels from end of scanline N appeared at start of scanline N+1 | `pix_history_r` carried over across scanlines; apple_video.sv compensates with 32-pixel head start (SCAN_PIX_OFFSET), but FB version had none | Reset `pix_history_r <= '0` at scanline start in ST_IDLE | apple_video_fb.sv:530 |
+| 2 | **4-pixel horizontal offset** | All content shifted right by ~4 doubled pixels | HISTORY_PIXEL_OFFSET pipeline delay — first pixels computed from empty/zero history | Added WARMUP_PIXELS=4; run pipeline 4 cycles before enabling fb_we_o | apple_video_fb.sv:63,770 |
+| 3 | **Artifact color swap** | HGR colors systematically wrong (magenta↔blue, blue↔green, green↔orange) | Artifact window used post-shift `next_history` instead of pre-shift `pix_history_r`, shifting the 7-bit window by 1 position and changing parity | Changed artifact window to use `pix_history_r[HISTORY_ARTIFACT_OFFSET+6:HISTORY_ARTIFACT_OFFSET]` | apple_video_fb.sv:741 |
+| 4 | **TEXT80 garbled** | Character pairs swapped in 80-column mode | Buffer positions for TEXT80 characters were in wrong order vs apple_video.sv (char0↔char1 and char2↔char3 swapped) | Swapped buffer positions to match apple_video.sv: char0→[13:7], char1→[6:0], char2→[27:21], char3→[20:14] | apple_video_fb.sv:623-664 |
+| 5 | **LORES nibble lag** | First half of each LORES pixel showed wrong color on color transitions | Used registered `pix_nibble_r` (1 cycle behind) instead of combinational nibble like apple_video.sv's `pix_nibble_w` | Compute `current_nibble` inline via blocking assignment before color mux; register result for next cycle's `prev_nibble` | apple_video_fb.sv:757-761,771,791 |
+| 6 | **LORES boundary artifacts** | Thin artifact lines at LORES color bar boundaries | Step counters (`pix_step7_r`, `pix_step4_r`) were gated during warmup, creating phase desync with pixel data in history buffer. Nibble capture at `step7==4` hit wrong position. | Removed warmup gate — step counters now advance every pixel cycle. `pix_step4_r` wraps fully (4 mod 4 = 0); `pix_step7_r` reaches 4 at first output pixel, aligning nibble capture. | apple_video_fb.sv:796-805 |
+| 7 | **DDR3 framebuffer race** | Intermittent pixel corruption | Overlapping `if` blocks for `new_frame`/`fifo_draining`/normal-write in ddr3_framebuffer.v | Changed to `if/else if/else` chain | ddr3_framebuffer.v |
+
+### Phase 3 Status: `vgc_fb.sv` — NOT STARTED
+
+IIgs Super Hi-Res rendering (320×200 and 640×200 modes) has not yet been implemented. The existing `vgc.sv` is still used via the project file.
+
+### Phase 4 Status: `top.sv` Integration — PARTIAL
+
+`top.sv` has been modified to instantiate `ddr3_framebuffer` and route the `fb_*` signals from `apple_video_fb`. The HDMI encoder has been replaced. Audio passthrough is connected. The compositing chain (SuperSprite, DebugOverlay) has not yet been adapted to the burst pipeline — they are currently bypassed.
+
+---
+
 ## Phase 5: Testing & Validation
 
 ### Task 5.1 — Basic video modes

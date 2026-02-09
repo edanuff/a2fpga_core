@@ -5,34 +5,34 @@
 1. PnR Messages
 
   <Report Title>: PnR Report
-  <Design File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2mega/impl/gwsynthesis/a2mega.vg
-  <Physical Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2mega/hdl/a2mega.cst
-  <Timing Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2mega/hdl/a2mega.sdc
+  <Design File>: /Users/edanuff/.claude-worktrees/a2fpga_core/mystifying-bohr/boards/a2mega/impl/gwsynthesis/a2mega.vg
+  <Physical Constraints File>: /Users/edanuff/.claude-worktrees/a2fpga_core/mystifying-bohr/boards/a2mega/hdl/a2mega.cst
+  <Timing Constraints File>: /Users/edanuff/.claude-worktrees/a2fpga_core/mystifying-bohr/boards/a2mega/hdl/a2mega.sdc
   <Tool Version>: V1.9.12.01
   <Part Number>: GW5AT-LV60PG484AC1/I0
   <Device>: GW5AT-60
   <Device Version>: B
-  <Created Time>:Fri Feb  6 22:09:06 2026
+  <Created Time>:Sun Feb  8 20:44:55 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 1s
-    Placement Phase 1: CPU time = 0h 0m 0.343s, Elapsed time = 0h 0m 0.314s
-    Placement Phase 2: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
-    Placement Phase 3: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
-    Total Placement: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 9s
+    Placement Phase 0: CPU time = 0h 0m 23s, Elapsed time = 0h 0m 31s
+    Placement Phase 1: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 3s
+    Placement Phase 2: CPU time = 0h 0m 58s, Elapsed time = 0h 1m 16s
+    Placement Phase 3: CPU time = 0h 0m 47s, Elapsed time = 0h 1m 2s
+    Total Placement: CPU time = 0h 2m 10s, Elapsed time = 0h 2m 52s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.003s, Elapsed time = 0h 0m 0.002s
-    Routing Phase 1: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 11s
-    Routing Phase 2: CPU time = 0h 0m 0.172s, Elapsed time = 0h 0m 0.11s
+    Routing Phase 0: CPU time = 0h 0m 0.032s, Elapsed time = 0h 0m 0.04s
+    Routing Phase 1: CPU time = 0h 2m 0s, Elapsed time = 0h 2m 40s
+    Routing Phase 2: CPU time = 0h 0m 0.544s, Elapsed time = 0h 0m 0.812s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 11s
+    Total Routing: CPU time = 0h 2m 0s, Elapsed time = 0h 2m 41s
  Generate output files:
-    CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+    CPU time = 0h 0m 13s, Elapsed time = 0h 0m 17s
 
- Total Time and Memory Usage: CPU time = 0h 0m 25s, Elapsed time = 0h 0m 23s, Peak memory usage = 3087MB
+ Total Time and Memory Usage: CPU time = 0h 4m 23s, Elapsed time = 0h 5m 51s, Peak memory usage = 2449MB
 
 
 3. Resource Usage Summary
@@ -40,30 +40,33 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 9570/59904                          |  16%
-    --LUT,ALU,ROM16           | 9570(8882 LUT, 688 ALU, 0 ROM16)    | -
+  Logic                       | 12714/59904                         |  22%
+    --LUT,ALU,ROM16           | 12714(11827 LUT, 887 ALU, 0 ROM16)  | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 7263/60780                          |  12%
+  Register                    | 11273/60780                         |  19%
     --Logic Register as Latch | 0/59904                             |  0%
-    --Logic Register as FF    | 7224/59904                          |  13%
+    --Logic Register as FF    | 11233/59904                         |  19%
     --I/O Register as Latch   | 0/876                               |  0%
-    --I/O Register as FF      | 39/876                              |  5%
-  CLS                         | 8650/29952                          |  29%
+    --I/O Register as FF      | 40/876                              |  5%
+  CLS                         | 11842/29952                         |  40%
   I/O Port                    | 128/297                             |  44%
-  I/O Buf                     | 113                                 | -
-    --Input Buf               | 30                                  | -
-    --Output Buf              | 67                                  | -
-    --Inout Buf               | 16                                  | -
-  IOLOGIC                     | 6/293                               | 3%
+  I/O Buf                     | 109                                 | -
+    --Input Buf               | 29                                  | -
+    --Output Buf              | 46                                  | -
+    --Inout Buf               | 34                                  | -
+  IOLOGIC                     | 66/293                              | 23%
+    --IDES8_MEM               | 16
+    --OSER8                   | 24
+    --OSER8_MEM               | 20
     --OSER10                  | 3
-  BSRAM                       | 78/118                              | 67%
-    --SP                      | 2
-    --SDPB                    | 64
+    --IODELAY                 | 16
+  BSRAM                       | 96/118                              | 82%
+    --SDPB                    | 71
+    --SDPX9B                  | 16
     --DPB                     | 8
-    --DPX9B                   | 2
-    --pROM                    | 2
-  DSP                         | 4.5/118                             | 4%
-    --MULT12X12               | 9
+    --pROM                    | 1
+  DSP                         | 3.5/118                             | 3%
+    --MULT12X12               | 7
   ================================================================================
 
 
@@ -73,7 +76,7 @@
   --------------------------------------
   I/O Bank  | Usage       | Utilization 
   --------------------------------------
-  bank 1   | 16/25       | 64%         
+  bank 1   | 13/25       | 52%         
   bank 2   | 14/26       | 54%         
   bank 3   | 0/8         | 0%          
   bank 4   | 12/16       | 75%         
@@ -93,10 +96,13 @@
   ------------------------------------------
   Clock Resource| Usage         | Utilization 
   ------------------------------------------
-  PRIMARY       | 3/8           | 38%
+  PRIMARY       | 8/8           | 100%
   LW            | 8/8           | 100%
   GCLK_PIN      | 16/40         | 40%
-  PLLA          | 1/8           | 13%
+  CLKDIV        | 1/20          | 5%
+  DDRDLL        | 1/5           | 20%
+  DQS           | 2/13          | 16%
+  PLLA          | 3/8           | 38%
   ==========================================
 
 
@@ -105,18 +111,24 @@
   -------------------------------------------
   Signal         | Global Clock   | Location
   -------------------------------------------
-  clk_d          | PRIMARY        |  PBR3
-  a2bus_if.clk_pixel| PRIMARY        |  PTR1 PTR2 PTR3 PBR1
-  a2bus_if.clk_logic| PRIMARY        |  PTR0 PTR1 PTR2 PTR3 PBR0 PBR1 PBR2 PBR3
+  clk_d          | PRIMARY        |  PTR0 PTR1 PTR3 PBR0 PBR1
+  a2bus_if.clk_pixel| PRIMARY        |  PBR1 PBR2
+  a2bus_if.clk_logic| PRIMARY        |  PTR1 PTR2 PTR3 PBR1 PBR2 PBR3
+  superserial/COM2/n67_7| PRIMARY        |  PTR1 PTR2
+  u_ddr3_fb/pixels_3841| PRIMARY        |  PTR0 PTR1
+  u_ddr3_fb/n826_5| PRIMARY        |  PTR1
+  u_ddr3_fb/hclk | PRIMARY        |  PTR3
+  u_ddr3_fb/clk_x1| PRIMARY        |  PTR0 PTR1 PTR3 PBR0 PBR1 PBR3
   a2bus_if.device_reset_n| LW             |  -
   n29_13         | LW             |  -
   supersprite/vdp/f18a_core/reset_n_r| LW             |  -
   supersprite/vdp/f18a_core/inst_cpu/n931_6| LW             |  -
   mockingboard/pb_l_o[2]| LW             |  -
   mockingboard/pb_r_o[2]| LW             |  -
-  superserial/COM2/n67_7| LW             |  -
-  hdmi/true_hdmi_output.packet_picker/n4077_4| LW             |  -
-  clk_hdmi_w     | HCLK           | BANK3_BANK4_BANK5_HCLK1
+  u_ddr3_fb/ddr_rst_w| LW             |  -
+  u_ddr3_fb/hdmi/true_hdmi_output.packet_picker/n4077_4| LW             |  -
+  u_ddr3_fb/memory_clk| HCLK           | BANK10_BANK11_HCLK2 BANK9_HCLK2
+  u_ddr3_fb/hclk5| HCLK           | BANK3_BANK4_BANK5_HCLK0
   ===========================================
 
 
@@ -209,8 +221,8 @@ ddr_cs             | -         | P4/10         | Y          | out   | IOL66[B] |
 ddr_ras            | -         | L5/10         | Y          | out   | IOL59[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_cas            | -         | L4/10         | Y          | out   | IOL59[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_we             | -         | M5/10         | Y          | out   | IOL70[B] | BPLL0_C_IN0     | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_ck             | -         | L3/10         | Y          | out   | IOL50[A] | GCLKT_16        | SSTL15D_I  | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_ck_n           | -         | E16/1         | N          | out   | IOT87[A] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | NONE         
+ddr_ck             | ddr_ck_n  | L3/10         | Y          | out   | IOL50[A] | GCLKT_16        | SSTL15D_I  | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
+ddr_ck_n           | ddr_ck    | K3/10         | Y          | out   | IOL50[B] | GCLKC_16        | SSTL15D_I  | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_cke            | -         | K6/10         | Y          | out   | IOL57[A] | -               | SSTL15_I   | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_odt            | -         | M2/10         | Y          | out   | IOL54[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_reset_n        | -         | L6/10         | Y          | out   | IOL65[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
@@ -224,26 +236,26 @@ a2_d[4]            | -         | K18/5         | Y          | io    | IOR57[A] |
 a2_d[5]            | -         | K19/5         | Y          | io    | IOR57[B] | GCLKC_6         | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
 a2_d[6]            | -         | H17/4         | Y          | io    | IOR32[A] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
 a2_d[7]            | -         | H18/4         | Y          | io    | IOR32[B] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
-ddr_dq[0]          | -         | Y4/9          | Y          | io    | IOB31[A] | GCLKT_14        | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[1]          | -         | AB3/9         | Y          | io    | IOB24[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[2]          | -         | AA5/9         | Y          | io    | IOB29[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[3]          | -         | V4/9          | Y          | io    | IOB33[A] | GCLKT_15        | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[4]          | -         | AA1/9         | Y          | io    | IOB22[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[5]          | -         | AB2/9         | Y          | io    | IOB24[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[6]          | -         | AB5/9         | Y          | io    | IOB29[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[7]          | -         | AB1/9         | Y          | io    | IOB22[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[8]          | -         | AA8/9         | Y          | io    | IOB65[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[9]          | -         | Y8/9          | Y          | io    | IOB67[A] | BPLL1_T_IN0     | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[10]         | -         | AB7/9         | Y          | io    | IOB60[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[11]         | -         | Y7/9          | Y          | io    | IOB67[B] | BPLL1_C_IN0     | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[12]         | -         | AB8/9         | Y          | io    | IOB65[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[13]         | -         | W9/9          | Y          | io    | IOB69[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[14]         | -         | AB6/9         | Y          | io    | IOB60[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dq[15]         | -         | Y9/9          | Y          | io    | IOB69[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dqs[0]         | -         | Y3/9          | Y          | io    | IOB26[A] | -               | SSTL15D_I  | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dqs[1]         | -         | V9/9          | Y          | io    | IOB62[A] | -               | SSTL15D_I  | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_dqs_n[0]       | -         | D16/1         | N          | io    | IOT87[B] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | NONE         
-ddr_dqs_n[1]       | -         | F16/1         | N          | io    | IOT89[A] | Q0REF_T_IN0     | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | NONE         
+ddr_dq[0]          | -         | Y4/9          | Y          | io    | IOB31[A] | GCLKT_14        | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[1]          | -         | AB3/9         | Y          | io    | IOB24[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[2]          | -         | AA5/9         | Y          | io    | IOB29[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[3]          | -         | V4/9          | Y          | io    | IOB33[A] | GCLKT_15        | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[4]          | -         | AA1/9         | Y          | io    | IOB22[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[5]          | -         | AB2/9         | Y          | io    | IOB24[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[6]          | -         | AB5/9         | Y          | io    | IOB29[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[7]          | -         | AB1/9         | Y          | io    | IOB22[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[8]          | -         | AA8/9         | Y          | io    | IOB65[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[9]          | -         | Y8/9          | Y          | io    | IOB67[A] | BPLL1_T_IN0     | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[10]         | -         | AB7/9         | Y          | io    | IOB60[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[11]         | -         | Y7/9          | Y          | io    | IOB67[B] | BPLL1_C_IN0     | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[12]         | -         | AB8/9         | Y          | io    | IOB65[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[13]         | -         | W9/9          | Y          | io    | IOB69[A] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[14]         | -         | AB6/9         | Y          | io    | IOB60[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dq[15]         | -         | Y9/9          | Y          | io    | IOB69[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dqs[0]         | ddr_dqs_n[0] | Y3/9          | Y          | io    | IOB26[A] | -               | SSTL15D_I  | 8     | NONE      | OFF       | NONE       | OFF        | FAST      | OFF        | OFF             | ON            | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dqs[1]         | ddr_dqs_n[1] | V9/9          | Y          | io    | IOB62[A] | -               | SSTL15D_I  | 8     | NONE      | OFF       | NONE       | OFF        | FAST      | OFF        | OFF             | ON            | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dqs_n[0]       | ddr_dqs[0] | AA3/9         | Y          | io    | IOB26[B] | -               | SSTL15D_I  | 8     | NONE      | OFF       | NONE       | OFF        | FAST      | OFF        | OFF             | ON            | 1.5        | MEDIUM        | OFF           | OFF          
+ddr_dqs_n[1]       | ddr_dqs[1] | V8/9          | Y          | io    | IOB62[B] | -               | SSTL15D_I  | 8     | NONE      | OFF       | NONE       | OFF        | FAST      | OFF        | OFF             | ON            | 1.5        | MEDIUM        | OFF           | OFF          
 esp_data[0]        | -         | E13/1         | Y          | io    | IOT78[A] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
 esp_data[1]        | -         | E14/1         | Y          | io    | IOT78[B] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
 esp_data[2]        | -         | C14/1         | Y          | io    | IOT85[A] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
@@ -270,9 +282,9 @@ D14/1    | led[1]             | out   | IOT82[A] | PCIE_HOST_RSTN/TPLL0_T_IN2/TP
 D15/1    | led[0]             | out   | IOT82[B] | TPLL0_C_IN2/TPLL0_C_FB0 | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | NONE         
 C14/1    | esp_data[2]        | io    | IOT85[A] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 C15/1    | esp_data[3]        | io    | IOT85[B] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
-E16/1    | ddr_ck_n           | out   | IOT87[A] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | NONE         
-D16/1    | ddr_dqs_n[0]       | out   | IOT87[B] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | NONE         
-F16/1    | ddr_dqs_n[1]       | out   | IOT89[A] | Q0REF_T_IN0     | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | NONE         
+E16/1    | -                  | in    | IOT87[A] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
+D16/1    | -                  | in    | IOT87[B] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
+F16/1    | -                  | in    | IOT89[A] | Q0REF_T_IN0     | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 E17/1    | -                  | in    | IOT89[B] | Q0REF_C_IN0     | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 F15/1    | dip_switches_n[3]  | in    | IOT91[A] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 C13/1    | esp_data[4]        | io    | IOT93[A] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
@@ -334,17 +346,17 @@ AB12/9   | -                  | in    | IOB18[A] | -               | LVCMOS15 | 
 AB11/9   | -                  | in    | IOB18[B] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 AA11/9   | -                  | in    | IOB20[A] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 Y11/9    | -                  | in    | IOB20[B] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
-AA1/9    | ddr_dq[4]          | out   | IOB22[A] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-AB1/9    | ddr_dq[7]          | out   | IOB22[B] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-AB3/9    | ddr_dq[1]          | out   | IOB24[A] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-AB2/9    | ddr_dq[5]          | out   | IOB24[B] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-Y3/9     | ddr_dqs[0](p)      | out   | IOB26[A] | -               | SSTL15D_I | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-AA3/9    | ddr_dqs[0](n)      | out   | IOB26[B] | -               | SSTL15D_I | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-AA5/9    | ddr_dq[2]          | out   | IOB29[A] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-AB5/9    | ddr_dq[6]          | out   | IOB29[B] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-Y4/9     | ddr_dq[0]          | out   | IOB31[A] | GCLKT_14        | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
+AA1/9    | ddr_dq[4]          | io    | IOB22[A] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+AB1/9    | ddr_dq[7]          | io    | IOB22[B] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+AB3/9    | ddr_dq[1]          | io    | IOB24[A] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+AB2/9    | ddr_dq[5]          | io    | IOB24[B] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+Y3/9     | ddr_dqs[0]         | io    | IOB26[A] | -               | SSTL15D_I | 8     | NONE      | OFF       | NONE       | OFF        | FAST      | OFF        | OFF             | ON            | 1.5   | MEDIUM        | OFF           | OFF          
+AA3/9    | ddr_dqs_n[0]       | io    | IOB26[B] | -               | SSTL15D_I | 8     | NONE      | OFF       | NONE       | OFF        | FAST      | OFF        | OFF             | ON            | 1.5   | MEDIUM        | OFF           | OFF          
+AA5/9    | ddr_dq[2]          | io    | IOB29[A] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+AB5/9    | ddr_dq[6]          | io    | IOB29[B] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+Y4/9     | ddr_dq[0]          | io    | IOB31[A] | GCLKT_14        | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
 AA4/9    | ddr_dm[0]          | out   | IOB31[B] | GCLKC_14        | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-V4/9     | ddr_dq[3]          | out   | IOB33[A] | GCLKT_15        | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
+V4/9     | ddr_dq[3]          | io    | IOB33[A] | GCLKT_15        | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
 W4/9     | -                  | in    | IOB33[B] | GCLKC_15        | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 W11/9    | -                  | in    | IOB35[A] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 W10/9    | -                  | in    | IOB35[B] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
@@ -368,16 +380,16 @@ Y13/9    | -                  | in    | IOB56[A] | -               | LVCMOS15 | 
 Y14/9    | -                  | in    | IOB56[B] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 V7/9     | ddr_dm[1]          | out   | IOB58[A] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
 W7/9     | -                  | in    | IOB58[B] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
-AB7/9    | ddr_dq[10]         | out   | IOB60[A] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-AB6/9    | ddr_dq[14]         | out   | IOB60[B] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-V9/9     | ddr_dqs[1](p)      | out   | IOB62[A] | -               | SSTL15D_I | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-V8/9     | ddr_dqs[1](n)      | out   | IOB62[B] | -               | SSTL15D_I | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-AA8/9    | ddr_dq[8]          | out   | IOB65[A] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-AB8/9    | ddr_dq[12]         | out   | IOB65[B] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-Y8/9     | ddr_dq[9]          | out   | IOB67[A] | BPLL1_T_IN0     | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-Y7/9     | ddr_dq[11]         | out   | IOB67[B] | BPLL1_C_IN0     | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-W9/9     | ddr_dq[13]         | out   | IOB69[A] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-Y9/9     | ddr_dq[15]         | out   | IOB69[B] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
+AB7/9    | ddr_dq[10]         | io    | IOB60[A] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+AB6/9    | ddr_dq[14]         | io    | IOB60[B] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+V9/9     | ddr_dqs[1]         | io    | IOB62[A] | -               | SSTL15D_I | 8     | NONE      | OFF       | NONE       | OFF        | FAST      | OFF        | OFF             | ON            | 1.5   | MEDIUM        | OFF           | OFF          
+V8/9     | ddr_dqs_n[1]       | io    | IOB62[B] | -               | SSTL15D_I | 8     | NONE      | OFF       | NONE       | OFF        | FAST      | OFF        | OFF             | ON            | 1.5   | MEDIUM        | OFF           | OFF          
+AA8/9    | ddr_dq[8]          | io    | IOB65[A] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+AB8/9    | ddr_dq[12]         | io    | IOB65[B] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+Y8/9     | ddr_dq[9]          | io    | IOB67[A] | BPLL1_T_IN0     | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+Y7/9     | ddr_dq[11]         | io    | IOB67[B] | BPLL1_C_IN0     | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+W9/9     | ddr_dq[13]         | io    | IOB69[A] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
+Y9/9     | ddr_dq[15]         | io    | IOB69[B] | -               | SSTL15_I | 12    | NONE      | OFF       | NONE       | OFF        | FAST      | INTERNAL   | OFF             | OFF           | 1.5   | MEDIUM        | OFF           | OFF          
 U7/9     | -                  | in    | IOB71[A] | BPLL1_T_IN1/BPLL1_T_FB1 | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 V10/9    | -                  | in    | IOB71[B] | BPLL1_C_IN1/BPLL1_C_FB1 | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 U17/8    | -                  | in    | IOB75[A] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
@@ -476,8 +488,8 @@ H4/11    | -                  | in    | IOL45[A] | GCLKT_18        | LVCMOS15 | 
 G4/11    | -                  | in    | IOL45[B] | GCLKC_18        | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 K4/10    | ddr_addr[12]       | out   | IOL48[A] | GCLKT_17        | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
 J4/10    | ddr_addr[3]        | out   | IOL48[B] | GCLKC_17        | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-L3/10    | ddr_ck(p)          | out   | IOL50[A] | GCLKT_16        | SSTL15D_I | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
-K3/10    | ddr_ck(n)          | out   | IOL50[B] | GCLKC_16        | SSTL15D_I | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
+L3/10    | ddr_ck             | out   | IOL50[A] | GCLKT_16        | SSTL15D_I | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
+K3/10    | ddr_ck_n           | out   | IOL50[B] | GCLKC_16        | SSTL15D_I | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
 M1/10    | ddr_addr[0]        | out   | IOL52[A] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
 L1/10    | ddr_addr[10]       | out   | IOL52[B] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
 M3/10    | -                  | in    | IOL54[A] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
