@@ -238,17 +238,18 @@ DDR3_Memory_Interface_Top u_ddr3 (
 // Audio
 
 localparam AUDIO_RATE=48000;
-localparam AUDIO_CLK_DELAY = 74250 * 1000 / AUDIO_RATE / 2;
+localparam AUDIO_CLK_DELAY = 74250000 / AUDIO_RATE;  // cycles per audio sample period
 logic [$clog2(AUDIO_CLK_DELAY)-1:0] audio_divider;
-logic clk_audio;
+logic clk_audio;  // single-cycle pulse at AUDIO_RATE Hz
 
-always_ff@(posedge clk_x1) 
+always_ff@(posedge clk_x1)
 begin
-    if (audio_divider != AUDIO_CLK_DELAY - 1) 
-        audio_divider++;
-    else begin 
-        clk_audio <= ~clk_audio; 
-        audio_divider <= 0; 
+    if (audio_divider == AUDIO_CLK_DELAY - 1) begin
+        clk_audio <= 1'b1;
+        audio_divider <= 0;
+    end else begin
+        clk_audio <= 1'b0;
+        audio_divider <= audio_divider + 1;
     end
 end
 
@@ -272,7 +273,7 @@ wire [2:0] tmds;
 localparam VIDEOID = 4;
 localparam VIDEO_REFRESH = 60.0;
 localparam AUDIO_BIT_WIDTH = 16;
-localparam AUDIO_OUT_RATE = 32000;
+localparam AUDIO_OUT_RATE = AUDIO_RATE;
 
 hdmi #( .VIDEO_ID_CODE(VIDEOID), 
         .DVI_OUTPUT(0), 

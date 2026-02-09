@@ -12,27 +12,27 @@
   <Part Number>: GW5AT-LV60PG484AC1/I0
   <Device>: GW5AT-60
   <Device Version>: B
-  <Created Time>:Sun Feb  8 20:44:55 2026
+  <Created Time>:Sun Feb  8 22:20:41 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 23s, Elapsed time = 0h 0m 31s
+    Placement Phase 0: CPU time = 0h 0m 21s, Elapsed time = 0h 0m 29s
     Placement Phase 1: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 3s
-    Placement Phase 2: CPU time = 0h 0m 58s, Elapsed time = 0h 1m 16s
-    Placement Phase 3: CPU time = 0h 0m 47s, Elapsed time = 0h 1m 2s
-    Total Placement: CPU time = 0h 2m 10s, Elapsed time = 0h 2m 52s
+    Placement Phase 2: CPU time = 0h 0m 58s, Elapsed time = 0h 1m 18s
+    Placement Phase 3: CPU time = 0h 0m 43s, Elapsed time = 0h 0m 57s
+    Total Placement: CPU time = 0h 2m 5s, Elapsed time = 0h 2m 46s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.032s, Elapsed time = 0h 0m 0.04s
-    Routing Phase 1: CPU time = 0h 2m 0s, Elapsed time = 0h 2m 40s
-    Routing Phase 2: CPU time = 0h 0m 0.544s, Elapsed time = 0h 0m 0.812s
+    Routing Phase 0: CPU time = 0h 0m 0.031s, Elapsed time = 0h 0m 0.037s
+    Routing Phase 1: CPU time = 0h 1m 30s, Elapsed time = 0h 1m 57s
+    Routing Phase 2: CPU time = 0h 0m 0.536s, Elapsed time = 0h 0m 0.744s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 2m 0s, Elapsed time = 0h 2m 41s
+    Total Routing: CPU time = 0h 1m 31s, Elapsed time = 0h 1m 58s
  Generate output files:
-    CPU time = 0h 0m 13s, Elapsed time = 0h 0m 17s
+    CPU time = 0h 0m 13s, Elapsed time = 0h 0m 16s
 
- Total Time and Memory Usage: CPU time = 0h 4m 23s, Elapsed time = 0h 5m 51s, Peak memory usage = 2449MB
+ Total Time and Memory Usage: CPU time = 0h 3m 48s, Elapsed time = 0h 5m 0s, Peak memory usage = 2386MB
 
 
 3. Resource Usage Summary
@@ -41,14 +41,14 @@
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
   Logic                       | 12714/59904                         |  22%
-    --LUT,ALU,ROM16           | 12714(11827 LUT, 887 ALU, 0 ROM16)  | -
+    --LUT,ALU,ROM16           | 12714(11830 LUT, 884 ALU, 0 ROM16)  | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 11273/60780                         |  19%
+  Register                    | 11275/60780                         |  19%
     --Logic Register as Latch | 0/59904                             |  0%
-    --Logic Register as FF    | 11233/59904                         |  19%
+    --Logic Register as FF    | 11235/59904                         |  19%
     --I/O Register as Latch   | 0/876                               |  0%
     --I/O Register as FF      | 40/876                              |  5%
-  CLS                         | 11842/29952                         |  40%
+  CLS                         | 11920/29952                         |  40%
   I/O Port                    | 128/297                             |  44%
   I/O Buf                     | 109                                 | -
     --Input Buf               | 29                                  | -
@@ -115,8 +115,8 @@
   a2bus_if.clk_pixel| PRIMARY        |  PBR1 PBR2
   a2bus_if.clk_logic| PRIMARY        |  PTR1 PTR2 PTR3 PBR1 PBR2 PBR3
   superserial/COM2/n67_7| PRIMARY        |  PTR1 PTR2
-  u_ddr3_fb/pixels_3841| PRIMARY        |  PTR0 PTR1
-  u_ddr3_fb/n826_5| PRIMARY        |  PTR1
+  u_ddr3_fb/pixels_3849| PRIMARY        |  PTR0 PTR1
+  u_ddr3_fb/n829_5| PRIMARY        |  PTR1
   u_ddr3_fb/hclk | PRIMARY        |  PTR3
   u_ddr3_fb/clk_x1| PRIMARY        |  PTR0 PTR1 PTR3 PBR0 PBR1 PBR3
   a2bus_if.device_reset_n| LW             |  -
