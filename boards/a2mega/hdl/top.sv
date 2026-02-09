@@ -672,6 +672,30 @@ module top #(
     wire [10:0] fb_width_w  = use_vgc_r ? VGC_FB_WIDTH  : APPLE_FB_WIDTH;
     wire [9:0]  fb_height_w = use_vgc_r ? VGC_FB_HEIGHT : APPLE_FB_HEIGHT;
 
+    // Border color: convert 4-bit palette index to RGB666
+    // Uses {GSP, BORDER_COLOR} as 5-bit index into 32-entry palette,
+    // same as apple_video_fb.sv: entries 0-15 = Apple II, 16-31 = IIgs
+    wire border_gsp_w = a2bus_if.sw_gs;
+    wire [4:0] border_idx_w = {border_gsp_w, a2mem_if.BORDER_COLOR};
+    wire [11:0] border_palette_w [0:31];
+    assign border_palette_w = '{
+        12'h000, 12'h924, 12'h42a, 12'hd4e,   // Apple II  0-3
+        12'h064, 12'h888, 12'h39e, 12'hcbf,   //           4-7
+        12'h450, 12'hc73, 12'h888, 12'hfac,   //           8-11
+        12'h3c2, 12'hcd6, 12'h7ec, 12'hfff,   //          12-15
+        12'h000, 12'hd03, 12'h009, 12'hd2d,   // IIgs      0-3
+        12'h072, 12'h555, 12'h22f, 12'h6af,   //           4-7
+        12'h850, 12'hf60, 12'haaa, 12'hf98,   //           8-11
+        12'h1d0, 12'hff0, 12'h4f9, 12'hfff    //          12-15
+    };
+    wire [11:0] border_rgb444_w = border_palette_w[border_idx_w];
+    // Expand RGB444 to RGB666: replicate top 2 bits into bottom 2 for accurate scaling
+    wire [17:0] border_rgb666_w = {
+        border_rgb444_w[11:8], 2'b00,  // R: 4->6 bits (zero-pad, matches apple_video_fb.sv)
+        border_rgb444_w[7:4],  2'b00,  // G: 4->6 bits
+        border_rgb444_w[3:0],  2'b00   // B: 4->6 bits
+    };
+
     wire init_calib_complete_w;
     wire ddr_rst_w;
 
@@ -700,6 +724,7 @@ module top #(
         .fb_vsync(fb_vsync_mux_w),
         .fb_we(fb_we_mux_w),
         .fb_data(fb_data_mux_w),
+        .border_color(border_rgb666_w),
 
         // Audio — CDC'd internally via 2-stage sync
         .sound_left(core_audio_l_w),

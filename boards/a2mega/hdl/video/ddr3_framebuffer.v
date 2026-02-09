@@ -47,6 +47,7 @@ module ddr3_framebuffer #(
     input               fb_vsync,    // start of frame signal, on or before the first pixel
     input               fb_we,       // update a pixel and move to next pixel
     input [COLOR_BITS-1:0] fb_data,  // pixel data
+    input [COLOR_BITS-1:0] border_color, // border color for inactive display area
 
     input [15:0]        sound_left,
     input [15:0]        sound_right,
@@ -259,6 +260,12 @@ always @(posedge clk_x1) begin       // crossing clock domain
     audio_sample_word[0] <= audio_sample_word0[0];
     audio_sample_word0[1] <= sound_right;
     audio_sample_word[1] <= audio_sample_word0[1];
+end
+
+// Border color CDC (quasi-static, changes at most once per frame)
+reg [COLOR_BITS-1:0] border_color_x1;
+always @(posedge clk_x1) begin
+    border_color_x1 <= border_color;
 end
 
 /////////////////////////////////////////////////////////////////////
@@ -518,7 +525,7 @@ always @(posedge clk_x1) begin
             end
             rgb <= torgb(pixels[cx == 0 ? 0 : ox[PREFETCH_POW-1:0]]);
         end else
-            rgb <= 24'h202020;
+            rgb <= torgb(border_color_x1);
 
         // if (cy >= 300 && cy < 330)    // a blue bar in the middle for debug
         //     rgb <= 24'h4040ff;
