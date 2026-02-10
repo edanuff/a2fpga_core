@@ -48,6 +48,7 @@ module ddr3_framebuffer #(
     input               fb_we,       // update a pixel and move to next pixel
     input [COLOR_BITS-1:0] fb_data,  // pixel data
     input [COLOR_BITS-1:0] border_color, // border color for inactive display area
+    input               sleep_i,     // when high, output black (clk domain, sync'd internally)
 
     input [15:0]        sound_left,
     input [15:0]        sound_right,
@@ -68,6 +69,13 @@ module ddr3_framebuffer #(
     inout  [16-1:0]     ddr_dq,
     inout  [2-1:0]      ddr_dqs,     
     inout  [2-1:0]      ddr_dqs_n, 
+
+    // HDMI overlay interface (active in clk_x1 / 74.25 MHz domain)
+    output [10:0]       hdmi_cx,
+    output [9:0]        hdmi_cy,
+    output [23:0]       fb_rgb_o,
+    input  [23:0]       overlay_rgb_i,
+    input               overlay_en_i,
 
     // HDMI output
 	output              tmds_clk_n,
@@ -268,12 +276,24 @@ always @(posedge clk_x1) begin
     border_color_x1 <= border_color;
 end
 
+// Sleep CDC (quasi-static, 2-stage sync from clk to clk_x1)
+reg sleep_sync0, sleep_sync1;
+always @(posedge clk_x1) begin
+    sleep_sync0 <= sleep_i;
+    sleep_sync1 <= sleep_sync0;
+end
+
 /////////////////////////////////////////////////////////////////////
 // HDMI TX
 
 wire [10:0] cx;
 wire [9:0] cy;
 reg [23:0] rgb;
+
+// Overlay interface: expose raster position and RGB for DebugOverlay
+assign hdmi_cx = cx;
+assign hdmi_cy = cy;
+assign fb_rgb_o = rgb;
 
 // HDMI output.
 wire [2:0] tmds;
@@ -282,24 +302,26 @@ localparam VIDEO_REFRESH = 60.0;
 localparam AUDIO_BIT_WIDTH = 16;
 localparam AUDIO_OUT_RATE = AUDIO_RATE;
 
-hdmi #( .VIDEO_ID_CODE(VIDEOID), 
-        .DVI_OUTPUT(0), 
+// DebugOverlay is now internally pipelined (2 register stages), so its
+// outputs are already registered.  Feed them directly to HDMI.
+hdmi #( .VIDEO_ID_CODE(VIDEOID),
+        .DVI_OUTPUT(0),
         .VIDEO_REFRESH_RATE(VIDEO_REFRESH),
         .IT_CONTENT(1),
-        .AUDIO_RATE(AUDIO_OUT_RATE), 
+        .AUDIO_RATE(AUDIO_OUT_RATE),
         .AUDIO_BIT_WIDTH(AUDIO_BIT_WIDTH),
         .START_X(0),
         .START_Y(0) )
 
-hdmi(   .clk_pixel_x5(hclk5), 
-        .clk_pixel(clk_x1), 
+hdmi(   .clk_pixel_x5(hclk5),
+        .clk_pixel(clk_x1),
         .clk_audio(clk_audio),
-        .rgb(rgb), 
+        .rgb(overlay_en_i ? overlay_rgb_i : rgb),
         .reset( ddr_rst ),
         .audio_sample_word(audio_sample_word),
-        .tmds(tmds), 
-        .tmds_clock(), 
-        .cx(cx), 
+        .tmds(tmds),
+        .tmds_clock(),
+        .cx(cx),
         .cy(cy),
         .frame_width(),
         .frame_height() );
@@ -523,9 +545,9 @@ always @(posedge clk_x1) begin
                 xcnt <= xcnt - diff_disp_width_width;
                 ox <= ox + 1;
             end
-            rgb <= torgb(pixels[cx == 0 ? 0 : ox[PREFETCH_POW-1:0]]);
+            rgb <= sleep_sync1 ? 24'h000000 : torgb(pixels[cx == 0 ? 0 : ox[PREFETCH_POW-1:0]]);
         end else
-            rgb <= torgb(border_color_x1);
+            rgb <= sleep_sync1 ? 24'h000000 : torgb(border_color_x1);
 
         // if (cy >= 300 && cy < 330)    // a blue bar in the middle for debug
         //     rgb <= 24'h4040ff;

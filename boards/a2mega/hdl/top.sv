@@ -239,7 +239,7 @@ module top #(
         .ENABLE_DENOISE(ENABLE_DENOISE)
     ) apple_bus (
         .clk_logic_i(clk_logic_w),
-        .clk_pixel_i(clk_pixel_w),
+        .clk_pixel_i(clk_logic_w),    // F18A runs on clk_logic (54 MHz) — no separate pixel clock
         .system_reset_n_i(system_reset_n_w),
         .device_reset_n_i(device_reset_n_w),
         .a2_phi1_i(a2_phi1),
@@ -368,6 +368,12 @@ module top #(
     wire [17:0] fb_data_w;
     wire fb_vsync_w;
 
+    // Apple II RGB outputs for SuperSprite compositing
+    wire [7:0] apple_fb_r_w;
+    wire [7:0] apple_fb_g_w;
+    wire [7:0] apple_fb_b_w;
+    wire       apple_fb_active_w;
+
     apple_video_fb apple_video_fb (
         .a2bus_if(a2bus_if),
         .a2mem_if(a2mem_if),
@@ -385,7 +391,19 @@ module top #(
 
         .fb_we_o(fb_we_w),
         .fb_data_o(fb_data_w),
-        .fb_vsync_o(fb_vsync_w)
+        .fb_vsync_o(fb_vsync_w),
+
+        // Apple II RGB output for SuperSprite
+        .apple_r_o(apple_fb_r_w),
+        .apple_g_o(apple_fb_g_w),
+        .apple_b_o(apple_fb_b_w),
+        .apple_active_o(apple_fb_active_w),
+
+        // SuperSprite composited input
+        .ssp_r_i(rgb_r_w),
+        .ssp_g_i(rgb_g_w),
+        .ssp_b_i(rgb_b_w),
+        .ssp_active_i(1'b0)         // TODO: enable when SuperSprite verified working
     );
 
     // VGC framebuffer renderer — IIgs Super Hi-Res modes
@@ -481,6 +499,37 @@ module top #(
 
     wire VDP_OVERLAY_SW;
     wire APPLE_VIDEO_SW;
+    // =========================================================================
+    // VDP Raster Counter — synced to Apple II scan_timer (clk_logic domain)
+    // =========================================================================
+    // Free-running counter on clk_logic (54 MHz), reset by scan_timer hsync/vsync.
+    // Clamped at 1023 to prevent 10-bit wrap causing spurious prescan triggers.
+    reg [9:0] vdp_cx;   // 0–1023 (matches F18A HMAX)
+    reg [8:0] vdp_cy;   // 0–261
+
+    reg hsync_prev_r;
+    always @(posedge a2bus_if.clk_logic) begin
+        hsync_prev_r <= hsync_w;
+    end
+    wire hsync_edge_w = hsync_w && !hsync_prev_r;
+
+    always @(posedge a2bus_if.clk_logic) begin
+        if (vsync_w) begin
+            vdp_cx <= 10'd0;
+            vdp_cy <= 9'd0;
+        end else if (hsync_edge_w) begin
+            vdp_cx <= 10'd0;
+            vdp_cy <= vdp_cy + 9'd1;
+        end else if (vdp_cx < 10'd1023) begin
+            vdp_cx <= vdp_cx + 10'd1;
+        end
+        // else: stay at 1023 until next hsync resets to 0
+    end
+
+    // =========================================================================
+    // SuperSprite / VDP
+    // =========================================================================
+
     wire [0:7] ssp_d_w;
     wire ssp_rd;
     wire [3:0] vdp_r;
@@ -523,12 +572,12 @@ module top #(
         .rd_en_o(ssp_rd),
         .irq_n_o(vdp_irq_n),
 
-        .screen_x_i(hdmi_x),
-        .screen_y_i(hdmi_y),
-        .apple_vga_r_i(vgc_vga_r),
-        .apple_vga_g_i(vgc_vga_g),
-        .apple_vga_b_i(vgc_vga_b),
-        .apple_vga_active_i(apple_vga_active),
+        .screen_x_i(vdp_cx),              // VDP raster X (10-bit, 0–1023)
+        .screen_y_i({1'b0, vdp_cy}),      // VDP raster Y (9-bit→10-bit, 0–261)
+        .apple_vga_r_i(apple_fb_r_w),     // Apple II RGB from apple_video_fb
+        .apple_vga_g_i(apple_fb_g_w),
+        .apple_vga_b_i(apple_fb_b_w),
+        .apple_vga_active_i(apple_fb_active_w),
 
         .scanlines_i(SCANLINES_ENABLE | sw_scanlines_w),
 
@@ -698,6 +747,12 @@ module top #(
 
     wire init_calib_complete_w;
     wire ddr_rst_w;
+    wire clk_x1_w;              // 74.25 MHz from ddr3_framebuffer (HDMI pixel clock)
+    wire [10:0] hdmi_cx_w;      // HDMI raster X (0–1649)
+    wire [9:0]  hdmi_cy_w;      // HDMI raster Y (0–749)
+    wire [23:0] fb_rgb_w;       // Current framebuffer RGB output
+    wire [23:0] overlay_rgb_w;  // DebugOverlay RGB output
+    wire        overlay_en_w;   // DebugOverlay enable
 
     // DDR3 framebuffer — drives DDR3 and HDMI output
     wire [13:0] ddr_addr_fb;
@@ -712,7 +767,7 @@ module top #(
         .clk_g(clk),                   // 50 MHz board crystal (same pin as PLL clkin)
         .pll_lock_27(clk_lock_w),
         .rst_n(1'b1),
-        .clk_out(),                    // 74.25 MHz output — unused externally
+        .clk_out(clk_x1_w),             // 74.25 MHz output for DebugOverlay
         .ddr_rst(ddr_rst_w),
         .init_calib_complete(init_calib_complete_w),
 
@@ -725,10 +780,18 @@ module top #(
         .fb_we(fb_we_mux_w),
         .fb_data(fb_data_mux_w),
         .border_color(border_rgb666_w),
+        .sleep_i(sleep_w),
 
         // Audio — CDC'd internally via 2-stage sync
         .sound_left(core_audio_l_w),
         .sound_right(core_audio_r_w),
+
+        // HDMI overlay interface (clk_x1 domain)
+        .hdmi_cx(hdmi_cx_w),
+        .hdmi_cy(hdmi_cy_w),
+        .fb_rgb_o(fb_rgb_w),
+        .overlay_rgb_i(overlay_rgb_w),
+        .overlay_en_i(overlay_en_w),
 
         // DDR3 pins
         .ddr_addr(ddr_addr_fb),
@@ -760,6 +823,63 @@ module top #(
 
     // DDR3 calibration status on LED[1]
     assign led[1] = !init_calib_complete_w;
+
+    // =========================================================================
+    // Debug Overlay — runs in clk_x1 (74.25 MHz) domain
+    // =========================================================================
+
+    // CDC for debug hex values: double-flop from clk_logic to clk_x1
+    // These are quasi-static values, so double-flop is sufficient
+    reg [7:0] dbg_hex_sync0 [8], dbg_hex_sync1 [8];
+    reg [7:0] dbg_bits0_sync0, dbg_bits0_sync1;
+    reg [7:0] dbg_bits1_sync0, dbg_bits1_sync1;
+    always @(posedge clk_x1_w) begin
+        dbg_hex_sync0[0] <= scanline_w[8:1];   dbg_hex_sync1[0] <= dbg_hex_sync0[0];
+        dbg_hex_sync0[1] <= {7'b0, scanline_w[0]}; dbg_hex_sync1[1] <= dbg_hex_sync0[1];
+        dbg_hex_sync0[2] <= 8'h00;              dbg_hex_sync1[2] <= dbg_hex_sync0[2];
+        dbg_hex_sync0[3] <= 8'h00;              dbg_hex_sync1[3] <= dbg_hex_sync0[3];
+        dbg_hex_sync0[4] <= 8'h00;              dbg_hex_sync1[4] <= dbg_hex_sync0[4];
+        dbg_hex_sync0[5] <= 8'h00;              dbg_hex_sync1[5] <= dbg_hex_sync0[5];
+        dbg_hex_sync0[6] <= 8'h00;              dbg_hex_sync1[6] <= dbg_hex_sync0[6];
+        dbg_hex_sync0[7] <= {4'b0, a2mem_if.BACKGROUND_COLOR};
+                                                dbg_hex_sync1[7] <= dbg_hex_sync0[7];
+        dbg_bits0_sync0 <= {a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE,
+                            a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.STORE80,
+                            a2bus_if.system_reset_n, a2bus_if.device_reset_n};
+        dbg_bits0_sync1 <= dbg_bits0_sync0;
+        dbg_bits1_sync0 <= 8'h00;
+        dbg_bits1_sync1 <= dbg_bits1_sync0;
+    end
+
+    DebugOverlay #(
+        .VERSION(`BUILD_DATETIME),
+        .ENABLE(1'b1),
+        .X_OFFSET(16),
+        .Y_OFFSET(24)
+    ) debug_overlay (
+        .clk_i          (clk_x1_w),
+        .reset_n        (device_reset_n_w),
+        .enable_i       (1'b1),
+
+        .hex_values     ('{dbg_hex_sync1[0], dbg_hex_sync1[1], dbg_hex_sync1[2], dbg_hex_sync1[3],
+                           dbg_hex_sync1[4], dbg_hex_sync1[5], dbg_hex_sync1[6], dbg_hex_sync1[7]}),
+
+        .debug_bits_0_i (dbg_bits0_sync1),
+        .debug_bits_1_i (dbg_bits1_sync1),
+
+        .screen_x_i     (hdmi_cx_w),
+        .screen_y_i     (hdmi_cy_w),
+
+        .r_i            (fb_rgb_w[23:16]),
+        .g_i            (fb_rgb_w[15:8]),
+        .b_i            (fb_rgb_w[7:0]),
+
+        .r_o            (overlay_rgb_w[23:16]),
+        .g_o            (overlay_rgb_w[15:8]),
+        .b_o            (overlay_rgb_w[7:0])
+    );
+
+    assign overlay_en_w = 1'b1;
 
     // =========================================================================
     // ESP32 Octal SPI Interface

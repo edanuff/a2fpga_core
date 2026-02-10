@@ -53,7 +53,19 @@ module apple_video_fb (
     // Framebuffer write outputs
     output reg        fb_we_o,
     output reg [17:0] fb_data_o, // RGB666
-    output reg        fb_vsync_o
+    output reg        fb_vsync_o,
+
+    // Apple II RGB output for SuperSprite compositing (expanded from RGB444)
+    output reg [7:0]  apple_r_o,
+    output reg [7:0]  apple_g_o,
+    output reg [7:0]  apple_b_o,
+    output reg        apple_active_o,
+
+    // SuperSprite composited input (VDP overlaid on Apple II)
+    input [7:0]       ssp_r_i,
+    input [7:0]       ssp_g_i,
+    input [7:0]       ssp_b_i,
+    input             ssp_active_i
 );
 
     localparam FORCE_NIBBLE_COLORS = 1;
@@ -425,6 +437,10 @@ module apple_video_fb (
             fb_we_o <= 1'b0;
             fb_vsync_o <= 1'b0;
             fb_data_o <= 18'd0;
+            apple_r_o <= 8'd0;
+            apple_g_o <= 8'd0;
+            apple_b_o <= 8'd0;
+            apple_active_o <= 1'b0;
             video_rd_o <= 1'b0;
             video_address_o <= 16'd0;
             video_bank_o <= 1'b0;
@@ -472,6 +488,7 @@ module apple_video_fb (
 
             fb_we_o <= 1'b0;
             fb_vsync_o <= 1'b0;
+            apple_active_o <= 1'b0;
             video_rd_o <= 1'b0;
 
             // Character ROM read — single-registered, 2-cycle latency
@@ -779,7 +796,20 @@ module apple_video_fb (
                         // fb_we_o only fires during the output phase.
                         if (scanline_pix_cnt_r >= WARMUP_PIXELS && scanline_pix_cnt_r < (WARMUP_PIXELS + 10'd560)) begin
                             pix_rgb = palette_rgb_r[{GSP, color}];
-                            fb_data_o <= {pix_rgb[11:8], 2'b00, pix_rgb[7:4], 2'b00, pix_rgb[3:0], 2'b00};
+
+                            // Expose Apple II RGB expanded to 8-bit for SuperSprite input
+                            apple_r_o <= {pix_rgb[11:8], pix_rgb[11:8]};
+                            apple_g_o <= {pix_rgb[7:4], pix_rgb[7:4]};
+                            apple_b_o <= {pix_rgb[3:0], pix_rgb[3:0]};
+                            apple_active_o <= 1'b1;
+
+                            // When SuperSprite is active, use its composited RGB (VDP over Apple II);
+                            // otherwise use the raw Apple II palette color
+                            if (ssp_active_i) begin
+                                fb_data_o <= {ssp_r_i[7:2], ssp_g_i[7:2], ssp_b_i[7:2]};
+                            end else begin
+                                fb_data_o <= {pix_rgb[11:8], 2'b00, pix_rgb[7:4], 2'b00, pix_rgb[3:0], 2'b00};
+                            end
                             fb_we_o <= 1'b1;
                         end
 
