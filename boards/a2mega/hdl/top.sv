@@ -403,7 +403,7 @@ module top #(
         .ssp_r_i(rgb_r_w),
         .ssp_g_i(rgb_g_w),
         .ssp_b_i(rgb_b_w),
-        .ssp_active_i(1'b0)         // TODO: enable when SuperSprite verified working
+        .ssp_active_i(1'b1)
     );
 
     // VGC framebuffer renderer — IIgs Super Hi-Res modes
@@ -502,10 +502,20 @@ module top #(
     // =========================================================================
     // VDP Raster Counter — synced to Apple II scan_timer (clk_logic domain)
     // =========================================================================
-    // Free-running counter on clk_logic (54 MHz), reset by scan_timer hsync/vsync.
-    // Clamped at 1023 to prevent 10-bit wrap causing spurious prescan triggers.
-    reg [9:0] vdp_cx;   // 0–1023 (matches F18A HMAX)
-    reg [8:0] vdp_cy;   // 0–261
+    // vdp_cx: horizontal counter advancing once per 4 clk_logic cycles (pixel rate)
+    // to match apple_video_fb's gap_cnt_r. Clamped at VDP_HMAX to prevent wrap.
+    //
+    // vdp_cy: uses scanline_w directly from scan_timer (0–261) to guarantee exact
+    // alignment with apple_video_fb. This ensures the F18A sees the correct scanline
+    // numbers (including 260/261 for scanline_reset during blanking) and that VDP
+    // line 0 corresponds to framebuffer line 0.
+    //
+    // At 54 MHz with ~63.5 µs scanline: ~3,429 clk_logic cycles / 4 = ~857 ticks/line.
+    // VDP_HMAX=856 ensures y_tick fires near end of each scanline.
+    localparam VDP_HMAX = 10'd856;
+
+    reg [9:0] vdp_cx;   // 0–856 (VDP_HMAX)
+    reg [1:0] vdp_div;  // 2-bit divider: vdp_cx advances when vdp_div wraps
 
     reg hsync_prev_r;
     always @(posedge a2bus_if.clk_logic) begin
@@ -514,16 +524,16 @@ module top #(
     wire hsync_edge_w = hsync_w && !hsync_prev_r;
 
     always @(posedge a2bus_if.clk_logic) begin
-        if (vsync_w) begin
+        if (hsync_w) begin
+            // Reset horizontal counter on hsync (same cycle as scan_timer scanline change)
             vdp_cx <= 10'd0;
-            vdp_cy <= 9'd0;
-        end else if (hsync_edge_w) begin
-            vdp_cx <= 10'd0;
-            vdp_cy <= vdp_cy + 9'd1;
-        end else if (vdp_cx < 10'd1023) begin
-            vdp_cx <= vdp_cx + 10'd1;
+            vdp_div <= 2'd0;
+        end else begin
+            vdp_div <= vdp_div + 2'd1;
+            if (vdp_div == 2'd3 && vdp_cx < VDP_HMAX) begin
+                vdp_cx <= vdp_cx + 10'd1;
+            end
         end
-        // else: stay at 1023 until next hsync resets to 0
     end
 
     // =========================================================================
@@ -572,8 +582,8 @@ module top #(
         .rd_en_o(ssp_rd),
         .irq_n_o(vdp_irq_n),
 
-        .screen_x_i(vdp_cx),              // VDP raster X (10-bit, 0–1023)
-        .screen_y_i({1'b0, vdp_cy}),      // VDP raster Y (9-bit→10-bit, 0–261)
+        .screen_x_i(vdp_cx),              // VDP raster X (10-bit, 0–856)
+        .screen_y_i({1'b0, scanline_w}),  // VDP raster Y from scan_timer (9-bit→10-bit, 0–261)
         .apple_vga_r_i(apple_fb_r_w),     // Apple II RGB from apple_video_fb
         .apple_vga_g_i(apple_fb_g_w),
         .apple_vga_b_i(apple_fb_b_w),

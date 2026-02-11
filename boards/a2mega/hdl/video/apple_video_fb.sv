@@ -382,6 +382,10 @@ module apple_video_fb (
     // Scanline pixel counter — gates fb_we_o at exactly 560 pulses
     reg [9:0] scanline_pix_cnt_r;
 
+    // SSP capture flag: defers fb_data_o/fb_we_o by 1 clk_logic cycle so that
+    // the combinational SuperSprite path sees the updated apple_r_o value.
+    reg ssp_capture_r;
+
     // Pixel pipeline
     reg [PIX_BUFFER_SIZE-1:0] pix_shift_r;
     reg [PIX_HISTORY_SIZE-1:0] pix_history_r;
@@ -459,6 +463,7 @@ module apple_video_fb (
             video_data_r <= 32'd0;
             h_offset_r <= 6'd0;
             scanline_pix_cnt_r <= 10'd0;
+            ssp_capture_r <= 1'b0;
 
             pix_shift_r <= '0;
             pix_history_r <= '0;
@@ -490,6 +495,15 @@ module apple_video_fb (
             fb_vsync_o <= 1'b0;
             apple_active_o <= 1'b0;
             video_rd_o <= 1'b0;
+
+            // SSP capture: 1 clk_logic cycle after apple_r_o is set,
+            // the SuperSprite combinational path has propagated and
+            // ssp_r_i/g_i/b_i are valid. Capture and write to framebuffer.
+            if (ssp_capture_r) begin
+                fb_data_o <= {ssp_r_i[7:2], ssp_g_i[7:2], ssp_b_i[7:2]};
+                fb_we_o <= 1'b1;
+                ssp_capture_r <= 1'b0;
+            end
 
             // Character ROM read — single-registered, 2-cycle latency
             viderom_d_r <= ~viderom_r[viderom_a_r];
@@ -536,6 +550,7 @@ module apple_video_fb (
                     h_offset_r <= 6'd0;
                     next_pix_delay_r <= 1'b0;
                     scanline_pix_cnt_r <= 10'd0;
+                    ssp_capture_r <= 1'b0;
 
                     pix_shift_r <= '0;
                     // Reset pix_history_r to zeros at the start of each scanline.
@@ -797,20 +812,26 @@ module apple_video_fb (
                         if (scanline_pix_cnt_r >= WARMUP_PIXELS && scanline_pix_cnt_r < (WARMUP_PIXELS + 10'd560)) begin
                             pix_rgb = palette_rgb_r[{GSP, color}];
 
-                            // Expose Apple II RGB expanded to 8-bit for SuperSprite input
-                            apple_r_o <= {pix_rgb[11:8], pix_rgb[11:8]};
-                            apple_g_o <= {pix_rgb[7:4], pix_rgb[7:4]};
-                            apple_b_o <= {pix_rgb[3:0], pix_rgb[3:0]};
+                            // Expose Apple II RGB expanded to 8-bit for SuperSprite input.
+                            // Use {nibble, 4'b0} so that SSP pass-through truncated to [7:2]
+                            // produces {nibble, 2'b00}, matching the direct RGB444→RGB666 path
+                            // and the border color expansion.
+                            apple_r_o <= {pix_rgb[11:8], 4'b0};
+                            apple_g_o <= {pix_rgb[7:4], 4'b0};
+                            apple_b_o <= {pix_rgb[3:0], 4'b0};
                             apple_active_o <= 1'b1;
 
-                            // When SuperSprite is active, use its composited RGB (VDP over Apple II);
-                            // otherwise use the raw Apple II palette color
+                            // When SuperSprite is active, defer the framebuffer write by
+                            // 1 clk_logic cycle so the combinational SSP path sees the
+                            // updated apple_r_o. Without this delay, the first pixel of
+                            // each scanline reads stale (black) apple_r_o, creating a
+                            // 1-pixel notch artifact.
                             if (ssp_active_i) begin
-                                fb_data_o <= {ssp_r_i[7:2], ssp_g_i[7:2], ssp_b_i[7:2]};
+                                ssp_capture_r <= 1'b1;
                             end else begin
                                 fb_data_o <= {pix_rgb[11:8], 2'b00, pix_rgb[7:4], 2'b00, pix_rgb[3:0], 2'b00};
+                                fb_we_o <= 1'b1;
                             end
-                            fb_we_o <= 1'b1;
                         end
 
                         // Always advance the pixel cycle counter

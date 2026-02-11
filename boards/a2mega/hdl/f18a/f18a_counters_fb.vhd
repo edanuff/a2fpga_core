@@ -3,7 +3,8 @@
 --
 -- Based on f18a_counters.vhd by Matthew Hagerty (3-Clause BSD License)
 -- Modified for DDR3 framebuffer pipeline:
---   - No 2x pixel doubling (1:1 scale, 256x192 TMS pixels)
+--   - 2x horizontal pixel doubling (512 raster pixels for 256 TMS pixels)
+--   - No vertical doubling (1:1 Y scale, 192 TMS lines = 192 FB lines)
 --   - Margin constants for 560x192 visible frame
 --   - Both clk and vga_clk are the same clock (54 MHz) — no CDC needed
 --   - Simplified scan line blanking (no doubled VGA lines)
@@ -47,22 +48,27 @@ end f18a_counters;
 architecture rtl of f18a_counters is
 
    -- Start and end points to center the TMS9918 display within the 560-pixel
-   -- framebuffer scanline. No vertical margin (192 TMS lines = 192 FB lines).
+   -- framebuffer scanline at 2x horizontal scale.
+   -- No vertical margin (192 TMS lines = 192 FB lines).
    --
-   -- Graphics modes: 256 active pixels centered in 560 → margin = (560-256)/2 = 152
-   -- Text modes:     240 active pixels centered in 560 → margin = (560-240)/2 = 160
-   constant XSTART   : integer := 152;    -- X start for graphics modes
-   constant XSTART2  : integer := 160;    -- X start for text modes
-   constant XEND     : integer := 407;    -- X end for graphics modes (152+256-1)
-   constant XEND2    : integer := 399;    -- X end for text modes (160+240-1)
+   -- Graphics modes: 256 TMS pixels × 2 = 512 raster pixels, centered in 560
+   --   margin = (560-512)/2 = 24. XEND = 24+512-1 = 535
+   -- Text modes:     240 TMS pixels × 2 = 480 raster pixels, centered in 560
+   --   margin = (560-480)/2 = 40. XEND2 = 40+480-1 = 519
+   constant XSTART   : integer := 24;     -- X start for graphics modes
+   constant XSTART2  : integer := 40;     -- X start for text modes
+   constant XEND     : integer := 535;    -- X end for graphics modes (24+512-1)
+   constant XEND2    : integer := 519;    -- X end for text modes (40+480-1)
 
-   -- No vertical margin — 192 visible lines fill the entire frame
-   constant YPRESCAN : integer := 261;    -- = VMAX, trigger prescan on wrap
+   -- No vertical margin — 192 visible lines fill the entire frame.
+   -- YPRESCAN equivalent: line 261 is the non-visible prescan line where
+   -- y_count=0, filling tile/sprite buffers before first visible line (0).
+   constant YPRESCAN : integer := 261;    -- = VMAX, prescan line for row 0
    constant YSTART   : integer := 0;
    constant YEND     : integer := 191;
 
-   constant SL_RESET1: integer := 260;    -- Near VMAX (scanline counter reset)
-   constant SL_RESET2: integer := 261;    -- = VMAX
+   constant SL_RESET1: integer := 260;    -- 1 line before VMAX (prescan line 261)
+   constant SL_RESET2: integer := 260;    -- 1 line before VMAX (prescan line 261)
 
    -- row30 mode uses same values (no vertical margin either way)
    constant YPRESCAN2: integer := 261;
@@ -103,14 +109,14 @@ architecture rtl of f18a_counters is
    signal x480 : unsigned(0 to 9);  -- text modes (8x6 tiles)
    signal x512 : unsigned(0 to 9);  -- graphics modes (8x8 tiles)
 
-   -- X pixels at 1:1 (no 2x doubling)
+   -- X pixels at 2x scale (divide by 2 to get TMS pixel coords)
    signal x240 : unsigned(0 to 7);
    signal x256 : unsigned(0 to 7);
 
    -- Y 1x-pixels
    signal y_count : unsigned(0 to 8);  -- 0 to 191 in this variant
 
-   -- Y at 1:1 (no 2x doubling)
+   -- Y at 1:1 (no vertical doubling)
    signal y_half : unsigned(0 to 7);
 
    -- Scan line counter
@@ -125,13 +131,14 @@ begin
    end if; end process;
 
    -- Indexes for tile and sprite output line buffers.
-   -- At 1:1 scale, no divide-by-2. x512/x480 directly give TMS pixel coords.
+   -- At 2x horizontal scale, divide raster position by 2 to get TMS pixel coords.
    x512 <= raster_x - XSTART;
    x480 <= raster_x - XSTART2;
 
-   -- NO 2x doubling: take low 8 bits directly (was: x512(1 to 8) = divide by 2)
-   x256 <= x512(2 to 9);  -- Low 8 bits of 10-bit subtraction result
-   x240 <= x480(2 to 9);  -- Low 8 bits of 10-bit subtraction result
+   -- 2x horizontal: x512(1 to 8) = bits 1-8 of 10-bit result = divide by 2
+   -- x512 goes 0-511 in active area, x256 = 0-255 TMS pixels
+   x256 <= x512(1 to 8);
+   x240 <= x480(1 to 8);
 
    x_pixel_max <=
       "011101111" when gmode = 1 else  -- 239 for text1 mode
@@ -165,6 +172,13 @@ begin
    prescan_start <= '1' when raster_x = 1 and y_count_en = '1' else '0';
 
    -- Normalized Y counter.
+   -- At 1:1 vertical scale (no 2x doubling), we must NOT increment y_count
+   -- on the scanline_reset tick. In the original 2x design, the division by 2
+   -- absorbed the initial increment (y_count=1 → y_half=0). At 1:1 scale,
+   -- y_count maps directly to y_half, so we only enable y_count_en on the
+   -- scanline_reset tick. This gives us y_count=0 on the prescan line (261),
+   -- filling the first tile line buffer with row 0 before the first visible
+   -- line (0) renders from that buffer.
    process (vga_clk)
    begin
       if rising_edge(vga_clk) then
@@ -172,9 +186,14 @@ begin
             -- Reset the counter to zero outside the active area.
             y_count <= (others => '0');
             y_count_en <= '0';
-         elsif y_tick = '1' and (y_count_en = '1' or scanline_reset = '1') then
-            y_count_en <= '1';
-            y_count <= y_count + 1;
+         elsif y_tick = '1' then
+            if scanline_reset = '1' then
+               -- Enable only — do not increment. First prescan (line 261)
+               -- will use y_count=0 to fill row 0 of tile/sprite buffers.
+               y_count_en <= '1';
+            elsif y_count_en = '1' then
+               y_count <= y_count + 1;
+            end if;
          end if;
       end if;
    end process;

@@ -83,7 +83,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Mon Feb  9 19:31:38 2026
+<td>Tue Feb 10 13:16:32 2026
 </td>
 </tr>
 <tr>
@@ -97,24 +97,24 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <tr>
 <td class="label">Place & Route Process</td>
 <td>Running placement:
-   Placement Phase 0: CPU time = 0h 0m 22s, Elapsed time = 0h 0m 29s
-   Placement Phase 1: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 5s
-   Placement Phase 2: CPU time = 0h 1m 2s, Elapsed time = 0h 1m 24s
-   Placement Phase 3: CPU time = 0h 0m 34s, Elapsed time = 0h 0m 47s
-   Total Placement: CPU time = 0h 2m 2s, Elapsed time = 0h 2m 45s
+   Placement Phase 0: CPU time = 0h 0m 26s, Elapsed time = 0h 0m 35s
+   Placement Phase 1: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 6s
+   Placement Phase 2: CPU time = 0h 1m 24s, Elapsed time = 0h 1m 56s
+   Placement Phase 3: CPU time = 0h 0m 32s, Elapsed time = 0h 0m 44s
+   Total Placement: CPU time = 0h 2m 26s, Elapsed time = 0h 3m 22s
 Running routing:
-   Routing Phase 0: CPU time = 0h 0m 0.036s, Elapsed time = 0h 0m 0.076s
-   Routing Phase 1: CPU time = 0h 2m 6s, Elapsed time = 0h 2m 50s
-   Routing Phase 2: CPU time = 0h 0m 0.547s, Elapsed time = 0h 0m 0.709s
+   Routing Phase 0: CPU time = 0h 0m 0.037s, Elapsed time = 0h 0m 0.05s
+   Routing Phase 1: CPU time = 0h 1m 46s, Elapsed time = 0h 2m 28s
+   Routing Phase 2: CPU time = 0h 0m 0.645s, Elapsed time = 0h 0m 0.858s
    Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-   Total Routing: CPU time = 0h 2m 7s, Elapsed time = 0h 2m 50s
+   Total Routing: CPU time = 0h 1m 47s, Elapsed time = 0h 2m 29s
 Generate output files:
-   CPU time = 0h 0m 13s, Elapsed time = 0h 0m 17s
+   CPU time = 0h 0m 14s, Elapsed time = 0h 0m 20s
 </td>
 </tr>
 <tr>
 <td class="label">Total Time and Memory Usage</td>
-<td>CPU time = 0h 4m 21s, Elapsed time = 0h 5m 52s, Peak memory usage = 2336MB</td>
+<td>CPU time = 0h 4m 27s, Elapsed time = 0h 6m 11s, Peak memory usage = 2415MB</td>
 </tr>
 </table>
 <br/>
@@ -129,12 +129,12 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Logic</td>
-<td>13125/59904</td>
-<td>22%</td>
+<td>13823/59904</td>
+<td>24%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --LUT,ALU,ROM16</td>
-<td>13125(12172 LUT, 953 ALU, 0 ROM16)</td>
+<td>13823(12885 LUT, 938 ALU, 0 ROM16)</td>
 <td>-</td>
 </tr>
 <tr>
@@ -144,8 +144,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Register</td>
-<td>11517/60780</td>
-<td>19%</td>
+<td>12469/60780</td>
+<td>21%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as Latch</td>
@@ -154,8 +154,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as FF</td>
-<td>11476/59904</td>
-<td>20%</td>
+<td>12428/59904</td>
+<td>21%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --I/O Register as Latch</td>
@@ -169,8 +169,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">CLS</td>
-<td>12245/29952</td>
-<td>41%</td>
+<td>13169/29952</td>
+<td>44%</td>
 </tr>
 <tr>
 <td class="label">I/O Port</td>
@@ -204,8 +204,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">BSRAM</td>
-<td>71 SDPB<br/>16 SDPX9B<br/>8 DPB<br/>2 DPX9B<br/>1 pROM<br/></td>
-<td>84%</td>
+<td>2 SP<br/>71 SDPB<br/>16 SDPX9B<br/>8 DPB<br/>2 DPX9B<br/>1 pROM<br/></td>
+<td>85%</td>
 </tr>
 <tr>
 <td class="label">DSP</td>
@@ -322,7 +322,7 @@ Generate output files:
 <tr>
 <td class="label">clk_d</td>
 <td>PRIMARY</td>
-<td> PTR0 PTR1 PTR3 PBR0 PBR1</td>
+<td> PTR0 PTR3 PBR0 PBR1</td>
 </tr>
 <tr>
 <td class="label">clk_pixel_w</td>
@@ -332,12 +332,12 @@ Generate output files:
 <tr>
 <td class="label">a2bus_if.clk_pixel</td>
 <td>PRIMARY</td>
-<td> PTR1 PTR2 PTR3 PBR1 PBR2 PBR3</td>
+<td> PTR0 PTR1 PTR2 PTR3 PBR0 PBR1 PBR2 PBR3</td>
 </tr>
 <tr>
 <td class="label">clk_x1_w</td>
 <td>PRIMARY</td>
-<td> PTR0 PTR1 PTR2 PTR3 PBR0 PBR1 PBR2 PBR3</td>
+<td> PTR0 PTR1 PTR2 PTR3 PBR0 PBR1 PBR3</td>
 </tr>
 <tr>
 <td class="label">superserial/COM2/n67_7</td>
@@ -345,14 +345,14 @@ Generate output files:
 <td> PTR2</td>
 </tr>
 <tr>
-<td class="label">u_ddr3_fb/pixels_3849</td>
+<td class="label">u_ddr3_fb/pixels_3835</td>
 <td>PRIMARY</td>
-<td> PTR0 PTR1</td>
+<td> PTR1 PBR1</td>
 </tr>
 <tr>
 <td class="label">u_ddr3_fb/n920_5</td>
 <td>PRIMARY</td>
-<td> PTR1</td>
+<td> PTR1 PBR1</td>
 </tr>
 <tr>
 <td class="label">u_ddr3_fb/hclk</td>
