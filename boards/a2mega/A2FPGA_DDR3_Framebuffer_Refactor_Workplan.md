@@ -834,25 +834,56 @@ The `apple_video_fb.sv` renderer is fully implemented and tested. All convention
 | 5 | **LORES nibble lag** | First half of each LORES pixel showed wrong color on color transitions | Used registered `pix_nibble_r` (1 cycle behind) instead of combinational nibble like apple_video.sv's `pix_nibble_w` | Compute `current_nibble` inline via blocking assignment before color mux; register result for next cycle's `prev_nibble` | apple_video_fb.sv:757-761,771,791 |
 | 6 | **LORES boundary artifacts** | Thin artifact lines at LORES color bar boundaries | Step counters (`pix_step7_r`, `pix_step4_r`) were gated during warmup, creating phase desync with pixel data in history buffer. Nibble capture at `step7==4` hit wrong position. | Removed warmup gate — step counters now advance every pixel cycle. `pix_step4_r` wraps fully (4 mod 4 = 0); `pix_step7_r` reaches 4 at first output pixel, aligning nibble capture. | apple_video_fb.sv:796-805 |
 | 7 | **DDR3 framebuffer race** | Intermittent pixel corruption | Overlapping `if` blocks for `new_frame`/`fifo_draining`/normal-write in ddr3_framebuffer.v | Changed to `if/else if/else` chain | ddr3_framebuffer.v |
+| 8 | **Border color mismatch** | Side borders didn't match text background color when SSP active | SSP path used `{nibble, nibble}` → 8-bit → `[7:2]` truncation producing `{nibble[3:0], nibble[3:2]}` (6-bit), while direct/border path used `{nibble, 2'b00}`. Different 6-bit values for same 4-bit input. | Changed `apple_r_o` expansion from `{pix_rgb[11:8], pix_rgb[11:8]}` to `{pix_rgb[11:8], 4'b0}` so SSP truncation `[7:2]` produces `{nibble, 2'b00}`, matching borders | apple_video_fb.sv:815-817 |
+| 9 | **1-pixel black notch** | Black pixel at top-left corner and text area transition on each scanline | Non-blocking assignment `apple_r_o <=` in same always block as reading `ssp_r_i` (combinationally depends on `apple_r_o`). First pixel of each scanline reads stale (black) `apple_r_o` because the new value hasn't propagated yet. | Added `ssp_capture_r` flag to defer `fb_data_o`/`fb_we_o` by 1 `clk_logic` cycle. When SSP active, set flag instead of writing immediately; on next cycle, `apple_r_o` has propagated and `ssp_r_i` is valid. | apple_video_fb.sv:385,496-506,814-818 |
+| 10 | **VDP 1 scanline too early** | VDP content appeared 1 scanline above correct position | `SL_RESET1` was 260 (1 line too early for the f18a_counters_fb timing). `y_count_en` was being set and `y_count` incremented before the first visible scanline, offsetting all VDP content by 1 line. | Changed `SL_RESET1` from 260 to 261 (= VMAX) so scanline_reset fires at the correct position relative to first visible line. | f18a_counters_fb.vhd:68 |
+| 11 | **VDP raster counter too fast** | F18A `y_tick` fired multiple times per scanline | `vdp_cx` incremented every `clk_logic` cycle (54 MHz), reaching HMAX=1023 mid-scanline. Since `y_tick` was a level signal (`hcounter = HMAX`), it stayed high for many cycles, incrementing `y_count` repeatedly. | (a) Added 4× clock divider so `vdp_cx` advances once per 4 `clk_logic` cycles (~857 ticks/line matching `gap_cnt_r`). (b) Reduced HMAX from 1023 to 856. (c) Added edge detectors (`hmax_prev`, `vsize_prev`) for single-cycle `y_tick` and `y_max` pulses. | top.sv:515-536, f18a_vga_cont_fb.vhd:61,94-115 |
+| 12 | **VDP screen_y misalignment** | `vdp_cy` drifted from `scanline_w` over time due to independent counter | VDP used its own `vdp_cy` counter that incremented on `hsync_edge_w`. Slight timing differences from `scan_timer`'s `scanline_counter_r` caused accumulated drift. | Fed `scanline_w` directly to `screen_y_i` via `{1'b0, scanline_w}`, eliminating `vdp_cy` entirely. Single source of truth for vertical position. | top.sv:586 |
+| 13 | **Sprites/tiles 1 scanline too far down** | VDP sprites appeared 1 line below correct position; some tile backgrounds also offset by 1 line | Missing YPRESCAN equivalent. F18A tile engine uses double-buffered line buffers (even y_next → linebuf1, odd → linebuf2). Original design had non-visible YPRESCAN line with y_next=0 filling first buffer. FB variant went directly to visible line 0 with y_next=1, so row 0 was never prescanned. At 1:1 vertical scale, `y_count` maps directly to `y_half` (no division by 2 to absorb the scanline_reset increment). | (a) Changed `SL_RESET1`/`SL_RESET2` from 261 to 260, giving non-visible prescan on line 261. (b) Modified y_count process: `scanline_reset` only enables `y_count_en` WITHOUT incrementing `y_count`. First prescan at line 261 sees y_count=0/y_next=0, filling linebuf1 with row 0. Line 0 (first visible) reads row 0 from linebuf1 while prescanning row 1 into linebuf2. | f18a_counters_fb.vhd:70-71,188-194 |
 
 ### Phase 3 Status: `vgc_fb.sv` — NOT STARTED
 
 IIgs Super Hi-Res rendering (320×200 and 640×200 modes) has not yet been implemented. The existing `vgc.sv` is still used via the project file.
 
-### Phase 4 Status: `top.sv` Integration — PARTIAL
+### Phase 4 Status: `top.sv` Integration — COMPLETE (SuperSprite/F18A VDP)
 
-`top.sv` has been modified to instantiate `ddr3_framebuffer` and route the `fb_*` signals from `apple_video_fb`. The HDMI encoder has been replaced. Audio passthrough is connected. The compositing chain (SuperSprite, DebugOverlay) has not yet been adapted to the burst pipeline — they are currently bypassed.
+Phase 4 SuperSprite/F18A VDP integration is fully implemented and verified on hardware. The VDP renders correctly in all tested tile and sprite modes with proper vertical and horizontal alignment.
+
+**Architecture implemented:**
+
+The SuperSprite/F18A VDP is integrated into the `apple_video_fb` framebuffer pipeline via a per-pixel compositing loop. Rather than a separate burst-based VDP renderer, the F18A core runs with its own internal timing (driven by an external raster counter synced to `scan_timer`) and its pixel output is composited with the Apple II video in real-time:
+
+1. **`apple_video_fb`** renders an Apple II pixel and exposes it as `apple_r_o`/`apple_g_o`/`apple_b_o`
+2. **`SuperSprite`** (containing F18A core) reads the Apple II RGB as its "external video" input and composites the VDP overlay: `ssp_r_o = vdp_pixel_en ? {vdp_r, 4'b0} : video_in_r`
+3. **`apple_video_fb`** captures the composited SSP output and writes it to the framebuffer (deferred by 1 cycle via `ssp_capture_r` to handle pipeline latency)
+
+When `ssp_active_i = 1'b1`, every pixel goes through this Apple→SSP→FB loop. When the VDP has a non-transparent pixel, it replaces the Apple II content.
+
+**Board-specific F18A variants created:**
+
+Two new VHDL files provide F18A counter/VGA controller variants adapted for the framebuffer's 560×192 visible area at 1:1 vertical scale:
+
+- **`boards/a2mega/hdl/f18a/f18a_counters_fb.vhd`** — Adapted margins (2× horizontal: XSTART=24, 512 raster pixels for 256 TMS), 1:1 vertical (y_half = y_count directly, no division by 2), prescan timing with YPRESCAN=261 and SL_RESET=260
+- **`boards/a2mega/hdl/f18a/f18a_vga_cont_fb.vhd`** — HMAX=856, VMAX=261, VSIZE=192. Single-cycle edge-detected y_tick and y_max pulses. External raster counter input (hcounter/vcounter from top.sv).
+
+**VDP raster counter (top.sv):**
+
+A dedicated counter generates the F18A's `screen_x_i`/`screen_y_i`:
+- `vdp_cx`: 10-bit horizontal counter with 4× clock divider (`vdp_div`), advancing once per 4 `clk_logic` cycles to match `apple_video_fb`'s pixel rate. Clamped at VDP_HMAX=856. Reset on `hsync_w`.
+- `screen_y_i`: Fed directly from `scan_timer`'s `scanline_w` (0-261) — single source of truth for vertical position.
+
+**Key technical insights documented below in "F18A Integration Technical Notes" section.**
 
 ---
 
 ## Phase 5: Testing & Validation
 
 ### Task 5.1 — Basic video modes
-- [ ] 40-column text, cursor flash
-- [ ] Lores graphics (`GR: FOR I=0 TO 39: COLOR=I: VLIN 0,39 AT I: NEXT`)
-- [ ] HGR — artifact colors correct
-- [ ] Mixed mode
-- [ ] 80-column text (PR#3)
+- [x] 40-column text, cursor flash
+- [x] Lores graphics (`GR: FOR I=0 TO 39: COLOR=I: VLIN 0,39 AT I: NEXT`)
+- [x] HGR — artifact colors correct
+- [x] Mixed mode
+- [x] 80-column text (PR#3)
 - [ ] DHGR, Double Lores
 - [ ] IIgs SHR 320-mode — per-scanline palette, color fill
 - [ ] IIgs SHR 640-mode — dithered colors
@@ -868,18 +899,23 @@ IIgs Super Hi-Res rendering (320×200 and 640×200 modes) has not yet been imple
 - [ ] Verify ddr3_framebuffer handles dynamic width/height changes cleanly
 
 ### Task 5.4 — Compositing chain
-- [ ] SuperSprite VDP overlay on Apple II modes (transparency keying)
+- [x] SuperSprite VDP overlay on Apple II modes (transparency keying)
 - [ ] SuperSprite correctly disabled during SHR mode
-- [ ] DebugOverlay visible on Apple II modes (560-wide)
+- [x] DebugOverlay visible on Apple II modes (560-wide)
 - [ ] DebugOverlay visible on SHR modes (640-wide)
-- [ ] Full chain: apple_video → vgc passthrough → SuperSprite overlay → DebugOverlay
+- [x] Full chain: apple_video → SuperSprite overlay → DebugOverlay → framebuffer
+- [x] VDP tile modes — correct vertical alignment (row 0 renders on line 0)
+- [x] VDP sprite positioning — correct Y position (sprites at expected scanlines)
+- [x] VDP border colors match Apple II background color through SSP compositing
+- [x] No pixel artifacts at scanline boundaries (notch fix verified)
 
 ### Task 5.5 — Stability
-- [ ] Extended operation (hours)
-- [ ] DDR3 calibration stable
-- [ ] 4:3 aspect ratio, border colors, upscaling quality
-- [ ] Audio (speaker, Mockingboard, SuperSprite, Ensoniq)
-- [ ] Burst timing: verify all pixels emitted within HBlank window
+- [x] Extended operation (hours)
+- [x] DDR3 calibration stable
+- [x] 4:3 aspect ratio, border colors, upscaling quality
+- [x] Audio (speaker, Mockingboard, SuperSprite, Ensoniq)
+- [x] Burst timing: verify all pixels emitted within HBlank window
+- [x] Timing closure: clk_logic 55.018 MHz actual vs 54.000 MHz constraint (0 violations)
 
 ---
 
@@ -901,19 +937,115 @@ Investigate modifying ddr3_framebuffer's `AUDIO_OUT_RATE` from 32 kHz to 48 kHz 
 
 ## Key Risks & Mitigations
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| ddr3_framebuffer incompatible with GW5AT-LV60P484A | **Low** | High | nand2mario designed it for Tang Mega 60K; PLLs in `src/console60k/` may need regeneration for the exact device variant |
-| PLL count exceeded (3 total needed) | Low | High | ddr3_framebuffer's 2 PLLs replace the existing HDMI PLL output; net +1 PLL. Verify GW5AT PLL count. |
-| ddr3_framebuffer DDR3 IP conflicts with existing `DDR3.v` | **Confirmed risk** | Medium | ddr3_framebuffer instantiates its own `DDR3_Memory_Interface_Top`. Must use ddr3_framebuffer's version or verify they're identical. Remove or disable existing `DDR3.v` from project. |
-| Async FIFO overflow (fb_we too fast) | Low | Medium | FIFO is 8-deep; burst writes at 54 MHz during HBlank (~640 pixels in 11.9 µs) are well within the 74.25 MHz read-side capacity. |
-| `clk_g` 50 MHz routing | Low | Low | Same crystal pin as existing PLL `clkin`; verify it can drive both the existing PLL and ddr3_framebuffer's `clk_g` (may need BUFG fanout). |
-| VGC per-scanline palette timing broken | Medium | Medium | Pre-burst fetch sequence must complete before long PHI0 triggers burst |
-| Burst pipeline latency exceeds HBlank | Low | Medium | 640 pixels at 54 MHz = 11.9 µs; HBlank ≈ 25 µs. Even with 4-stage compositing chain, single-cycle-per-pixel is achievable. |
-| SuperSprite VDP burst rendering | Medium | Medium | VDP renderer must produce one pixel per `clk_logic` cycle from `burst_x`; current implementation may need pipelining |
-| DebugOverlay dual-width handling | Low | Low | Must handle both 560-wide and 640-wide bursts; character positioning needs to account for variable width |
-| Artifact color context broken | Medium | Medium | Preserve pix_history shift register exactly |
-| Audio quality (32 kHz output) | Low | Low | ddr3_framebuffer outputs at 32 kHz; may want to modify to 48 kHz for better quality |
+| Risk | Likelihood | Impact | Mitigation | Status |
+|------|-----------|--------|------------|--------|
+| ddr3_framebuffer incompatible with GW5AT-LV60P484A | **Low** | High | nand2mario designed it for Tang Mega 60K; PLLs in `src/console60k/` may need regeneration for the exact device variant | ✅ Resolved — working on hardware |
+| PLL count exceeded (3 total needed) | Low | High | ddr3_framebuffer's 2 PLLs replace the existing HDMI PLL output; net +1 PLL. Verify GW5AT PLL count. | ✅ Resolved — 3 PLLs fit |
+| ddr3_framebuffer DDR3 IP conflicts with existing `DDR3.v` | **Confirmed risk** | Medium | ddr3_framebuffer instantiates its own `DDR3_Memory_Interface_Top`. Must use ddr3_framebuffer's version or verify they're identical. Remove or disable existing `DDR3.v` from project. | ✅ Resolved — using ddr3_framebuffer's IP |
+| Async FIFO overflow (fb_we too fast) | Low | Medium | FIFO is 8-deep; burst writes at 54 MHz during HBlank (~640 pixels in 11.9 µs) are well within the 74.25 MHz read-side capacity. | ✅ No issues observed |
+| `clk_g` 50 MHz routing | Low | Low | Same crystal pin as existing PLL `clkin`; verify it can drive both the existing PLL and ddr3_framebuffer's `clk_g` (may need BUFG fanout). | ✅ Resolved — works with direct routing |
+| VGC per-scanline palette timing broken | Medium | Medium | Pre-burst fetch sequence must complete before long PHI0 triggers burst | Open — VGC not started |
+| Burst pipeline latency exceeds HBlank | Low | Medium | 640 pixels at 54 MHz = 11.9 µs; HBlank ≈ 25 µs. Even with 4-stage compositing chain, single-cycle-per-pixel is achievable. | ✅ Verified — 560 pixels renders cleanly within window |
+| SuperSprite VDP burst rendering | Medium | Medium | VDP renderer must produce one pixel per `clk_logic` cycle from `burst_x`; current implementation may need pipelining | ✅ Resolved — F18A runs with its own internal timing, composited per-pixel via SSP loop rather than burst-based rendering |
+| DebugOverlay dual-width handling | Low | Low | Must handle both 560-wide and 640-wide bursts; character positioning needs to account for variable width | ✅ Resolved — DebugOverlay adapted for 720p with 560-wide content |
+| Artifact color context broken | Medium | Medium | Preserve pix_history shift register exactly | ✅ Resolved — artifact colors correct after warmup pipeline fix |
+| Audio quality (32 kHz output) | Low | Low | ddr3_framebuffer outputs at 32 kHz; may want to modify to 48 kHz for better quality | ✅ Resolved — audio_rate parameter matched, working |
+| F18A prescan/double-buffer alignment | **Discovered** | High | F18A tile engine uses double-buffered line buffers. At 1:1 vertical scale, the original 2× division-by-2 no longer absorbs the initial y_count increment. Must provide a non-visible prescan line and separate enable from increment on scanline_reset. | ✅ Resolved — SL_RESET=260, enable-only on scanline_reset |
+| SSP combinational pipeline delay | **Discovered** | Medium | Non-blocking assignment of `apple_r_o` means `ssp_r_i` (which depends combinationally on `apple_r_o`) reads stale value on first pixel of each scanline. | ✅ Resolved — ssp_capture_r defers write by 1 clk cycle |
+
+---
+
+## F18A Integration Technical Notes
+
+### VHDL Bit Indexing Convention
+
+The F18A VHDL code uses descending-to-ascending bit ordering (`unsigned(0 to N)`) where **bit 0 is the MSB**. This is the opposite of Verilog convention:
+
+| VHDL Declaration | Bit 0 | Bit N | Equivalent Verilog |
+|---|---|---|---|
+| `unsigned(0 to 8)` | MSB (value 256) | LSB (value 1) | `[8:0]` with bit 8 = MSB |
+| `y_count(0 to 7)` | Bits 0-7 = upper 8 bits | — | Divide by 2 (right-shift) |
+| `y_count(1 to 8)` | Bits 1-8 = lower 8 bits | — | Direct value (no division) |
+
+**Critical for fb variant:** The original `y_half <= y_count(0 to 7)` divides by 2 for 2× VGA vertical scaling. The fb variant uses `y_half <= y_count(1 to 8)` for 1:1 scale (no division). Getting this wrong causes either half the expected lines or doubled/skipped lines.
+
+### F18A Double-Buffered Tile Line Buffers
+
+`f18a_tile_linebuf.vhd` contains **two independent 512×8 line buffers** (linebuf1, linebuf2) that alternate based on the LSB of `y_next_r`:
+
+```vhdl
+-- Write to one buffer based on y_next parity
+we1 <= (not y_next_r(8)) and we_sel;   -- even y_next → write linebuf1
+we2 <= y_next_r(8) and we_sel;          -- odd y_next  → write linebuf2
+
+-- Read from the OTHER buffer (double-buffering)
+tile_color <= dout1 when y_next_r(8) = '1' else dout2;
+```
+
+Note: `y_next_r(8)` is the **LSB** (bit 8 in VHDL `0 to 8` ordering = value 1).
+
+**Double-buffer flow:**
+- When y_next is even (e.g., 0): prescan writes to linebuf1, pixel engine reads from linebuf2
+- When y_next is odd (e.g., 1): prescan writes to linebuf2, pixel engine reads from linebuf1
+
+**Consequence:** You need TWO prescan cycles before the first visible line reads correctly:
+1. Non-visible prescan line: fills buffer A with row 0
+2. First visible line: prescan fills buffer B with row 1, pixel engine reads buffer A (row 0) ✓
+
+### F18A Prescan Timing — Original vs FB Variant
+
+**Original (2× VGA vertical scale):**
+```
+SL_RESET1=46 → scanline_reset at raster_y=46
+YPRESCAN=47  → first prescan line (non-visible), y_count=1, y_half=0 (÷2), y_next=0
+YSTART=48    → first visible line, y_count=2, y_half=1, y_next=1
+               reads linebuf1 (filled with row 0 at YPRESCAN) ✓
+```
+
+The 2× division absorbs the increment: `y_count=1 → y_half = y_count(0 to 7) = 0`.
+
+**FB variant (1:1 vertical scale) — FIXED:**
+```
+SL_RESET1=260 → scanline_reset at raster_y=260, enables y_count_en (NO increment)
+Line 261       → prescan (non-visible), y_count=0, y_half=0, y_next=0
+                 fills linebuf1 with row 0
+Line 261 end   → y_tick increments y_count to 1
+Line 0         → first visible, y_count=1, y_half=1, y_next=1
+                 prescan fills linebuf2 with row 1
+                 pixel engine reads linebuf1 (row 0) ✓
+```
+
+At 1:1 scale, `y_half = y_count(1 to 8) = y_count` directly. The scanline_reset must NOT increment y_count — only enable y_count_en. Otherwise y_count starts at 1 and row 0 is never prescanned.
+
+### F18A Sprite Y Position
+
+```vhdl
+y_sprt_pos <= y_half - 1 when sprt_yreal = '0' else y_half;
+```
+
+This means sprites are "1 line behind the raster" by default (TI 9918A compatibility). With the prescan fix:
+- Line 0 (first visible): y_half=1, y_sprt_pos = 1-1 = 0 ✓
+- Line 1: y_half=2, y_sprt_pos = 2-1 = 1 ✓
+
+On the non-visible prescan line (261): y_half=0, y_sprt_pos = 0-1 = 255 (unsigned wrap). This is fine — line 261 is non-visible, so the wrapped sprite position has no visible effect.
+
+### SuperSprite Compositing Pipeline
+
+The SuperSprite output is purely combinational — no internal registers between input and output:
+
+```verilog
+assign ssp_r_o = vdp_pixel_en ? {vdp_r, 4'b0} : video_in_r;
+```
+
+Where `video_in_r` is the Apple II RGB from `apple_video_fb`'s `apple_r_o`. Since `apple_r_o` is assigned via non-blocking `<=`, on the same clock edge that sets `apple_r_o`, `ssp_r_o` still reflects the OLD value. This is why `ssp_capture_r` defers the framebuffer write by 1 cycle — by the next cycle, `apple_r_o` has updated and the combinational SSP path outputs the correct value.
+
+### VDP Raster Counter Design
+
+The F18A's `screen_x_i`/`screen_y_i` must match the framebuffer's scanline timing exactly:
+
+- **Horizontal:** `vdp_cx` uses a 4× clock divider (`vdp_div`) to advance once per 4 `clk_logic` cycles, matching `apple_video_fb`'s `gap_cnt_r` pixel rate. This gives ~857 ticks per scanline (54 MHz / 4 × ~63.5 µs). Clamped at VDP_HMAX=856.
+- **Vertical:** Uses `scanline_w` directly from `scan_timer` — single source of truth. No separate VDP vertical counter.
+- **Edge detection:** `f18a_vga_cont_fb.vhd` uses `hmax_prev`/`vsize_prev` registers to produce single-cycle pulses for `y_tick` and `y_max`. Without edge detection, the level signals would fire for many cycles while `hcounter = HMAX` (since the counter clamps), causing `y_count` to increment many times per scanline.
 
 ---
 
@@ -941,3 +1073,10 @@ Investigate modifying ddr3_framebuffer's `AUDIO_OUT_RATE` from 32 kHz to 48 kHz 
 - **SHR dot clock is 16.36 MHz (8/7 × 14M)**, but the burst renderer doesn't need to match this — it reads pre-fetched scanline data and produces 640 pixels at `clk_logic` rate during HBlank.
 - **`scan_timer` is the single source of truth** for scanline position and burst timing. Uses `a2bus_if.extended_cycle` (fork-specific signal for long PHI0 / HBlank). Instantiated once in `top.sv`, outputs shared by burst controller and all renderers.
 - **`a2bus_if.extended_cycle`** is the fork's signal for detecting the long PHI0 cycle at the scanline boundary. This is the burst trigger — replaces manual cycle counting.
+- **F18A board variants** go in `boards/a2mega/hdl/f18a/`. `f18a_counters_fb.vhd` and `f18a_vga_cont_fb.vhd` replace the shared `hdl/f18a/` versions via the `.gprj` file. Do not modify `hdl/f18a/f18a_counters.vhd` or `hdl/f18a/f18a_vga_cont_640_60.vhd`.
+- **F18A VHDL uses `unsigned(0 to N)` where bit 0 is MSB.** `y_count(0 to 7)` = divide by 2 (upper 8 bits). `y_count(1 to 8)` = direct value (lower 8 bits). The fb variant uses `(1 to 8)` for 1:1 vertical scale.
+- **F18A tile engine has double-buffered line buffers.** Even/odd y_next selects which buffer to write/read. A non-visible prescan line is required before the first visible line. The fb variant achieves this with SL_RESET=260 (enabling y_count_en at end of line 260) and prescan on line 261 (y_count=0).
+- **SuperSprite compositing is per-pixel via `apple_video_fb`**, not burst-based. `apple_r_o`/`apple_g_o`/`apple_b_o` feed the SSP combinational path, which feeds back `ssp_r_i`/`ssp_g_i`/`ssp_b_i`. The fb_data_o write is deferred 1 cycle when SSP is active (via `ssp_capture_r`) to let `apple_r_o` propagate.
+- **VDP raster counter** in `top.sv` uses a 4× clock divider (VDP_HMAX=856, ~857 ticks/line). `screen_y_i` comes directly from `scanline_w`. Edge-detected `y_tick`/`y_max` pulses prevent multi-increment bugs.
+- **RGB bit expansion for SSP path** must use `{nibble, 4'b0}` (not `{nibble, nibble}`) so that truncation to `[7:2]` produces `{nibble, 2'b00}`, matching the direct border/Apple II RGB expansion path.
+- **When modifying F18A prescan timing**, remember that `scanline_reset` enable-only (no increment) is critical at 1:1 vertical scale. The original 2× design absorbs the first increment via division by 2.
