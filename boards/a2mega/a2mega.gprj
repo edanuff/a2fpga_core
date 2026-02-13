@@ -77,7 +77,8 @@
         <File path="hdl/sound/iir_filter.v" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
         <File path="hdl/video/apple_video_fb.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/video/ddr3_framebuffer.v" type="file.verilog" enable="1"/>
+        <File path="hdl/video/ddr3_framebuffer.v" type="file.verilog" enable="0"/>
+        <File path="hdl/video/ddr3_framebuffer_480p.v" type="file.verilog" enable="1"/>
         <File path="hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>
     </FileList>
 </Project>

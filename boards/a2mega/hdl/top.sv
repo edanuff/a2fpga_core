@@ -697,18 +697,18 @@ module top #(
     assign core_audio_r_w = sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
 
     // =========================================================================
-    // DDR3 Framebuffer + HDMI Output
+    // DDR3 Framebuffer + HDMI Output (480p)
     // =========================================================================
     //
-    // The ddr3_framebuffer module handles:
+    // The ddr3_framebuffer_480p module handles:
     //   - DDR3 controller + memory interface
-    //   - HDMI encoder + TMDS output (720p60)
-    //   - Audio CDC (2-stage sync from clk_logic to internal 74.25 MHz)
-    //   - Upscaling from framebuffer resolution to 720p
+    //   - HDMI encoder + TMDS output (480p 59.94Hz)
+    //   - Audio CDC (2-stage sync from clk_logic to 27 MHz pixel clock)
+    //   - 2× vertical integer scaling with scanline dimming
+    //   - Centered display with border color fill
     //
-    // Audio is fed directly from the clk_logic domain — no external CDC needed.
-    // The old hdmi encoder, ELVDS_OBUF, audio_timing, audio_out, and cdc_sampling
-    // modules are replaced by ddr3_framebuffer's internal equivalents.
+    // Board PLL provides clk_pixel (27 MHz) and clk_pixel_x5 (135 MHz) directly.
+    // No internal HDMI PLL needed — simpler than the 720p version.
 
     // Scan timer — authoritative Apple II scanline timing (kept for future use)
     // Wire declarations are forward-declared near apple_video_fb instantiation
@@ -726,8 +726,6 @@ module top #(
     localparam [9:0]  APPLE_FB_HEIGHT = 10'd192;
     localparam [10:0] VGC_FB_WIDTH    = 11'd640;
     localparam [9:0]  VGC_FB_HEIGHT   = 10'd200;
-    localparam [10:0] FB_DISP_WIDTH   = 11'd960;  // 4:3 in 1280-wide 720p frame
-
     wire [10:0] fb_width_w  = use_vgc_r ? VGC_FB_WIDTH  : APPLE_FB_WIDTH;
     wire [9:0]  fb_height_w = use_vgc_r ? VGC_FB_HEIGHT : APPLE_FB_HEIGHT;
 
@@ -757,23 +755,23 @@ module top #(
 
     wire init_calib_complete_w;
     wire ddr_rst_w;
-    wire clk_x1_w;              // 74.25 MHz from ddr3_framebuffer (HDMI pixel clock)
-    wire [10:0] hdmi_cx_w;      // HDMI raster X (0–1649)
-    wire [9:0]  hdmi_cy_w;      // HDMI raster Y (0–749)
+    wire clk_x1_w;              // 74.25 MHz from DDR3 controller (for DebugOverlay)
+    wire [10:0] hdmi_cx_w;      // HDMI raster X (0–857)
+    wire [9:0]  hdmi_cy_w;      // HDMI raster Y (0–524)
     wire [23:0] fb_rgb_w;       // Current framebuffer RGB output
     wire [23:0] overlay_rgb_w;  // DebugOverlay RGB output
     wire        overlay_en_w;   // DebugOverlay enable
 
-    // DDR3 framebuffer — drives DDR3 and HDMI output
-    wire [13:0] ddr_addr_fb;
+    // DDR3 framebuffer — drives DDR3 and HDMI output (480p)
+    wire [14:0] ddr_addr_fb;
 
-    ddr3_framebuffer #(
+    ddr3_framebuffer_480p #(
         .WIDTH(640),                   // max of 560 (Apple II) and 640 (SHR)
-        .HEIGHT(200),                  // max of 192 (Apple II) and 200 (SHR)
+        .HEIGHT(480),                  // 480p output height
         .COLOR_BITS(18)
     ) u_ddr3_fb (
         // Clock inputs
-        .clk_27(clk_pixel_w),          // 27 MHz from existing PLL
+        .clk_27(clk_pixel_w),          // 27 MHz from board PLL
         .clk_g(clk),                   // 50 MHz board crystal (same pin as PLL clkin)
         .pll_lock_27(clk_lock_w),
         .rst_n(1'b1),
@@ -781,11 +779,14 @@ module top #(
         .ddr_rst(ddr_rst_w),
         .init_calib_complete(init_calib_complete_w),
 
+        // HDMI pixel clocks (from board PLL — no internal HDMI PLL needed)
+        .clk_pixel(clk_pixel_w),       // 27 MHz pixel clock
+        .clk_pixel_x5(clk_hdmi_w),     // 135 MHz TMDS 5x clock
+
         // Framebuffer write interface — on clk_logic (54 MHz), muxed between apple_video_fb and vgc_fb
         .clk(clk_logic_w),
         .fb_width(fb_width_w),
         .fb_height(fb_height_w),
-        .disp_width(FB_DISP_WIDTH),
         .fb_vsync(fb_vsync_mux_w),
         .fb_we(fb_we_mux_w),
         .fb_data(fb_data_mux_w),
@@ -796,7 +797,7 @@ module top #(
         .sound_left(core_audio_l_w),
         .sound_right(core_audio_r_w),
 
-        // HDMI overlay interface (clk_x1 domain)
+        // HDMI overlay interface (clk_pixel / 27 MHz domain)
         .hdmi_cx(hdmi_cx_w),
         .hdmi_cy(hdmi_cy_w),
         .fb_rgb_o(fb_rgb_w),
@@ -827,23 +828,26 @@ module top #(
         .tmds_d_n(tmds_d_n)
     );
 
-    // DDR3 address: framebuffer uses 14 bits, top port has 16 bits
-    assign ddr_addr[13:0] = ddr_addr_fb;
-    assign ddr_addr[15:14] = 2'b0;
+    // DDR3 address: framebuffer uses 15 bits, top port has 16 bits
+    assign ddr_addr[14:0] = ddr_addr_fb;
+    assign ddr_addr[15] = 1'b0;
 
     // DDR3 calibration status on LED[1]
     assign led[1] = !init_calib_complete_w;
 
     // =========================================================================
-    // Debug Overlay — runs in clk_x1 (74.25 MHz) domain
+    // Debug Overlay — runs in clk_pixel (27 MHz) domain
     // =========================================================================
+    // The 480p framebuffer's overlay interface (hdmi_cx, hdmi_cy, fb_rgb_o,
+    // overlay_rgb_i, overlay_en_i) is in the clk_pixel domain, so DebugOverlay
+    // must also run in clk_pixel.
 
-    // CDC for debug hex values: double-flop from clk_logic to clk_x1
+    // CDC for debug hex values: double-flop from clk_logic to clk_pixel
     // These are quasi-static values, so double-flop is sufficient
     reg [7:0] dbg_hex_sync0 [8], dbg_hex_sync1 [8];
     reg [7:0] dbg_bits0_sync0, dbg_bits0_sync1;
     reg [7:0] dbg_bits1_sync0, dbg_bits1_sync1;
-    always @(posedge clk_x1_w) begin
+    always @(posedge clk_pixel_w) begin
         dbg_hex_sync0[0] <= scanline_w[8:1];   dbg_hex_sync1[0] <= dbg_hex_sync0[0];
         dbg_hex_sync0[1] <= {7'b0, scanline_w[0]}; dbg_hex_sync1[1] <= dbg_hex_sync0[1];
         dbg_hex_sync0[2] <= 8'h00;              dbg_hex_sync1[2] <= dbg_hex_sync0[2];
@@ -867,7 +871,7 @@ module top #(
         .X_OFFSET(16),
         .Y_OFFSET(24)
     ) debug_overlay (
-        .clk_i          (clk_x1_w),
+        .clk_i          (clk_pixel_w),
         .reset_n        (device_reset_n_w),
         .enable_i       (1'b1),
 
