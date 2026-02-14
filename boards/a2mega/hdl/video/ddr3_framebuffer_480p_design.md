@@ -556,64 +556,48 @@ exactly one always block). Communication is via:
 
 ---
 
-## Known Issues and Future Work
+## Current Status and Future Work
 
-### Current Status: Jitter Under Investigation
+### Current Status: Stable With BRAM Contention Fix
 
-The display currently shows some form of jitter or visual artifact related to
-the timing of line buffer fills relative to display reads. The single-buffer
-approach eliminates the ping-pong CDC races but introduces a write/read overlap
-window during the first scanline of each 2-line pair.
+The remaining "moving distortion" issue (especially visible during VGC
+animation or other active video-memory writes) was traced to contention in
+`apple_memory.sv`, not the DDR3 line-buffer path itself.
 
-### Potential Improvements
+`sdpram32` instances in `apple_memory.sv` infer Gowin SDPB block RAM. With
+continuous read-enable and simultaneous writes, read/write overlap can produce
+undefined/unstable pixels. The fix was:
 
-1. **Pipelined DDR3 reads:** Issue the next read command while the previous
-   response is being written to the line buffer. This would roughly halve the
-   fetch time from ~37.7 us to ~20 us, providing more margin. Requires
-   tracking one in-flight read or a small response FIFO.
+1. Drive BRAM read-enable from real scan fetch strobes:
+   - `video_read_active = video_rd_i && !vgc_active_i`
+   - `vgc_read_active = vgc_rd_i && vgc_active_i`
+2. Route each VRAM bank's `read_enable` from those strobes instead of `1'b1`.
+3. Add deferred VRAM write strobe logic (`write_strobe_vram`) so shadow-memory
+   writes are delayed while either active video read strobe is asserted.
 
-2. **Prefetch timing:** Trigger the fetch of line N+1 during the second HDMI
-   scanline of line N's display pair. This ensures the buffer is completely
-   filled before the first scanline of line N+1's pair begins reading.
-   Requires careful tracking to avoid overwriting data that the second
-   scanline of the current pair still needs. (This is the core ping-pong
-   problem that was eliminated — revisiting it would require a 2-bank approach
-   with correct CDC.)
+This removes deterministic read/write overlap windows that previously caused
+visible corruption.
 
-3. **Triple buffering:** Use 3 line buffer banks to completely decouple fill
-   and read timing. One bank is being filled, one is being displayed, and one
-   is idle (ready for the next fill). This eliminates all timing races at the
-   cost of 3x BRAM usage (3 × 18 Kbits = 54 Kbits, still feasible).
+### Remaining Improvement Opportunities
 
-4. **cx CDC to clk_x1:** Instead of (or in addition to) cy CDC, bring cx to
-   `clk_x1` to know exactly where the display raster is. This would allow
-   the fetch logic to start during HBlank with guaranteed safety.
+1. **Pipelined DDR3 reads:** Issue the next read while the prior response is
+   being unpacked into the line buffer. This would increase timing margin for
+   wide active regions.
+2. **Fetch lead optimization:** Start line fetch slightly earlier in HBlank to
+   maximize fill completion margin before active pixels.
+3. **Timing margin cleanup:** Current `clk_logic` timing passes but with modest
+   headroom in this configuration; further path cleanup is advisable.
 
 ### Lessons Learned
 
-1. **Ping-pong CDC is hard with 2x vertical scaling.** The fundamental
-   conflict: 2x scaling means 2 scanlines read the same bank, but each fill
-   toggles the bank. Any approach that toggles a bank-select signal across an
-   async clock boundary risks mid-scanline or inter-scanline misalignment.
-
-2. **True dual-port BRAM is the simplest CDC mechanism for bulk data.** The
-   FPGA's BRAM primitive handles cross-clock access at the hardware level,
-   eliminating the need for explicit CDC on the data path.
-
-3. **One-at-a-time DDR3 reads prevent response overlap.** The DDR3 controller
-   returns responses in order, but if multiple reads are in flight, the
-   responses arrive in rapid succession and can overwhelm the 4-cycle
-   writeback pipeline. The `rd_pending` flag serializes access.
-
-4. **Gray-code CDC is essential for multi-bit counters.** The `cy` counter has
-   transitions where 5+ bits change simultaneously (e.g., 47→48). Standard
-   double-flop CDC would produce glitched intermediate values. Gray code
-   ensures only 1 bit changes per increment.
-
-5. **Diagnostic tests are invaluable.** The systematic approach of bypassing
-   components (test #1: bypass line buffer; test #2: bypass DDR3) definitively
-   identified the ping-pong CDC as the root cause, after multiple speculative
-   fixes had failed.
+1. **True dual-port BRAM is still the right CDC primitive for line-buffer
+   crossing** (`clk_x1` write, `clk_pixel` read).
+2. **Inferred SDPB read-enable must be explicit.** Leaving read-enable tied on
+   can expose read/write collision behavior when upstream writers are active.
+3. **Sparse writes are not a guarantee.** Even low-rate Apple bus writes can
+   coincide with scan reads unless arbitration/strobing is explicit.
+4. **Gray-code CDC for raster counters remains essential** for clean
+   cross-domain line tracking.
 
 ---
 
