@@ -404,6 +404,15 @@ reg [3:0] batch_groups_left;
 wire write_inflight = write_pixels_req ^ write_pixels_ack;
 wire new_frame = b_vsync_toggle_rr != b_vsync_toggle_r;
 reg fifo_draining;
+// Forward declarations for read/write arbitration coupling.
+reg line_fetch_needed;
+reg line_fetch_active;
+localparam [6:0] WRITE_BATCH_MIN_LEVEL = 7'd8;
+localparam [6:0] WRITE_URGENT_LEVEL = 7'd48;
+localparam [3:0] WRITE_BATCH_NORMAL = 4'd8;
+localparam [3:0] WRITE_BATCH_URGENT = 4'd4;
+wire read_critical = line_fetch_needed || line_fetch_active;
+wire write_urgent = fifo_level >= WRITE_URGENT_LEVEL;
 
 always @(posedge clk_x1) begin : write_batch_control
     fifo_read <= 1'b0;
@@ -428,10 +437,12 @@ always @(posedge clk_x1) begin : write_batch_control
                 fifo_draining <= 0;
             end
         end else begin
-            if (!write_batch_active && !mem_dir_write && fifo_level >= 7'd8) begin
+            if (!write_batch_active && !mem_dir_write &&
+                fifo_level >= WRITE_BATCH_MIN_LEVEL &&
+                (!read_critical || write_urgent)) begin
                 write_batch_active <= 1'b1;
                 mem_dir_write <= 1'b1;
-                batch_groups_left <= 4'd8;
+                batch_groups_left <= read_critical ? WRITE_BATCH_URGENT : WRITE_BATCH_NORMAL;
             end
 
             if (write_batch_active) begin
@@ -461,39 +472,34 @@ always @(posedge clk_x1) begin : write_batch_control
 end
 
 /////////////////////////////////////////////////////////////////////
-// Line Buffer — single BRAM, true dual-port (write: clk_x1, read: clk_pixel)
+// Line Buffer — dual-bank BRAM, true dual-port (write: clk_x1, read: clk_pixel)
 //
-// No ping-pong needed. With 2x vertical scaling, each FB line is displayed
-// for 2 HDMI scanlines. The fetch fills the buffer during HBlank or VBlank,
-// completing before the display scanline reads from it. True dual-port BRAM
-// handles the cross-clock access natively — no CDC needed for bank selection.
+// Bank 0/1 alternate by framebuffer line parity:
+// - Display line N reads bank (N[0])
+// - While line N is displayed, fetch line N+1 into bank ((N+1)[0])
 //
-// Write/read overlap safety: writes happen during VBlank (for line 0) or
-// during one scanline's display while the buffer holds valid data for that
-// scanline. The NEXT line's data overwrites from address 0, but the display
-// is reading the CURRENT line. Since each FB line displays for 2 scanlines,
-// we fetch during the second, and the first scanline of the next pair reads
-// the freshly written data without any overlap.
+// This avoids same-bank read/write overlap entirely.
 
-localparam LB_ADDR_BITS = 10;  // 2^10 = 1024 entries (>= WIDTH=640)
-reg [COLOR_BITS-1:0] line_buf [0:(1<<LB_ADDR_BITS)-1] /* synthesis syn_ramstyle="block_ram" */;
+localparam LB_ADDR_BITS = 10;  // 2^10 = 1024 entries per bank (>= WIDTH=640)
+localparam LB_BANK_BITS = 1;   // 2 banks
+reg [COLOR_BITS-1:0] line_buf [0:(1<<(LB_ADDR_BITS+LB_BANK_BITS))-1] /* synthesis syn_ramstyle="block_ram" */;
 
 // Write port (clk_x1 domain) — single pixel per cycle
-reg [9:0] lb_wr_addr;
+reg [LB_ADDR_BITS+LB_BANK_BITS-1:0] lb_wr_addr;
 reg [COLOR_BITS-1:0] lb_wr_data;
 reg lb_wr_en;
 
 always @(posedge clk_x1) begin
     if (lb_wr_en)
-        line_buf[lb_wr_addr[LB_ADDR_BITS-1:0]] <= lb_wr_data;
+        line_buf[lb_wr_addr] <= lb_wr_data;
 end
 
 // Read port (clk_pixel domain)
-reg [9:0] lb_rd_addr;
+reg [LB_ADDR_BITS+LB_BANK_BITS-1:0] lb_rd_addr;
 reg [COLOR_BITS-1:0] lb_rd_data;
 
 always @(posedge clk_pixel) begin
-    lb_rd_data <= line_buf[lb_rd_addr[LB_ADDR_BITS-1:0]];
+    lb_rd_data <= line_buf[lb_rd_addr];
 end
 
 /////////////////////////////////////////////////////////////////////
@@ -550,18 +556,12 @@ wire [9:0] v_active_end_x1 = 10'd480 - v_border_x1;
 wire cy_in_active_x1 = (cy_sync1 >= v_active_start_x1) && (cy_sync1 < v_active_end_x1);
 wire [8:0] fb_line_x1 = (cy_sync1 - v_active_start_x1) >> 1;  // 2x vertical: divide by 2
 
-// Line fetch timing for 2x vertical scaling (single buffer, no ping-pong):
+// Line fetch timing for 2x vertical scaling (dual-bank):
 //
-// Each FB line is displayed on 2 consecutive HDMI scanlines. With a single
-// line buffer and true dual-port BRAM, we simply fetch each FB line when it
-// changes. The fetch completes in ~7.5µs (560 pixels at 74.25MHz), well
-// within a single scanline period (~31.8µs). After the fetch, the buffer
-// holds the correct data for the display to read on both HDMI lines.
-//
-// Timing: line 0 is fetched during VBlank. Subsequent lines are fetched
-// when fb_line_x1 changes (detected via cy transition). The fetch starts
-// near the beginning of the first HDMI line of each pair and completes
-// before the active display area begins reading.
+// Line 0 is prefetched during VBlank. During active display of line N,
+// we fetch line N+1 into the opposite bank. This gives a full 2-scanline
+// window (~63.6 us) for each line fetch and avoids read/write overlap on
+// the bank currently being displayed.
 
 wire cy_is_vblank_before_active = (cy_sync1 < v_active_start_x1) &&
                                    (cy_sync1 + 10'd2 >= v_active_start_x1);
@@ -569,32 +569,47 @@ wire cy_is_vblank_before_active = (cy_sync1 < v_active_start_x1) &&
 // Track which line was last fetched, and whether cy changed
 reg [9:0] cy_prev;
 reg [8:0] last_fetched_line;
-reg line_fetch_needed;
-reg line_fetch_active;
+reg [8:0] fetch_target_line;
+reg fetch_bank;
 reg [9:0] fetch_write_x;     // current write position into line buffer
 
 // DDR3 read address for current line — computed incrementally to avoid multiplier
 reg [$clog2(FB_SIZE*2)-1:0] fetch_line_addr;
 
-// Response handler: latch DDR3 data, write 4 pixels sequentially to line buffer.
-// Signals rd_done pulse when complete, so ddr3_rw block can clear rd_pending.
+// Pipelined read response buffering.
+localparam integer RD_FIFO_DEPTH = 32;
+localparam integer RD_FIFO_ADDR_BITS = 5;
+localparam integer RD_MAX_OUTSTANDING = 8;
+reg [127:0] rd_fifo [0:RD_FIFO_DEPTH-1] /* synthesis syn_ramstyle="block_ram" */;
+reg [RD_FIFO_ADDR_BITS-1:0] rd_fifo_wr_ptr, rd_fifo_rd_ptr;
+reg [RD_FIFO_ADDR_BITS:0] rd_fifo_count;
+wire rd_fifo_empty = (rd_fifo_count == 0);
+wire rd_fifo_full = (rd_fifo_count == RD_FIFO_DEPTH);
+// Keep enough FIFO headroom for all in-flight read responses.
+wire rd_fifo_almost_full = (rd_fifo_count >= (RD_FIFO_DEPTH - RD_MAX_OUTSTANDING));
+
+// Response handler: pop 128-bit words from rd_fifo and write 4 pixels sequentially.
 reg [127:0] rd_data_latched;
 reg [1:0] rd_pixel_idx;
 reg rd_pixel_active;
-reg rd_done_r;
-wire rd_done = rd_done_r;
+wire rd_fifo_push = app_rd_data_valid && !rd_fifo_full;
+wire rd_fifo_pop = !rd_pixel_active && !rd_fifo_empty;
 
 always @(posedge clk_x1) begin
     lb_wr_en <= 1'b0;
-    rd_done_r <= 1'b0;
 
     if (ddr_rst | ~init_calib_complete) begin
         cy_prev <= 10'h3FF;
         last_fetched_line <= 9'h1FF;
         line_fetch_needed <= 0;
         line_fetch_active <= 0;
+        fetch_target_line <= 0;
+        fetch_bank <= 0;
         fetch_write_x <= 0;
         fetch_line_addr <= 0;
+        rd_fifo_wr_ptr <= 0;
+        rd_fifo_rd_ptr <= 0;
+        rd_fifo_count <= 0;
         rd_pixel_idx <= 0;
         rd_pixel_active <= 0;
 
@@ -602,15 +617,17 @@ always @(posedge clk_x1) begin
         // Detect cy transition — fetch new FB line when it changes
         if (cy_sync1 != cy_prev) begin
             cy_prev <= cy_sync1;
-            if (!line_fetch_active) begin
+            if (!line_fetch_active && !line_fetch_needed) begin
                 if (cy_is_vblank_before_active && last_fetched_line != 9'd0) begin
                     // Approaching active area from VBlank — fetch line 0
                     line_fetch_needed <= 1'b1;
+                    fetch_target_line <= 9'd0;
                     fetch_write_x <= 0;
-                end else if (cy_in_active_x1 && fb_line_x1 != last_fetched_line &&
-                             fb_line_x1 < fb_height_x1[8:0]) begin
-                    // FB line changed — fetch the new line
+                end else if (cy_in_active_x1 && (fb_line_x1 + 9'd1) < fb_height_x1[8:0] &&
+                             (fb_line_x1 + 9'd1) != last_fetched_line) begin
+                    // Displaying line N: fetch line N+1 into the opposite bank
                     line_fetch_needed <= 1'b1;
+                    fetch_target_line <= fb_line_x1 + 9'd1;
                     fetch_write_x <= 0;
                 end
             end
@@ -620,27 +637,42 @@ always @(posedge clk_x1) begin
         if (line_fetch_needed && !line_fetch_active && !mem_dir_write) begin
             line_fetch_active <= 1'b1;
             line_fetch_needed <= 1'b0;
-            if (cy_is_vblank_before_active || !cy_in_active_x1) begin
-                // Fetch line 0 during VBlank
-                last_fetched_line <= 9'd0;
-                fetch_line_addr <= 0;
-            end else begin
-                // Fetch the current FB line
-                last_fetched_line <= fb_line_x1;
-                fetch_line_addr <= {fb_line_x1 * WIDTH, 1'b0};
-            end
+            last_fetched_line <= fetch_target_line;
+            fetch_bank <= fetch_target_line[0];
+            fetch_line_addr <= {fetch_target_line * WIDTH, 1'b0};
         end
 
-        // DDR3 read response handler: latch 128-bit data, write 4 pixels sequentially
-        if (app_rd_data_valid && !rd_pixel_active) begin
-            rd_data_latched <= app_rd_data;
+        // Push incoming DDR3 responses into the FIFO.
+        if (rd_fifo_push) begin
+            rd_fifo[rd_fifo_wr_ptr] <= app_rd_data;
+        end
+
+        // Pop a buffered response word when pixel writer is idle.
+        if (rd_fifo_pop) begin
+            rd_data_latched <= rd_fifo[rd_fifo_rd_ptr];
             rd_pixel_idx <= 0;
             rd_pixel_active <= 1'b1;
         end
 
+        case ({rd_fifo_push, rd_fifo_pop})
+            2'b10: begin
+                rd_fifo_wr_ptr <= rd_fifo_wr_ptr + 1'b1;
+                rd_fifo_count <= rd_fifo_count + 1'b1;
+            end
+            2'b01: begin
+                rd_fifo_rd_ptr <= rd_fifo_rd_ptr + 1'b1;
+                rd_fifo_count <= rd_fifo_count - 1'b1;
+            end
+            2'b11: begin
+                rd_fifo_wr_ptr <= rd_fifo_wr_ptr + 1'b1;
+                rd_fifo_rd_ptr <= rd_fifo_rd_ptr + 1'b1;
+            end
+        endcase
+
+        // Write out 4 pixels from each buffered response word.
         if (rd_pixel_active) begin
             lb_wr_en <= 1'b1;
-            lb_wr_addr <= fetch_write_x;
+            lb_wr_addr <= {fetch_bank, fetch_write_x[LB_ADDR_BITS-1:0]};
             case (rd_pixel_idx)
                 2'd0: lb_wr_data <= rd_data_latched[COLOR_BITS-1:0];
                 2'd1: lb_wr_data <= rd_data_latched[32+COLOR_BITS-1:32];
@@ -651,12 +683,16 @@ always @(posedge clk_x1) begin
             rd_pixel_idx <= rd_pixel_idx + 1;
             if (rd_pixel_idx == 2'd3) begin
                 rd_pixel_active <= 1'b0;
-                rd_done_r <= 1'b1;
             end
         end
 
-        // Line fetch complete: all pixels written and no response pending
-        if (line_fetch_active && !rd_pixel_active && fetch_write_x >= fb_width_x1[9:0] && fetch_write_x > 0) begin
+        // Line fetch complete: all reads issued, all responses returned, FIFO drained.
+        if (line_fetch_active &&
+            (fetch_pixel_x >= fb_width_x1[9:0]) &&
+            (rd_outstanding == 0) &&
+            !rd_pixel_active && rd_fifo_empty &&
+            (fetch_write_x >= fb_width_x1[9:0]) &&
+            (fetch_write_x > 0)) begin
             line_fetch_active <= 1'b0;
         end
     end
@@ -664,17 +700,19 @@ end
 
 /////////////////////////////////////////////////////////////////////
 // DDR3 Read/Write Arbitration (clk_x1 domain)
-// rd_pending owned by this block: set on read issue, cleared on rd_done.
+// Supports multiple in-flight reads to reduce fetch latency.
 
 reg cmd_done, data_done;
 reg [9:0] fetch_pixel_x;
 reg line_fetch_active_prev;
 reg fetch_needs_reset;
-reg rd_pending;
+reg [3:0] rd_outstanding;
+reg rd_issue_fire;
 
 always @(posedge clk_x1) begin : ddr3_rw
     app_en <= 0;
     app_wdf_wren <= 0;
+    rd_issue_fire = 1'b0;
 
     if (ddr_rst | ~init_calib_complete) begin
         cmd_done <= 0;
@@ -682,46 +720,54 @@ always @(posedge clk_x1) begin : ddr3_rw
         fetch_pixel_x <= 0;
         line_fetch_active_prev <= 0;
         fetch_needs_reset <= 0;
-        rd_pending <= 0;
+        rd_outstanding <= 0;
     end else begin
         line_fetch_active_prev <= line_fetch_active;
 
-        if (rd_done)
-            rd_pending <= 1'b0;
-
-        if (line_fetch_active && !line_fetch_active_prev)
+        if (line_fetch_active && !line_fetch_active_prev) begin
             fetch_needs_reset <= 1'b1;
-
-        // Writes have priority
-        if (write_pixels_req ^ write_pixels_ack) begin
-            if (!cmd_done && app_rdy) begin
-                app_en <= 1'b1;
-                app_cmd <= 3'b000;
-                app_addr <= wr_addr;
-                cmd_done <= 1'b1;
-            end
-            if (!data_done && app_wdf_rdy) begin
-                app_wdf_wren <= 1;
-                data_done <= 1'b1;
-            end
-            if ((cmd_done | app_rdy) & (data_done | app_wdf_rdy)) begin
-                write_pixels_ack <= write_pixels_req;
-                cmd_done <= 0;
-                data_done <= 0;
-            end
-        end else if (fetch_needs_reset) begin
-            fetch_pixel_x <= 0;
-            fetch_needs_reset <= 0;
+            rd_outstanding <= 0;
         end else begin
-            if (!mem_dir_write && line_fetch_active &&
-                     fetch_pixel_x < fb_width_x1[9:0] && app_rdy &&
-                     !rd_pending) begin
-                app_en <= 1;
-                app_cmd <= 3'b001;
-                app_addr <= {fetch_pixel_x, 1'b0} + fetch_line_addr;
-                fetch_pixel_x <= fetch_pixel_x + 4;
-                rd_pending <= 1'b1;
+            // Writes have priority
+            if (write_pixels_req ^ write_pixels_ack) begin
+                if (!cmd_done && app_rdy) begin
+                    app_en <= 1'b1;
+                    app_cmd <= 3'b000;
+                    app_addr <= wr_addr;
+                    cmd_done <= 1'b1;
+                end
+                if (!data_done && app_wdf_rdy) begin
+                    app_wdf_wren <= 1;
+                    data_done <= 1'b1;
+                end
+                if ((cmd_done | app_rdy) & (data_done | app_wdf_rdy)) begin
+                    write_pixels_ack <= write_pixels_req;
+                    cmd_done <= 0;
+                    data_done <= 0;
+                end
+            end else if (fetch_needs_reset) begin
+                fetch_pixel_x <= 0;
+                fetch_needs_reset <= 0;
+            end else begin
+                if (!mem_dir_write && line_fetch_active &&
+                         fetch_pixel_x < fb_width_x1[9:0] && app_rdy &&
+                         (rd_outstanding < RD_MAX_OUTSTANDING) &&
+                         !rd_fifo_almost_full) begin
+                    app_en <= 1;
+                    app_cmd <= 3'b001;
+                    app_addr <= {fetch_pixel_x, 1'b0} + fetch_line_addr;
+                    fetch_pixel_x <= fetch_pixel_x + 4;
+                    rd_issue_fire = 1'b1;
+                end
             end
+
+            // Track outstanding read responses accurately, including
+            // issue+response in the same clock (net 0 delta).
+            case ({rd_issue_fire, (app_rd_data_valid && (rd_outstanding != 0))})
+                2'b10: rd_outstanding <= rd_outstanding + 1'b1;
+                2'b01: rd_outstanding <= rd_outstanding - 1'b1;
+                default: rd_outstanding <= rd_outstanding;
+            endcase
         end
     end
 end
@@ -748,6 +794,8 @@ end
 wire in_h_active = (cx[9:0] >= h_active_start_px) && (cx[9:0] < h_active_end_px);
 wire in_v_active = (cy >= v_active_start_px) && (cy < v_active_end_px);
 wire in_active = in_h_active && in_v_active;
+wire [8:0] fb_line_px = (cy - v_active_start_px) >> 1;
+wire lb_rd_bank = fb_line_px[0];
 
 // Line buffer read address: pixel position within active area
 // Needs to be set 1 cycle early for BRAM read latency
@@ -756,8 +804,8 @@ wire [9:0] next_fb_x = next_cx - h_active_start_px;
 
 always @(posedge clk_pixel) begin
     // Set read address for next cycle's pixel
-    if (next_cx >= h_active_start_px && next_cx < h_active_end_px)
-        lb_rd_addr <= next_fb_x;
+    if (next_cx >= h_active_start_px && next_cx < h_active_end_px && in_v_active)
+        lb_rd_addr <= {lb_rd_bank, next_fb_x[LB_ADDR_BITS-1:0]};
     else
         lb_rd_addr <= 0;
 end
