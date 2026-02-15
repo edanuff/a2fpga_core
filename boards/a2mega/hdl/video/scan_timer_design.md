@@ -48,7 +48,7 @@ Our `scan_timer` initialized `scanline_counter_r` to 0 on reset. Since
 each pulse corresponds to a real hardware scanline. After reset, the Mega II
 starts at $0FA (a VBL line), but we started at 0 (a visible line).
 
-This meant we were **6 scanlines ahead** of the real hardware: our renderer
+This meant we were **6 scanlines ahead** of the real hardware: our scanner
 was reading VRAM for "line 0" while the Apple II was still in VBL. Games that
 do raster chasing --- timing their draws relative to the beam position by
 polling $C02E or $C019 --- would see tearing at the wrong scanline.

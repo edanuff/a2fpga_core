@@ -2,7 +2,7 @@
 
 ## Project Summary
 
-Refactor the A2FPGA (A2Mega variant) HDMI video output pipeline to use a DDR3-backed framebuffer for display. The key architectural change moves video renderers from the HDMI pixel clock domain to the Apple II native timing domain (`a2bus_if.clk_logic`, 54 MHz), outputting pixels via the `fb_*` framebuffer interface. This eliminates beam racing synchronization problems — the renderer sees VRAM writes at the correct beam-relative position because it runs on Apple II timing.
+Refactor the A2FPGA (A2Mega variant) HDMI video output pipeline to use a DDR3-backed framebuffer for display. The key architectural change moves video scanners from the HDMI pixel clock domain to the Apple II native timing domain (`a2bus_if.clk_logic`, 54 MHz), outputting pixels via the `fb_*` framebuffer interface. This eliminates beam racing synchronization problems — the scanner sees VRAM writes at the correct beam-relative position because it runs on Apple II timing.
 
 **Development repo:** https://github.com/edanuff/a2fpga_core (fork, `ddr3_framebuffer` branch)
 **ddr3_framebuffer reference:** https://github.com/nand2mario/ddr3_framebuffer_gowin

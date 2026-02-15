@@ -373,7 +373,7 @@ module top #(
     wire [7:0] scan_dbg_c02e_cnt_w;
     wire [7:0] scan_dbg_c019_cnt_w;
 
-    // Apple II video → DDR3 framebuffer renderer
+    // Apple II video → DDR3 framebuffer scanner
     wire fb_we_w;
     wire [17:0] fb_data_w;
     wire fb_vsync_w;
@@ -416,7 +416,7 @@ module top #(
         .ssp_active_i(1'b1)
     );
 
-    // VGC framebuffer renderer — IIgs Super Hi-Res modes
+    // VGC framebuffer scanner — IIgs Super Hi-Res modes
     wire vgc_fb_we_w;
     wire [17:0] vgc_fb_data_w;
     wire vgc_fb_vsync_w;
