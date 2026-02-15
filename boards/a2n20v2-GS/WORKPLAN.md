@@ -44,22 +44,40 @@ Since the SDRAM controller runs on the same 54 MHz logic clock, **no async FIFO*
 
 ### Data Flow
 
+The SDRAM serves two distinct roles:
+
+1. **Video shadow memory** — Apple II bus writes are shadowed to SDRAM (via `apple_memory` from Enhanced board). The framebuffer renderers read VRAM back from SDRAM.
+2. **Framebuffer storage** — Rendered RGB pixels are written to a separate SDRAM region and read back for HDMI display.
+
 ```
-Apple II VRAM (BRAM, 54 MHz logic clock)
+Apple II Bus (CPU writes)
     |
+    v  data_in_strobe (write shadows to SDRAM)
+[apple_memory] -----> SDRAM via MAIN_MEM_PORT (write, port 2)
+    |                    (shadows text $0400-$0BFF + hires $2000-$5FFF)
+    |
+    |  VGC aux memory ($2000-$9FFF) stays in BRAM
+    |  (interleaved SHR reads need single-cycle BRAM access)
+    |
+    +-----> SDRAM via VIDEO_MEM_PORT (read, port 1)
+    |         (renderer reads back shadowed VRAM)
     v
-[apple_video_fb / vgc_fb] -- renders pixels using scan_timer timing
+[apple_video_fb] -- renders pixels using scan_timer timing
+    |                reads VRAM from SDRAM (text, lores, hires, dhires)
+    |
+[vgc_fb] -- renders IIgs SHR pixels using scan_timer timing
+    |          reads from BRAM aux banks (interleaved format)
     |
     v  fb_we + fb_data (RGB666, 18-bit)
 [sdram_framebuffer] -- pixel write accumulator
     |
-    v  mem_port_if.wr + .addr + .data
+    v  SDRAM via FB_WRITE_PORT (write, port 3)
 [sdram_ports] -- SDRAM controller with multi-port arbitration
     |
     v  (SDRAM at 54 MHz, 32-bit data bus)
 [Tang Nano 20K on-chip SDRAM, 8MB]
     |
-    ^  mem_port_if.rd + .q (read back)
+    ^  SDRAM via FB_READ_PORT (read, port 0)
 [sdram_framebuffer] -- line fetch FSM
     |
     v  line_buf write (54 MHz)
@@ -71,6 +89,16 @@ Apple II VRAM (BRAM, 54 MHz logic clock)
     v  RGB888
 [HDMI encoder] -- 720x480 @ 59.94 Hz
 ```
+
+### SDRAM vs BRAM Split
+
+| Memory Region | Storage | Reason |
+|---------------|---------|--------|
+| Text pages ($0400-$0BFF) | SDRAM (shadow) | Renderer reads via VIDEO_MEM_PORT |
+| Hires pages ($2000-$5FFF) main bank | SDRAM (shadow) | Renderer reads via VIDEO_MEM_PORT |
+| Hires pages ($2000-$9FFF) aux bank | BRAM | VGC needs interleaved byte-pair reads in one cycle |
+| Framebuffer pixels (rendered RGB) | SDRAM (upper region) | Too large for BRAM (~500KB) |
+| Line buffer (1-2 scanlines) | BRAM | True dual-port CDC between 54 MHz and 27 MHz |
 
 ### Display Layout
 
@@ -102,12 +130,22 @@ Remaining SDRAM (0x000000 - 0x17FFFF):
 
 ```
 Port 0: FB_READ_PORT    -- Framebuffer line reads (highest priority, display-critical)
-Port 1: VIDEO_MEM_PORT  -- Apple II VRAM reads for rendering
-Port 2: MAIN_MEM_PORT   -- CPU memory (main + aux banks)
-Port 3: FB_WRITE_PORT   -- Framebuffer pixel writes (lowest among active ports)
+Port 1: VIDEO_MEM_PORT  -- Apple II VRAM reads for rendering (apple_memory → renderer)
+Port 2: MAIN_MEM_PORT   -- Apple II bus write shadows (apple_memory ← Apple bus)
+Port 3: FB_WRITE_PORT   -- Framebuffer pixel writes (rendered RGB → SDRAM)
 Port 4: DOC_MEM_PORT    -- Ensoniq DOC (if enabled)
 Port 5: GLU_MEM_PORT    -- Ensoniq GLU (if enabled)
 ```
+
+**Port usage patterns** (from Enhanced board's `apple_memory.sv`):
+
+- **MAIN_MEM_PORT (write-only)**: `apple_memory` writes Apple II bus data to SDRAM on every `data_in_strobe` for video address ranges ($0400-$0BFF text, $2000-$5FFF hires). With `SHADOW_ALL_MEMORY=1`, all of $0000-$BFFF is shadowed. Write address is `{6'b0, addr[15:1]}`, data is replicated across 32-bit word, byte-enable selects the correct byte+bank.
+
+- **VIDEO_MEM_PORT (read-only)**: `apple_memory` reads back shadowed VRAM for the renderer. Read address is `{5'b0, video_bank, addr[15:1]}`, returning 32-bit words (4 bytes packed). The renderer (`apple_video_fb`) requests reads via `video_address_o`/`video_rd_o` and receives data via `video_data_i`.
+
+- **FB_WRITE_PORT (write-only)**: `sdram_framebuffer` writes rendered RGB666 pixels. One pixel per 32-bit word at framebuffer base address + linear offset.
+
+- **FB_READ_PORT (read-only)**: `sdram_framebuffer` fetches full scanlines into line buffer BRAM. Highest priority to prevent display tearing.
 
 Framebuffer reads get highest priority since display stalls cause visible artifacts. Framebuffer writes are lower priority since the write accumulator can buffer pixels.
 
@@ -115,39 +153,61 @@ Framebuffer reads get highest priority since display stalls cause visible artifa
 
 At 54 MHz with 32-bit bus, single-word access:
 - Theoretical max: ~54M words/sec, but with overhead (activate, precharge, refresh): ~10-15M words/sec effective
-- **FB read (per line)**: 640 reads per 2 scanlines (~127 µs) = ~5,040 reads/sec per line x 200 lines = ~1M reads/sec
-- **FB write (per frame)**: 560-640 writes x 192-200 lines x 60 fps = ~7.7M writes/sec
-- **Video VRAM reads**: ~2,250 reads per scanline x 262 lines x 60 fps = ~35M reads/sec (but shares with existing BRAM path)
-- Total FB bandwidth: ~8.7M accesses/sec — well within SDRAM capacity
 
-**Note**: Video VRAM reads are from BRAM (like current design), not SDRAM. Only the framebuffer pixels go through SDRAM. This keeps bandwidth manageable.
+**All four active ports share SDRAM bandwidth:**
+
+| Port | Direction | Access Pattern | Est. Accesses/sec |
+|------|-----------|----------------|-------------------|
+| FB_READ (0) | Read | 640/line × 200 lines × 60 fps | ~7.7M |
+| VIDEO_MEM (1) | Read | ~40 reads/scanline × 262 lines × 60 fps | ~0.6M |
+| MAIN_MEM (2) | Write | ~1 write/bus cycle × ~1M bus cycles/sec | ~1.0M |
+| FB_WRITE (3) | Write | 560-640/line × 192-200 lines × 60 fps | ~7.7M |
+| **Total** | | | **~17M** |
+
+This is within the effective ~10-15M words/sec budget because:
+- VIDEO_MEM reads are sparse (only during active rendering, ~40 bytes per text/hires line)
+- MAIN_MEM writes only occur on Apple II write cycles to video ranges
+- FB reads and writes are sequential (same SDRAM row), so open-row optimization reduces per-access overhead to ~2 cycles instead of ~8
+- With open-row: effective bandwidth rises to ~27M words/sec for sequential patterns
+
+**Note on VGC aux memory**: IIgs SHR aux bank data ($2000-$9FFF) remains in BRAM (as in Enhanced board) because the VGC renderer needs interleaved byte-pair reads that can't tolerate SDRAM latency.
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Add SDRAM Infrastructure
+### Phase 1: Add SDRAM Infrastructure and Memory Subsystem
 
-**Goal**: Get SDRAM controller running on a2n20v2-GS with basic port access.
+**Goal**: Get SDRAM controller running on a2n20v2-GS with Apple II bus writes shadowed to SDRAM and video reads working through SDRAM. This follows the a2n20v2-Enhanced architecture.
 
 **Files to create/modify**:
 
 1. **`boards/a2n20v2-GS/hdl/top.sv`** — Add SDRAM port declarations and `sdram_ports` instantiation
    - Add SDRAM I/O ports (O_sdram_clk, O_sdram_addr, IO_sdram_dq, etc.)
-   - Add `mem_port_if` array instantiation
-   - Instantiate `sdram_ports` controller
+   - Add `mem_port_if` array instantiation (6 ports)
+   - Instantiate `sdram_ports` controller (matching Enhanced board parameters)
    - Wire phase-shifted clock from PLL to SDRAM
+   - Update `apple_memory` instantiation to pass `main_mem_if` and `video_mem_if` ports
 
-2. **`boards/a2n20v2-GS/hdl/a2n20v2_gs.cst`** — No SDRAM pin changes needed (Gowin auto-manages on-chip SDRAM via "magic" signal names)
+2. **`boards/a2n20v2-GS/hdl/memory/apple_memory.sv`** — Copy from `boards/a2n20v2-Enhanced/hdl/memory/apple_memory.sv`
+   - This is the SDRAM-aware version that:
+     - Writes Apple II bus data to SDRAM via `main_mem_if` (write-only port)
+     - Reads video data back from SDRAM via `video_mem_if` (read-only port)
+     - Keeps VGC aux memory ($2000-$9FFF) in BRAM for interleaved SHR reads
+     - Handles all soft switch decoding (TEXT_MODE, HIRES_MODE, SHRG_MODE, etc.)
+     - Manages aux memory banking (STORE80, RAMWRT, PAGE2, etc.)
 
-3. **`boards/a2n20v2-GS/hdl/gowin/clk_logic/clk_logic.v`** — Verify PLL outputs include phase-shifted clock for SDRAM (already has `clkoutp`)
+3. **`boards/a2n20v2-GS/hdl/a2n20v2_gs.cst`** — No SDRAM pin changes needed (Gowin auto-manages on-chip SDRAM via "magic" signal names)
 
-4. **`boards/a2n20v2-GS/a2n20v2_gs.gprj`** — Add SDRAM source files to project:
+4. **`boards/a2n20v2-GS/hdl/gowin/clk_logic/clk_logic.v`** — Verify PLL outputs include phase-shifted clock for SDRAM (already has `clkoutp`)
+
+5. **`boards/a2n20v2-GS/a2n20v2_gs.gprj`** — Add SDRAM and memory source files to project:
    - `hdl/sdram/sdram.sv`
    - `hdl/sdram/sdram_ports.sv`
    - `hdl/memory/mem_port_if.sv`
+   - `boards/a2n20v2-GS/hdl/memory/apple_memory.sv`
 
-**Validation**: SDRAM initialization completes (LED indicator or debug overlay)
+**Validation**: SDRAM initialization completes, Apple II text mode displays correctly (bus writes shadow to SDRAM, renderer reads back from SDRAM via VIDEO_MEM_PORT)
 
 ---
 
@@ -357,26 +417,29 @@ This mirrors the a2n20v2-Enhanced implementation:
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| SDRAM bandwidth insufficient for FB + system | Low | High | FB reads highest priority; video VRAM stays in BRAM |
-| Line fetch doesn't complete within 2-scanline window | Low | Medium | 640 reads at 54 MHz with ~8 cycle overhead = ~95µs, window is ~127µs |
-| SDRAM port starvation under heavy FB write load | Medium | Medium | Write accumulator buffers pixels; writes are lower priority |
-| apple_video_fb pixel timing doesn't match SDRAM available cycles | Medium | Medium | Buffer 1-2 pixels; stall renderer if needed |
-| FPGA resource utilization too high | Low | Medium | Tang Nano 20K GW2A has 20K LUTs; current design uses ~60% |
+| SDRAM bandwidth contention (4 active ports) | Medium | High | FB_READ highest priority; sequential access patterns enable open-row optimization; VIDEO_MEM reads are sparse (~40/scanline) |
+| Line fetch doesn't complete within 2-scanline window | Low | Medium | 640 sequential reads with open-row ≈ ~24µs, window is ~127µs (5x margin) |
+| VIDEO_MEM reads stall renderer during FB_READ bursts | Medium | Medium | FB_READ is bursty (one scanline fetch per 2 HDMI lines); VIDEO_MEM reads happen between bursts |
+| MAIN_MEM writes conflict with FB writes | Low | Low | Both are write-only, non-blocking; SDRAM controller round-robins when both pending |
+| apple_video_fb pixel timing doesn't match SDRAM available cycles | Medium | Medium | Buffer 1-2 pixels; stall renderer if FB_WRITE port busy |
+| FPGA resource utilization too high | Low | Medium | Tang Nano 20K GW2A has 20K LUTs; current design uses ~60%; SDRAM controller adds ~1K LUTs |
 
 ## Files Summary
 
 ### New files
-- `boards/a2n20v2-GS/hdl/video/sdram_framebuffer.sv` — Core framebuffer module
+- `boards/a2n20v2-GS/hdl/video/sdram_framebuffer.sv` — Core framebuffer module (write path, read FSM, line buffer, output)
 - `boards/a2n20v2-GS/hdl/video/scan_timer.sv` — Copy from a2mega
 - `boards/a2n20v2-GS/hdl/video/apple_video_fb.sv` — Copy from a2mega
 - `boards/a2n20v2-GS/hdl/video/vgc_fb.sv` — Copy from a2mega
+- `boards/a2n20v2-GS/hdl/memory/apple_memory.sv` — Copy from a2n20v2-Enhanced (SDRAM-aware version with main_mem_if + video_mem_if ports)
 
 ### Modified files
-- `boards/a2n20v2-GS/hdl/top.sv` — Major restructure for SDRAM + framebuffer
+- `boards/a2n20v2-GS/hdl/top.sv` — Major restructure: add SDRAM ports, sdram_ports controller, mem_port_if array, swap apple_memory/apple_video/vgc for SDRAM-aware versions, add sdram_framebuffer
 - `boards/a2n20v2-GS/a2n20v2_gs.gprj` — Add source files
 - `boards/a2n20v2-GS/hdl/a2n20v2_gs.sdc` — Timing constraints for CDC paths
 
 ### Reused shared files (already in repo)
-- `hdl/sdram/sdram.sv` — SDRAM controller
-- `hdl/sdram/sdram_ports.sv` — Multi-port wrapper
+- `hdl/sdram/sdram.sv` — SDRAM controller FSM
+- `hdl/sdram/sdram_ports.sv` — Multi-port arbitration wrapper
 - `hdl/memory/mem_port_if.sv` — Port interface definition
+- `hdl/memory/sdpram32.sv` — Simple dual-port BRAM (used for VGC aux banks)
