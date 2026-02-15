@@ -726,8 +726,7 @@ module top #(
     scan_timer #(
         .VGC_VERTCNT_LOCK(1),
         .VGC_VBL_LOCK(1),
-        .VBL_BIT_IS_HIGH(1),     // IIgs convention: bit7=1 during VBL (TN #40)
-        .RESYNC_THRESHOLD(2)
+        .RESYNC_THRESHOLD(2)     // VBL polarity auto-detected via a2bus_if.sw_gs
     ) scan_timer (
         .a2bus_if(a2bus_if),
         .scanline_o(scanline_w),

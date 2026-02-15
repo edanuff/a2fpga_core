@@ -37,6 +37,7 @@
 //   VGC_VERTCNT_LOCK: snoop $C02E reads to correct drift vs. hardware
 //   VGC_VBL_LOCK: snoop $C019 reads to correct drift at VBL boundaries
 //   RESYNC_THRESHOLD: minimum scanline delta before correction applied
+//   VBL polarity auto-detected at runtime via a2bus_if.sw_gs (IIgs vs IIe)
 //
 // See: scan_timer_design.md for detailed design rationale.
 //
@@ -44,8 +45,6 @@
 module scan_timer #(
     parameter VGC_VERTCNT_LOCK = 0,   // 1 = snoop $C02E reads for resync
     parameter VGC_VBL_LOCK = 0,       // 1 = snoop $C019 reads for resync
-    parameter VBL_BIT_IS_HIGH = 1,    // 1 = IIgs convention (bit7=1 during VBL)
-                                      // 0 = IIe convention (bit7=0 during VBL)
     parameter RESYNC_THRESHOLD = 2    // min scanline delta to trigger correction
 ) (
     a2bus_if.slave a2bus_if,
@@ -236,11 +235,11 @@ module scan_timer #(
                           (a2bus_if.addr == 16'hC019) &&
                           !a2bus_if.m2sel_n;
 
-        // VBL_BIT_IS_HIGH selects polarity convention:
-        //   1 = IIgs: data[7]=1 during VBL (TN #40)
-        //   0 = IIe:  data[7]=0 during VBL (RDVBLBAR)
+        // VBL polarity depends on computer type (from sw_gs bus signal):
+        //   IIgs (sw_gs=1): data[7]=1 during VBL (TN #40)
+        //   IIe  (sw_gs=0): data[7]=0 during VBL (RDVBLBAR)
         // vbl_active_w is 1 when VBL is active regardless of convention
-        wire vbl_active_w = VBL_BIT_IS_HIGH ? a2bus_if.data[7] : ~a2bus_if.data[7];
+        wire vbl_active_w = a2bus_if.sw_gs ? a2bus_if.data[7] : ~a2bus_if.data[7];
 
         reg vbl_prev_r;             // previous VBL active state
         reg vbl_valid_r;            // have we seen at least one $C019 read?

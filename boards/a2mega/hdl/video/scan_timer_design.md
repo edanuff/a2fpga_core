@@ -137,8 +137,12 @@ Note: this is the **inverted sense** from the Apple IIe, where bit 7 low
 indicates VBL. The Apple IIgs Hardware Reference originally documented this
 incorrectly; TN #40 corrected it. MAME PR #14177 also confirmed this.
 
-The `VBL_BIT_IS_HIGH` parameter (default 1) controls polarity interpretation
-to allow testing both conventions.
+The VBL polarity is automatically selected at runtime using `a2bus_if.sw_gs`:
+- `sw_gs = 1` (IIgs): bit 7 high = VBL active
+- `sw_gs = 0` (IIe):  bit 7 low  = VBL active
+
+This means the same bitstream works correctly on both IIgs and IIe computers
+without recompilation.
 
 **Transition detection**:
 - Bit 7 goes 1->0 (VBL ending): snap to scan line 0
@@ -235,8 +239,8 @@ counter climbs steadily, the resync logic needs investigation.
 module scan_timer #(
     parameter VGC_VERTCNT_LOCK = 1,   // snoop $C02E reads for resync
     parameter VGC_VBL_LOCK = 1,       // snoop $C019 reads for resync
-    parameter VBL_BIT_IS_HIGH = 1,    // 1 = IIgs, 0 = IIe polarity
     parameter RESYNC_THRESHOLD = 2    // min delta to trigger correction
+    // VBL polarity auto-detected at runtime via a2bus_if.sw_gs
 ) (
     a2bus_if.slave a2bus_if,
     output [8:0] scanline_o,    // 0-261
