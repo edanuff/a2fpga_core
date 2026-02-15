@@ -175,7 +175,7 @@ module apple_bus #(
     always @(posedge a2bus_if.clk_logic) begin
         data_in_strobe_r <= 1'b0;
         if (a2_data_in_valid_w) begin
-            if (!rw_n_r) data_r <= a2_d_i;
+            data_r <= a2_d_i;
             data_in_strobe_r <= 1'b1;
         end
 

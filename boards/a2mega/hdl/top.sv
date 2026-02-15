@@ -363,6 +363,16 @@ module top #(
     wire vsync_w;
     wire [9:0] pixel_w;
 
+    // Scan timer debug outputs for DebugOverlay
+    wire [8:0] scan_dbg_delta_w;
+    wire [8:0] scan_dbg_expected_w;
+    wire [8:0] scan_dbg_actual_w;
+    wire [7:0] scan_dbg_raw_data_w;
+    wire [7:0] scan_dbg_vbl_correct_w;
+    wire [7:0] scan_dbg_vertcnt_correct_w;
+    wire [7:0] scan_dbg_c02e_cnt_w;
+    wire [7:0] scan_dbg_c019_cnt_w;
+
     // Apple II video → DDR3 framebuffer renderer
     wire fb_we_w;
     wire [17:0] fb_data_w;
@@ -713,12 +723,25 @@ module top #(
     // Scan timer — authoritative Apple II scanline timing (kept for future use)
     // Wire declarations are forward-declared near apple_video_fb instantiation
 
-    scan_timer scan_timer (
+    scan_timer #(
+        .VGC_VERTCNT_LOCK(1),
+        .VGC_VBL_LOCK(1),
+        .VBL_BIT_IS_HIGH(1),     // IIgs convention: bit7=1 during VBL (TN #40)
+        .RESYNC_THRESHOLD(2)
+    ) scan_timer (
         .a2bus_if(a2bus_if),
         .scanline_o(scanline_w),
         .hsync_o(hsync_w),
         .vsync_o(vsync_w),
-        .pixel_o(pixel_w)
+        .pixel_o(pixel_w),
+        .dbg_last_delta_o(scan_dbg_delta_w),
+        .dbg_last_expected_o(scan_dbg_expected_w),
+        .dbg_last_actual_o(scan_dbg_actual_w),
+        .dbg_last_raw_data_o(scan_dbg_raw_data_w),
+        .dbg_vbl_correct_o(scan_dbg_vbl_correct_w),
+        .dbg_vertcnt_correct_o(scan_dbg_vertcnt_correct_w),
+        .dbg_c02e_count_o(scan_dbg_c02e_cnt_w),
+        .dbg_c019_count_o(scan_dbg_c019_cnt_w)
     );
 
     // Framebuffer dynamic dimensions — switch at frame boundary
@@ -848,14 +871,26 @@ module top #(
     reg [7:0] dbg_bits0_sync0, dbg_bits0_sync1;
     reg [7:0] dbg_bits1_sync0, dbg_bits1_sync1;
     always @(posedge clk_pixel_w) begin
-        dbg_hex_sync0[0] <= scanline_w[8:1];   dbg_hex_sync1[0] <= dbg_hex_sync0[0];
-        dbg_hex_sync0[1] <= {7'b0, scanline_w[0]}; dbg_hex_sync1[1] <= dbg_hex_sync0[1];
-        dbg_hex_sync0[2] <= 8'h00;              dbg_hex_sync1[2] <= dbg_hex_sync0[2];
-        dbg_hex_sync0[3] <= 8'h00;              dbg_hex_sync1[3] <= dbg_hex_sync0[3];
-        dbg_hex_sync0[4] <= 8'h00;              dbg_hex_sync1[4] <= dbg_hex_sync0[4];
+        // Hex 0-1: last resync delta (9 bits)
+        dbg_hex_sync0[0] <= {7'b0, scan_dbg_delta_w[8]};
+                                                dbg_hex_sync1[0] <= dbg_hex_sync0[0];
+        dbg_hex_sync0[1] <= scan_dbg_delta_w[7:0];
+                                                dbg_hex_sync1[1] <= dbg_hex_sync0[1];
+        // Hex 2-3: our scanline at resync moment (9 bits)
+        dbg_hex_sync0[2] <= {7'b0, scan_dbg_actual_w[8]};
+                                                dbg_hex_sync1[2] <= dbg_hex_sync0[2];
+        dbg_hex_sync0[3] <= scan_dbg_actual_w[7:0];
+                                                dbg_hex_sync1[3] <= dbg_hex_sync0[3];
+        // Hex 4: last raw bus byte ($C019 or $C02E)
+        dbg_hex_sync0[4] <= scan_dbg_raw_data_w;
+                                                dbg_hex_sync1[4] <= dbg_hex_sync0[4];
+        // Hex 5: (reserved)
         dbg_hex_sync0[5] <= 8'h00;              dbg_hex_sync1[5] <= dbg_hex_sync0[5];
-        dbg_hex_sync0[6] <= 8'h00;              dbg_hex_sync1[6] <= dbg_hex_sync0[6];
-        dbg_hex_sync0[7] <= {4'b0, a2mem_if.BACKGROUND_COLOR};
+        // Hex 6: VBL correction count
+        dbg_hex_sync0[6] <= scan_dbg_vbl_correct_w;
+                                                dbg_hex_sync1[6] <= dbg_hex_sync0[6];
+        // Hex 7: VERTCNT correction count
+        dbg_hex_sync0[7] <= scan_dbg_vertcnt_correct_w;
                                                 dbg_hex_sync1[7] <= dbg_hex_sync0[7];
         dbg_bits0_sync0 <= {a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE,
                             a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.STORE80,

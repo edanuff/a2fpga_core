@@ -83,7 +83,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Fri Feb 13 23:45:50 2026
+<td>Sat Feb 14 19:39:31 2026
 </td>
 </tr>
 <tr>
@@ -97,24 +97,24 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <tr>
 <td class="label">Place & Route Process</td>
 <td>Running placement:
-   Placement Phase 0: CPU time = 0h 0m 23s, Elapsed time = 0h 0m 33s
-   Placement Phase 1: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 5s
-   Placement Phase 2: CPU time = 0h 0m 57s, Elapsed time = 0h 1m 21s
-   Placement Phase 3: CPU time = 0h 0m 49s, Elapsed time = 0h 1m 16s
-   Total Placement: CPU time = 0h 2m 13s, Elapsed time = 0h 3m 15s
+   Placement Phase 0: CPU time = 0h 0m 22s, Elapsed time = 0h 0m 27s
+   Placement Phase 1: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 6s
+   Placement Phase 2: CPU time = 0h 1m 1s, Elapsed time = 0h 1m 16s
+   Placement Phase 3: CPU time = 0h 0m 41s, Elapsed time = 0h 0m 53s
+   Total Placement: CPU time = 0h 2m 8s, Elapsed time = 0h 2m 42s
 Running routing:
-   Routing Phase 0: CPU time = 0h 0m 0.036s, Elapsed time = 0h 0m 0.067s
-   Routing Phase 1: CPU time = 0h 1m 39s, Elapsed time = 0h 2m 32s
-   Routing Phase 2: CPU time = 0h 0m 0.57s, Elapsed time = 0h 0m 0.919s
+   Routing Phase 0: CPU time = 0h 0m 0.035s, Elapsed time = 0h 0m 0.045s
+   Routing Phase 1: CPU time = 0h 1m 43s, Elapsed time = 0h 2m 11s
+   Routing Phase 2: CPU time = 0h 0m 0.556s, Elapsed time = 0h 0m 0.748s
    Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-   Total Routing: CPU time = 0h 1m 40s, Elapsed time = 0h 2m 33s
+   Total Routing: CPU time = 0h 1m 43s, Elapsed time = 0h 2m 12s
 Generate output files:
-   CPU time = 0h 0m 13s, Elapsed time = 0h 0m 20s
+   CPU time = 0h 0m 13s, Elapsed time = 0h 0m 16s
 </td>
 </tr>
 <tr>
 <td class="label">Total Time and Memory Usage</td>
-<td>CPU time = 0h 4m 6s, Elapsed time = 0h 6m 8s, Peak memory usage = 2200MB</td>
+<td>CPU time = 0h 4m 4s, Elapsed time = 0h 5m 11s, Peak memory usage = 2237MB</td>
 </tr>
 </table>
 <br/>
@@ -129,12 +129,12 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Logic</td>
-<td>13314/59904</td>
+<td>13533/59904</td>
 <td>23%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --LUT,ALU,ROM16</td>
-<td>13314(12383 LUT, 931 ALU, 0 ROM16)</td>
+<td>13533(12551 LUT, 982 ALU, 0 ROM16)</td>
 <td>-</td>
 </tr>
 <tr>
@@ -144,8 +144,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Register</td>
-<td>11495/60780</td>
-<td>19%</td>
+<td>11631/60780</td>
+<td>20%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as Latch</td>
@@ -154,7 +154,7 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as FF</td>
-<td>11454/59904</td>
+<td>11590/59904</td>
 <td>20%</td>
 </tr>
 <tr>
@@ -169,8 +169,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">CLS</td>
-<td>12282/29952</td>
-<td>41%</td>
+<td>12507/29952</td>
+<td>42%</td>
 </tr>
 <tr>
 <td class="label">I/O Port</td>
@@ -322,17 +322,22 @@ Generate output files:
 <tr>
 <td class="label">clk_d</td>
 <td>PRIMARY</td>
-<td> PTR1 PBR0 PBR1 PBR3</td>
+<td> PTR0 PTR1 PBR1 PBR3</td>
 </tr>
 <tr>
 <td class="label">clk_pixel_w</td>
 <td>PRIMARY</td>
-<td> PTR0 PTR1 PTR2 PTR3 PBR1 PBR3</td>
+<td> PTR0 PTR1 PTR2 PTR3 PBR1</td>
 </tr>
 <tr>
 <td class="label">a2bus_if.clk_pixel</td>
 <td>PRIMARY</td>
-<td> PTR0 PTR1 PTR2 PTR3 PBR0 PBR1 PBR2 PBR3</td>
+<td> PTR0 PTR1 PTR2 PTR3 PBR1 PBR2 PBR3</td>
+</tr>
+<tr>
+<td class="label">mockingboard/pb_l_o[2]</td>
+<td>PRIMARY</td>
+<td> PBR1 PBR2</td>
 </tr>
 <tr>
 <td class="label">superserial/COM2/n67_7</td>
@@ -342,12 +347,7 @@ Generate output files:
 <tr>
 <td class="label">u_ddr3_fb/clk_x1</td>
 <td>PRIMARY</td>
-<td> PTR0 PTR1 PTR2 PBR0 PBR1</td>
-</tr>
-<tr>
-<td class="label">u_ddr3_fb/hdmi_inst/true_hdmi_output.packet_picker/n4077_4</td>
-<td>PRIMARY</td>
-<td> PTR0 PTR1</td>
+<td> PTR0 PTR1 PBR0 PBR1 PBR2</td>
 </tr>
 <tr>
 <td class="label">a2bus_if.device_reset_n</td>
@@ -370,11 +370,6 @@ Generate output files:
 <td> -</td>
 </tr>
 <tr>
-<td class="label">mockingboard/pb_l_o[2]</td>
-<td>LW</td>
-<td> -</td>
-</tr>
-<tr>
 <td class="label">mockingboard/pb_r_o[2]</td>
 <td>LW</td>
 <td> -</td>
@@ -386,6 +381,11 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">u_ddr3_fb/ddr_rst_w</td>
+<td>LW</td>
+<td> -</td>
+</tr>
+<tr>
+<td class="label">u_ddr3_fb/hdmi_inst/true_hdmi_output.packet_picker/n4077_6</td>
 <td>LW</td>
 <td> -</td>
 </tr>
