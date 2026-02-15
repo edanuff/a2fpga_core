@@ -60,7 +60,7 @@
         <File path="../../hdl/support/via6522.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/support/YM2149.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/apple_video.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/video/vgc_fb.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/vgc_fb.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/video_control_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/video.hex" type="file.other" enable="1"/>
         <File path="hdl/a2mega.cst" type="file.cst" enable="1"/>
@@ -76,9 +76,9 @@
         <File path="hdl/hdmi/serializer.sv" type="file.verilog" enable="1"/>
         <File path="hdl/sound/iir_filter.v" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/video/apple_video_fb.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/apple_video_fb.sv" type="file.verilog" enable="1"/>
         <File path="hdl/video/ddr3_framebuffer.v" type="file.verilog" enable="0"/>
         <File path="hdl/video/ddr3_framebuffer_480p.v" type="file.verilog" enable="1"/>
-        <File path="hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>
     </FileList>
 </Project>
