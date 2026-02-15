@@ -172,9 +172,13 @@ This is within the effective bandwidth because:
 
 ## Implementation Phases
 
-### Phase 1: Add SDRAM Infrastructure
+### Phase 1: Module Development (parallel, no hardware needed)
 
-**Goal**: Get SDRAM controller running on a2n20v2-GS with 4 ports. The existing BRAM-based `apple_memory` is unchanged — SDRAM is only for framebuffer and Ensoniq.
+These three workstreams can proceed in parallel. New modules are added to the project file but **not wired into `top.sv`** yet (or added commented-out). The existing video pipeline continues to work unchanged.
+
+#### 1A: SDRAM Infrastructure
+
+**Goal**: Add `sdram_ports` controller and `mem_port_if` array to the project, with ports tied off.
 
 **Files to create/modify**:
 
@@ -183,6 +187,7 @@ This is within the effective bandwidth because:
    - Add `mem_port_if` array instantiation (4 ports)
    - Instantiate `sdram_ports` controller (matching Enhanced board parameters)
    - Wire phase-shifted clock from PLL to SDRAM
+   - Tie off all 4 port client signals (rd=0, wr=0, addr=0, etc.) so SDRAM initializes but is idle
    - `apple_memory` remains unchanged (BRAM-only, no SDRAM ports)
 
 2. **`boards/a2n20v2-GS/hdl/a2n20v2_gs.cst`** — No SDRAM pin changes needed (Gowin auto-manages on-chip SDRAM via "magic" signal names)
@@ -194,13 +199,11 @@ This is within the effective bandwidth because:
    - `hdl/sdram/sdram_ports.sv`
    - `hdl/memory/mem_port_if.sv`
 
-**Validation**: SDRAM initialization completes (LED indicator or debug overlay)
+**Validation**: Project synthesizes cleanly with SDRAM controller present but idle.
 
----
+#### 1B: Scan Timer and Framebuffer Renderers
 
-### Phase 2: Add Scan Timer and Framebuffer Renderers
-
-**Goal**: Replace `apple_video` with framebuffer-aware renderers driven by `scan_timer`.
+**Goal**: Copy and adapt framebuffer-aware renderers from a2mega. These are standalone modules — not connected in `top.sv` yet.
 
 **Files to copy from a2mega**:
 
@@ -217,23 +220,13 @@ This is within the effective bandwidth because:
    - Framebuffer-aware IIgs Super Hi-Res renderer
    - Same `fb_we_o`, `fb_data_o` interface
 
-**Files to modify**:
+4. **`boards/a2n20v2-GS/a2n20v2_gs.gprj`** — Add new source files (can be included in project even if not instantiated in top.sv)
 
-4. **`boards/a2n20v2-GS/hdl/top.sv`** — Wire scan_timer and swap video modules
-   - Instantiate `scan_timer` connected to `a2bus_if`
-   - Replace `apple_video` with `apple_video_fb`
-   - Replace `vgc` with `vgc_fb`
-   - Add framebuffer mux (selects between apple_video_fb and vgc_fb based on SHRG_MODE)
+**Validation**: Files are syntactically correct and included in project. Review interfaces for a2mega-specific dependencies and adapt as needed.
 
-5. **`boards/a2n20v2-GS/a2n20v2_gs.gprj`** — Add new source files
+#### 1C: SDRAM Framebuffer Module
 
-**Validation**: Framebuffer renderers produce `fb_we`/`fb_data` pulses (observable via debug overlay counters)
-
----
-
-### Phase 3: Create SDRAM Framebuffer Module
-
-**Goal**: New module that bridges framebuffer pixel writes to SDRAM and reads scanlines back for display.
+**Goal**: Write the new `sdram_framebuffer.sv` module. This is standalone — not connected in `top.sv` yet.
 
 **New file**: **`boards/a2n20v2-GS/hdl/video/sdram_framebuffer.sv`**
 
@@ -306,42 +299,42 @@ module sdram_framebuffer #(
    - Apply scanline dimming on odd lines: `{1'b0, R[7:1], 1'b0, G[7:1], 1'b0, B[7:1]}`
    - Output border color for non-active pixels
 
-**Validation**: Static color fill test — write solid color to SDRAM, verify display output
+**Validation**: Module compiles as part of the project. Interface review against `mem_port_if` and framebuffer renderer outputs.
 
 ---
 
-### Phase 4: Integration and Top-Level Wiring
+### Phase 2: Integration and Top-Level Wiring (requires hardware)
 
-**Goal**: Connect everything in `top.sv` and get end-to-end video working.
+**Goal**: Wire all Phase 1 modules into `top.sv` and get end-to-end video working.
 
 **Modify**: **`boards/a2n20v2-GS/hdl/top.sv`**
 
 1. Remove direct `apple_video` → `vgc` → `SuperSprite` → HDMI chain
-2. Add framebuffer mux:
+2. Instantiate `scan_timer` connected to `a2bus_if`
+3. Replace `apple_video` with `apple_video_fb`, replace `vgc` with `vgc_fb`
+4. Add framebuffer mux:
    ```
    fb_we = vgc_fb_active ? vgc_fb_we : apple_video_fb_we
    fb_data = vgc_fb_active ? vgc_fb_data : apple_video_fb_data
    ```
-3. Instantiate `sdram_framebuffer` with:
+5. Instantiate `sdram_framebuffer` with:
    - `fb_write_port` → `mem_ports[FB_WRITE_PORT]`
    - `fb_read_port` → `mem_ports[FB_READ_PORT]`
+   - Remove port tie-offs from Phase 1A
    - RGB output → SuperSprite → DebugOverlay → HDMI
-4. Wire HDMI `cx`/`cy` back to `sdram_framebuffer`
-5. Update `DebugOverlay` with framebuffer debug values (write count, line fetch status, etc.)
-6. Connect `border_color` from `a2mem_if` soft switches
+6. Wire HDMI `cx`/`cy` back to `sdram_framebuffer`
+7. Update `DebugOverlay` with framebuffer debug values (write count, line fetch status, etc.)
+8. Connect `border_color` from `a2mem_if` soft switches
 
 **Modify**: **`boards/a2n20v2-GS/hdl/a2n20v2_gs.sdc`**
 - Add timing constraints for SDRAM ↔ pixel clock CDC paths
 - Verify false paths between 54 MHz and 27 MHz domains through line buffer
 
-**Modify**: **`boards/a2n20v2-GS/a2n20v2_gs.gprj`**
-- Add all new source files
-
 **Validation**: Full video output — Apple II text mode, graphics modes, IIgs SHR all display correctly via framebuffer
 
 ---
 
-### Phase 5: SuperSprite Integration
+### Phase 3: SuperSprite Integration (requires hardware)
 
 **Goal**: Ensure VDP overlay compositing works with framebuffer output.
 
@@ -359,7 +352,7 @@ The a2mega's framebuffer renders SuperSprite compositing **into** the framebuffe
 
 ---
 
-### Phase 6: Ensoniq DOC Sound Integration
+### Phase 4: Ensoniq DOC Sound Integration (requires hardware)
 
 **Goal**: Add Ensoniq DOC/GLU support using SDRAM for 128K sound memory.
 
@@ -374,7 +367,7 @@ This mirrors the a2n20v2-Enhanced implementation:
 
 ---
 
-### Phase 7: Testing and Optimization
+### Phase 5: Testing and Optimization (requires hardware)
 
 **Goal**: Verify all video modes and optimize SDRAM access patterns.
 
