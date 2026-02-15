@@ -66,5 +66,12 @@
         <File path="hdl/gowin/clk_hdmi/clk_hdmi.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/clk_logic/clk_logic.v" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/video/apple_video_fb.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/video/vgc_fb.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/video/sdram_framebuffer.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sdram/sdram.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sdram/sdram_ports.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/memory/mem_port_if.sv" type="file.verilog" enable="1"/>
     </FileList>
 </Project>

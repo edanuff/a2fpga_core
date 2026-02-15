@@ -73,8 +73,19 @@ module top #(
 
     // uart
     output  uart_tx,
-    input  uart_rx
+    input  uart_rx,
 
+    // "Magic" port names that the gowin compiler connects to the on-chip SDRAM
+    output        O_sdram_clk,
+    output        O_sdram_cke,
+    output        O_sdram_cs_n,   // chip select
+    output        O_sdram_cas_n,  // columns address select
+    output        O_sdram_ras_n,  // row address select
+    output        O_sdram_wen_n,  // write enable
+    inout  [31:0] IO_sdram_dq,    // 32 bit bidirectional data bus
+    output [10:0] O_sdram_addr,   // 11 bit multiplexed address bus
+    output [ 1:0] O_sdram_ba,     // two banks
+    output [ 3:0] O_sdram_dqm     // 32/4
 
 );
 
@@ -114,6 +125,75 @@ module top #(
     wire device_reset_n_w = rst_n & clk_logic_lock_w & clk_hdmi_lock_w;
 
     wire system_reset_n_w = device_reset_n_w & a2_reset_n;
+
+    // SDRAM Controller
+
+    wire sdram_init_complete;
+
+    // SDRAM ports: lower number = higher priority
+    localparam FB_READ_PORT  = 0;   // Framebuffer line reads (highest priority)
+    localparam FB_WRITE_PORT = 1;   // Framebuffer pixel writes
+    localparam DOC_MEM_PORT  = 2;   // Ensoniq DOC sound memory
+    localparam GLU_MEM_PORT  = 3;   // Ensoniq GLU registers
+    localparam NUM_PORTS     = 4;
+
+    localparam PORT_ADDR_WIDTH = 21;
+    localparam DATA_WIDTH = 32;
+    localparam DQM_WIDTH = 4;
+    localparam PORT_OUTPUT_WIDTH = 32;
+
+    mem_port_if #(
+        .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
+        .DATA_WIDTH(DATA_WIDTH),
+        .DQM_WIDTH(DQM_WIDTH),
+        .PORT_OUTPUT_WIDTH(PORT_OUTPUT_WIDTH)
+    ) mem_ports[NUM_PORTS-1:0]();
+
+    sdram_ports #(
+        .CLOCK_SPEED_MHZ(MEM_MHZ),
+        .NUM_PORTS(NUM_PORTS),
+        .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
+        .PORT_OUTPUT_WIDTH(PORT_OUTPUT_WIDTH),
+        .CAS_LATENCY(2),
+        .SETTING_REFRESH_TIMER_NANO_SEC(15000),
+        .SETTING_T_WR_MIN_WRITE_AUTO_PRECHARGE_RECOVERY_NANO_SEC(16),
+        .BURST_LENGTH(1),
+        .PORT_BURST_LENGTH(1),
+        .DATA_WIDTH(DATA_WIDTH),
+        .ROW_WIDTH(11),
+        .COL_WIDTH(8),
+        .PRECHARGE_BIT(10),
+        .DQM_WIDTH(DQM_WIDTH)
+    ) sdram_ports (
+        .clk(clk_logic_w),
+        .sdram_clk(clk_logic_p_w),
+        .reset(!device_reset_n_w),
+        .init_complete(sdram_init_complete),
+
+        .ports(mem_ports),
+
+        .SDRAM_DQ(IO_sdram_dq),
+        .SDRAM_A(O_sdram_addr),
+        .SDRAM_DQM(O_sdram_dqm),
+        .SDRAM_BA(O_sdram_ba),
+        .SDRAM_nCS(O_sdram_cs_n),
+        .SDRAM_nWE(O_sdram_wen_n),
+        .SDRAM_nRAS(O_sdram_ras_n),
+        .SDRAM_nCAS(O_sdram_cas_n),
+        .SDRAM_CKE(O_sdram_cke),
+        .SDRAM_CLK(O_sdram_clk)
+    );
+
+    // Tie off all SDRAM ports for now (Phase 1A — ports idle, controller initializes)
+    generate
+        for (genvar i = 0; i < NUM_PORTS; i++) begin : gen_tieoff
+            assign mem_ports[i].addr    = '0;
+            assign mem_ports[i].data    = '0;
+            assign mem_ports[i].byte_en = '0;
+            assign mem_ports[i].wr      = 1'b0;
+            assign mem_ports[i].rd      = 1'b0;
+        end
+    endgenerate
 
     // Interface to Apple II
 
