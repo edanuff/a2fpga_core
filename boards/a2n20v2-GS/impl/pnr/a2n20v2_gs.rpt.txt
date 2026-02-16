@@ -12,27 +12,27 @@
   <Part Number>: GW2AR-LV18QN88C8/I7
   <Device>: GW2AR-18
   <Device Version>: C
-  <Created Time>:Sun Feb 15 17:47:10 2026
+  <Created Time>:Sun Feb 15 19:22:45 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.638s, Elapsed time = 0h 0m 0.62s
+    Placement Phase 0: CPU time = 0h 0m 0.779s, Elapsed time = 0h 0m 0.755s
     Placement Phase 1: CPU time = 0h 0m 0.172s, Elapsed time = 0h 0m 0.164s
     Placement Phase 2: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-    Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
-    Total Placement: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+    Placement Phase 3: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
+    Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.001s, Elapsed time = 0h 0m 0.001s
-    Routing Phase 1: CPU time = 0h 0m 0.173s, Elapsed time = 0h 0m 0.172s
-    Routing Phase 2: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 4s
+    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
+    Routing Phase 1: CPU time = 0h 0m 0.188s, Elapsed time = 0h 0m 0.186s
+    Routing Phase 2: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
     Total Routing: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
  Generate output files:
-    CPU time = 0h 0m 0.837s, Elapsed time = 0h 0m 0.807s
+    CPU time = 0h 0m 0.911s, Elapsed time = 0h 0m 0.871s
 
- Total Time and Memory Usage: CPU time = 0h 0m 9s, Elapsed time = 0h 0m 9s, Peak memory usage = 833MB
+ Total Time and Memory Usage: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 11s, Peak memory usage = 833MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 7249/20736                          |  35%
-    --LUT,ALU,ROM16           | 7165(6010 LUT, 1155 ALU, 0 ROM16)   | -
-    --SSRAM(RAM16)            | 14                                  | -
-  Register                    | 4099/15915                          |  26%
+  Logic                       | 9100/20736                          |  44%
+    --LUT,ALU,ROM16           | 8998(7675 LUT, 1323 ALU, 0 ROM16)   | -
+    --SSRAM(RAM16)            | 17                                  | -
+  Register                    | 4784/15915                          |  31%
     --Logic Register as Latch | 0/15552                             |  0%
-    --Logic Register as FF    | 4074/15552                          |  27%
+    --Logic Register as FF    | 4729/15552                          |  31%
     --I/O Register as Latch   | 0/363                               |  0%
-    --I/O Register as FF      | 25/363                              |  7%
-  CLS                         | 5364/10368                          |  52%
+    --I/O Register as FF      | 55/363                              |  16%
+  CLS                         | 6577/10368                          |  64%
   I/O Port                    | 36/66                               |  55%
   I/O Buf                     | 31                                  | -
     --Input Buf               | 6                                   | -
@@ -58,13 +58,14 @@
     --OSER10                  | 3
   BSRAM                       | 43/46                               | 94%
     --SP                      | 2
-    --SDPB                    | 29
+    --SDPB                    | 28
+    --SDPX9B                  | 2
     --DPB                     | 8
     --DPX9B                   | 2
-    --pROM                    | 2
-  DSP                         | 14/24                               | 59%
+    --pROM                    | 1
+  DSP                         | 14.5/24                             | 61%
     --MULT9X9                 | 4
-    --MULT18X18               | 4
+    --MULT18X18               | 5
     --MULTADDALU18X18         | 11
   ================================================================================
 
@@ -107,9 +108,9 @@
   a2bus_if.clk_logic| PRIMARY        |  TR TL BR BL
   O_sdram_clk_d  | PRIMARY        |  TR
   a2bus_if.clk_pixel| PRIMARY        |  TR TL BR BL
-  n16_7          | LW             |  -
-  n48_7          | LW             |  -
+  n3138_5        | LW             |  -
   timer_a_count_15_7| LW             |  -
+  n48_7          | LW             |  -
   supersprite/vdp/f18a_core/reset_n_r| LW             |  -
   supersprite/vdp/f18a_core/inst_cpu/n931_6| LW             |  -
   mockingboard/pb_l_o[2]| LW             |  -
@@ -258,15 +259,15 @@ Loc./Bank| Signal                | Dir.  | Site     | CFG             | IO Type 
 42/4     | a2_bridge_d[7]        | io    | IOB42[B] | -               | LVCMOS33 | 8     | UP        | NA        | NONE       | OFF        | NA         | NA              | NA            | 3.3  
 41/4     | a2_bridge_d[6]        | io    | IOB43[A] | -               | LVCMOS33 | 8     | UP        | NA        | NONE       | OFF        | NA         | NA              | NA            | 3.3  
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-p1/7     | IO_sdram_dq[0]        | out   | IOL3[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p2/7     | IO_sdram_dq[1]        | out   | IOL3[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p1/7     | IO_sdram_dq[0]        | io    | IOL3[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p2/7     | IO_sdram_dq[1]        | io    | IOL3[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 4/7      | clk                   | in    | IOL7[A]  | LPLL1_T_in      | LVCMOS33 | NA    | NONE      | ON        | NONE       | NA         | NA         | OFF             | NA            | 3.3  
-p5/7     | IO_sdram_dq[2]        | out   | IOL8[A]  | LPLL1_T_fb      | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p6/7     | IO_sdram_dq[3]        | out   | IOL8[B]  | LPLL1_C_fb      | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p7/7     | IO_sdram_dq[4]        | out   | IOL9[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p8/7     | IO_sdram_dq[5]        | out   | IOL9[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p11/7    | IO_sdram_dq[6]        | out   | IOL11[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p12/7    | IO_sdram_dq[7]        | out   | IOL11[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p5/7     | IO_sdram_dq[2]        | io    | IOL8[A]  | LPLL1_T_fb      | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p6/7     | IO_sdram_dq[3]        | io    | IOL8[B]  | LPLL1_C_fb      | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p7/7     | IO_sdram_dq[4]        | io    | IOL9[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p8/7     | IO_sdram_dq[5]        | io    | IOL9[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p11/7    | IO_sdram_dq[6]        | io    | IOL11[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p12/7    | IO_sdram_dq[7]        | io    | IOL11[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p14/7    | O_sdram_dqm[0]        | out   | IOL12[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p19/7    | O_sdram_wen_n         | out   | IOL12[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p18/7    | O_sdram_cke           | out   | IOL13[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
@@ -288,8 +289,8 @@ p35/6    | IO_sdram_dq[21]       | out   | IOL30[A] | -               | LVTTL33 
 p36/6    | IO_sdram_dq[20]       | out   | IOL30[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p37/6    | IO_sdram_dq[19]       | out   | IOL35[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p38/6    | IO_sdram_dq[18]       | out   | IOL35[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p41/6    | IO_sdram_dq[17]       | out   | IOL39[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p42/6    | IO_sdram_dq[16]       | out   | IOL39[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p41/6    | IO_sdram_dq[17]       | io    | IOL39[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p42/6    | IO_sdram_dq[16]       | io    | IOL39[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 13/6     | -                     | in    | IOL45[A] | LPLL2_T_in      | LVCMOS18 | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
 15/6     | a2_reset_n            | in    | IOL47[A] | LPLL2_T_fb      | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | OFF             | NA            | 3.3  
 16/6     | led[0]                | out   | IOL47[B] | LPLL2_C_fb      | LVCMOS33 | 8     | UP        | NA        | NA         | OFF        | NA         | OFF             | NA            | 3.3  
@@ -298,14 +299,14 @@ p42/6    | IO_sdram_dq[16]       | out   | IOL39[B] | -               | LVTTL33 
 19/6     | led[3]                | out   | IOL51[A] | -               | LVCMOS33 | 8     | UP        | NA        | NA         | OFF        | NA         | OFF             | NA            | 3.3  
 20/6     | led[4]                | out   | IOL51[B] | -               | LVCMOS33 | 8     | UP        | NA        | NA         | OFF        | NA         | OFF             | NA            | 3.3  
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-p89/2    | IO_sdram_dq[15]       | out   | IOR3[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p88/2    | IO_sdram_dq[14]       | out   | IOR3[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p85/2    | IO_sdram_dq[13]       | out   | IOR4[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p84/2    | IO_sdram_dq[12]       | out   | IOR5[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p82/2    | IO_sdram_dq[10]       | out   | IOR5[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p83/2    | IO_sdram_dq[11]       | out   | IOR6[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p79/2    | IO_sdram_dq[9]        | out   | IOR9[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-p78/2    | IO_sdram_dq[8]        | out   | IOR9[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p89/2    | IO_sdram_dq[15]       | io    | IOR3[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p88/2    | IO_sdram_dq[14]       | io    | IOR3[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p85/2    | IO_sdram_dq[13]       | io    | IOR4[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p84/2    | IO_sdram_dq[12]       | io    | IOR5[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p82/2    | IO_sdram_dq[10]       | io    | IOR5[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p83/2    | IO_sdram_dq[11]       | io    | IOR6[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p79/2    | IO_sdram_dq[9]        | io    | IOR9[A]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
+p78/2    | IO_sdram_dq[8]        | io    | IOR9[B]  | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p76/2    | O_sdram_dqm[1]        | out   | IOR11[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p73/2    | O_sdram_clk           | out   | IOR11[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p70/2    | O_sdram_ba[1]         | out   | IOR12[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
