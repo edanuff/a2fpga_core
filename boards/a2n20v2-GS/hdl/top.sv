@@ -184,16 +184,18 @@ module top #(
         .SDRAM_CLK(O_sdram_clk)
     );
 
-    // Tie off all SDRAM ports for now (Phase 1A — ports idle, controller initializes)
-    generate
-        for (genvar i = 0; i < NUM_PORTS; i++) begin : gen_tieoff
-            assign mem_ports[i].addr    = '0;
-            assign mem_ports[i].data    = '0;
-            assign mem_ports[i].byte_en = '0;
-            assign mem_ports[i].wr      = 1'b0;
-            assign mem_ports[i].rd      = 1'b0;
-        end
-    endgenerate
+    // Tie off unused SDRAM ports (DOC/GLU — reserved for Ensoniq)
+    assign mem_ports[DOC_MEM_PORT].addr    = '0;
+    assign mem_ports[DOC_MEM_PORT].data    = '0;
+    assign mem_ports[DOC_MEM_PORT].byte_en = '0;
+    assign mem_ports[DOC_MEM_PORT].wr      = 1'b0;
+    assign mem_ports[DOC_MEM_PORT].rd      = 1'b0;
+
+    assign mem_ports[GLU_MEM_PORT].addr    = '0;
+    assign mem_ports[GLU_MEM_PORT].data    = '0;
+    assign mem_ports[GLU_MEM_PORT].byte_en = '0;
+    assign mem_ports[GLU_MEM_PORT].wr      = 1'b0;
+    assign mem_ports[GLU_MEM_PORT].rd      = 1'b0;
 
     // Interface to Apple II
 
@@ -328,63 +330,127 @@ module top #(
     assign video_control_if.MONOCHROME_DHIRES_MODE = 1'b0;
     assign video_control_if.SHRG_MODE = 1'b0;
 
+    // HDMI raster position (from HDMI encoder, pixel clock domain)
     wire [9:0] hdmi_x;
     wire [9:0] hdmi_y;
-    wire apple_vga_active;
-    wire [7:0] apple_vga_r;
-    wire [7:0] apple_vga_g;
-    wire [7:0] apple_vga_b;
 
-    apple_video apple_video (
+    // Scan timer — generates scanline/hsync/vsync from Apple II bus timing
+    wire [8:0] scanline_w;
+    wire hsync_w;
+    wire vsync_w;
+    wire [9:0] pixel_w;
+
+    // Scan timer debug outputs for DebugOverlay
+    wire [8:0] scan_dbg_delta_w;
+    wire [8:0] scan_dbg_expected_w;
+    wire [8:0] scan_dbg_actual_w;
+    wire [7:0] scan_dbg_raw_data_w;
+    wire [7:0] scan_dbg_vbl_correct_w;
+    wire [7:0] scan_dbg_vertcnt_correct_w;
+    wire [7:0] scan_dbg_c02e_cnt_w;
+    wire [7:0] scan_dbg_c019_cnt_w;
+
+    scan_timer #(
+        .VGC_VERTCNT_LOCK(1),
+        .VGC_VBL_LOCK(1),
+        .RESYNC_THRESHOLD(2)
+    ) scan_timer (
+        .a2bus_if(a2bus_if),
+        .scanline_o(scanline_w),
+        .hsync_o(hsync_w),
+        .vsync_o(vsync_w),
+        .pixel_o(pixel_w),
+        .dbg_last_delta_o(scan_dbg_delta_w),
+        .dbg_last_expected_o(scan_dbg_expected_w),
+        .dbg_last_actual_o(scan_dbg_actual_w),
+        .dbg_last_raw_data_o(scan_dbg_raw_data_w),
+        .dbg_vbl_correct_o(scan_dbg_vbl_correct_w),
+        .dbg_vertcnt_correct_o(scan_dbg_vertcnt_correct_w),
+        .dbg_c02e_count_o(scan_dbg_c02e_cnt_w),
+        .dbg_c019_count_o(scan_dbg_c019_cnt_w)
+    );
+
+    // Apple II video → framebuffer scanner
+    wire fb_we_w;
+    wire [17:0] fb_data_w;
+    wire fb_vsync_w;
+
+    // Apple II RGB outputs for SuperSprite compositing
+    wire [7:0] apple_fb_r_w;
+    wire [7:0] apple_fb_g_w;
+    wire [7:0] apple_fb_b_w;
+    wire       apple_fb_active_w;
+
+    apple_video_fb apple_video_fb (
         .a2bus_if(a2bus_if),
         .a2mem_if(a2mem_if),
 
         .video_control_if(video_control_if),
-
-        .screen_x_i(hdmi_x),
-        .screen_y_i(hdmi_y),
 
         .video_address_o(video_address_w),
         .video_bank_o(video_bank_w),
         .video_rd_o(video_rd_w),
         .video_data_i(video_data_w),
 
-        .video_active_o(apple_vga_active),
-        .video_r_o(apple_vga_r),
-        .video_g_o(apple_vga_g),
-        .video_b_o(apple_vga_b)
+        .scanline_i(scanline_w),
+        .hsync_i(hsync_w),
+        .vsync_i(vsync_w),
+
+        .fb_we_o(fb_we_w),
+        .fb_data_o(fb_data_w),
+        .fb_vsync_o(fb_vsync_w),
+
+        // Apple II RGB output for SuperSprite
+        .apple_r_o(apple_fb_r_w),
+        .apple_g_o(apple_fb_g_w),
+        .apple_b_o(apple_fb_b_w),
+        .apple_active_o(apple_fb_active_w),
+
+        // SuperSprite composited input
+        .ssp_r_i(rgb_r_w),
+        .ssp_g_i(rgb_g_w),
+        .ssp_b_i(rgb_b_w),
+        .ssp_active_i(1'b1)
     );
 
-    wire [7:0] vgc_vga_r;
-    wire [7:0] vgc_vga_g;
-    wire [7:0] vgc_vga_b;
+    // VGC framebuffer scanner — IIgs Super Hi-Res modes
+    wire vgc_fb_we_w;
+    wire [17:0] vgc_fb_data_w;
+    wire vgc_fb_vsync_w;
 
-    vgc vgc (
+    vgc_fb vgc_fb (
         .a2bus_if(a2bus_if),
         .a2mem_if(a2mem_if),
 
         .video_control_if(video_control_if),
 
-        .cx_i(hdmi_x),
-        .cy_i(hdmi_y),
-
-        .apple_vga_r_i(apple_vga_r),
-        .apple_vga_g_i(apple_vga_g),
-        .apple_vga_b_i(apple_vga_b),
-
-        .vgc_vga_r_o(vgc_vga_r),
-        .vgc_vga_g_o(vgc_vga_g),
-        .vgc_vga_b_o(vgc_vga_b),
-
-        .R_o(),
-        .G_o(),
-        .B_o(),
-
         .vgc_active_o(vgc_active_w),
         .vgc_address_o(vgc_address_w),
         .vgc_rd_o(vgc_rd_w),
-        .vgc_data_i(vgc_data_w)
+        .vgc_data_i(vgc_data_w),
+
+        .scanline_i(scanline_w),
+        .hsync_i(hsync_w),
+        .vsync_i(vsync_w),
+
+        .fb_we_o(vgc_fb_we_w),
+        .fb_data_o(vgc_fb_data_w),
+        .fb_vsync_o(vgc_fb_vsync_w)
     );
+
+    // Framebuffer output mux — select apple_video_fb or vgc_fb based on SHRG_MODE
+    // Latched at frame boundary for clean transitions
+    reg use_vgc_r;
+    always @(posedge clk_logic_w) begin
+        if (vsync_w) use_vgc_r <= a2mem_if.SHRG_MODE;
+    end
+
+    wire fb_we_mux_w          = use_vgc_r ? vgc_fb_we_w    : fb_we_w;
+    wire [17:0] fb_data_mux_w = use_vgc_r ? vgc_fb_data_w  : fb_data_w;
+    wire fb_vsync_mux_w       = use_vgc_r ? vgc_fb_vsync_w : fb_vsync_w;
+
+    wire [10:0] fb_width_w  = use_vgc_r ? 11'd640 : 11'd560;
+    wire [9:0]  fb_height_w = use_vgc_r ? 10'd200 : 10'd192;
 
     // SuperSprite
 
@@ -420,6 +486,31 @@ module top #(
     assign f18a_gpu_if.raddr = 13'b0;
     assign f18a_gpu_if.gstatus = 7'b0;
 
+    // VDP Raster Counter — synced to Apple II scan_timer (clk_logic domain)
+    // vdp_cx: horizontal counter advancing once per 4 clk_logic cycles
+    // vdp_cy: uses scanline_w directly from scan_timer (0–261)
+    localparam VDP_HMAX = 10'd856;
+
+    reg [9:0] vdp_cx;
+    reg [1:0] vdp_div;
+
+    reg hsync_prev_r;
+    always @(posedge a2bus_if.clk_logic) begin
+        hsync_prev_r <= hsync_w;
+    end
+
+    always @(posedge a2bus_if.clk_logic) begin
+        if (hsync_w) begin
+            vdp_cx <= 10'd0;
+            vdp_div <= 2'd0;
+        end else begin
+            vdp_div <= vdp_div + 2'd1;
+            if (vdp_div == 2'd3 && vdp_cx < VDP_HMAX) begin
+                vdp_cx <= vdp_cx + 10'd1;
+            end
+        end
+    end
+
     SuperSprite #(
         .ENABLE(SUPERSPRITE_ENABLE),
         .ID(SUPERSPRITE_ID),
@@ -432,12 +523,12 @@ module top #(
         .rd_en_o(ssp_rd),
         .irq_n_o(vdp_irq_n),
 
-        .screen_x_i(hdmi_x),
-        .screen_y_i(hdmi_y),
-        .apple_vga_r_i(vgc_vga_r),
-        .apple_vga_g_i(vgc_vga_g),
-        .apple_vga_b_i(vgc_vga_b),
-        .apple_vga_active_i(apple_vga_active),
+        .screen_x_i(vdp_cx),
+        .screen_y_i({1'b0, scanline_w}),
+        .apple_vga_r_i(apple_fb_r_w),
+        .apple_vga_g_i(apple_fb_g_w),
+        .apple_vga_b_i(apple_fb_b_w),
+        .apple_vga_active_i(apple_fb_active_w),
 
         .scanlines_i(SCANLINES_ENABLE | sw_scanlines_w),
 
@@ -622,9 +713,59 @@ module top #(
         .audio_r(audio_sample_word[1])
     );
 
-    // HDMI
+    // Border color: convert 4-bit palette index to RGB666
+    wire border_gsp_w = a2bus_if.sw_gs;
+    wire [4:0] border_idx_w = {border_gsp_w, a2mem_if.BORDER_COLOR};
+    wire [11:0] border_palette_w [0:31];
+    assign border_palette_w = '{
+        12'h000, 12'h924, 12'h42a, 12'hd4e,   // Apple II  0-3
+        12'h064, 12'h888, 12'h39e, 12'hcbf,   //           4-7
+        12'h450, 12'hc73, 12'h888, 12'hfac,   //           8-11
+        12'h3c2, 12'hcd6, 12'h7ec, 12'hfff,   //          12-15
+        12'h000, 12'hd03, 12'h009, 12'hd2d,   // IIgs      0-3
+        12'h072, 12'h555, 12'h22f, 12'h6af,   //           4-7
+        12'h850, 12'hf60, 12'haaa, 12'hf98,   //           8-11
+        12'h1d0, 12'hff0, 12'h4f9, 12'hfff    //          12-15
+    };
+    wire [11:0] border_rgb444_w = border_palette_w[border_idx_w];
+    wire [17:0] border_rgb666_w = {
+        border_rgb444_w[11:8], 2'b00,
+        border_rgb444_w[7:4],  2'b00,
+        border_rgb444_w[3:0],  2'b00
+    };
 
-    wire scanline_en = scanlines_w && hdmi_y[0];
+    // SDRAM Framebuffer
+    wire [7:0] fb_r_w;
+    wire [7:0] fb_g_w;
+    wire [7:0] fb_b_w;
+
+    sdram_framebuffer sdram_framebuffer (
+        .clk(clk_logic_w),
+        .clk_pixel(clk_pixel_w),
+        .rst_n(device_reset_n_w),
+
+        .fb_vsync(fb_vsync_mux_w),
+        .fb_we(fb_we_mux_w),
+        .fb_data(fb_data_mux_w),
+        .fb_width(fb_width_w),
+        .fb_height(fb_height_w),
+
+        .fb_write_port(mem_ports[FB_WRITE_PORT]),
+        .fb_read_port(mem_ports[FB_READ_PORT]),
+
+        .hdmi_cx({1'b0, hdmi_x}),
+        .hdmi_cy(hdmi_y),
+
+        .r_o(fb_r_w),
+        .g_o(fb_g_w),
+        .b_o(fb_b_w),
+
+        .border_color(border_rgb666_w),
+        .scanline_en(scanlines_w),
+        .sleep_i(sleep_w)
+    );
+
+    // HDMI
 
     reg show_debug_overlay_r = 1'b0;
 
@@ -640,25 +781,25 @@ module top #(
         .enable_i(show_debug_overlay_r),
 
         .hex_values ({
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,       
-            8'h0,
-            8'h0,
-            8'h0
-        }), 
+            scan_dbg_raw_data_w,
+            scan_dbg_c02e_cnt_w,
+            scan_dbg_c019_cnt_w,
+            scan_dbg_vbl_correct_w,
+            scan_dbg_vertcnt_correct_w,
+            8'(scan_dbg_delta_w),
+            8'(scan_dbg_expected_w),
+            8'(scan_dbg_actual_w)
+        }),
 
-        .debug_bits_0_i ('0), 
+        .debug_bits_0_i ('0),
         .debug_bits_1_i ('0),
 
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),
 
-        .r_i            (scanline_en ? {1'b0, rgb_r_w[7:1]} : rgb_r_w),
-        .g_i            (scanline_en ? {1'b0, rgb_g_w[7:1]} : rgb_g_w),
-        .b_i            (scanline_en ? {1'b0, rgb_b_w[7:1]} : rgb_b_w),
+        .r_i            (fb_r_w),
+        .g_i            (fb_g_w),
+        .b_i            (fb_b_w),
 
         .r_o            (debug_r_w),
         .g_o            (debug_g_w),
