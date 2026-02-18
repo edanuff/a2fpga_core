@@ -36,6 +36,9 @@ module top #(
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
+    parameter bit ENSONIQ_ENABLE = 1,
+    parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
+
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 1,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
@@ -184,18 +187,34 @@ module top #(
         .SDRAM_CLK(O_sdram_clk)
     );
 
-    // Tie off unused SDRAM ports (DOC/GLU — reserved for Ensoniq)
-    assign mem_ports[DOC_MEM_PORT].addr    = '0;
-    assign mem_ports[DOC_MEM_PORT].data    = '0;
-    assign mem_ports[DOC_MEM_PORT].byte_en = '0;
-    assign mem_ports[DOC_MEM_PORT].wr      = 1'b0;
-    assign mem_ports[DOC_MEM_PORT].rd      = 1'b0;
+    // Ensoniq DOC5503 Sound
 
-    assign mem_ports[GLU_MEM_PORT].addr    = '0;
-    assign mem_ports[GLU_MEM_PORT].data    = '0;
-    assign mem_ports[GLU_MEM_PORT].byte_en = '0;
-    assign mem_ports[GLU_MEM_PORT].wr      = 1'b0;
-    assign mem_ports[GLU_MEM_PORT].rd      = 1'b0;
+    wire [15:0] sg_audio_l;
+    wire [15:0] sg_audio_r;
+    wire [7:0] sg_d_w;
+    wire sg_rd_w;
+    wire [7:0] doc_osc_en_w;
+    wire [1:0] doc_osc_mode_w[8];
+    wire [7:0] doc_osc_halt_w;
+
+    sound_glu #(
+        .ENABLE(ENSONIQ_ENABLE),
+        .MONO_MIX(ENSONIQ_MONO_MIX)
+    ) sg (
+        .a2bus_if(a2bus_if),
+        .data_o(sg_d_w),
+        .rd_en_o(sg_rd_w),
+
+        .audio_l_o(sg_audio_l),
+        .audio_r_o(sg_audio_r),
+
+        .debug_osc_en_o(doc_osc_en_w),
+        .debug_osc_mode_o(doc_osc_mode_w),
+        .debug_osc_halt_o(doc_osc_halt_w),
+
+        .glu_mem_if(mem_ports[GLU_MEM_PORT]),
+        .doc_mem_if(mem_ports[DOC_MEM_PORT])
+    );
 
     // Interface to Apple II
 
@@ -633,8 +652,9 @@ module top #(
     wire signed [15:0] core_audio_l_w;
     wire signed [15:0] core_audio_r_w;
     // Combine all the audio sources into a single 16-bit signed audio signal
-    assign core_audio_l_w = ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
-    assign core_audio_r_w = ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
+    // This could theoretically overflow by 1 bit and clip, but unlikely
+    assign core_audio_l_w = sg_audio_l + ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
+    assign core_audio_r_w = sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
 
     // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
 
