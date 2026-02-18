@@ -95,6 +95,9 @@ module apple_video_fb (
     initial $readmemh("video.hex", viderom_r, 0);
     reg [11:0] viderom_a_r;
     reg [7:0] viderom_d_r;
+    // Dedicated always block for character ROM read — required for BSRAM inference.
+    // Synthesizer cannot extract memory read patterns from large state machines.
+    always @(posedge a2bus_if.clk_logic) viderom_d_r <= ~viderom_r[viderom_a_r];
 
     reg [22:0] flash_cnt_r;
     always @(posedge a2bus_if.clk_logic) flash_cnt_r <= flash_cnt_r + 1'b1;
@@ -306,7 +309,7 @@ module apple_video_fb (
         12'h072, 12'h555, 12'h22f, 12'h6af,
         12'h850, 12'hf60, 12'haaa, 12'hf98,
         12'h1d0, 12'hff0, 12'h4f9, 12'hfff
-    };
+    } /* synthesis syn_romstyle = "distributed_rom" */;
 
     reg [3:0] artifact_r[0:127] = '{
         4'h0,4'h0,4'h0,4'h0,4'h8,4'h0,4'h0,4'h0,4'h1,4'h1,4'h5,4'h1,4'h9,4'h9,4'hd,4'hf,
@@ -320,13 +323,15 @@ module apple_video_fb (
     };
 
     wire BW = FORCE_MONOCHROME | monochrome_mode_r | monochrome_dhires_mode_r;
+
+    // Combinational artifact lookup — extracted from state machine for ROM16 inference.
     wire [6:0] artifact_window_w = pix_history_r[HISTORY_ARTIFACT_OFFSET + 6:HISTORY_ARTIFACT_OFFSET];
-    wire [3:0] pix_artifact_w = artifact_r[artifact_window_w];
-    wire [3:0] rot_pix_artifact_w =
-        pix_step4_r == 2'b00 ? pix_artifact_w :
-        pix_step4_r == 2'b01 ? {pix_artifact_w[2:0], pix_artifact_w[3]} :
-        pix_step4_r == 2'b10 ? {pix_artifact_w[1:0], pix_artifact_w[3:2]} :
-                                {pix_artifact_w[0], pix_artifact_w[3:1]};
+    wire [3:0] artifact_data_w = artifact_r[artifact_window_w];
+
+    // Combinational palette lookup — extracted from state machine for ROM16 inference.
+    // Address is registered in gap_cnt_r==0; data is valid in gap_cnt_r==1.
+    reg [4:0] palette_addr_r;
+    wire [11:0] palette_data_w = palette_rgb_r[palette_addr_r];
 
     // ----------------------------------------------------------------------------------------------------------------
     // Nibble helper
@@ -386,6 +391,10 @@ module apple_video_fb (
     // the combinational SuperSprite path sees the updated apple_r_o value.
     reg ssp_capture_r;
 
+    // Pixel output pending flag: set during gap_cnt_r==0 when a pixel is ready,
+    // consumed during gap_cnt_r==1 after palette_data_w has settled.
+    reg pixel_output_pending_r;
+
     // Pixel pipeline
     reg [PIX_BUFFER_SIZE-1:0] pix_shift_r;
     reg [PIX_HISTORY_SIZE-1:0] pix_history_r;
@@ -435,7 +444,7 @@ module apple_video_fb (
         (next_GR & col80_r & hires_mode_r & !an3_r) ? HIRES80_LINE :
         TEXT40_LINE;
 
-    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
+    always @(posedge a2bus_if.clk_logic) begin
         if (!a2bus_if.system_reset_n) begin
             state_r <= ST_IDLE;
             fb_we_o <= 1'b0;
@@ -449,7 +458,6 @@ module apple_video_fb (
             video_address_o <= 16'd0;
             video_bank_o <= 1'b0;
             viderom_a_r <= 12'd0;
-            viderom_d_r <= 8'd0;
 
             chunk_r <= 5'd0;
             pix_cnt_r <= 5'd0;
@@ -464,6 +472,8 @@ module apple_video_fb (
             h_offset_r <= 6'd0;
             scanline_pix_cnt_r <= 10'd0;
             ssp_capture_r <= 1'b0;
+            pixel_output_pending_r <= 1'b0;
+            palette_addr_r <= 5'd0;
 
             pix_shift_r <= '0;
             pix_history_r <= '0;
@@ -504,9 +514,6 @@ module apple_video_fb (
                 fb_we_o <= 1'b1;
                 ssp_capture_r <= 1'b0;
             end
-
-            // Character ROM read — single-registered, 2-cycle latency
-            viderom_d_r <= ~viderom_r[viderom_a_r];
 
             // Vsync: latch mode registers and emit fb_vsync early
             // (70 non-visible scanlines before first pixel gives the
@@ -551,6 +558,7 @@ module apple_video_fb (
                     next_pix_delay_r <= 1'b0;
                     scanline_pix_cnt_r <= 10'd0;
                     ssp_capture_r <= 1'b0;
+                    pixel_output_pending_r <= 1'b0;
 
                     pix_shift_r <= '0;
                     // Reset pix_history_r to zeros at the start of each scanline.
@@ -735,9 +743,9 @@ module apple_video_fb (
                 // ============================================================
                 // PIXEL OUTPUT — active when primed
                 //
-                // Inline color computation: shift pixel into history,
-                // compute color from post-shift history (next_history),
-                // output in the same cycle. This minimizes pipeline delay.
+                // Two-phase pixel pipeline:
+                //   gap_cnt_r==0: compute color, register palette address
+                //   gap_cnt_r==1: palette_data_w valid, output pixel to FB
                 //
                 // pix_history_r is cleared at scanline start to prevent
                 // previous scanline's trailing pixels from wrapping around.
@@ -750,34 +758,27 @@ module apple_video_fb (
                 else begin
                     gap_cnt_r <= gap_cnt_r + 2'd1;
 
-                    // --- Pixel processing and output cycle (gap_cnt_r == 0) ---
+                    // --- Phase 1: Color computation (gap_cnt_r == 0) ---
                     if (gap_cnt_r == 2'd0) begin
 
                         // Compute post-shift history (what pix_history_r will
                         // become after this cycle's non-blocking assignment)
                         reg [PIX_HISTORY_SIZE-1:0] next_history;
                         reg [3:0] color;
-                        reg [11:0] pix_rgb;
-                        reg [6:0] next_artifact_window;
-                        reg [3:0] next_artifact;
                         reg [3:0] next_rot_artifact;
                         reg [3:0] current_nibble;
 
                         next_history = {pix_shift_r[0], pix_history_r[PIX_HISTORY_SIZE-1:1]};
 
-                        // Compute artifact color from PRE-shift history (pix_history_r),
-                        // matching apple_video.sv. The 7-bit artifact window is
-                        // phase-sensitive: using post-shift (next_history) would
-                        // shift bit positions by 1, swapping the color palette
-                        // (e.g. blue↔orange). The single-bit text/BW pixel check
-                        // can use next_history since parity doesn't matter there.
-                        next_artifact_window = pix_history_r[HISTORY_ARTIFACT_OFFSET + 6:HISTORY_ARTIFACT_OFFSET];
-                        next_artifact = artifact_r[next_artifact_window];
+                        // Artifact color from PRE-shift history via module-scope
+                        // combinational wire (artifact_data_w), extracted for ROM16
+                        // inference. Phase-sensitive: must use pix_history_r, not
+                        // next_history, to avoid swapping artifact color palette.
                         case (pix_step4_r)
-                            2'b00: next_rot_artifact = next_artifact;
-                            2'b01: next_rot_artifact = {next_artifact[2:0], next_artifact[3]};
-                            2'b10: next_rot_artifact = {next_artifact[1:0], next_artifact[3:2]};
-                            2'b11: next_rot_artifact = {next_artifact[0], next_artifact[3:1]};
+                            2'b00: next_rot_artifact = artifact_data_w;
+                            2'b01: next_rot_artifact = {artifact_data_w[2:0], artifact_data_w[3]};
+                            2'b10: next_rot_artifact = {artifact_data_w[1:0], artifact_data_w[3:2]};
+                            2'b11: next_rot_artifact = {artifact_data_w[0], artifact_data_w[3:1]};
                         endcase
 
                         // Shift history with current pixel
@@ -806,33 +807,15 @@ module apple_video_fb (
 
                         pix_color_r <= color;
 
-                        // Output pixel after warmup period
-                        // scanline_pix_cnt_r counts ALL pixel cycles (warmup + output).
-                        // fb_we_o only fires during the output phase.
-                        if (scanline_pix_cnt_r >= WARMUP_PIXELS && scanline_pix_cnt_r < (WARMUP_PIXELS + 10'd560)) begin
-                            pix_rgb = palette_rgb_r[{GSP, color}];
+                        // Register palette address for ROM16-inferred lookup.
+                        // palette_data_w will be valid next cycle (gap_cnt_r==1).
+                        palette_addr_r <= {GSP, color};
 
-                            // Expose Apple II RGB expanded to 8-bit for SuperSprite input.
-                            // Use {nibble, 4'b0} so that SSP pass-through truncated to [7:2]
-                            // produces {nibble, 2'b00}, matching the direct RGB444→RGB666 path
-                            // and the border color expansion.
-                            apple_r_o <= {pix_rgb[11:8], 4'b0};
-                            apple_g_o <= {pix_rgb[7:4], 4'b0};
-                            apple_b_o <= {pix_rgb[3:0], 4'b0};
-                            apple_active_o <= 1'b1;
-
-                            // When SuperSprite is active, defer the framebuffer write by
-                            // 1 clk_logic cycle so the combinational SSP path sees the
-                            // updated apple_r_o. Without this delay, the first pixel of
-                            // each scanline reads stale (black) apple_r_o, creating a
-                            // 1-pixel notch artifact.
-                            if (ssp_active_i) begin
-                                ssp_capture_r <= 1'b1;
-                            end else begin
-                                fb_data_o <= {pix_rgb[11:8], 2'b00, pix_rgb[7:4], 2'b00, pix_rgb[3:0], 2'b00};
-                                fb_we_o <= 1'b1;
-                            end
-                        end
+                        // Set pending flag if this pixel is in the output window
+                        if (scanline_pix_cnt_r >= WARMUP_PIXELS && scanline_pix_cnt_r < (WARMUP_PIXELS + 10'd560))
+                            pixel_output_pending_r <= 1'b1;
+                        else
+                            pixel_output_pending_r <= 1'b0;
 
                         // Always advance the pixel cycle counter
                         scanline_pix_cnt_r <= scanline_pix_cnt_r + 10'd1;
@@ -864,8 +847,36 @@ module apple_video_fb (
                         end
                     end
 
-                    // --- Scanline complete check (gap_cnt_r == 1) ---
+                    // --- Phase 2: Palette output + scanline complete (gap_cnt_r == 1) ---
                     if (gap_cnt_r == 2'd1) begin
+                        // palette_data_w is now valid (addr was registered last cycle).
+                        // Output pixel to framebuffer and SuperSprite interface.
+                        if (pixel_output_pending_r) begin
+                            pixel_output_pending_r <= 1'b0;
+
+                            // Expose Apple II RGB expanded to 8-bit for SuperSprite input.
+                            // Use {nibble, 4'b0} so that SSP pass-through truncated to [7:2]
+                            // produces {nibble, 2'b00}, matching the direct RGB444→RGB666 path
+                            // and the border color expansion.
+                            apple_r_o <= {palette_data_w[11:8], 4'b0};
+                            apple_g_o <= {palette_data_w[7:4], 4'b0};
+                            apple_b_o <= {palette_data_w[3:0], 4'b0};
+                            apple_active_o <= 1'b1;
+
+                            // When SuperSprite is active, defer the framebuffer write by
+                            // 1 clk_logic cycle so the combinational SSP path sees the
+                            // updated apple_r_o. Without this delay, the first pixel of
+                            // each scanline reads stale (black) apple_r_o, creating a
+                            // 1-pixel notch artifact.
+                            if (ssp_active_i) begin
+                                ssp_capture_r <= 1'b1;
+                            end else begin
+                                fb_data_o <= {palette_data_w[11:8], 2'b00, palette_data_w[7:4], 2'b00, palette_data_w[3:0], 2'b00};
+                                fb_we_o <= 1'b1;
+                            end
+                        end
+
+                        // Scanline complete check
                         if (scanline_pix_cnt_r == (WARMUP_PIXELS + 10'd560)) begin
                             state_r <= ST_IDLE;
                         end

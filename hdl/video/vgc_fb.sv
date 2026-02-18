@@ -28,7 +28,7 @@
 // In 640 mode, 2-bit pixels with palette pair dithering are rendered
 // directly at 640 pixels wide.
 //
-// Per-scanline budget: ~956 cycles at 54 MHz out of ~3,429 available.
+// Per-scanline budget: ~964 cycles at 54 MHz out of ~3,429 available.
 //
 // Runs entirely on clk_logic (54 MHz).
 //
@@ -152,7 +152,7 @@ module vgc_fb (
     // Main state machine
     // =========================================================================
 
-    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
+    always @(posedge a2bus_if.clk_logic) begin
         if (!a2bus_if.system_reset_n) begin
             state_r <= ST_IDLE;
             fetch_step_r <= 3'd0;
@@ -233,8 +233,9 @@ module vgc_fb (
             end
 
             // -----------------------------------------------------------------
-            // FETCH PALETTE — 8 iterations x 3 cycles = 24 cycles
-            // Each read loads 2 palette entries (12-bit RGB444 each)
+            // FETCH PALETTE — 8 iterations x 5 cycles = 40 cycles
+            // Each read loads 2 palette entries (12-bit RGB444 each),
+            // written one per cycle for single-port SSRAM inference.
             // -----------------------------------------------------------------
             ST_FETCH_PAL: begin
                 case (fetch_step_r)
@@ -253,9 +254,14 @@ module vgc_fb (
                         fetch_step_r <= 3'd3;
                     end
                     3'd3: begin
-                        // Store 2 palette entries from 32-bit word
-                        palette_rgb_r[{pal_fetch_cnt_r[2:0], 1'b0}]     <= vgc_data_i[11:0];
-                        palette_rgb_r[{pal_fetch_cnt_r[2:0], 1'b0} + 1] <= vgc_data_i[27:16];
+                        // Store even palette entry and latch word for odd entry
+                        palette_rgb_r[{pal_fetch_cnt_r[2:0], 1'b0}] <= vgc_data_i[11:0];
+                        pixel_word_r <= vgc_data_i;  // reuse pixel_word_r to hold data for odd entry
+                        fetch_step_r <= 3'd4;
+                    end
+                    3'd4: begin
+                        // Store odd palette entry
+                        palette_rgb_r[{pal_fetch_cnt_r[2:0], 1'b1}] <= pixel_word_r[27:16];
 
                         if (pal_fetch_cnt_r == 4'd7) begin
                             // All 16 palette entries loaded — start pixel rendering
