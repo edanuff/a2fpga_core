@@ -22,7 +22,7 @@
         <File path="../../hdl/f18a/f18a_gpu_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/f18a/f18a_single_port_ram.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/f18a/f18a_sprites.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_tile_linebuf.vhd" type="file.vhdl" enable="1"/>
+        <File path="../../hdl/f18a/f18a_tile_linebuf_ssram.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/f18a/f18a_tiles.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/f18a/f18a_version.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/f18a/f18a_vga_cont_640_60.vhd" type="file.vhdl" enable="1"/>
