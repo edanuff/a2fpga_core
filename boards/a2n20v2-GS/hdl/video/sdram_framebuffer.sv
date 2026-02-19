@@ -158,6 +158,7 @@ module sdram_framebuffer #(
     reg [10:0] wr_width_r;           // latched at vsync
     reg [20:0] wr_line_base_r;       // FB_BASE_ADDR + y * (fb_width/2)
     reg [15:0] wr_pixel_even_r;      // buffered even pixel (RGB565)
+    reg        frame_pending_r;      // waiting for first fb_we after accepted frame start
     // Reject implausibly short frame-start intervals so a spurious fb_vsync
     // pulse cannot reset write/read tracking mid-frame.
     localparam [19:0] FRAME_MIN_CYCLES = 20'd540000;  // ~10ms at 54MHz
@@ -183,33 +184,45 @@ module sdram_framebuffer #(
             wr_line_base_r <= FB_BASE_ADDR;
             fifo_wr_ptr_r <= '0;
             wr_pixel_even_r <= 16'd0;
+            frame_pending_r <= 1'b0;
         end else begin
             if (frame_start_w) begin
-                wr_x_r <= 11'd0;
-                wr_y_r <= 10'd0;
+                // Arm reset, but align to the first pixel write pulse so
+                // wr_x/wr_y stay phase-locked to the producer's fb_we stream.
+                frame_pending_r <= 1'b1;
                 wr_width_r <= fb_width;
-                wr_line_base_r <= FB_BASE_ADDR;
-            end else if (fb_we) begin
-                if (wr_x_r[0] == 1'b0) begin
-                    // Even pixel — buffer as RGB565
-                    wr_pixel_even_r <= rgb666_to_565(fb_data);
-                end else if (!fifo_full_w) begin
-                    // Odd pixel — pack with buffered even and push to FIFO
-                    wr_fifo[fifo_wr_ptr_r[FIFO_ADDR_BITS-1:0]] <= {
-                        wr_line_base_r + {11'd0, wr_x_r[10:1]},  // packed addr
-                        rgb666_to_565(fb_data),                    // odd pixel [31:16]
-                        wr_pixel_even_r                            // even pixel [15:0]
-                    };
-                    fifo_wr_ptr_r <= fifo_wr_ptr_r + 1;
-                end
+            end
 
-                // Advance position
-                if (wr_x_r == wr_width_r - 11'd1) begin
-                    wr_x_r <= 11'd0;
-                    wr_y_r <= wr_y_r + 10'd1;
-                    wr_line_base_r <= wr_line_base_r + {11'd0, wr_width_r[10:1]};
+            if (fb_we) begin
+                if (frame_pending_r || frame_start_w) begin
+                    // First pixel of new frame: consume as x=0 even pixel.
+                    wr_x_r <= 11'd1;
+                    wr_y_r <= 10'd0;
+                    wr_line_base_r <= FB_BASE_ADDR;
+                    wr_pixel_even_r <= rgb666_to_565(fb_data);
+                    frame_pending_r <= 1'b0;
                 end else begin
-                    wr_x_r <= wr_x_r + 11'd1;
+                    if (wr_x_r[0] == 1'b0) begin
+                        // Even pixel — buffer as RGB565
+                        wr_pixel_even_r <= rgb666_to_565(fb_data);
+                    end else if (!fifo_full_w) begin
+                        // Odd pixel — pack with buffered even and push to FIFO
+                        wr_fifo[fifo_wr_ptr_r[FIFO_ADDR_BITS-1:0]] <= {
+                            wr_line_base_r + {11'd0, wr_x_r[10:1]},  // packed addr
+                            rgb666_to_565(fb_data),                    // odd pixel [31:16]
+                            wr_pixel_even_r                            // even pixel [15:0]
+                        };
+                        fifo_wr_ptr_r <= fifo_wr_ptr_r + 1;
+                    end
+
+                    // Advance position
+                    if (wr_x_r == wr_width_r - 11'd1) begin
+                        wr_x_r <= 11'd0;
+                        wr_y_r <= wr_y_r + 10'd1;
+                        wr_line_base_r <= wr_line_base_r + {11'd0, wr_width_r[10:1]};
+                    end else begin
+                        wr_x_r <= wr_x_r + 11'd1;
+                    end
                 end
             end
         end
