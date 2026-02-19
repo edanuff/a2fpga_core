@@ -291,6 +291,7 @@ module sdram_framebuffer #(
     // Packed width: SDRAM words per line (fb_width / 2)
     wire [10:0] packed_width_w = {1'b0, fb_width[10:1]};
     localparam integer FB_READ_BURST_WORDS = 4;  // 4 x 32-bit words = 8 pixels per request
+    localparam integer PREFETCH_LEAD_LINES = 12;
 
     localparam FETCH_IDLE    = 2'd0;
     localparam FETCH_READ    = 2'd1;
@@ -329,9 +330,11 @@ module sdram_framebuffer #(
     wire       display_in_active_w = (cy_sync_r >= v_border_w) &&
                                       (cy_sync_r < v_border_w + {fb_height, 1'b0});
 
-    // Approaching active area: 1-2 scanlines before content starts
+    // Approaching active area: prefetch line 0 early in vblank so first active
+    // lines are guaranteed ready.
+    wire [10:0] cy_prefetch_sum_w = {1'b0, cy_sync_r} + 11'(PREFETCH_LEAD_LINES);
     wire cy_approaching_active_w = (cy_sync_r < v_border_w) &&
-                                    ({1'b0, cy_sync_r} + 11'd2 >= {1'b0, v_border_w});
+                                    (cy_prefetch_sum_w >= {1'b0, v_border_w});
 
     wire [8:0] next_line_w = display_fb_line_w + 9'd1;
     wire [10:0] fetch_words_left_w = packed_width_w - fetch_word_r;
