@@ -603,6 +603,9 @@ module sdram_framebuffer #(
 
     wire in_v_active_px_w = (hdmi_cy >= v_border_px_r) &&
                              (hdmi_cy < v_border_px_r + {fb_height_px_r, 1'b0});
+    wire in_h_active_px_w = (hdmi_cx >= {1'b0, h_border_px_r}) &&
+                             (hdmi_cx < {1'b0, h_border_px_r} + fb_width_px_r);
+    wire in_active_px_w = in_h_active_px_w && in_v_active_px_w;
 
     // Use next_cx to compensate for 1-cycle BRAM read latency (matches DDR3 approach).
     // At clock edge N we set the address for pixel at cx+1; the BRAM delivers that
@@ -611,36 +614,38 @@ module sdram_framebuffer #(
     wire        next_in_h_active_w = (next_cx_w >= {1'b0, h_border_px_r}) &&
                                       (next_cx_w < {1'b0, h_border_px_r} + fb_width_px_r);
     wire [9:0]  next_fb_x_w = next_cx_w[9:0] - h_border_px_r[9:0];
-    wire [9:0]  lb_rd_addr_pair_w = {rd_bank_w, next_fb_x_w[9:1]};
-
+    reg [9:0] lb_rd_addr_pair_r;
     reg [(2*COLOR_BITS)-1:0] lb_rd_pair_r;
     reg lb_rd_pixel_odd_r;
     always @(posedge clk_pixel) begin
-        lb_rd_pair_r <= line_buf_pair[lb_rd_addr_pair_w];
-        lb_rd_pixel_odd_r <= next_fb_x_w[0];
+        // Set read address/odd selector for next pixel.
+        if (next_in_h_active_w && in_v_active_px_w) begin
+            lb_rd_addr_pair_r <= {rd_bank_w, next_fb_x_w[9:1]};
+            lb_rd_pixel_odd_r <= next_fb_x_w[0];
+        end else begin
+            lb_rd_addr_pair_r <= 10'd0;
+            lb_rd_pixel_odd_r <= 1'b0;
+        end
+
+        // BRAM returns the pixel pair for the address captured last cycle.
+        lb_rd_pair_r <= line_buf_pair[lb_rd_addr_pair_r];
     end
     wire [COLOR_BITS-1:0] lb_rd_data_w = lb_rd_pixel_odd_r
                                         ? lb_rd_pair_r[(2*COLOR_BITS)-1:COLOR_BITS]
                                         : lb_rd_pair_r[COLOR_BITS-1:0];
-
-    reg in_active_px_d1_r;
-    reg scanline_dim_d1_r;
-    always @(posedge clk_pixel) begin
-        in_active_px_d1_r <= next_in_h_active_w && in_v_active_px_w;
-        scanline_dim_d1_r <= scanline_en && in_v_active_px_w && hdmi_cy[0];
-    end
+    wire scanline_dim_px_w = scanline_en && in_v_active_px_w && hdmi_cy[0];
 
     wire [23:0] active_rgb_w = torgb(lb_rd_data_w);
     wire [23:0] border_rgb_w = torgb(border_color);
 
-    wire [23:0] pixel_rgb_w = in_active_px_d1_r ? active_rgb_w : border_rgb_w;
+    wire [23:0] pixel_rgb_w = in_active_px_w ? active_rgb_w : border_rgb_w;
 
     wire [23:0] dimmed_rgb_w = {1'b0, pixel_rgb_w[23:17],
                                  1'b0, pixel_rgb_w[15:9],
                                  1'b0, pixel_rgb_w[7:1]};
 
     wire [23:0] final_rgb_w = sleep_i ? 24'd0 :
-                               scanline_dim_d1_r ? dimmed_rgb_w : pixel_rgb_w;
+                               scanline_dim_px_w ? dimmed_rgb_w : pixel_rgb_w;
 
     assign r_o = final_rgb_w[23:16];
     assign g_o = final_rgb_w[15:8];
