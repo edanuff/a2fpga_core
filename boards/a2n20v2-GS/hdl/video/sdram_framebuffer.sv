@@ -85,7 +85,10 @@ module sdram_framebuffer #(
     output logic [7:0]  dbg_flags_o,           // Live status flags
     output logic [7:0]  dbg_line_not_ready_o,  // Display line-starts before line fully fetched
     output logic [7:0]  dbg_line_lag_max_o,    // Max display-vs-fetched line lag per frame
-    output logic [7:0]  dbg_ready_phase_err_o  // Read ready pulses outside FETCH_WAIT
+    output logic [7:0]  dbg_ready_phase_err_o, // Read ready pulses outside FETCH_WAIT
+    output logic [7:0]  dbg_vsync_raw_o,       // Raw fb_vsync pulses seen in this frame
+    output logic [7:0]  dbg_frame_start_accept_o, // Accepted frame starts in this frame
+    output logic [7:0]  dbg_frame_start_reject_o  // Rejected fb_vsync pulses in this frame
 );
 
     // =========================================================================
@@ -312,6 +315,9 @@ module sdram_framebuffer #(
     reg [7:0] dbg_line_not_ready_r;
     reg [7:0] dbg_line_lag_max_r;
     reg [7:0] dbg_ready_phase_err_r;
+    reg [7:0] dbg_vsync_raw_r;
+    reg [7:0] dbg_frame_start_accept_r;
+    reg [7:0] dbg_frame_start_reject_r;
     reg [8:0] completed_line_even_r;
     reg [8:0] completed_line_odd_r;
     reg [8:0] display_line_prev_r;
@@ -371,6 +377,9 @@ module sdram_framebuffer #(
             dbg_line_not_ready_r <= 8'd0;
             dbg_line_lag_max_r <= 8'd0;
             dbg_ready_phase_err_r <= 8'd0;
+            dbg_vsync_raw_r <= 8'd0;
+            dbg_frame_start_accept_r <= 8'd0;
+            dbg_frame_start_reject_r <= 8'd0;
             completed_line_even_r <= 9'h1FF;
             completed_line_odd_r <= 9'h1FF;
             display_line_prev_r <= 9'd0;
@@ -387,11 +396,21 @@ module sdram_framebuffer #(
             dbg_line_not_ready_r <= 8'd0;
             dbg_line_lag_max_r <= 8'd0;
             dbg_ready_phase_err_r <= 8'd0;
+            dbg_vsync_raw_r <= 8'd1;
+            dbg_frame_start_accept_r <= 8'd1;
+            dbg_frame_start_reject_r <= 8'd0;
             completed_line_even_r <= 9'h1FF;
             completed_line_odd_r <= 9'h1FF;
             display_line_prev_r <= 9'd0;
             display_active_prev_r <= 1'b0;
         end else begin
+            if (fb_vsync) begin
+                if (dbg_vsync_raw_r != 8'hFF)
+                    dbg_vsync_raw_r <= dbg_vsync_raw_r + 8'd1;
+                if (dbg_frame_start_reject_r != 8'hFF)
+                    dbg_frame_start_reject_r <= dbg_frame_start_reject_r + 8'd1;
+            end
+
             if (fifo_count_clamped_w > dbg_fifo_highwater_r)
                 dbg_fifo_highwater_r <= fifo_count_clamped_w;
 
@@ -520,6 +539,9 @@ module sdram_framebuffer #(
     assign dbg_line_not_ready_o = dbg_line_not_ready_r;
     assign dbg_line_lag_max_o = dbg_line_lag_max_r;
     assign dbg_ready_phase_err_o = dbg_ready_phase_err_r;
+    assign dbg_vsync_raw_o = dbg_vsync_raw_r;
+    assign dbg_frame_start_accept_o = dbg_frame_start_accept_r;
+    assign dbg_frame_start_reject_o = dbg_frame_start_reject_r;
     assign dbg_flags_o = {
         fifo_full_w,                 // [7]
         fifo_busy_w,                 // [6]

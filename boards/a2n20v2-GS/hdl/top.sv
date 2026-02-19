@@ -770,6 +770,9 @@ module top #(
     wire [7:0] fb_dbg_line_not_ready_w;
     wire [7:0] fb_dbg_line_lag_max_w;
     wire [7:0] fb_dbg_ready_phase_err_w;
+    wire [7:0] fb_dbg_vsync_raw_w;
+    wire [7:0] fb_dbg_frame_start_accept_w;
+    wire [7:0] fb_dbg_frame_start_reject_w;
     wire [7:0] fb_dbg_flags_w;
 
     sdram_framebuffer sdram_framebuffer (
@@ -808,6 +811,9 @@ module top #(
         .dbg_line_not_ready_o(fb_dbg_line_not_ready_w),
         .dbg_line_lag_max_o(fb_dbg_line_lag_max_w),
         .dbg_ready_phase_err_o(fb_dbg_ready_phase_err_w),
+        .dbg_vsync_raw_o(fb_dbg_vsync_raw_w),
+        .dbg_frame_start_accept_o(fb_dbg_frame_start_accept_w),
+        .dbg_frame_start_reject_o(fb_dbg_frame_start_reject_w),
         .dbg_flags_o(fb_dbg_flags_w)
     );
 
@@ -832,9 +838,9 @@ module top #(
             fb_dbg_fifo_overflow_w,
             fb_dbg_line_not_ready_w,
             fb_dbg_line_lag_max_w,
-            fb_dbg_ready_phase_err_w,
-            fb_dbg_fetch_start_w,
-            fb_dbg_fetch_done_w
+            fb_dbg_vsync_raw_w,
+            fb_dbg_frame_start_accept_w,
+            fb_dbg_frame_start_reject_w
         }),
 
         .debug_bits_0_i (fb_dbg_flags_w),
