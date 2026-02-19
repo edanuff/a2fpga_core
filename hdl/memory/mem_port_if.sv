@@ -34,9 +34,10 @@ interface mem_port_if #(
 
     logic wr;
     logic rd;
+    logic burst;  // Read request uses controller burst length when high
 
     logic available;                 // The port is able to be used
-    logic ready;                      // The port has finished its task. Will rise for a single cycle
+    logic ready;                      // Read data beat or write completion pulse
 
     modport controller (
         input addr,
@@ -46,6 +47,7 @@ interface mem_port_if #(
 
         input wr,
         input rd,
+        input burst,
 
         output available,
         output ready
@@ -59,6 +61,7 @@ interface mem_port_if #(
 
         output wr,
         output rd,
+        output burst,
 
         input available,
         input ready

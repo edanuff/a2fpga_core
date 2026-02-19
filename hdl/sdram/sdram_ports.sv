@@ -27,6 +27,7 @@ module sdram_ports #(
     parameter BURST_LENGTH = 1,  // 1, 2, 4, 8 words per read
     parameter BURST_TYPE   = 0,  // 1 for interleaved
     parameter WRITE_BURST  = 0,  // 1 to enable write bursting
+    parameter READ_BURST_LENGTH = 4,  // Bytes returned when port burst bit is set
 
     parameter CAS_LATENCY = 2,  // 1, 2, or 3 cycle delays
 
@@ -108,6 +109,7 @@ module sdram_ports #(
     wire [PORT_OUTPUT_WIDTH-1:0] port_q[NUM_PORTS-1:0];
     wire port_wr[NUM_PORTS-1:0];
     wire port_rd[NUM_PORTS-1:0];
+    wire port_burst[NUM_PORTS-1:0];
     wire port_available[NUM_PORTS-1:0];
     wire port_ready[NUM_PORTS-1:0];
 
@@ -119,6 +121,7 @@ module sdram_ports #(
             assign ports[i].q = port_q[i];
             assign port_wr[i] = ports[i].wr;
             assign port_rd[i] = ports[i].rd;
+            assign port_burst[i] = ports[i].burst;
             assign ports[i].available = port_available[i];
             assign ports[i].ready = port_ready[i];
         end
@@ -130,6 +133,7 @@ module sdram_ports #(
         .BURST_LENGTH(BURST_LENGTH),
         .BURST_TYPE  (BURST_TYPE),
         .WRITE_BURST (WRITE_BURST),
+        .READ_BURST_LENGTH(READ_BURST_LENGTH),
 
         .CAS_LATENCY(CAS_LATENCY),
 
@@ -197,6 +201,7 @@ module sdram_ports #(
         .port_q(port_q),
         .port_wr(port_wr),
         .port_rd(port_rd),
+        .port_burst(port_burst),
         .port_available(port_available),
         .port_ready(port_ready),
 

@@ -160,7 +160,9 @@ module top #(
         .CAS_LATENCY(2),
         .SETTING_REFRESH_TIMER_NANO_SEC(15000),
         .SETTING_T_WR_MIN_WRITE_AUTO_PRECHARGE_RECOVERY_NANO_SEC(16),
-        .BURST_LENGTH(1),
+        .SETTING_USE_FAST_INPUT_REGISTER(0),
+        .BURST_LENGTH(4),
+        .READ_BURST_LENGTH(16),
         .PORT_BURST_LENGTH(1),
         .DATA_WIDTH(DATA_WIDTH),
         .ROW_WIDTH(11),
@@ -185,35 +187,6 @@ module top #(
         .SDRAM_nCAS(O_sdram_cas_n),
         .SDRAM_CKE(O_sdram_cke),
         .SDRAM_CLK(O_sdram_clk)
-    );
-
-    // Ensoniq DOC5503 Sound
-
-    wire [15:0] sg_audio_l;
-    wire [15:0] sg_audio_r;
-    wire [7:0] sg_d_w;
-    wire sg_rd_w;
-    wire [7:0] doc_osc_en_w;
-    wire [1:0] doc_osc_mode_w[8];
-    wire [7:0] doc_osc_halt_w;
-
-    sound_glu #(
-        .ENABLE(ENSONIQ_ENABLE),
-        .MONO_MIX(ENSONIQ_MONO_MIX)
-    ) sg (
-        .a2bus_if(a2bus_if),
-        .data_o(sg_d_w),
-        .rd_en_o(sg_rd_w),
-
-        .audio_l_o(sg_audio_l),
-        .audio_r_o(sg_audio_r),
-
-        .debug_osc_en_o(doc_osc_en_w),
-        .debug_osc_mode_o(doc_osc_mode_w),
-        .debug_osc_halt_o(doc_osc_halt_w),
-
-        .glu_mem_if(mem_ports[GLU_MEM_PORT]),
-        .doc_mem_if(mem_ports[DOC_MEM_PORT])
     );
 
     // Interface to Apple II
@@ -399,6 +372,9 @@ module top #(
     wire [7:0] apple_fb_g_w;
     wire [7:0] apple_fb_b_w;
     wire       apple_fb_active_w;
+    wire [7:0] rgb_r_w;
+    wire [7:0] rgb_g_w;
+    wire [7:0] rgb_b_w;
 
     apple_video_fb apple_video_fb (
         .a2bus_if(a2bus_if),
@@ -487,10 +463,6 @@ module top #(
     wire vdp_unlocked_w;
     wire [3:0] vdp_gmode_w;
     wire scanlines_w;
-
-    wire [7:0] rgb_r_w;
-    wire [7:0] rgb_g_w;
-    wire [7:0] rgb_b_w;
 
     f18a_gpu_if f18a_gpu_if();
     assign f18a_gpu_if.running = 1'b0;
@@ -643,6 +615,35 @@ module top #(
         .speaker_o(speaker_audio_w)
     );
 
+    // Ensoniq DOC5503 Sound
+
+    wire [15:0] sg_audio_l;
+    wire [15:0] sg_audio_r;
+    wire [7:0] sg_d_w;
+    wire sg_rd_w;
+    wire [7:0] doc_osc_en_w;
+    wire [1:0] doc_osc_mode_w[8];
+    wire [7:0] doc_osc_halt_w;
+
+    sound_glu #(
+        .ENABLE(ENSONIQ_ENABLE),
+        .MONO_MIX(ENSONIQ_MONO_MIX)
+    ) sg (
+        .a2bus_if(a2bus_if),
+        .data_o(sg_d_w),
+        .rd_en_o(sg_rd_w),
+
+        .audio_l_o(sg_audio_l),
+        .audio_r_o(sg_audio_r),
+
+        .debug_osc_en_o(doc_osc_en_w),
+        .debug_osc_mode_o(doc_osc_mode_w),
+        .debug_osc_halt_o(doc_osc_halt_w),
+
+        .glu_mem_if(mem_ports[GLU_MEM_PORT]),
+        .doc_mem_if(mem_ports[DOC_MEM_PORT])
+    );
+
     // Extend all the unsigned audio signals to 13 bits
     wire [12:0] speaker_audio_ext_w = {speaker_audio_w, 12'b0};
     wire [12:0] ssp_audio_ext_w = {ssp_audio_w, 3'b0};
@@ -758,6 +759,18 @@ module top #(
     wire [7:0] fb_r_w;
     wire [7:0] fb_g_w;
     wire [7:0] fb_b_w;
+    wire [7:0] fb_dbg_fifo_level_w;
+    wire [7:0] fb_dbg_fifo_highwater_w;
+    wire [7:0] fb_dbg_fifo_overflow_w;
+    wire [7:0] fb_dbg_fetch_start_w;
+    wire [7:0] fb_dbg_fetch_done_w;
+    wire [7:0] fb_dbg_read_blocked_w;
+    wire [7:0] fb_dbg_yield_busy_w;
+    wire [7:0] fb_dbg_late_line_w;
+    wire [7:0] fb_dbg_line_not_ready_w;
+    wire [7:0] fb_dbg_line_lag_max_w;
+    wire [7:0] fb_dbg_ready_phase_err_w;
+    wire [7:0] fb_dbg_flags_w;
 
     sdram_framebuffer sdram_framebuffer (
         .clk(clk_logic_w),
@@ -782,7 +795,20 @@ module top #(
 
         .border_color(border_rgb666_w),
         .scanline_en(scanlines_w),
-        .sleep_i(sleep_w)
+        .sleep_i(sleep_w),
+
+        .dbg_fifo_level_o(fb_dbg_fifo_level_w),
+        .dbg_fifo_highwater_o(fb_dbg_fifo_highwater_w),
+        .dbg_fifo_overflow_o(fb_dbg_fifo_overflow_w),
+        .dbg_fetch_start_o(fb_dbg_fetch_start_w),
+        .dbg_fetch_done_o(fb_dbg_fetch_done_w),
+        .dbg_read_blocked_o(fb_dbg_read_blocked_w),
+        .dbg_yield_busy_o(fb_dbg_yield_busy_w),
+        .dbg_late_line_o(fb_dbg_late_line_w),
+        .dbg_line_not_ready_o(fb_dbg_line_not_ready_w),
+        .dbg_line_lag_max_o(fb_dbg_line_lag_max_w),
+        .dbg_ready_phase_err_o(fb_dbg_ready_phase_err_w),
+        .dbg_flags_o(fb_dbg_flags_w)
     );
 
     // HDMI
@@ -801,18 +827,27 @@ module top #(
         .enable_i(show_debug_overlay_r),
 
         .hex_values ({
-            scan_dbg_raw_data_w,
-            scan_dbg_c02e_cnt_w,
-            scan_dbg_c019_cnt_w,
-            scan_dbg_vbl_correct_w,
-            scan_dbg_vertcnt_correct_w,
-            8'(scan_dbg_delta_w),
-            8'(scan_dbg_expected_w),
-            8'(scan_dbg_actual_w)
+            fb_dbg_fifo_level_w,
+            fb_dbg_fifo_highwater_w,
+            fb_dbg_fifo_overflow_w,
+            fb_dbg_line_not_ready_w,
+            fb_dbg_line_lag_max_w,
+            fb_dbg_ready_phase_err_w,
+            fb_dbg_fetch_start_w,
+            fb_dbg_fetch_done_w
         }),
 
-        .debug_bits_0_i ('0),
-        .debug_bits_1_i ('0),
+        .debug_bits_0_i (fb_dbg_flags_w),
+        .debug_bits_1_i ({
+            1'b0,
+            scanlines_w,
+            use_vgc_r,
+            a2mem_if.SHRG_MODE,
+            a2mem_if.HIRES_MODE,
+            a2mem_if.TEXT_MODE,
+            sdram_init_complete,
+            sleep_w
+        }),
 
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),
