@@ -35,6 +35,7 @@ module mem_if_mux (
             client_0.q = controller.q;
             controller.wr = client_0.wr;
             controller.rd = client_0.rd;
+            controller.burst = client_0.burst;
             client_0.available = controller.available;
             client_0.ready = controller.ready;
 
@@ -48,6 +49,7 @@ module mem_if_mux (
             client_1.q = controller.q;
             controller.wr = client_1.wr;
             controller.rd = client_1.rd;
+            controller.burst = client_1.burst;
             client_1.available = controller.available;
             client_1.ready = controller.ready;
 

@@ -21,6 +21,7 @@ module mem_if_cdc #(
     assign client.q = controller.q;
     assign controller.wr = client.wr;
     assign controller.rd = client.rd;
+    assign controller.burst = client.burst;
     assign client.available = controller.available;
 
 endmodule

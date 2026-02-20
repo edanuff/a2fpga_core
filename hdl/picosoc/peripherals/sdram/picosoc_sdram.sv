@@ -44,6 +44,7 @@ module picosoc_sdram
     assign mem_if.wr = mem_wr;
     assign mem_if.rd = mem_rd;
     assign mem_if.byte_en = iomem_wstrb;
+    assign mem_if.burst = 1'b0;
     assign iomem_rdata = /* iomem_instr ? cache_data : */ mem_if.q;
     assign iomem_ready = /* iomem_instr ? iomem_valid & cache_hit : */ mem_if.ready;
 

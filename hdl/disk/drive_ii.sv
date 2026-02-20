@@ -170,6 +170,7 @@ module drive_ii (
     assign ram_disk_if.data = 32'b0;
     assign ram_disk_if.byte_en = 4'b1111;
     assign ram_disk_if.wr = 1'b0;
+    assign ram_disk_if.burst = 1'b0;
     //assign track_do_w = ram_disk_if.q >> ((ramdisk_addr_w[1:0] ^ 2'b11) << 3); // 0,1,2,3 -> 3,2,1,0
     //assign track_do_w = 8'(ram_disk_if.q >> (ramdisk_addr_w[1:0] << 3));
     assign track_do_w = ram_disk_if.q[ramdisk_addr_w[1:0]*8+:8];

@@ -93,6 +93,7 @@ module sound_glu #(
     reg [3:0] glu_mem_byte_en_r;
     assign glu_mem_if.byte_en = glu_mem_byte_en_r;
     assign glu_mem_if.data = {a2bus_if.data, a2bus_if.data, a2bus_if.data, a2bus_if.data};
+    assign glu_mem_if.burst = 1'b0;
 
     reg doc_wr_r;
     reg [7:0] doc_addr_r;
@@ -157,6 +158,7 @@ module sound_glu #(
     assign doc_mem_if.byte_en = 4'b1111;
     assign doc_mem_if.addr = {4'b0, 1'b1, 2'b0, wave_addr_w[15:2]};
     assign doc_mem_if.rd = ENABLE && doc_mem_rd_w;
+    assign doc_mem_if.burst = 1'b0;
 
     reg [1:0] doc_mem_offset_r;
 
