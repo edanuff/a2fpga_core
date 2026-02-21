@@ -328,10 +328,26 @@ module apple_video_fb (
     wire [6:0] artifact_window_w = pix_history_r[HISTORY_ARTIFACT_OFFSET + 6:HISTORY_ARTIFACT_OFFSET];
     wire [3:0] artifact_data_w = artifact_r[artifact_window_w];
 
+    // Registered artifact output — breaks combinational depth through the
+    // artifact LUT (128x4, deep on GW2AR LUT4) so that next_rot_artifact
+    // at gap_cnt==0 starts from a registered value instead of a long chain.
+    reg [3:0] artifact_data_r;
+    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n)
+        if (!a2bus_if.system_reset_n) artifact_data_r <= 4'd0;
+        else artifact_data_r <= artifact_data_w;
+
     // Combinational palette lookup — extracted from state machine for ROM16 inference.
-    // Address is registered in gap_cnt_r==0; data is valid in gap_cnt_r==1.
     reg [4:0] palette_addr_r;
     wire [11:0] palette_data_w = palette_rgb_r[palette_addr_r];
+
+    // Registered palette output — on GW2AR, ROM16 uses distributed RAM (SSRAM)
+    // cells which may have different timing than GW5AT. The register ensures
+    // palette data is captured cleanly. Address set at gap_cnt==0, data valid
+    // at gap_cnt==2 (was gap_cnt==1 with combinational lookup).
+    reg [11:0] palette_data_r;
+    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n)
+        if (!a2bus_if.system_reset_n) palette_data_r <= 12'd0;
+        else palette_data_r <= palette_data_w;
 
     // ----------------------------------------------------------------------------------------------------------------
     // Nibble helper
@@ -743,9 +759,11 @@ module apple_video_fb (
                 // ============================================================
                 // PIXEL OUTPUT — active when primed
                 //
-                // Two-phase pixel pipeline:
-                //   gap_cnt_r==0: compute color, register palette address
-                //   gap_cnt_r==1: palette_data_w valid, output pixel to FB
+                // Three-phase pixel pipeline (registered ROM lookups):
+                //   gap_cnt_r==0: compute color from artifact_data_r, register palette address
+                //   gap_cnt_r==1: palette_data_r settles (ROM16/SSRAM output registered)
+                //   gap_cnt_r==2: output pixel to FB from palette_data_r
+                //   gap_cnt_r==3: ssp_capture fires (fb_data/fb_we), chunk boundary
                 //
                 // pix_history_r is cleared at scanline start to prevent
                 // previous scanline's trailing pixels from wrapping around.
@@ -770,15 +788,16 @@ module apple_video_fb (
 
                         next_history = {pix_shift_r[0], pix_history_r[PIX_HISTORY_SIZE-1:1]};
 
-                        // Artifact color from PRE-shift history via module-scope
-                        // combinational wire (artifact_data_w), extracted for ROM16
-                        // inference. Phase-sensitive: must use pix_history_r, not
-                        // next_history, to avoid swapping artifact color palette.
+                        // Artifact color from registered artifact lookup (artifact_data_r).
+                        // The free-running register captures artifact_r[pix_history_r[7:1]]
+                        // every cycle; at gap_cnt==0 it holds the PRE-shift history's
+                        // artifact (registered 1 cycle earlier), breaking the deep
+                        // combinational path through the artifact LUT on GW2AR.
                         case (pix_step4_r)
-                            2'b00: next_rot_artifact = artifact_data_w;
-                            2'b01: next_rot_artifact = {artifact_data_w[2:0], artifact_data_w[3]};
-                            2'b10: next_rot_artifact = {artifact_data_w[1:0], artifact_data_w[3:2]};
-                            2'b11: next_rot_artifact = {artifact_data_w[0], artifact_data_w[3:1]};
+                            2'b00: next_rot_artifact = artifact_data_r;
+                            2'b01: next_rot_artifact = {artifact_data_r[2:0], artifact_data_r[3]};
+                            2'b10: next_rot_artifact = {artifact_data_r[1:0], artifact_data_r[3:2]};
+                            2'b11: next_rot_artifact = {artifact_data_r[0], artifact_data_r[3:1]};
                         endcase
 
                         // Shift history with current pixel
@@ -808,7 +827,7 @@ module apple_video_fb (
                         pix_color_r <= color;
 
                         // Register palette address for ROM16-inferred lookup.
-                        // palette_data_w will be valid next cycle (gap_cnt_r==1).
+                        // palette_data_r (registered) will be valid at gap_cnt_r==2.
                         palette_addr_r <= {GSP, color};
 
                         // Set pending flag if this pixel is in the output window
@@ -847,10 +866,16 @@ module apple_video_fb (
                         end
                     end
 
-                    // --- Phase 2: Palette output + scanline complete (gap_cnt_r == 1) ---
-                    if (gap_cnt_r == 2'd1) begin
-                        // palette_data_w is now valid (addr was registered last cycle).
-                        // Output pixel to framebuffer and SuperSprite interface.
+                    // --- Phase 2: Palette register settles (gap_cnt_r == 1) ---
+                    // palette_data_r captures palette_rgb_r[palette_addr_r] (set at
+                    // gap_cnt==0). On GW2AR, ROM16 uses SSRAM cells that may need
+                    // the full cycle to produce valid data. No output logic here;
+                    // the registered palette data is consumed at gap_cnt==2.
+
+                    // --- Phase 3: Palette output + scanline complete (gap_cnt_r == 2) ---
+                    if (gap_cnt_r == 2'd2) begin
+                        // palette_data_r is now valid (registered from palette_addr_r
+                        // set two cycles ago). Output pixel to framebuffer and SSP.
                         if (pixel_output_pending_r) begin
                             pixel_output_pending_r <= 1'b0;
 
@@ -858,9 +883,9 @@ module apple_video_fb (
                             // Use {nibble, 4'b0} so that SSP pass-through truncated to [7:2]
                             // produces {nibble, 2'b00}, matching the direct RGB444→RGB666 path
                             // and the border color expansion.
-                            apple_r_o <= {palette_data_w[11:8], 4'b0};
-                            apple_g_o <= {palette_data_w[7:4], 4'b0};
-                            apple_b_o <= {palette_data_w[3:0], 4'b0};
+                            apple_r_o <= {palette_data_r[11:8], 4'b0};
+                            apple_g_o <= {palette_data_r[7:4], 4'b0};
+                            apple_b_o <= {palette_data_r[3:0], 4'b0};
                             apple_active_o <= 1'b1;
 
                             // When SuperSprite is active, defer the framebuffer write by
@@ -871,7 +896,7 @@ module apple_video_fb (
                             if (ssp_active_i) begin
                                 ssp_capture_r <= 1'b1;
                             end else begin
-                                fb_data_o <= {palette_data_w[11:8], 2'b00, palette_data_w[7:4], 2'b00, palette_data_w[3:0], 2'b00};
+                                fb_data_o <= {palette_data_r[11:8], 2'b00, palette_data_r[7:4], 2'b00, palette_data_r[3:0], 2'b00};
                                 fb_we_o <= 1'b1;
                             end
                         end
