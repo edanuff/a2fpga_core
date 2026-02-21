@@ -41,7 +41,12 @@
 
 module sdram_framebuffer #(
     parameter COLOR_BITS = 18,           // RGB666
-    parameter FB_BASE_ADDR = 21'h180000  // 1.5MB offset in SDRAM
+    parameter FB_BASE_ADDR = 21'h180000, // 1.5MB offset in SDRAM
+    // Test pattern modes:
+    //   0 = normal (SDRAM data)
+    //   1 = test pattern via line buffer (tests BRAM + display pipeline)
+    //   2 = test pattern at output (bypasses BRAM entirely, tests display only)
+    parameter TEST_PATTERN = 0
 ) (
     // Clocks and reset
     input  logic        clk,             // 54 MHz logic clock (also SDRAM clock)
@@ -615,6 +620,20 @@ module sdram_framebuffer #(
         end
     end
 
+    // Test pattern: 8-pixel wide vertical bars (white, red, green, blue, cyan, magenta, yellow, black)
+    function automatic [COLOR_BITS-1:0] test_pixel(input [9:0] x);
+        case (x[5:3])
+            3'd0: test_pixel = 18'h3FFFF;  // white
+            3'd1: test_pixel = 18'h3F000;  // red
+            3'd2: test_pixel = 18'h00FC0;  // green
+            3'd3: test_pixel = 18'h0003F;  // blue
+            3'd4: test_pixel = 18'h00FFF;  // cyan
+            3'd5: test_pixel = 18'h3F03F;  // magenta
+            3'd6: test_pixel = 18'h3FFC0;  // yellow
+            3'd7: test_pixel = 18'h00000;  // black
+        endcase
+    endfunction
+
     // Pop 1 pixel per cycle into line buffer
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -624,7 +643,9 @@ module sdram_framebuffer #(
             px_rd_ptr <= 3'd0;
             lb_wr_pixel_x <= 11'd0;
         end else if (!px_empty) begin
-            line_buf[{fetch_bank_r, lb_wr_pixel_x[9:0]}] <= px_buf[px_rd_ptr[1:0]];
+            // TEST_PATTERN==1: write test pattern to BRAM instead of SDRAM data
+            line_buf[{fetch_bank_r, lb_wr_pixel_x[9:0]}] <=
+                (TEST_PATTERN == 1) ? test_pixel(lb_wr_pixel_x[9:0]) : px_buf[px_rd_ptr[1:0]];
             px_rd_ptr <= px_rd_ptr + 3'd1;
             lb_wr_pixel_x <= lb_wr_pixel_x + 11'd1;
         end
@@ -676,7 +697,9 @@ module sdram_framebuffer #(
         scanline_dim_r <= scanline_en && in_v_active_px_w && hdmi_cy[0];
     end
 
-    wire [COLOR_BITS-1:0] lb_rd_data_w = line_buf[lb_rd_addr];
+    // TEST_PATTERN==2: bypass BRAM entirely, generate test pattern from pixel position
+    wire [COLOR_BITS-1:0] lb_rd_data_w = (TEST_PATTERN == 2) ?
+        test_pixel(lb_rd_addr[9:0]) : line_buf[lb_rd_addr];
 
     wire [23:0] active_rgb_w = torgb(lb_rd_data_w);
     wire [23:0] border_rgb_w = torgb(border_color);

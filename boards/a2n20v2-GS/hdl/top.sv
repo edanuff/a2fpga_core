@@ -39,6 +39,7 @@ module top #(
     parameter bit ENSONIQ_ENABLE = 1,
     parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
+    parameter bit SHOW_OVERLAY_ON_STARTUP = 1,  // Show DebugOverlay on startup until a button is pressed
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 1,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
@@ -784,7 +785,9 @@ module top #(
     wire [7:0] fb_dbg_frame_start_reject_w;
     wire [7:0] fb_dbg_flags_w;
 
-    sdram_framebuffer sdram_framebuffer (
+    sdram_framebuffer #(
+        .TEST_PATTERN(1)  // 0=normal, 1=test bars via BRAM, 2=test bars bypass BRAM
+    ) sdram_framebuffer (
         .clk(clk_logic_w),
         .clk_pixel(clk_pixel_w),
         .rst_n(device_reset_n_w),
@@ -828,7 +831,7 @@ module top #(
 
     // HDMI
 
-    reg show_debug_overlay_r = 1'b0;
+    reg show_debug_overlay_r = SHOW_OVERLAY_ON_STARTUP;
 
     wire [7:0] debug_r_w;
     wire [7:0] debug_g_w;
