@@ -620,55 +620,31 @@ module sdram_framebuffer #(
     wire in_h_active_px_w = (hdmi_cx >= {1'b0, h_border_px_r}) &&
                              (hdmi_cx < {1'b0, h_border_px_r} + fb_width_px_r);
 
-    // 2-stage read pipeline matching DDR3 framebuffer's proven approach.
-    // Stage 1: register address (absorbed into BSRAM address latch on CLKB)
-    // Stage 2: register BRAM output (provides clean CDC crossing from write domain)
-    // cx+2 look-ahead compensates for the 2 registered stages.
-    wire [10:0] next2_cx_w = hdmi_cx + 11'd2;
-    wire        next2_in_h_active_w = (next2_cx_w >= {1'b0, h_border_px_r}) &&
-                                       (next2_cx_w < {1'b0, h_border_px_r} + fb_width_px_r);
-    wire [9:0]  next2_fb_x_w = next2_cx_w[9:0] - h_border_px_r[9:0];
+    // Fully combinational read path — zero look-ahead, zero pipeline stages.
+    // With Gowin SDPX9B READ_MODE=0, the BRAM output is asynchronous from the
+    // address. No look-ahead needed — data is available in the same cycle.
+    // The DebugOverlay (2 stages) provides all the registration needed.
+    wire [9:0]  fb_x_w = hdmi_cx[9:0] - h_border_px_r[9:0];
+    wire [9:0]  lb_rd_addr_w = {rd_bank_w, fb_x_w[9:1]};
 
-    // Stage 1: address register — Gowin absorbs this into BSRAM address latch
-    reg [9:0]  lb_rd_addr_r;
-    reg        lb_rd_pixel_odd_s1_r;
-    reg        in_active_px_s1_r;
-    reg        scanline_dim_s1_r;
-    always @(posedge clk_pixel) begin
-        lb_rd_addr_r        <= {rd_bank_w, next2_fb_x_w[9:1]};
-        lb_rd_pixel_odd_s1_r <= next2_fb_x_w[0];
-        in_active_px_s1_r   <= next2_in_h_active_w && in_v_active_px_w;
-        scanline_dim_s1_r   <= scanline_en && in_v_active_px_w && hdmi_cy[0];
-    end
+    wire [COLOR_BITS-1:0] lb_rd_even_w = line_buf_even[lb_rd_addr_w];
+    wire [COLOR_BITS-1:0] lb_rd_odd_w  = line_buf_odd[lb_rd_addr_w];
+    wire [COLOR_BITS-1:0] lb_rd_data_w = fb_x_w[0] ? lb_rd_odd_w : lb_rd_even_w;
 
-    // Stage 2: register BRAM output — critical for clean CDC from 54 MHz write domain.
-    // syn_preserve prevents Gowin from absorbing these into the BSRAM or optimizing away.
-    reg [COLOR_BITS-1:0] lb_rd_even_r /* synthesis syn_preserve = 1 */;
-    reg [COLOR_BITS-1:0] lb_rd_odd_r  /* synthesis syn_preserve = 1 */;
-    reg lb_rd_pixel_odd_r;
-    reg in_active_px_r;
-    reg scanline_dim_r;
-    always @(posedge clk_pixel) begin
-        lb_rd_even_r      <= line_buf_even[lb_rd_addr_r];
-        lb_rd_odd_r       <= line_buf_odd[lb_rd_addr_r];
-        lb_rd_pixel_odd_r <= lb_rd_pixel_odd_s1_r;
-        in_active_px_r    <= in_active_px_s1_r;
-        scanline_dim_r    <= scanline_dim_s1_r;
-    end
-
-    wire [COLOR_BITS-1:0] lb_rd_data_w = lb_rd_pixel_odd_r ? lb_rd_odd_r : lb_rd_even_r;
+    wire in_active_px_w = in_h_active_px_w && in_v_active_px_w;
+    wire scanline_dim_w = scanline_en && in_v_active_px_w && hdmi_cy[0];
 
     wire [23:0] active_rgb_w = torgb(lb_rd_data_w);
     wire [23:0] border_rgb_w = torgb(border_color);
 
-    wire [23:0] pixel_rgb_w = in_active_px_r ? active_rgb_w : border_rgb_w;
+    wire [23:0] pixel_rgb_w = in_active_px_w ? active_rgb_w : border_rgb_w;
 
     wire [23:0] dimmed_rgb_w = {1'b0, pixel_rgb_w[23:17],
                                  1'b0, pixel_rgb_w[15:9],
                                  1'b0, pixel_rgb_w[7:1]};
 
     wire [23:0] final_rgb_w = sleep_i ? 24'd0 :
-                               scanline_dim_r ? dimmed_rgb_w : pixel_rgb_w;
+                               scanline_dim_w ? dimmed_rgb_w : pixel_rgb_w;
 
     assign r_o = final_rgb_w[23:16];
     assign g_o = final_rgb_w[15:8];
