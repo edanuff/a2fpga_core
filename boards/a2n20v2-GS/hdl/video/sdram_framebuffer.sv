@@ -577,10 +577,10 @@ module sdram_framebuffer #(
     // Write port: clk (54 MHz) — unpacked SDRAM read responses
     // Read port: clk_pixel (27 MHz) — HDMI pixel output
 
-    // Split even/odd pixels into separate 18-bit BRAMs to avoid 36-bit wide
-    // BSRAM read + combinational mux routing issues that cause ghosting.
-    reg [COLOR_BITS-1:0] line_buf_even [0:1023];
-    reg [COLOR_BITS-1:0] line_buf_odd  [0:1023];
+    // Split even/odd pixels into separate 18-bit BRAMs (matches Gowin native BSRAM width).
+    // syn_ramstyle="block_ram" matches the DDR3 framebuffer's proven BRAM configuration.
+    reg [COLOR_BITS-1:0] line_buf_even [0:1023] /* synthesis syn_ramstyle="block_ram" */;
+    reg [COLOR_BITS-1:0] line_buf_odd  [0:1023] /* synthesis syn_ramstyle="block_ram" */;
 
     // Write side (clk domain): each 32-bit read beat contains two RGB565 pixels.
     wire lb_wr_w = fb_read_port.ready && (fetch_state_r == FETCH_WAIT);
@@ -620,34 +620,42 @@ module sdram_framebuffer #(
     wire in_h_active_px_w = (hdmi_cx >= {1'b0, h_border_px_r}) &&
                              (hdmi_cx < {1'b0, h_border_px_r} + fb_width_px_r);
 
-    // Use next_cx to compensate for 1-cycle BRAM read latency (matches DDR3 approach).
-    // At clock edge N we set the address for pixel at cx+1; the BRAM delivers that
-    // data at edge N+1 when hdmi_cx has advanced to match.
-    wire [10:0] next_cx_w = hdmi_cx + 11'd1;
-    wire        next_in_h_active_w = (next_cx_w >= {1'b0, h_border_px_r}) &&
-                                      (next_cx_w < {1'b0, h_border_px_r} + fb_width_px_r);
-    wire [9:0]  next_fb_x_w = next_cx_w[9:0] - h_border_px_r[9:0];
-    wire [9:0]  lb_rd_addr_pair_w = {rd_bank_w, next_fb_x_w[9:1]};
-    // Registered BRAM output — forces Gowin to use READ_MODE=1 (synchronous read),
-    // which keeps the address register inside the BRAM primitive. With READ_MODE=0
-    // (async), the synthesizer can eliminate the address register, causing the BRAM
-    // data to be 1 pixel ahead of the mux select (lb_rd_pixel_odd_r), producing
-    // the ghosting artifact. This matches the DDR3 framebuffer's proven approach.
-    reg [COLOR_BITS-1:0] lb_rd_even_r;
-    reg [COLOR_BITS-1:0] lb_rd_odd_r;
+    // 2-stage read pipeline matching DDR3 framebuffer's proven approach.
+    // Stage 1: register address (absorbed into BSRAM address latch on CLKB)
+    // Stage 2: register BRAM output (provides clean CDC crossing from write domain)
+    // cx+2 look-ahead compensates for the 2 registered stages.
+    wire [10:0] next2_cx_w = hdmi_cx + 11'd2;
+    wire        next2_in_h_active_w = (next2_cx_w >= {1'b0, h_border_px_r}) &&
+                                       (next2_cx_w < {1'b0, h_border_px_r} + fb_width_px_r);
+    wire [9:0]  next2_fb_x_w = next2_cx_w[9:0] - h_border_px_r[9:0];
+
+    // Stage 1: address register — Gowin absorbs this into BSRAM address latch
+    reg [9:0]  lb_rd_addr_r;
+    reg        lb_rd_pixel_odd_s1_r;
+    reg        in_active_px_s1_r;
+    reg        scanline_dim_s1_r;
+    always @(posedge clk_pixel) begin
+        lb_rd_addr_r        <= {rd_bank_w, next2_fb_x_w[9:1]};
+        lb_rd_pixel_odd_s1_r <= next2_fb_x_w[0];
+        in_active_px_s1_r   <= next2_in_h_active_w && in_v_active_px_w;
+        scanline_dim_s1_r   <= scanline_en && in_v_active_px_w && hdmi_cy[0];
+    end
+
+    // Stage 2: register BRAM output — critical for clean CDC from 54 MHz write domain.
+    // syn_preserve prevents Gowin from absorbing these into the BSRAM or optimizing away.
+    reg [COLOR_BITS-1:0] lb_rd_even_r /* synthesis syn_preserve = 1 */;
+    reg [COLOR_BITS-1:0] lb_rd_odd_r  /* synthesis syn_preserve = 1 */;
     reg lb_rd_pixel_odd_r;
     reg in_active_px_r;
     reg scanline_dim_r;
     always @(posedge clk_pixel) begin
-        // BRAM read with registered output: address is combinational (lb_rd_addr_pair_w),
-        // data is captured on posedge. This and lb_rd_pixel_odd_r both derive from the
-        // same next_fb_x_w, so they're naturally aligned at the register boundary.
-        lb_rd_even_r <= line_buf_even[lb_rd_addr_pair_w];
-        lb_rd_odd_r  <= line_buf_odd[lb_rd_addr_pair_w];
-        lb_rd_pixel_odd_r <= next_fb_x_w[0];
-        in_active_px_r <= next_in_h_active_w && in_v_active_px_w;
-        scanline_dim_r <= scanline_en && in_v_active_px_w && hdmi_cy[0];
+        lb_rd_even_r      <= line_buf_even[lb_rd_addr_r];
+        lb_rd_odd_r       <= line_buf_odd[lb_rd_addr_r];
+        lb_rd_pixel_odd_r <= lb_rd_pixel_odd_s1_r;
+        in_active_px_r    <= in_active_px_s1_r;
+        scanline_dim_r    <= scanline_dim_s1_r;
     end
+
     wire [COLOR_BITS-1:0] lb_rd_data_w = lb_rd_pixel_odd_r ? lb_rd_odd_r : lb_rd_even_r;
 
     wire [23:0] active_rgb_w = torgb(lb_rd_data_w);
