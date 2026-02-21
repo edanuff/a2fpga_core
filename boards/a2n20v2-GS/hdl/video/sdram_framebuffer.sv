@@ -368,12 +368,14 @@ module sdram_framebuffer #(
                        (last_fetched_line_r < display_fb_line_w);
     wire fetch_start_line0_w = (fetch_state_r == FETCH_IDLE) &&
                                cy_approaching_active_w &&
-                               (last_fetched_line_r != 9'd0);
+                               (last_fetched_line_r != 9'd0) &&
+                               px_empty;
     wire fetch_start_next_w = (fetch_state_r == FETCH_IDLE) &&
                               !fetch_start_line0_w &&
                               display_in_active_w &&
                               (next_line_w < fb_height[8:0]) &&
-                              (next_line_w != last_fetched_line_r);
+                              (next_line_w != last_fetched_line_r) &&
+                              px_empty;
     wire fetch_start_pulse_w = fetch_start_line0_w || fetch_start_next_w;
     wire fetch_done_pulse_w = (fetch_state_r == FETCH_WAIT) &&
                               fb_read_port.ready &&
@@ -570,32 +572,66 @@ module sdram_framebuffer #(
     };
 
     // =========================================================================
-    // Line Buffer — true dual-port BRAM
+    // Line Buffer — 1 pixel per entry (matches DDR3 architecture)
     // =========================================================================
     //
-    // Two banks of 1024 entries x 18 bits (RGB666). Ping-pong between banks.
-    // Write port: clk (54 MHz) — unpacked SDRAM read responses
+    // Single BRAM array: 2 banks x 1024 entries x 18 bits (RGB666).
+    // Write port: clk (54 MHz) — serialized SDRAM read responses
     // Read port: clk_pixel (27 MHz) — HDMI pixel output
+    //
+    // Previous experiments (EXP 1-3) showed that the even/odd pixel mux
+    // between two separate BRAMs causes ghosting artifacts regardless of
+    // pipeline depth or register placement. This approach eliminates the
+    // mux entirely by storing 1 pixel per entry (like the working DDR3
+    // framebuffer), serializing the 2-pixel SDRAM words through a small
+    // buffer on the write side.
 
-    // Split even/odd pixels into separate 18-bit BRAMs (matches Gowin native BSRAM width).
-    // syn_ramstyle="block_ram" matches the DDR3 framebuffer's proven BRAM configuration.
-    reg [COLOR_BITS-1:0] line_buf_even [0:1023] /* synthesis syn_ramstyle="block_ram" */;
-    reg [COLOR_BITS-1:0] line_buf_odd  [0:1023] /* synthesis syn_ramstyle="block_ram" */;
+    reg [COLOR_BITS-1:0] line_buf [0:2047] /* synthesis syn_ramstyle="block_ram" */;
 
-    // Write side (clk domain): each 32-bit read beat contains two RGB565 pixels.
+    // ---- Write side (clk domain, 54 MHz) ----
+    // Each 32-bit SDRAM word contains 2 packed RGB565 pixels.
+    // SDRAM ready can pulse on consecutive cycles during burst reads,
+    // so we buffer pixels and drain 1 per cycle to the single-port BRAM.
+
     wire lb_wr_w = fb_read_port.ready && (fetch_state_r == FETCH_WAIT);
-    wire [9:0] lb_wr_addr_pair_w = {fetch_bank_r, fetch_word_r[8:0]};
 
-    always @(posedge clk) begin
-        if (lb_wr_w) begin
-            line_buf_even[lb_wr_addr_pair_w] <= rgb565_to_666(fb_read_port.q[15:0]);
-            line_buf_odd[lb_wr_addr_pair_w]  <= rgb565_to_666(fb_read_port.q[31:16]);
+    // 4-pixel ring buffer for write serialization
+    reg [COLOR_BITS-1:0] px_buf [0:3];
+    reg [2:0] px_wr_ptr, px_rd_ptr;
+    wire [2:0] px_count = px_wr_ptr - px_rd_ptr;
+    wire px_empty = (px_wr_ptr == px_rd_ptr);
+    reg [10:0] lb_wr_pixel_x;
+
+    // Push 2 pixels per SDRAM word
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            px_wr_ptr <= 3'd0;
+        end else if (fetch_start_pulse_w) begin
+            px_wr_ptr <= 3'd0;
+        end else if (lb_wr_w) begin
+            px_buf[px_wr_ptr[1:0]]          <= rgb565_to_666(fb_read_port.q[15:0]);   // even pixel
+            px_buf[px_wr_ptr[1:0] + 2'd1]  <= rgb565_to_666(fb_read_port.q[31:16]);  // odd pixel
+            px_wr_ptr <= px_wr_ptr + 3'd2;
         end
     end
 
-    // Read side (clk_pixel domain)
+    // Pop 1 pixel per cycle into line buffer
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            px_rd_ptr <= 3'd0;
+            lb_wr_pixel_x <= 11'd0;
+        end else if (fetch_start_pulse_w) begin
+            px_rd_ptr <= 3'd0;
+            lb_wr_pixel_x <= 11'd0;
+        end else if (!px_empty) begin
+            line_buf[{fetch_bank_r, lb_wr_pixel_x[9:0]}] <= px_buf[px_rd_ptr[1:0]];
+            px_rd_ptr <= px_rd_ptr + 3'd1;
+            lb_wr_pixel_x <= lb_wr_pixel_x + 11'd1;
+        end
+    end
+
+    // ---- Read side (clk_pixel domain, 27 MHz) ----
     // Bank = line parity, computed directly from hdmi_cy — no CDC needed.
-    // fb_line = (hdmi_cy - v_border) >> 1, so fb_line[0] = (hdmi_cy - v_border)[1]
     wire [9:0] display_cy_offset_px_w = hdmi_cy - v_border_px_r;
     wire       rd_bank_w = display_cy_offset_px_w[1];
 
@@ -617,34 +653,42 @@ module sdram_framebuffer #(
 
     wire in_v_active_px_w = (hdmi_cy >= v_border_px_r) &&
                              (hdmi_cy < v_border_px_r + {fb_height_px_r, 1'b0});
-    wire in_h_active_px_w = (hdmi_cx >= {1'b0, h_border_px_r}) &&
-                             (hdmi_cx < {1'b0, h_border_px_r} + fb_width_px_r);
 
-    // Fully combinational read path — zero look-ahead, zero pipeline stages.
-    // With Gowin SDPX9B READ_MODE=0, the BRAM output is asynchronous from the
-    // address. No look-ahead needed — data is available in the same cycle.
-    // The DebugOverlay (2 stages) provides all the registration needed.
-    wire [9:0]  fb_x_w = hdmi_cx[9:0] - h_border_px_r[9:0];
-    wire [9:0]  lb_rd_addr_w = {rd_bank_w, fb_x_w[9:1]};
+    // Use next_cx to compensate for 1-cycle BRAM read latency (matches DDR3).
+    // Pipeline: cx+1 → addr register → async BRAM read → DebugOverlay(2) → HDMI
+    // Total 3 stages = same depth as DDR3 (addr + BRAM out + output registers)
+    wire [10:0] next_cx_w = hdmi_cx + 11'd1;
+    wire        next_in_h_active_w = (next_cx_w >= {1'b0, h_border_px_r}) &&
+                                      (next_cx_w < {1'b0, h_border_px_r} + fb_width_px_r);
+    wire [9:0]  next_fb_x_w = next_cx_w[9:0] - h_border_px_r[9:0];
 
-    wire [COLOR_BITS-1:0] lb_rd_even_w = line_buf_even[lb_rd_addr_w];
-    wire [COLOR_BITS-1:0] lb_rd_odd_w  = line_buf_odd[lb_rd_addr_w];
-    wire [COLOR_BITS-1:0] lb_rd_data_w = fb_x_w[0] ? lb_rd_odd_w : lb_rd_even_w;
+    // Single BRAM read — no even/odd mux needed (1 pixel per entry)
+    reg [10:0] lb_rd_addr;
+    reg in_active_px_r;
+    reg scanline_dim_r;
 
-    wire in_active_px_w = in_h_active_px_w && in_v_active_px_w;
-    wire scanline_dim_w = scanline_en && in_v_active_px_w && hdmi_cy[0];
+    always @(posedge clk_pixel) begin
+        if (next_in_h_active_w && in_v_active_px_w)
+            lb_rd_addr <= {rd_bank_w, next_fb_x_w[9:0]};
+        else
+            lb_rd_addr <= 11'd0;  // default to 0 outside active area (matches DDR3)
+        in_active_px_r <= next_in_h_active_w && in_v_active_px_w;
+        scanline_dim_r <= scanline_en && in_v_active_px_w && hdmi_cy[0];
+    end
+
+    wire [COLOR_BITS-1:0] lb_rd_data_w = line_buf[lb_rd_addr];
 
     wire [23:0] active_rgb_w = torgb(lb_rd_data_w);
     wire [23:0] border_rgb_w = torgb(border_color);
 
-    wire [23:0] pixel_rgb_w = in_active_px_w ? active_rgb_w : border_rgb_w;
+    wire [23:0] pixel_rgb_w = in_active_px_r ? active_rgb_w : border_rgb_w;
 
     wire [23:0] dimmed_rgb_w = {1'b0, pixel_rgb_w[23:17],
                                  1'b0, pixel_rgb_w[15:9],
                                  1'b0, pixel_rgb_w[7:1]};
 
     wire [23:0] final_rgb_w = sleep_i ? 24'd0 :
-                               scanline_dim_w ? dimmed_rgb_w : pixel_rgb_w;
+                               scanline_dim_r ? dimmed_rgb_w : pixel_rgb_w;
 
     assign r_o = final_rgb_w[23:16];
     assign g_o = final_rgb_w[15:8];
