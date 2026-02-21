@@ -46,6 +46,7 @@ module sdram_framebuffer #(
     //   0 = normal (SDRAM data)
     //   1 = test pattern via line buffer (tests BRAM + display pipeline)
     //   2 = test pattern at output (bypasses BRAM entirely, tests display only)
+    //   3 = test pattern at write packer input (tests full SDRAM round-trip)
     parameter TEST_PATTERN = 0
 ) (
     // Clocks and reset
@@ -126,6 +127,20 @@ module sdram_framebuffer #(
                 c[5:0],   c[5:4]};    // B
     endfunction
 
+    // Test pattern: 8-pixel wide vertical bars
+    function automatic [COLOR_BITS-1:0] test_pixel(input [9:0] x);
+        case (x[5:3])
+            3'd0: test_pixel = 18'h3FFFF;  // white
+            3'd1: test_pixel = 18'h3F000;  // red
+            3'd2: test_pixel = 18'h00FC0;  // green
+            3'd3: test_pixel = 18'h0003F;  // blue
+            3'd4: test_pixel = 18'h00FFF;  // cyan
+            3'd5: test_pixel = 18'h3F03F;  // magenta
+            3'd6: test_pixel = 18'h3FFC0;  // yellow
+            3'd7: test_pixel = 18'h00000;  // black
+        endcase
+    endfunction
+
     // =========================================================================
     // Write FIFO — buffers packed pixel pairs for SDRAM
     // =========================================================================
@@ -181,6 +196,10 @@ module sdram_framebuffer #(
         end
     end
 
+    // TEST_PATTERN==3: replace renderer data with test bars at write packer input
+    // This tests the full round-trip: RGB666→RGB565 → FIFO → SDRAM → fetch → RGB565→RGB666 → BRAM → display
+    wire [COLOR_BITS-1:0] wr_pixel_data_w = (TEST_PATTERN == 3) ? test_pixel(wr_x_r[9:0]) : fb_data;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             wr_x_r <= 11'd0;
@@ -204,17 +223,17 @@ module sdram_framebuffer #(
                     wr_x_r <= 11'd1;
                     wr_y_r <= 10'd0;
                     wr_line_base_r <= FB_BASE_ADDR;
-                    wr_pixel_even_r <= rgb666_to_565(fb_data);
+                    wr_pixel_even_r <= rgb666_to_565(wr_pixel_data_w);
                     frame_pending_r <= 1'b0;
                 end else begin
                     if (wr_x_r[0] == 1'b0) begin
                         // Even pixel — buffer as RGB565
-                        wr_pixel_even_r <= rgb666_to_565(fb_data);
+                        wr_pixel_even_r <= rgb666_to_565(wr_pixel_data_w);
                     end else if (!fifo_full_w) begin
                         // Odd pixel — pack with buffered even and push to FIFO
                         wr_fifo[fifo_wr_ptr_r[FIFO_ADDR_BITS-1:0]] <= {
                             wr_line_base_r + {11'd0, wr_x_r[10:1]},  // packed addr
-                            rgb666_to_565(fb_data),                    // odd pixel [31:16]
+                            rgb666_to_565(wr_pixel_data_w),            // odd pixel [31:16]
                             wr_pixel_even_r                            // even pixel [15:0]
                         };
                         fifo_wr_ptr_r <= fifo_wr_ptr_r + 1;
@@ -619,20 +638,6 @@ module sdram_framebuffer #(
             px_wr_ptr <= px_wr_ptr + 3'd2;
         end
     end
-
-    // Test pattern: 8-pixel wide vertical bars (white, red, green, blue, cyan, magenta, yellow, black)
-    function automatic [COLOR_BITS-1:0] test_pixel(input [9:0] x);
-        case (x[5:3])
-            3'd0: test_pixel = 18'h3FFFF;  // white
-            3'd1: test_pixel = 18'h3F000;  // red
-            3'd2: test_pixel = 18'h00FC0;  // green
-            3'd3: test_pixel = 18'h0003F;  // blue
-            3'd4: test_pixel = 18'h00FFF;  // cyan
-            3'd5: test_pixel = 18'h3F03F;  // magenta
-            3'd6: test_pixel = 18'h3FFC0;  // yellow
-            3'd7: test_pixel = 18'h00000;  // black
-        endcase
-    endfunction
 
     // Pop 1 pixel per cycle into line buffer
     always @(posedge clk or negedge rst_n) begin

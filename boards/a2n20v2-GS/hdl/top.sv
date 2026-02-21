@@ -786,7 +786,7 @@ module top #(
     wire [7:0] fb_dbg_flags_w;
 
     sdram_framebuffer #(
-        .TEST_PATTERN(1)  // 0=normal, 1=test bars via BRAM, 2=test bars bypass BRAM
+        .TEST_PATTERN(3)  // 0=normal, 1=test bars via BRAM, 2=test bars bypass BRAM, 3=test bars via full SDRAM round-trip
     ) sdram_framebuffer (
         .clk(clk_logic_w),
         .clk_pixel(clk_pixel_w),
