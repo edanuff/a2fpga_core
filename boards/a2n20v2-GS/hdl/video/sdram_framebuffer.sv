@@ -142,6 +142,29 @@ module sdram_framebuffer #(
     endfunction
 
     // =========================================================================
+    // Input registration — 1-cycle pipeline for fb_data/fb_we/fb_vsync
+    // =========================================================================
+    // EXP 6: TEST_PATTERN=3 (clean) uses an internal register for pixel data,
+    // while normal mode uses the external fb_data input through a combinational
+    // mux chain. Register all write-path inputs to test whether a marginal
+    // timing issue at the input boundary causes the ghosting artifact.
+
+    reg [COLOR_BITS-1:0] fb_data_r;
+    reg fb_we_r;
+    reg fb_vsync_r;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            fb_data_r <= '0;
+            fb_we_r <= 1'b0;
+            fb_vsync_r <= 1'b0;
+        end else begin
+            fb_data_r <= fb_data;
+            fb_we_r <= fb_we;
+            fb_vsync_r <= fb_vsync;
+        end
+    end
+
+    // =========================================================================
     // Write FIFO — buffers packed pixel pairs for SDRAM
     // =========================================================================
     //
@@ -183,7 +206,7 @@ module sdram_framebuffer #(
     // pulse cannot reset write/read tracking mid-frame.
     localparam [19:0] FRAME_MIN_CYCLES = 20'd540000;  // ~10ms at 54MHz
     reg [19:0] frame_gap_r;
-    wire frame_start_w = fb_vsync && (frame_gap_r >= FRAME_MIN_CYCLES);
+    wire frame_start_w = fb_vsync_r && (frame_gap_r >= FRAME_MIN_CYCLES);
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -198,7 +221,7 @@ module sdram_framebuffer #(
 
     // TEST_PATTERN==3: replace renderer data with test bars at write packer input
     // This tests the full round-trip: RGB666→RGB565 → FIFO → SDRAM → fetch → RGB565→RGB666 → BRAM → display
-    wire [COLOR_BITS-1:0] wr_pixel_data_w = (TEST_PATTERN == 3) ? test_pixel(wr_x_r[9:0]) : fb_data;
+    wire [COLOR_BITS-1:0] wr_pixel_data_w = (TEST_PATTERN == 3) ? test_pixel(wr_x_r[9:0]) : fb_data_r;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -217,7 +240,7 @@ module sdram_framebuffer #(
                 wr_width_r <= fb_width;
             end
 
-            if (fb_we) begin
+            if (fb_we_r) begin
                 if (frame_pending_r || frame_start_w) begin
                     // First pixel of new frame: consume as x=0 even pixel.
                     wr_x_r <= 11'd1;
@@ -376,7 +399,7 @@ module sdram_framebuffer #(
     wire [8:0] next_line_w = display_fb_line_w + 9'd1;
     wire [10:0] fetch_words_left_w = packed_width_w - fetch_word_r;
     wire fetch_use_burst_w = (fetch_words_left_w >= FB_READ_BURST_WORDS[10:0]);
-    wire wr_drop_w = fb_we && wr_x_r[0] && fifo_full_w;
+    wire wr_drop_w = fb_we_r && wr_x_r[0] && fifo_full_w;
     wire [8:0] completed_line_for_display_w = display_fb_line_w[0] ? completed_line_odd_r : completed_line_even_r;
     wire line_ready_w = (completed_line_for_display_w == display_fb_line_w);
     wire [8:0] line_lag_w = (completed_line_for_display_w == 9'h1FF ||
@@ -446,7 +469,7 @@ module sdram_framebuffer #(
             display_line_prev_r <= 9'd0;
             display_active_prev_r <= 1'b0;
         end else begin
-            if (fb_vsync) begin
+            if (fb_vsync_r) begin
                 if (dbg_vsync_raw_r != 8'hFF)
                     dbg_vsync_raw_r <= dbg_vsync_raw_r + 8'd1;
                 if (dbg_frame_start_reject_r != 8'hFF)
