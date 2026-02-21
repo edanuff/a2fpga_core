@@ -127,7 +127,16 @@ module top #(
 
     wire device_reset_n_w = rst_n & clk_logic_lock_w & clk_hdmi_lock_w;
 
-    wire system_reset_n_w = device_reset_n_w & a2_reset_n;
+    wire a2_reset_cdc_w;
+    cdc_fifo #(
+        .WIDTH(1)
+    ) cdc_a2reset (
+        .clk(clk_logic_w),
+        .i(a2_reset_n),
+        .o(a2_reset_cdc_w)
+    );
+
+    wire system_reset_n_w = device_reset_n_w & a2_reset_cdc_w;
 
     // SDRAM Controller
 

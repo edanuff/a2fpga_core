@@ -303,7 +303,7 @@ module sdram_framebuffer #(
 
     // Packed width: SDRAM words per line (fb_width / 2)
     wire [10:0] packed_width_w = {1'b0, fb_width[10:1]};
-    localparam integer FB_READ_BURST_WORDS = 4;  // 4 x 32-bit words = 8 pixels per request
+    localparam integer FB_READ_BURST_WORDS = 2;  // Must match SDRAM controller's READ_BURST_WORDS
     localparam integer PREFETCH_LEAD_LINES = 12;
 
     localparam FETCH_IDLE    = 2'd0;
@@ -577,7 +577,10 @@ module sdram_framebuffer #(
     // Write port: clk (54 MHz) — unpacked SDRAM read responses
     // Read port: clk_pixel (27 MHz) — HDMI pixel output
 
-    reg [(2*COLOR_BITS)-1:0] line_buf_pair [0:1023];
+    // Split even/odd pixels into separate 18-bit BRAMs to avoid 36-bit wide
+    // BSRAM read + combinational mux routing issues that cause ghosting.
+    reg [COLOR_BITS-1:0] line_buf_even [0:1023];
+    reg [COLOR_BITS-1:0] line_buf_odd  [0:1023];
 
     // Write side (clk domain): each 32-bit read beat contains two RGB565 pixels.
     wire lb_wr_w = fb_read_port.ready && (fetch_state_r == FETCH_WAIT);
@@ -585,10 +588,8 @@ module sdram_framebuffer #(
 
     always @(posedge clk) begin
         if (lb_wr_w) begin
-            line_buf_pair[lb_wr_addr_pair_w] <= {
-                rgb565_to_666(fb_read_port.q[31:16]),  // odd pixel
-                rgb565_to_666(fb_read_port.q[15:0])    // even pixel
-            };
+            line_buf_even[lb_wr_addr_pair_w] <= rgb565_to_666(fb_read_port.q[15:0]);
+            line_buf_odd[lb_wr_addr_pair_w]  <= rgb565_to_666(fb_read_port.q[31:16]);
         end
     end
 
@@ -628,7 +629,9 @@ module sdram_framebuffer #(
     wire [9:0]  next_fb_x_w = next_cx_w[9:0] - h_border_px_r[9:0];
     wire [9:0]  lb_rd_addr_pair_w = {rd_bank_w, next_fb_x_w[9:1]};
     reg [9:0] lb_rd_addr_pair_r;
-    wire [(2*COLOR_BITS)-1:0] lb_rd_pair_w = line_buf_pair[lb_rd_addr_pair_r];
+    // Independent BRAM reads — each is 18-bit, matching Gowin's native BSRAM width.
+    wire [COLOR_BITS-1:0] lb_rd_even_w = line_buf_even[lb_rd_addr_pair_r];
+    wire [COLOR_BITS-1:0] lb_rd_odd_w  = line_buf_odd[lb_rd_addr_pair_r];
     reg lb_rd_pixel_odd_r;
     reg in_active_px_r;
     reg scanline_dim_r;
@@ -640,9 +643,7 @@ module sdram_framebuffer #(
         in_active_px_r <= next_in_h_active_w && in_v_active_px_w;
         scanline_dim_r <= scanline_en && in_v_active_px_w && hdmi_cy[0];
     end
-    wire [COLOR_BITS-1:0] lb_rd_data_w = lb_rd_pixel_odd_r
-                                        ? lb_rd_pair_w[(2*COLOR_BITS)-1:COLOR_BITS]
-                                        : lb_rd_pair_w[COLOR_BITS-1:0];
+    wire [COLOR_BITS-1:0] lb_rd_data_w = lb_rd_pixel_odd_r ? lb_rd_odd_w : lb_rd_even_w;
 
     wire [23:0] active_rgb_w = torgb(lb_rd_data_w);
     wire [23:0] border_rgb_w = torgb(border_color);
