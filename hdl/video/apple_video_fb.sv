@@ -81,10 +81,13 @@ module apple_video_fb (
     localparam HISTORY_PIXEL_OFFSET = 4;
 
     // Number of pixel-processing cycles to run before enabling fb_we_o.
-    // Compensates for the HISTORY_PIXEL_OFFSET pipeline delay: the first
-    // WARMUP_PIXELS cycles shift real data into the history buffer so that
-    // pix_history_r[HISTORY_PIXEL_OFFSET] holds valid data when output begins.
-    // apple_video.sv uses SCAN_PIX_OFFSET=32 for this; we use a small warmup.
+    // Must match HISTORY_PIXEL_OFFSET so that pix_history_r[HISTORY_PIXEL_OFFSET]
+    // holds P0 (first real pixel) when output begins.
+    // EXP 36: With WARMUP=4, pix_history_r[4] = P0 at cycle 4 (aligned).
+    // The original code used next_history[4] (= post-shift look-ahead =
+    // pix_history_r[5]), which with WARMUP=4 gave P1 at cycle 4 (off by 1).
+    // Image analysis confirmed: ghost at leading edges with 1-pixel leftward
+    // shift + artifact colors. Switching to direct PRE-shift read fixes alignment.
     localparam WARMUP_PIXELS = 4;
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -421,13 +424,13 @@ module apple_video_fb (
     // consumed during gap_cnt_r==1 after palette_data_w has settled.
     reg pixel_output_pending_r;
 
-    // EXP 33d: Separate 3-stage color delay line using individual 1-bit
-    // flip-flops with syn_preserve. Completely isolated from pix_history_r
-    // and its fan-out to artifact/nibble paths. Tests whether the ghost is
-    // caused by pix_history_r synthesis (SRL/distributed RAM) or by the data.
+    // EXP 35: 4-stage color delay line — adds cdl_3_r for 4-shift delay
+    // (matching pix_history_r[4] which was ghost-free in EXP 33).
+    // Tests whether the ghost is delay-depth dependent.
     (* syn_preserve=1 *) reg cdl_0_r;  // pix_shift_r[0] delayed 1 pixel
     (* syn_preserve=1 *) reg cdl_1_r;  // delayed 2 pixels
-    (* syn_preserve=1 *) reg cdl_2_r;  // delayed 3 pixels = equivalent to pix_history_r[5] pre-shift
+    (* syn_preserve=1 *) reg cdl_2_r;  // delayed 3 pixels
+    (* syn_preserve=1 *) reg cdl_3_r;  // delayed 4 pixels = equivalent to pix_history_r[4] pre-shift
 
     // Pixel pipeline
     // EXP 32: Use syn_srlstyle="registers" from working apple_video.sv
@@ -518,6 +521,7 @@ module apple_video_fb (
             cdl_0_r <= 1'b0;
             cdl_1_r <= 1'b0;
             cdl_2_r <= 1'b0;
+            cdl_3_r <= 1'b0;
             palette_addr_r <= 5'd0;
 
             pix_shift_r <= '0;
@@ -611,6 +615,7 @@ module apple_video_fb (
                     cdl_0_r <= 1'b0;
                     cdl_1_r <= 1'b0;
                     cdl_2_r <= 1'b0;
+                    cdl_3_r <= 1'b0;
 
                     pix_shift_r <= '0;
                     // Reset pix_history_r to zeros at the start of each scanline.
@@ -822,18 +827,16 @@ module apple_video_fb (
                         // Shift history with current pixel (non-blocking)
                         pix_history_r <= {pix_shift_r[0], pix_history_r[PIX_HISTORY_SIZE-1:1]};
 
-                        // EXP 33d: Advance separate color delay line (individual flip-flops)
-                        cdl_0_r <= pix_shift_r[0];
-                        cdl_1_r <= cdl_0_r;
-                        cdl_2_r <= cdl_1_r;
-
-                        // EXP 30: Simplified color — read from isolated delay line
-                        // cdl_2_r (pre-NB value) = pixel from 3 shifts ago = pix_history_r[5] pre-shift
-                        pix_color_r <= cdl_2_r ? 4'hF : 4'h0;
+                        // EXP 36c: Simplified B&W like EXP 33 — direct assignment to
+                        // pix_color_r without scoped reg intermediate. Tests whether
+                        // the scoped reg [3:0] color variable causes Gowin synthesis issue.
+                        // EXP 33 (this exact pattern) was ghost-free.
+                        // EXP 36b (same logic through scoped reg) was ghosted.
+                        pix_color_r <= pix_history_r[HISTORY_PIXEL_OFFSET] ? 4'hF : 4'h0;
 
                         // Register palette address for ROM16-inferred lookup.
                         // palette_data_w will be valid next cycle (gap_cnt_r==1).
-                        palette_addr_r <= {GSP, cdl_2_r ? 4'hF : 4'h0};
+                        palette_addr_r <= {GSP, pix_history_r[HISTORY_PIXEL_OFFSET] ? 4'hF : 4'h0};
 
                         // Set pending flag if this pixel is in the output window
                         if (scanline_pix_cnt_r >= WARMUP_PIXELS && scanline_pix_cnt_r < (WARMUP_PIXELS + 10'd560))
@@ -852,12 +855,6 @@ module apple_video_fb (
                         pix_shift_r <= {1'b0, pix_shift_r[PIX_BUFFER_SIZE-1:1]};
 
                         // Advance step counters every pixel cycle, including warmup.
-                        // In apple_video.sv, step counters run unconditionally from
-                        // scan_start. With WARMUP_PIXELS=4, un-gated advancement means:
-                        // - pix_step7_r reaches 4 at the first output pixel, aligning
-                        //   nibble capture (calcNibble at step7==4) with byte boundaries.
-                        // - pix_step4_r wraps fully (4 mod 4 = 0), preserving NTSC
-                        //   artifact color phase for HIRES modes.
                         pix_step4_r <= pix_step4_r + 2'd1;
                         pix_step7_r <= (pix_step7_r == 3'd6) ? 3'd0 : pix_step7_r + 3'd1;
 
@@ -873,22 +870,26 @@ module apple_video_fb (
 
                     // --- Phase 2: Palette output + scanline complete (gap_cnt_r == 1) ---
                     if (gap_cnt_r == 2'd1) begin
-                        // EXP 33e: Bypass palette ROM and SSP path entirely.
-                        // Write directly to fb_data_o based on pix_color_r.
-                        // pix_color_r is 4'hF (white) or 4'h0 (black) from gap_cnt==0.
-                        // This tests whether the ghost is in the data path or the output path.
+                        // palette_data_w is now valid (addr was registered last cycle).
+                        // Output pixel to framebuffer and SuperSprite interface.
                         if (pixel_output_pending_r) begin
                             pixel_output_pending_r <= 1'b0;
 
-                            // Direct RGB666: white = 18'h3FFFF, black = 18'h00000
-                            fb_data_o <= pix_color_r[0] ? 18'h3FFFF : 18'h00000;
-                            fb_we_o <= 1'b1;
-
-                            // Still set apple outputs for SSP (not used for FB in this path)
-                            apple_r_o <= pix_color_r[0] ? 8'hF0 : 8'h00;
-                            apple_g_o <= pix_color_r[0] ? 8'hF0 : 8'h00;
-                            apple_b_o <= pix_color_r[0] ? 8'hF0 : 8'h00;
+                            // Expose Apple II RGB expanded to 8-bit for SuperSprite input.
+                            apple_r_o <= {palette_data_w[11:8], 4'b0};
+                            apple_g_o <= {palette_data_w[7:4], 4'b0};
+                            apple_b_o <= {palette_data_w[3:0], 4'b0};
                             apple_active_o <= 1'b1;
+
+                            // When SuperSprite is active, defer the framebuffer write by
+                            // 1 clk_logic cycle so the combinational SSP path sees the
+                            // updated apple_r_o.
+                            if (ssp_active_i) begin
+                                ssp_capture_r <= 1'b1;
+                            end else begin
+                                fb_data_o <= {palette_data_w[11:8], 2'b00, palette_data_w[7:4], 2'b00, palette_data_w[3:0], 2'b00};
+                                fb_we_o <= 1'b1;
+                            end
                         end
 
                         // Scanline complete check

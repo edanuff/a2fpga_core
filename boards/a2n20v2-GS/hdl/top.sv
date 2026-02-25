@@ -43,7 +43,10 @@ module top #(
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 1,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
-    parameter bit BUS_DATA_OUT_ENABLE = 1       // Allow driving data to Apple bus
+    parameter bit BUS_DATA_OUT_ENABLE = 1,      // Allow driving data to Apple bus
+
+    // Debug: override VRAM data with fixed characters (0=normal)
+    parameter bit FORCE_VRAM = 0
 
 ) (
     // fpga clocks
@@ -395,7 +398,11 @@ module top #(
         .video_address_o(video_address_w),
         .video_bank_o(video_bank_w),
         .video_rd_o(video_rd_w),
-        .video_data_i(video_data_w),
+        // EXP 10: Override VRAM data with fixed 'A' characters (0xC1) to test
+        // whether the ghost is in the VRAM data path or in the renderer pipeline.
+        // If ghost persists with fixed data → pipeline issue.
+        // If ghost disappears → VRAM data issue from apple_memory.
+        .video_data_i(FORCE_VRAM ? 32'hC1_00_C1_00 : video_data_w),
 
         .scanline_i(scanline_w),
         .hsync_i(hsync_w),
@@ -450,9 +457,10 @@ module top #(
         if (vsync_w) use_vgc_r <= a2mem_if.SHRG_MODE;
     end
 
-    wire fb_we_mux_w          = use_vgc_r ? vgc_fb_we_w    : fb_we_w;
-    wire [17:0] fb_data_mux_w = use_vgc_r ? vgc_fb_data_w  : fb_data_w;
     wire fb_vsync_mux_w       = use_vgc_r ? vgc_fb_vsync_w : fb_vsync_w;
+    wire [17:0] fb_data_mux_w = use_vgc_r ? vgc_fb_data_w  : fb_data_w;
+
+    wire fb_we_mux_w          = use_vgc_r ? vgc_fb_we_w   : fb_we_w;
 
     wire [10:0] fb_width_w  = use_vgc_r ? 11'd640 : 11'd560;
     wire [9:0]  fb_height_w = use_vgc_r ? 10'd200 : 10'd192;
@@ -786,7 +794,8 @@ module top #(
     wire [7:0] fb_dbg_flags_w;
 
     sdram_framebuffer #(
-        .TEST_PATTERN(0)  // 0=normal, 1=test bars via BRAM, 2=test bars bypass BRAM, 3=test bars via full SDRAM round-trip
+        .TEST_PATTERN(0),  // 0=normal
+        .THRESHOLD_DIAG(0) // EXP 22: 0=normal colors, 1=binary threshold
     ) sdram_framebuffer (
         .clk(clk_logic_w),
         .clk_pixel(clk_pixel_w),

@@ -47,7 +47,10 @@ module sdram_framebuffer #(
     //   1 = test pattern via line buffer (tests BRAM + display pipeline)
     //   2 = test pattern at output (bypasses BRAM entirely, tests display only)
     //   3 = test pattern at write packer input (tests full SDRAM round-trip)
-    parameter TEST_PATTERN = 0
+    parameter TEST_PATTERN = 0,
+    // EXP 22: Binary threshold diagnostic — all non-zero pixels become white,
+    // zero pixels become black. Makes ghost artifacts maximally visible.
+    parameter THRESHOLD_DIAG = 0
 ) (
     // Clocks and reset
     input  logic        clk,             // 54 MHz logic clock (also SDRAM clock)
@@ -127,7 +130,10 @@ module sdram_framebuffer #(
                 c[5:0],   c[5:4]};    // B
     endfunction
 
-    // Test pattern: 8-pixel wide vertical bars
+    // Test pattern: configurable vertical bars
+    // TEST_PATTERN==3: 8-pixel wide bars (same-color pairs only)
+    // TEST_PATTERN==4: 1-pixel alternating stripes (EVERY pair has mixed colors)
+    //   Tests whether the pixel packer/SDRAM handles mixed-color pairs correctly.
     function automatic [COLOR_BITS-1:0] test_pixel(input [9:0] x);
         case (x[5:3])
             3'd0: test_pixel = 18'h3FFFF;  // white
@@ -139,6 +145,11 @@ module sdram_framebuffer #(
             3'd6: test_pixel = 18'h3FFC0;  // yellow
             3'd7: test_pixel = 18'h00000;  // black
         endcase
+    endfunction
+
+    // 1-pixel alternating stripes for mixed-pair testing
+    function automatic [COLOR_BITS-1:0] test_pixel_mixed(input [9:0] x);
+        test_pixel_mixed = x[0] ? 18'h00000 : 18'h3FFFF;  // even=white, odd=black
     endfunction
 
     // =========================================================================
@@ -219,9 +230,11 @@ module sdram_framebuffer #(
         end
     end
 
-    // TEST_PATTERN==3: replace renderer data with test bars at write packer input
-    // This tests the full round-trip: RGB666→RGB565 → FIFO → SDRAM → fetch → RGB565→RGB666 → BRAM → display
-    wire [COLOR_BITS-1:0] wr_pixel_data_w = (TEST_PATTERN == 3) ? test_pixel(wr_x_r[9:0]) : fb_data_r;
+    // TEST_PATTERN==3: replace renderer data with 8-pixel test bars at write packer input
+    // TEST_PATTERN==4: replace with 1-pixel alternating stripes (mixed-color pairs)
+    // Both test the full round-trip: RGB666→RGB565 → FIFO → SDRAM → fetch → RGB565→RGB666 → BRAM → display
+    wire [COLOR_BITS-1:0] wr_pixel_data_w = (TEST_PATTERN == 4) ? test_pixel_mixed(wr_x_r[9:0]) :
+                                             (TEST_PATTERN == 3) ? test_pixel(wr_x_r[9:0]) : fb_data_r;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -703,33 +716,56 @@ module sdram_framebuffer #(
     wire in_v_active_px_w = (hdmi_cy >= v_border_px_r) &&
                              (hdmi_cy < v_border_px_r + {fb_height_px_r, 1'b0});
 
-    // Use next_cx to compensate for 1-cycle BRAM read latency (matches DDR3).
-    // Pipeline: cx+1 → addr register → async BRAM read → DebugOverlay(2) → HDMI
-    // Total 3 stages = same depth as DDR3 (addr + BRAM out + output registers)
-    wire [10:0] next_cx_w = hdmi_cx + 11'd1;
+    // EXP 20: Explicit BSRAM read register + pipeline alignment.
+    //
+    // The line buffer is inferred as BSRAM (syn_ramstyle="block_ram"), which has
+    // synchronous reads — but the original code used a wire assignment
+    // (line_buf[addr]) that implies async read. This mismatch causes:
+    //   1) Ambiguous read-port clock selection by the synthesizer
+    //   2) Unconstrained timing path from address to data
+    //   3) in_active_px_r / scanline_dim_r 1 cycle ahead of pixel data
+    //
+    // Fix: explicitly register the BSRAM read output on clk_pixel, and delay
+    // the control signals to match.
+
+    wire [10:0] next_cx_w = hdmi_cx + 11'd3;
     wire        next_in_h_active_w = (next_cx_w >= {1'b0, h_border_px_r}) &&
                                       (next_cx_w < {1'b0, h_border_px_r} + fb_width_px_r);
     wire [9:0]  next_fb_x_w = next_cx_w[9:0] - h_border_px_r[9:0];
 
-    // Single BRAM read — no even/odd mux needed (1 pixel per entry)
+    // Pipeline stage 1: address register + control flags (posedge N)
     reg [10:0] lb_rd_addr;
-    reg in_active_px_r;
-    reg scanline_dim_r;
+    reg in_active_s1_r;
+    reg scanline_dim_s1_r;
 
     always @(posedge clk_pixel) begin
         if (next_in_h_active_w && in_v_active_px_w)
             lb_rd_addr <= {rd_bank_w, next_fb_x_w[9:0]};
         else
-            lb_rd_addr <= 11'd0;  // default to 0 outside active area (matches DDR3)
-        in_active_px_r <= next_in_h_active_w && in_v_active_px_w;
-        scanline_dim_r <= scanline_en && in_v_active_px_w && hdmi_cy[0];
+            lb_rd_addr <= 11'd0;
+        in_active_s1_r <= next_in_h_active_w && in_v_active_px_w;
+        scanline_dim_s1_r <= scanline_en && in_v_active_px_w && hdmi_cy[0];
     end
 
-    // TEST_PATTERN==2: bypass BRAM entirely, generate test pattern from pixel position
-    wire [COLOR_BITS-1:0] lb_rd_data_w = (TEST_PATTERN == 2) ?
-        test_pixel(lb_rd_addr[9:0]) : line_buf[lb_rd_addr];
+    // Pipeline stage 2: BSRAM read register + delayed control (posedge N+1)
+    // This gives the synthesizer a clear clk_pixel read clock for the BSRAM
+    // and ensures deterministic 1-cycle read latency.
+    reg [COLOR_BITS-1:0] lb_rd_data_r;
+    reg in_active_px_r;
+    reg scanline_dim_r;
 
-    wire [23:0] active_rgb_w = torgb(lb_rd_data_w);
+    always @(posedge clk_pixel) begin
+        lb_rd_data_r <= (TEST_PATTERN == 2) ?
+            test_pixel(lb_rd_addr[9:0]) : line_buf[lb_rd_addr];
+        in_active_px_r <= in_active_s1_r;
+        scanline_dim_r <= scanline_dim_s1_r;
+    end
+
+    // EXP 22: Binary threshold — non-zero pixel data → white, zero → black.
+    // This makes ghost pixels maximally visible by eliminating color ambiguity.
+    wire [23:0] active_rgb_w = (THRESHOLD_DIAG != 0) ?
+        (lb_rd_data_r != {COLOR_BITS{1'b0}} ? 24'hFFFFFF : 24'h000000) :
+        torgb(lb_rd_data_r);
     wire [23:0] border_rgb_w = torgb(border_color);
 
     wire [23:0] pixel_rgb_w = in_active_px_r ? active_rgb_w : border_rgb_w;
