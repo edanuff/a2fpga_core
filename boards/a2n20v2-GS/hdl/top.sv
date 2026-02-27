@@ -571,7 +571,7 @@ module top #(
         );
 
         framebuffer_writer #(
-            .GAP_CYCLES(2)
+            .GAP_CYCLES(4)
         ) vgc_fb_writer (
             .clk_i(clk_logic_w),
             .reset_n_i(system_reset_n_w),
