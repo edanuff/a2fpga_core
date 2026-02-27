@@ -46,7 +46,10 @@ module top #(
     parameter bit BUS_DATA_OUT_ENABLE = 1,      // Allow driving data to Apple bus
 
     // Debug: override VRAM data with fixed characters (0=normal)
-    parameter bit FORCE_VRAM = 0
+    parameter bit FORCE_VRAM = 0,
+
+    parameter bit USE_PIXEL_STREAM = 1,         // Use new pixel stream generators (0=old, 1=new)
+    parameter bit USE_DIRECT_DISPLAY = 0        // 0=framebuffer, 1=direct to HDMI (ghost isolation)
 
 ) (
     // fpga clocks
@@ -339,6 +342,14 @@ module top #(
     wire [9:0] hdmi_x;
     wire [9:0] hdmi_y;
 
+    // CDC HDMI raster counters to clk_logic domain (synchronous 2:1 clocks)
+    reg [9:0] hdmi_x_logic_r;
+    reg [9:0] hdmi_y_logic_r;
+    always @(posedge clk_logic_w) begin
+        hdmi_x_logic_r <= hdmi_x;
+        hdmi_y_logic_r <= hdmi_y;
+    end
+
     // Scan timer — generates scanline/hsync/vsync from Apple II bus timing
     wire [8:0] scanline_w;
     wire hsync_w;
@@ -375,92 +386,228 @@ module top #(
         .dbg_c019_count_o(scan_dbg_c019_cnt_w)
     );
 
-    // Apple II video → framebuffer scanner
-    wire fb_we_w;
-    wire [17:0] fb_data_w;
-    wire fb_vsync_w;
+    // =========================================================================
+    // Video Generators — conditioned on USE_PIXEL_STREAM parameter
+    // =========================================================================
 
-    // Apple II RGB outputs for SuperSprite compositing
-    wire [7:0] apple_fb_r_w;
-    wire [7:0] apple_fb_g_w;
-    wire [7:0] apple_fb_b_w;
-    wire       apple_fb_active_w;
+    // Shared output wires from whichever generator path is active
+    wire        fb_we_w;
+    wire [17:0] fb_data_w;
+    wire        fb_vsync_w;
+    wire [7:0]  apple_fb_r_w;
+    wire [7:0]  apple_fb_g_w;
+    wire [7:0]  apple_fb_b_w;
+    wire        apple_fb_active_w;
+    wire        vgc_fb_we_w;
+    wire [17:0] vgc_fb_data_w;
+    wire        vgc_fb_vsync_w;
+
+    // SSP RGB wires — declared before generate block so Gowin doesn't
+    // create implicit 1-bit wires inside the generate scope
     wire [7:0] rgb_r_w;
     wire [7:0] rgb_g_w;
     wire [7:0] rgb_b_w;
 
-    apple_video_fb apple_video_fb (
-        .a2bus_if(a2bus_if),
-        .a2mem_if(a2mem_if),
+    // Direct display output wires (clk_logic domain)
+    wire [7:0] dd_r_w;
+    wire [7:0] dd_g_w;
+    wire [7:0] dd_b_w;
 
-        .video_control_if(video_control_if),
+    generate if (!USE_PIXEL_STREAM) begin : gen_legacy_video
+        // -----------------------------------------------------------------
+        // Legacy path: apple_video_fb + vgc_fb (existing implementations)
+        // -----------------------------------------------------------------
 
-        .video_address_o(video_address_w),
-        .video_bank_o(video_bank_w),
-        .video_rd_o(video_rd_w),
-        // EXP 10: Override VRAM data with fixed 'A' characters (0xC1) to test
-        // whether the ghost is in the VRAM data path or in the renderer pipeline.
-        // If ghost persists with fixed data → pipeline issue.
-        // If ghost disappears → VRAM data issue from apple_memory.
-        .video_data_i(FORCE_VRAM ? 32'hC1_00_C1_00 : video_data_w),
+        apple_video_fb apple_video_fb (
+            .a2bus_if(a2bus_if),
+            .a2mem_if(a2mem_if),
 
-        .scanline_i(scanline_w),
-        .hsync_i(hsync_w),
-        .vsync_i(vsync_w),
+            .video_control_if(video_control_if),
 
-        .fb_we_o(fb_we_w),
-        .fb_data_o(fb_data_w),
-        .fb_vsync_o(fb_vsync_w),
+            .video_address_o(video_address_w),
+            .video_bank_o(video_bank_w),
+            .video_rd_o(video_rd_w),
+            .video_data_i(FORCE_VRAM ? 32'hC1_00_C1_00 : video_data_w),
 
-        // Apple II RGB output for SuperSprite
-        .apple_r_o(apple_fb_r_w),
-        .apple_g_o(apple_fb_g_w),
-        .apple_b_o(apple_fb_b_w),
-        .apple_active_o(apple_fb_active_w),
+            .scanline_i(scanline_w),
+            .hsync_i(hsync_w),
+            .vsync_i(vsync_w),
 
-        // SuperSprite composited input
-        .ssp_r_i(rgb_r_w),
-        .ssp_g_i(rgb_g_w),
-        .ssp_b_i(rgb_b_w),
-        .ssp_active_i(1'b1)
-    );
+            .fb_we_o(fb_we_w),
+            .fb_data_o(fb_data_w),
+            .fb_vsync_o(fb_vsync_w),
 
-    // VGC framebuffer scanner — IIgs Super Hi-Res modes
-    wire vgc_fb_we_w;
-    wire [17:0] vgc_fb_data_w;
-    wire vgc_fb_vsync_w;
+            .apple_r_o(apple_fb_r_w),
+            .apple_g_o(apple_fb_g_w),
+            .apple_b_o(apple_fb_b_w),
+            .apple_active_o(apple_fb_active_w),
 
-    vgc_fb vgc_fb (
-        .a2bus_if(a2bus_if),
-        .a2mem_if(a2mem_if),
+            .ssp_r_i(rgb_r_w),
+            .ssp_g_i(rgb_g_w),
+            .ssp_b_i(rgb_b_w),
+            .ssp_active_i(1'b1)
+        );
 
-        .video_control_if(video_control_if),
+        vgc_fb vgc_fb (
+            .a2bus_if(a2bus_if),
+            .a2mem_if(a2mem_if),
 
-        .vgc_active_o(vgc_active_w),
-        .vgc_address_o(vgc_address_w),
-        .vgc_rd_o(vgc_rd_w),
-        .vgc_data_i(vgc_data_w),
+            .video_control_if(video_control_if),
 
-        .scanline_i(scanline_w),
-        .hsync_i(hsync_w),
-        .vsync_i(vsync_w),
+            .vgc_active_o(vgc_active_w),
+            .vgc_address_o(vgc_address_w),
+            .vgc_rd_o(vgc_rd_w),
+            .vgc_data_i(vgc_data_w),
 
-        .fb_we_o(vgc_fb_we_w),
-        .fb_data_o(vgc_fb_data_w),
-        .fb_vsync_o(vgc_fb_vsync_w)
-    );
+            .scanline_i(scanline_w),
+            .hsync_i(hsync_w),
+            .vsync_i(vsync_w),
 
-    // Framebuffer output mux — select apple_video_fb or vgc_fb based on SHRG_MODE
+            .fb_we_o(vgc_fb_we_w),
+            .fb_data_o(vgc_fb_data_w),
+            .fb_vsync_o(vgc_fb_vsync_w)
+        );
+
+    end else begin : gen_pixel_stream
+        // -----------------------------------------------------------------
+        // Pixel stream path: apple_video_gen + vgc_gen + framebuffer_writer
+        // -----------------------------------------------------------------
+
+        // --- Apple II generator ---
+        pixel_stream_if apple_ps();
+
+        apple_video_gen apple_video_gen (
+            .clk_i(clk_logic_w),
+            .reset_n_i(system_reset_n_w),
+
+            .a2mem_if(a2mem_if),
+            .video_control_if(video_control_if),
+            .sw_gs_i(sw_gs_w),
+
+            .pixel_stream(apple_ps),
+
+            .video_address_o(video_address_w),
+            .video_bank_o(video_bank_w),
+            .video_rd_o(video_rd_w),
+            .video_data_i(FORCE_VRAM ? 32'hC1_00_C1_00 : video_data_w)
+        );
+
+        if (USE_DIRECT_DISPLAY) begin : gen_apple_direct
+            // Direct display: bypass framebuffer, output to HDMI
+            direct_display #(
+                .PIX_CLK_DIV(2)
+            ) apple_direct (
+                .clk_i(clk_logic_w),
+                .reset_n_i(system_reset_n_w),
+                .pixel_stream(apple_ps),
+                .cx_i(hdmi_x_logic_r),
+                .cy_i(hdmi_y_logic_r),
+                .border_r_i({border_rgb444_w[11:8], border_rgb444_w[11:8]}),
+                .border_g_i({border_rgb444_w[7:4], border_rgb444_w[7:4]}),
+                .border_b_i({border_rgb444_w[3:0], border_rgb444_w[3:0]}),
+                .video_r_o(dd_r_w),
+                .video_g_o(dd_g_w),
+                .video_b_o(dd_b_w)
+            );
+
+            // Tie off framebuffer write signals
+            assign fb_we_w = 1'b0;
+            assign fb_data_w = 18'd0;
+            assign fb_vsync_w = 1'b0;
+            assign apple_fb_r_w = 8'd0;
+            assign apple_fb_g_w = 8'd0;
+            assign apple_fb_b_w = 8'd0;
+            assign apple_fb_active_w = 1'b0;
+        end else begin : gen_apple_fb
+            framebuffer_writer #(
+                .GAP_CYCLES(4)
+            ) apple_fb_writer (
+                .clk_i(clk_logic_w),
+                .reset_n_i(system_reset_n_w),
+
+                .pixel_stream(apple_ps),
+
+                .scanline_i(scanline_w),
+                .hsync_i(hsync_w),
+                .vsync_i(vsync_w),
+
+                .fb_we_o(fb_we_w),
+                .fb_data_o(fb_data_w),
+                .fb_vsync_o(fb_vsync_w),
+
+                .apple_r_o(apple_fb_r_w),
+                .apple_g_o(apple_fb_g_w),
+                .apple_b_o(apple_fb_b_w),
+                .apple_active_o(apple_fb_active_w),
+
+                .ssp_r_i(rgb_r_w),
+                .ssp_g_i(rgb_g_w),
+                .ssp_b_i(rgb_b_w),
+                .ssp_active_i(1'b1)
+            );
+
+            // Tie off direct display output
+            assign dd_r_w = 8'd0;
+            assign dd_g_w = 8'd0;
+            assign dd_b_w = 8'd0;
+        end
+
+        // --- VGC generator ---
+        pixel_stream_if vgc_ps();
+
+        vgc_gen vgc_gen (
+            .clk_i(clk_logic_w),
+            .reset_n_i(system_reset_n_w),
+
+            .a2mem_if(a2mem_if),
+            .video_control_if(video_control_if),
+
+            .pixel_stream(vgc_ps),
+
+            .vgc_active_o(vgc_active_w),
+            .vgc_address_o(vgc_address_w),
+            .vgc_rd_o(vgc_rd_w),
+            .vgc_data_i(vgc_data_w)
+        );
+
+        framebuffer_writer #(
+            .GAP_CYCLES(2)
+        ) vgc_fb_writer (
+            .clk_i(clk_logic_w),
+            .reset_n_i(system_reset_n_w),
+
+            .pixel_stream(vgc_ps),
+
+            .scanline_i(scanline_w),
+            .hsync_i(hsync_w),
+            .vsync_i(vsync_w),
+
+            .fb_we_o(vgc_fb_we_w),
+            .fb_data_o(vgc_fb_data_w),
+            .fb_vsync_o(vgc_fb_vsync_w),
+
+            .apple_r_o(),
+            .apple_g_o(),
+            .apple_b_o(),
+            .apple_active_o(),
+            .ssp_r_i(8'd0),
+            .ssp_g_i(8'd0),
+            .ssp_b_i(8'd0),
+            .ssp_active_i(1'b0)
+        );
+
+    end endgenerate
+
+    // Framebuffer output mux — select apple or vgc based on SHRG_MODE
     // Latched at frame boundary for clean transitions
     reg use_vgc_r;
     always @(posedge clk_logic_w) begin
         if (vsync_w) use_vgc_r <= a2mem_if.SHRG_MODE;
     end
 
-    wire fb_vsync_mux_w       = use_vgc_r ? vgc_fb_vsync_w : fb_vsync_w;
+    wire fb_we_mux_w          = use_vgc_r ? vgc_fb_we_w    : fb_we_w;
     wire [17:0] fb_data_mux_w = use_vgc_r ? vgc_fb_data_w  : fb_data_w;
-
-    wire fb_we_mux_w          = use_vgc_r ? vgc_fb_we_w   : fb_we_w;
+    wire fb_vsync_mux_w       = use_vgc_r ? vgc_fb_vsync_w : fb_vsync_w;
 
     wire [10:0] fb_width_w  = use_vgc_r ? 11'd640 : 11'd560;
     wire [9:0]  fb_height_w = use_vgc_r ? 10'd200 : 10'd192;
@@ -794,7 +941,7 @@ module top #(
     wire [7:0] fb_dbg_flags_w;
 
     sdram_framebuffer #(
-        .TEST_PATTERN(0),  // 0=normal
+        .TEST_PATTERN(0),  // 0=normal operation
         .THRESHOLD_DIAG(0) // EXP 22: 0=normal colors, 1=binary threshold
     ) sdram_framebuffer (
         .clk(clk_logic_w),
@@ -838,6 +985,21 @@ module top #(
         .dbg_flags_o(fb_dbg_flags_w)
     );
 
+    // Direct display CDC: clk_logic → clk_pixel (synchronous 2:1 clocks)
+    reg [7:0] dd_r_pixel_r;
+    reg [7:0] dd_g_pixel_r;
+    reg [7:0] dd_b_pixel_r;
+    always @(posedge clk_pixel_w) begin
+        dd_r_pixel_r <= dd_r_w;
+        dd_g_pixel_r <= dd_g_w;
+        dd_b_pixel_r <= dd_b_w;
+    end
+
+    // Select display source: direct display or framebuffer
+    wire [7:0] display_r_w = USE_DIRECT_DISPLAY ? dd_r_pixel_r : fb_r_w;
+    wire [7:0] display_g_w = USE_DIRECT_DISPLAY ? dd_g_pixel_r : fb_g_w;
+    wire [7:0] display_b_w = USE_DIRECT_DISPLAY ? dd_b_pixel_r : fb_b_w;
+
     // HDMI
 
     reg show_debug_overlay_r = SHOW_OVERLAY_ON_STARTUP;
@@ -879,9 +1041,9 @@ module top #(
         .screen_x_i     (hdmi_x),
         .screen_y_i     (hdmi_y),
 
-        .r_i            (fb_r_w),
-        .g_i            (fb_g_w),
-        .b_i            (fb_b_w),
+        .r_i            (display_r_w),
+        .g_i            (display_g_w),
+        .b_i            (display_b_w),
 
         .r_o            (debug_r_w),
         .g_o            (debug_g_w),

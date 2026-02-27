@@ -47,6 +47,8 @@ module sdram_framebuffer #(
     //   1 = test pattern via line buffer (tests BRAM + display pipeline)
     //   2 = test pattern at output (bypasses BRAM entirely, tests display only)
     //   3 = test pattern at write packer input (tests full SDRAM round-trip)
+    //   4 = 1-pixel alternating B/W stripes (mixed-color pair test)
+    //   6 = frame-alternating solid color (stale-data/FIFO-drop detection)
     parameter TEST_PATTERN = 0,
     // EXP 22: Binary threshold diagnostic — all non-zero pixels become white,
     // zero pixels become black. Makes ghost artifacts maximally visible.
@@ -152,6 +154,11 @@ module sdram_framebuffer #(
         test_pixel_mixed = x[0] ? 18'h00000 : 18'h3FFFF;  // even=white, odd=black
     endfunction
 
+    // Frame-alternating solid color for stale-data detection
+    function automatic [COLOR_BITS-1:0] test_pixel_frame_alt(input parity);
+        test_pixel_frame_alt = parity ? 18'h3FFFF : 18'h00000;  // white/black
+    endfunction
+
     // =========================================================================
     // Input registration — 1-cycle pipeline for fb_data/fb_we/fb_vsync
     // =========================================================================
@@ -213,6 +220,7 @@ module sdram_framebuffer #(
     reg [20:0] wr_line_base_r;       // FB_BASE_ADDR + y * (fb_width/2)
     reg [15:0] wr_pixel_even_r;      // buffered even pixel (RGB565)
     reg        frame_pending_r;      // waiting for first fb_we after accepted frame start
+    reg        frame_parity_r;      // toggles each frame for TEST_PATTERN==6
     // Reject implausibly short frame-start intervals so a spurious fb_vsync
     // pulse cannot reset write/read tracking mid-frame.
     localparam [19:0] FRAME_MIN_CYCLES = 20'd540000;  // ~10ms at 54MHz
@@ -232,8 +240,9 @@ module sdram_framebuffer #(
 
     // TEST_PATTERN==3: replace renderer data with 8-pixel test bars at write packer input
     // TEST_PATTERN==4: replace with 1-pixel alternating stripes (mixed-color pairs)
-    // Both test the full round-trip: RGB666→RGB565 → FIFO → SDRAM → fetch → RGB565→RGB666 → BRAM → display
-    wire [COLOR_BITS-1:0] wr_pixel_data_w = (TEST_PATTERN == 4) ? test_pixel_mixed(wr_x_r[9:0]) :
+    // 3/4/6 test the full round-trip: RGB666→RGB565 → FIFO → SDRAM → fetch → RGB565→RGB666 → BRAM → display
+    wire [COLOR_BITS-1:0] wr_pixel_data_w = (TEST_PATTERN == 6) ? test_pixel_frame_alt(frame_parity_r) :
+                                             (TEST_PATTERN == 4) ? test_pixel_mixed(wr_x_r[9:0]) :
                                              (TEST_PATTERN == 3) ? test_pixel(wr_x_r[9:0]) : fb_data_r;
 
     always @(posedge clk or negedge rst_n) begin
@@ -245,8 +254,10 @@ module sdram_framebuffer #(
             fifo_wr_ptr_r <= '0;
             wr_pixel_even_r <= 16'd0;
             frame_pending_r <= 1'b0;
+            frame_parity_r <= 1'b0;
         end else begin
             if (frame_start_w) begin
+                frame_parity_r <= ~frame_parity_r;
                 // Arm reset, but align to the first pixel write pulse so
                 // wr_x/wr_y stay phase-locked to the producer's fb_we stream.
                 frame_pending_r <= 1'b1;
@@ -655,42 +666,116 @@ module sdram_framebuffer #(
 
     wire lb_wr_w = fb_read_port.ready && (fetch_state_r == FETCH_WAIT);
 
-    // 4-pixel ring buffer for write serialization
-    reg [COLOR_BITS-1:0] px_buf [0:3];
-    reg [2:0] px_wr_ptr, px_rd_ptr;
-    wire [2:0] px_count = px_wr_ptr - px_rd_ptr;
-    wire px_empty = (px_wr_ptr == px_rd_ptr);
+    // ---- Read FIFO: buffer raw 32-bit SDRAM words (single write port) ----
+    // Replaces the 4-entry px_buf that used simultaneous 2-write push.
+    // Gowin distributed RAM has a single write port; the old dual-write pattern
+    // forced register duplication and caused pixel data corruption (ghosting).
+    localparam RD_FIFO_DEPTH = 8;
+    localparam RD_FIFO_ADDR_BITS = 3;
+    reg [31:0] rd_fifo [0:RD_FIFO_DEPTH-1];
+    reg [RD_FIFO_ADDR_BITS:0] rd_fifo_wr_ptr, rd_fifo_rd_ptr;
+    wire [RD_FIFO_ADDR_BITS:0] rd_fifo_count = rd_fifo_wr_ptr - rd_fifo_rd_ptr;
+    wire rd_fifo_empty = (rd_fifo_wr_ptr == rd_fifo_rd_ptr);
+
+    // Response handler: pop 32-bit words and write 2 pixels sequentially.
+    // Matches the DDR3 framebuffer's rd_pixel_active / rd_pixel_idx pattern.
+    reg [31:0] rd_word_latched_r;
+    reg        rd_pixel_idx_r;      // 0 = even pixel [15:0], 1 = odd pixel [31:16]
+    reg        rd_pixel_active_r;
+    wire rd_fifo_push = lb_wr_w && !rd_fifo_count[RD_FIFO_ADDR_BITS];
+    wire px_empty = rd_fifo_empty && !rd_pixel_active_r;
     reg [10:0] lb_wr_pixel_x;
 
-    // Push 2 pixels per SDRAM word
+    // Push 1 word per SDRAM ready pulse (single write port — no multi-write)
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            px_wr_ptr <= 3'd0;
+            rd_fifo_wr_ptr <= '0;
         end else if (fetch_start_pulse_w) begin
-            px_wr_ptr <= 3'd0;
-        end else if (lb_wr_w) begin
-            px_buf[px_wr_ptr[1:0]]          <= rgb565_to_666(fb_read_port.q[15:0]);   // even pixel
-            px_buf[px_wr_ptr[1:0] + 2'd1]  <= rgb565_to_666(fb_read_port.q[31:16]);  // odd pixel
-            px_wr_ptr <= px_wr_ptr + 3'd2;
+            rd_fifo_wr_ptr <= '0;
+        end else if (rd_fifo_push) begin
+            rd_fifo[rd_fifo_wr_ptr[RD_FIFO_ADDR_BITS-1:0]] <= fb_read_port.q;
+            rd_fifo_wr_ptr <= rd_fifo_wr_ptr + 1;
         end
     end
 
-    // Pop 1 pixel per cycle into line buffer
+    // Pop + extract: latch word, then write 2 pixels sequentially to line buffer.
+    // Even pixel (bits [15:0]) first, then odd pixel (bits [31:16]).
+    // RGB565→RGB666 conversion at extraction time.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            px_rd_ptr <= 3'd0;
+            rd_fifo_rd_ptr <= '0;
+            rd_word_latched_r <= 32'd0;
+            rd_pixel_idx_r <= 1'b0;
+            rd_pixel_active_r <= 1'b0;
             lb_wr_pixel_x <= 11'd0;
         end else if (fetch_start_pulse_w) begin
-            px_rd_ptr <= 3'd0;
+            rd_fifo_rd_ptr <= '0;
+            rd_pixel_idx_r <= 1'b0;
+            rd_pixel_active_r <= 1'b0;
             lb_wr_pixel_x <= 11'd0;
-        end else if (!px_empty) begin
-            // TEST_PATTERN==1: write test pattern to BRAM instead of SDRAM data
+        end else if (rd_pixel_active_r) begin
+            // Extract pixel from latched word and write to line buffer
             line_buf[{fetch_bank_r, lb_wr_pixel_x[9:0]}] <=
-                (TEST_PATTERN == 1) ? test_pixel(lb_wr_pixel_x[9:0]) : px_buf[px_rd_ptr[1:0]];
-            px_rd_ptr <= px_rd_ptr + 3'd1;
+                (TEST_PATTERN == 1) ? test_pixel(lb_wr_pixel_x[9:0]) :
+                rd_pixel_idx_r ? rgb565_to_666(rd_word_latched_r[31:16]) :
+                                 rgb565_to_666(rd_word_latched_r[15:0]);
             lb_wr_pixel_x <= lb_wr_pixel_x + 11'd1;
+            if (rd_pixel_idx_r)
+                rd_pixel_active_r <= 1'b0;
+            rd_pixel_idx_r <= ~rd_pixel_idx_r;
+        end else if (!rd_fifo_empty && TEST_PATTERN != 5) begin
+            // Pop next word from FIFO and start pixel extraction
+            rd_word_latched_r <= rd_fifo[rd_fifo_rd_ptr[RD_FIFO_ADDR_BITS-1:0]];
+            rd_fifo_rd_ptr <= rd_fifo_rd_ptr + 1;
+            rd_pixel_idx_r <= 1'b0;
+            rd_pixel_active_r <= 1'b1;
         end
     end
+
+    // TEST_PATTERN==5: SDRAM bypass — write fb_data directly to line buffer.
+    // Bypasses FIFO, SDRAM, px_buf entirely. Tests line buffer + display pipeline
+    // in isolation from the SDRAM round-trip.
+    //
+    // Sync strategy: use frame_start_w (scan_timer vsync) for frame boundaries,
+    // but defer the reset until a clean line boundary (bypass_x_r wraps) to
+    // avoid mid-line x corruption. The scan_timer and HDMI display have
+    // slightly different frame rates (~59.94 Hz vs ~60.0 Hz), causing a slow
+    // vertical scroll (~1 full cycle every ~17 seconds). This is an inherent
+    // limitation of the 2-bank line buffer without full-frame storage — the
+    // scroll confirms the line buffer + display pipeline is clean.
+    generate if (TEST_PATTERN == 5) begin : gen_bypass
+        reg [10:0] bypass_x_r;
+        reg [8:0]  bypass_y_r;
+        reg        bp_sync_pending_r;
+
+        always @(posedge clk or negedge rst_n) begin
+            if (!rst_n) begin
+                bypass_x_r <= 11'd0;
+                bypass_y_r <= 9'd0;
+                bp_sync_pending_r <= 1'b0;
+            end else begin
+                // Mark frame sync pending on scan_timer vsync
+                if (frame_start_w)
+                    bp_sync_pending_r <= 1'b1;
+
+                if (fb_we_r) begin
+                    line_buf[{bypass_y_r[0], bypass_x_r[9:0]}] <= fb_data_r;
+                    if (bypass_x_r == fb_width - 11'd1) begin
+                        bypass_x_r <= 11'd0;
+                        // Apply frame sync at clean line boundary only
+                        if (bp_sync_pending_r) begin
+                            bypass_y_r <= 9'd0;
+                            bp_sync_pending_r <= 1'b0;
+                        end else begin
+                            bypass_y_r <= bypass_y_r + 9'd1;
+                        end
+                    end else begin
+                        bypass_x_r <= bypass_x_r + 11'd1;
+                    end
+                end
+            end
+        end
+    end endgenerate
 
     // ---- Read side (clk_pixel domain, 27 MHz) ----
     // Bank = line parity, computed directly from hdmi_cy — no CDC needed.

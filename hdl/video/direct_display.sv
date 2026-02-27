@@ -24,8 +24,8 @@
 //
 // Drives pixel_clk_en from display pixel clock (as a clock enable on
 // clk_logic). Generates hsync/vsync/scanline from HDMI cx/cy counters.
-// Handles line doubling (same scanline number for consecutive display lines)
-// and border color when active is low.
+// Handles line doubling by rendering the same scanline on consecutive
+// display lines. Shows border color when generator is not active.
 //
 // 480p timing (720x480 @ 59.94Hz):
 //   SCREEN_WIDTH  = 720
@@ -70,15 +70,11 @@ module direct_display #(
     // Display geometry
     // =========================================================================
 
-    localparam [9:0] H_BORDER = (SCREEN_WIDTH - WINDOW_WIDTH) / 2;
     localparam [9:0] V_BORDER = (SCREEN_HEIGHT - WINDOW_HEIGHT) / 2;
-    localparam [9:0] H_LEFT   = H_BORDER;
-    localparam [9:0] H_RIGHT  = H_BORDER + WINDOW_WIDTH;
     localparam [9:0] V_TOP    = V_BORDER;
     localparam [9:0] V_BOTTOM = V_BORDER + WINDOW_HEIGHT;
 
-    wire in_window_w = (cx_i >= H_LEFT) && (cx_i < H_RIGHT) &&
-                       (cy_i >= V_TOP) && (cy_i < V_BOTTOM);
+    wire in_visible_lines_w = (cy_i >= V_TOP) && (cy_i < V_BOTTOM);
 
     // =========================================================================
     // Scanline generation — line doubling
@@ -91,7 +87,7 @@ module direct_display #(
     // Timing signal generation
     // =========================================================================
 
-    // pixel_clk_en: divide clk_i by PIX_CLK_DIV
+    // pixel_clk_en: divide clk_i by PIX_CLK_DIV (ungated — runs always)
     reg [$clog2(PIX_CLK_DIV)-1:0] pix_div_r;
     wire pix_tick_w = (pix_div_r == 0);
 
@@ -106,10 +102,11 @@ module direct_display #(
         end
     end
 
-    // hsync: pulse at start of each visible scanline (first pixel of active window)
-    // Specifically, pulse when cy enters a new Apple II scanline (even display lines only)
+    // hsync: pulse on every new display line within the visible window.
+    // Fires on both even and odd lines — the generator re-renders the same
+    // Apple II scanline for line doubling (scanline number repeats in pairs).
     reg [9:0] prev_cy_r;
-    wire new_scanline_w = (cy_i != prev_cy_r) && (cy_i >= V_TOP) && (cy_i < V_BOTTOM) && !cy_i[0];
+    wire new_scanline_w = (cy_i != prev_cy_r) && in_visible_lines_w;
 
     always @(posedge clk_i) begin
         if (!reset_n_i)
@@ -118,24 +115,27 @@ module direct_display #(
             prev_cy_r <= cy_i;
     end
 
-    // vsync: pulse at frame boundary (cy wraps or transitions to blanking)
+    // vsync: pulse at frame boundary
     wire vsync_pulse_w = (cy_i == FRAME_HEIGHT - 1) && (cx_i == 0);
 
     // =========================================================================
     // Drive pixel stream timing
     // =========================================================================
 
-    assign pixel_stream.pixel_clk_en = pix_tick_w & in_window_w;
+    // pixel_clk_en not gated by horizontal position — the generator gets
+    // 858 ticks per display line (at PIX_CLK_DIV=2), which is plenty for
+    // the 564 ticks it needs (4 warmup + 560 active).
+    assign pixel_stream.pixel_clk_en = pix_tick_w;
     assign pixel_stream.hsync        = new_scanline_w;
     assign pixel_stream.vsync        = vsync_pulse_w;
     assign pixel_stream.scanline     = apple_scanline_w;
 
     // =========================================================================
-    // Output mux — generator pixels in window, border color outside
+    // Output mux — generator pixels when active, border color otherwise
     // =========================================================================
 
-    assign video_r_o = (in_window_w && pixel_stream.active) ? pixel_stream.r : border_r_i;
-    assign video_g_o = (in_window_w && pixel_stream.active) ? pixel_stream.g : border_g_i;
-    assign video_b_o = (in_window_w && pixel_stream.active) ? pixel_stream.b : border_b_i;
+    assign video_r_o = pixel_stream.active ? pixel_stream.r : border_r_i;
+    assign video_g_o = pixel_stream.active ? pixel_stream.g : border_g_i;
+    assign video_b_o = pixel_stream.active ? pixel_stream.b : border_b_i;
 
 endmodule
