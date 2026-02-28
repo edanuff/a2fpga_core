@@ -18,9 +18,12 @@ create_generated_clock -name clk_pixel -source [get_pins {clk_logic_inst/rpll_in
 // HDMI PLL: 27 MHz × 5 = 135 MHz
 create_generated_clock -name clk_hdmi -source [get_pins {clk_logic_inst/rpll_inst/CLKOUTD}] -master_clock clk_pixel -divide_by 1 -multiply_by 5 -add [get_pins {clk_hdmi_inst/rpll_inst/CLKOUT}]
 
-// clk_sdram (108 MHz) and clk_logic (54 MHz) are synchronous — CLKDIV2
-// gives an exact 2:1 ratio where every 54 MHz edge IS a 108 MHz edge.
-// Binary pointer CDC is safe under this alignment guarantee.
+// clk_sdram (108 MHz) and clk_logic (54 MHz) are synchronous via CLKDIV2.
+// Binary pointer CDC relies on CLKDIV2 alignment guarantee.
+// NOTE: set_multicycle_path is broken on Gowin (relaxes ALL domain paths).
+// NOTE: set_max_delay squeezes Fmax to 0.3% margin, destabilizing SDRAM.
+// false_path is the only viable SDC constraint; CDC robustness must come
+// from the HDL design (gray-code FIFO) rather than from routing constraints.
 set_false_path -from [get_clocks {clk_logic}] -to [get_clocks {clk_sdram}]
 set_false_path -from [get_clocks {clk_sdram}] -to [get_clocks {clk_logic}]
 
