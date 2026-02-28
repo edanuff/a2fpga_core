@@ -83,7 +83,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Thu Feb 26 22:33:52 2026
+<td>Fri Feb 27 20:20:09 2026
 </td>
 </tr>
 <tr>
@@ -98,23 +98,23 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td class="label">Place & Route Process</td>
 <td>Running placement:
    Placement Phase 0: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
-   Placement Phase 1: CPU time = 0h 0m 0.616s, Elapsed time = 0h 0m 0.779s
+   Placement Phase 1: CPU time = 0h 0m 0.81s, Elapsed time = 0h 0m 0.869s
    Placement Phase 2: CPU time = 0h 0m 13s, Elapsed time = 0h 0m 14s
-   Placement Phase 3: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 11s
-   Total Placement: CPU time = 0h 0m 25s, Elapsed time = 0h 0m 27s
+   Placement Phase 3: CPU time = 0h 0m 8s, Elapsed time = 0h 0m 9s
+   Total Placement: CPU time = 0h 0m 23s, Elapsed time = 0h 0m 25s
 Running routing:
-   Routing Phase 0: CPU time = 0h 0m 0.012s, Elapsed time = 0h 0m 0.013s
-   Routing Phase 1: CPU time = 0h 0m 0.947s, Elapsed time = 0h 0m 1s
-   Routing Phase 2: CPU time = 0h 0m 32s, Elapsed time = 0h 0m 34s
+   Routing Phase 0: CPU time = 0h 0m 0.003s, Elapsed time = 0h 0m 0.003s
+   Routing Phase 1: CPU time = 0h 0m 0.396s, Elapsed time = 0h 0m 0.41s
+   Routing Phase 2: CPU time = 0h 0m 34s, Elapsed time = 0h 0m 35s
    Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-   Total Routing: CPU time = 0h 0m 32s, Elapsed time = 0h 0m 35s
+   Total Routing: CPU time = 0h 0m 34s, Elapsed time = 0h 0m 36s
 Generate output files:
    CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
 </td>
 </tr>
 <tr>
 <td class="label">Total Time and Memory Usage</td>
-<td>CPU time = 0h 1m 2s, Elapsed time = 0h 1m 7s, Peak memory usage = 651MB</td>
+<td>CPU time = 0h 1m 2s, Elapsed time = 0h 1m 5s, Peak memory usage = 658MB</td>
 </tr>
 </table>
 <br/>
@@ -129,23 +129,23 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Logic</td>
-<td>12493/20736</td>
-<td>61%</td>
+<td>12655/20736</td>
+<td>62%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --LUT,ALU,ROM16</td>
-<td>9991(8486 LUT, 1481 ALU, 24 ROM16)</td>
+<td>10057(8513 LUT, 1520 ALU, 24 ROM16)</td>
 <td>-</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --SSRAM(RAM16)</td>
-<td>417</td>
+<td>433</td>
 <td>-</td>
 </tr>
 <tr>
 <td class="label">Register</td>
-<td>5356/15915</td>
-<td>34%</td>
+<td>5485/15915</td>
+<td>35%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as Latch</td>
@@ -154,8 +154,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as FF</td>
-<td>5289/15552</td>
-<td>34%</td>
+<td>5418/15552</td>
+<td>35%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --I/O Register as Latch</td>
@@ -169,8 +169,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">CLS</td>
-<td>8138/10368</td>
-<td>79%</td>
+<td>8252/10368</td>
+<td>80%</td>
 </tr>
 <tr>
 <td class="label">I/O Port</td>
@@ -209,7 +209,7 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">DSP</td>
-<td>5 MULT9X9<br/>5 MULT18X18<br/>11 MULTADDALU18X18<br/></td><td>62%</td>
+<td>5 MULT9X9<br/>4 MULT18X18<br/>11 MULTADDALU18X18<br/></td><td>60%</td>
 </tr>
 </table>
 <h2><a name="I/O_Bank_Usage_Summary">I/O Bank Usage Summary:</a></h2>
@@ -261,8 +261,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">PRIMARY</td>
-<td>4/8</td>
-<td>50%</td>
+<td>5/8</td>
+<td>63%</td>
 </tr>
 <tr>
 <td class="label">LW</td>
@@ -273,6 +273,11 @@ Generate output files:
 <td class="label">GCLK_PIN</td>
 <td>2/5</td>
 <td>40%</td>
+</tr>
+<tr>
+<td class="label">CLKDIV</td>
+<td>1/8</td>
+<td>13%</td>
 </tr>
 <tr>
 <td class="label">rPLL</td>
@@ -299,6 +304,11 @@ Generate output files:
 <td> TR TL BR BL</td>
 </tr>
 <tr>
+<td class="label">clk_sdram_w</td>
+<td>PRIMARY</td>
+<td> TR TL BR BL</td>
+</tr>
+<tr>
 <td class="label">O_sdram_clk_d</td>
 <td>PRIMARY</td>
 <td> TR</td>
@@ -309,7 +319,7 @@ Generate output files:
 <td> TR TL BR BL</td>
 </tr>
 <tr>
-<td class="label">n3293_5</td>
+<td class="label">n3295_5</td>
 <td>LW</td>
 <td> -</td>
 </tr>
@@ -347,6 +357,11 @@ Generate output files:
 <td class="label">superserial/COM2/n67_5</td>
 <td>LW</td>
 <td> -</td>
+</tr>
+<tr>
+<td class="label">clk_sdram_w</td>
+<td>HCLK</td>
+<td>BANK2_BANK3_HCLK0</td>
 </tr>
 <tr>
 <td class="label">clk_hdmi_w</td>

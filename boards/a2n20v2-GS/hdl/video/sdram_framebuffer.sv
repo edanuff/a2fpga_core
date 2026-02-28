@@ -55,7 +55,7 @@ module sdram_framebuffer #(
     parameter THRESHOLD_DIAG = 0
 ) (
     // Clocks and reset
-    input  logic        clk,             // 54 MHz logic clock (also SDRAM clock)
+    input  logic        clk,             // 54 MHz logic clock
     input  logic        clk_pixel,       // 27 MHz pixel clock
     input  logic        rst_n,
 
@@ -369,22 +369,36 @@ module sdram_framebuffer #(
     // - Natural pacing: the fetcher can't outrun the display because
     //   next_line == last_fetched prevents re-fetch of the same line.
 
-    wire [10:0] h_border_w = (HDMI_WIDTH - fb_width) >> 1;
-    wire [9:0]  v_border_w = (HDMI_HEIGHT - {fb_height, 1'b0}) >> 1;
+    // Register fb_width/fb_height derivatives to break timing path from
+    // use_vgc_r mux (only changes at vsync, 1-cycle latency is fine)
+    reg [10:0] h_border_r;
+    reg [9:0]  v_border_r;
+    reg [8:0]  fb_height_r;
+    always @(posedge clk) begin
+        h_border_r <= (HDMI_WIDTH - fb_width) >> 1;
+        v_border_r <= (HDMI_HEIGHT - {fb_height, 1'b0}) >> 1;
+        fb_height_r <= fb_height[8:0];
+    end
 
-    // Packed width: SDRAM words per line (fb_width / 2)
-    wire [10:0] packed_width_w = {1'b0, fb_width[10:1]};
+    // Packed width: SDRAM words per line (fb_width / 2), registered to break
+    // timing path from use_vgc_r→fb_width mux (only changes at vsync)
+    reg [10:0] packed_width_r;
+    always @(posedge clk) begin
+        packed_width_r <= {1'b0, fb_width[10:1]};
+    end
     localparam integer FB_READ_BURST_WORDS = 2;  // Must match SDRAM controller's READ_BURST_WORDS
     localparam integer PREFETCH_LEAD_LINES = 12;
 
     localparam FETCH_IDLE    = 2'd0;
     localparam FETCH_READ    = 2'd1;
     localparam FETCH_WAIT    = 2'd2;
+    localparam FETCH_GAP     = 2'd3;  // 1-cycle gap between bursts for port fairness
 
     reg [1:0]  fetch_state_r;
     reg [8:0]  last_fetched_line_r;  // 9'h1FF = invalid sentinel
     reg [10:0] fetch_word_r;
     reg [20:0] fetch_addr_r;
+    reg [20:0] fetch_line_base_r;   // Base SDRAM addr of current/last fetched line
     reg        fetch_bank_r;
     reg [3:0]  fetch_beats_left_r;
 
@@ -409,19 +423,19 @@ module sdram_framebuffer #(
     reg       display_active_prev_r;
 
     // Display position in clk domain (from CDC'd cy)
-    wire [9:0] cy_minus_border_w = cy_sync_r - v_border_w;
+    wire [9:0] cy_minus_border_w = cy_sync_r - v_border_r;
     wire [8:0] display_fb_line_w = cy_minus_border_w[9:1];
-    wire       display_in_active_w = (cy_sync_r >= v_border_w) &&
-                                      (cy_sync_r < v_border_w + {fb_height, 1'b0});
+    wire       display_in_active_w = (cy_sync_r >= v_border_r) &&
+                                      (cy_sync_r < v_border_r + {fb_height_r, 1'b0});
 
     // Approaching active area: prefetch line 0 early in vblank so first active
     // lines are guaranteed ready.
     wire [10:0] cy_prefetch_sum_w = {1'b0, cy_sync_r} + 11'(PREFETCH_LEAD_LINES);
-    wire cy_approaching_active_w = (cy_sync_r < v_border_w) &&
-                                    (cy_prefetch_sum_w >= {1'b0, v_border_w});
+    wire cy_approaching_active_w = (cy_sync_r < v_border_r) &&
+                                    (cy_prefetch_sum_w >= {1'b0, v_border_r});
 
     wire [8:0] next_line_w = display_fb_line_w + 9'd1;
-    wire [10:0] fetch_words_left_w = packed_width_w - fetch_word_r;
+    wire [10:0] fetch_words_left_w = packed_width_r - fetch_word_r;
     wire fetch_use_burst_w = (fetch_words_left_w >= FB_READ_BURST_WORDS[10:0]);
     wire wr_drop_w = fb_we_r && wr_x_r[0] && fifo_full_w;
     wire [8:0] completed_line_for_display_w = display_fb_line_w[0] ? completed_line_odd_r : completed_line_even_r;
@@ -444,13 +458,13 @@ module sdram_framebuffer #(
     wire fetch_start_next_w = (fetch_state_r == FETCH_IDLE) &&
                               !fetch_start_line0_w &&
                               display_in_active_w &&
-                              (next_line_w < fb_height[8:0]) &&
+                              (next_line_w < fb_height_r) &&
                               (next_line_w != last_fetched_line_r) &&
                               px_empty;
     wire fetch_start_pulse_w = fetch_start_line0_w || fetch_start_next_w;
     wire fetch_done_pulse_w = (fetch_state_r == FETCH_WAIT) &&
                               fb_read_port.ready &&
-                              (fetch_word_r == packed_width_w - 11'd1);
+                              (fetch_word_r == packed_width_r - 11'd1);
 
     // Per-frame debug counters and live high-water tracking
     always @(posedge clk or negedge rst_n) begin
@@ -552,6 +566,7 @@ module sdram_framebuffer #(
             last_fetched_line_r <= 9'h1FF;
             fetch_word_r <= 11'd0;
             fetch_addr_r <= 21'd0;
+            fetch_line_base_r <= FB_BASE_ADDR;
             fetch_bank_r <= 1'b0;
             fetch_beats_left_r <= 4'd0;
         end else begin
@@ -566,25 +581,30 @@ module sdram_framebuffer #(
                     fetch_bank_r <= 1'b0;
                     fetch_word_r <= 11'd0;
                     fetch_beats_left_r <= 4'd0;
+                    fetch_line_base_r <= FB_BASE_ADDR;
                     fetch_addr_r <= FB_BASE_ADDR;
                     fetch_state_r <= FETCH_READ;
                 end else if (display_in_active_w &&
-                             next_line_w < fb_height[8:0] &&
+                             next_line_w < fb_height_r &&
                              next_line_w != last_fetched_line_r) begin
                     // Displaying line N — prefetch line N+1
+                    // Use incremental addition instead of multiplication
+                    // (packed_width_r only changes at vsync so this is always correct)
                     last_fetched_line_r <= next_line_w;
                     fetch_bank_r <= next_line_w[0];
                     fetch_word_r <= 11'd0;
                     fetch_beats_left_r <= 4'd0;
-                    fetch_addr_r <= FB_BASE_ADDR +
-                                    {12'd0, next_line_w} * {10'd0, packed_width_w};
+                    fetch_line_base_r <= fetch_line_base_r + {10'd0, packed_width_r};
+                    fetch_addr_r <= fetch_line_base_r + {10'd0, packed_width_r};
                     fetch_state_r <= FETCH_READ;
                 end
             end
 
             FETCH_READ: begin
-                // Yield to writes when FIFO has pending entries
-                if (!fifo_busy_w && fb_read_port.available) begin
+                // SDRAM runs at 108 MHz via CDC (~49% utilization), no available
+                // gate needed — port 0 hardware priority keeps DOC latency well
+                // within budget. Only yield if write FIFO is near full.
+                if (!fifo_busy_w) begin
                     fetch_beats_left_r <= fetch_use_burst_w ? 4'(FB_READ_BURST_WORDS) : 4'd1;
                     fetch_state_r <= FETCH_WAIT;
                 end
@@ -592,15 +612,23 @@ module sdram_framebuffer #(
 
             FETCH_WAIT: begin
                 if (fb_read_port.ready) begin
-                    if (fetch_word_r == packed_width_w - 11'd1) begin
+                    if (fetch_word_r == packed_width_r - 11'd1) begin
                         fetch_state_r <= FETCH_IDLE;
                     end else begin
                         fetch_word_r <= fetch_word_r + 11'd1;
                         fetch_addr_r <= fetch_addr_r + 21'd1;
                         fetch_beats_left_r <= fetch_beats_left_r - 4'd1;
-                        fetch_state_r <= (fetch_beats_left_r == 4'd1) ? FETCH_READ : FETCH_WAIT;
+                        // Go through FETCH_GAP between bursts so lower-priority
+                        // ports (DOC, FB_WRITE) get a window to be serviced.
+                        fetch_state_r <= (fetch_beats_left_r == 4'd1) ? FETCH_GAP : FETCH_WAIT;
                     end
                 end
+            end
+
+            FETCH_GAP: begin
+                // 1-cycle gap: port 0 has no queued request, SDRAM can
+                // service DOC or FB_WRITE if they have pending requests.
+                fetch_state_r <= FETCH_READ;
             end
 
             default: fetch_state_r <= FETCH_IDLE;
@@ -608,13 +636,12 @@ module sdram_framebuffer #(
         end
     end
 
-    // Drive read port — only request when not yielding to writes
+    // Drive read port — SDRAM runs at 108 MHz via CDC, ample bandwidth headroom
     assign fb_read_port.addr    = fetch_addr_r;
     assign fb_read_port.data    = 32'd0;
     assign fb_read_port.byte_en = 4'b1111;
     assign fb_read_port.wr      = 1'b0;
-    assign fb_read_port.rd      = (fetch_state_r == FETCH_READ) &&
-                                   fb_read_port.available && !fifo_busy_w;
+    assign fb_read_port.rd      = (fetch_state_r == FETCH_READ) && !fifo_busy_w;
     assign fb_read_port.burst   = fetch_use_burst_w;
 
     assign dbg_fifo_level_o = fifo_count_clamped_w;

@@ -19,8 +19,9 @@
 `include "datetime.svh"
 
 module top #(
-    parameter int CLOCK_SPEED_HZ = 54_000_000,
-    parameter int MEM_MHZ = CLOCK_SPEED_HZ / 1_000_000,
+    parameter int CLOCK_SPEED_HZ = 54_000_000,   // Logic clock
+    parameter int SDRAM_SPEED_HZ = 108_000_000,  // SDRAM clock
+    parameter int MEM_MHZ = SDRAM_SPEED_HZ / 1_000_000,
 
     parameter bit SCANLINES_ENABLE = 0,
     parameter bit APPLE_SPEAKER_ENABLE = 0,
@@ -103,8 +104,9 @@ module top #(
 
     // Clocks
 
-    wire clk_logic_w;
-    wire clk_logic_p_w;
+    wire clk_sdram_w;      // 108 MHz from PLL
+    wire clk_sdram_p_w;    // 108 MHz phase-shifted (SDRAM data capture)
+    wire clk_logic_w;      // 54 MHz from CLKDIV2
     wire clk_logic_lock_w;
     wire clk_pixel_w;
     wire clk_hdmi_w;
@@ -112,15 +114,25 @@ module top #(
     wire hdmi_rst_n_w;
     wire a2_2M;
 
-    // PLL - 54hz from 27
+    // PLL - 108MHz from 27
     clk_logic clk_logic_inst (
-        .clkout(clk_logic_w),  //output clkout
+        .clkout(clk_sdram_w),  //output clkout (108 MHz)
         .lock(clk_logic_lock_w),  //output lock
-        .clkoutp(clk_logic_p_w),  //output clkoutp
-        .clkoutd(clk_pixel_w),  //output clkoutd
+        .clkoutp(clk_sdram_p_w),  //output clkoutp (108 MHz phase-shifted)
+        .clkoutd(clk_pixel_w),  //output clkoutd (27 MHz)
         .reset(~rst_n),  //input reset
         .clkin(clk)  //input clkin
     );
+
+    // 108 MHz → 54 MHz logic clock
+    CLKDIV clkdiv2_inst(
+        .CLKOUT(clk_logic_w),
+        .HCLKIN(clk_sdram_w),
+        .RESETN(rst_n),
+        .CALIB(1'b0)
+    );
+    defparam clkdiv2_inst.DIV_MODE = "2";
+    defparam clkdiv2_inst.GSREN = "false";
 
     // PLL - 135Mhz from 27
     clk_hdmi clk_hdmi_inst (
@@ -147,8 +159,6 @@ module top #(
 
     // SDRAM Controller
 
-    wire sdram_init_complete;
-
     // SDRAM ports: lower number = higher priority
     localparam FB_READ_PORT  = 0;   // Framebuffer line reads (highest priority)
     localparam FB_WRITE_PORT = 1;   // Framebuffer pixel writes
@@ -161,12 +171,23 @@ module top #(
     localparam DQM_WIDTH = 4;
     localparam PORT_OUTPUT_WIDTH = 32;
 
+    // Client-side port interfaces (54 MHz logic domain)
     mem_port_if #(
         .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
         .DATA_WIDTH(DATA_WIDTH),
         .DQM_WIDTH(DQM_WIDTH),
         .PORT_OUTPUT_WIDTH(PORT_OUTPUT_WIDTH)
     ) mem_ports[NUM_PORTS-1:0]();
+
+    // SDRAM-side port interfaces (108 MHz SDRAM domain)
+    mem_port_if #(
+        .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
+        .DATA_WIDTH(DATA_WIDTH),
+        .DQM_WIDTH(DQM_WIDTH),
+        .PORT_OUTPUT_WIDTH(PORT_OUTPUT_WIDTH)
+    ) mem_ports_sdram[NUM_PORTS-1:0]();
+
+    wire sdram_init_complete_raw;  // from sdram_ports (108 MHz domain)
 
     sdram_ports #(
         .CLOCK_SPEED_MHZ(MEM_MHZ),
@@ -186,12 +207,12 @@ module top #(
         .PRECHARGE_BIT(10),
         .DQM_WIDTH(DQM_WIDTH)
     ) sdram_ports (
-        .clk(clk_logic_w),
-        .sdram_clk(clk_logic_p_w),
+        .clk(clk_sdram_w),            // 108 MHz
+        .sdram_clk(clk_sdram_p_w),    // 108 MHz phase-shifted
         .reset(!device_reset_n_w),
-        .init_complete(sdram_init_complete),
+        .init_complete(sdram_init_complete_raw),
 
-        .ports(mem_ports),
+        .ports(mem_ports_sdram),       // 108 MHz side
 
         .SDRAM_DQ(IO_sdram_dq),
         .SDRAM_A(O_sdram_addr),
@@ -204,6 +225,36 @@ module top #(
         .SDRAM_CKE(O_sdram_cke),
         .SDRAM_CLK(O_sdram_clk)
     );
+
+    // CDC wrappers: 54 MHz clients ↔ 108 MHz SDRAM
+    generate
+        for (genvar i = 0; i < NUM_PORTS; i++) begin : mem_cdc
+            mem_port_cdc #(
+                .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
+                .DATA_WIDTH(DATA_WIDTH),
+                .DQM_WIDTH(DQM_WIDTH),
+                .PORT_OUTPUT_WIDTH(PORT_OUTPUT_WIDTH)
+            ) cdc_inst (
+                .clk_client(clk_logic_w),   // 54 MHz
+                .clk_sdram(clk_sdram_w),    // 108 MHz
+                .rst_n(device_reset_n_w),
+                .client(mem_ports[i]),
+                .sdram(mem_ports_sdram[i])
+            );
+        end
+    endgenerate
+
+    // Sync sdram_init_complete from 108 MHz → 54 MHz (2FF synchronizer)
+    reg sdram_init_sync1, sdram_init_sync2;
+    always @(posedge clk_logic_w or negedge device_reset_n_w) begin
+        if (!device_reset_n_w) begin
+            {sdram_init_sync1, sdram_init_sync2} <= 2'b0;
+        end else begin
+            sdram_init_sync1 <= sdram_init_complete_raw;
+            sdram_init_sync2 <= sdram_init_sync1;
+        end
+    end
+    wire sdram_init_complete = sdram_init_sync2;
 
     // Interface to Apple II
 
@@ -815,12 +866,14 @@ module top #(
     wire [12:0] mb_audio_l_ext_w = {mb_audio_l, 3'b0};
     wire [12:0] mb_audio_r_ext_w = {mb_audio_r, 3'b0};
 
-    wire signed [15:0] core_audio_l_w;
-    wire signed [15:0] core_audio_r_w;
     // Combine all the audio sources into a single 16-bit signed audio signal
-    // This could theoretically overflow by 1 bit and clip, but unlikely
-    assign core_audio_l_w = sg_audio_l + ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
-    assign core_audio_r_w = sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
+    // Registered to break timing path through 4-input addition chain
+    reg signed [15:0] core_audio_l_r;
+    reg signed [15:0] core_audio_r_r;
+    always @(posedge clk_logic_w) begin
+        core_audio_l_r <= sg_audio_l + ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
+        core_audio_r_r <= sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
+    end
 
     // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
 
@@ -833,7 +886,7 @@ module top #(
         .rst_n(device_reset_n_w),
         .clk_fast(clk_logic_w),
         .clk_slow(clk_pixel_w),
-        .data_in(core_audio_l_w),
+        .data_in(core_audio_l_r),
         .data_out(cdc_audio_l)
     );
 
@@ -843,7 +896,7 @@ module top #(
         .rst_n(device_reset_n_w),
         .clk_fast(clk_logic_w),
         .clk_slow(clk_pixel_w),
-        .data_in(core_audio_r_w),
+        .data_in(core_audio_r_r),
         .data_out(cdc_audio_r)
     );
 
@@ -860,7 +913,7 @@ module top #(
     localparam AUDIO_BIT_WIDTH = 16;
     wire clk_audio_w;
     audio_timing #(
-        .CLK_RATE(CLOCK_SPEED_HZ / 2),
+        .CLK_RATE(27_000_000),
         .AUDIO_RATE(AUDIO_RATE)
     ) audio_timing (
         .reset(~device_reset_n_w),
@@ -874,7 +927,7 @@ module top #(
 
     wire [15:0] audio_sample_word[1:0];
     audio_out #(
-        .CLK_RATE(CLOCK_SPEED_HZ / 2),
+        .CLK_RATE(27_000_000),
         .AUDIO_RATE(AUDIO_RATE)
     ) audio_out
     (
