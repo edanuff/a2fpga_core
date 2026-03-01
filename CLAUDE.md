@@ -12,7 +12,7 @@ line tool is `gw_sh` and its path on this Mac is:
 ### Full Build (Synthesis + Place & Route)
 
 ```bash
-cd /Users/edanuff/GitHub/a2fpga_core/boards/a2mega
+cd boards/a2mega
 echo 'open_project a2mega.gprj
 run all
 exit' | /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh
@@ -21,7 +21,7 @@ exit' | /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh
 ### Synthesis Only
 
 ```bash
-cd /Users/edanuff/GitHub/a2fpga_core/boards/a2mega
+cd boards/a2mega
 echo 'open_project a2mega.gprj
 run syn
 exit' | /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh
