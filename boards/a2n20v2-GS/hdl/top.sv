@@ -293,7 +293,7 @@ module top #(
         .IRQ_OUT_ENABLE(IRQ_OUT_ENABLE)
     ) apple_bus (
         .clk_logic_i(clk_logic_w),
-        .clk_pixel_i(clk_pixel_w),
+        .clk_pixel_i(clk_logic_w),    // F18A runs on clk_logic (54 MHz) — no separate pixel clock
         .system_reset_n_i(system_reset_n_w),
         .device_reset_n_i(device_reset_n_w),
         .a2_phi1_i(a2_phi1),
@@ -665,15 +665,11 @@ module top #(
 
     // SuperSprite
 
-    wire VDP_OVERLAY_SW;
-    wire APPLE_VIDEO_SW;
     wire [0:7] ssp_d_w;
     wire ssp_rd;
-    wire [3:0] vdp_r;
-    wire [3:0] vdp_g;
-    wire [3:0] vdp_b;
-    wire vdp_transparent;
     wire vdp_ext_video;
+    wire [3:0] vdp_border_r_w, vdp_border_g_w, vdp_border_b_w;
+    wire vdp_border_active_w;
     wire vdp_irq_n;
     wire [9:0] ssp_audio_w;
     wire vdp_unlocked_w;
@@ -696,7 +692,7 @@ module top #(
     // VDP Raster Counter — synced to Apple II scan_timer (clk_logic domain)
     // vdp_cx: horizontal counter advancing once per 4 clk_logic cycles
     // vdp_cy: uses scanline_w directly from scan_timer (0–261)
-    localparam VDP_HMAX = 10'd856;
+    localparam VDP_HMAX = 10'd856;  // matches custom f18a_vga_cont_fb HMAX=856
 
     reg [9:0] vdp_cx;
     reg [1:0] vdp_div;
@@ -748,6 +744,11 @@ module top #(
         .vdp_ext_video_o(vdp_ext_video),
         .vdp_unlocked_o(vdp_unlocked_w),
         .vdp_gmode_o(vdp_gmode_w),
+
+        .vdp_border_r_o(vdp_border_r_w),
+        .vdp_border_g_o(vdp_border_g_w),
+        .vdp_border_b_o(vdp_border_b_w),
+        .vdp_border_active_o(vdp_border_active_w),
 
         .f18a_gpu_if(f18a_gpu_if),
 
@@ -968,11 +969,21 @@ module top #(
         12'h1d0, 12'hff0, 12'h4f9, 12'hfff    //          12-15
     };
     wire [11:0] border_rgb444_w = border_palette_w[border_idx_w];
-    wire [17:0] border_rgb666_w = {
+    wire [17:0] apple_border_rgb666_w = {
         border_rgb444_w[11:8], 2'b00,
         border_rgb444_w[7:4],  2'b00,
         border_rgb444_w[3:0],  2'b00
     };
+
+    // VDP border color: when the SuperSprite overlay is active, use the VDP
+    // backdrop color for the display border. Uses the same overlay logic as
+    // active pixels (non-black VDP backdrop overrides Apple II border).
+    // Match active area path: SSP outputs {vdp_r, 4'b0}, framebuffer_writer
+    // truncates to [7:2] = {vdp_r, 2'b00}. Use same expansion here.
+    wire [17:0] vdp_border_rgb666_w = {vdp_border_r_w, 2'b00,
+                                        vdp_border_g_w, 2'b00,
+                                        vdp_border_b_w, 2'b00};
+    wire [17:0] border_rgb666_w = vdp_border_active_w ? vdp_border_rgb666_w : apple_border_rgb666_w;
 
     // SDRAM Framebuffer
     wire [7:0] fb_r_w;

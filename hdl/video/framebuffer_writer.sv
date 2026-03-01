@@ -72,7 +72,7 @@ module framebuffer_writer #(
     wire pixel_tick_w = (gap_cnt_r == 0);
 
     always @(posedge clk_i) begin
-        if (!reset_n_i) begin
+        if (!reset_n_i || hsync_i) begin
             gap_cnt_r <= '0;
         end else begin
             if (gap_cnt_r == GAP_CYCLES - 1)
