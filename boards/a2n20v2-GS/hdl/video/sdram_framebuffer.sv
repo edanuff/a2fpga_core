@@ -856,7 +856,7 @@ module sdram_framebuffer #(
         else
             lb_rd_addr <= 11'd0;
         in_active_s1_r <= next_in_h_active_w && in_v_active_px_w;
-        scanline_dim_s1_r <= scanline_en && in_v_active_px_w && hdmi_cy[0];
+        scanline_dim_s1_r <= scanline_en && hdmi_cy[0];
     end
 
     // Pipeline stage 2: BSRAM read register + delayed control (posedge N+1)
@@ -878,7 +878,7 @@ module sdram_framebuffer #(
     wire [23:0] active_rgb_w = (THRESHOLD_DIAG != 0) ?
         (lb_rd_data_r != {COLOR_BITS{1'b0}} ? 24'hFFFFFF : 24'h000000) :
         torgb(lb_rd_data_r);
-    wire [23:0] border_rgb_w = torgb(border_color);
+    wire [23:0] border_rgb_w = torgb(rgb565_to_666(rgb666_to_565(border_color)));
 
     wire [23:0] pixel_rgb_w = in_active_px_r ? active_rgb_w : border_rgb_w;
 
