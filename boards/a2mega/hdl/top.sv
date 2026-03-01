@@ -46,8 +46,7 @@ module top #(
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
-    parameter bit BUS_DATA_OUT_ENABLE = 1,       // Allow driving data to Apple bus
-    parameter bit USE_PIXEL_STREAM = 1          // Use new pixel stream generators (0=old, 1=new)
+    parameter bit BUS_DATA_OUT_ENABLE = 1        // Allow driving data to Apple bus
 
 ) (
     // fpga clocks
@@ -358,7 +357,6 @@ module top #(
     assign video_control_if.MONOCHROME_DHIRES_MODE = 1'b0;
     assign video_control_if.SHRG_MODE = 1'b0;
 
-    // Scan timer outputs — forward-declared for apple_video_fb
     wire [8:0] scanline_w;
     wire hsync_w;
     wire vsync_w;
@@ -375,10 +373,9 @@ module top #(
     wire [7:0] scan_dbg_c019_cnt_w;
 
     // =========================================================================
-    // Video Generators — conditioned on USE_PIXEL_STREAM parameter
+    // Video Generators — pixel stream path
     // =========================================================================
 
-    // Shared output wires from whichever generator path is active
     wire        fb_we_w;
     wire [17:0] fb_data_w;
     wire        fb_vsync_w;
@@ -390,163 +387,99 @@ module top #(
     wire [17:0] vgc_fb_data_w;
     wire        vgc_fb_vsync_w;
 
-    // SSP RGB wires — declared before generate block so Gowin doesn't
-    // create implicit 1-bit wires inside the generate scope
     wire [7:0] rgb_r_w;
     wire [7:0] rgb_g_w;
     wire [7:0] rgb_b_w;
 
-    generate if (!USE_PIXEL_STREAM) begin : gen_legacy_video
-        // -----------------------------------------------------------------
-        // Legacy path: apple_video_fb + vgc_fb (existing implementations)
-        // -----------------------------------------------------------------
+    // --- Apple II generator ---
+    pixel_stream_if apple_ps();
 
-        apple_video_fb apple_video_fb (
-            .a2bus_if(a2bus_if),
-            .a2mem_if(a2mem_if),
+    apple_video_gen apple_video_gen (
+        .clk_i(clk_logic_w),
+        .reset_n_i(system_reset_n_w),
 
-            .video_control_if(video_control_if),
+        .a2mem_if(a2mem_if),
+        .video_control_if(video_control_if),
+        .sw_gs_i(!dip_switches_n[3]),
 
-            .video_address_o(video_address_w),
-            .video_bank_o(video_bank_w),
-            .video_rd_o(video_rd_w),
-            .video_data_i(video_data_w),
+        .pixel_stream(apple_ps),
 
-            .scanline_i(scanline_w),
-            .hsync_i(hsync_w),
-            .vsync_i(vsync_w),
+        .video_address_o(video_address_w),
+        .video_bank_o(video_bank_w),
+        .video_rd_o(video_rd_w),
+        .video_data_i(video_data_w)
+    );
 
-            .fb_we_o(fb_we_w),
-            .fb_data_o(fb_data_w),
-            .fb_vsync_o(fb_vsync_w),
+    framebuffer_writer #(
+        .GAP_CYCLES(4)
+    ) apple_fb_writer (
+        .clk_i(clk_logic_w),
+        .reset_n_i(system_reset_n_w),
 
-            .apple_r_o(apple_fb_r_w),
-            .apple_g_o(apple_fb_g_w),
-            .apple_b_o(apple_fb_b_w),
-            .apple_active_o(apple_fb_active_w),
+        .pixel_stream(apple_ps),
 
-            .ssp_r_i(rgb_r_w),
-            .ssp_g_i(rgb_g_w),
-            .ssp_b_i(rgb_b_w),
-            .ssp_active_i(1'b1)
-        );
+        .scanline_i(scanline_w),
+        .hsync_i(hsync_w),
+        .vsync_i(vsync_w),
 
-        vgc_fb vgc_fb (
-            .a2bus_if(a2bus_if),
-            .a2mem_if(a2mem_if),
+        .fb_we_o(fb_we_w),
+        .fb_data_o(fb_data_w),
+        .fb_vsync_o(fb_vsync_w),
 
-            .video_control_if(video_control_if),
+        .apple_r_o(apple_fb_r_w),
+        .apple_g_o(apple_fb_g_w),
+        .apple_b_o(apple_fb_b_w),
+        .apple_active_o(apple_fb_active_w),
 
-            .vgc_active_o(vgc_active_w),
-            .vgc_address_o(vgc_address_w),
-            .vgc_rd_o(vgc_rd_w),
-            .vgc_data_i(vgc_data_w),
+        .ssp_r_i(rgb_r_w),
+        .ssp_g_i(rgb_g_w),
+        .ssp_b_i(rgb_b_w),
+        .ssp_active_i(1'b1)
+    );
 
-            .scanline_i(scanline_w),
-            .hsync_i(hsync_w),
-            .vsync_i(vsync_w),
+    // --- VGC generator ---
+    pixel_stream_if vgc_ps();
 
-            .fb_we_o(vgc_fb_we_w),
-            .fb_data_o(vgc_fb_data_w),
-            .fb_vsync_o(vgc_fb_vsync_w)
-        );
+    vgc_gen vgc_gen (
+        .clk_i(clk_logic_w),
+        .reset_n_i(system_reset_n_w),
 
-    end else begin : gen_pixel_stream
-        // -----------------------------------------------------------------
-        // Pixel stream path: apple_video_gen + vgc_gen + framebuffer_writer
-        // -----------------------------------------------------------------
+        .a2mem_if(a2mem_if),
+        .video_control_if(video_control_if),
 
-        // --- Apple II generator ---
-        pixel_stream_if apple_ps();
+        .pixel_stream(vgc_ps),
 
-        apple_video_gen apple_video_gen (
-            .clk_i(clk_logic_w),
-            .reset_n_i(system_reset_n_w),
+        .vgc_active_o(vgc_active_w),
+        .vgc_address_o(vgc_address_w),
+        .vgc_rd_o(vgc_rd_w),
+        .vgc_data_i(vgc_data_w)
+    );
 
-            .a2mem_if(a2mem_if),
-            .video_control_if(video_control_if),
-            .sw_gs_i(!dip_switches_n[3]),
+    framebuffer_writer #(
+        .GAP_CYCLES(2)
+    ) vgc_fb_writer (
+        .clk_i(clk_logic_w),
+        .reset_n_i(system_reset_n_w),
 
-            .pixel_stream(apple_ps),
+        .pixel_stream(vgc_ps),
 
-            .video_address_o(video_address_w),
-            .video_bank_o(video_bank_w),
-            .video_rd_o(video_rd_w),
-            .video_data_i(video_data_w)
-        );
+        .scanline_i(scanline_w),
+        .hsync_i(hsync_w),
+        .vsync_i(vsync_w),
 
-        framebuffer_writer #(
-            .GAP_CYCLES(4)
-        ) apple_fb_writer (
-            .clk_i(clk_logic_w),
-            .reset_n_i(system_reset_n_w),
+        .fb_we_o(vgc_fb_we_w),
+        .fb_data_o(vgc_fb_data_w),
+        .fb_vsync_o(vgc_fb_vsync_w),
 
-            .pixel_stream(apple_ps),
-
-            .scanline_i(scanline_w),
-            .hsync_i(hsync_w),
-            .vsync_i(vsync_w),
-
-            .fb_we_o(fb_we_w),
-            .fb_data_o(fb_data_w),
-            .fb_vsync_o(fb_vsync_w),
-
-            .apple_r_o(apple_fb_r_w),
-            .apple_g_o(apple_fb_g_w),
-            .apple_b_o(apple_fb_b_w),
-            .apple_active_o(apple_fb_active_w),
-
-            .ssp_r_i(rgb_r_w),
-            .ssp_g_i(rgb_g_w),
-            .ssp_b_i(rgb_b_w),
-            .ssp_active_i(1'b1)
-        );
-
-        // --- VGC generator ---
-        pixel_stream_if vgc_ps();
-
-        vgc_gen vgc_gen (
-            .clk_i(clk_logic_w),
-            .reset_n_i(system_reset_n_w),
-
-            .a2mem_if(a2mem_if),
-            .video_control_if(video_control_if),
-
-            .pixel_stream(vgc_ps),
-
-            .vgc_active_o(vgc_active_w),
-            .vgc_address_o(vgc_address_w),
-            .vgc_rd_o(vgc_rd_w),
-            .vgc_data_i(vgc_data_w)
-        );
-
-        framebuffer_writer #(
-            .GAP_CYCLES(2)
-        ) vgc_fb_writer (
-            .clk_i(clk_logic_w),
-            .reset_n_i(system_reset_n_w),
-
-            .pixel_stream(vgc_ps),
-
-            .scanline_i(scanline_w),
-            .hsync_i(hsync_w),
-            .vsync_i(vsync_w),
-
-            .fb_we_o(vgc_fb_we_w),
-            .fb_data_o(vgc_fb_data_w),
-            .fb_vsync_o(vgc_fb_vsync_w),
-
-            .apple_r_o(),
-            .apple_g_o(),
-            .apple_b_o(),
-            .apple_active_o(),
-            .ssp_r_i(8'd0),
-            .ssp_g_i(8'd0),
-            .ssp_b_i(8'd0),
-            .ssp_active_i(1'b0)
-        );
-
-    end endgenerate
+        .apple_r_o(),
+        .apple_g_o(),
+        .apple_b_o(),
+        .apple_active_o(),
+        .ssp_r_i(8'd0),
+        .ssp_g_i(8'd0),
+        .ssp_b_i(8'd0),
+        .ssp_active_i(1'b0)
+    );
 
     // Framebuffer output mux — select apple or vgc based on SHRG_MODE
     // Latched at frame boundary for clean transitions
@@ -659,11 +592,9 @@ module top #(
 
     wire [0:7] ssp_d_w;
     wire ssp_rd;
-    wire [3:0] vdp_r;
-    wire [3:0] vdp_g;
-    wire [3:0] vdp_b;
-    wire vdp_transparent;
     wire vdp_ext_video;
+    wire [3:0] vdp_border_r_w, vdp_border_g_w, vdp_border_b_w;
+    wire vdp_border_active_w;
     wire vdp_irq_n;
     wire [9:0] ssp_audio_w;
     wire vdp_unlocked_w;
@@ -713,6 +644,11 @@ module top #(
         .vdp_ext_video_o(vdp_ext_video),
         .vdp_unlocked_o(vdp_unlocked_w),
         .vdp_gmode_o(vdp_gmode_w),
+
+        .vdp_border_r_o(vdp_border_r_w),
+        .vdp_border_g_o(vdp_border_g_w),
+        .vdp_border_b_o(vdp_border_b_w),
+        .vdp_border_active_o(vdp_border_active_w),
 
         .f18a_gpu_if(f18a_gpu_if),
 
@@ -823,8 +759,7 @@ module top #(
     // Board PLL provides clk_pixel (27 MHz) and clk_pixel_x5 (135 MHz) directly.
     // No internal HDMI PLL needed — simpler than the 720p version.
 
-    // Scan timer — authoritative Apple II scanline timing (kept for future use)
-    // Wire declarations are forward-declared near apple_video_fb instantiation
+    // Scan timer — authoritative Apple II scanline timing
 
     scan_timer #(
         .VGC_VERTCNT_LOCK(1),
@@ -871,12 +806,15 @@ module top #(
         12'h1d0, 12'hff0, 12'h4f9, 12'hfff    //          12-15
     };
     wire [11:0] border_rgb444_w = border_palette_w[border_idx_w];
-    // Expand RGB444 to RGB666: replicate top 2 bits into bottom 2 for accurate scaling
-    wire [17:0] border_rgb666_w = {
-        border_rgb444_w[11:8], 2'b00,  // R: 4->6 bits (zero-pad, matches apple_video_fb.sv)
-        border_rgb444_w[7:4],  2'b00,  // G: 4->6 bits
-        border_rgb444_w[3:0],  2'b00   // B: 4->6 bits
+    wire [17:0] apple_border_rgb666_w = {
+        border_rgb444_w[11:8], 2'b00,
+        border_rgb444_w[7:4],  2'b00,
+        border_rgb444_w[3:0],  2'b00
     };
+    wire [17:0] vdp_border_rgb666_w = {vdp_border_r_w, 2'b00,
+                                        vdp_border_g_w, 2'b00,
+                                        vdp_border_b_w, 2'b00};
+    wire [17:0] border_rgb666_w = vdp_border_active_w ? vdp_border_rgb666_w : apple_border_rgb666_w;
 
     wire init_calib_complete_w;
     wire ddr_rst_w;
@@ -908,7 +846,7 @@ module top #(
         .clk_pixel(clk_pixel_w),       // 27 MHz pixel clock
         .clk_pixel_x5(clk_hdmi_w),     // 135 MHz TMDS 5x clock
 
-        // Framebuffer write interface — on clk_logic (54 MHz), muxed between apple_video_fb and vgc_fb
+        // Framebuffer write interface — on clk_logic (54 MHz), muxed between apple and vgc generators
         .clk(clk_logic_w),
         .fb_width(fb_width_w),
         .fb_height(fb_height_w),
