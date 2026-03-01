@@ -875,30 +875,31 @@ module top #(
         core_audio_r_r <= sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
     end
 
-    // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
+    // Audio CDC: 54 MHz (CLKDIV2) → 108 MHz (PLL CLKOUT) → 27 MHz (PLL CLKOUTD)
+    //
+    // Stage 1: 54→108 MHz is safe because CLKDIV2 guarantees every 54 MHz edge
+    //          IS a 108 MHz edge. The 108 MHz register captures stable data.
+    // Stage 2: 108→27 MHz is safe because both come from the same PLL
+    //          (CLKOUT and CLKOUTD), with PLL-guaranteed phase alignment.
+    //
+    // The old cdc_sampling approach (54→27 MHz direct) was broken because
+    // CLKDIV2 output (54 MHz) and PLL CLKOUTD (27 MHz) don't have a
+    // PLL-guaranteed phase relationship — their alignment depends on the
+    // asynchronous CLKDIV2 RESETN timing.
 
-    wire [15:0] cdc_audio_l;
-    wire [15:0] cdc_audio_r;
+    // Stage 1: 54 MHz → 108 MHz (CLKDIV2 alignment guarantee)
+    reg signed [15:0] audio_l_sdram_r, audio_r_sdram_r;
+    always @(posedge clk_sdram_w) begin
+        audio_l_sdram_r <= core_audio_l_r;
+        audio_r_sdram_r <= core_audio_r_r;
+    end
 
-    cdc_sampling #(
-        .WIDTH(16)
-    ) audio_cdc_left (
-        .rst_n(device_reset_n_w),
-        .clk_fast(clk_logic_w),
-        .clk_slow(clk_pixel_w),
-        .data_in(core_audio_l_r),
-        .data_out(cdc_audio_l)
-    );
-
-    cdc_sampling #(
-        .WIDTH(16)
-    ) audio_cdc_right (
-        .rst_n(device_reset_n_w),
-        .clk_fast(clk_logic_w),
-        .clk_slow(clk_pixel_w),
-        .data_in(core_audio_r_r),
-        .data_out(cdc_audio_r)
-    );
+    // Stage 2: 108 MHz → 27 MHz (PLL CLKOUT/CLKOUTD phase guarantee)
+    reg [15:0] cdc_audio_l, cdc_audio_r;
+    always @(posedge clk_pixel_w) begin
+        cdc_audio_l <= audio_l_sdram_r;
+        cdc_audio_r <= audio_r_sdram_r;
+    end
 
     localparam [31:0] aflt_rate = 7_056_000;
     localparam [39:0] acx  = 4258969;
