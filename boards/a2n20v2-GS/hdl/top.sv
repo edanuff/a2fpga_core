@@ -159,11 +159,13 @@ module top #(
     // SDRAM Controller
 
     // SDRAM ports: lower number = higher priority
-    localparam FB_READ_PORT  = 0;   // Framebuffer line reads (highest priority)
-    localparam FB_WRITE_PORT = 1;   // Framebuffer pixel writes
-    localparam DOC_MEM_PORT  = 2;   // Ensoniq DOC sound memory
-    localparam GLU_MEM_PORT  = 3;   // Ensoniq GLU registers
-    localparam NUM_PORTS     = 4;
+    localparam FB_READ_PORT      = 0;   // Framebuffer line reads (highest priority)
+    localparam FB_WRITE_PORT     = 1;   // Framebuffer pixel writes
+    localparam SHADOW_READ_PORT  = 2;   // Video gen reads from shadow memory
+    localparam SHADOW_WRITE_PORT = 3;   // CPU writes to shadow memory
+    localparam DOC_MEM_PORT      = 4;   // Ensoniq DOC read from sound memory
+    localparam GLU_MEM_PORT      = 5;   // GLU write to sound memory
+    localparam NUM_PORTS         = 6;
 
     localparam PORT_ADDR_WIDTH = 21;
     localparam DATA_WIDTH = 32;
@@ -328,6 +330,7 @@ module top #(
     wire video_bank_w;
     wire video_rd_w;
     wire [31:0] video_data_w;
+    wire video_ready_w;
 
     wire vgc_active_w;
     wire [12:0] vgc_address_w;
@@ -340,9 +343,14 @@ module top #(
         .a2bus_if(a2bus_if),
         .a2mem_if(a2mem_if),
 
+        .main_mem_if(mem_ports[SHADOW_WRITE_PORT]),
+        .video_mem_if(mem_ports[SHADOW_READ_PORT]),
+
         .video_address_i(video_address_w),
+        .video_bank_i(video_bank_w),
         .video_rd_i(video_rd_w),
         .video_data_o(video_data_w),
+        .video_ready_o(video_ready_w),
 
         .vgc_active_i(vgc_active_w),
         .vgc_address_i(vgc_address_w),
@@ -463,7 +471,10 @@ module top #(
     // --- Apple II generator ---
     pixel_stream_if apple_ps();
 
-    apple_video_gen apple_video_gen (
+    apple_video_gen #(
+        .VRAM_READ_LATENCY(16),      // SDRAM via mem_port_cdc
+        .PIXEL_START_TICK(10)        // Fixed delay for deterministic SSP overlay timing
+    ) apple_video_gen (
         .clk_i(clk_logic_w),
         .reset_n_i(system_reset_n_w),
 
@@ -476,7 +487,8 @@ module top #(
         .video_address_o(video_address_w),
         .video_bank_o(video_bank_w),
         .video_rd_o(video_rd_w),
-        .video_data_i(FORCE_VRAM ? 32'hC1_00_C1_00 : video_data_w)
+        .video_data_i(FORCE_VRAM ? 32'hC1_00_C1_00 : video_data_w),
+        .video_ready_i(video_ready_w)
     );
 
     generate if (USE_DIRECT_DISPLAY) begin : gen_apple_direct

@@ -407,7 +407,8 @@ module top #(
         .video_address_o(video_address_w),
         .video_bank_o(video_bank_w),
         .video_rd_o(video_rd_w),
-        .video_data_i(video_data_w)
+        .video_data_i(video_data_w),
+        .video_ready_i(1'b1)         // BSRAM: always ready after fixed latency
     );
 
     framebuffer_writer #(

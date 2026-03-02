@@ -34,7 +34,12 @@
 // interface). SuperSprite compositing is handled externally by the consumer.
 //
 
-module apple_video_gen (
+module apple_video_gen #(
+    parameter VRAM_READ_LATENCY = 2,  // (unused, kept for documentation) 2=BSRAM, ~16=SDRAM
+    parameter PIXEL_START_TICK = 0    // 0=immediate (BSRAM), >0=fixed delay in pixel_clk_en ticks
+                                      // after hsync before pixel output begins, for deterministic
+                                      // SSP overlay timing when SDRAM priming latency varies
+) (
     input wire clk_i,
     input wire reset_n_i,
 
@@ -50,7 +55,8 @@ module apple_video_gen (
     output reg [15:0] video_address_o,
     output reg video_bank_o,
     output reg video_rd_o,
-    input [31:0] video_data_i
+    input [31:0] video_data_i,
+    input wire video_ready_i       // VRAM data ready (active-high, tie 1 for BSRAM)
 );
 
     localparam FORCE_NIBBLE_COLORS = 1;
@@ -377,6 +383,10 @@ module apple_video_gen (
     // Scanline pixel counter — gates output at exactly 560 pixels
     reg [9:0] scanline_pix_cnt_r;
 
+    // Pixel tick counter since hsync — for PIXEL_START_TICK delay
+    reg [4:0] hsync_tick_cnt_r;
+    wire pixel_start_ok_w = (PIXEL_START_TICK == 0) || (hsync_tick_cnt_r >= PIXEL_START_TICK);
+
     // Pixel pipeline
     reg [PIX_BUFFER_SIZE-1:0] pix_shift_r /* synthesis syn_srlstyle = "registers" */;
     reg [PIX_HISTORY_SIZE-1:0] pix_history_r /* synthesis syn_srlstyle = "registers" */;
@@ -457,6 +467,7 @@ module apple_video_gen (
             video_data_r <= 32'd0;
             h_offset_r <= 6'd0;
             scanline_pix_cnt_r <= 10'd0;
+            hsync_tick_cnt_r <= 5'd0;
 
             pix_shift_r <= '0;
             pix_history_r <= '0;
@@ -522,6 +533,7 @@ module apple_video_gen (
                     h_offset_r <= 6'd0;
                     next_pix_delay_r <= 1'b0;
                     scanline_pix_cnt_r <= 10'd0;
+                    hsync_tick_cnt_r <= 5'd0;
 
                     pix_shift_r <= '0;
                     pix_history_r <= '0;
@@ -537,6 +549,10 @@ module apple_video_gen (
             // ================================================================
             ST_ACTIVE: begin
 
+                // Count pixel_clk_en ticks since scanline start (for PIXEL_START_TICK)
+                if (pixel_stream.pixel_clk_en && hsync_tick_cnt_r < 5'd31)
+                    hsync_tick_cnt_r <= hsync_tick_cnt_r + 5'd1;
+
                 // ============================================================
                 // FETCH/EXPAND PIPELINE — runs every cycle when not done
                 // ============================================================
@@ -549,8 +565,14 @@ module apple_video_gen (
                             video_rd_o <= 1'b1;
                             fe_step_r <= 4'd1;
                         end
-                        4'd1: fe_step_r <= 4'd2;
-                        4'd2: fe_step_r <= 4'd3;
+                        4'd1: begin
+                            video_rd_o <= 1'b0;          // deassert rd after 1 cycle
+                            fe_step_r <= 4'd2;
+                        end
+                        4'd2: begin
+                            if (video_ready_i)           // wait for VRAM data ready
+                                fe_step_r <= 4'd3;
+                        end
 
                         4'd3: begin
                             video_data_r <= video_data_i;
@@ -679,8 +701,10 @@ module apple_video_gen (
 
                 // ============================================================
                 // PIXEL OUTPUT — active when primed, gated by pixel_clk_en
+                // Delayed by PIXEL_START_TICK to ensure deterministic phase
+                // with vdp_cx for SuperSprite overlay alignment
                 // ============================================================
-                else if (pixel_stream.pixel_clk_en) begin
+                else if (pixel_stream.pixel_clk_en && pixel_start_ok_w) begin
 
                     // Shift history with current pixel
                     pix_history_r <= {pix_shift_r[0], pix_history_r[PIX_HISTORY_SIZE-1:1]};

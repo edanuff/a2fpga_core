@@ -33,7 +33,7 @@
         <File path="../../hdl/hdmi/source_product_description_info_frame.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/hdmi/tmds_channel.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/memory/a2mem_if.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/memory/apple_memory.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/memory/apple_memory.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/mockingboard/mockingboard.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/slots/slot_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/slots/slotmaker.sv" type="file.verilog" enable="1"/>
