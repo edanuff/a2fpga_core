@@ -176,7 +176,8 @@ module apple_bus #(
         data_in_strobe_r <= 1'b0;
         if (a2_data_in_valid_w) begin
             data_r <= a2_d_i;
-            data_in_strobe_r <= 1'b1;
+            //data_in_strobe_r <= 1'b1;
+            data_in_strobe_r <= !a2bus_if.m2sel_n;
         end
 
     end

@@ -297,11 +297,25 @@ module top #(
     wire video_bank_w;
     wire video_rd_w;
     wire [31:0] video_data_w;
+    wire video_ready_w;
 
     wire vgc_active_w;
     wire [12:0] vgc_address_w;
     wire vgc_rd_w;
     wire [31:0] vgc_data_w;
+
+    // External DDR3 memory ports for shadow memory and Ensoniq
+    localparam SHADOW_READ_PORT  = 0;
+    localparam SHADOW_WRITE_PORT = 1;
+    localparam DOC_MEM_PORT      = 2;
+    localparam GLU_MEM_PORT      = 3;
+    localparam NUM_EXT_PORTS     = 4;
+
+    localparam [27:0] SHADOW_MEM_BASE  = 28'h0100000;  // 1MB offset
+    localparam [27:0] ENSONIQ_MEM_BASE = 28'h0200000;  // 2MB offset
+
+    mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32))
+        ext_mem_ports[NUM_EXT_PORTS-1:0]();
 
     apple_memory #(
         .VGC_MEMORY(1)
@@ -309,9 +323,14 @@ module top #(
         .a2bus_if(a2bus_if),
         .a2mem_if(a2mem_if),
 
+        .main_mem_if(ext_mem_ports[SHADOW_WRITE_PORT]),
+        .video_mem_if(ext_mem_ports[SHADOW_READ_PORT]),
+
         .video_address_i(video_address_w),
+        .video_bank_i(video_bank_w),
         .video_rd_i(video_rd_w),
         .video_data_o(video_data_w),
+        .video_ready_o(video_ready_w),
 
         .vgc_active_i(vgc_active_w),
         .vgc_address_i(vgc_address_w),
@@ -394,7 +413,10 @@ module top #(
     // --- Apple II generator ---
     pixel_stream_if apple_ps();
 
-    apple_video_gen apple_video_gen (
+    apple_video_gen #(
+        .VRAM_READ_LATENCY(20),
+        .PIXEL_START_TICK(10)
+    ) apple_video_gen (
         .clk_i(clk_logic_w),
         .reset_n_i(system_reset_n_w),
 
@@ -408,7 +430,7 @@ module top #(
         .video_bank_o(video_bank_w),
         .video_rd_o(video_rd_w),
         .video_data_i(video_data_w),
-        .video_ready_i(1'b1)         // BSRAM: always ready after fixed latency
+        .video_ready_i(video_ready_w)
     );
 
     framebuffer_writer #(
@@ -504,28 +526,7 @@ module top #(
     wire [1:0] doc_osc_mode_w[8];
     wire [7:0] doc_osc_halt_w;
 
-    // 64KB sound RAM backed by blockram via mem_port_if
-    mem_port_if #(
-        .PORT_ADDR_WIDTH(21),
-        .DATA_WIDTH(32),
-        .DQM_WIDTH(4),
-        .PORT_OUTPUT_WIDTH(32)
-    ) glu_mem_if();
-
-    mem_port_if #(
-        .PORT_ADDR_WIDTH(21),
-        .DATA_WIDTH(32),
-        .DQM_WIDTH(4),
-        .PORT_OUTPUT_WIDTH(32)
-    ) doc_mem_if();
-
-    mem_port_bram #(
-        .ADDR_WIDTH(14)  // 16K words x 4 bytes = 64KB
-    ) sound_ram (
-        .clk(clk_logic_w),
-        .write_port(glu_mem_if),
-        .read_port(doc_mem_if)
-    );
+    // 64KB sound RAM backed by DDR3 via ext_mem_ports
 
     sound_glu #(
         .ENABLE(ENSONIQ_ENABLE),
@@ -542,8 +543,8 @@ module top #(
         .debug_osc_mode_o(doc_osc_mode_w),
         .debug_osc_halt_o(doc_osc_halt_w),
 
-        .glu_mem_if(glu_mem_if),
-        .doc_mem_if(doc_mem_if)
+        .glu_mem_if(ext_mem_ports[GLU_MEM_PORT]),
+        .doc_mem_if(ext_mem_ports[DOC_MEM_PORT])
     );
 
     // SuperSprite
@@ -832,7 +833,9 @@ module top #(
     ddr3_framebuffer_480p #(
         .WIDTH(640),                   // max of 560 (Apple II) and 640 (SHR)
         .HEIGHT(480),                  // 480p output height
-        .COLOR_BITS(18)
+        .COLOR_BITS(18),
+        .NUM_EXT_PORTS(NUM_EXT_PORTS),
+        .EXT_PORT_BASE('{SHADOW_MEM_BASE, SHADOW_MEM_BASE, ENSONIQ_MEM_BASE, ENSONIQ_MEM_BASE})
     ) u_ddr3_fb (
         // Clock inputs
         .clk_27(clk_pixel_w),          // 27 MHz from board PLL
@@ -860,6 +863,9 @@ module top #(
         // Audio — CDC'd internally via 2-stage sync
         .sound_left(core_audio_l_w),
         .sound_right(core_audio_r_w),
+
+        // External memory port clock (logic domain)
+        .ext_clk(clk_logic_w),
 
         // HDMI overlay interface (clk_pixel / 27 MHz domain)
         .hdmi_cx(hdmi_cx_w),
@@ -889,7 +895,10 @@ module top #(
         .tmds_clk_p(tmds_clk_p),
         .tmds_clk_n(tmds_clk_n),
         .tmds_d_p(tmds_d_p),
-        .tmds_d_n(tmds_d_n)
+        .tmds_d_n(tmds_d_n),
+
+        // External memory ports (shadow memory + Ensoniq)
+        .ext_ports(ext_mem_ports)
     );
 
     // DDR3 address: framebuffer uses 15 bits, top port has 16 bits

@@ -34,9 +34,9 @@
         <File path="../../hdl/hdmi/source_product_description_info_frame.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/hdmi/tmds_channel.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/memory/a2mem_if.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/memory/apple_memory.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/memory/apple_memory.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/mockingboard/mockingboard.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/memory/mem_port_bram.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/memory/mem_port_bram.sv" type="file.verilog" enable="0"/>
         <File path="../../hdl/memory/mem_port_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/slots/slot_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/slots/slotmaker_config_if.sv" type="file.verilog" enable="1"/>
@@ -82,7 +82,7 @@
         <File path="hdl/sound/iir_filter.v" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
         <File path="hdl/video/ddr3_framebuffer.v" type="file.verilog" enable="0"/>
-        <File path="hdl/video/ddr3_framebuffer_480p.v" type="file.verilog" enable="1"/>
+        <File path="hdl/video/ddr3_framebuffer_480p.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>
     </FileList>
 </Project>
