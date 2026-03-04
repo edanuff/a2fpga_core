@@ -42,3 +42,4 @@ src/cardrom/cardrom
 /boards/a2p25/src/esp32_usb_jtag/build
 *.m4a
 *.wav
+*.mov
