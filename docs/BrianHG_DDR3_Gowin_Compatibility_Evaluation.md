@@ -186,3 +186,137 @@ written on top of the existing Gowin IP with far less effort.
 The porting effort for BrianHG (estimated weeks to months of PHY-level work
 with uncertain timing closure) is not justified when the existing Gowin IP
 already meets the project's bandwidth requirements with substantial headroom.
+
+---
+
+## 7. The Real Problem: Multi-Client Arbitration
+
+The motivation for evaluating BrianHG was not the DDR3 PHY -- it was the
+**16-port COMMANDER arbitration layer**. The a2mega board needs framebuffer,
+shadow memory, and Ensoniq DOC to share DDR3 simultaneously, just as the
+a2n20v2 board shares SDRAM across 6 ports via the `sdram.sv` controller.
+
+### How SDRAM Multi-Port Works (a2n20v2 Reference)
+
+The SDRAM controller (`hdl/sdram/sdram.sv`) has **native multi-port
+arbitration** built into the controller itself:
+
+| Port | Client | Priority |
+|------|--------|----------|
+| 0 | FB_READ_PORT (framebuffer line prefetch) | Highest |
+| 1 | FB_WRITE_PORT (pixel writes) | |
+| 2 | SHADOW_READ_PORT (video gen reads) | |
+| 3 | SHADOW_WRITE_PORT (CPU writes) | |
+| 4 | DOC_MEM_PORT (Ensoniq wavetable reads) | |
+| 5 | GLU_MEM_PORT (Ensoniq parameter writes) | Lowest |
+
+Each client gets its own `mem_port_if` with `rd`/`wr`/`addr`/`data`/`ready`
+signals. The controller scans ports 0→5, selects the first with a pending
+request, executes it, and returns to IDLE. Clients are completely decoupled --
+they don't know about each other. CDC is handled per-port via `mem_port_cdc.sv`
+(54 MHz ↔ 108 MHz gray-code FIFOs).
+
+### Why DDR3 Can't Do This Today
+
+The Gowin DDR3 IP provides a **single command port**: one `cmd`/`cmd_en`/`addr`
+input, one `wr_data`/`rd_data` path. The `ddr3_framebuffer_480p` module
+currently owns this port entirely and handles external clients via a bolted-on
+state machine (`ext_state` / `EXT_IDLE` → `EXT_DECODE` → `EXT_ISSUE`) that
+only runs when the framebuffer isn't busy:
+
+**Current architecture (problematic):**
+```
+                              ┌──────────────────────────────────┐
+  apple_fb_writer ──►         │                                  │
+  vgc_fb_writer ──►           │   ddr3_framebuffer_480p          │
+                              │   (owns DDR3 command port)       │
+  ext_ports[0] (shadow rd) ──►│                                  ├──► Gowin DDR3 IP
+  ext_ports[1] (shadow wr) ──►│   ext_state machine:             │    (single port)
+  ext_ports[2] (DOC rd) ────►│   only runs when FB is idle      │
+  ext_ports[3] (GLU wr) ────►│                                  │
+                              └──────────────────────────────────┘
+```
+
+**Problems:**
+1. **Ext ports are starved** -- they only access DDR3 in gaps between FB
+   writes and line fetches
+2. **Arbitration is inside the framebuffer** -- tightly coupled to FB state,
+   not a reusable service
+3. **One ext read at a time** -- `ext_rd_pending` blocks all other ext port
+   activity until the DDR3 response arrives
+4. **CDC issues** -- async FIFOs on GW5AT corrupt multi-bit data during the
+   54 MHz → 74.25 MHz crossing; toggle-based workaround only handles ports 0-1
+5. **Ensoniq latency risk** -- DOC oscillators need samples every ~1.1 µs;
+   a 16-cycle FB write batch (~215 ns) could delay responses unpredictably
+
+### Recommended Architecture: Standalone Multi-Port DDR3 Arbiter
+
+Extract arbitration from the framebuffer and build a standalone module that
+mirrors `sdram.sv`'s architecture but wraps the Gowin DDR3 IP:
+
+**Target architecture:**
+```
+                              ┌──────────────────────────────┐
+  Port 0: FB reads ─────────►│                              │
+  Port 1: FB writes ────────►│   ddr3_arbiter               │
+  Port 2: Shadow reads ─────►│   (standalone, reusable)     │
+  Port 3: Shadow writes ────►│                              ├──► Gowin DDR3 IP
+  Port 4: DOC reads ────────►│   Static priority scan       │    (single port)
+  Port 5: GLU writes ───────►│   Per-port CDC               │
+                              │   128-bit burst caching      │
+                              └──────────────────────────────┘
+
+  ddr3_framebuffer_480p becomes just another client (ports 0+1),
+  same as sdram_framebuffer.sv on the SDRAM board.
+```
+
+**Design requirements:**
+
+1. **Same `mem_port_if` interface** that all clients already use -- no client
+   code changes needed for shadow memory or Ensoniq
+2. **Static priority arbitration** matching `sdram.sv`'s `get_priority_port()`
+   scan -- FB reads highest, GLU writes lowest
+3. **Per-port CDC** via `mem_port_cdc.sv` instances (54 MHz client ↔ 74.25 MHz
+   DDR3), using toggle-based handshake to avoid GW5AT async FIFO corruption
+4. **128-bit burst cache** -- each 128-bit DDR3 read returns 4 × 32-bit words;
+   cache the burst and serve up to 4 consecutive reads without re-issuing
+   DDR3 commands (4× reduction in shadow memory DDR3 traffic)
+5. **Pipelined command issuing** -- overlap read latency (~20 cycles) with
+   write processing for other ports, using the Gowin IP's `cmd_ready` flow
+   control
+6. **Framebuffer decoupling** -- `ddr3_framebuffer_480p` shrinks from ~1200
+   lines of interleaved DDR3+display logic to a clean display module that
+   talks through `mem_port_if`, matching `sdram_framebuffer.sv`'s structure
+
+**Bandwidth budget with arbiter (all clients active):**
+
+| Client | Mcyc/s @ 74.25 MHz | % Peak |
+|--------|-------------------|--------|
+| Framebuffer writes | 6.75 | 9.1% |
+| Framebuffer reads | 10.1 | 13.6% |
+| Shadow writes (CPU) | ~1.0 | 1.3% |
+| Shadow reads (video gen) | 1.15 (0.29 with cache) | 1.5% (0.4%) |
+| Ensoniq DOC reads | 0.57 (0.14 with cache) | 0.8% (0.2%) |
+| Ensoniq GLU writes | <0.01 | <0.01% |
+| DDR3 refresh | ~1.0 | 1.3% |
+| **Total** | **~20.6 (~19.2 cached)** | **~27.7% (~25.9%)** |
+| **Headroom** | **~53.7 (~55.1)** | **~72.3% (~74.1%)** |
+
+With 128-bit burst caching, shadow and Ensoniq reads drop to <1% combined,
+leaving 74% headroom for future expansion.
+
+### Why BrianHG's COMMANDER Doesn't Solve This
+
+The COMMANDER (`BrianHG_DDR3_COMMANDER_v16.sv`) is vendor-neutral
+SystemVerilog, but it's tightly coupled to BrianHG's own PHY interface
+(command sequencer signals), not to the Gowin DDR3 IP's `cmd`/`addr`/`wr_data`
+interface. Using the COMMANDER would require:
+
+1. A translation shim between COMMANDER output and Gowin IP input
+2. Adapting the COMMANDER's timing assumptions (designed for Altera IO latency)
+3. Testing SystemVerilog compatibility with GowinSynthesis
+4. Carrying ~5000 lines of COMMANDER code when a ~300 line custom arbiter
+   suffices
+
+The custom arbiter approach is simpler, proven (it mirrors the working SDRAM
+architecture), and directly targets the Gowin DDR3 IP's interface.
