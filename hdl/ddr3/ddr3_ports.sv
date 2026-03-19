@@ -27,6 +27,8 @@
 //   - Writes use wr_data_mask to write 4 bytes within 128-bit word (no RMW)
 //   - Burst reads decompose 128-bit response into 4 × 32-bit beats
 //   - Non-burst reads extract the addressed 32-bit slot from 128-bit response
+//   - Per-port 128-bit read cache: hits skip DDR3 entirely (~75% hit rate
+//     for sequential access patterns). Invalidated on writes to same burst addr.
 //
 // DDR3 IP interface follows Gowin DDR3 Memory Interface conventions:
 //   - cmd[2:0]: 000=write, 001=read
@@ -123,6 +125,19 @@ module ddr3_ports #(
     endgenerate
 
     // =========================================================================
+    // Per-port read cache (clk_ddr domain)
+    // =========================================================================
+    // One 128-bit cache line per port, tagged by burst-aligned address.
+    // Serves ~75% of sequential reads from cache (4 words per line).
+    // Invalidated when any write targets the same burst address.
+
+    localparam BURST_TAG_WIDTH = PORT_ADDR_WIDTH - 2;  // addr[PORT_ADDR_WIDTH-1:2]
+
+    reg [DDR_DATA_WIDTH-1:0]   cache_data  [NUM_PORTS];
+    reg [BURST_TAG_WIDTH-1:0]  cache_tag   [NUM_PORTS];
+    reg [NUM_PORTS-1:0]        cache_valid;
+
+    // =========================================================================
     // Arbiter state machine (clk_ddr domain)
     // =========================================================================
 
@@ -141,6 +156,7 @@ module ddr3_ports #(
     reg [DDR_ADDR_WIDTH-1:0] active_ddr_addr;
     reg [DDR_DATA_WIDTH-1:0] rd_data_latched;
     reg [1:0]                beat_cnt;
+    reg                      cache_hit;
 
     // Compute DDR3 address from client word address.
     // Client addr is PORT_ADDR_WIDTH bits of 32-bit word addressing.
@@ -208,6 +224,7 @@ module ddr3_ports #(
             active_ddr_addr <= '0;
             rd_data_latched <= '0;
             beat_cnt       <= 2'b0;
+            cache_valid    <= '0;
         end else begin
             // Default: deassert one-cycle pulses
             cmd_en         <= 1'b0;
@@ -226,7 +243,19 @@ module ddr3_ports #(
                                 active_burst    <= cdc_req_burst[i];
                                 active_slot     <= cdc_req_addr[i][1:0];
                                 active_ddr_addr <= word_to_ddr_addr(cdc_req_addr[i]);
-                                state           <= cdc_req_wr[i] ? S_WRITE : S_READ_CMD;
+                                if (cdc_req_wr[i]) begin
+                                    state <= S_WRITE;
+                                end else if (cache_valid[i] &&
+                                             cache_tag[i] == cdc_req_addr[i][PORT_ADDR_WIDTH-1:2]) begin
+                                    // Cache hit: load cached data, skip DDR3
+                                    rd_data_latched <= cache_data[i];
+                                    beat_cnt        <= cdc_req_burst[i] ? 2'd0 : cdc_req_addr[i][1:0];
+                                    cache_hit       <= 1'b1;
+                                    state           <= S_RESPOND;
+                                end else begin
+                                    cache_hit <= 1'b0;
+                                    state     <= S_READ_CMD;
+                                end
                                 disable pick_port;
                             end
                         end
@@ -242,7 +271,16 @@ module ddr3_ports #(
                         wr_data      <= {4{cdc_req_data[active_port]}};
                         wr_data_mask <= compute_write_mask(active_slot,
                                                           cdc_req_byte_en[active_port]);
-                        state        <= S_DONE;
+                        // Invalidate any cache line matching this burst address
+                        begin : invalidate_caches
+                            integer j;
+                            for (j = 0; j < NUM_PORTS; j = j + 1) begin
+                                if (cache_valid[j] &&
+                                    cache_tag[j] == cdc_req_addr[active_port][PORT_ADDR_WIDTH-1:2])
+                                    cache_valid[j] <= 1'b0;
+                            end
+                        end
+                        state <= S_DONE;
                     end
                 end
 
@@ -259,7 +297,11 @@ module ddr3_ports #(
                     if (rd_data_valid) begin
                         rd_data_latched <= rd_data;
                         beat_cnt        <= active_burst ? 2'd0 : active_slot;
-                        state           <= S_RESPOND;
+                        // Fill cache for this port
+                        cache_data[active_port]  <= rd_data;
+                        cache_tag[active_port]   <= cdc_req_addr[active_port][PORT_ADDR_WIDTH-1:2];
+                        cache_valid[active_port] <= 1'b1;
+                        state <= S_RESPOND;
                     end
                 end
 
