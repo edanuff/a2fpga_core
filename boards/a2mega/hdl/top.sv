@@ -311,8 +311,11 @@ module top #(
     localparam GLU_MEM_PORT      = 3;
     localparam NUM_EXT_PORTS     = 4;
 
-    localparam [27:0] SHADOW_MEM_BASE  = 28'h0100000;  // 1MB offset
-    localparam [27:0] ENSONIQ_MEM_BASE = 28'h0200000;  // 2MB offset
+    localparam [27:0] SHADOW_MEM_BASE  = 28'h0100000;  // 1MB byte offset
+    localparam [27:0] ENSONIQ_MEM_BASE = 28'h0200000;  // 2MB byte offset
+    // Word address offsets (mem_port_if uses 32-bit word addressing)
+    localparam [20:0] SHADOW_WORD_BASE  = SHADOW_MEM_BASE[22:2];   // 21'h040000
+    localparam [20:0] ENSONIQ_WORD_BASE = ENSONIQ_MEM_BASE[22:2];  // 21'h080000
 
     mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32))
         ext_mem_ports[NUM_EXT_PORTS-1:0]();
@@ -748,18 +751,16 @@ module top #(
     assign core_audio_r_w = sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
 
     // =========================================================================
-    // DDR3 Framebuffer + HDMI Output (480p)
+    // DDR3 + Framebuffer + HDMI Output (480p)
     // =========================================================================
     //
-    // The ddr3_framebuffer_480p module handles:
-    //   - DDR3 controller + memory interface
-    //   - HDMI encoder + TMDS output (480p 59.94Hz)
-    //   - Audio CDC (2-stage sync from clk_logic to 27 MHz pixel clock)
-    //   - 2× vertical integer scaling with scanline dimming
-    //   - Centered display with border color fill
+    // Decomposed architecture:
+    //   1. DDR3 PLL + DDR3_Memory_Interface_Top (memory controller)
+    //   2. ddr3_ports — multi-port arbiter (mem_port_if → DDR3 IP)
+    //   3. framebuffer_480p — shared framebuffer (2 × mem_port_if)
+    //   4. HDMI encoder + TMDS output (480p 59.94Hz)
     //
     // Board PLL provides clk_pixel (27 MHz) and clk_pixel_x5 (135 MHz) directly.
-    // No internal HDMI PLL needed — simpler than the 720p version.
 
     // Scan timer — authoritative Apple II scanline timing
 
@@ -820,90 +821,339 @@ module top #(
 
     wire init_calib_complete_w;
     wire ddr_rst_w;
-    wire clk_x1_w;              // 74.25 MHz from DDR3 controller (for DebugOverlay)
+    wire clk_x1_w;              // 74.25 MHz from DDR3 controller
     wire [10:0] hdmi_cx_w;      // HDMI raster X (0–857)
     wire [9:0]  hdmi_cy_w;      // HDMI raster Y (0–524)
     wire [23:0] fb_rgb_w;       // Current framebuffer RGB output
     wire [23:0] overlay_rgb_w;  // DebugOverlay RGB output
     wire        overlay_en_w;   // DebugOverlay enable
 
-    // DDR3 framebuffer — drives DDR3 and HDMI output (480p)
-    wire [14:0] ddr_addr_fb;
+    // -----------------------------------------------------------------
+    // DDR3 PLL — 297 MHz memory clock from 27 MHz input
+    // -----------------------------------------------------------------
+    wire memory_clk_w;
+    wire pll_lock_w;
+    wire pll_stop_w;
 
-    ddr3_framebuffer_480p #(
-        .WIDTH(640),                   // max of 560 (Apple II) and 640 (SHR)
-        .HEIGHT(480),                  // 480p output height
-        .COLOR_BITS(18),
-        .NUM_EXT_PORTS(NUM_EXT_PORTS),
-        .EXT_PORT_BASE('{SHADOW_MEM_BASE, SHADOW_MEM_BASE, ENSONIQ_MEM_BASE, ENSONIQ_MEM_BASE})
-    ) u_ddr3_fb (
-        // Clock inputs
-        .clk_27(clk_pixel_w),          // 27 MHz from board PLL
-        .clk_g(clk),                   // 50 MHz board crystal (same pin as PLL clkin)
-        .pll_lock_27(clk_lock_w),
-        .rst_n(1'b1),
-        .clk_out(clk_x1_w),             // 74.25 MHz output for DebugOverlay
-        .ddr_rst(ddr_rst_w),
-        .init_calib_complete(init_calib_complete_w),
+    wire mdrp_inc_w;
+    wire [1:0] mdrp_op_w;
+    wire [7:0] mdrp_wdata_w;
+    wire [7:0] mdrp_rdata_w;
 
-        // HDMI pixel clocks (from board PLL — no internal HDMI PLL needed)
-        .clk_pixel(clk_pixel_w),       // 27 MHz pixel clock
-        .clk_pixel_x5(clk_hdmi_w),     // 135 MHz TMDS 5x clock
-
-        // Framebuffer write interface — on clk_logic (54 MHz), muxed between apple and vgc generators
-        .clk(clk_logic_w),
-        .fb_width(fb_width_w),
-        .fb_height(fb_height_w),
-        .fb_vsync(fb_vsync_mux_w),
-        .fb_we(fb_we_mux_w),
-        .fb_data(fb_data_mux_w),
-        .border_color(border_rgb666_w),
-        .sleep_i(sleep_w),
-
-        // Audio — CDC'd internally via 2-stage sync
-        .sound_left(core_audio_l_w),
-        .sound_right(core_audio_r_w),
-
-        // External memory port clock (logic domain)
-        .ext_clk(clk_logic_w),
-
-        // HDMI overlay interface (clk_pixel / 27 MHz domain)
-        .hdmi_cx(hdmi_cx_w),
-        .hdmi_cy(hdmi_cy_w),
-        .fb_rgb_o(fb_rgb_w),
-        .overlay_rgb_i(overlay_rgb_w),
-        .overlay_en_i(overlay_en_w),
-
-        // DDR3 pins
-        .ddr_addr(ddr_addr_fb),
-        .ddr_bank(ddr_bank),
-        .ddr_cs(ddr_cs),
-        .ddr_ras(ddr_ras),
-        .ddr_cas(ddr_cas),
-        .ddr_we(ddr_we),
-        .ddr_ck(ddr_ck),
-        .ddr_ck_n(ddr_ck_n),
-        .ddr_cke(ddr_cke),
-        .ddr_odt(ddr_odt),
-        .ddr_reset_n(ddr_reset_n),
-        .ddr_dm(ddr_dm),
-        .ddr_dq(ddr_dq),
-        .ddr_dqs(ddr_dqs),
-        .ddr_dqs_n(ddr_dqs_n),
-
-        // HDMI TMDS output
-        .tmds_clk_p(tmds_clk_p),
-        .tmds_clk_n(tmds_clk_n),
-        .tmds_d_p(tmds_d_p),
-        .tmds_d_n(tmds_d_n),
-
-        // External memory ports (shadow memory + Ensoniq)
-        .ext_ports(ext_mem_ports)
+    pll_ddr3 pll_ddr3_inst(
+        .lock(pll_lock_w),
+        .clkout0(),
+        .clkout2(memory_clk_w),
+        .clkin(clk_pixel_w),           // 27 MHz from board PLL
+        .reset(~clk_lock_w),
+        .mdclk(clk),
+        .mdopc(mdrp_op_w),
+        .mdainc(mdrp_inc_w),
+        .mdwdi(mdrp_wdata_w),
+        .mdrdo(mdrp_rdata_w)
     );
 
-    // DDR3 address: framebuffer uses 15 bits, top port has 16 bits
-    assign ddr_addr[14:0] = ddr_addr_fb;
+    reg mdrp_wr_r;
+    reg pll_stop_r;
+    reg [7:0] pll_stop_count_r;
+    pll_mDRP_intf u_pll_mDRP_intf(
+        .clk(clk),
+        .rst_n(clk_lock_w),
+        .pll_lock(pll_lock_w),
+        .wr(mdrp_wr_r),
+        .mdrp_inc(mdrp_inc_w),
+        .mdrp_op(mdrp_op_w),
+        .mdrp_wdata(mdrp_wdata_w),
+        .mdrp_rdata(mdrp_rdata_w)
+    );
+
+    always @(posedge clk) begin
+        pll_stop_r <= pll_stop_w;
+        mdrp_wr_r <= pll_stop_w ^ pll_stop_r;
+        if (pll_stop_r && !pll_stop_w && pll_stop_count_r != 8'hff)
+            pll_stop_count_r <= pll_stop_count_r + 1;
+    end
+
+    // -----------------------------------------------------------------
+    // DDR3 Memory Controller (Gowin IP)
+    // -----------------------------------------------------------------
+    wire        ddr3_cmd_ready_w;
+    wire [2:0]  ddr3_cmd_w;
+    wire        ddr3_cmd_en_w;
+    wire [27:0] ddr3_addr_w;
+
+    wire        ddr3_wr_data_rdy_w;
+    wire [127:0] ddr3_wr_data_w;
+    wire        ddr3_wr_data_en_w;
+    wire        ddr3_wr_data_end_w;
+    wire [15:0] ddr3_wr_data_mask_w;
+
+    wire        ddr3_rd_data_valid_w;
+    wire        ddr3_rd_data_end_w;
+    wire [127:0] ddr3_rd_data_w;
+
+    DDR3_Memory_Interface_Top u_ddr3 (
+        .memory_clk      (memory_clk_w),
+        .pll_stop        (pll_stop_w),
+        .clk             (clk),                 // 50 MHz board crystal
+        .rst_n           (1'b1),
+        .cmd_ready       (ddr3_cmd_ready_w),
+        .cmd             (ddr3_cmd_w),
+        .cmd_en          (ddr3_cmd_en_w),
+        .addr            (ddr3_addr_w),
+        .wr_data_rdy     (ddr3_wr_data_rdy_w),
+        .wr_data         (ddr3_wr_data_w),
+        .wr_data_en      (ddr3_wr_data_en_w),
+        .wr_data_end     (ddr3_wr_data_end_w),
+        .wr_data_mask    (ddr3_wr_data_mask_w),
+        .rd_data         (ddr3_rd_data_w),
+        .rd_data_valid   (ddr3_rd_data_valid_w),
+        .rd_data_end     (ddr3_rd_data_end_w),
+        .sr_req          (1'b0),
+        .ref_req         (1'b0),
+        .sr_ack          (),
+        .ref_ack         (),
+        .init_calib_complete(init_calib_complete_w),
+        .clk_out         (clk_x1_w),            // 74.25 MHz DDR3 app clock
+        .pll_lock        (pll_lock_w),
+        .burst           (1'b1),
+        .ddr_rst         (ddr_rst_w),
+        .O_ddr_addr      (ddr_addr[14:0]),
+        .O_ddr_ba        (ddr_bank),
+        .O_ddr_cs_n      (ddr_cs),
+        .O_ddr_ras_n     (ddr_ras),
+        .O_ddr_cas_n     (ddr_cas),
+        .O_ddr_we_n      (ddr_we),
+        .O_ddr_clk       (ddr_ck),
+        .O_ddr_clk_n     (ddr_ck_n),
+        .O_ddr_cke       (ddr_cke),
+        .O_ddr_odt       (ddr_odt),
+        .O_ddr_reset_n   (ddr_reset_n),
+        .O_ddr_dqm       (ddr_dm),
+        .IO_ddr_dq       (ddr_dq),
+        .IO_ddr_dqs      (ddr_dqs),
+        .IO_ddr_dqs_n    (ddr_dqs_n)
+    );
+
     assign ddr_addr[15] = 1'b0;
+
+    // -----------------------------------------------------------------
+    // DDR3 Multi-Port Arbiter
+    // -----------------------------------------------------------------
+    // Port allocation:
+    //   0 = FB read  (highest priority — scanline prefetch)
+    //   1 = FB write
+    //   2 = Shadow read  (apple_video_gen)
+    //   3 = Shadow write (CPU)
+    //   4 = DOC (Ensoniq wavetable read)
+    //   5 = GLU (Ensoniq write)
+
+    localparam FB_READ_PORT  = 0;
+    localparam FB_WRITE_PORT = 1;
+    localparam DDR3_SHADOW_READ_PORT  = 2;
+    localparam DDR3_SHADOW_WRITE_PORT = 3;
+    localparam DDR3_DOC_MEM_PORT      = 4;
+    localparam DDR3_GLU_MEM_PORT      = 5;
+    localparam NUM_DDR3_PORTS = 6;
+
+    mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32))
+        ddr3_mem_ports[NUM_DDR3_PORTS-1:0]();
+
+    // Connect ext_mem_ports (used by apple_memory, sound_glu) to ddr3 arbiter ports
+    // with base address offsets applied
+    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].addr    = SHADOW_WORD_BASE + ext_mem_ports[SHADOW_READ_PORT].addr;
+    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].data    = ext_mem_ports[SHADOW_READ_PORT].data;
+    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].byte_en = ext_mem_ports[SHADOW_READ_PORT].byte_en;
+    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].wr      = ext_mem_ports[SHADOW_READ_PORT].wr;
+    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].rd      = ext_mem_ports[SHADOW_READ_PORT].rd;
+    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].burst   = ext_mem_ports[SHADOW_READ_PORT].burst;
+    assign ext_mem_ports[SHADOW_READ_PORT].q             = ddr3_mem_ports[DDR3_SHADOW_READ_PORT].q;
+    assign ext_mem_ports[SHADOW_READ_PORT].ready         = ddr3_mem_ports[DDR3_SHADOW_READ_PORT].ready;
+    assign ext_mem_ports[SHADOW_READ_PORT].available     = ddr3_mem_ports[DDR3_SHADOW_READ_PORT].available;
+
+    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].addr    = SHADOW_WORD_BASE + ext_mem_ports[SHADOW_WRITE_PORT].addr;
+    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].data    = ext_mem_ports[SHADOW_WRITE_PORT].data;
+    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].byte_en = ext_mem_ports[SHADOW_WRITE_PORT].byte_en;
+    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].wr      = ext_mem_ports[SHADOW_WRITE_PORT].wr;
+    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].rd      = ext_mem_ports[SHADOW_WRITE_PORT].rd;
+    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].burst   = ext_mem_ports[SHADOW_WRITE_PORT].burst;
+    assign ext_mem_ports[SHADOW_WRITE_PORT].q             = ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].q;
+    assign ext_mem_ports[SHADOW_WRITE_PORT].ready         = ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].ready;
+    assign ext_mem_ports[SHADOW_WRITE_PORT].available     = ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].available;
+
+    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].addr    = ENSONIQ_WORD_BASE + ext_mem_ports[DOC_MEM_PORT].addr;
+    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].data    = ext_mem_ports[DOC_MEM_PORT].data;
+    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].byte_en = ext_mem_ports[DOC_MEM_PORT].byte_en;
+    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].wr      = ext_mem_ports[DOC_MEM_PORT].wr;
+    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].rd      = ext_mem_ports[DOC_MEM_PORT].rd;
+    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].burst   = ext_mem_ports[DOC_MEM_PORT].burst;
+    assign ext_mem_ports[DOC_MEM_PORT].q             = ddr3_mem_ports[DDR3_DOC_MEM_PORT].q;
+    assign ext_mem_ports[DOC_MEM_PORT].ready         = ddr3_mem_ports[DDR3_DOC_MEM_PORT].ready;
+    assign ext_mem_ports[DOC_MEM_PORT].available     = ddr3_mem_ports[DDR3_DOC_MEM_PORT].available;
+
+    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].addr    = ENSONIQ_WORD_BASE + ext_mem_ports[GLU_MEM_PORT].addr;
+    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].data    = ext_mem_ports[GLU_MEM_PORT].data;
+    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].byte_en = ext_mem_ports[GLU_MEM_PORT].byte_en;
+    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].wr      = ext_mem_ports[GLU_MEM_PORT].wr;
+    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].rd      = ext_mem_ports[GLU_MEM_PORT].rd;
+    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].burst   = ext_mem_ports[GLU_MEM_PORT].burst;
+    assign ext_mem_ports[GLU_MEM_PORT].q             = ddr3_mem_ports[DDR3_GLU_MEM_PORT].q;
+    assign ext_mem_ports[GLU_MEM_PORT].ready         = ddr3_mem_ports[DDR3_GLU_MEM_PORT].ready;
+    assign ext_mem_ports[GLU_MEM_PORT].available     = ddr3_mem_ports[DDR3_GLU_MEM_PORT].available;
+
+    ddr3_ports #(
+        .NUM_PORTS(NUM_DDR3_PORTS)
+    ) u_ddr3_ports (
+        .clk_client      (clk_logic_w),
+        .clk_ddr          (clk_x1_w),
+        .rst              (ddr_rst_w),
+        .init_complete    (init_calib_complete_w),
+
+        .ports            (ddr3_mem_ports),
+
+        .cmd_ready        (ddr3_cmd_ready_w),
+        .cmd              (ddr3_cmd_w),
+        .cmd_en           (ddr3_cmd_en_w),
+        .addr             (ddr3_addr_w),
+
+        .wr_data_rdy      (ddr3_wr_data_rdy_w),
+        .wr_data          (ddr3_wr_data_w),
+        .wr_data_en       (ddr3_wr_data_en_w),
+        .wr_data_end      (ddr3_wr_data_end_w),
+        .wr_data_mask     (ddr3_wr_data_mask_w),
+
+        .rd_data_valid    (ddr3_rd_data_valid_w),
+        .rd_data          (ddr3_rd_data_w),
+        .rd_data_end      (ddr3_rd_data_end_w)
+    );
+
+    // -----------------------------------------------------------------
+    // Shared Framebuffer (480p via mem_port_if)
+    // -----------------------------------------------------------------
+
+    framebuffer_480p #(
+        .COLOR_BITS(18)
+    ) u_framebuffer (
+        .clk              (clk_logic_w),
+        .clk_pixel        (clk_pixel_w),
+        .rst_n            (~ddr_rst_w),
+
+        .fb_vsync         (fb_vsync_mux_w),
+        .fb_we            (fb_we_mux_w),
+        .fb_data          (fb_data_mux_w),
+        .fb_width         (fb_width_w),
+        .fb_height        (fb_height_w),
+
+        .fb_write_port    (ddr3_mem_ports[FB_WRITE_PORT]),
+        .fb_read_port     (ddr3_mem_ports[FB_READ_PORT]),
+
+        .hdmi_cx          (hdmi_cx_w),
+        .hdmi_cy          (hdmi_cy_w),
+
+        .r_o              (fb_rgb_w[23:16]),
+        .g_o              (fb_rgb_w[15:8]),
+        .b_o              (fb_rgb_w[7:0]),
+
+        .border_color     (border_rgb666_w),
+        .scanline_en      (1'b1),
+        .sleep_i          (sleep_w),
+
+        // Debug outputs (unused for now)
+        .dbg_fifo_level_o        (),
+        .dbg_fifo_highwater_o    (),
+        .dbg_fifo_overflow_o     (),
+        .dbg_fetch_start_o       (),
+        .dbg_fetch_done_o        (),
+        .dbg_read_blocked_o      (),
+        .dbg_yield_busy_o        (),
+        .dbg_late_line_o         (),
+        .dbg_flags_o             (),
+        .dbg_line_not_ready_o    (),
+        .dbg_line_lag_max_o      (),
+        .dbg_ready_phase_err_o   (),
+        .dbg_vsync_raw_o         (),
+        .dbg_frame_start_accept_o(),
+        .dbg_frame_start_reject_o()
+    );
+
+    // -----------------------------------------------------------------
+    // Audio clock generation (27 MHz pixel clock domain)
+    // -----------------------------------------------------------------
+
+    localparam AUDIO_RATE = 48000;
+    localparam AUDIO_CLK_DELAY = 27000000 / AUDIO_RATE;  // 562 (27M/48k = 562.5)
+    logic [$clog2(AUDIO_CLK_DELAY)-1:0] audio_divider;
+    logic clk_audio;
+    reg audio_frac;
+
+    always_ff @(posedge clk_pixel_w) begin
+        clk_audio <= 1'b0;
+        if (audio_divider >= (audio_frac ? AUDIO_CLK_DELAY : AUDIO_CLK_DELAY - 1)) begin
+            clk_audio <= 1'b1;
+            audio_divider <= 0;
+            audio_frac <= ~audio_frac;
+        end else begin
+            audio_divider <= audio_divider + 1;
+        end
+    end
+
+    // Audio CDC: clk_logic (54 MHz) -> clk_pixel (27 MHz) via double-flop
+    reg [15:0] audio_sample_word [1:0], audio_sample_word0 [1:0];
+    always @(posedge clk_pixel_w) begin
+        audio_sample_word0[0] <= core_audio_l_w;
+        audio_sample_word[0]  <= audio_sample_word0[0];
+        audio_sample_word0[1] <= core_audio_r_w;
+        audio_sample_word[1]  <= audio_sample_word0[1];
+    end
+
+    // -----------------------------------------------------------------
+    // HDMI TX — 480p 59.94Hz
+    // -----------------------------------------------------------------
+
+    wire [9:0] hdmi_cx_raw_w;
+    wire [9:0] hdmi_cy_raw_w;
+    reg [23:0] hdmi_rgb_r;
+
+    assign hdmi_cx_w = {1'b0, hdmi_cx_raw_w};
+    assign hdmi_cy_w = hdmi_cy_raw_w;
+
+    wire [2:0] tmds_w;
+
+    hdmi #(
+        .VIDEO_ID_CODE(2),          // 720x480p 59.94Hz
+        .DVI_OUTPUT(0),
+        .VIDEO_REFRESH_RATE(59.94),
+        .IT_CONTENT(1),
+        .AUDIO_RATE(AUDIO_RATE),
+        .AUDIO_BIT_WIDTH(16),
+        .START_X(0),
+        .START_Y(0)
+    ) hdmi_inst (
+        .clk_pixel_x5    (clk_hdmi_w),
+        .clk_pixel        (clk_pixel_w),
+        .clk_audio        (clk_audio),
+        .rgb              (overlay_en_w ? overlay_rgb_w : hdmi_rgb_r),
+        .reset            (ddr_rst_w),
+        .audio_sample_word(audio_sample_word),
+        .tmds             (tmds_w),
+        .tmds_clock       (),
+        .cx               (hdmi_cx_raw_w),
+        .cy               (hdmi_cy_raw_w),
+        .frame_width      (),
+        .frame_height     ()
+    );
+
+    // Register framebuffer RGB output for HDMI
+    always @(posedge clk_pixel_w) begin
+        hdmi_rgb_r <= fb_rgb_w;
+    end
+
+    // Gowin LVDS output buffer
+    ELVDS_OBUF tmds_bufds [3:0] (
+        .I({clk_pixel_w, tmds_w}),
+        .O({tmds_clk_p, tmds_d_p}),
+        .OB({tmds_clk_n, tmds_d_n})
+    );
 
     // DDR3 calibration status on LED[1]
     assign led[1] = !init_calib_complete_w;

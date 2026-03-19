@@ -82,7 +82,10 @@
         <File path="hdl/sound/iir_filter.v" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
         <File path="hdl/video/ddr3_framebuffer.v" type="file.verilog" enable="0"/>
-        <File path="hdl/video/ddr3_framebuffer_480p.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/video/ddr3_framebuffer_480p.sv" type="file.verilog" enable="0"/>
+        <File path="../../hdl/ddr3/ddr3_ports.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/ddr3/ddr3_port_cdc.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/framebuffer_480p.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>
     </FileList>
 </Project>
