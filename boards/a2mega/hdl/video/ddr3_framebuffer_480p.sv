@@ -7,11 +7,12 @@
 //   with integer 2x vertical scaling, centered in the 720x480 frame with borders.
 // - The DDR3 intermediate buffer solves the beam-racing problem while preserving
 //   clean integer-scaled pixel output.
-// - Color depth supported: 12, 15, 18, and 24 bits.
+// - Pixels stored as RGB565 (16-bit) for 2x bandwidth savings vs RGB666.
+//   Lossless for all Apple II/IIgs/TMS9918A content (all sources are RGB444).
 // - Dynamic change of framebuffer size is supported (e.g. Apple II 560x192 <-> VGC 640x200).
 //
 // Internals:
-// - Write path: identical to 720p version (async FIFO, 4-pixel grouping, batch DDR3 writes)
+// - Write path: async FIFO, 8-pixel RGB565 grouping (128 bits = 1 DDR3 word), batch writes
 // - Read path: line buffer (dual-port BRAM, ping-pong) bridges DDR3 (clk_x1) to HDMI (clk_pixel)
 // - 2x vertical scaling: each FB line is fetched once, displayed on 2 consecutive HDMI lines
 // - Borders: computed from fb_width/fb_height, centered in 720x480
@@ -22,7 +23,7 @@
 //   525 = 480 +  9(front porch) +  6(sync) + 30(back porch)
 
 module ddr3_framebuffer_480p #(
-    parameter WIDTH = 640,           // multiples of 4
+    parameter WIDTH = 640,           // multiples of 8
     parameter HEIGHT = 480,
     parameter COLOR_BITS = 18,       // RGB666
     parameter NUM_EXT_PORTS = 0,     // number of external memory ports
@@ -161,6 +162,20 @@ end
 // and clk_pixel_x5 (135 MHz) directly.
 
 /////////////////////////////////////////////////////////////////////
+// RGB565 packing — lossless for all Apple II/IIgs/TMS9918A content
+// (all sources are RGB444 or fixed-palette, well within 5/6/5 bits).
+
+function [15:0] rgb666_to_565(input [COLOR_BITS-1:0] c);
+    rgb666_to_565 = {c[17:13], c[11:6], c[5:1]};
+endfunction
+
+function [COLOR_BITS-1:0] rgb565_to_666(input [15:0] c);
+    rgb565_to_666 = {c[15:11], c[15],   // R: 5->6 bits (replicate MSB)
+                     c[10:5],             // G: 6 bits (unchanged)
+                     c[4:0], c[4]};       // B: 5->6 bits (replicate MSB)
+endfunction
+
+/////////////////////////////////////////////////////////////////////
 // DDR3 controller
 
 wire           app_rdy;
@@ -259,10 +274,10 @@ end
 /////////////////////////////////////////////////////////////////////
 // CDC: border_color and sleep from clk to clk_pixel
 
-// Border color CDC (quasi-static)
+// Border color CDC (quasi-static) — round-trip through RGB565 for consistency
 reg [COLOR_BITS-1:0] border_color_px0, border_color_px;
 always @(posedge clk_pixel) begin
-    border_color_px0 <= border_color;
+    border_color_px0 <= rgb565_to_666(rgb666_to_565(border_color));
     border_color_px <= border_color_px0;
 end
 
@@ -329,20 +344,20 @@ localparam FB_SIZE = WIDTH * HEIGHT;
 reg write_pixels_req;
 reg write_pixels_ack;
 reg [9:0] wr_x, wr_y;
-reg [$clog2(FB_SIZE*2)-1:0] wr_addr;
+reg [$clog2(FB_SIZE)-1:0] wr_addr;
 
 wire fifo_can_read;
 wire fifo_can_write;
-wire [4*COLOR_BITS-1:0] fifo_data;
+wire [127:0] fifo_data;
 wire [6:0] fifo_level;
 reg fifo_read;
 reg fifo_write;
 
-reg [1:0]  wgrp_cnt;
-reg [4*COLOR_BITS-1:0] wgrp_data;
+reg [2:0]  wgrp_cnt;
+reg [127:0] wgrp_data;
 reg        wgrp_pending;
 
-async_fifo #(.BUFFER_ADDR_WIDTH(6), .DATA_WIDTH(4*COLOR_BITS)) u_asyncfifo (
+async_fifo #(.BUFFER_ADDR_WIDTH(6), .DATA_WIDTH(128)) u_asyncfifo (
   .reset(ddr_rst),
   .write_clk(clk), .write(fifo_write), .write_data(wgrp_data), .can_write(fifo_can_write),
   .read_clk(clk_x1), .read(fifo_read), .read_data(fifo_data),  .can_read(fifo_can_read),
@@ -359,7 +374,8 @@ always @(posedge clk) begin
     end
 end
 
-// Assemble 4 pixels per FIFO word (clk domain)
+// Assemble 8 RGB565 pixels per FIFO word (clk domain)
+// Each pixel: RGB666 -> RGB565 (16 bits), 8 pixels = 128 bits = 1 DDR3 word
 always @(posedge clk) begin
     fifo_write <= 1'b0;
     if (ddr_rst | ~init_calib_complete) begin
@@ -372,25 +388,13 @@ always @(posedge clk) begin
             wgrp_pending <= 0;
         end
         if (fb_we && !wgrp_pending) begin
-            case (wgrp_cnt)
-                2'd0: begin
-                    wgrp_data[COLOR_BITS-1:0] <= fb_data;
-                    wgrp_cnt <= 2'd1;
-                end
-                2'd1: begin
-                    wgrp_data[2*COLOR_BITS-1:COLOR_BITS] <= fb_data;
-                    wgrp_cnt <= 2'd2;
-                end
-                2'd2: begin
-                    wgrp_data[3*COLOR_BITS-1:2*COLOR_BITS] <= fb_data;
-                    wgrp_cnt <= 2'd3;
-                end
-                2'd3: begin
-                    wgrp_data[4*COLOR_BITS-1:3*COLOR_BITS] <= fb_data;
-                    wgrp_cnt <= 2'd0;
-                    wgrp_pending <= 1'b1;
-                end
-            endcase
+            wgrp_data[wgrp_cnt * 16 +: 16] <= rgb666_to_565(fb_data);
+            if (wgrp_cnt == 3'd7) begin
+                wgrp_cnt <= 0;
+                wgrp_pending <= 1'b1;
+            end else begin
+                wgrp_cnt <= wgrp_cnt + 1;
+            end
         end
         if (wgrp_pending && fifo_can_write) begin
             fifo_write <= 1'b1;
@@ -458,17 +462,14 @@ always @(posedge clk_x1) begin : write_batch_control
 
             if (write_batch_active) begin
                 if (fifo_can_read && !write_inflight) begin
-                    wr_addr <= {wr_y * WIDTH + {wr_x[9:2], 2'b0}, 1'b0};
-                    fb_wdf_data <= { {(32-COLOR_BITS){1'b0}}, fifo_data[4*COLOR_BITS-1:3*COLOR_BITS],
-                                      {(32-COLOR_BITS){1'b0}}, fifo_data[3*COLOR_BITS-1:2*COLOR_BITS],
-                                      {(32-COLOR_BITS){1'b0}}, fifo_data[2*COLOR_BITS-1:1*COLOR_BITS],
-                                      {(32-COLOR_BITS){1'b0}}, fifo_data[1*COLOR_BITS-1:0] };
+                    wr_addr <= wr_y * WIDTH + {wr_x[9:3], 3'b0};
+                    fb_wdf_data <= fifo_data;
                     write_pixels_req <= ~write_pixels_req;
                     fifo_read <= 1'b1;
                     batch_groups_left <= batch_groups_left - 1;
                     if (batch_groups_left == 1) write_batch_active <= 0;
-                    wr_x <= wr_x + 4;
-                    if (wr_x + 4 >= fb_width) begin
+                    wr_x <= wr_x + 8;
+                    if (wr_x + 8 >= fb_width) begin
                         wr_x <= 0;
                         wr_y <= wr_y + 1;
                     end
@@ -585,7 +586,7 @@ reg fetch_bank;
 reg [9:0] fetch_write_x;     // current write position into line buffer
 
 // DDR3 read address for current line — computed incrementally to avoid multiplier
-reg [$clog2(FB_SIZE*2)-1:0] fetch_line_addr;
+reg [$clog2(FB_SIZE)-1:0] fetch_line_addr;
 
 // Pipelined read response buffering.
 localparam integer RD_FIFO_DEPTH = 32;
@@ -599,9 +600,9 @@ wire rd_fifo_full = (rd_fifo_count == RD_FIFO_DEPTH);
 // Keep enough FIFO headroom for all in-flight read responses.
 wire rd_fifo_almost_full = (rd_fifo_count >= (RD_FIFO_DEPTH - RD_MAX_OUTSTANDING));
 
-// Response handler: pop 128-bit words from rd_fifo and write 4 pixels sequentially.
+// Response handler: pop 128-bit words from rd_fifo and write 8 RGB565 pixels sequentially.
 reg [127:0] rd_data_latched;
-reg [1:0] rd_pixel_idx;
+reg [2:0] rd_pixel_idx;
 reg rd_pixel_active;
 // Guard: don't push ext port read responses into the FB line buffer
 wire rd_fifo_push = app_rd_data_valid && !rd_fifo_full &&
@@ -652,7 +653,7 @@ always @(posedge clk_x1) begin
             line_fetch_needed <= 1'b0;
             last_fetched_line <= fetch_target_line;
             fetch_bank <= fetch_target_line[0];
-            fetch_line_addr <= {fetch_target_line * WIDTH, 1'b0};
+            fetch_line_addr <= fetch_target_line * WIDTH;
         end
 
         // Push incoming DDR3 responses into the FIFO.
@@ -682,19 +683,14 @@ always @(posedge clk_x1) begin
             end
         endcase
 
-        // Write out 4 pixels from each buffered response word.
+        // Write out 8 RGB565 pixels from each buffered response word.
         if (rd_pixel_active) begin
             lb_wr_en <= 1'b1;
             lb_wr_addr <= {fetch_bank, fetch_write_x[LB_ADDR_BITS-1:0]};
-            case (rd_pixel_idx)
-                2'd0: lb_wr_data <= rd_data_latched[COLOR_BITS-1:0];
-                2'd1: lb_wr_data <= rd_data_latched[32+COLOR_BITS-1:32];
-                2'd2: lb_wr_data <= rd_data_latched[64+COLOR_BITS-1:64];
-                2'd3: lb_wr_data <= rd_data_latched[96+COLOR_BITS-1:96];
-            endcase
+            lb_wr_data <= rgb565_to_666(rd_data_latched[rd_pixel_idx * 16 +: 16]);
             fetch_write_x <= fetch_write_x + 1;
             rd_pixel_idx <= rd_pixel_idx + 1;
-            if (rd_pixel_idx == 2'd3) begin
+            if (rd_pixel_idx == 3'd7) begin
                 rd_pixel_active <= 1'b0;
             end
         end
@@ -997,8 +993,8 @@ always @(posedge clk_x1) begin : ddr3_rw
                 // Line fetch reads — yield when ext ports need service
                 app_en <= 1;
                 app_cmd <= 3'b001;
-                app_addr <= {fetch_pixel_x, 1'b0} + fetch_line_addr;
-                fetch_pixel_x <= fetch_pixel_x + 4;
+                app_addr <= fetch_pixel_x + fetch_line_addr;
+                fetch_pixel_x <= fetch_pixel_x + 8;
                 rd_issue_fire = 1'b1;
             end else if (NUM_EXT_PORTS > 0 && !ext_rd_pending) begin
                 // External port state machine — only when no ext read pending
