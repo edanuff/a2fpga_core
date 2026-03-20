@@ -85,7 +85,8 @@ module sound_glu #(
     // write only for a2fpga, will need to implement reads at alternate address
     // and for future standalone IIgs core
     assign glu_mem_if.rd = '0;
-    // DOC memory is at 0x4_0000/8 or 0x1_0000/32
+    // Ensoniq 64KB sound RAM: 16-bit byte pointer → 14-bit word address
+    // Base address offset applied by the memory arbiter (ddr3_ports/sdram_ports).
     reg [20:0] glu_mem_addr_r;
     assign glu_mem_if.addr = glu_mem_addr_r;
     reg glu_mem_wr_r;
@@ -120,7 +121,7 @@ module sound_glu #(
                             if (access_ram_w) begin
                                 // write to sound RAM
                                 glu_mem_wr_r <= 1'b1;
-                                glu_mem_addr_r <= {4'b0, 1'b1, 2'b0, sound_ptr_hi_r, sound_ptr_lo_r[7:2]};
+                                glu_mem_addr_r <= {7'b0, sound_ptr_hi_r, sound_ptr_lo_r[7:2]};
                                 glu_mem_byte_en_r <= 1'b1 << sound_ptr_lo_r[1:0];
                             end else if (access_doc_w) begin
                                 // write to DOC
@@ -156,7 +157,7 @@ module sound_glu #(
     assign doc_mem_if.wr = '0;
     assign doc_mem_if.data = '0;
     assign doc_mem_if.byte_en = 4'b1111;
-    assign doc_mem_if.addr = {4'b0, 1'b1, 2'b0, wave_addr_w[15:2]};
+    assign doc_mem_if.addr = {7'b0, wave_addr_w[15:2]};
     assign doc_mem_if.rd = ENABLE && doc_mem_rd_w;
     assign doc_mem_if.burst = 1'b0;
 

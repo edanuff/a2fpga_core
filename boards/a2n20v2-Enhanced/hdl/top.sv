@@ -212,6 +212,19 @@ module top #(
     localparam DQM_WIDTH = 4;
     localparam PORT_OUTPUT_WIDTH = 32;
 
+    // SDRAM memory map — word address offsets (32-bit word addressing)
+    // Applied per-port inside sdram_ports via PORT_BASE_ADDR parameter.
+    localparam [PORT_ADDR_WIDTH-1:0] SHADOW_WORD_BASE  = 21'h000000;  // 0MB
+`ifdef ENSONIQ
+    localparam [PORT_ADDR_WIDTH-1:0] ENSONIQ_WORD_BASE = 21'h010000;  // 128KB
+`endif
+`ifdef PICOSOC
+    localparam [PORT_ADDR_WIDTH-1:0] SOC_WORD_BASE     = 21'h000000;  // Full SDRAM access
+`endif
+`ifdef DISKII
+    localparam [PORT_ADDR_WIDTH-1:0] RAMDISK_WORD_BASE = 21'h020000;  // 256KB
+`endif
+
     // Signals for the multiple ports
     mem_port_if #(
         .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
@@ -225,6 +238,34 @@ module top #(
         .NUM_PORTS(NUM_PORTS),
         .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
         .PORT_OUTPUT_WIDTH(PORT_OUTPUT_WIDTH),
+`ifdef ENSONIQ
+    `ifdef PICOSOC
+        `ifdef DISKII
+        .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE,
+                          ENSONIQ_WORD_BASE, ENSONIQ_WORD_BASE,
+                          SOC_WORD_BASE, RAMDISK_WORD_BASE}),
+        `else
+        .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE,
+                          ENSONIQ_WORD_BASE, ENSONIQ_WORD_BASE,
+                          SOC_WORD_BASE}),
+        `endif
+    `else
+        .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE,
+                          ENSONIQ_WORD_BASE, ENSONIQ_WORD_BASE}),
+    `endif
+`else
+    `ifdef PICOSOC
+        `ifdef DISKII
+        .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE,
+                          SOC_WORD_BASE, RAMDISK_WORD_BASE}),
+        `else
+        .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE,
+                          SOC_WORD_BASE}),
+        `endif
+    `else
+        .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE}),
+    `endif
+`endif
         .CAS_LATENCY(2),
         .SETTING_REFRESH_TIMER_NANO_SEC(15000),
         .SETTING_T_WR_MIN_WRITE_AUTO_PRECHARGE_RECOVERY_NANO_SEC(16),

@@ -165,7 +165,9 @@ module drive_ii (
 
     wire [19:0] ramdisk_addr_w = ((track_w * 8'h1a) << 8) + track_byte_addr_r;
 
-    assign ram_disk_if.addr = {3'b0, 1'b1, drive_id_i, ramdisk_addr_w[17:2]};
+    // Base address offset applied by the memory arbiter (sdram_ports/ddr3_ports).
+    // drive_id_i selects between drive 0 and drive 1 within the ramdisk region.
+    assign ram_disk_if.addr = {4'b0, drive_id_i, ramdisk_addr_w[17:2]};
     assign ram_disk_if.rd = track_rd_r;
     assign ram_disk_if.data = 32'b0;
     assign ram_disk_if.byte_en = 4'b1111;

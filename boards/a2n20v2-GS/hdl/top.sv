@@ -172,6 +172,12 @@ module top #(
     localparam DQM_WIDTH = 4;
     localparam PORT_OUTPUT_WIDTH = 32;
 
+    // SDRAM memory map — word address offsets (32-bit word addressing)
+    // Applied per-port inside sdram_ports via PORT_BASE_ADDR parameter.
+    localparam [PORT_ADDR_WIDTH-1:0] SHADOW_WORD_BASE  = 21'h000000;  // 0MB
+    localparam [PORT_ADDR_WIDTH-1:0] ENSONIQ_WORD_BASE = 21'h010000;  // 128KB
+    localparam [PORT_ADDR_WIDTH-1:0] FB_WORD_BASE      = 21'h180000;  // 1.5MB (above shadow+ensoniq)
+
     // Client-side port interfaces (54 MHz logic domain)
     mem_port_if #(
         .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
@@ -195,6 +201,14 @@ module top #(
         .NUM_PORTS(NUM_PORTS),
         .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
         .PORT_OUTPUT_WIDTH(PORT_OUTPUT_WIDTH),
+        .PORT_BASE_ADDR('{
+            FB_WORD_BASE,       // [0] FB read
+            FB_WORD_BASE,       // [1] FB write
+            SHADOW_WORD_BASE,   // [2] Shadow read
+            SHADOW_WORD_BASE,   // [3] Shadow write
+            ENSONIQ_WORD_BASE,  // [4] DOC read
+            ENSONIQ_WORD_BASE   // [5] GLU write
+        }),
         .CAS_LATENCY(2),
         .SETTING_REFRESH_TIMER_NANO_SEC(15000),
         .SETTING_T_WR_MIN_WRITE_AUTO_PRECHARGE_RECOVERY_NANO_SEC(16),

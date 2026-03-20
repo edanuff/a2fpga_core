@@ -41,7 +41,6 @@
 
 module framebuffer_480p #(
     parameter COLOR_BITS = 18,           // RGB666
-    parameter FB_BASE_ADDR = 21'h000000, // Base address in memory
     // Test pattern modes:
     //   0 = normal (memory data)
     //   1 = test pattern via line buffer (tests BRAM + display pipeline)
@@ -217,7 +216,7 @@ module framebuffer_480p #(
     reg [10:0] wr_x_r;
     reg [9:0]  wr_y_r;
     reg [10:0] wr_width_r;           // latched at vsync
-    reg [20:0] wr_line_base_r;       // FB_BASE_ADDR + y * (fb_width/2)
+    reg [20:0] wr_line_base_r;       // y * (fb_width/2)
     reg [15:0] wr_pixel_even_r;      // buffered even pixel (RGB565)
     reg        frame_pending_r;      // waiting for first fb_we after accepted frame start
     reg        frame_parity_r;      // toggles each frame for TEST_PATTERN==6
@@ -250,7 +249,7 @@ module framebuffer_480p #(
             wr_x_r <= 11'd0;
             wr_y_r <= 10'd0;
             wr_width_r <= 11'd560;
-            wr_line_base_r <= FB_BASE_ADDR;
+            wr_line_base_r <= 21'd0;
             fifo_wr_ptr_r <= '0;
             wr_pixel_even_r <= 16'd0;
             frame_pending_r <= 1'b0;
@@ -269,7 +268,7 @@ module framebuffer_480p #(
                     // First pixel of new frame: consume as x=0 even pixel.
                     wr_x_r <= 11'd1;
                     wr_y_r <= 10'd0;
-                    wr_line_base_r <= FB_BASE_ADDR;
+                    wr_line_base_r <= 21'd0;
                     wr_pixel_even_r <= rgb666_to_565(wr_pixel_data_w);
                     frame_pending_r <= 1'b0;
                 end else begin
@@ -566,7 +565,7 @@ module framebuffer_480p #(
             last_fetched_line_r <= 9'h1FF;
             fetch_word_r <= 11'd0;
             fetch_addr_r <= 21'd0;
-            fetch_line_base_r <= FB_BASE_ADDR;
+            fetch_line_base_r <= 21'd0;
             fetch_bank_r <= 1'b0;
             fetch_beats_left_r <= 4'd0;
         end else begin
@@ -581,8 +580,8 @@ module framebuffer_480p #(
                     fetch_bank_r <= 1'b0;
                     fetch_word_r <= 11'd0;
                     fetch_beats_left_r <= 4'd0;
-                    fetch_line_base_r <= FB_BASE_ADDR;
-                    fetch_addr_r <= FB_BASE_ADDR;
+                    fetch_line_base_r <= 21'd0;
+                    fetch_addr_r <= 21'd0;
                     fetch_state_r <= FETCH_READ;
                 end else if (display_in_active_w &&
                              next_line_w < fb_height_r &&

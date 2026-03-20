@@ -81,7 +81,12 @@ module sdram_ports #(
 
     parameter PORT_ADDR_WIDTH = 25,
     parameter PORT_BURST_LENGTH = BURST_LENGTH,  // 1, 2, 4, 8 words per read
-    parameter PORT_OUTPUT_WIDTH = PORT_BURST_LENGTH * DATA_WIDTH
+    parameter PORT_OUTPUT_WIDTH = PORT_BURST_LENGTH * DATA_WIDTH,
+
+    // Per-port base address in word-address space.
+    // Clients address from 0; the wrapper adds this offset before
+    // passing addresses to the SDRAM controller.
+    parameter [PORT_ADDR_WIDTH-1:0] PORT_BASE_ADDR [NUM_PORTS] = '{NUM_PORTS{0}}
 ) (
     input wire clk,
     input wire sdram_clk,
@@ -115,7 +120,7 @@ module sdram_ports #(
 
     generate
         for (genvar i = 0; i < NUM_PORTS; i++) begin : port_interface_loop
-            assign port_addr[i] = ports[i].addr;
+            assign port_addr[i] = PORT_BASE_ADDR[i] + ports[i].addr;
             assign port_data[i] = ports[i].data;
             assign port_byte_en[i] = ports[i].byte_en;
             assign ports[i].q = port_q[i];
