@@ -304,21 +304,29 @@ module top #(
     wire vgc_rd_w;
     wire [31:0] vgc_data_w;
 
-    // External DDR3 memory ports for shadow memory and Ensoniq
-    localparam SHADOW_READ_PORT  = 0;
-    localparam SHADOW_WRITE_PORT = 1;
-    localparam DOC_MEM_PORT      = 2;
-    localparam GLU_MEM_PORT      = 3;
-    localparam NUM_EXT_PORTS     = 4;
+    // DDR3 memory port allocation (single unified array for all clients):
+    //   0 = FB read  (highest priority — scanline prefetch)
+    //   1 = FB write
+    //   2 = Shadow read  (apple_video_gen)
+    //   3 = Shadow write (CPU)
+    //   4 = DOC (Ensoniq wavetable read)
+    //   5 = GLU (Ensoniq write)
+    localparam FB_READ_PORT    = 0;
+    localparam FB_WRITE_PORT   = 1;
+    localparam SHADOW_READ_PORT  = 2;
+    localparam SHADOW_WRITE_PORT = 3;
+    localparam DOC_MEM_PORT      = 4;
+    localparam GLU_MEM_PORT      = 5;
+    localparam NUM_DDR3_PORTS    = 6;
 
-    localparam [27:0] SHADOW_MEM_BASE  = 28'h0100000;  // 1MB byte offset
-    localparam [27:0] ENSONIQ_MEM_BASE = 28'h0200000;  // 2MB byte offset
-    // Word address offsets (mem_port_if uses 32-bit word addressing)
-    localparam [20:0] SHADOW_WORD_BASE  = SHADOW_MEM_BASE[22:2];   // 21'h040000
-    localparam [20:0] ENSONIQ_WORD_BASE = ENSONIQ_MEM_BASE[22:2];  // 21'h080000
+    // DDR3 memory map — word address offsets (32-bit word addressing)
+    // Applied per-port inside ddr3_ports via PORT_BASE_ADDR parameter.
+    localparam [20:0] FB_WORD_BASE      = 21'h000000;  // 0MB
+    localparam [20:0] SHADOW_WORD_BASE  = 21'h040000;  // 1MB (28'h0100000 >> 2)
+    localparam [20:0] ENSONIQ_WORD_BASE = 21'h080000;  // 2MB (28'h0200000 >> 2)
 
     mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32))
-        ext_mem_ports[NUM_EXT_PORTS-1:0]();
+        ddr3_mem_ports[NUM_DDR3_PORTS-1:0]();
 
     apple_memory #(
         .VGC_MEMORY(1)
@@ -326,8 +334,8 @@ module top #(
         .a2bus_if(a2bus_if),
         .a2mem_if(a2mem_if),
 
-        .main_mem_if(ext_mem_ports[SHADOW_WRITE_PORT]),
-        .video_mem_if(ext_mem_ports[SHADOW_READ_PORT]),
+        .main_mem_if(ddr3_mem_ports[SHADOW_WRITE_PORT]),
+        .video_mem_if(ddr3_mem_ports[SHADOW_READ_PORT]),
 
         .video_address_i(video_address_w),
         .video_bank_i(video_bank_w),
@@ -529,7 +537,7 @@ module top #(
     wire [1:0] doc_osc_mode_w[8];
     wire [7:0] doc_osc_halt_w;
 
-    // 64KB sound RAM backed by DDR3 via ext_mem_ports
+    // 64KB sound RAM backed by DDR3 via ddr3_mem_ports
 
     sound_glu #(
         .ENABLE(ENSONIQ_ENABLE),
@@ -546,8 +554,8 @@ module top #(
         .debug_osc_mode_o(doc_osc_mode_w),
         .debug_osc_halt_o(doc_osc_halt_w),
 
-        .glu_mem_if(ext_mem_ports[GLU_MEM_PORT]),
-        .doc_mem_if(ext_mem_ports[DOC_MEM_PORT])
+        .glu_mem_if(ddr3_mem_ports[GLU_MEM_PORT]),
+        .doc_mem_if(ddr3_mem_ports[DOC_MEM_PORT])
     );
 
     // SuperSprite
@@ -940,69 +948,17 @@ module top #(
     // -----------------------------------------------------------------
     // DDR3 Multi-Port Arbiter
     // -----------------------------------------------------------------
-    // Port allocation:
-    //   0 = FB read  (highest priority — scanline prefetch)
-    //   1 = FB write
-    //   2 = Shadow read  (apple_video_gen)
-    //   3 = Shadow write (CPU)
-    //   4 = DOC (Ensoniq wavetable read)
-    //   5 = GLU (Ensoniq write)
-
-    localparam FB_READ_PORT  = 0;
-    localparam FB_WRITE_PORT = 1;
-    localparam DDR3_SHADOW_READ_PORT  = 2;
-    localparam DDR3_SHADOW_WRITE_PORT = 3;
-    localparam DDR3_DOC_MEM_PORT      = 4;
-    localparam DDR3_GLU_MEM_PORT      = 5;
-    localparam NUM_DDR3_PORTS = 6;
-
-    mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32))
-        ddr3_mem_ports[NUM_DDR3_PORTS-1:0]();
-
-    // Connect ext_mem_ports (used by apple_memory, sound_glu) to ddr3 arbiter ports
-    // with base address offsets applied
-    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].addr    = SHADOW_WORD_BASE + ext_mem_ports[SHADOW_READ_PORT].addr;
-    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].data    = ext_mem_ports[SHADOW_READ_PORT].data;
-    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].byte_en = ext_mem_ports[SHADOW_READ_PORT].byte_en;
-    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].wr      = ext_mem_ports[SHADOW_READ_PORT].wr;
-    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].rd      = ext_mem_ports[SHADOW_READ_PORT].rd;
-    assign ddr3_mem_ports[DDR3_SHADOW_READ_PORT].burst   = ext_mem_ports[SHADOW_READ_PORT].burst;
-    assign ext_mem_ports[SHADOW_READ_PORT].q             = ddr3_mem_ports[DDR3_SHADOW_READ_PORT].q;
-    assign ext_mem_ports[SHADOW_READ_PORT].ready         = ddr3_mem_ports[DDR3_SHADOW_READ_PORT].ready;
-    assign ext_mem_ports[SHADOW_READ_PORT].available     = ddr3_mem_ports[DDR3_SHADOW_READ_PORT].available;
-
-    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].addr    = SHADOW_WORD_BASE + ext_mem_ports[SHADOW_WRITE_PORT].addr;
-    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].data    = ext_mem_ports[SHADOW_WRITE_PORT].data;
-    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].byte_en = ext_mem_ports[SHADOW_WRITE_PORT].byte_en;
-    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].wr      = ext_mem_ports[SHADOW_WRITE_PORT].wr;
-    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].rd      = ext_mem_ports[SHADOW_WRITE_PORT].rd;
-    assign ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].burst   = ext_mem_ports[SHADOW_WRITE_PORT].burst;
-    assign ext_mem_ports[SHADOW_WRITE_PORT].q             = ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].q;
-    assign ext_mem_ports[SHADOW_WRITE_PORT].ready         = ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].ready;
-    assign ext_mem_ports[SHADOW_WRITE_PORT].available     = ddr3_mem_ports[DDR3_SHADOW_WRITE_PORT].available;
-
-    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].addr    = ENSONIQ_WORD_BASE + ext_mem_ports[DOC_MEM_PORT].addr;
-    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].data    = ext_mem_ports[DOC_MEM_PORT].data;
-    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].byte_en = ext_mem_ports[DOC_MEM_PORT].byte_en;
-    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].wr      = ext_mem_ports[DOC_MEM_PORT].wr;
-    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].rd      = ext_mem_ports[DOC_MEM_PORT].rd;
-    assign ddr3_mem_ports[DDR3_DOC_MEM_PORT].burst   = ext_mem_ports[DOC_MEM_PORT].burst;
-    assign ext_mem_ports[DOC_MEM_PORT].q             = ddr3_mem_ports[DDR3_DOC_MEM_PORT].q;
-    assign ext_mem_ports[DOC_MEM_PORT].ready         = ddr3_mem_ports[DDR3_DOC_MEM_PORT].ready;
-    assign ext_mem_ports[DOC_MEM_PORT].available     = ddr3_mem_ports[DDR3_DOC_MEM_PORT].available;
-
-    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].addr    = ENSONIQ_WORD_BASE + ext_mem_ports[GLU_MEM_PORT].addr;
-    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].data    = ext_mem_ports[GLU_MEM_PORT].data;
-    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].byte_en = ext_mem_ports[GLU_MEM_PORT].byte_en;
-    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].wr      = ext_mem_ports[GLU_MEM_PORT].wr;
-    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].rd      = ext_mem_ports[GLU_MEM_PORT].rd;
-    assign ddr3_mem_ports[DDR3_GLU_MEM_PORT].burst   = ext_mem_ports[GLU_MEM_PORT].burst;
-    assign ext_mem_ports[GLU_MEM_PORT].q             = ddr3_mem_ports[DDR3_GLU_MEM_PORT].q;
-    assign ext_mem_ports[GLU_MEM_PORT].ready         = ddr3_mem_ports[DDR3_GLU_MEM_PORT].ready;
-    assign ext_mem_ports[GLU_MEM_PORT].available     = ddr3_mem_ports[DDR3_GLU_MEM_PORT].available;
 
     ddr3_ports #(
-        .NUM_PORTS(NUM_DDR3_PORTS)
+        .NUM_PORTS(NUM_DDR3_PORTS),
+        .PORT_BASE_ADDR('{
+            FB_WORD_BASE,       // [0] FB read
+            FB_WORD_BASE,       // [1] FB write
+            SHADOW_WORD_BASE,   // [2] Shadow read
+            SHADOW_WORD_BASE,   // [3] Shadow write
+            ENSONIQ_WORD_BASE,  // [4] DOC read
+            ENSONIQ_WORD_BASE   // [5] GLU write
+        })
     ) u_ddr3_ports (
         .clk_client      (clk_logic_w),
         .clk_ddr          (clk_x1_w),

@@ -39,7 +39,8 @@
 // Client addressing: PORT_ADDR_WIDTH-bit word address (32-bit words).
 //   - addr[1:0] selects 32-bit slot within 128-bit DDR3 burst
 //   - addr[PORT_ADDR_WIDTH-1:2] selects 128-bit burst
-//   - Clients are responsible for applying any base address offset
+//   - Per-port base address offset applied via PORT_BASE_ADDR parameter,
+//     so clients use local addressing starting from 0.
 //
 
 module ddr3_ports #(
@@ -49,7 +50,11 @@ module ddr3_ports #(
     parameter DQM_WIDTH = 4,
     parameter DDR_ADDR_WIDTH = 28,
     parameter DDR_DATA_WIDTH = 128,
-    parameter DDR_MASK_WIDTH = 16
+    parameter DDR_MASK_WIDTH = 16,
+    // Per-port base address in word-address space (32-bit words).
+    // Clients address from 0; the arbiter adds this offset before
+    // computing the DDR3 byte address.
+    parameter [PORT_ADDR_WIDTH-1:0] PORT_BASE_ADDR [NUM_PORTS] = '{NUM_PORTS{0}}
 ) (
     input  wire clk_client,          // Client clock (e.g. 54 MHz)
     input  wire clk_ddr,             // DDR3 controller clock (e.g. 74.25 MHz)
@@ -98,6 +103,14 @@ module ddr3_ports #(
     reg  [NUM_PORTS-1:0]          cdc_req_done;
     reg  [NUM_PORTS-1:0]          cdc_resp_valid;
     reg  [DATA_WIDTH-1:0]         cdc_resp_data;    // Shared bus
+
+    // Per-port mapped addresses: local addr + base offset
+    wire [PORT_ADDR_WIDTH-1:0] mapped_addr [NUM_PORTS];
+    generate
+        for (genvar ga = 0; ga < NUM_PORTS; ga++) begin : gen_addr
+            assign mapped_addr[ga] = PORT_BASE_ADDR[ga] + cdc_req_addr[ga];
+        end
+    endgenerate
 
     generate
         for (genvar gi = 0; gi < NUM_PORTS; gi++) begin : gen_cdc
@@ -241,15 +254,15 @@ module ddr3_ports #(
                                 active_port     <= i[PORT_IDX_WIDTH-1:0];
                                 active_wr       <= cdc_req_wr[i];
                                 active_burst    <= cdc_req_burst[i];
-                                active_slot     <= cdc_req_addr[i][1:0];
-                                active_ddr_addr <= word_to_ddr_addr(cdc_req_addr[i]);
+                                active_slot     <= mapped_addr[i][1:0];
+                                active_ddr_addr <= word_to_ddr_addr(mapped_addr[i]);
                                 if (cdc_req_wr[i]) begin
                                     state <= S_WRITE;
                                 end else if (cache_valid[i] &&
-                                             cache_tag[i] == cdc_req_addr[i][PORT_ADDR_WIDTH-1:2]) begin
+                                             cache_tag[i] == mapped_addr[i][PORT_ADDR_WIDTH-1:2]) begin
                                     // Cache hit: load cached data, skip DDR3
                                     rd_data_latched <= cache_data[i];
-                                    beat_cnt        <= cdc_req_burst[i] ? 2'd0 : cdc_req_addr[i][1:0];
+                                    beat_cnt        <= cdc_req_burst[i] ? 2'd0 : mapped_addr[i][1:0];
                                     cache_hit       <= 1'b1;
                                     state           <= S_RESPOND;
                                 end else begin
@@ -276,7 +289,7 @@ module ddr3_ports #(
                             integer j;
                             for (j = 0; j < NUM_PORTS; j = j + 1) begin
                                 if (cache_valid[j] &&
-                                    cache_tag[j] == cdc_req_addr[active_port][PORT_ADDR_WIDTH-1:2])
+                                    cache_tag[j] == mapped_addr[active_port][PORT_ADDR_WIDTH-1:2])
                                     cache_valid[j] <= 1'b0;
                             end
                         end
@@ -299,7 +312,7 @@ module ddr3_ports #(
                         beat_cnt        <= active_burst ? 2'd0 : active_slot;
                         // Fill cache for this port
                         cache_data[active_port]  <= rd_data;
-                        cache_tag[active_port]   <= cdc_req_addr[active_port][PORT_ADDR_WIDTH-1:2];
+                        cache_tag[active_port]   <= mapped_addr[active_port][PORT_ADDR_WIDTH-1:2];
                         cache_valid[active_port] <= 1'b1;
                         state <= S_RESPOND;
                     end
