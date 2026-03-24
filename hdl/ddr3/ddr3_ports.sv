@@ -21,18 +21,18 @@
 // them onto a single Gowin DDR3 Memory Interface IP running at clk_ddr.
 //
 // Architecture:
-//   - Per-port CDC via ddr3_port_cdc (toggle request, gray-code response FIFO)
+//   - Per-port synchronous CDC via ddr3_port_cdc (registered crossing + gray-code
+//     response FIFO). clk_client (54 MHz) derived from clk_ddr (108 MHz) via
+//     CLKDIV2, so every 54 MHz edge coincides with a 108 MHz edge.
 //   - Static priority arbiter (port 0 = highest) scans for pending requests
 //   - Width conversion: 128-bit DDR3 ↔ 32-bit clients
-//   - Writes use wr_data_mask to write 4 bytes within 128-bit word (no RMW)
+//   - Writes use wr_data_mask to write target bytes within 128-bit word
 //   - Burst reads decompose 128-bit response into 4 × 32-bit beats
 //   - Non-burst reads extract the addressed 32-bit slot from 128-bit response
-//   - Per-port 128-bit read cache: hits skip DDR3 entirely (~75% hit rate
-//     for sequential access patterns). Invalidated on writes to same burst addr.
 //
 // DDR3 IP interface follows Gowin DDR3 Memory Interface conventions:
 //   - cmd[2:0]: 000=write, 001=read
-//   - addr[27:0]: byte address, 16-byte aligned
+//   - addr[28:0]: byte address, 16-byte aligned
 //   - wr_data[127:0] + wr_data_mask[15:0]: masked write (1=don't write)
 //   - rd_data[127:0] + rd_data_valid: read response
 //
@@ -48,7 +48,7 @@ module ddr3_ports #(
     parameter PORT_ADDR_WIDTH = 21,
     parameter DATA_WIDTH = 32,
     parameter DQM_WIDTH = 4,
-    parameter DDR_ADDR_WIDTH = 28,
+    parameter DDR_ADDR_WIDTH = 29,
     parameter DDR_DATA_WIDTH = 128,
     parameter DDR_MASK_WIDTH = 16,
     // Per-port base address in word-address space (32-bit words).
@@ -56,8 +56,8 @@ module ddr3_ports #(
     // computing the DDR3 byte address.
     parameter [PORT_ADDR_WIDTH-1:0] PORT_BASE_ADDR [NUM_PORTS] = '{NUM_PORTS{0}}
 ) (
-    input  wire clk_client,          // Client clock (e.g. 54 MHz)
-    input  wire clk_ddr,             // DDR3 controller clock (e.g. 74.25 MHz)
+    input  wire clk_client,          // Client clock (54 MHz, from CLKDIV2)
+    input  wire clk_ddr,             // DDR3 controller clock (108 MHz)
     input  wire rst,                 // Active-high reset (clk_ddr domain, from DDR3 IP)
     input  wire init_complete,       // DDR3 calibration complete (clk_ddr domain)
 
@@ -80,7 +80,17 @@ module ddr3_ports #(
     // DDR3 IP read interface (clk_ddr domain)
     input  wire                        rd_data_valid,
     input  wire [DDR_DATA_WIDTH-1:0]   rd_data,
-    input  wire                        rd_data_end
+    input  wire                        rd_data_end,
+
+    // Debug (clk_ddr domain) — forces optimizer to preserve CDC FIFO logic
+    output wire [NUM_PORTS-1:0]        dbg_req_pending,
+    output wire [7:0]                  dbg_arb_state,
+
+    // DDR3 loopback test result (clk_ddr domain)
+    // After init_complete, writes 0xA5..A5 to addr 0, reads back, XOR with expected.
+    // [31:0] = rd_data[31:0] XOR 0xA5A5A5A5. Zero = DDR3 data path OK.
+    output wire [31:0]                 dbg_test_result,
+    output wire                        dbg_test_done
 );
 
     assign wr_data_end = 1'b1;  // Single-beat writes (BL8, one 128-bit word)
@@ -104,64 +114,111 @@ module ddr3_ports #(
     reg  [NUM_PORTS-1:0]          cdc_resp_valid;
     reg  [DATA_WIDTH-1:0]         cdc_resp_data;    // Shared bus
 
-    // Per-port mapped addresses: local addr + base offset
-    wire [PORT_ADDR_WIDTH-1:0] mapped_addr [NUM_PORTS];
+    // Per-port mapped addresses: local addr + base offset, REGISTERED in clk_ddr.
+    // Together with registered port_ddr_addr, this creates a 2-stage pipeline that
+    // breaks the 108 MHz critical path (req_addr → mapped_addr → ddr_addr → FSM).
+    // Pipeline stages:
+    //   Stage 1: mapped_addr = PORT_BASE_ADDR + cdc_req_addr  (registered)
+    //   Stage 2: port_ddr_addr                                (registered)
+    // The arbiter's S_LOAD state provides 1 cycle for the pipeline to settle
+    // after req_pending goes high. CDC freezes req registers while pending,
+    // keeping the pipeline inputs stable.
+    reg [PORT_ADDR_WIDTH-1:0] mapped_addr [NUM_PORTS];
     generate
         for (genvar ga = 0; ga < NUM_PORTS; ga++) begin : gen_addr
-            assign mapped_addr[ga] = PORT_BASE_ADDR[ga] + cdc_req_addr[ga];
+            always @(posedge clk_ddr or posedge rst) begin
+                if (rst)
+                    mapped_addr[ga] <= '0;
+                else
+                    mapped_addr[ga] <= PORT_BASE_ADDR[ga] + cdc_req_addr[ga];
+            end
         end
     endgenerate
 
+    // Per-port client status wires (CDC outputs → interface assignments)
+    wire [NUM_PORTS-1:0]       cdc_client_available;
+    wire [NUM_PORTS-1:0]       cdc_client_ready;
+    wire [DATA_WIDTH-1:0]      cdc_client_q [NUM_PORTS];
+
     generate
         for (genvar gi = 0; gi < NUM_PORTS; gi++) begin : gen_cdc
+            // Explicit wire connections break Gowin's interface array
+            // flattening bug that reverses port indices in generate loops.
             ddr3_port_cdc #(
                 .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
                 .DATA_WIDTH(DATA_WIDTH),
                 .DQM_WIDTH(DQM_WIDTH)
             ) u_cdc (
-                .clk_client    (clk_client),
-                .clk_ddr       (clk_ddr),
-                .rst           (rst),
-                .client        (ports[gi]),
-                .req_pending   (cdc_req_pending[gi]),
-                .req_addr      (cdc_req_addr[gi]),
-                .req_data      (cdc_req_data[gi]),
-                .req_byte_en   (cdc_req_byte_en[gi]),
-                .req_wr        (cdc_req_wr[gi]),
-                .req_burst     (cdc_req_burst[gi]),
-                .req_done      (cdc_req_done[gi]),
-                .resp_valid    (cdc_resp_valid[gi]),
-                .resp_data     (cdc_resp_data),
-                .init_complete (init_complete)
+                .clk_client       (clk_client),
+                .clk_ddr          (clk_ddr),
+                .rst              (rst),
+                .client_rd        (ports[gi].rd),
+                .client_wr        (ports[gi].wr),
+                .client_addr      (ports[gi].addr),
+                .client_data      (ports[gi].data),
+                .client_byte_en   (ports[gi].byte_en),
+                .client_burst     (ports[gi].burst),
+                .client_available (cdc_client_available[gi]),
+                .client_ready     (cdc_client_ready[gi]),
+                .client_q         (cdc_client_q[gi]),
+                .req_pending      (cdc_req_pending[gi]),
+                .req_addr         (cdc_req_addr[gi]),
+                .req_data         (cdc_req_data[gi]),
+                .req_byte_en      (cdc_req_byte_en[gi]),
+                .req_wr           (cdc_req_wr[gi]),
+                .req_burst        (cdc_req_burst[gi]),
+                .req_done         (cdc_req_done[gi]),
+                .resp_valid       (cdc_resp_valid[gi]),
+                .resp_data        (cdc_resp_data),
+                .init_complete    (init_complete)
             );
+
+            assign ports[gi].available = cdc_client_available[gi];
+            assign ports[gi].ready     = cdc_client_ready[gi];
+            assign ports[gi].q         = cdc_client_q[gi];
         end
     endgenerate
 
-    // =========================================================================
-    // Per-port read cache (clk_ddr domain)
-    // =========================================================================
-    // One 128-bit cache line per port, tagged by burst-aligned address.
-    // Serves ~75% of sequential reads from cache (4 words per line).
-    // Invalidated when any write targets the same burst address.
+    // Debug: expose per-port pending status. This output forces the
+    // optimizer to preserve the CDC FIFO empty detection logic — without
+    // an observable consumer, Gowin's optimizer collapses the gray-code
+    // FIFO through circular constant propagation.
+    assign dbg_req_pending = cdc_req_pending;
 
-    localparam BURST_TAG_WIDTH = PORT_ADDR_WIDTH - 2;  // addr[PORT_ADDR_WIDTH-1:2]
+    // Debug: arbiter state + key signals (clk_ddr domain)
+    // [7:4] = state[3:0], [3] = init_complete, [2] = cmd_ready,
+    // [1] = rd_data_valid, [0] = test_done
+    assign dbg_arb_state = {state, init_complete, cmd_ready,
+                            rd_data_valid, test_done};
 
-    reg [DDR_DATA_WIDTH-1:0]   cache_data  [NUM_PORTS];
-    reg [BURST_TAG_WIDTH-1:0]  cache_tag   [NUM_PORTS];
-    reg [NUM_PORTS-1:0]        cache_valid;
+    // Pre-computed DDR addresses per port (registered, breaks timing path).
+    reg [DDR_ADDR_WIDTH-1:0] port_ddr_addr [NUM_PORTS];
+    generate
+        for (genvar gd = 0; gd < NUM_PORTS; gd++) begin : gen_ddr_addr
+            always @(posedge clk_ddr or posedge rst) begin
+                if (rst)
+                    port_ddr_addr[gd] <= '0;
+                else
+                    port_ddr_addr[gd] <= word_to_ddr_addr(mapped_addr[gd]);
+            end
+        end
+    endgenerate
 
     // =========================================================================
     // Arbiter state machine (clk_ddr domain)
     // =========================================================================
 
-    localparam S_IDLE      = 3'd0;
-    localparam S_WRITE     = 3'd1;
-    localparam S_READ_CMD  = 3'd2;
-    localparam S_READ_WAIT = 3'd3;
-    localparam S_RESPOND   = 3'd4;
-    localparam S_DONE      = 3'd5;
-
-    reg [2:0] state;
+    localparam S_IDLE      = 4'd0;
+    localparam S_LOAD      = 4'd1;   // Pipeline settle: latch addresses
+    localparam S_WRITE     = 4'd2;
+    localparam S_READ_CMD  = 4'd3;
+    localparam S_READ_WAIT = 4'd4;
+    localparam S_RESPOND   = 4'd5;
+    localparam S_DONE      = 4'd6;
+    localparam S_TEST_WR   = 4'd7;   // DDR3 loopback: write test pattern
+    localparam S_TEST_RD   = 4'd8;   // DDR3 loopback: issue read
+    localparam S_TEST_WAIT = 4'd9;   // DDR3 loopback: check result
+    reg [3:0] state;
     reg [PORT_IDX_WIDTH-1:0] active_port;
     reg                      active_wr;
     reg                      active_burst;
@@ -169,7 +226,22 @@ module ddr3_ports #(
     reg [DDR_ADDR_WIDTH-1:0] active_ddr_addr;
     reg [DDR_DATA_WIDTH-1:0] rd_data_latched;
     reg [1:0]                beat_cnt;
-    reg                      cache_hit;
+
+    // =========================================================================
+    // DDR3 loopback test registers
+    // =========================================================================
+    localparam [DDR_DATA_WIDTH-1:0] TEST_PATTERN = {4{32'hA5A5A5A5}};
+    // Byte address for loopback test. Must NOT overlap any port's address range.
+    // Double-buffered FB uses word addresses 0..0x4B000 = DDR3 byte 0..0x12C000.
+    // SHADOW at word 0x050000, ENSONIQ at word 0x080000.
+    // 0x0400000 (4MB) is safely above all used regions.
+    localparam [DDR_ADDR_WIDTH-1:0] TEST_ADDR = {DDR_ADDR_WIDTH{1'b0}} | 29'h0400000;
+
+    reg        test_done;
+    reg [31:0] test_result;
+
+    assign dbg_test_result = test_result;
+    assign dbg_test_done   = test_done;
 
     // Compute DDR3 address from client word address.
     // Client addr is PORT_ADDR_WIDTH bits of 32-bit word addressing.
@@ -237,7 +309,8 @@ module ddr3_ports #(
             active_ddr_addr <= '0;
             rd_data_latched <= '0;
             beat_cnt       <= 2'b0;
-            cache_valid    <= '0;
+            test_done      <= 1'b0;
+            test_result    <= '0;
         end else begin
             // Default: deassert one-cycle pulses
             cmd_en         <= 1'b0;
@@ -247,31 +320,34 @@ module ddr3_ports #(
 
             case (state)
                 S_IDLE: begin
-                    if (init_complete) begin : pick_port
+                    if (init_complete && !test_done) begin
+                        // Run loopback test before normal operation
+                        state <= S_TEST_WR;
+                    end else if (init_complete) begin : pick_port
                         integer i;
                         for (i = 0; i < NUM_PORTS; i = i + 1) begin
                             if (cdc_req_pending[i]) begin
-                                active_port     <= i[PORT_IDX_WIDTH-1:0];
-                                active_wr       <= cdc_req_wr[i];
-                                active_burst    <= cdc_req_burst[i];
-                                active_slot     <= mapped_addr[i][1:0];
-                                active_ddr_addr <= word_to_ddr_addr(mapped_addr[i]);
-                                if (cdc_req_wr[i]) begin
-                                    state <= S_WRITE;
-                                end else if (cache_valid[i] &&
-                                             cache_tag[i] == mapped_addr[i][PORT_ADDR_WIDTH-1:2]) begin
-                                    // Cache hit: load cached data, skip DDR3
-                                    rd_data_latched <= cache_data[i];
-                                    beat_cnt        <= cdc_req_burst[i] ? 2'd0 : mapped_addr[i][1:0];
-                                    cache_hit       <= 1'b1;
-                                    state           <= S_RESPOND;
-                                end else begin
-                                    cache_hit <= 1'b0;
-                                    state     <= S_READ_CMD;
-                                end
+                                active_port  <= i[PORT_IDX_WIDTH-1:0];
+                                active_wr    <= cdc_req_wr[i];
+                                active_burst <= cdc_req_burst[i];
+                                state        <= S_LOAD;
                                 disable pick_port;
                             end
                         end
+                    end
+                end
+
+                // S_LOAD: wait 1 cycle for pipeline (mapped_addr → port_ddr_addr)
+                // to settle, then latch addresses. Also validates the request is
+                // still pending — if req_done cleared it (ghost from previous
+                // transaction), return to S_IDLE without servicing.
+                S_LOAD: begin
+                    if (cdc_req_pending[active_port]) begin
+                        active_slot     <= mapped_addr[active_port][1:0];
+                        active_ddr_addr <= port_ddr_addr[active_port];
+                        state <= active_wr ? S_WRITE : S_READ_CMD;
+                    end else begin
+                        state <= S_IDLE;  // Ghost squashed
                     end
                 end
 
@@ -284,15 +360,6 @@ module ddr3_ports #(
                         wr_data      <= {4{cdc_req_data[active_port]}};
                         wr_data_mask <= compute_write_mask(active_slot,
                                                           cdc_req_byte_en[active_port]);
-                        // Invalidate any cache line matching this burst address
-                        begin : invalidate_caches
-                            integer j;
-                            for (j = 0; j < NUM_PORTS; j = j + 1) begin
-                                if (cache_valid[j] &&
-                                    cache_tag[j] == mapped_addr[active_port][PORT_ADDR_WIDTH-1:2])
-                                    cache_valid[j] <= 1'b0;
-                            end
-                        end
                         state <= S_DONE;
                     end
                 end
@@ -310,10 +377,6 @@ module ddr3_ports #(
                     if (rd_data_valid) begin
                         rd_data_latched <= rd_data;
                         beat_cnt        <= active_burst ? 2'd0 : active_slot;
-                        // Fill cache for this port
-                        cache_data[active_port]  <= rd_data;
-                        cache_tag[active_port]   <= mapped_addr[active_port][PORT_ADDR_WIDTH-1:2];
-                        cache_valid[active_port] <= 1'b1;
                         state <= S_RESPOND;
                     end
                 end
@@ -334,6 +397,39 @@ module ddr3_ports #(
                 S_DONE: begin
                     cdc_req_done[active_port] <= 1'b1;
                     state <= S_IDLE;
+                end
+
+                // =============================================================
+                // DDR3 loopback test: write TEST_PATTERN, read back, XOR
+                // =============================================================
+                S_TEST_WR: begin
+                    if (cmd_ready && wr_data_rdy) begin
+                        cmd_en       <= 1'b1;
+                        cmd          <= CMD_WRITE;
+                        addr         <= TEST_ADDR;
+                        wr_data_en   <= 1'b1;
+                        wr_data      <= TEST_PATTERN;
+                        wr_data_mask <= {DDR_MASK_WIDTH{1'b0}};  // Write all bytes
+                        state        <= S_TEST_RD;
+                    end
+                end
+
+                S_TEST_RD: begin
+                    if (cmd_ready) begin
+                        cmd_en <= 1'b1;
+                        cmd    <= CMD_READ;
+                        addr   <= TEST_ADDR;
+                        state  <= S_TEST_WAIT;
+                    end
+                end
+
+                // XOR read data with expected pattern — 0x0000 = pass
+                S_TEST_WAIT: begin
+                    if (rd_data_valid) begin
+                        test_result <= rd_data[31:0] ^ TEST_PATTERN[31:0];
+                        test_done   <= 1'b1;
+                        state       <= S_IDLE;
+                    end
                 end
 
                 default: state <= S_IDLE;

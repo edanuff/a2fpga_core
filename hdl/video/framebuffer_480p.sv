@@ -51,7 +51,11 @@ module framebuffer_480p #(
     parameter TEST_PATTERN = 0,
     // EXP 22: Binary threshold diagnostic — all non-zero pixels become white,
     // zero pixels become black. Makes ghost artifacts maximally visible.
-    parameter THRESHOLD_DIAG = 0
+    parameter THRESHOLD_DIAG = 0,
+    // Words per burst read — must match the memory backend's burst length.
+    // DDR3 (ddr3_ports): 4 beats per burst (128-bit / 32-bit)
+    // SDRAM (sdram_ports): 2 beats per burst (64-bit / 32-bit)
+    parameter FB_READ_BURST_WORDS = 4
 ) (
     // Clocks and reset
     input  logic        clk,             // 54 MHz logic clock
@@ -108,6 +112,10 @@ module framebuffer_480p #(
     localparam HDMI_WIDTH  = 720;
     localparam HDMI_HEIGHT = 480;
 
+    // Double-buffer: offset for second framebuffer in DDR3 word address space.
+    // Must be >= max packed words per frame (320 * 480 = 153,600 = 0x25800).
+    localparam [20:0] BUFFER_OFFSET = 21'h025800;
+
     // =========================================================================
     // Color conversion functions
     // =========================================================================
@@ -131,20 +139,21 @@ module framebuffer_480p #(
                 c[5:0],   c[5:4]};    // B
     endfunction
 
-    // Test pattern: configurable vertical bars
-    // TEST_PATTERN==3: 8-pixel wide bars (same-color pairs only)
-    // TEST_PATTERN==4: 1-pixel alternating stripes (EVERY pair has mixed colors)
-    //   Tests whether the pixel packer handles mixed-color pairs correctly.
+    // Test pattern: 2-pixel wide bars (different colors per 32-bit word)
+    // This creates 4 different words within each 128-bit DDR3 burst,
+    // making wr_data_mask failures clearly visible:
+    //   - Working mask: 2-pixel bars (W R G B C M Y K repeating)
+    //   - Broken mask: 8-pixel bars (last word wins, all same color)
     function automatic [COLOR_BITS-1:0] test_pixel(input [9:0] x);
-        case (x[5:3])
-            3'd0: test_pixel = 18'h3FFFF;  // white
-            3'd1: test_pixel = 18'h3F000;  // red
-            3'd2: test_pixel = 18'h00FC0;  // green
-            3'd3: test_pixel = 18'h0003F;  // blue
-            3'd4: test_pixel = 18'h00FFF;  // cyan
-            3'd5: test_pixel = 18'h3F03F;  // magenta
-            3'd6: test_pixel = 18'h3FFC0;  // yellow
-            3'd7: test_pixel = 18'h00000;  // black
+        case (x[3:1])
+            3'd0: test_pixel = 18'h3FFFF;  // white  (pixels 0-1)
+            3'd1: test_pixel = 18'h3F000;  // red    (pixels 2-3)
+            3'd2: test_pixel = 18'h00FC0;  // green  (pixels 4-5)
+            3'd3: test_pixel = 18'h0003F;  // blue   (pixels 6-7)
+            3'd4: test_pixel = 18'h00FFF;  // cyan   (pixels 8-9)
+            3'd5: test_pixel = 18'h3F03F;  // magenta(pixels 10-11)
+            3'd6: test_pixel = 18'h3FFC0;  // yellow (pixels 12-13)
+            3'd7: test_pixel = 18'h00000;  // black  (pixels 14-15)
         endcase
     endfunction
 
@@ -192,10 +201,12 @@ module framebuffer_480p #(
 
     localparam FIFO_DEPTH = 256;
     localparam FIFO_ADDR_BITS = 8;  // log2(256)
-    // Yield reads only as a safety valve when write FIFO backs up.
-    localparam FIFO_YIELD_THRESHOLD = 64;
+    // Yield reads only as a safety valve when write FIFO is nearly full.
+    // Must be high enough to avoid stalling the fetch pipeline during normal
+    // operation — stalling causes late lines and display distortion.
+    localparam FIFO_YIELD_THRESHOLD = 224;
 
-    reg [52:0] wr_fifo [0:FIFO_DEPTH-1];
+    reg [52:0] wr_fifo [0:FIFO_DEPTH-1] /* synthesis syn_ramstyle="registers" */;
     reg [FIFO_ADDR_BITS:0] fifo_wr_ptr_r, fifo_rd_ptr_r;
 
     wire [FIFO_ADDR_BITS:0] fifo_count_w = fifo_wr_ptr_r - fifo_rd_ptr_r;
@@ -278,7 +289,8 @@ module framebuffer_480p #(
                     end else if (!fifo_full_w) begin
                         // Odd pixel — pack with buffered even and push to FIFO
                         wr_fifo[fifo_wr_ptr_r[FIFO_ADDR_BITS-1:0]] <= {
-                            wr_line_base_r + {11'd0, wr_x_r[10:1]},  // packed addr
+                            (frame_parity_r ? BUFFER_OFFSET : 21'd0) +
+                            wr_line_base_r + {11'd0, wr_x_r[10:1]},  // packed addr + buf offset
                             rgb666_to_565(wr_pixel_data_w),            // odd pixel [31:16]
                             wr_pixel_even_r                            // even pixel [15:0]
                         };
@@ -385,7 +397,7 @@ module framebuffer_480p #(
     always @(posedge clk) begin
         packed_width_r <= {1'b0, fb_width[10:1]};
     end
-    localparam integer FB_READ_BURST_WORDS = 2;  // Words per burst read
+    // FB_READ_BURST_WORDS is now a module parameter (set from top.sv)
     localparam integer PREFETCH_LEAD_LINES = 12;
 
     localparam FETCH_IDLE    = 2'd0;
@@ -400,6 +412,10 @@ module framebuffer_480p #(
     reg [20:0] fetch_line_base_r;   // Base addr of current/last fetched line
     reg        fetch_bank_r;
     reg [3:0]  fetch_beats_left_r;
+
+    // Double-buffer: read buffer offset, latched at display frame start
+    // so it stays stable for the entire display frame.
+    reg [20:0] rd_buf_offset_r;
 
     // Debug counters (saturating, reset each frame at fb_vsync)
     reg [7:0] dbg_fifo_highwater_r;
@@ -568,14 +584,22 @@ module framebuffer_480p #(
             fetch_line_base_r <= 21'd0;
             fetch_bank_r <= 1'b0;
             fetch_beats_left_r <= 4'd0;
+            rd_buf_offset_r <= 21'd0;
         end else begin
             case (fetch_state_r)
 
             FETCH_IDLE: begin
                 // Check every cycle — no cy_changed gate needed.
                 // last_fetched_line_r prevents redundant fetches.
-                if (cy_approaching_active_w && last_fetched_line_r != 9'd0) begin
+                // px_empty gate: must wait for pixel extraction to finish so
+                // fetch_start_pulse_w fires and resets rd_fifo/lb_wr_pixel_x.
+                // Without this, lb_wr_pixel_x carries over from the previous
+                // line and pixels are written to wrong line buffer positions.
+                if (cy_approaching_active_w && last_fetched_line_r != 9'd0 && px_empty) begin
                     // Approaching active area — prefetch line 0
+                    // Latch read buffer: read from the buffer the writer
+                    // just FINISHED (opposite of writer's current buffer).
+                    rd_buf_offset_r <= frame_parity_r ? 21'd0 : BUFFER_OFFSET;
                     last_fetched_line_r <= 9'd0;
                     fetch_bank_r <= 1'b0;
                     fetch_word_r <= 11'd0;
@@ -583,7 +607,7 @@ module framebuffer_480p #(
                     fetch_line_base_r <= 21'd0;
                     fetch_addr_r <= 21'd0;
                     fetch_state_r <= FETCH_READ;
-                end else if (display_in_active_w &&
+                end else if (px_empty && display_in_active_w &&
                              next_line_w < fb_height_r &&
                              next_line_w != last_fetched_line_r) begin
                     // Displaying line N — prefetch line N+1
@@ -600,8 +624,11 @@ module framebuffer_480p #(
             end
 
             FETCH_READ: begin
-                // Only yield if write FIFO is near full.
-                if (!fifo_busy_w) begin
+                // Only proceed when write FIFO is not near full AND read port
+                // is available (CDC ready to accept).  Without the available
+                // check, the rd pulse is silently dropped and the FSM hangs
+                // in FETCH_WAIT waiting for ready beats that never come.
+                if (!fifo_busy_w && fb_read_port.available) begin
                     fetch_beats_left_r <= fetch_use_burst_w ? 4'(FB_READ_BURST_WORDS) : 4'd1;
                     fetch_state_r <= FETCH_WAIT;
                 end
@@ -634,11 +661,11 @@ module framebuffer_480p #(
     end
 
     // Drive read port
-    assign fb_read_port.addr    = fetch_addr_r;
+    assign fb_read_port.addr    = fetch_addr_r + rd_buf_offset_r;
     assign fb_read_port.data    = 32'd0;
     assign fb_read_port.byte_en = 4'b1111;
     assign fb_read_port.wr      = 1'b0;
-    assign fb_read_port.rd      = (fetch_state_r == FETCH_READ) && !fifo_busy_w;
+    assign fb_read_port.rd      = (fetch_state_r == FETCH_READ) && !fifo_busy_w && fb_read_port.available;
     assign fb_read_port.burst   = fetch_use_burst_w;
 
     assign dbg_fifo_level_o = fifo_count_clamped_w;

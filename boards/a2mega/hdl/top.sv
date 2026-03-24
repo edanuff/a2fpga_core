@@ -133,7 +133,8 @@ module top #(
 
     // Clocks
 
-    wire clk_logic_w;
+    wire clk_logic_ddr_w;           // 54 MHz from CLKDIV2 (synchronous with DDR3)
+    wire clk_logic_w = clk_logic_ddr_w;
     wire clk_lock_w;
     wire clk_pixel_w;
     wire clk_hdmi_w;
@@ -143,7 +144,7 @@ module top #(
         .lock(clk_lock_w), //output lock
         .clkout0(clk_pixel_w), //output clkout0
         .clkout1(clk_hdmi_w), //output clkout1
-        .clkout2(clk_logic_w), //output clkout2
+        .clkout2(), //output clkout2 (unused — clk_logic from CLKDIV2)
         .clkin(clk) //input clkin
     );
 
@@ -299,6 +300,19 @@ module top #(
     wire [31:0] video_data_w;
     wire video_ready_w;
 
+    // Diagnostic: capture first shadow memory read response
+    reg [31:0] shadow_read_capture_r;
+    reg shadow_read_captured_r;
+    always @(posedge clk_logic_w or negedge device_reset_n_w) begin
+        if (!device_reset_n_w) begin
+            shadow_read_capture_r <= 32'hDEADBEEF;
+            shadow_read_captured_r <= 1'b0;
+        end else if (video_ready_w && !shadow_read_captured_r) begin
+            shadow_read_capture_r <= video_data_w;
+            shadow_read_captured_r <= 1'b1;
+        end
+    end
+
     wire vgc_active_w;
     wire [12:0] vgc_address_w;
     wire vgc_rd_w;
@@ -321,12 +335,12 @@ module top #(
 
     // DDR3 memory map — word address offsets (32-bit word addressing)
     // Applied per-port inside ddr3_ports via PORT_BASE_ADDR parameter.
-    localparam [20:0] FB_WORD_BASE      = 21'h000000;  // 0MB
-    localparam [20:0] SHADOW_WORD_BASE  = 21'h040000;  // 1MB (28'h0100000 >> 2)
+    localparam [20:0] FB_WORD_BASE      = 21'h000000;  // 0MB (double-buffered: buf0 0x000000-0x025800, buf1 0x025800-0x04B000)
+    localparam [20:0] SHADOW_WORD_BASE  = 21'h050000;  // 1.25MB — after double-buffered FB (was 0x040000)
     localparam [20:0] ENSONIQ_WORD_BASE = 21'h080000;  // 2MB (28'h0200000 >> 2)
 
     mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32))
-        ddr3_mem_ports[NUM_DDR3_PORTS-1:0]();
+        ddr3_mem_ports[0:NUM_DDR3_PORTS-1]();
 
     apple_memory #(
         .VGC_MEMORY(1)
@@ -829,7 +843,7 @@ module top #(
 
     wire init_calib_complete_w;
     wire ddr_rst_w;
-    wire clk_x1_w;              // 74.25 MHz from DDR3 controller
+    wire clk_x1_w;              // 108 MHz from DDR3 controller
     wire [10:0] hdmi_cx_w;      // HDMI raster X (0–857)
     wire [9:0]  hdmi_cy_w;      // HDMI raster Y (0–524)
     wire [23:0] fb_rgb_w;       // Current framebuffer RGB output
@@ -837,7 +851,7 @@ module top #(
     wire        overlay_en_w;   // DebugOverlay enable
 
     // -----------------------------------------------------------------
-    // DDR3 PLL — 297 MHz memory clock from 27 MHz input
+    // DDR3 PLL — 432 MHz memory clock from 27 MHz input
     // -----------------------------------------------------------------
     wire memory_clk_w;
     wire pll_lock_w;
@@ -854,6 +868,7 @@ module top #(
         .clkout2(memory_clk_w),
         .clkin(clk_pixel_w),           // 27 MHz from board PLL
         .reset(~clk_lock_w),
+        .pll_init_bypass(1'b0),
         .mdclk(clk),
         .mdopc(mdrp_op_w),
         .mdainc(mdrp_inc_w),
@@ -888,7 +903,7 @@ module top #(
     wire        ddr3_cmd_ready_w;
     wire [2:0]  ddr3_cmd_w;
     wire        ddr3_cmd_en_w;
-    wire [27:0] ddr3_addr_w;
+    wire [28:0] ddr3_addr_w;
 
     wire        ddr3_wr_data_rdy_w;
     wire [127:0] ddr3_wr_data_w;
@@ -922,7 +937,7 @@ module top #(
         .sr_ack          (),
         .ref_ack         (),
         .init_calib_complete(init_calib_complete_w),
-        .clk_out         (clk_x1_w),            // 74.25 MHz DDR3 app clock
+        .clk_out         (clk_x1_w),            // 108 MHz DDR3 app clock
         .pll_lock        (pll_lock_w),
         .burst           (1'b1),
         .ddr_rst         (ddr_rst_w),
@@ -946,11 +961,26 @@ module top #(
     assign ddr_addr[15] = 1'b0;
 
     // -----------------------------------------------------------------
+    // CLKDIV /2: derive 54 MHz logic clock from DDR3 108 MHz
+    // -----------------------------------------------------------------
+    // Synchronous: every 54 MHz rising edge coincides with a 108 MHz
+    // rising edge. This eliminates async CDC between clk_logic and
+    // clk_ddr — simple registered crossing is sufficient.
+    CLKDIV clkdiv2_logic (
+        .HCLKIN(clk_x1_w),         // 108 MHz from DDR3 IP
+        .RESETN(~ddr_rst_w),       // Release when DDR3 PLL stable
+        .CALIB(1'b0),
+        .CLKOUT(clk_logic_ddr_w)   // 54 MHz, phase-aligned
+    );
+    defparam clkdiv2_logic.DIV_MODE = "2";
+
+    // -----------------------------------------------------------------
     // DDR3 Multi-Port Arbiter
     // -----------------------------------------------------------------
 
     ddr3_ports #(
         .NUM_PORTS(NUM_DDR3_PORTS),
+        .DDR_ADDR_WIDTH(29),
         .PORT_BASE_ADDR('{
             FB_WORD_BASE,       // [0] FB read
             FB_WORD_BASE,       // [1] FB write
@@ -960,8 +990,8 @@ module top #(
             ENSONIQ_WORD_BASE   // [5] GLU write
         })
     ) u_ddr3_ports (
-        .clk_client      (clk_logic_w),
-        .clk_ddr          (clk_x1_w),
+        .clk_client      (clk_logic_w),     // 54 MHz from CLKDIV2 (synchronous)
+        .clk_ddr          (clk_x1_w),       // 108 MHz from DDR3 IP
         .rst              (ddr_rst_w),
         .init_complete    (init_calib_complete_w),
 
@@ -980,15 +1010,36 @@ module top #(
 
         .rd_data_valid    (ddr3_rd_data_valid_w),
         .rd_data          (ddr3_rd_data_w),
-        .rd_data_end      (ddr3_rd_data_end_w)
+        .rd_data_end      (ddr3_rd_data_end_w),
+
+        .dbg_req_pending  (ddr3_dbg_req_pending_w),
+        .dbg_arb_state    (ddr3_dbg_arb_state_w),
+        .dbg_test_result  (ddr3_dbg_test_result_w),
+        .dbg_test_done    (ddr3_dbg_test_done_w)
     );
+
+    wire [NUM_DDR3_PORTS-1:0] ddr3_dbg_req_pending_w;
+    wire [7:0] ddr3_dbg_arb_state_w;
+    wire [31:0] ddr3_dbg_test_result_w;
+    wire ddr3_dbg_test_done_w;
 
     // -----------------------------------------------------------------
     // Shared Framebuffer (480p via mem_port_if)
     // -----------------------------------------------------------------
 
+    wire [7:0] fb_dbg_fifo_highwater_w;
+    wire [7:0] fb_dbg_fifo_overflow_w;
+    wire [7:0] fb_dbg_read_blocked_w;
+    wire [7:0] fb_dbg_yield_busy_w;
+    wire [7:0] fb_dbg_late_line_w;
+    wire [7:0] fb_dbg_flags_w;
+    wire [7:0] fb_dbg_line_not_ready_w;
+    wire [7:0] fb_dbg_line_lag_max_w;
+    wire [7:0] fb_dbg_ready_phase_err_w;
     framebuffer_480p #(
-        .COLOR_BITS(18)
+        .COLOR_BITS(18),
+        .FB_READ_BURST_WORDS(4),
+        .TEST_PATTERN(0)
     ) u_framebuffer (
         .clk              (clk_logic_w),
         .clk_pixel        (clk_pixel_w),
@@ -1014,19 +1065,19 @@ module top #(
         .scanline_en      (1'b1),
         .sleep_i          (sleep_w),
 
-        // Debug outputs (unused for now)
+        // Debug outputs
         .dbg_fifo_level_o        (),
-        .dbg_fifo_highwater_o    (),
-        .dbg_fifo_overflow_o     (),
+        .dbg_fifo_highwater_o    (fb_dbg_fifo_highwater_w),
+        .dbg_fifo_overflow_o     (fb_dbg_fifo_overflow_w),
         .dbg_fetch_start_o       (),
         .dbg_fetch_done_o        (),
-        .dbg_read_blocked_o      (),
-        .dbg_yield_busy_o        (),
-        .dbg_late_line_o         (),
-        .dbg_flags_o             (),
-        .dbg_line_not_ready_o    (),
-        .dbg_line_lag_max_o      (),
-        .dbg_ready_phase_err_o   (),
+        .dbg_read_blocked_o      (fb_dbg_read_blocked_w),
+        .dbg_yield_busy_o        (fb_dbg_yield_busy_w),
+        .dbg_late_line_o         (fb_dbg_late_line_w),
+        .dbg_flags_o             (fb_dbg_flags_w),
+        .dbg_line_not_ready_o    (fb_dbg_line_not_ready_w),
+        .dbg_line_lag_max_o      (fb_dbg_line_lag_max_w),
+        .dbg_ready_phase_err_o   (fb_dbg_ready_phase_err_w),
         .dbg_vsync_raw_o         (),
         .dbg_frame_start_accept_o(),
         .dbg_frame_start_reject_o()
@@ -1127,32 +1178,35 @@ module top #(
     reg [7:0] dbg_bits0_sync0, dbg_bits0_sync1;
     reg [7:0] dbg_bits1_sync0, dbg_bits1_sync1;
     always @(posedge clk_pixel_w) begin
-        // Hex 0-1: last resync delta (9 bits)
-        dbg_hex_sync0[0] <= {7'b0, scan_dbg_delta_w[8]};
+        // Hex 0: DDR3 arbiter state {state[2:0], init, cmd_rdy, rd_valid, pending[1:0]}
+        dbg_hex_sync0[0] <= ddr3_dbg_arb_state_w;
                                                 dbg_hex_sync1[0] <= dbg_hex_sync0[0];
-        dbg_hex_sync0[1] <= scan_dbg_delta_w[7:0];
+        // Hex 1: req_pending bitmask for all 6 ports
+        dbg_hex_sync0[1] <= {2'b0, ddr3_dbg_req_pending_w};
                                                 dbg_hex_sync1[1] <= dbg_hex_sync0[1];
-        // Hex 2-3: our scanline at resync moment (9 bits)
+        // Hex 2-3: scan_timer actual scanline
         dbg_hex_sync0[2] <= {7'b0, scan_dbg_actual_w[8]};
                                                 dbg_hex_sync1[2] <= dbg_hex_sync0[2];
         dbg_hex_sync0[3] <= scan_dbg_actual_w[7:0];
                                                 dbg_hex_sync1[3] <= dbg_hex_sync0[3];
-        // Hex 4: last raw bus byte ($C019 or $C02E)
-        dbg_hex_sync0[4] <= scan_dbg_raw_data_w;
+        // Hex 4-7: DDR3 FB_READ response capture (ddr3_dbg_test_result_w)
+        // Shows most recent slot 0 of FB_READ burst — expected 0xFFFFFFFF or 0x00000000
+        // for TEST_PATTERN=6 (frame-alternating solid color)
+        dbg_hex_sync0[4] <= ddr3_dbg_test_result_w[31:24];
                                                 dbg_hex_sync1[4] <= dbg_hex_sync0[4];
-        // Hex 5: (reserved)
-        dbg_hex_sync0[5] <= 8'h00;              dbg_hex_sync1[5] <= dbg_hex_sync0[5];
-        // Hex 6: VBL correction count
-        dbg_hex_sync0[6] <= scan_dbg_vbl_correct_w;
+        dbg_hex_sync0[5] <= ddr3_dbg_test_result_w[23:16];
+                                                dbg_hex_sync1[5] <= dbg_hex_sync0[5];
+        dbg_hex_sync0[6] <= ddr3_dbg_test_result_w[15:8];
                                                 dbg_hex_sync1[6] <= dbg_hex_sync0[6];
-        // Hex 7: VERTCNT correction count
-        dbg_hex_sync0[7] <= scan_dbg_vertcnt_correct_w;
+        dbg_hex_sync0[7] <= ddr3_dbg_test_result_w[7:0];
                                                 dbg_hex_sync1[7] <= dbg_hex_sync0[7];
-        dbg_bits0_sync0 <= {a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE,
+        // Bits 0: framebuffer status flags
+        dbg_bits0_sync0 <= fb_dbg_flags_w;
+        dbg_bits0_sync1 <= dbg_bits0_sync0;
+        // Bits 1: video mode flags
+        dbg_bits1_sync0 <= {a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE,
                             a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.STORE80,
                             a2bus_if.system_reset_n, a2bus_if.device_reset_n};
-        dbg_bits0_sync1 <= dbg_bits0_sync0;
-        dbg_bits1_sync0 <= 8'h00;
         dbg_bits1_sync1 <= dbg_bits1_sync0;
     end
 

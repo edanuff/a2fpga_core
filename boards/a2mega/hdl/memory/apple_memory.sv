@@ -42,7 +42,6 @@ module apple_memory #(
     input [12:0] vgc_address_i,
     input vgc_rd_i,
     output [31:0] vgc_data_o
-
 );
 
     wire write_strobe = !a2bus_if.rw_n && a2bus_if.data_in_strobe;
@@ -320,28 +319,72 @@ module apple_memory #(
         end
     endgenerate
 
+    // =========================================================================
     // DDR3 write path — CPU writes text and hires to DDR3
+    // =========================================================================
 
     wire write_en = !a2bus_if.rw_n &&
         a2bus_if.data_in_strobe &&
         (bus_addr_2000_5FFF || bus_addr_0400_0BFF) &&
         !a2bus_if.m2sel_n;
 
+    reg        shadow_wr_pending_r;
+    reg [20:0] shadow_wr_addr_r;
+    reg [31:0] shadow_wr_data_r;
+    reg [3:0]  shadow_wr_byte_en_r;
+
+    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
+        if (!a2bus_if.system_reset_n) begin
+            shadow_wr_pending_r <= 1'b0;
+        end else begin
+            if (write_en && !main_mem_if.available) begin
+                shadow_wr_pending_r <= 1'b1;
+                shadow_wr_addr_r <= {6'b0, a2bus_if.addr[15:1]};
+                shadow_wr_data_r <= write_word;
+                shadow_wr_byte_en_r <= 4'(1 << {a2bus_if.addr[0],
+                                                 aux_mem_r || a2bus_if.m2b0});
+            end else if (shadow_wr_pending_r && main_mem_if.available) begin
+                shadow_wr_pending_r <= 1'b0;
+            end
+        end
+    end
+
     assign main_mem_if.rd = 1'b0;
-    assign main_mem_if.wr = write_en;
-    assign main_mem_if.addr = {6'b0, a2bus_if.addr[15:1]};
-    assign main_mem_if.data = write_word;
-    assign main_mem_if.byte_en = 4'(1 << {a2bus_if.addr[0], aux_mem_r || a2bus_if.m2b0});
     assign main_mem_if.burst = 1'b0;
+    assign main_mem_if.wr = (write_en || shadow_wr_pending_r) && main_mem_if.available;
+    assign main_mem_if.addr = shadow_wr_pending_r ? shadow_wr_addr_r : {6'b0, a2bus_if.addr[15:1]};
+    assign main_mem_if.data = shadow_wr_pending_r ? shadow_wr_data_r : write_word;
+    assign main_mem_if.byte_en = shadow_wr_pending_r ? shadow_wr_byte_en_r :
+        4'(1 << {a2bus_if.addr[0], aux_mem_r || a2bus_if.m2b0});
 
     // DDR3 read path — video gen reads text and hires from DDR3
+    // Retry logic: if CDC is busy when video_rd_i fires, latch the request
+    // and hold it pending until available becomes true. Without this,
+    // the single-cycle rd pulse is permanently lost and video_gen hangs
+    // waiting for a ready that never comes.
+
+    reg        shadow_rd_pending_r;
+    reg [20:0] shadow_rd_addr_r;
+
+    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
+        if (!a2bus_if.system_reset_n) begin
+            shadow_rd_pending_r <= 1'b0;
+        end else if (video_rd_i && !video_mem_if.available) begin
+            shadow_rd_pending_r <= 1'b1;
+            shadow_rd_addr_r <= {5'b0, video_bank_i, video_address_i[15:1]};
+        end else if (shadow_rd_pending_r && video_mem_if.available) begin
+            shadow_rd_pending_r <= 1'b0;
+        end
+    end
 
     generate begin : gen_normal_read
         assign video_data_o = video_mem_if.q;
         assign video_ready_o = video_mem_if.ready;
-        assign video_mem_if.rd = video_rd_i;
+        assign video_mem_if.rd = (video_rd_i || shadow_rd_pending_r) &&
+                                  video_mem_if.available;
         assign video_mem_if.wr = 1'b0;
-        assign video_mem_if.addr = {5'b0, video_bank_i, video_address_i[15:1]};
+        assign video_mem_if.addr = shadow_rd_pending_r ? shadow_rd_addr_r :
+                                    {5'b0, video_bank_i, video_address_i[15:1]};
         assign video_mem_if.data = 32'b0;
         assign video_mem_if.byte_en = 4'b1111;
         assign video_mem_if.burst = 1'b0;

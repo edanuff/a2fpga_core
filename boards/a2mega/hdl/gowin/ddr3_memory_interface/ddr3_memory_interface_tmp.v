@@ -6,7 +6,7 @@
 //Part Number: GW5AT-LV60PG484AC1/I0
 //Device: GW5AT-60
 //Device Version: B
-//Created Time: Sat Feb  7 09:09:04 2026
+//Created Time: Mon Mar 23 19:24:33 2026
 
 //Change the instance name and port connections to the signal names
 //--------Copy here to design--------
@@ -23,7 +23,7 @@
 		.cmd_ready(cmd_ready), //output cmd_ready
 		.cmd(cmd), //input [2:0] cmd
 		.cmd_en(cmd_en), //input cmd_en
-		.addr(addr), //input [27:0] addr
+		.addr(addr), //input [28:0] addr
 		.wr_data_rdy(wr_data_rdy), //output wr_data_rdy
 		.wr_data(wr_data), //input [127:0] wr_data
 		.wr_data_en(wr_data_en), //input wr_data_en
@@ -37,7 +37,7 @@
 		.sr_ack(sr_ack), //output sr_ack
 		.ref_ack(ref_ack), //output ref_ack
 		.burst(burst), //input burst
-		.O_ddr_addr(O_ddr_addr), //output [13:0] O_ddr_addr
+		.O_ddr_addr(O_ddr_addr), //output [14:0] O_ddr_addr
 		.O_ddr_ba(O_ddr_ba), //output [2:0] O_ddr_ba
 		.O_ddr_cs_n(O_ddr_cs_n), //output O_ddr_cs_n
 		.O_ddr_ras_n(O_ddr_ras_n), //output O_ddr_ras_n
