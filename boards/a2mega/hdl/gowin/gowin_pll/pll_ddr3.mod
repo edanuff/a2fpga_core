@@ -7,10 +7,9 @@
 
 -mod_name pll_ddr3_MOD
 -file_name pll_ddr3_mod
--path /Users/edanuff/GitHub/a2fpga_core/boards/a2mega/hdl/gowin/gowin_pll/
+-path C:/Users/ed/GitHub/a2fpga_core/boards/a2mega/hdl/gowin/gowin_pll/
 -type PLL_ADV
 -file_type vlg
--ip_version 1.0
 -ssc false
 -rst true
 -rst_pwd false

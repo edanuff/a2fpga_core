@@ -1,12 +1,11 @@
 //Copyright (C)2014-2025 Gowin Semiconductor Corporation.
 //All rights reserved.
 //File Title: Template file for instantiation
-//Tool Version: V1.9.12.01
-//IP Version: 1.0
+//Tool Version: V1.9.11.03 Education
 //Part Number: GW5AT-LV60PG484AC1/I0
 //Device: GW5AT-60
 //Device Version: B
-//Created Time: Mon Mar 23 19:41:52 2026
+//Created Time: Sat Mar 28 12:49:41 2026
 
 //Change the instance name and port connections to the signal names
 //--------Copy here to design--------
