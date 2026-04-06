@@ -184,8 +184,8 @@
 // FSM states per oscillator: up to 14 (fits comfortably)
 //
 // Critical path: wave_rd_o asserted in OSC_REQUEST_DATA, wave_data_ready_i
-// must arrive before clk_count_r == 6 (timeout). This gives ~6/8 of the
-// oscillator cycle (~838 ns at 7.159 MHz) for memory round-trip.
+// must arrive before clk_count_r == 7 (timeout). This gives ~7/8 of the
+// oscillator cycle (~978 ns at 7.159 MHz) for memory round-trip.
 // Timeout produces 0x80 (mid-level silence) as a safe fallback.
 //
 // Real DOC DRAM access completes in ~300-400 ns (within E-high phase).
@@ -1018,7 +1018,7 @@ module doc5503 #(
             end else begin
                 osc_state_r <= OSC_OUT;
             end
-        end else if (clk_count_r == 3'd6) begin
+        end else if (clk_count_r == 3'd7) begin
             // If no data received, set default waveform data to 0x80
             curr_wds_r <= 8'h80;
             osc_state_r <= OSC_OUT;

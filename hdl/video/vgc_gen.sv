@@ -39,11 +39,12 @@ module vgc_gen (
     // Pixel stream interface
     pixel_stream_if.generator pixel_stream,
 
-    // VGC memory interface (to apple_memory blockram)
+    // VGC memory interface (to apple_memory DDR3 unified region)
     output        vgc_active_o,
     output reg [12:0] vgc_address_o,
     output reg        vgc_rd_o,
-    input [31:0]      vgc_data_i
+    input [31:0]      vgc_data_i,
+    input             vgc_ready_i
 );
 
     // =========================================================================
@@ -181,7 +182,7 @@ module vgc_gen (
             end
 
             // -----------------------------------------------------------------
-            // FETCH SCB — 4-cycle fetch of scanline control byte
+            // FETCH SCB — issue read, wait for ready, capture
             // -----------------------------------------------------------------
             ST_FETCH_SCB: begin
                 case (fetch_step_r)
@@ -190,25 +191,25 @@ module vgc_gen (
                         vgc_rd_o <= 1'b1;
                         fetch_step_r <= 3'd1;
                     end
-                    3'd1: fetch_step_r <= 3'd2;
-                    3'd2: fetch_step_r <= 3'd3;
-                    3'd3: begin
-                        case (render_line_r[1:0])
-                            2'd0: scan_ctl_r <= vgc_data_i[7:0];
-                            2'd1: scan_ctl_r <= vgc_data_i[15:8];
-                            2'd2: scan_ctl_r <= vgc_data_i[23:16];
-                            2'd3: scan_ctl_r <= vgc_data_i[31:24];
-                        endcase
-                        pal_fetch_cnt_r <= 4'd0;
-                        fetch_step_r <= 3'd0;
-                        state_r <= ST_FETCH_PAL;
+                    3'd1: begin
+                        if (vgc_ready_i) begin
+                            case (render_line_r[1:0])
+                                2'd0: scan_ctl_r <= vgc_data_i[7:0];
+                                2'd1: scan_ctl_r <= vgc_data_i[15:8];
+                                2'd2: scan_ctl_r <= vgc_data_i[23:16];
+                                2'd3: scan_ctl_r <= vgc_data_i[31:24];
+                            endcase
+                            pal_fetch_cnt_r <= 4'd0;
+                            fetch_step_r <= 3'd0;
+                            state_r <= ST_FETCH_PAL;
+                        end
                     end
                     default: fetch_step_r <= 3'd0;
                 endcase
             end
 
             // -----------------------------------------------------------------
-            // FETCH PALETTE — 8 iterations x 5 cycles = 40 cycles
+            // FETCH PALETTE — 8 iterations, ready-based
             // -----------------------------------------------------------------
             ST_FETCH_PAL: begin
                 case (fetch_step_r)
@@ -217,14 +218,14 @@ module vgc_gen (
                         vgc_rd_o <= 1'b1;
                         fetch_step_r <= 3'd1;
                     end
-                    3'd1: fetch_step_r <= 3'd2;
-                    3'd2: fetch_step_r <= 3'd3;
-                    3'd3: begin
-                        palette_rgb_r[{pal_fetch_cnt_r[2:0], 1'b0}] <= vgc_data_i[11:0];
-                        pixel_word_r <= vgc_data_i;
-                        fetch_step_r <= 3'd4;
+                    3'd1: begin
+                        if (vgc_ready_i) begin
+                            palette_rgb_r[{pal_fetch_cnt_r[2:0], 1'b0}] <= vgc_data_i[11:0];
+                            pixel_word_r <= vgc_data_i;
+                            fetch_step_r <= 3'd2;
+                        end
                     end
-                    3'd4: begin
+                    3'd2: begin
                         palette_rgb_r[{pal_fetch_cnt_r[2:0], 1'b1}] <= pixel_word_r[27:16];
 
                         if (pal_fetch_cnt_r == 4'd7) begin
@@ -242,7 +243,7 @@ module vgc_gen (
             end
 
             // -----------------------------------------------------------------
-            // RENDER — fetch pixel words and output pixels
+            // RENDER — fetch pixel words (ready-based) and output pixels
             // -----------------------------------------------------------------
             ST_RENDER: begin
                 case (fetch_step_r)
@@ -251,12 +252,12 @@ module vgc_gen (
                         vgc_rd_o <= 1'b1;
                         fetch_step_r <= 3'd1;
                     end
-                    3'd1: fetch_step_r <= 3'd2;
-                    3'd2: fetch_step_r <= 3'd3;
-                    3'd3: begin
-                        pixel_word_r <= vgc_data_i;
-                        pix_sub_cnt_r <= 4'd0;
-                        fetch_step_r <= 3'd4;
+                    3'd1: begin
+                        if (vgc_ready_i) begin
+                            pixel_word_r <= vgc_data_i;
+                            pix_sub_cnt_r <= 4'd0;
+                            fetch_step_r <= 3'd4;
+                        end
                     end
                     3'd4: begin
                         // Output one pixel per pixel_clk_en

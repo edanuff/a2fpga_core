@@ -82,6 +82,10 @@ module framebuffer_480p #(
     output logic [7:0]  g_o,
     output logic [7:0]  b_o,
 
+    // Wide write data (upper 96 bits of 128-bit DDR3 word, clk domain)
+    // Lower 32 bits go via fb_write_port.data.  Routed to ddr3_port_cdc sideband.
+    output logic [95:0] fb_wr_wide_data_hi_o,
+
     // Configuration
     input  logic [COLOR_BITS-1:0] border_color,
     input  logic        scanline_en,     // Enable CRT scanline dimming
@@ -102,7 +106,9 @@ module framebuffer_480p #(
     output logic [7:0]  dbg_ready_phase_err_o, // Read ready pulses outside FETCH_WAIT
     output logic [7:0]  dbg_vsync_raw_o,       // Raw fb_vsync pulses seen in this frame
     output logic [7:0]  dbg_frame_start_accept_o, // Accepted frame starts in this frame
-    output logic [7:0]  dbg_frame_start_reject_o  // Rejected fb_vsync pulses in this frame
+    output logic [7:0]  dbg_frame_start_reject_o, // Rejected fb_vsync pulses in this frame
+    output logic [7:0]  dbg_fifo_pop_o,           // FIFO pops (writes sent to DDR3) per frame
+    output logic [7:0]  dbg_fifo_push_o           // FIFO pushes (128-bit words queued) per frame
 );
 
     // =========================================================================
@@ -112,9 +118,9 @@ module framebuffer_480p #(
     localparam HDMI_WIDTH  = 720;
     localparam HDMI_HEIGHT = 480;
 
-    // Double-buffer: offset for second framebuffer in DDR3 word address space.
-    // Must be >= max packed words per frame (320 * 480 = 153,600 = 0x25800).
-    localparam [20:0] BUFFER_OFFSET = 21'h025800;
+    // Double-buffer disabled: single buffer eliminates slow frame updates
+    // caused by Apple II's slow pixel rate vs 60 Hz HDMI refresh.
+    localparam [20:0] BUFFER_OFFSET = 21'h0;
 
     // =========================================================================
     // Color conversion functions
@@ -191,38 +197,41 @@ module framebuffer_480p #(
     end
 
     // =========================================================================
-    // Write FIFO — buffers packed pixel pairs for memory
+    // Write FIFO — buffers 128-bit packed pixel groups for memory
     // =========================================================================
     //
-    // Each entry: {21-bit addr, 32-bit data} = 53 bits
-    // Depth 256 absorbs full write bursts during uninterrupted line fetches.
-    // The fetcher only yields to writes as a safety valve when the FIFO is
-    // near full, allowing line fetches to complete as fast as possible.
+    // Each entry: {21-bit addr, 128-bit data} = 149 bits
+    // Addr is 128-bit aligned (bits [1:0] always 00).
+    // 4 pixel pairs (8 pixels) are accumulated before each FIFO push,
+    // yielding one full DDR3 128-bit write with mask=0 per entry.
+    // Depth 64 holds ~4.5k pixels (64 × 8 × 8 = ~3.6 lines at 560px).
 
-    localparam FIFO_DEPTH = 256;
-    localparam FIFO_ADDR_BITS = 8;  // log2(256)
+    localparam FIFO_DEPTH = 64;
+    localparam FIFO_ADDR_BITS = 6;  // log2(64)
     // Yield reads only as a safety valve when write FIFO is nearly full.
-    // Must be high enough to avoid stalling the fetch pipeline during normal
-    // operation — stalling causes late lines and display distortion.
-    localparam FIFO_YIELD_THRESHOLD = 224;
+    localparam FIFO_YIELD_THRESHOLD = 48;
 
-    reg [52:0] wr_fifo [0:FIFO_DEPTH-1] /* synthesis syn_ramstyle="registers" */;
+    reg [148:0] wr_fifo [0:FIFO_DEPTH-1] /* synthesis syn_ramstyle="registers" */;
     reg [FIFO_ADDR_BITS:0] fifo_wr_ptr_r, fifo_rd_ptr_r;
 
     wire [FIFO_ADDR_BITS:0] fifo_count_w = fifo_wr_ptr_r - fifo_rd_ptr_r;
     wire fifo_empty_w = (fifo_wr_ptr_r == fifo_rd_ptr_r);
-    wire fifo_full_w  = fifo_count_w[FIFO_ADDR_BITS];  // MSB set when count >= 256
+    wire fifo_full_w  = fifo_count_w[FIFO_ADDR_BITS];  // MSB set when count >= 64
     // Start yielding reads earlier so write FIFO never reaches drop-on-full behavior.
     wire fifo_busy_w  = (fifo_count_w >= FIFO_YIELD_THRESHOLD);
-    wire [7:0] fifo_count_clamped_w = fifo_count_w[FIFO_ADDR_BITS] ? 8'hFF : fifo_count_w[7:0];
+    wire [7:0] fifo_count_clamped_w = fifo_count_w[FIFO_ADDR_BITS] ? 8'hFF : {{(8-FIFO_ADDR_BITS){1'b0}}, fifo_count_w[FIFO_ADDR_BITS-1:0]};
 
     // =========================================================================
-    // Write path — pixel packing + FIFO (clk domain, 54 MHz)
+    // Write path — pixel packing + 4-pair accumulator + FIFO (clk domain, 54 MHz)
     // =========================================================================
     //
     // Accepts RGB666 pixels from renderers, converts to RGB565, buffers even
-    // pixels, packs pairs into 32-bit words, and pushes to FIFO for memory.
+    // pixels, packs pairs into 32-bit words, accumulates 4 consecutive pairs
+    // (128 bits = one DDR3 word), and pushes to FIFO for memory.
     // Memory address uses packed width (fb_width/2 words per line).
+    //
+    // All Apple II/IIgs modes produce lines that are multiples of 8 pixels,
+    // so the accumulator always fills completely before a line boundary.
 
     reg [10:0] wr_x_r;
     reg [9:0]  wr_y_r;
@@ -231,6 +240,11 @@ module framebuffer_480p #(
     reg [15:0] wr_pixel_even_r;      // buffered even pixel (RGB565)
     reg        frame_pending_r;      // waiting for first fb_we after accepted frame start
     reg        frame_parity_r;      // toggles each frame for TEST_PATTERN==6
+
+    // 4-pair accumulator: collects 4 × 32-bit pixel pairs before FIFO push
+    reg [31:0] wr_accum_r [0:2];     // Slots 0-2; slot 3 comes from current pair
+    reg [1:0]  wr_accum_slot_r;      // Which slot is next (0-3)
+    reg [20:0] wr_accum_addr_r;      // Base address of slot 0 (128-bit aligned)
     // Reject implausibly short frame-start intervals so a spurious fb_vsync
     // pulse cannot reset write/read tracking mid-frame.
     localparam [19:0] FRAME_MIN_CYCLES = 20'd540000;  // ~10ms at 54MHz
@@ -265,6 +279,11 @@ module framebuffer_480p #(
             wr_pixel_even_r <= 16'd0;
             frame_pending_r <= 1'b0;
             frame_parity_r <= 1'b0;
+            wr_accum_r[0] <= 32'd0;
+            wr_accum_r[1] <= 32'd0;
+            wr_accum_r[2] <= 32'd0;
+            wr_accum_slot_r <= 2'd0;
+            wr_accum_addr_r <= 21'd0;
         end else begin
             if (frame_start_w) begin
                 frame_parity_r <= ~frame_parity_r;
@@ -282,19 +301,50 @@ module framebuffer_480p #(
                     wr_line_base_r <= 21'd0;
                     wr_pixel_even_r <= rgb666_to_565(wr_pixel_data_w);
                     frame_pending_r <= 1'b0;
+                    wr_accum_slot_r <= 2'd0;
                 end else begin
                     if (wr_x_r[0] == 1'b0) begin
                         // Even pixel — buffer as RGB565
                         wr_pixel_even_r <= rgb666_to_565(wr_pixel_data_w);
-                    end else if (!fifo_full_w) begin
-                        // Odd pixel — pack with buffered even and push to FIFO
-                        wr_fifo[fifo_wr_ptr_r[FIFO_ADDR_BITS-1:0]] <= {
-                            (frame_parity_r ? BUFFER_OFFSET : 21'd0) +
-                            wr_line_base_r + {11'd0, wr_x_r[10:1]},  // packed addr + buf offset
-                            rgb666_to_565(wr_pixel_data_w),            // odd pixel [31:16]
-                            wr_pixel_even_r                            // even pixel [15:0]
-                        };
-                        fifo_wr_ptr_r <= fifo_wr_ptr_r + 1;
+                    end else begin
+                        // Odd pixel — pack with buffered even into 32-bit pair
+                        // and accumulate into 128-bit word (4 pairs = 8 pixels)
+                        begin : accum_block
+                            reg [31:0] pair;
+                            pair = {rgb666_to_565(wr_pixel_data_w), wr_pixel_even_r};
+
+                            case (wr_accum_slot_r)
+                                2'd0: begin
+                                    wr_accum_r[0] <= pair;
+                                    wr_accum_addr_r <= (frame_parity_r ? BUFFER_OFFSET : 21'd0) +
+                                                       wr_line_base_r + {11'd0, wr_x_r[10:1]};
+                                    wr_accum_slot_r <= 2'd1;
+                                end
+                                2'd1: begin
+                                    wr_accum_r[1] <= pair;
+                                    wr_accum_slot_r <= 2'd2;
+                                end
+                                2'd2: begin
+                                    wr_accum_r[2] <= pair;
+                                    wr_accum_slot_r <= 2'd3;
+                                end
+                                2'd3: begin
+                                    // 4th pair completes the 128-bit word — push to FIFO
+                                    if (!fifo_full_w) begin
+                                        wr_fifo[fifo_wr_ptr_r[FIFO_ADDR_BITS-1:0]] <= {
+                                            wr_accum_addr_r,    // [148:128] = 21-bit addr
+                                            pair,               // [127:96]  = slot 3
+                                            wr_accum_r[2],      // [95:64]   = slot 2
+                                            wr_accum_r[1],      // [63:32]   = slot 1
+                                            wr_accum_r[0]       // [31:0]    = slot 0
+                                        };
+                                        fifo_wr_ptr_r <= fifo_wr_ptr_r + 1;
+                                    end
+                                    // Always reset slot (even on drop — 4 pairs lost together)
+                                    wr_accum_slot_r <= 2'd0;
+                                end
+                            endcase
+                        end
                     end
 
                     // Advance position
@@ -310,8 +360,10 @@ module framebuffer_480p #(
         end
     end
 
-    // FIFO drain to memory write port
-    wire [52:0] fifo_head_w = wr_fifo[fifo_rd_ptr_r[FIFO_ADDR_BITS-1:0]];
+    // FIFO drain to memory write port (128-bit wide write)
+    wire [148:0] fifo_head_w = wr_fifo[fifo_rd_ptr_r[FIFO_ADDR_BITS-1:0]];
+    wire [20:0]  fifo_addr_w = fifo_head_w[148:128];
+    wire [127:0] fifo_data_w = fifo_head_w[127:0];
     wire fifo_pop_w = !fifo_empty_w && fb_write_port.available;
 
     always @(posedge clk or negedge rst_n) begin
@@ -321,12 +373,14 @@ module framebuffer_480p #(
             fifo_rd_ptr_r <= fifo_rd_ptr_r + 1;
     end
 
-    assign fb_write_port.addr    = fifo_head_w[52:32];
-    assign fb_write_port.data    = fifo_head_w[31:0];
+    // Lower 32 bits via port data; upper 96 bits via wide sideband
+    assign fb_write_port.addr    = fifo_addr_w;
+    assign fb_write_port.data    = fifo_data_w[31:0];
     assign fb_write_port.byte_en = 4'b1111;
     assign fb_write_port.wr      = fifo_pop_w;
     assign fb_write_port.rd      = 1'b0;
     assign fb_write_port.burst   = 1'b0;
+    assign fb_wr_wide_data_hi_o  = fifo_data_w[127:32];
 
     // =========================================================================
     // CDC: HDMI cy → clk domain (gray-code)
@@ -424,6 +478,8 @@ module framebuffer_480p #(
     reg [7:0] dbg_fetch_done_r;
     reg [7:0] dbg_read_blocked_r;
     reg [7:0] dbg_yield_busy_r;
+    reg [15:0] dbg_fifo_pop_r;    // Successful FIFO drains (writes sent to DDR3) per frame
+    reg [15:0] dbg_fifo_push_r;   // FIFO pushes (128-bit words written) per frame
     reg [7:0] dbg_late_line_r;
     reg       late_line_prev_r;
     reg [7:0] dbg_line_not_ready_r;
@@ -452,7 +508,8 @@ module framebuffer_480p #(
     wire [8:0] next_line_w = display_fb_line_w + 9'd1;
     wire [10:0] fetch_words_left_w = packed_width_r - fetch_word_r;
     wire fetch_use_burst_w = (fetch_words_left_w >= FB_READ_BURST_WORDS[10:0]);
-    wire wr_drop_w = fb_we_r && wr_x_r[0] && fifo_full_w;
+    // Drop occurs when the 4th pair (completing a 128-bit word) can't push to FIFO
+    wire wr_drop_w = fb_we_r && wr_x_r[0] && (wr_accum_slot_r == 2'd3) && fifo_full_w;
     wire [8:0] completed_line_for_display_w = display_fb_line_w[0] ? completed_line_odd_r : completed_line_even_r;
     wire line_ready_w = (completed_line_for_display_w == display_fb_line_w);
     wire [8:0] line_lag_w = (completed_line_for_display_w == 9'h1FF ||
@@ -490,6 +547,8 @@ module framebuffer_480p #(
             dbg_fetch_done_r <= 8'd0;
             dbg_read_blocked_r <= 8'd0;
             dbg_yield_busy_r <= 8'd0;
+            dbg_fifo_pop_r <= 16'd0;
+            dbg_fifo_push_r <= 16'd0;
             dbg_late_line_r <= 8'd0;
             late_line_prev_r <= 1'b0;
             dbg_line_not_ready_r <= 8'd0;
@@ -509,6 +568,8 @@ module framebuffer_480p #(
             dbg_fetch_done_r <= 8'd0;
             dbg_read_blocked_r <= 8'd0;
             dbg_yield_busy_r <= 8'd0;
+            dbg_fifo_pop_r <= 16'd0;
+            dbg_fifo_push_r <= 16'd0;
             dbg_late_line_r <= 8'd0;
             late_line_prev_r <= 1'b0;
             dbg_line_not_ready_r <= 8'd0;
@@ -535,11 +596,18 @@ module framebuffer_480p #(
             if (wr_drop_w && dbg_fifo_overflow_r != 8'hFF)
                 dbg_fifo_overflow_r <= dbg_fifo_overflow_r + 8'd1;
 
+            // Count successful FIFO pushes (accumulator completing a 128-bit word)
+            if (fb_we_r && wr_x_r[0] && (wr_accum_slot_r == 2'd3) && !fifo_full_w && dbg_fifo_push_r != 16'hFFFF)
+                dbg_fifo_push_r <= dbg_fifo_push_r + 16'd1;
+
             if (fetch_start_pulse_w && dbg_fetch_start_r != 8'hFF)
                 dbg_fetch_start_r <= dbg_fetch_start_r + 8'd1;
 
             if (fetch_done_pulse_w && dbg_fetch_done_r != 8'hFF)
                 dbg_fetch_done_r <= dbg_fetch_done_r + 8'd1;
+
+            if (fifo_pop_w && dbg_fifo_pop_r != 16'hFFFF)
+                dbg_fifo_pop_r <= dbg_fifo_pop_r + 16'd1;
 
             if ((fetch_state_r == FETCH_READ) && fifo_busy_w && dbg_yield_busy_r != 8'hFF)
                 dbg_yield_busy_r <= dbg_yield_busy_r + 8'd1;
@@ -675,6 +743,8 @@ module framebuffer_480p #(
     assign dbg_fetch_done_o = dbg_fetch_done_r;
     assign dbg_read_blocked_o = dbg_read_blocked_r;
     assign dbg_yield_busy_o = dbg_yield_busy_r;
+    assign dbg_fifo_pop_o = dbg_fifo_pop_r[15:8];   // Upper byte: count / 256
+    assign dbg_fifo_push_o = dbg_fifo_push_r[15:8]; // Upper byte: count / 256
     assign dbg_late_line_o = dbg_late_line_r;
     assign dbg_line_not_ready_o = dbg_line_not_ready_r;
     assign dbg_line_lag_max_o = dbg_line_lag_max_r;

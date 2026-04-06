@@ -66,6 +66,11 @@ module ddr3_port_cdc #(
     output wire                        client_ready,
     output wire [DATA_WIDTH-1:0]       client_q,
 
+    // Optional wide write data extension (clk_client domain)
+    // Upper 96 bits of 128-bit DDR3 word; lower 32 bits come via client_data.
+    // Tie to 96'd0 for ports that don't use wide writes (optimized away).
+    input  wire [95:0]                 client_wide_data_hi,
+
     // Arbiter-facing request (clk_ddr domain)
     output wire                        req_pending,  // Request waiting for service
     output wire [PORT_ADDR_WIDTH-1:0]  req_addr,     // Stable while req_pending
@@ -73,6 +78,7 @@ module ddr3_port_cdc #(
     output wire [DQM_WIDTH-1:0]        req_byte_en,  // Stable while req_pending
     output wire                        req_wr,       // 1=write, 0=read
     output wire                        req_burst,    // Burst read request
+    output wire [95:0]                 req_wide_data_hi, // Upper 96 bits (stable while pending)
     input  wire                        req_done,     // Pulse: full transaction complete
 
     // Arbiter-facing response (clk_ddr domain)
@@ -124,11 +130,23 @@ module ddr3_port_cdc #(
         end
     end
 
-    assign req_addr    = req_addr_r;
-    assign req_data    = req_data_r;
-    assign req_byte_en = req_byte_en_r;
-    assign req_wr      = req_wr_r;
-    assign req_burst   = req_burst_r;
+    // Wide write data extension — registered with same freeze as req_data_r.
+    // When client_wide_data_hi is tied to 96'd0 (non-wide ports), synthesis
+    // optimizes this register away entirely.
+    reg [95:0] req_wide_data_hi_r;
+    always @(posedge clk_ddr or posedge rst) begin
+        if (rst)
+            req_wide_data_hi_r <= '0;
+        else if (!pending_r)
+            req_wide_data_hi_r <= client_wide_data_hi;
+    end
+
+    assign req_addr         = req_addr_r;
+    assign req_data         = req_data_r;
+    assign req_byte_en      = req_byte_en_r;
+    assign req_wr           = req_wr_r;
+    assign req_burst        = req_burst_r;
+    assign req_wide_data_hi = req_wide_data_hi_r;
 
     // Edge detection: trigger pending on rising edge of wr/rd only.
     // Without this, when req_done clears pending_r and the freeze lifts,

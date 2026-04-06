@@ -317,16 +317,17 @@ module top #(
     wire [12:0] vgc_address_w;
     wire vgc_rd_w;
     wire [31:0] vgc_data_w;
+    wire vgc_ready_w;
 
     // DDR3 memory port allocation (single unified array for all clients):
-    //   0 = FB read  (highest priority — scanline prefetch)
-    //   1 = FB write
+    //   0 = FB write (highest priority — prevents FIFO overflow/pixel drops)
+    //   1 = FB read  (scanline prefetch, line-buffer absorbs latency)
     //   2 = Shadow read  (apple_video_gen)
     //   3 = Shadow write (CPU)
     //   4 = DOC (Ensoniq wavetable read)
     //   5 = GLU (Ensoniq write)
-    localparam FB_READ_PORT    = 0;
-    localparam FB_WRITE_PORT   = 1;
+    localparam FB_WRITE_PORT   = 0;
+    localparam FB_READ_PORT    = 1;
     localparam SHADOW_READ_PORT  = 2;
     localparam SHADOW_WRITE_PORT = 3;
     localparam DOC_MEM_PORT      = 4;
@@ -360,7 +361,8 @@ module top #(
         .vgc_active_i(vgc_active_w),
         .vgc_address_i(vgc_address_w),
         .vgc_rd_i(vgc_rd_w),
-        .vgc_data_o(vgc_data_w)
+        .vgc_data_o(vgc_data_w),
+        .vgc_ready_o(vgc_ready_w)
     );
 
     // Slots
@@ -500,7 +502,8 @@ module top #(
         .vgc_active_o(vgc_active_w),
         .vgc_address_o(vgc_address_w),
         .vgc_rd_o(vgc_rd_w),
-        .vgc_data_i(vgc_data_w)
+        .vgc_data_i(vgc_data_w),
+        .vgc_ready_i(vgc_ready_w)
     );
 
     framebuffer_writer #(
@@ -551,11 +554,12 @@ module top #(
     wire [1:0] doc_osc_mode_w[8];
     wire [7:0] doc_osc_halt_w;
 
-    // 64KB sound RAM backed by DDR3 via ddr3_mem_ports
+    // 64KB sound RAM backed by BSRAM (DDR3 ports kept but idle)
 
     sound_glu #(
         .ENABLE(ENSONIQ_ENABLE),
-        .MONO_MIX(ENSONIQ_MONO_MIX)
+        .MONO_MIX(ENSONIQ_MONO_MIX),
+        .USE_BSRAM(1)
     ) sg (
         .a2bus_if(a2bus_if),
         .data_o(sg_d_w),
@@ -852,50 +856,26 @@ module top #(
 
     // -----------------------------------------------------------------
     // DDR3 PLL — 432 MHz memory clock from 27 MHz input
+    // Uses pll_ddr3 wrapper with PLL_INIT for VCO calibration
+    // No pll_mDRP_intf needed — bypass permanently disabled
     // -----------------------------------------------------------------
     wire memory_clk_w;
     wire pll_lock_w;
     wire pll_stop_w;
 
-    wire mdrp_inc_w;
-    wire [1:0] mdrp_op_w;
-    wire [7:0] mdrp_wdata_w;
-    wire [7:0] mdrp_rdata_w;
-
-    pll_ddr3 pll_ddr3_inst(
-        .lock(pll_lock_w),
-        .clkout0(),
-        .clkout2(memory_clk_w),
+    pll_ddr3 pll_ddr3_inst (
         .clkin(clk_pixel_w),           // 27 MHz from board PLL
-        .reset(~clk_lock_w),
-        .pll_init_bypass(1'b0),
-        .mdclk(clk),
-        .mdopc(mdrp_op_w),
-        .mdainc(mdrp_inc_w),
-        .mdwdi(mdrp_wdata_w),
-        .mdrdo(mdrp_rdata_w)
+        .clkout0(),                    // unused
+        .clkout2(memory_clk_w),        // 432 MHz to DDR3
+        .lock(pll_lock_w),
+        .mdopc(2'b00),                 // external MDRP unused
+        .mdainc(1'b0),
+        .mdwdi(8'b0),
+        .mdrdo(),                      // unused output
+        .pll_init_bypass(1'b0),        // PLL_INIT always controls calibration
+        .mdclk(clk),                   // 50 MHz board crystal for MDRP clock
+        .reset(~clk_lock_w)
     );
-
-    reg mdrp_wr_r;
-    reg pll_stop_r;
-    reg [7:0] pll_stop_count_r;
-    pll_mDRP_intf u_pll_mDRP_intf(
-        .clk(clk),
-        .rst_n(clk_lock_w),
-        .pll_lock(pll_lock_w),
-        .wr(mdrp_wr_r),
-        .mdrp_inc(mdrp_inc_w),
-        .mdrp_op(mdrp_op_w),
-        .mdrp_wdata(mdrp_wdata_w),
-        .mdrp_rdata(mdrp_rdata_w)
-    );
-
-    always @(posedge clk) begin
-        pll_stop_r <= pll_stop_w;
-        mdrp_wr_r <= pll_stop_w ^ pll_stop_r;
-        if (pll_stop_r && !pll_stop_w && pll_stop_count_r != 8'hff)
-            pll_stop_count_r <= pll_stop_count_r + 1;
-    end
 
     // -----------------------------------------------------------------
     // DDR3 Memory Controller (Gowin IP)
@@ -978,17 +958,20 @@ module top #(
     // DDR3 Multi-Port Arbiter
     // -----------------------------------------------------------------
 
+    wire [95:0] fb_wide_data_hi_w;
+
     ddr3_ports #(
         .NUM_PORTS(NUM_DDR3_PORTS),
         .DDR_ADDR_WIDTH(29),
         .PORT_BASE_ADDR('{
-            FB_WORD_BASE,       // [0] FB read
-            FB_WORD_BASE,       // [1] FB write
+            FB_WORD_BASE,       // [0] FB write (highest priority)
+            FB_WORD_BASE,       // [1] FB read
             SHADOW_WORD_BASE,   // [2] Shadow read
             SHADOW_WORD_BASE,   // [3] Shadow write
             ENSONIQ_WORD_BASE,  // [4] DOC read
             ENSONIQ_WORD_BASE   // [5] GLU write
-        })
+        }),
+        .WIDE_WR_PORT(FB_WRITE_PORT)
     ) u_ddr3_ports (
         .clk_client      (clk_logic_w),     // 54 MHz from CLKDIV2 (synchronous)
         .clk_ddr          (clk_x1_w),       // 108 MHz from DDR3 IP
@@ -996,6 +979,7 @@ module top #(
         .init_complete    (init_calib_complete_w),
 
         .ports            (ddr3_mem_ports),
+        .wide_wr_data_hi  (fb_wide_data_hi_w),
 
         .cmd_ready        (ddr3_cmd_ready_w),
         .cmd              (ddr3_cmd_w),
@@ -1031,6 +1015,8 @@ module top #(
     wire [7:0] fb_dbg_fifo_overflow_w;
     wire [7:0] fb_dbg_read_blocked_w;
     wire [7:0] fb_dbg_yield_busy_w;
+    wire [7:0] fb_dbg_fifo_pop_w;
+    wire [7:0] fb_dbg_fifo_push_w;
     wire [7:0] fb_dbg_late_line_w;
     wire [7:0] fb_dbg_flags_w;
     wire [7:0] fb_dbg_line_not_ready_w;
@@ -1053,6 +1039,7 @@ module top #(
 
         .fb_write_port    (ddr3_mem_ports[FB_WRITE_PORT]),
         .fb_read_port     (ddr3_mem_ports[FB_READ_PORT]),
+        .fb_wr_wide_data_hi_o (fb_wide_data_hi_w),
 
         .hdmi_cx          (hdmi_cx_w),
         .hdmi_cy          (hdmi_cy_w),
@@ -1073,6 +1060,8 @@ module top #(
         .dbg_fetch_done_o        (),
         .dbg_read_blocked_o      (fb_dbg_read_blocked_w),
         .dbg_yield_busy_o        (fb_dbg_yield_busy_w),
+        .dbg_fifo_pop_o          (fb_dbg_fifo_pop_w),
+        .dbg_fifo_push_o         (fb_dbg_fifo_push_w),
         .dbg_late_line_o         (fb_dbg_late_line_w),
         .dbg_flags_o             (fb_dbg_flags_w),
         .dbg_line_not_ready_o    (fb_dbg_line_not_ready_w),
@@ -1189,22 +1178,23 @@ module top #(
                                                 dbg_hex_sync1[2] <= dbg_hex_sync0[2];
         dbg_hex_sync0[3] <= scan_dbg_actual_w[7:0];
                                                 dbg_hex_sync1[3] <= dbg_hex_sync0[3];
-        // Hex 4-7: DDR3 FB_READ response capture (ddr3_dbg_test_result_w)
-        // Shows most recent slot 0 of FB_READ burst — expected 0xFFFFFFFF or 0x00000000
-        // for TEST_PATTERN=6 (frame-alternating solid color)
-        dbg_hex_sync0[4] <= ddr3_dbg_test_result_w[31:24];
+        // Hex 4: FIFO overflow (dropped pixel pairs per frame, saturating)
+        dbg_hex_sync0[4] <= fb_dbg_fifo_overflow_w;
                                                 dbg_hex_sync1[4] <= dbg_hex_sync0[4];
-        dbg_hex_sync0[5] <= ddr3_dbg_test_result_w[23:16];
+        // Hex 5: FIFO highwater (max fill level per frame, 0-255)
+        dbg_hex_sync0[5] <= fb_dbg_fifo_highwater_w;
                                                 dbg_hex_sync1[5] <= dbg_hex_sync0[5];
-        dbg_hex_sync0[6] <= ddr3_dbg_test_result_w[15:8];
+        // Hex 6: FIFO pop count (writes sent to DDR3 per frame, saturating 0-FF)
+        dbg_hex_sync0[6] <= fb_dbg_fifo_pop_w;
                                                 dbg_hex_sync1[6] <= dbg_hex_sync0[6];
-        dbg_hex_sync0[7] <= ddr3_dbg_test_result_w[7:0];
+        // Hex 7: FIFO push count (128-bit words queued per frame, saturating 0-FF)
+        dbg_hex_sync0[7] <= fb_dbg_fifo_push_w;
                                                 dbg_hex_sync1[7] <= dbg_hex_sync0[7];
         // Bits 0: framebuffer status flags
         dbg_bits0_sync0 <= fb_dbg_flags_w;
         dbg_bits0_sync1 <= dbg_bits0_sync0;
         // Bits 1: video mode flags
-        dbg_bits1_sync0 <= {a2mem_if.SHRG_MODE, a2mem_if.TEXT_MODE, a2mem_if.MIXED_MODE,
+        dbg_bits1_sync0 <= {pll_lock_w, init_calib_complete_w, a2mem_if.MIXED_MODE,
                             a2mem_if.HIRES_MODE, a2mem_if.RAMWRT, a2mem_if.STORE80,
                             a2bus_if.system_reset_n, a2bus_if.device_reset_n};
         dbg_bits1_sync1 <= dbg_bits1_sync0;

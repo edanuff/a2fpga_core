@@ -16,10 +16,10 @@
 //
 // Description:
 //
-// Handle the writing of data to the shadow memory copy of the Apple II's
-// memory that is kept in DDR3. Text and hires main memory are in DDR3 to
-// free BSRAM. VGC aux memory stays in BSRAM (interleave_mux requires
-// dual-BRAM read).
+// Unified DDR3 shadow memory for Apple II text, hires, and VGC aux data.
+// Text ($0400-$0BFF) uses flat shadow format. Hires and VGC ($2000-$9FFF)
+// use a unified 128-bit layout: one DDR3 burst = main + aux_2000 + aux_6000
+// for 4 consecutive addresses. Single-entry burst cache for video reads.
 //
 
 module apple_memory #(
@@ -41,7 +41,8 @@ module apple_memory #(
     input vgc_active_i,
     input [12:0] vgc_address_i,
     input vgc_rd_i,
-    output [31:0] vgc_data_o
+    output [31:0] vgc_data_o,
+    output vgc_ready_o
 );
 
     wire write_strobe = !a2bus_if.rw_n && a2bus_if.data_in_strobe;
@@ -188,16 +189,6 @@ module apple_memory #(
     end
     assign a2mem_if.aux_mem = aux_mem_r;
 
-    // Original 16-bit address space
-    //                1111 1100 0000 0000
-    //                5432 1098 7654 3210
-    // 16'h0400 = 16'b0000_0100_0000_0000
-    // 16'h0BFF = 16'b0000_1011_1111_1111
-    // 16'h2000 = 16'b0010_0000_0000_0000
-    // 16'h5FFF = 16'b0101_1111_1111_1111
-    // 16'h6000 = 16'b0110_0000_0000_0000
-    // 16'9FFFF = 16'b1001_1111_1111_1111
-
     wire E1 = aux_mem_r || a2bus_if.m2b0;
 
     wire [31:0] write_word = {a2bus_if.data, a2bus_if.data, a2bus_if.data, a2bus_if.data};
@@ -210,8 +201,6 @@ module apple_memory #(
 
     wire [14:0] hires_write_offset = 15'({3'(a2bus_if.addr[15:13] - 1'b1), a2bus_if.addr[12:0]});
 
-    wire [31:0] hires_data_aux;
-
     function automatic [31:0] interleave_mux(input hi, input [31:0] data_a, input [31:0] data_b);
         logic [31:0] result = 0;
         if (hi) result = {data_b[31:24], data_a[31:24], data_b[23:16], data_a[23:16]};
@@ -219,114 +208,60 @@ module apple_memory #(
         return result;
     endfunction
 
-    wire [3:0] hires_byte_enable = 4'(1 << hires_write_offset[1:0]);
+    // =========================================================================
+    // Unified DDR3 layout — each 128-bit burst stores 4 consecutive addresses:
+    //   Word 0: main bytes      Word 1: (padding)
+    //   Word 2: aux $2000-$5FFF Word 3: aux $6000-$9FFF
+    // =========================================================================
 
-    // video_data_o and video_ready_o are assigned in the generate block below
-    // (either from DDR3 via video_mem_if, or from test pattern when TEST_DDR3_BYPASS=1)
+    localparam [20:0] UNIFIED_OFFSET = 21'h010000;  // above flat shadow region
 
-    // vgc_data_o comes from BSRAM via interleave_mux (unchanged)
-    wire [31:0] hires_data_aux_6000_9FFF;
+    // =========================================================================
+    // DDR3 write path — text to flat shadow, $2000+ to unified region
+    // =========================================================================
 
-    // VGC reads from BSRAM aux banks
-    logic [11:0] hires_aux_read_offset;
+    wire is_text_write = bus_addr_0400_0BFF;
+    wire is_unified_write = bus_addr_2000_5FFF || (bus_addr_6000_9FFF && E1);
+
+    // Compute unified group R, word (slot), and byte within the 128-bit line
+    logic [11:0] unified_group;
+    logic [1:0]  unified_word;
+    logic [1:0]  unified_byte;
 
     always_comb begin
-        if (VGC_MEMORY && vgc_active_i) begin
-            hires_aux_read_offset = vgc_address_i[12:1];
-        end else begin
-            hires_aux_read_offset = 12'b0;  // VGC only reads from BSRAM
+        unified_group = 12'b0;
+        unified_word  = 2'b0;
+        unified_byte  = 2'b0;
+
+        if (a2mem_if.LINEARIZE_MODE && bus_addr_2000_9FFF && E1) begin
+            // Linearize mode: aux $2000-$9FFF interleaved by bit 0
+            unified_group = hires_write_offset[14:3];
+            unified_word  = hires_write_offset[0] ? 2'd3 : 2'd2;
+            unified_byte  = hires_write_offset[2:1];
+        end else if (bus_addr_2000_5FFF) begin
+            // Non-linearize: main→word 0, aux→word 2
+            unified_group = hires_write_offset[13:2];
+            unified_word  = E1 ? 2'd2 : 2'd0;
+            unified_byte  = hires_write_offset[1:0];
+        end else if (bus_addr_6000_9FFF) begin
+            // Non-linearize: aux $6000-$9FFF → word 3
+            unified_group = hires_write_offset[13:2];
+            unified_word  = 2'd3;
+            unified_byte  = hires_write_offset[1:0];
         end
     end
 
-    assign vgc_data_o = vgc_active_i ? interleave_mux(vgc_address_i[0], hires_data_aux, hires_data_aux_6000_9FFF) : 32'b0;
+    wire [20:0] unified_write_addr = UNIFIED_OFFSET + {7'b0, unified_group, unified_word};
+    wire [3:0]  unified_byte_en    = 4'(1 << unified_byte);
 
-    // Aux memory writes — still go to BSRAM for VGC reads
+    // Mux between text (flat shadow) and unified ($2000+) addressing
+    wire [20:0] write_addr = is_text_write ?
+        {6'b0, a2bus_if.addr[15:1]} : unified_write_addr;
+    wire [3:0]  write_byte_en = is_text_write ?
+        4'(1 << {a2bus_if.addr[0], aux_mem_r || a2bus_if.m2b0}) : unified_byte_en;
 
-    logic write_enable_aux_2000_5FFF;
-    logic write_enable_aux_6000_9FFF;
-    logic [11:0] write_offset_aux_2000_5FFF;
-    logic [11:0] write_offset_aux_6000_9FFF;
-    logic [3:0] hires_byte_enable_aux_2000_5FFF;
-    logic [3:0] hires_byte_enable_aux_6000_9FFF;
-
-    always_comb begin
-        write_enable_aux_2000_5FFF = 1'b0;
-        write_offset_aux_2000_5FFF = 12'b0;
-        hires_byte_enable_aux_2000_5FFF = 4'b0;
-
-        write_enable_aux_6000_9FFF = 1'b0;
-        write_offset_aux_6000_9FFF = 12'b0;
-        hires_byte_enable_aux_6000_9FFF = 4'b0;
-
-        if (VGC_MEMORY) begin
-            if (a2mem_if.LINEARIZE_MODE) begin
-                write_enable_aux_2000_5FFF = write_strobe && bus_addr_2000_9FFF && E1;
-                write_offset_aux_2000_5FFF = hires_write_offset[14:3];
-                hires_byte_enable_aux_2000_5FFF = hires_write_offset[0] ? 4'b0 : 4'(1 << hires_write_offset[2:1]);
-
-                write_enable_aux_6000_9FFF = write_strobe && bus_addr_2000_9FFF && E1;
-                write_offset_aux_6000_9FFF = hires_write_offset[14:3];
-                hires_byte_enable_aux_6000_9FFF = hires_write_offset[0] ? 4'(1 << hires_write_offset[2:1]) : 4'b0;
-
-            end else begin
-                if (bus_addr_2000_5FFF) begin
-                    write_enable_aux_2000_5FFF = write_strobe && bus_addr_2000_5FFF && E1;
-                    write_offset_aux_2000_5FFF = hires_write_offset[13:2];
-                    hires_byte_enable_aux_2000_5FFF = hires_byte_enable;
-                end else if (bus_addr_6000_9FFF) begin
-                    write_enable_aux_6000_9FFF = write_strobe && bus_addr_6000_9FFF && E1;
-                    write_offset_aux_6000_9FFF = hires_write_offset[13:2];
-                    hires_byte_enable_aux_6000_9FFF = hires_byte_enable;
-                end
-            end
-        end else begin
-            // only write to the aux 2000-5FFF bank when VGC_MEMORY is not set
-            write_enable_aux_2000_5FFF = write_strobe && bus_addr_2000_5FFF && E1;
-            write_offset_aux_2000_5FFF = hires_write_offset[13:2];
-            hires_byte_enable_aux_2000_5FFF = hires_byte_enable;
-        end
-    end
-
-    sdpram32 #(
-        .ADDR_WIDTH(12)
-    ) hires_aux_2000_5FFF (
-        .clk(a2bus_if.clk_logic),
-        .write_addr(write_offset_aux_2000_5FFF),
-        .write_data(write_word),
-        .write_enable(write_enable_aux_2000_5FFF),
-        .byte_enable(hires_byte_enable_aux_2000_5FFF),
-        .read_addr(hires_aux_read_offset),
-        .read_enable(vgc_rd_i && vgc_active_i),
-        .read_data(hires_data_aux)
-    );
-
-    generate
-        if (VGC_MEMORY) begin
-            sdpram32 #(
-                .ADDR_WIDTH(12)
-            ) hires_aux_6000_9FFF (
-                .clk(a2bus_if.clk_logic),
-                .write_addr(write_offset_aux_6000_9FFF),
-                .write_data(write_word),
-                .write_enable(write_enable_aux_6000_9FFF),
-                .byte_enable(hires_byte_enable_aux_6000_9FFF),
-                .read_addr(hires_aux_read_offset),
-                .read_enable(vgc_rd_i && vgc_active_i),
-                .read_data(hires_data_aux_6000_9FFF)
-            );
-        end else begin
-            assign hires_data_aux_6000_9FFF = 32'b0;
-        end
-    endgenerate
-
-    // =========================================================================
-    // DDR3 write path — CPU writes text and hires to DDR3
-    // =========================================================================
-
-    wire write_en = !a2bus_if.rw_n &&
-        a2bus_if.data_in_strobe &&
-        (bus_addr_2000_5FFF || bus_addr_0400_0BFF) &&
-        !a2bus_if.m2sel_n;
+    wire write_en = write_strobe && !a2bus_if.m2sel_n &&
+        (is_text_write || is_unified_write);
 
     reg        shadow_wr_pending_r;
     reg [20:0] shadow_wr_addr_r;
@@ -339,55 +274,241 @@ module apple_memory #(
         end else begin
             if (write_en && !main_mem_if.available) begin
                 shadow_wr_pending_r <= 1'b1;
-                shadow_wr_addr_r <= {6'b0, a2bus_if.addr[15:1]};
-                shadow_wr_data_r <= write_word;
-                shadow_wr_byte_en_r <= 4'(1 << {a2bus_if.addr[0],
-                                                 aux_mem_r || a2bus_if.m2b0});
+                shadow_wr_addr_r    <= write_addr;
+                shadow_wr_data_r    <= write_word;
+                shadow_wr_byte_en_r <= write_byte_en;
             end else if (shadow_wr_pending_r && main_mem_if.available) begin
                 shadow_wr_pending_r <= 1'b0;
             end
         end
     end
 
-    assign main_mem_if.rd = 1'b0;
-    assign main_mem_if.burst = 1'b0;
-    assign main_mem_if.wr = (write_en || shadow_wr_pending_r) && main_mem_if.available;
-    assign main_mem_if.addr = shadow_wr_pending_r ? shadow_wr_addr_r : {6'b0, a2bus_if.addr[15:1]};
-    assign main_mem_if.data = shadow_wr_pending_r ? shadow_wr_data_r : write_word;
-    assign main_mem_if.byte_en = shadow_wr_pending_r ? shadow_wr_byte_en_r :
-        4'(1 << {a2bus_if.addr[0], aux_mem_r || a2bus_if.m2b0});
+    assign main_mem_if.rd      = 1'b0;
+    assign main_mem_if.burst   = 1'b0;
+    assign main_mem_if.wr      = (write_en || shadow_wr_pending_r) && main_mem_if.available;
+    assign main_mem_if.addr    = shadow_wr_pending_r ? shadow_wr_addr_r    : write_addr;
+    assign main_mem_if.data    = shadow_wr_pending_r ? shadow_wr_data_r    : write_word;
+    assign main_mem_if.byte_en = shadow_wr_pending_r ? shadow_wr_byte_en_r : write_byte_en;
 
-    // DDR3 read path — video gen reads text and hires from DDR3
-    // Retry logic: if CDC is busy when video_rd_i fires, latch the request
-    // and hold it pending until available becomes true. Without this,
-    // the single-cycle rd pulse is permanently lost and video_gen hangs
-    // waiting for a ready that never comes.
+    // =========================================================================
+    // DDR3 read path — burst cache for unified region, passthrough for text
+    // =========================================================================
 
-    reg        shadow_rd_pending_r;
-    reg [20:0] shadow_rd_addr_r;
+    // Read address classification
+    wire is_text_read  = !vgc_active_i && (video_address_i < 16'h2000);
+    wire is_hires_read = !vgc_active_i && (video_address_i >= 16'h2000);
+    wire is_vgc_read   = vgc_active_i;
+
+    // Compute group R for cache lookup
+    wire [14:0] hires_read_offset = {(video_address_i[15:13] - 1'b1), video_address_i[12:0]};
+    wire [11:0] video_group = hires_read_offset[13:2];
+    wire [11:0] vgc_group   = vgc_address_i[12:1];
+    wire [11:0] read_group  = is_vgc_read ? vgc_group : video_group;
+
+    // Single-entry burst cache: 4 × 32-bit words + 12-bit tag
+    reg [31:0] cache_r [0:3];
+    reg [11:0] cache_tag_r;
+    reg        cache_valid_r;
+
+    wire cache_hit = cache_valid_r && (cache_tag_r == read_group);
+
+    // Cache invalidation: snoop writes to unified region
+    wire [11:0] wr_unified_group = unified_group;
+    wire cache_inv_write = cache_valid_r && write_en && is_unified_write &&
+                           (cache_tag_r == wr_unified_group);
+
+    // Read state machine
+    localparam RD_IDLE       = 3'd0;
+    localparam RD_TEXT_WAIT  = 3'd1;  // Non-burst text read in flight
+    localparam RD_BURST_WAIT = 3'd2;  // Burst read filling cache
+    localparam RD_HIT_RESP   = 3'd3;  // Cache hit, 1-cycle ready pulse
+
+    reg [2:0]  rd_state_r;
+    reg [1:0]  burst_cnt_r;
+    reg        rd_is_vgc_r;         // Which requester gets the response
+    reg [14:0] rd_hires_offset_r;   // Latched for format conversion
+    reg [12:0] rd_vgc_addr_r;       // Latched for VGC extraction
+
+    // Pending read retry (port busy when rd pulse fires)
+    reg        rd_pending_r;
+    reg [20:0] rd_pending_addr_r;
+    reg        rd_pending_burst_r;
+    reg        rd_pending_vgc_r;
+    reg [14:0] rd_pending_hires_r;
+    reg [12:0] rd_pending_vgc_addr_r;
+
+    // Combinational: DDR3 read address for new requests
+    wire [20:0] text_rd_addr   = {5'b0, video_bank_i, video_address_i[15:1]};
+    wire [20:0] unified_rd_addr = UNIFIED_OFFSET + {7'b0, read_group, 2'b00};
+
+    // New read request detection
+    wire new_text_rd  = is_text_read  && video_rd_i && (rd_state_r == RD_IDLE) && !rd_pending_r;
+    wire new_hires_rd = is_hires_read && video_rd_i && (rd_state_r == RD_IDLE) && !rd_pending_r;
+    wire new_vgc_rd   = is_vgc_read   && vgc_rd_i  && (rd_state_r == RD_IDLE) && !rd_pending_r;
+
+    // Issue DDR3 read (text non-burst or unified burst on cache miss)
+    wire issue_text_rd  = new_text_rd;
+    wire issue_burst_rd = (new_hires_rd || new_vgc_rd) && !cache_hit;
+
+    // Ready output signals
+    reg video_ready_r;
+    reg vgc_ready_r;
+
+    // Data output registers
+    reg [31:0] video_data_r;
+    reg [31:0] vgc_data_r;
+
+    // Format conversion: extract {main_odd, aux_odd, main_even, aux_even}
+    // from cached words 0 (main) and 2 (aux_2000)
+    function automatic [31:0] format_hires_data(input [14:0] offset, input [31:0] w_main, input [31:0] w_aux);
+        logic [31:0] result;
+        if (offset[1] == 1'b0)  // addresses off+0, off+1
+            result = {w_main[15:8], w_aux[15:8], w_main[7:0], w_aux[7:0]};
+        else                     // addresses off+2, off+3
+            result = {w_main[31:24], w_aux[31:24], w_main[23:16], w_aux[23:16]};
+        return result;
+    endfunction
 
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
-            shadow_rd_pending_r <= 1'b0;
-        end else if (video_rd_i && !video_mem_if.available) begin
-            shadow_rd_pending_r <= 1'b1;
-            shadow_rd_addr_r <= {5'b0, video_bank_i, video_address_i[15:1]};
-        end else if (shadow_rd_pending_r && video_mem_if.available) begin
-            shadow_rd_pending_r <= 1'b0;
+            rd_state_r    <= RD_IDLE;
+            burst_cnt_r   <= 2'd0;
+            cache_valid_r <= 1'b0;
+            cache_tag_r   <= 12'd0;
+            rd_is_vgc_r   <= 1'b0;
+            rd_pending_r  <= 1'b0;
+            video_ready_r <= 1'b0;
+            vgc_ready_r   <= 1'b0;
+            video_data_r  <= 32'd0;
+            vgc_data_r    <= 32'd0;
+            rd_hires_offset_r    <= 15'd0;
+            rd_vgc_addr_r        <= 13'd0;
+            rd_pending_addr_r    <= 21'd0;
+            rd_pending_burst_r   <= 1'b0;
+            rd_pending_vgc_r     <= 1'b0;
+            rd_pending_hires_r   <= 15'd0;
+            rd_pending_vgc_addr_r <= 13'd0;
+        end else begin
+            // Default: clear ready pulses each cycle
+            video_ready_r <= 1'b0;
+            vgc_ready_r   <= 1'b0;
+
+            // Cache invalidation on writes to same unified group
+            if (cache_inv_write)
+                cache_valid_r <= 1'b0;
+
+            // Pending read retry: if we captured a request while port was busy,
+            // try to issue it now
+            if (rd_pending_r && video_mem_if.available && rd_state_r == RD_IDLE) begin
+                rd_pending_r <= 1'b0;
+                rd_is_vgc_r  <= rd_pending_vgc_r;
+                rd_hires_offset_r <= rd_pending_hires_r;
+                rd_vgc_addr_r     <= rd_pending_vgc_addr_r;
+                if (rd_pending_burst_r)
+                    rd_state_r <= RD_BURST_WAIT;
+                else
+                    rd_state_r <= RD_TEXT_WAIT;
+                burst_cnt_r <= 2'd0;
+            end else begin
+                case (rd_state_r)
+                    RD_IDLE: begin
+                        if (issue_text_rd) begin
+                            if (video_mem_if.available) begin
+                                rd_state_r <= RD_TEXT_WAIT;
+                            end else begin
+                                // Port busy — latch for retry
+                                rd_pending_r          <= 1'b1;
+                                rd_pending_addr_r     <= text_rd_addr;
+                                rd_pending_burst_r    <= 1'b0;
+                                rd_pending_vgc_r      <= 1'b0;
+                                rd_pending_hires_r    <= 15'd0;
+                                rd_pending_vgc_addr_r <= 13'd0;
+                            end
+                        end else if (issue_burst_rd) begin
+                            rd_is_vgc_r       <= is_vgc_read;
+                            rd_hires_offset_r <= hires_read_offset;
+                            rd_vgc_addr_r     <= vgc_address_i;
+                            if (video_mem_if.available) begin
+                                burst_cnt_r <= 2'd0;
+                                rd_state_r  <= RD_BURST_WAIT;
+                            end else begin
+                                // Port busy — latch for retry
+                                rd_pending_r          <= 1'b1;
+                                rd_pending_addr_r     <= unified_rd_addr;
+                                rd_pending_burst_r    <= 1'b1;
+                                rd_pending_vgc_r      <= is_vgc_read;
+                                rd_pending_hires_r    <= hires_read_offset;
+                                rd_pending_vgc_addr_r <= vgc_address_i;
+                            end
+                        end else if ((new_hires_rd || new_vgc_rd) && cache_hit) begin
+                            // Cache hit — respond next cycle
+                            rd_is_vgc_r       <= is_vgc_read;
+                            rd_hires_offset_r <= hires_read_offset;
+                            rd_vgc_addr_r     <= vgc_address_i;
+                            rd_state_r        <= RD_HIT_RESP;
+                        end
+                    end
+
+                    RD_TEXT_WAIT: begin
+                        if (video_mem_if.ready) begin
+                            video_data_r  <= video_mem_if.q;
+                            video_ready_r <= 1'b1;
+                            rd_state_r    <= RD_IDLE;
+                        end
+                    end
+
+                    RD_BURST_WAIT: begin
+                        if (video_mem_if.ready) begin
+                            cache_r[burst_cnt_r] <= video_mem_if.q;
+                            if (burst_cnt_r == 2'd3) begin
+                                cache_tag_r   <= rd_is_vgc_r ? rd_vgc_addr_r[12:1] :
+                                                 rd_hires_offset_r[13:2];
+                                cache_valid_r <= 1'b1;
+                                rd_state_r    <= RD_HIT_RESP;
+                            end
+                            burst_cnt_r <= burst_cnt_r + 2'd1;
+                        end
+                    end
+
+                    RD_HIT_RESP: begin
+                        // Provide formatted data and pulse ready
+                        if (rd_is_vgc_r) begin
+                            vgc_data_r  <= interleave_mux(rd_vgc_addr_r[0],
+                                                          cache_r[2], cache_r[3]);
+                            vgc_ready_r <= 1'b1;
+                        end else begin
+                            video_data_r  <= format_hires_data(rd_hires_offset_r,
+                                                               cache_r[0], cache_r[2]);
+                            video_ready_r <= 1'b1;
+                        end
+                        rd_state_r <= RD_IDLE;
+                    end
+
+                    default: rd_state_r <= RD_IDLE;
+                endcase
+            end
         end
     end
 
-    generate begin : gen_normal_read
-        assign video_data_o = video_mem_if.q;
-        assign video_ready_o = video_mem_if.ready;
-        assign video_mem_if.rd = (video_rd_i || shadow_rd_pending_r) &&
-                                  video_mem_if.available;
-        assign video_mem_if.wr = 1'b0;
-        assign video_mem_if.addr = shadow_rd_pending_r ? shadow_rd_addr_r :
-                                    {5'b0, video_bank_i, video_address_i[15:1]};
-        assign video_mem_if.data = 32'b0;
-        assign video_mem_if.byte_en = 4'b1111;
-        assign video_mem_if.burst = 1'b0;
-    end endgenerate
+    // Drive video_mem_if for DDR3 reads
+    // Text: non-burst read. Burst: read with burst=1 at group-aligned address.
+    wire do_text_issue  = issue_text_rd  && video_mem_if.available;
+    wire do_burst_issue = issue_burst_rd && video_mem_if.available;
+    wire do_pending_issue = rd_pending_r && video_mem_if.available && (rd_state_r == RD_IDLE);
+
+    assign video_mem_if.wr      = 1'b0;
+    assign video_mem_if.data    = 32'b0;
+    assign video_mem_if.byte_en = 4'b1111;
+    assign video_mem_if.rd      = do_text_issue || do_burst_issue || do_pending_issue;
+    assign video_mem_if.burst   = do_burst_issue || (do_pending_issue && rd_pending_burst_r);
+    assign video_mem_if.addr    = do_pending_issue ? rd_pending_addr_r :
+                                  do_burst_issue   ? unified_rd_addr :
+                                                     text_rd_addr;
+
+    // Output assignments — text uses registered data from DDR3, hires/VGC from cache
+    assign video_data_o  = (rd_state_r == RD_TEXT_WAIT) ? video_mem_if.q : video_data_r;
+    assign video_ready_o = video_ready_r;
+    assign vgc_data_o    = vgc_data_r;
+    assign vgc_ready_o   = vgc_ready_r;
 
 endmodule

@@ -13,7 +13,7 @@
         <File path="hdl/gowin/gowin_pll/pll_ddr3.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/pll_ddr3_mod.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/pll_hdmi.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/pll_mDRP_intf.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_pll/pll_mDRP_intf.v" type="file.verilog" enable="0"/>
         <File path="hdl/hdmi/serializer.sv" type="file.verilog" enable="1"/>
         <File path="hdl/memory/apple_memory.sv" type="file.verilog" enable="1"/>
         <File path="hdl/sound/iir_filter.v" type="file.verilog" enable="1"/>
@@ -46,6 +46,7 @@
         <File path="/Users/edanuff/GitHub/a2fpga_core/hdl/sound/apple_speaker.sv" type="file.verilog" enable="1"/>
         <File path="/Users/edanuff/GitHub/a2fpga_core/hdl/sound/audio_out.v" type="file.verilog" enable="1"/>
         <File path="/Users/edanuff/GitHub/a2fpga_core/hdl/sound/audio_timing.sv" type="file.verilog" enable="1"/>
+        <File path="/Users/edanuff/GitHub/a2fpga_core/boards/a2mega/hdl/sound/ensoniq_bsram.sv" type="file.verilog" enable="1"/>
         <File path="/Users/edanuff/GitHub/a2fpga_core/hdl/sound/doc5503.sv" type="file.verilog" enable="1"/>
         <File path="/Users/edanuff/GitHub/a2fpga_core/hdl/sound/sound_glu.sv" type="file.verilog" enable="1"/>
         <File path="/Users/edanuff/GitHub/a2fpga_core/hdl/ssc/super_serial_card.sv" type="file.verilog" enable="1"/>

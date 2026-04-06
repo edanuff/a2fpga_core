@@ -22,7 +22,8 @@
 
 module sound_glu #(
     parameter bit ENABLE = 1'b1,
-    parameter bit MONO_MIX = 1'b0 // If true, mono mix is used instead of stereo
+    parameter bit MONO_MIX = 1'b0, // If true, mono mix is used instead of stereo
+    parameter bit USE_BSRAM = 1'b0 // If true, use on-chip BSRAM instead of DDR3 for sound RAM
 ) (
     a2bus_if.slave a2bus_if,
 
@@ -84,17 +85,29 @@ module sound_glu #(
 
     // write only for a2fpga, will need to implement reads at alternate address
     // and for future standalone IIgs core
-    assign glu_mem_if.rd = '0;
-    // Ensoniq 64KB sound RAM: 16-bit byte pointer → 14-bit word address
-    // Base address offset applied by the memory arbiter (ddr3_ports/sdram_ports).
+    // DOC memory is at 0x4_0000/8 or 0x1_0000/32
     reg [20:0] glu_mem_addr_r;
-    assign glu_mem_if.addr = glu_mem_addr_r;
     reg glu_mem_wr_r;
-    assign glu_mem_if.wr = glu_mem_wr_r;
     reg [3:0] glu_mem_byte_en_r;
-    assign glu_mem_if.byte_en = glu_mem_byte_en_r;
-    assign glu_mem_if.data = {a2bus_if.data, a2bus_if.data, a2bus_if.data, a2bus_if.data};
-    assign glu_mem_if.burst = 1'b0;
+
+    // GLU mem_if driven to DDR3 when USE_BSRAM=0, idle when USE_BSRAM=1
+    generate
+        if (USE_BSRAM) begin : gen_glu_idle
+            assign glu_mem_if.rd = '0;
+            assign glu_mem_if.wr = '0;
+            assign glu_mem_if.addr = '0;
+            assign glu_mem_if.data = '0;
+            assign glu_mem_if.byte_en = '0;
+            assign glu_mem_if.burst = 1'b0;
+        end else begin : gen_glu_ddr3
+            assign glu_mem_if.rd = '0;
+            assign glu_mem_if.addr = glu_mem_addr_r;
+            assign glu_mem_if.wr = glu_mem_wr_r;
+            assign glu_mem_if.byte_en = glu_mem_byte_en_r;
+            assign glu_mem_if.data = {a2bus_if.data, a2bus_if.data, a2bus_if.data, a2bus_if.data};
+            assign glu_mem_if.burst = 1'b0;
+        end
+    endgenerate
 
     reg doc_wr_r;
     reg [7:0] doc_addr_r;
@@ -154,13 +167,6 @@ module sound_glu #(
     wire [15:0] wave_addr_w;
     wire doc_mem_rd_w;
 
-    assign doc_mem_if.wr = '0;
-    assign doc_mem_if.data = '0;
-    assign doc_mem_if.byte_en = 4'b1111;
-    assign doc_mem_if.addr = {7'b0, wave_addr_w[15:2]};
-    assign doc_mem_if.rd = ENABLE && doc_mem_rd_w;
-    assign doc_mem_if.burst = 1'b0;
-
     reg [1:0] doc_mem_offset_r;
 
     always_ff @(posedge a2bus_if.clk_logic) begin
@@ -171,13 +177,64 @@ module sound_glu #(
 
     reg [7:0] wave_data_r;
     reg wave_data_ready_r;
-    always_ff @(posedge a2bus_if.clk_logic) begin
-        wave_data_ready_r <= 1'b0;
-        if (doc_mem_if.ready) begin
-            wave_data_r <= doc_mem_if.q[8*doc_mem_offset_r +: 8];
-            wave_data_ready_r <= 1'b1;
+
+    generate
+        if (USE_BSRAM) begin : gen_doc_bsram
+            // Drive DDR3 DOC port idle
+            assign doc_mem_if.wr = '0;
+            assign doc_mem_if.rd = '0;
+            assign doc_mem_if.data = '0;
+            assign doc_mem_if.byte_en = '0;
+            assign doc_mem_if.addr = '0;
+            assign doc_mem_if.burst = 1'b0;
+
+            // BSRAM instance for 64KB sound RAM
+            wire [31:0] bsram_rd_data;
+            wire        bsram_rd_valid;
+
+            ensoniq_bsram ensoniq_bsram (
+                .clk(a2bus_if.clk_logic),
+
+                // Write port (GLU) - use registered signals from always_ff block
+                .wr_en(glu_mem_wr_r),
+                .wr_addr(glu_mem_addr_r[13:0]),
+                .wr_data({sound_data_r, sound_data_r, sound_data_r, sound_data_r}),
+                .wr_byte_en(glu_mem_byte_en_r),
+
+                // Read port (DOC)
+                .rd_en(ENABLE && doc_mem_rd_w),
+                .rd_addr(wave_addr_w[15:2]),
+                .rd_data(bsram_rd_data),
+                .rd_valid(bsram_rd_valid)
+            );
+
+            // BSRAM read completes in 1 cycle (rd_valid is 1 cycle after rd_en)
+            always_ff @(posedge a2bus_if.clk_logic) begin
+                wave_data_ready_r <= 1'b0;
+                if (bsram_rd_valid) begin
+                    wave_data_r <= bsram_rd_data[8*doc_mem_offset_r +: 8];
+                    wave_data_ready_r <= 1'b1;
+                end
+            end
+
+        end else begin : gen_doc_ddr3
+            // Original DDR3 path
+            assign doc_mem_if.wr = '0;
+            assign doc_mem_if.data = '0;
+            assign doc_mem_if.byte_en = 4'b1111;
+            assign doc_mem_if.addr = {7'b0, wave_addr_w[15:2]};
+            assign doc_mem_if.rd = ENABLE && doc_mem_rd_w;
+            assign doc_mem_if.burst = 1'b0;
+
+            always_ff @(posedge a2bus_if.clk_logic) begin
+                wave_data_ready_r <= 1'b0;
+                if (doc_mem_if.ready) begin
+                    wave_data_r <= doc_mem_if.q[8*doc_mem_offset_r +: 8];
+                    wave_data_ready_r <= 1'b1;
+                end
+            end
         end
-    end
+    endgenerate
 
     wire signed [15:0] mono_mix_w;
     wire signed [15:0] left_mix_w;

@@ -54,7 +54,10 @@ module ddr3_ports #(
     // Per-port base address in word-address space (32-bit words).
     // Clients address from 0; the arbiter adds this offset before
     // computing the DDR3 byte address.
-    parameter [PORT_ADDR_WIDTH-1:0] PORT_BASE_ADDR [NUM_PORTS] = '{NUM_PORTS{0}}
+    parameter [PORT_ADDR_WIDTH-1:0] PORT_BASE_ADDR [NUM_PORTS] = '{NUM_PORTS{0}},
+    // Port index that uses 128-bit wide writes (-1 = none).
+    // When active_port matches, S_WRITE uses the full 128-bit data with mask=0.
+    parameter integer WIDE_WR_PORT = -1
 ) (
     input  wire clk_client,          // Client clock (54 MHz, from CLKDIV2)
     input  wire clk_ddr,             // DDR3 controller clock (108 MHz)
@@ -76,6 +79,11 @@ module ddr3_ports #(
     output reg                         wr_data_en,
     output wire                        wr_data_end,
     output reg  [DDR_MASK_WIDTH-1:0]   wr_data_mask,
+
+    // Wide write data extension (clk_client domain, from framebuffer)
+    // Upper 96 bits of 128-bit word; lower 32 bits come via port data.
+    // Only used when WIDE_WR_PORT >= 0.  Directly wired to that port's CDC.
+    input  wire [95:0]                 wide_wr_data_hi,
 
     // DDR3 IP read interface (clk_ddr domain)
     input  wire                        rd_data_valid,
@@ -110,6 +118,7 @@ module ddr3_ports #(
     wire [DQM_WIDTH-1:0]          cdc_req_byte_en [NUM_PORTS];
     wire [NUM_PORTS-1:0]          cdc_req_wr;
     wire [NUM_PORTS-1:0]          cdc_req_burst;
+    wire [95:0]                   cdc_req_wide_hi [NUM_PORTS];
     reg  [NUM_PORTS-1:0]          cdc_req_done;
     reg  [NUM_PORTS-1:0]          cdc_resp_valid;
     reg  [DATA_WIDTH-1:0]         cdc_resp_data;    // Shared bus
@@ -158,6 +167,7 @@ module ddr3_ports #(
                 .client_data      (ports[gi].data),
                 .client_byte_en   (ports[gi].byte_en),
                 .client_burst     (ports[gi].burst),
+                .client_wide_data_hi((gi == WIDE_WR_PORT) ? wide_wr_data_hi : 96'd0),
                 .client_available (cdc_client_available[gi]),
                 .client_ready     (cdc_client_ready[gi]),
                 .client_q         (cdc_client_q[gi]),
@@ -167,6 +177,7 @@ module ddr3_ports #(
                 .req_byte_en      (cdc_req_byte_en[gi]),
                 .req_wr           (cdc_req_wr[gi]),
                 .req_burst        (cdc_req_burst[gi]),
+                .req_wide_data_hi (cdc_req_wide_hi[gi]),
                 .req_done         (cdc_req_done[gi]),
                 .resp_valid       (cdc_resp_valid[gi]),
                 .resp_data        (cdc_resp_data),
@@ -357,9 +368,17 @@ module ddr3_ports #(
                         cmd          <= CMD_WRITE;
                         addr         <= active_ddr_addr;
                         wr_data_en   <= 1'b1;
-                        wr_data      <= {4{cdc_req_data[active_port]}};
-                        wr_data_mask <= compute_write_mask(active_slot,
-                                                          cdc_req_byte_en[active_port]);
+                        if (WIDE_WR_PORT >= 0 &&
+                            active_port == WIDE_WR_PORT[PORT_IDX_WIDTH-1:0]) begin
+                            // 128-bit wide write: full data, no mask
+                            wr_data      <= {cdc_req_wide_hi[active_port],
+                                             cdc_req_data[active_port]};
+                            wr_data_mask <= {DDR_MASK_WIDTH{1'b0}};
+                        end else begin
+                            wr_data      <= {4{cdc_req_data[active_port]}};
+                            wr_data_mask <= compute_write_mask(active_slot,
+                                                              cdc_req_byte_en[active_port]);
+                        end
                         state <= S_DONE;
                     end
                 end
