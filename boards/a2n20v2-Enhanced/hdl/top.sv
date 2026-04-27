@@ -613,6 +613,10 @@ wire picosoc_led;
         .button_i(s2),
         .led_o(mcu_led_w),
         .ws2812_o(mcu_ws2812_w),
+        .sd_clk_o(sd_clk),
+        .sd_cmd_o(sd_cmd),
+        .sd_dat0_i(sd_dat0),
+        .sd_dat3_o(sd_dat3),
         .fifo_empty(fifo_empty_w),
         .fifo_full(fifo_full_w),
         .fifo_count(fifo_count_w),
@@ -624,11 +628,6 @@ wire picosoc_led;
 
     assign picosoc_led = 1'b0;
     assign ws2812 = mcu_ws2812_w;
-
-    // SD card pins unused by FPGA when BL616 handles SD directly
-    assign sd_clk  = 1'b0;
-    assign sd_cmd  = 1'b1;
-    assign sd_dat3 = 1'b1;
 
 `else
 

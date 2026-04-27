@@ -13,6 +13,7 @@
 #include "cli.h"
 #include "fpga_spi.h"
 #include "fpga_screen.h"
+#include "ff.h"
 
 #define CLI_CMD_BUF_SIZE 128
 #define CLI_OUT_BUF_SIZE 512
@@ -56,6 +57,7 @@ static const char *help_text =
     "  status  - show FPGA device ID, version, and status\r\n"
     "  hello   - display 'Hello from the MCU!' on Apple II screen\r\n"
     "  regs    - dump video control registers\r\n"
+    "  dir     - list SD card root directory\r\n"
     "  quit    - exit CLI, resume UART passthrough\r\n";
 
 void cli_write(const char *str)
@@ -179,6 +181,65 @@ static void cli_cmd_regs(void)
     }
 }
 
+static FATFS sd_fs;
+static bool sd_mounted = false;
+
+static bool sd_ensure_mounted(void)
+{
+    if (sd_mounted) return true;
+
+    FRESULT res = f_mount(&sd_fs, "", 1);
+    if (res != FR_OK) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "Mount failed (err %d). No SD card?\r\n", res);
+        cli_write(buf);
+        return false;
+    }
+    sd_mounted = true;
+    return true;
+}
+
+static void cli_cmd_dir(void)
+{
+    DIR dir;
+    FILINFO fno;
+    FRESULT res;
+    char buf[128];
+    int nfiles = 0;
+
+    if (!sd_ensure_mounted()) return;
+
+    res = f_opendir(&dir, "/");
+    if (res != FR_OK) {
+        snprintf(buf, sizeof(buf), "Open root dir failed (err %d)\r\n", res);
+        cli_write(buf);
+        /* Mount may be stale — force remount on next attempt */
+        f_mount(NULL, "", 0);
+        sd_mounted = false;
+        return;
+    }
+
+    cli_write("Directory of /\r\n\r\n");
+
+    for (;;) {
+        res = f_readdir(&dir, &fno);
+        if (res != FR_OK || fno.fname[0] == 0) break;
+
+        if (fno.fattrib & AM_DIR) {
+            snprintf(buf, sizeof(buf), "  <DIR>  %s\r\n", fno.fname);
+        } else {
+            snprintf(buf, sizeof(buf), "  %7lu  %s\r\n", (unsigned long)fno.fsize, fno.fname);
+        }
+        cli_write(buf);
+        nfiles++;
+    }
+
+    f_closedir(&dir);
+
+    snprintf(buf, sizeof(buf), "\r\n%d file(s)\r\n", nfiles);
+    cli_write(buf);
+}
+
 static void cli_execute(void)
 {
     cmd_buf[cmd_pos] = '\0';
@@ -202,6 +263,8 @@ static void cli_execute(void)
         cli_cmd_hello();
     } else if (strcmp(cmd, "regs") == 0) {
         cli_cmd_regs();
+    } else if (strcmp(cmd, "dir") == 0 || strcmp(cmd, "ls") == 0) {
+        cli_cmd_dir();
     } else if (strcmp(cmd, "quit") == 0 || strcmp(cmd, "exit") == 0) {
         cli_exit();
         return;

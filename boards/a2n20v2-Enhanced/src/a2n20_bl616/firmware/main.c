@@ -18,6 +18,7 @@
 #include "uart_interface.h"
 #include "cli.h"
 #include "fpga_spi.h"
+#include "fpga_sd.h"
 
 /* USB descriptor — defined in usb_descriptor.c */
 extern const uint8_t ftdi_descriptor[];
@@ -106,6 +107,7 @@ int main(void)
     uart_init();
     usb_init();
     fpga_spi_init();
+    fpga_sd_init();
 
     printf("A2N20 BL616 FT2232 bridge started\r\n");
 

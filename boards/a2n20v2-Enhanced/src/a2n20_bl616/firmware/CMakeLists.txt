@@ -14,6 +14,10 @@ target_sources(app PRIVATE
     cli.c
     fpga_spi.c
     fpga_screen.c
+    fpga_sd.c
+    sdmm.c
+    ff.c
+    ffunicode.c
 )
 sdk_set_main_file(main.c)
 

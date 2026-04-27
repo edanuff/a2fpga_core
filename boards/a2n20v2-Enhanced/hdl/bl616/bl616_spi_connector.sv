@@ -42,6 +42,12 @@ module bl616_spi_connector #(
     output reg  [4:0]  led_o,
     output reg         ws2812_o,
 
+    // SD card pins
+    output wire        sd_clk_o,
+    output wire        sd_cmd_o,      // MOSI
+    input  wire        sd_dat0_i,     // MISO
+    output wire        sd_dat3_o,     // CS#
+
     // Bus event FIFO interface
     input  wire        fifo_empty,
     input  wire        fifo_full,
@@ -486,6 +492,33 @@ module bl616_spi_connector #(
         end
     end
 
+    // -------------------------------------------------------
+    // SD card SPI master (regs 0x6C-0x6E)
+    // -------------------------------------------------------
+    reg        sd_cs_n_r;
+    reg        sd_slow_clk_r;
+    reg  [7:0] sd_tx_data_r;
+    reg        sd_tx_start_r;
+    wire [7:0] sd_rx_data_w;
+    wire       sd_busy_w;
+
+    fpga_sd_spi #(
+        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ)
+    ) fpga_sd_spi_inst (
+        .clk(clk),
+        .rst_n(rst_n),
+        .cs_n_i(sd_cs_n_r),
+        .slow_clk_i(sd_slow_clk_r),
+        .tx_start_i(sd_tx_start_r),
+        .tx_data_i(sd_tx_data_r),
+        .rx_data_o(sd_rx_data_w),
+        .busy_o(sd_busy_w),
+        .sd_clk_o(sd_clk_o),
+        .sd_mosi_o(sd_cmd_o),
+        .sd_miso_i(sd_dat0_i),
+        .sd_cs_n_o(sd_dat3_o)
+    );
+
     // A2 reset detection
     wire a2_reset_debounced_w;
     debounce #(
@@ -614,6 +647,11 @@ module bl616_spi_connector #(
             7'h69: reg_rdata = {7'b0, ws2812_o};
             7'h6A: reg_rdata = {7'b0, button_i};
 
+            // SD card registers
+            7'h6C: reg_rdata = {6'b0, sd_slow_clk_r, sd_cs_n_r};
+            7'h6D: reg_rdata = sd_rx_data_w;
+            7'h6E: reg_rdata = {7'b0, sd_busy_w};
+
             // Page 7: Bus event FIFO
             7'h70: reg_rdata = {fifo_empty, fifo_full, 6'b0};
             7'h71: reg_rdata = fifo_count[7:0];
@@ -676,6 +714,10 @@ module bl616_spi_connector #(
             capture_mode_o   <= 3'd0;
             capture_enable_o <= 1'b0;
             fifo_reg_pop_r   <= 1'b0;
+            sd_cs_n_r        <= 1'b1;
+            sd_slow_clk_r    <= 1'b1;
+            sd_tx_data_r     <= 8'hFF;
+            sd_tx_start_r    <= 1'b0;
         end else begin
             // One-shot clears
             cardrom_release_r <= 1'b0;
@@ -684,6 +726,7 @@ module bl616_spi_connector #(
             slot_wr_r         <= 1'b0;
             slot_reconfig_r   <= 1'b0;
             fifo_reg_pop_r    <= 1'b0;
+            sd_tx_start_r     <= 1'b0;
 
             // A2 reset edge detection
             if (system_reset_release_w)
@@ -767,6 +810,16 @@ module bl616_spi_connector #(
                     7'h68: led_o    <= reg_wdata[4:0];
                     7'h69: ws2812_o <= reg_wdata[0];
                     7'h6B: slot_reconfig_r <= 1'b1;
+
+                    // SD card registers
+                    7'h6C: begin
+                        sd_cs_n_r     <= reg_wdata[0];
+                        sd_slow_clk_r <= reg_wdata[1];
+                    end
+                    7'h6D: begin
+                        sd_tx_data_r  <= reg_wdata;
+                        sd_tx_start_r <= 1'b1;
+                    end
 
                     // Page 7: Bus event FIFO control
                     7'h77: fifo_reg_pop_r  <= 1'b1;  // FIFO_POP

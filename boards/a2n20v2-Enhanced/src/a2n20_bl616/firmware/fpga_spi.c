@@ -101,19 +101,22 @@ static inline uint8_t spi_xfer_byte(uint8_t tx)
 
 uint8_t fpga_spi_reg_read(uint8_t reg)
 {
-    uint8_t val;
+    /* Send opcode + dummy as single continuous transfer to avoid SCLK glitch
+     * between bytes (same issue as XFER — see xfer_send_header comment). */
+    uint8_t tx[2] = {0x80 | (reg & 0x7F), 0xFF};
+    uint8_t rx[2];
     cs_setup();
-    spi_xfer_byte(0x80 | (reg & 0x7F));  /* opcode: rw=1, reg[6:0] */
-    val = spi_xfer_byte(0xFF);           /* clock out data byte */
+    bflb_spi_poll_exchange(spi0, tx, rx, 2);
     cs_release();
-    return val;
+    return rx[1];
 }
 
 void fpga_spi_reg_write(uint8_t reg, uint8_t val)
 {
+    /* Send opcode + data as single continuous transfer to avoid SCLK glitch. */
+    uint8_t tx[2] = {reg & 0x7F, val};
     cs_setup();
-    spi_xfer_byte(reg & 0x7F);   /* opcode: rw=0, reg[6:0] */
-    spi_xfer_byte(val);          /* payload */
+    bflb_spi_poll_exchange(spi0, tx, NULL, 2);
     cs_release();
 }
 
