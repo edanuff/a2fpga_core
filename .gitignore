@@ -40,6 +40,7 @@ src/cardrom/cardrom
 /boards/a2p25/src/esp32/build
 /boards/a2p25/src/a2fpga_esp32/build
 /boards/a2p25/src/esp32_usb_jtag/build
+/boards/a2n20v2-Enhanced/src/a2n20_bl616/firmware/build
 *.m4a
 *.wav
 *.mov

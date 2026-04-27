@@ -50,15 +50,15 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Design File</td>
-<td>/Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2-Enhanced/impl/gwsynthesis/a2n20v2_enhanced.vg</td>
+<td>/Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/a2n20-mcu/boards/a2n20v2-Enhanced/impl/gwsynthesis/a2n20v2_enhanced.vg</td>
 </tr>
 <tr>
 <td class="label">Physical Constraints File</td>
-<td>/Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.cst</td>
+<td>/Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/a2n20-mcu/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.cst</td>
 </tr>
 <tr>
 <td class="label">Timing Constraints File</td>
-<td>/Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.sdc</td>
+<td>/Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/a2n20-mcu/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.sdc</td>
 </tr>
 <tr>
 <td class="label">Tool Version</td>
@@ -78,7 +78,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Wed Jan 21 17:42:31 2026
+<td>Sun Apr 26 12:39:01 2026
 </td>
 </tr>
 <tr>
@@ -249,6 +249,63 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>in</td>
 <td>IOT6[A]</td>
 <td>-</td>
+<td>LVCMOS33</td>
+<td>NA</td>
+<td>NONE</td>
+<td>ON</td>
+<td>NONE</td>
+<td>NA</td>
+<td>NA</td>
+<td>NA</td>
+<td>NA</td>
+<td>3.3</td>
+</tr>
+<tr>
+<td class="label">spi_cs_n</td>
+<td>-</td>
+<td>86/0</td>
+<td>Y</td>
+<td>in</td>
+<td>IOT4[A]</td>
+<td>-</td>
+<td>LVCMOS33</td>
+<td>NA</td>
+<td>UP</td>
+<td>ON</td>
+<td>NONE</td>
+<td>NA</td>
+<td>NA</td>
+<td>NA</td>
+<td>NA</td>
+<td>3.3</td>
+</tr>
+<tr>
+<td class="label">spi_sclk</td>
+<td>-</td>
+<td>13/6</td>
+<td>Y</td>
+<td>in</td>
+<td>IOL45[A]</td>
+<td>LPLL2_T_in</td>
+<td>LVCMOS33</td>
+<td>NA</td>
+<td>NONE</td>
+<td>ON</td>
+<td>NONE</td>
+<td>NA</td>
+<td>NA</td>
+<td>OFF</td>
+<td>NA</td>
+<td>3.3</td>
+</tr>
+<tr>
+<td class="label">spi_mosi</td>
+<td>-</td>
+<td>76/1</td>
+<td>Y</td>
+<td>in</td>
+<td>IOT30[B]</td>
+<td>GCLKC_1</td>
 <td>LVCMOS33</td>
 <td>NA</td>
 <td>NONE</td>
@@ -727,6 +784,25 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <td>LVCMOS33</td>
 <td>8</td>
 <td>NONE</td>
+<td>NA</td>
+<td>NA</td>
+<td>OFF</td>
+<td>NA</td>
+<td>NA</td>
+<td>NA</td>
+<td>3.3</td>
+</tr>
+<tr>
+<td class="label">spi_miso</td>
+<td>-</td>
+<td>75/1</td>
+<td>Y</td>
+<td>out</td>
+<td>IOT34[A]</td>
+<td>-</td>
+<td>LVCMOS33</td>
+<td>8</td>
+<td>UP</td>
 <td>NA</td>
 <td>NA</td>
 <td>OFF</td>
@@ -1955,7 +2031,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">86/0</td>
-<td>-</td>
+<td>spi_cs_n</td>
 <td>in</td>
 <td>IOT4[A]</td>
 <td>-</td>
@@ -2108,13 +2184,13 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">76/1</td>
-<td>-</td>
+<td>spi_mosi</td>
 <td>in</td>
 <td>IOT30[B]</td>
 <td>GCLKC_1</td>
 <td>LVCMOS33</td>
 <td>NA</td>
-<td>UP</td>
+<td>NONE</td>
 <td>ON</td>
 <td>NONE</td>
 <td>NA</td>
@@ -2125,16 +2201,16 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">75/1</td>
-<td>-</td>
-<td>in</td>
+<td>spi_miso</td>
+<td>out</td>
 <td>IOT34[A]</td>
 <td>-</td>
 <td>LVCMOS33</td>
-<td>NA</td>
+<td>8</td>
 <td>UP</td>
-<td>ON</td>
-<td>NONE</td>
 <td>NA</td>
+<td>NA</td>
+<td>OFF</td>
 <td>NA</td>
 <td>NA</td>
 <td>NA</td>
@@ -3094,18 +3170,18 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">13/6</td>
-<td>-</td>
+<td>spi_sclk</td>
 <td>in</td>
 <td>IOL45[A]</td>
 <td>LPLL2_T_in</td>
 <td>LVCMOS33</td>
 <td>NA</td>
-<td>UP</td>
+<td>NONE</td>
 <td>ON</td>
 <td>NONE</td>
 <td>NA</td>
 <td>NA</td>
-<td>NA</td>
+<td>OFF</td>
 <td>NA</td>
 <td>3.3</td>
 </tr>

@@ -24,6 +24,7 @@
 `define ENSONIQ
 `undef PICOSOC
 `undef DISKII
+`define BL616_SPI
 
 `include "datetime.svh"
 
@@ -53,7 +54,8 @@ module top #(
 
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit SHADOW_ALL_MEMORY = 0,        // Shadoow all memory in SDRAM, not just video ram
-    parameter bit HDMI_SLEEP_ENABLE = 1,        // Sleep HDMI output on CPU stop
+    parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
+    parameter bit FORCE_DEBUG_OVERLAY = 1,      // Always show the debug overlay on the HDMI output
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
     parameter bit BUS_DATA_OUT_ENABLE = 1       // Allow driving data to Apple bus
 
@@ -101,6 +103,12 @@ module top #(
     //output sd_dat2,   // 1
     output sd_dat3,     // CS
 
+    // BL616 SPI
+    input  spi_cs_n,
+    input  spi_sclk,
+    input  spi_mosi,
+    output spi_miso,
+
     // "Magic" port names that the gowin compiler connects to the on-chip SDRAM
     output        O_sdram_clk,
     output        O_sdram_cke,
@@ -129,13 +137,23 @@ module top #(
     wire a2_2M;
 
     // PLL - 54hz from 27
+    wire clk_pixel_pll_w;  // raw clkoutd from PLL
     clk_logic clk_logic_inst (
         .clkout(clk_logic_w),  //output clkout
         .lock(clk_logic_lock_w),  //output lock
         .clkoutp(clk_logic_p_w),  //output clkoutp
-        .clkoutd(clk_pixel_w),  //output clkoutd
+        .clkoutd(clk_pixel_pll_w),  //output clkoutd
         .reset(~rst_n),  //input reset
         .clkin(clk)  //input clkin
+    );
+
+    // Force pixel clock onto global clock network via BUFG.
+    // Pin 13 (spi_sclk) is a clock-capable pin whose routing conflicts with
+    // clkoutd (PR1014), pushing it to generic routing. BUFG ensures the pixel
+    // clock reaches the clk_hdmi PLL and all clock sinks reliably.
+    BUFG pixel_bufg (
+        .O(clk_pixel_w),
+        .I(clk_pixel_pll_w)
     );
 
     // PLL - 135Mhz from 27
@@ -191,7 +209,12 @@ module top #(
     localparam NUM_PORTS = 5;
         `endif
     `else
+        `ifdef BL616_SPI
+    localparam MCU_MEM_PORT = 4;
+    localparam NUM_PORTS = 5;
+        `else
     localparam NUM_PORTS = 4;
+        `endif
     `endif
 `else
     `ifdef PICOSOC
@@ -203,7 +226,12 @@ module top #(
     localparam NUM_PORTS = 3;
         `endif
     `else
+        `ifdef BL616_SPI
+    localparam MCU_MEM_PORT = 2;
+    localparam NUM_PORTS = 3;
+        `else
     localparam NUM_PORTS = 2;
+        `endif
     `endif
 `endif
 
@@ -485,14 +513,131 @@ wire picosoc_led;
 
 `else
 
-    // Stub out the external interfaces if not using PicoSOC
+`ifdef BL616_SPI
+
+    // -------------------------------------------------------
+    // BL616 SPI Controller (replaces PicoSOC)
+    // -------------------------------------------------------
+
+    wire cardrom_release_w;
+    wire [0:7] cardrom_d_w;
+    wire cardrom_rd;
+
+    CardROM cardrom (
+        .a2bus_if(a2bus_if),
+        .data_o(cardrom_d_w),
+        .rd_en_o(cardrom_rd),
+        .inh_n_o(inh_n_w),
+        .req_rom_release_i(cardrom_release_w)
+    );
+
+    video_control_if video_control_if();
+    f18a_gpu_if f18a_gpu_if();
+    assign f18a_gpu_if.running = 1'b0;
+    assign f18a_gpu_if.pause_ack = 1'b1;
+    assign f18a_gpu_if.vwe = 1'b0;
+    assign f18a_gpu_if.vaddr = 14'b0;
+    assign f18a_gpu_if.vdout = 8'b0;
+    assign f18a_gpu_if.pwe = 1'b0;
+    assign f18a_gpu_if.paddr = 6'b0;
+    assign f18a_gpu_if.pdout = 12'b0;
+    assign f18a_gpu_if.rwe = 1'b0;
+    assign f18a_gpu_if.raddr = 13'b0;
+    assign f18a_gpu_if.gstatus = 7'b0;
+
+    drive_volume_if volumes[2]();
+
+    wire [7:0] diskii_d_w = 8'b0;
+    wire diskii_rd = 1'b0;
+
+    // Stub drive side of volumes (no DiskII controller yet with BL616)
+    assign volumes[0].active = 1'b0;
+    assign volumes[0].lba = 32'd0;
+    assign volumes[0].blk_cnt = 6'd0;
+    assign volumes[0].rd = 1'b0;
+    assign volumes[0].wr = 1'b0;
+    assign volumes[1].active = 1'b0;
+    assign volumes[1].lba = 32'd0;
+    assign volumes[1].blk_cnt = 6'd0;
+    assign volumes[1].rd = 1'b0;
+    assign volumes[1].wr = 1'b0;
+
+    // Bus event FIFO
+    wire        fifo_empty_w;
+    wire        fifo_full_w;
+    wire [8:0]  fifo_count_w;
+    wire [31:0] fifo_rdata_w;
+    wire        fifo_pop_w;
+    wire [2:0]  capture_mode_w;
+    wire        capture_enable_w;
+
+    a2bus_event_fifo #(
+        .ENABLE(1'b1)
+    ) a2bus_event_fifo (
+        .a2bus_if(a2bus_if),
+        .fifo_empty(fifo_empty_w),
+        .fifo_full(fifo_full_w),
+        .fifo_count(fifo_count_w),
+        .fifo_rdata(fifo_rdata_w),
+        .fifo_pop(fifo_pop_w),
+        .capture_enable(capture_enable_w),
+        .capture_mode(capture_mode_w)
+    );
+
+    // BL616 SPI connector -- drives LED and WS2812 internally
+    wire [4:0] mcu_led_w;
+    wire       mcu_ws2812_w;
+    wire       mcu_ready_w;
+
+    bl616_spi_connector #(
+        .USE_CRC(0),
+        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ)
+    ) bl616_spi (
+        .clk(clk_logic_w),
+        .rst_n(device_reset_n_w),
+        .spi_cs_n(spi_cs_n),
+        .spi_sclk(spi_sclk),
+        .spi_mosi(spi_mosi),
+        .spi_miso(spi_miso),
+        .a2bus_if(a2bus_if),
+        .a2mem_if(a2mem_if),
+        .a2bus_control_if(a2bus_control_if),
+        .video_control_if(video_control_if),
+        .slotmaker_config_if(slotmaker_config_if),
+        .volumes(volumes),
+        .mem_if(mem_ports[MCU_MEM_PORT]),
+        .sdram_init_complete_i(sdram_init_complete),
+        .mcu_ready_o(mcu_ready_w),
+        .cardrom_active_i(!inh_n_w),
+        .cardrom_release_o(cardrom_release_w),
+        .button_i(s2),
+        .led_o(mcu_led_w),
+        .ws2812_o(mcu_ws2812_w),
+        .fifo_empty(fifo_empty_w),
+        .fifo_full(fifo_full_w),
+        .fifo_count(fifo_count_w),
+        .fifo_rdata(fifo_rdata_w),
+        .fifo_pop(fifo_pop_w),
+        .capture_mode_o(capture_mode_w),
+        .capture_enable_o(capture_enable_w)
+    );
+
+    assign picosoc_led = 1'b0;
+    assign ws2812 = mcu_ws2812_w;
+
+    // SD card pins unused by FPGA when BL616 handles SD directly
+    assign sd_clk  = 1'b0;
+    assign sd_cmd  = 1'b1;
+    assign sd_dat3 = 1'b1;
+
+`else
+
+    // Stub out the external interfaces if not using PicoSOC or BL616
 
     assign slotmaker_config_if.slot = 3'b0;
     assign slotmaker_config_if.wr = 1'b0;
     assign slotmaker_config_if.card_i = 8'b0;
     assign slotmaker_config_if.reconfig = 1'b0;
-
-    // Video
 
     video_control_if video_control_if();
     assign video_control_if.enable = 1'b0;
@@ -524,7 +669,6 @@ wire picosoc_led;
     assign f18a_gpu_if.raddr = 13'b0;
     assign f18a_gpu_if.gstatus = 7'b0;
 
-
     wire [7:0] diskii_d_w = 8'b0;
     wire diskii_rd = 1'b0;
 
@@ -536,6 +680,13 @@ wire picosoc_led;
 
     assign picosoc_led = 1'b0;
 
+    assign spi_miso = 1'b1;
+    assign ws2812 = 1'b0;
+    assign sd_clk  = 1'b0;
+    assign sd_cmd  = 1'b1;
+    assign sd_dat3 = 1'b1;
+
+`endif
 
 `endif
 
@@ -877,7 +1028,7 @@ wire picosoc_led;
     ) debug_overlay (
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
-        .enable_i(show_debug_overlay_r),
+        .enable_i(FORCE_DEBUG_OVERLAY ? 1'b1 : show_debug_overlay_r),
 
         .hex_values ({
             {2'b0, doc_osc_mode_w[0], 2'b0, doc_osc_mode_w[1]},

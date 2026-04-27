@@ -5,34 +5,34 @@
 1. PnR Messages
 
   <Report Title>: PnR Report
-  <Design File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2-Enhanced/impl/gwsynthesis/a2n20v2_enhanced.vg
-  <Physical Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.cst
-  <Timing Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.sdc
+  <Design File>: /Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/a2n20-mcu/boards/a2n20v2-Enhanced/impl/gwsynthesis/a2n20v2_enhanced.vg
+  <Physical Constraints File>: /Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/a2n20-mcu/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.cst
+  <Timing Constraints File>: /Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/a2n20-mcu/boards/a2n20v2-Enhanced/hdl/a2n20v2_enhanced.sdc
   <Tool Version>: V1.9.12.01
   <Part Number>: GW2AR-LV18QN88C8/I7
   <Device>: GW2AR-18
   <Device Version>: C
-  <Created Time>:Wed Jan 21 17:42:31 2026
+  <Created Time>:Sun Apr 26 12:39:02 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.977s, Elapsed time = 0h 0m 0.918s
-    Placement Phase 1: CPU time = 0h 0m 0.225s, Elapsed time = 0h 0m 0.208s
-    Placement Phase 2: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
-    Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
-    Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
+    Placement Phase 0: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+    Placement Phase 1: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    Placement Phase 2: CPU time = 0h 0m 17s, Elapsed time = 0h 0m 19s
+    Placement Phase 3: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 12s
+    Total Placement: CPU time = 0h 0m 33s, Elapsed time = 0h 0m 36s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
-    Routing Phase 1: CPU time = 0h 0m 0.231s, Elapsed time = 0h 0m 0.221s
-    Routing Phase 2: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
+    Routing Phase 0: CPU time = 0h 0m 0.012s, Elapsed time = 0h 0m 0.012s
+    Routing Phase 1: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    Routing Phase 2: CPU time = 0h 0m 43s, Elapsed time = 0h 0m 46s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
+    Total Routing: CPU time = 0h 0m 44s, Elapsed time = 0h 0m 48s
  Generate output files:
-    CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    CPU time = 0h 0m 5s, Elapsed time = 0h 0m 6s
 
- Total Time and Memory Usage: CPU time = 0h 0m 13s, Elapsed time = 0h 0m 13s, Peak memory usage = 1723MB
+ Total Time and Memory Usage: CPU time = 0h 1m 22s, Elapsed time = 0h 1m 30s, Peak memory usage = 567MB
 
 
 3. Resource Usage Summary
@@ -40,32 +40,31 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 8502/20736                          |  41%
-    --LUT,ALU,ROM16           | 8178(6872 LUT, 1306 ALU, 0 ROM16)   | -
-    --SSRAM(RAM16)            | 54                                  | -
-  Register                    | 4726/15915                          |  30%
+  Logic                       | 10646/20736                         |  52%
+    --LUT,ALU,ROM16           | 9512(8130 LUT, 1358 ALU, 24 ROM16)  | -
+    --SSRAM(RAM16)            | 189                                 | -
+  Register                    | 5527/15915                          |  35%
     --Logic Register as Latch | 0/15552                             |  0%
-    --Logic Register as FF    | 4685/15552                          |  31%
+    --Logic Register as FF    | 5452/15552                          |  36%
     --I/O Register as Latch   | 0/363                               |  0%
-    --I/O Register as FF      | 41/363                              |  12%
-  CLS                         | 6250/10368                          |  61%
-  I/O Port                    | 41/66                               |  63%
-  I/O Buf                     | 36                                  | -
-    --Input Buf               | 7                                   | -
-    --Output Buf              | 21                                  | -
+    --I/O Register as FF      | 75/363                              |  21%
+  CLS                         | 7533/10368                          |  73%
+  I/O Port                    | 45/66                               |  69%
+  I/O Buf                     | 40                                  | -
+    --Input Buf               | 10                                  | -
+    --Output Buf              | 22                                  | -
     --Inout Buf               | 8                                   | -
   IOLOGIC                     | 6/121                               | 5%
     --OSER10                  | 3
   BSRAM                       | 31/46                               | 68%
-    --SP                      | 2
-    --SDPB                    | 17
+    --SDPB                    | 18
     --DPB                     | 8
     --DPX9B                   | 2
-    --pROM                    | 2
-  DSP                         | 15.25/24                            | 64%
+    --pROM                    | 3
+  DSP                         | 14.25/24                            | 60%
     --MULT9X9                 | 5
     --MULT18X18               | 4
-    --MULTADDALU18X18         | 12
+    --MULTADDALU18X18         | 11
   ================================================================================
 
 
@@ -75,13 +74,13 @@
   --------------------------------------
   I/O Bank  | Usage       | Utilization 
   --------------------------------------
-  bank 0   | 5/8         | 63%         
-  bank 1   | 7/9         | 78%         
+  bank 0   | 6/8         | 75%         
+  bank 1   | 9/9         | 100%        
   bank 2   | 0/4         | 0%          
   bank 3   | 7/17        | 42%         
   bank 4   | 8/8         | 100%        
   bank 5   | 7/10        | 70%         
-  bank 6   | 6/9         | 67%         
+  bank 6   | 7/9         | 78%         
   bank 7   | 1/1         | 100%        
   ======================================
 
@@ -106,10 +105,10 @@
   clk_d          | PRIMARY        |  BL
   a2bus_if.clk_logic| PRIMARY        |  TR TL BR BL
   O_sdram_clk_d  | PRIMARY        |  TR
-  a2bus_if.clk_pixel| PRIMARY        |  TR TL BR BL
-  n3226_5        | LW             |  -
+  clk_pixel_pll_w| PRIMARY        |  TR TL BR BL
   n29_11         | LW             |  -
-  timer_a_count_15_7| LW             |  -
+  slot_card_r[0]_ER_init| LW             |  -
+  sdram_ports/sdram_inst/n3373_5| LW             |  -
   supersprite/vdp/f18a_core/reset_n_r| LW             |  -
   supersprite/vdp/f18a_core/inst_cpu/n931_6| LW             |  -
   mockingboard/pb_l_o[2]| LW             |  -
@@ -132,6 +131,9 @@ a2_phi1               | -         | 31/5          | Y          | in    | IOB18[A
 a2_7M                 | -         | 73/1          | Y          | in    | IOT40[A] | -               | LVCMOS33   | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3       
 uart_rx               | -         | 70/1          | Y          | in    | IOT44[B] | -               | LVCMOS33   | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3       
 sd_dat0               | -         | 84/0          | Y          | in    | IOT6[A]  | -               | LVCMOS33   | NA    | NONE      | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3       
+spi_cs_n              | -         | 86/0          | Y          | in    | IOT4[A]  | -               | LVCMOS33   | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3       
+spi_sclk              | -         | 13/6          | Y          | in    | IOL45[A] | LPLL2_T_in      | LVCMOS33   | NA    | NONE      | ON        | NONE       | NA         | NA         | OFF             | NA            | 3.3       
+spi_mosi              | -         | 76/1          | Y          | in    | IOT30[B] | GCLKC_1         | LVCMOS33   | NA    | NONE      | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3       
 a2_bridge_sel[0]      | -         | 30/5          | Y          | out   | IOB14[B] | -               | LVCMOS33   | 8     | UP        | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3       
 a2_bridge_sel[1]      | -         | 29/5          | Y          | out   | IOB14[A] | -               | LVCMOS33   | 8     | UP        | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3       
 a2_bridge_sel[2]      | -         | 28/5          | Y          | out   | IOB8[B]  | -               | LVCMOS33   | 8     | UP        | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3       
@@ -157,6 +159,7 @@ uart_tx               | -         | 69/1          | Y          | out   | IOT50[A
 sd_clk                | -         | 83/0          | Y          | out   | IOT6[B]  | -               | LVCMOS33   | 8     | NONE      | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3       
 sd_cmd                | -         | 82/0          | Y          | out   | IOT17[A] | -               | LVCMOS33   | 8     | NONE      | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3       
 sd_dat3               | -         | 81/0          | Y          | out   | IOT17[B] | -               | LVCMOS33   | 8     | NONE      | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3       
+spi_miso              | -         | 75/1          | Y          | out   | IOT34[A] | -               | LVCMOS33   | 8     | UP        | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3       
 O_sdram_clk           | -         | p73/2         | -          | out   | IOR11[B] | -               | LVTTL33    | -     | UP        | -         | -          | -          | -          | -               | -             | -         
 O_sdram_cke           | -         | p18/7         | -          | out   | IOL13[A] | -               | LVTTL33    | -     | UP        | -         | -          | -          | -          | -               | -             | -         
 O_sdram_cs_n          | -         | p22/7         | -          | out   | IOL14[B] | -               | LVTTL33    | -     | UP        | -         | -          | -          | -          | -               | -             | -         
@@ -230,7 +233,7 @@ IO_sdram_dq[31]       | -         | p48/3         | -          | io    | IOR44[B
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Loc./Bank| Signal                | Dir.  | Site     | CFG             | IO Type  | Drive | Pull Mode | PCI Clamp | Hysteresis | Open Drain | Vref       | Single Resistor | Diff Resistor | Bank Vccio
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-86/0     | -                     | in    | IOT4[A]  | -               | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
+86/0     | spi_cs_n              | in    | IOT4[A]  | -               | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
 85/0     | -                     | in    | IOT4[B]  | -               | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
 84/0     | sd_dat0               | in    | IOT6[A]  | -               | LVCMOS33 | NA    | NONE      | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
 83/0     | sd_clk                | out   | IOT6[B]  | -               | LVCMOS33 | 8     | NONE      | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3  
@@ -239,8 +242,8 @@ Loc./Bank| Signal                | Dir.  | Site     | CFG             | IO Type 
 80/0     | -                     | in    | IOT27[A] | GCLKT_0         | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
 79/0     | ws2812                | out   | IOT27[B] | GCLKC_0         | LVCMOS33 | 8     | UP        | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3  
 77/1     | a2_bridge_bus_d_oe_n  | out   | IOT30[A] | GCLKT_1         | LVCMOS33 | 8     | UP        | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3  
-76/1     | -                     | in    | IOT30[B] | GCLKC_1         | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
-75/1     | -                     | in    | IOT34[A] | -               | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
+76/1     | spi_mosi              | in    | IOT30[B] | GCLKC_1         | LVCMOS33 | NA    | NONE      | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
+75/1     | spi_miso              | out   | IOT34[A] | -               | LVCMOS33 | 8     | UP        | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3  
 74/1     | a2_bridge_rd_n        | out   | IOT34[B] | -               | LVCMOS33 | 8     | UP        | NA        | NA         | OFF        | NA         | NA              | NA            | 3.3  
 73/1     | a2_7M                 | in    | IOT40[A] | -               | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
 72/1     | a2_bridge_d[0]        | io    | IOT40[B] | -               | LVCMOS33 | 8     | UP        | NA        | NONE       | OFF        | NA         | NA              | NA            | 3.3  
@@ -299,7 +302,7 @@ p37/6    | IO_sdram_dq[19]       | io    | IOL35[A] | -               | LVTTL33 
 p38/6    | IO_sdram_dq[18]       | io    | IOL35[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p41/6    | IO_sdram_dq[17]       | io    | IOL39[A] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
 p42/6    | IO_sdram_dq[16]       | io    | IOL39[B] | -               | LVTTL33  | -     | UP        | -         | -          | -          | -          | -               | -             | -    
-13/6     | -                     | in    | IOL45[A] | LPLL2_T_in      | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | NA              | NA            | 3.3  
+13/6     | spi_sclk              | in    | IOL45[A] | LPLL2_T_in      | LVCMOS33 | NA    | NONE      | ON        | NONE       | NA         | NA         | OFF             | NA            | 3.3  
 15/6     | a2_reset_n            | in    | IOL47[A] | LPLL2_T_fb      | LVCMOS33 | NA    | UP        | ON        | NONE       | NA         | NA         | OFF             | NA            | 3.3  
 16/6     | led[0]                | out   | IOL47[B] | LPLL2_C_fb      | LVCMOS33 | 8     | UP        | NA        | NA         | OFF        | NA         | OFF             | NA            | 3.3  
 17/6     | led[1]                | out   | IOL49[A] | -               | LVCMOS33 | 8     | UP        | NA        | NA         | OFF        | NA         | OFF             | NA            | 3.3  

@@ -40,19 +40,23 @@ USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX static uint8_t cli_out_buf[CLI_OUT_BUF_SI
 static volatile bool cli_tx_busy = false;
 static bool prompt_pending = false;
 
+#define FW_VERSION "0.2"
+#define FW_BUILD   __DATE__ " " __TIME__
+
 static const char *banner =
-    "\r\nA2N20 BL616 Firmware v0.1\r\n"
+    "\r\nA2N20 BL616 Firmware v" FW_VERSION " (" __DATE__ " " __TIME__ ")\r\n"
     "Type 'help' for commands.\r\n";
 
 static const char *prompt = "a2n20> ";
 
 static const char *help_text =
     "Commands:\r\n"
-    "  help   - show this help\r\n"
-    "  status - show FPGA device ID, version, and status\r\n"
-    "  hello  - display 'Hello from the MCU!' on Apple II screen\r\n"
-    "  regs   - dump video control registers\r\n"
-    "  quit   - exit CLI, resume UART passthrough\r\n";
+    "  help    - show this help\r\n"
+    "  version - show firmware version and build timestamp\r\n"
+    "  status  - show FPGA device ID, version, and status\r\n"
+    "  hello   - display 'Hello from the MCU!' on Apple II screen\r\n"
+    "  regs    - dump video control registers\r\n"
+    "  quit    - exit CLI, resume UART passthrough\r\n";
 
 void cli_write(const char *str)
 {
@@ -127,6 +131,23 @@ static void cli_cmd_status(void)
                       | ((uint32_t)fpga_spi_reg_read(0x0B) << 24);
     snprintf(buf, sizeof(buf), "SYS_TIME  : 0x%08lX\r\n", (unsigned long)sys_time);
     cli_write(buf);
+
+    /* Scratch register loopback test: write pattern, read back, verify */
+    int pass = 0, fail = 0;
+    static const uint8_t patterns[] = {0xA5, 0x5A, 0xFF, 0x00, 0x0F, 0xF0};
+    for (int i = 0; i < (int)(sizeof(patterns)/sizeof(patterns[0])); i++) {
+        fpga_spi_reg_write(0x07, patterns[i]);
+        uint8_t rb = fpga_spi_reg_read(0x07);
+        if (rb == patterns[i]) pass++; else fail++;
+    }
+    snprintf(buf, sizeof(buf), "SPI Test  : %d/%d pass", pass, pass + fail);
+    cli_write(buf);
+    if (fail) {
+        snprintf(buf, sizeof(buf), " (%d FAIL)\r\n", fail);
+    } else {
+        snprintf(buf, sizeof(buf), " OK\r\n");
+    }
+    cli_write(buf);
 }
 
 static void cli_cmd_hello(void)
@@ -172,6 +193,9 @@ static void cli_execute(void)
         /* Empty command — just show prompt again */
     } else if (strcmp(cmd, "help") == 0) {
         cli_write(help_text);
+    } else if (strcmp(cmd, "version") == 0) {
+        cli_write("A2N20 BL616 Firmware v" FW_VERSION "\r\n"
+                  "Build: " FW_BUILD "\r\n");
     } else if (strcmp(cmd, "status") == 0) {
         cli_cmd_status();
     } else if (strcmp(cmd, "hello") == 0) {

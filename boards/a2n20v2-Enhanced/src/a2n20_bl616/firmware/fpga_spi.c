@@ -2,7 +2,7 @@
  * FPGA SPI — Hardware SPI0 master with manual GPIO CS# for BL616→FPGA
  * communication per BL616_SPI_PROTOCOL.md.
  *
- * Uses BL616 hardware SPI0 for SCLK/MOSI/MISO clocking at 20 MHz,
+ * Uses BL616 hardware SPI0 for SCLK/MOSI/MISO clocking at 4 MHz,
  * with GPIO0 as a manual chip-select output for full framing control.
  */
 
@@ -28,6 +28,39 @@
 #define CS_LOW()   SPI_GPIO_CLR = CS_BIT
 #define CS_HIGH()  SPI_GPIO_SET = CS_BIT
 
+/* CS# setup delay: FPGA 2FF synchronizer needs ~37ns (2 cycles @ 54 MHz)
+ * to detect CS# active. Without this delay, the first SCLK edge can arrive
+ * before the FPGA recognizes CS# is low, causing missed bits. */
+static inline void cs_setup(void)
+{
+    CS_LOW();
+    /* ~200ns delay: 64 NOPs at ~3ns each (320 MHz E907 core) */
+    __asm volatile("nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;");
+}
+
+/* CS# hold delay: After CS# goes high, the FPGA's 2FF sync needs ~37ns
+ * to detect deassert and return to idle. Without this delay, a quick
+ * re-assertion could find the FPGA still in the previous transaction's state. */
+static inline void cs_release(void)
+{
+    CS_HIGH();
+    __asm volatile("nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;"
+                   "nop; nop; nop; nop; nop; nop; nop; nop;");
+}
+
 static struct bflb_device_s *spi0;
 
 void fpga_spi_init(void)
@@ -47,7 +80,8 @@ void fpga_spi_init(void)
     spi0 = bflb_device_get_by_name("spi0");
 
     struct bflb_spi_config_s spi_cfg = {
-        .freq = 20 * 1000 * 1000,      /* 20 MHz */
+        .freq = 4 * 1000 * 1000,       /* 4 MHz — FPGA 2FF sync + TX shift needs ~42ns worst case;
+                                         * at 4 MHz (125ns half-period) gives 83ns MISO setup margin */
         .role = SPI_ROLE_MASTER,
         .mode = SPI_MODE0,              /* CPOL=0 CPHA=0 per protocol spec */
         .data_width = SPI_DATA_WIDTH_8BIT,
@@ -68,67 +102,79 @@ static inline uint8_t spi_xfer_byte(uint8_t tx)
 uint8_t fpga_spi_reg_read(uint8_t reg)
 {
     uint8_t val;
-    CS_LOW();
-    spi_xfer_byte(0x80 | (reg & 0x7E));  /* opcode: rw=1, reg[6:0] */
+    cs_setup();
+    spi_xfer_byte(0x80 | (reg & 0x7F));  /* opcode: rw=1, reg[6:0] */
     val = spi_xfer_byte(0xFF);           /* clock out data byte */
-    CS_HIGH();
+    cs_release();
     return val;
 }
 
 void fpga_spi_reg_write(uint8_t reg, uint8_t val)
 {
-    CS_LOW();
-    spi_xfer_byte(reg & 0x7E);   /* opcode: rw=0, reg[6:0] */
+    cs_setup();
+    spi_xfer_byte(reg & 0x7F);   /* opcode: rw=0, reg[6:0] */
     spi_xfer_byte(val);          /* payload */
-    CS_HIGH();
+    cs_release();
 }
 
 /*
- * Build XFER subheader and send it.
+ * Build XFER subheader and send it as a single bulk transfer.
  * SUB0 format: { 0, RES=0, CRC_EN=0, INC=1, SPACE[2:0], DIR }
+ *
+ * Uses poll_exchange for continuous SCLK clocking — individual spi_xfer_byte
+ * calls leave inter-byte gaps where the BL616 SPI hardware can produce SCLK
+ * glitches that misalign the FPGA's bit counter.
  */
 static void xfer_send_header(uint8_t space, uint32_t addr, uint16_t len, uint8_t dir)
 {
-    uint8_t sub0 = (1 << 4) | ((space & 0x07) << 1) | (dir & 1);  /* INC=1 */
-
-    spi_xfer_byte(0x7F);                     /* XFER opcode */
-    spi_xfer_byte(sub0);                     /* SUB0 */
-    spi_xfer_byte((uint8_t)(addr & 0xFF));          /* ADDR low */
-    spi_xfer_byte((uint8_t)((addr >> 8) & 0xFF));   /* ADDR mid */
-    spi_xfer_byte((uint8_t)((addr >> 16) & 0xFF));  /* ADDR high */
-    spi_xfer_byte((uint8_t)(len & 0xFF));           /* LEN low */
-    spi_xfer_byte((uint8_t)((len >> 8) & 0xFF));    /* LEN high */
+    uint8_t hdr[7];
+    hdr[0] = 0x7F;                                          /* XFER opcode */
+    hdr[1] = (1 << 4) | ((space & 0x07) << 1) | (dir & 1); /* SUB0: INC=1 */
+    hdr[2] = (uint8_t)(addr & 0xFF);                        /* ADDR low */
+    hdr[3] = (uint8_t)((addr >> 8) & 0xFF);                 /* ADDR mid */
+    hdr[4] = (uint8_t)((addr >> 16) & 0xFF);                /* ADDR high */
+    hdr[5] = (uint8_t)(len & 0xFF);                         /* LEN low */
+    hdr[6] = (uint8_t)((len >> 8) & 0xFF);                  /* LEN high */
+    bflb_spi_poll_exchange(spi0, hdr, NULL, 7);
 }
 
 void fpga_spi_xfer_write(uint8_t space, uint32_t addr, const uint8_t *data, uint16_t len)
 {
-    CS_LOW();
+    cs_setup();
     xfer_send_header(space, addr, len, 0);  /* DIR=0 (write) */
     bflb_spi_poll_exchange(spi0, data, NULL, len);
-    CS_HIGH();
+    cs_release();
 }
 
 void fpga_spi_xfer_read(uint8_t space, uint32_t addr, uint8_t *data, uint16_t len)
 {
-    CS_LOW();
+    cs_setup();
     xfer_send_header(space, addr, len, 1);  /* DIR=1 (read) */
     spi_xfer_byte(0xFF);                    /* dummy byte per protocol */
     bflb_spi_poll_exchange(spi0, NULL, data, len);
-    CS_HIGH();
+    cs_release();
 }
 
 void fpga_spi_xfer_fill(uint8_t space, uint32_t addr, uint8_t val, uint16_t len)
 {
-    CS_LOW();
-    xfer_send_header(space, addr, len, 0);  /* DIR=0 (write) */
+    /* Split into multiple separate XFER transactions (one CS# cycle each).
+     * A single long XFER risks bit-alignment errors: if the BL616 SPI
+     * hardware produces a SCLK glitch during FIFO refill, the FPGA's 2FF
+     * sync detects it as a real edge and all subsequent bytes shift by 1 bit
+     * (0xA0 becomes 0x41 = flashing 'A'). Multiple CS# cycles limit damage
+     * since CS# deassert resets the FPGA's bit counter. */
+    static uint8_t fill_buf[128];
+    memset(fill_buf, val, sizeof(fill_buf));
 
-    /* Send repeating byte — can't use poll_exchange with NULL tx since
-     * that sends 0xFF. Send byte-by-byte for fill. */
-    for (uint16_t i = 0; i < len; i++) {
-        spi_xfer_byte(val);
+    uint32_t offset = 0;
+    uint16_t remaining = len;
+    while (remaining > 0) {
+        uint16_t chunk = (remaining > sizeof(fill_buf))
+                         ? (uint16_t)sizeof(fill_buf) : remaining;
+        fpga_spi_xfer_write(space, addr + offset, fill_buf, chunk);
+        offset += chunk;
+        remaining -= chunk;
     }
-
-    CS_HIGH();
 }
 
 uint8_t fpga_spi_read_status(void)

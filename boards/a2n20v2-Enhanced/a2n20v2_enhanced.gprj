@@ -101,6 +101,9 @@
         <File path="hdl/gowin/clk_hdmi/clk_hdmi.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/clk_logic/clk_logic.v" type="file.verilog" enable="1"/>
         <File path="hdl/memory/apple_memory.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/bl616/bl616_spi_proto_proc.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/bl616/bl616_spi_connector.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/bl616/a2bus_event_fifo.sv" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
     </FileList>
 </Project>
