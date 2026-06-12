@@ -42,7 +42,10 @@ module apple_memory #(
     input [12:0] vgc_address_i,
     input vgc_rd_i,
     output [31:0] vgc_data_o,
-    output vgc_ready_o
+    output vgc_ready_o,
+
+    // Debug: CPU shadow writes lost to a full shadow FIFO (sticky)
+    output [7:0] dbg_shadow_drop_o
 );
 
     wire write_strobe = !a2bus_if.rw_n && a2bus_if.data_in_strobe;
@@ -263,32 +266,60 @@ module apple_memory #(
     wire write_en = write_strobe && !a2bus_if.m2sel_n &&
         (is_text_write || is_unified_write);
 
-    reg        shadow_wr_pending_r;
-    reg [20:0] shadow_wr_addr_r;
-    reg [31:0] shadow_wr_data_r;
-    reg [3:0]  shadow_wr_byte_en_r;
+    // Shadow write FIFO — replaces the single-slot deferral, which LOST
+    // writes in two collision cases (the cause of permanently wrong/dropped
+    // pixels until the CPU rewrote the location):
+    //   1. A new write_en while a deferred write waited and the port was
+    //      busy overwrote the deferred slot — older write lost.
+    //   2. A new write_en on the same cycle the deferred write drained was
+    //      never stored — new write lost.
+    // All writes now transit the FIFO in strict order. Depth 8 absorbs
+    // worst-case port-busy stretches (~1µs behind an 8-beat FB read burst)
+    // at the CPU's ~0.36-1µs/write rate. Forced to registers: the head and
+    // the coherency scan below need combinational access to all entries.
+    localparam SW_FIFO_DEPTH = 8;
+    localparam SW_FIFO_ADDR_BITS = 3;
+    // Entry: {byte_en[56:53], addr[52:32], data[31:0]}
+    reg [56:0] sw_fifo [0:SW_FIFO_DEPTH-1] /* synthesis syn_ramstyle="registers" */;
+    reg [SW_FIFO_DEPTH-1:0] sw_valid_r;
+    reg [SW_FIFO_ADDR_BITS:0] sw_wr_ptr_r, sw_rd_ptr_r;
+    reg [7:0] dbg_shadow_drop_r;  // Sticky: writes lost to a full FIFO
+
+    wire sw_empty_w = (sw_wr_ptr_r == sw_rd_ptr_r);
+    wire [SW_FIFO_ADDR_BITS:0] sw_count_w = sw_wr_ptr_r - sw_rd_ptr_r;
+    wire sw_full_w = sw_count_w[SW_FIFO_ADDR_BITS];
+    wire sw_push_w = write_en && !sw_full_w;
+    wire sw_pop_w  = !sw_empty_w && main_mem_if.available;
+    wire [56:0] sw_head_w = sw_fifo[sw_rd_ptr_r[SW_FIFO_ADDR_BITS-1:0]];
 
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
-            shadow_wr_pending_r <= 1'b0;
+            sw_wr_ptr_r <= '0;
+            sw_rd_ptr_r <= '0;
+            sw_valid_r  <= '0;
+            dbg_shadow_drop_r <= 8'd0;
         end else begin
-            if (write_en && !main_mem_if.available) begin
-                shadow_wr_pending_r <= 1'b1;
-                shadow_wr_addr_r    <= write_addr;
-                shadow_wr_data_r    <= write_word;
-                shadow_wr_byte_en_r <= write_byte_en;
-            end else if (shadow_wr_pending_r && main_mem_if.available) begin
-                shadow_wr_pending_r <= 1'b0;
+            if (sw_push_w) begin
+                sw_fifo[sw_wr_ptr_r[SW_FIFO_ADDR_BITS-1:0]] <= {write_byte_en, write_addr, write_word};
+                sw_valid_r[sw_wr_ptr_r[SW_FIFO_ADDR_BITS-1:0]] <= 1'b1;
+                sw_wr_ptr_r <= sw_wr_ptr_r + 1'd1;
             end
+            if (sw_pop_w) begin
+                sw_valid_r[sw_rd_ptr_r[SW_FIFO_ADDR_BITS-1:0]] <= 1'b0;
+                sw_rd_ptr_r <= sw_rd_ptr_r + 1'd1;
+            end
+            if (write_en && sw_full_w && dbg_shadow_drop_r != 8'hFF)
+                dbg_shadow_drop_r <= dbg_shadow_drop_r + 8'd1;
         end
     end
 
     assign main_mem_if.rd      = 1'b0;
     assign main_mem_if.burst   = 1'b0;
-    assign main_mem_if.wr      = (write_en || shadow_wr_pending_r) && main_mem_if.available;
-    assign main_mem_if.addr    = shadow_wr_pending_r ? shadow_wr_addr_r    : write_addr;
-    assign main_mem_if.data    = shadow_wr_pending_r ? shadow_wr_data_r    : write_word;
-    assign main_mem_if.byte_en = shadow_wr_pending_r ? shadow_wr_byte_en_r : write_byte_en;
+    assign main_mem_if.wr      = sw_pop_w;
+    assign main_mem_if.addr    = sw_head_w[52:32];
+    assign main_mem_if.data    = sw_head_w[31:0];
+    assign main_mem_if.byte_en = sw_head_w[56:53];
+    assign dbg_shadow_drop_o   = dbg_shadow_drop_r;
 
     // =========================================================================
     // DDR3 read path — burst cache for unified region, passthrough for text
@@ -336,6 +367,60 @@ module apple_memory #(
     reg        rd_pending_vgc_r;
     reg [14:0] rd_pending_hires_r;
     reg [12:0] rd_pending_vgc_addr_r;
+
+    // Cache-coherency: snoop writes to the in-flight burst tag.
+    //
+    // RACE BUG (without this): cache_inv_write checks cache_tag_r, but during
+    // RD_BURST_WAIT cache_tag_r still holds the OLD tag — the NEW tag isn't
+    // committed until burst_cnt_r==3. If the CPU writes to the NEW tag while
+    // the burst is in flight, no invalidation fires, the burst loads
+    // pre-write data, and cache_valid_r is set with stale data. For static
+    // content (e.g. a splash screen written once and then displayed), the
+    // stale entry never gets invalidated by another write and persists
+    // indefinitely as wrong-color pixels.
+    //
+    // Fix: track an in-flight stale flag, set it whenever a write hits the
+    // tag currently being burst-loaded, and gate cache_valid_r at burst end.
+    // The in-flight tag itself is already held in rd_is_vgc_r / rd_vgc_addr_r
+    // / rd_hires_offset_r (latched at issue time, valid throughout RD_BURST_WAIT).
+    //
+    // There are TWO classes of racing writes we need to catch:
+    //   1. write_en pulses during RD_BURST_WAIT (or same cycle as issue).
+    //      These are new Apple-II bus writes that hit the in-flight tag.
+    //   2. the shadow write FIFO already holding a queued write to the
+    //      in-flight tag at burst issue time. This happens when an earlier
+    //      write couldn't issue because main_mem_if was busy (async CDC
+    //      handshake), and the deferred write hasn't drained yet. The
+    //      write_en pulse for this write already fired in a PRIOR cycle
+    //      (before rd_state_r was RD_BURST_WAIT), so burst_snoop_hit_w
+    //      won't catch it — we must consult the shadow FIFO directly.
+    //
+    // Unified-region addresses are of the form UNIFIED_OFFSET (0x010000) +
+    // {7'b0, group[11:0], word[1:0]}, so bit[16] set identifies unified and
+    // bits[13:2] are the tag.
+    reg burst_data_stale_r;
+    wire [11:0] inflight_burst_tag_w = rd_is_vgc_r ? rd_vgc_addr_r[12:1]
+                                                   : rd_hires_offset_r[13:2];
+    wire burst_snoop_hit_w = (rd_state_r == RD_BURST_WAIT) && write_en &&
+                             is_unified_write &&
+                             (inflight_burst_tag_w == wr_unified_group);
+
+    // Helper: check whether ANY queued shadow write targets a given tag.
+    // Used at burst-issue / pending-retry time before rd_is_vgc_r / rd_*_r
+    // have been latched. Scans all occupied shadow-FIFO entries — a queued
+    // write that hasn't drained is exactly as stale-producing as the old
+    // single-slot deferred write was. Packed entry: addr[16] = bit 48,
+    // addr[13:2] = bits [45:34].
+    function automatic shadow_pending_matches(input [11:0] tag);
+        integer i;
+        begin
+            shadow_pending_matches = 1'b0;
+            for (i = 0; i < SW_FIFO_DEPTH; i = i + 1) begin
+                if (sw_valid_r[i] && sw_fifo[i][48] && (sw_fifo[i][45:34] == tag))
+                    shadow_pending_matches = 1'b1;
+            end
+        end
+    endfunction
 
     // Combinational: DDR3 read address for new requests
     wire [20:0] text_rd_addr   = {5'b0, video_bank_i, video_address_i[15:1]};
@@ -388,6 +473,7 @@ module apple_memory #(
             rd_pending_vgc_r     <= 1'b0;
             rd_pending_hires_r   <= 15'd0;
             rd_pending_vgc_addr_r <= 13'd0;
+            burst_data_stale_r   <= 1'b0;
         end else begin
             // Default: clear ready pulses each cycle
             video_ready_r <= 1'b0;
@@ -404,9 +490,21 @@ module apple_memory #(
                 rd_is_vgc_r  <= rd_pending_vgc_r;
                 rd_hires_offset_r <= rd_pending_hires_r;
                 rd_vgc_addr_r     <= rd_pending_vgc_addr_r;
-                if (rd_pending_burst_r)
+                if (rd_pending_burst_r) begin
                     rd_state_r <= RD_BURST_WAIT;
-                else
+                    // Catch a same-cycle write to the tag we're about to load,
+                    // AND any deferred write still queued in the shadow FIFO
+                    // for the same tag. The write port and read port are on
+                    // independent CDC handshakes, so the arbiter may service
+                    // them in either order — treat coincident activity as
+                    // stale-producing.
+                    burst_data_stale_r <=
+                        (write_en && is_unified_write &&
+                         ((rd_pending_vgc_r ? rd_pending_vgc_addr_r[12:1]
+                                            : rd_pending_hires_r[13:2]) == wr_unified_group)) ||
+                        shadow_pending_matches(rd_pending_vgc_r ? rd_pending_vgc_addr_r[12:1]
+                                                                : rd_pending_hires_r[13:2]);
+                end else
                     rd_state_r <= RD_TEXT_WAIT;
                 burst_cnt_r <= 2'd0;
             end else begin
@@ -431,6 +529,14 @@ module apple_memory #(
                             if (video_mem_if.available) begin
                                 burst_cnt_r <= 2'd0;
                                 rd_state_r  <= RD_BURST_WAIT;
+                                // Catch a same-cycle write to the new burst's
+                                // tag AND any deferred write still sitting in
+                                // the shadow FIFO for the same tag.
+                                // (read_group is the combinational tag for this issue.)
+                                burst_data_stale_r <=
+                                    (write_en && is_unified_write &&
+                                     (read_group == wr_unified_group)) ||
+                                    shadow_pending_matches(read_group);
                             end else begin
                                 // Port busy — latch for retry
                                 rd_pending_r          <= 1'b1;
@@ -458,12 +564,23 @@ module apple_memory #(
                     end
 
                     RD_BURST_WAIT: begin
+                        // Snoop writes to the in-flight burst tag during the
+                        // entire load (in-flight tag = inflight_burst_tag_w).
+                        // burst_snoop_hit_w is gated by (rd_state_r == RD_BURST_WAIT).
+                        if (burst_snoop_hit_w)
+                            burst_data_stale_r <= 1'b1;
+
                         if (video_mem_if.ready) begin
                             cache_r[burst_cnt_r] <= video_mem_if.q;
                             if (burst_cnt_r == 2'd3) begin
-                                cache_tag_r   <= rd_is_vgc_r ? rd_vgc_addr_r[12:1] :
-                                                 rd_hires_offset_r[13:2];
-                                cache_valid_r <= 1'b1;
+                                cache_tag_r   <= inflight_burst_tag_w;
+                                // Combine accumulated stale flag with same-cycle
+                                // snoop so a write happening on the very last
+                                // beat is not lost (the second non-blocking
+                                // assignment to burst_data_stale_r below would
+                                // otherwise win).
+                                cache_valid_r <= !(burst_data_stale_r || burst_snoop_hit_w);
+                                burst_data_stale_r <= 1'b0;
                                 rd_state_r    <= RD_HIT_RESP;
                             end
                             burst_cnt_r <= burst_cnt_r + 2'd1;

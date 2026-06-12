@@ -97,18 +97,23 @@ module framebuffer_480p #(
     output logic [7:0]  dbg_fifo_overflow_o,   // Dropped packed writes per frame
     output logic [7:0]  dbg_fetch_start_o,     // Line fetch starts per frame
     output logic [7:0]  dbg_fetch_done_o,      // Line fetch completions per frame
-    output logic [7:0]  dbg_read_blocked_o,    // FETCH_READ cycles blocked by port unavailable
-    output logic [7:0]  dbg_yield_busy_o,      // FETCH_READ cycles yielding to near-full write FIFO
+    output logic [7:0]  dbg_read_blocked_o,    // Issue cycles blocked by port unavailable
+    output logic [7:0]  dbg_yield_busy_o,      // Issue cycles yielding to near-full write FIFO
     output logic [7:0]  dbg_late_line_o,       // Behind-display late-line detections per frame
     output logic [7:0]  dbg_flags_o,           // Live status flags
     output logic [7:0]  dbg_line_not_ready_o,  // Display line-starts before line fully fetched
     output logic [7:0]  dbg_line_lag_max_o,    // Max display-vs-fetched line lag per frame
-    output logic [7:0]  dbg_ready_phase_err_o, // Read ready pulses outside FETCH_WAIT
+    output logic [7:0]  dbg_ready_phase_err_o, // Read ready pulses outside FETCH_RUN
     output logic [7:0]  dbg_vsync_raw_o,       // Raw fb_vsync pulses seen in this frame
     output logic [7:0]  dbg_frame_start_accept_o, // Accepted frame starts in this frame
     output logic [7:0]  dbg_frame_start_reject_o, // Rejected fb_vsync pulses in this frame
     output logic [7:0]  dbg_fifo_pop_o,           // FIFO pops (writes sent to DDR3) per frame
-    output logic [7:0]  dbg_fifo_push_o           // FIFO pushes (128-bit words queued) per frame
+    output logic [7:0]  dbg_fifo_push_o,          // FIFO pushes (128-bit words queued) per frame
+    output logic [7:0]  dbg_rd_fifo_max_o,        // Peak rd_fifo fill level per frame (0..8)
+    output logic [7:0]  dbg_rd_fifo_drop_o,       // Read beats dropped because rd_fifo was full
+    output logic [7:0]  dbg_line_not_ready_total_o, // Cumulative not-ready since reset (sticky)
+    output logic [7:0]  dbg_beat_extra_o,          // Sticky: ready beats with none expected (duplicates)
+    output logic [7:0]  dbg_beat_timeout_o         // Sticky: 19µs stalls awaiting beats (losses)
 );
 
     // =========================================================================
@@ -454,18 +459,28 @@ module framebuffer_480p #(
     // FB_READ_BURST_WORDS is now a module parameter (set from top.sv)
     localparam integer PREFETCH_LEAD_LINES = 12;
 
-    localparam FETCH_IDLE    = 2'd0;
-    localparam FETCH_READ    = 2'd1;
-    localparam FETCH_WAIT    = 2'd2;
-    localparam FETCH_GAP     = 2'd3;  // 1-cycle gap between bursts for port fairness
+    // Pipelined fetch: issue side and receive side run independently within
+    // FETCH_RUN. The CDC request FIFO holds 2 requests, so the next burst is
+    // issued while the previous one's beats are still in flight — overlapping
+    // the async-CDC round-trip latency that previously serialized every
+    // burst (~28 cycles per 4 words ≈ 44µs per 320-word SHR line, marginal
+    // against the 63.5µs scanline budget under write contention).
+    // ISSUE_SPACING keeps a minimum gap between issues so the request queue
+    // drains periodically and lower-priority arbiter ports (VGC source
+    // reads, CPU shadow writes, DOC) are not starved during a line fetch.
+    localparam FETCH_IDLE    = 1'b0;
+    localparam FETCH_RUN     = 1'b1;
+    localparam ISSUE_SPACING = 8;
 
-    reg [1:0]  fetch_state_r;
+    reg        fetch_state_r;
     reg [8:0]  last_fetched_line_r;  // 9'h1FF = invalid sentinel
-    reg [10:0] fetch_word_r;
-    reg [20:0] fetch_addr_r;
+    reg [10:0] fetch_word_r;         // Receive side: words received this line
+    reg [10:0] issue_word_r;         // Issue side: words requested this line
+    reg [20:0] issue_addr_r;         // Issue side: next request address
+    reg [3:0]  in_flight_beats_r;    // Beats requested but not yet received
+    reg [3:0]  issue_spacing_r;      // Min-spacing countdown between issues
     reg [20:0] fetch_line_base_r;   // Base addr of current/last fetched line
-    reg        fetch_bank_r;
-    reg [3:0]  fetch_beats_left_r;
+    reg [2:0]  fetch_bank_r;
 
     // Double-buffer: read buffer offset, latched at display frame start
     // so it stays stable for the entire display frame.
@@ -484,12 +499,21 @@ module framebuffer_480p #(
     reg       late_line_prev_r;
     reg [7:0] dbg_line_not_ready_r;
     reg [7:0] dbg_line_lag_max_r;
+    // Latched previous-frame finals — live counters reset each frame, so
+    // reading them on the overlay misses brief spikes. These hold a stable
+    // value for a full frame.
+    reg [7:0] dbg_line_not_ready_frame_r;
+    reg [7:0] dbg_line_lag_frame_r;
+    // Cumulative not-ready events since reset (sticky, saturating) — catches
+    // rare events between overlay glances.
+    reg [7:0] dbg_line_not_ready_total_r;
     reg [7:0] dbg_ready_phase_err_r;
+    reg [7:0] dbg_rd_fifo_max_r;
+    reg [7:0] dbg_rd_fifo_drop_r;
     reg [7:0] dbg_vsync_raw_r;
     reg [7:0] dbg_frame_start_accept_r;
     reg [7:0] dbg_frame_start_reject_r;
-    reg [8:0] completed_line_even_r;
-    reg [8:0] completed_line_odd_r;
+    reg [8:0] completed_line_r [0:7];
     reg [8:0] display_line_prev_r;
     reg       display_active_prev_r;
 
@@ -505,12 +529,43 @@ module framebuffer_480p #(
     wire cy_approaching_active_w = (cy_sync_r < v_border_r) &&
                                     (cy_prefetch_sum_w >= {1'b0, v_border_r});
 
-    wire [8:0] next_line_w = display_fb_line_w + 9'd1;
-    wire [10:0] fetch_words_left_w = packed_width_r - fetch_word_r;
-    wire fetch_use_burst_w = (fetch_words_left_w >= FB_READ_BURST_WORDS[10:0]);
+    // Decoupled fetch: next line = last fetched + 1 (never skips lines)
+    localparam NUM_LINE_BANKS = 8;
+    wire [8:0] next_fetch_line_w = last_fetched_line_r + 9'd1;
+    // Bank guard: don't write to bank the display is currently reading
+    wire fetch_bank_safe_w = !display_in_active_w ||
+                             (next_fetch_line_w[2:0] != display_fb_line_w[2:0]);
+    // Prefetch limit: during vblank fill all 8 banks, during active stay <= 7 ahead
+    wire [8:0] prefetch_limit_w = display_in_active_w ?
+        (display_fb_line_w + 9'(NUM_LINE_BANKS)) : 9'(NUM_LINE_BANKS);
+    wire prefetch_ok_w = (next_fetch_line_w < prefetch_limit_w);
+
+    // Issue-side burst sizing and occupancy guard. The occupancy check
+    // bounds (rd_fifo fill + beats in flight + this burst) to the rd_fifo
+    // depth so response beats can never be dropped on a full rd_fifo.
+    wire [10:0] issue_words_left_w = packed_width_r - issue_word_r;
+    wire issue_burst_w = (issue_words_left_w >= FB_READ_BURST_WORDS[10:0]);
+    wire [3:0] issue_beats_w = issue_burst_w ? 4'(FB_READ_BURST_WORDS) : 4'd1;
+    wire issue_pending_w = (issue_word_r != packed_width_r);
+    // KEEP AT 1. 2-outstanding CDC requests (SERIALIZE_FETCH=0) corrupt
+    // read data on GW5AT silicon: beat counts stay balanced (verified by
+    // the beat_extra/beat_timeout detectors reading 00 during corruption)
+    // but chained requests return the PREVIOUS request's data — RTL
+    // analysis and STA are both clean, cause unresolved. Throughput is
+    // instead gained via 8-word bursts (READ_BURST8_PORT in ddr3_ports):
+    // one ordinary serialized request fetches two 128-bit words.
+    localparam SERIALIZE_FETCH = 1;
+    wire issue_ok_w = (fetch_state_r == FETCH_RUN) &&
+                      issue_pending_w &&
+                      (SERIALIZE_FETCH == 0 || in_flight_beats_r == 4'd0) &&
+                      (issue_spacing_r == 4'd0) &&
+                      !fifo_busy_w &&
+                      fb_read_port.available &&
+                      ({1'b0, rd_fifo_count} + {2'b0, in_flight_beats_r} +
+                       {2'b0, issue_beats_w} <= 6'(RD_FIFO_DEPTH));
     // Drop occurs when the 4th pair (completing a 128-bit word) can't push to FIFO
     wire wr_drop_w = fb_we_r && wr_x_r[0] && (wr_accum_slot_r == 2'd3) && fifo_full_w;
-    wire [8:0] completed_line_for_display_w = display_fb_line_w[0] ? completed_line_odd_r : completed_line_even_r;
+    wire [8:0] completed_line_for_display_w = completed_line_r[display_fb_line_w[2:0]];
     wire line_ready_w = (completed_line_for_display_w == display_fb_line_w);
     wire [8:0] line_lag_w = (completed_line_for_display_w == 9'h1FF ||
                              completed_line_for_display_w >= display_fb_line_w) ?
@@ -518,23 +573,45 @@ module framebuffer_480p #(
     wire [7:0] line_lag_clamped_w = line_lag_w[8] ? 8'hFF : line_lag_w[7:0];
     wire display_line_step_w = display_in_active_w &&
                                (!display_active_prev_r || (display_fb_line_w != display_line_prev_r));
-    wire ready_phase_err_w = fb_read_port.ready && (fetch_state_r != FETCH_WAIT);
+    wire ready_phase_err_w = fb_read_port.ready && (fetch_state_r != FETCH_RUN);
     wire late_line_w = display_in_active_w &&
                        (display_fb_line_w != 9'd0) &&
                        (last_fetched_line_r != 9'h1FF) &&
                        (last_fetched_line_r < display_fb_line_w);
+    // One-shot guard: without it, after prefetching lines 0-7 in the
+    // approach window, prefetch_ok_w blocks line 8 and the line-0 condition
+    // (last_fetched != 0) retriggers — looping refetches of lines 0-7 that
+    // hog the DDR3 port for the entire approach window.
+    reg line0_prefetched_r;
     wire fetch_start_line0_w = (fetch_state_r == FETCH_IDLE) &&
                                cy_approaching_active_w &&
+                               !line0_prefetched_r &&
                                (last_fetched_line_r != 9'd0) &&
                                px_empty;
+    // Catch-up: if the fetcher has fallen behind the display (port
+    // contention), skip lines the display already passed instead of
+    // fetching them late. Without this, the bank guard locks the fetcher
+    // into permanent lag-1 lockstep: it can never fetch the line the
+    // display is on, so every line completes one line too late and the
+    // display reads 8-line-stale bank content for the rest of the frame.
+    // Skipped lines display stale data once — they were already lost.
+    wire fetch_catchup_w = (fetch_state_r == FETCH_IDLE) &&
+                           !fetch_start_line0_w &&
+                           display_in_active_w &&
+                           (last_fetched_line_r != 9'h1FF) &&
+                           (next_fetch_line_w <= display_fb_line_w) &&
+                           (next_fetch_line_w < fb_height_r);
     wire fetch_start_next_w = (fetch_state_r == FETCH_IDLE) &&
                               !fetch_start_line0_w &&
-                              display_in_active_w &&
-                              (next_line_w < fb_height_r) &&
-                              (next_line_w != last_fetched_line_r) &&
+                              !fetch_catchup_w &&
+                              (display_in_active_w || cy_approaching_active_w) &&
+                              (next_fetch_line_w < fb_height_r) &&
+                              (next_fetch_line_w != last_fetched_line_r) &&
+                              fetch_bank_safe_w &&
+                              prefetch_ok_w &&
                               px_empty;
     wire fetch_start_pulse_w = fetch_start_line0_w || fetch_start_next_w;
-    wire fetch_done_pulse_w = (fetch_state_r == FETCH_WAIT) &&
+    wire fetch_done_pulse_w = (fetch_state_r == FETCH_RUN) &&
                               fb_read_port.ready &&
                               (fetch_word_r == packed_width_r - 11'd1);
 
@@ -553,12 +630,23 @@ module framebuffer_480p #(
             late_line_prev_r <= 1'b0;
             dbg_line_not_ready_r <= 8'd0;
             dbg_line_lag_max_r <= 8'd0;
+            dbg_line_not_ready_frame_r <= 8'd0;
+            dbg_line_lag_frame_r <= 8'd0;
+            dbg_line_not_ready_total_r <= 8'd0;
             dbg_ready_phase_err_r <= 8'd0;
+            dbg_rd_fifo_max_r <= 8'd0;
+            dbg_rd_fifo_drop_r <= 8'd0;
             dbg_vsync_raw_r <= 8'd0;
             dbg_frame_start_accept_r <= 8'd0;
             dbg_frame_start_reject_r <= 8'd0;
-            completed_line_even_r <= 9'h1FF;
-            completed_line_odd_r <= 9'h1FF;
+            completed_line_r[0] <= 9'h1FF;
+            completed_line_r[1] <= 9'h1FF;
+            completed_line_r[2] <= 9'h1FF;
+            completed_line_r[3] <= 9'h1FF;
+            completed_line_r[4] <= 9'h1FF;
+            completed_line_r[5] <= 9'h1FF;
+            completed_line_r[6] <= 9'h1FF;
+            completed_line_r[7] <= 9'h1FF;
             display_line_prev_r <= 9'd0;
             display_active_prev_r <= 1'b0;
         end else if (frame_start_w) begin
@@ -572,16 +660,26 @@ module framebuffer_480p #(
             dbg_fifo_push_r <= 16'd0;
             dbg_late_line_r <= 8'd0;
             late_line_prev_r <= 1'b0;
+            // Latch previous frame's finals before clearing the live counters
+            dbg_line_not_ready_frame_r <= dbg_line_not_ready_r;
+            dbg_line_lag_frame_r <= dbg_line_lag_max_r;
             dbg_line_not_ready_r <= 8'd0;
             dbg_line_lag_max_r <= 8'd0;
             dbg_ready_phase_err_r <= 8'd0;
+            dbg_rd_fifo_max_r <= 8'd0;
+            dbg_rd_fifo_drop_r <= 8'd0;
             dbg_vsync_raw_r <= 8'd1;
             dbg_frame_start_accept_r <= 8'd1;
             dbg_frame_start_reject_r <= 8'd0;
-            completed_line_even_r <= 9'h1FF;
-            completed_line_odd_r <= 9'h1FF;
-            display_line_prev_r <= 9'd0;
-            display_active_prev_r <= 1'b0;
+            // NOTE: completed_line_r is deliberately NOT reset here.
+            // frame_start_w is the WRITE-side (Apple-domain) vsync, async to
+            // the HDMI raster — wiping read-side bank bookkeeping mid-display
+            // made line_not_ready count ~8 false events per frame and forced
+            // line_lag to 0 via the sentinel. The banks still hold valid line
+            // data across write-frame boundaries; completed_line_r tracks
+            // which line each bank holds, which stays true regardless of
+            // write-side frame phase. display_line_prev_r/display_active_prev_r
+            // are likewise display-side state and keep running.
         end else begin
             if (fb_vsync_r) begin
                 if (dbg_vsync_raw_r != 8'hFF)
@@ -609,10 +707,11 @@ module framebuffer_480p #(
             if (fifo_pop_w && dbg_fifo_pop_r != 16'hFFFF)
                 dbg_fifo_pop_r <= dbg_fifo_pop_r + 16'd1;
 
-            if ((fetch_state_r == FETCH_READ) && fifo_busy_w && dbg_yield_busy_r != 8'hFF)
+            if ((fetch_state_r == FETCH_RUN) && issue_pending_w &&
+                fifo_busy_w && dbg_yield_busy_r != 8'hFF)
                 dbg_yield_busy_r <= dbg_yield_busy_r + 8'd1;
 
-            if ((fetch_state_r == FETCH_READ) && !fifo_busy_w &&
+            if ((fetch_state_r == FETCH_RUN) && issue_pending_w && !fifo_busy_w &&
                 !fb_read_port.available && dbg_read_blocked_r != 8'hFF)
                 dbg_read_blocked_r <= dbg_read_blocked_r + 8'd1;
 
@@ -621,21 +720,27 @@ module framebuffer_480p #(
 
             late_line_prev_r <= late_line_w;
 
-            if (fetch_done_pulse_w) begin
-                if (last_fetched_line_r[0])
-                    completed_line_odd_r <= last_fetched_line_r;
-                else
-                    completed_line_even_r <= last_fetched_line_r;
-            end
+            if (fetch_done_pulse_w)
+                completed_line_r[last_fetched_line_r[2:0]] <= last_fetched_line_r;
 
-            if (display_line_step_w && !line_ready_w && dbg_line_not_ready_r != 8'hFF)
-                dbg_line_not_ready_r <= dbg_line_not_ready_r + 8'd1;
+            if (display_line_step_w && !line_ready_w) begin
+                if (dbg_line_not_ready_r != 8'hFF)
+                    dbg_line_not_ready_r <= dbg_line_not_ready_r + 8'd1;
+                if (dbg_line_not_ready_total_r != 8'hFF)
+                    dbg_line_not_ready_total_r <= dbg_line_not_ready_total_r + 8'd1;
+            end
 
             if (display_in_active_w && (line_lag_clamped_w > dbg_line_lag_max_r))
                 dbg_line_lag_max_r <= line_lag_clamped_w;
 
             if (ready_phase_err_w && dbg_ready_phase_err_r != 8'hFF)
                 dbg_ready_phase_err_r <= dbg_ready_phase_err_r + 8'd1;
+
+            // rd_fifo diagnostics: peak fill and dropped beats
+            if ({3'd0, rd_fifo_count} > dbg_rd_fifo_max_r)
+                dbg_rd_fifo_max_r <= {3'd0, rd_fifo_count};
+            if (lb_wr_w && rd_fifo_count[RD_FIFO_ADDR_BITS] && dbg_rd_fifo_drop_r != 8'hFF)
+                dbg_rd_fifo_drop_r <= dbg_rd_fifo_drop_r + 8'd1;
 
             if (display_in_active_w)
                 display_line_prev_r <= display_fb_line_w;
@@ -648,12 +753,20 @@ module framebuffer_480p #(
             fetch_state_r <= FETCH_IDLE;
             last_fetched_line_r <= 9'h1FF;
             fetch_word_r <= 11'd0;
-            fetch_addr_r <= 21'd0;
+            issue_word_r <= 11'd0;
+            issue_addr_r <= 21'd0;
+            in_flight_beats_r <= 4'd0;
+            issue_spacing_r <= 4'd0;
             fetch_line_base_r <= 21'd0;
-            fetch_bank_r <= 1'b0;
-            fetch_beats_left_r <= 4'd0;
+            fetch_bank_r <= 3'd0;
             rd_buf_offset_r <= 21'd0;
+            line0_prefetched_r <= 1'b0;
         end else begin
+            // Rearm the one-shot line-0 prefetch once the approach window
+            // ends (display enters active, or mode change moves the border).
+            if (!cy_approaching_active_w)
+                line0_prefetched_r <= 1'b0;
+
             case (fetch_state_r)
 
             FETCH_IDLE: begin
@@ -663,64 +776,67 @@ module framebuffer_480p #(
                 // fetch_start_pulse_w fires and resets rd_fifo/lb_wr_pixel_x.
                 // Without this, lb_wr_pixel_x carries over from the previous
                 // line and pixels are written to wrong line buffer positions.
-                if (cy_approaching_active_w && last_fetched_line_r != 9'd0 && px_empty) begin
+                if (fetch_start_line0_w) begin
                     // Approaching active area — prefetch line 0
                     // Latch read buffer: read from the buffer the writer
                     // just FINISHED (opposite of writer's current buffer).
                     rd_buf_offset_r <= frame_parity_r ? 21'd0 : BUFFER_OFFSET;
                     last_fetched_line_r <= 9'd0;
-                    fetch_bank_r <= 1'b0;
+                    line0_prefetched_r <= 1'b1;
+                    fetch_bank_r <= 3'd0;
                     fetch_word_r <= 11'd0;
-                    fetch_beats_left_r <= 4'd0;
+                    issue_word_r <= 11'd0;
+                    in_flight_beats_r <= 4'd0;
+                    issue_spacing_r <= 4'd0;
                     fetch_line_base_r <= 21'd0;
-                    fetch_addr_r <= 21'd0;
-                    fetch_state_r <= FETCH_READ;
-                end else if (px_empty && display_in_active_w &&
-                             next_line_w < fb_height_r &&
-                             next_line_w != last_fetched_line_r) begin
-                    // Displaying line N — prefetch line N+1
+                    issue_addr_r <= 21'd0;
+                    fetch_state_r <= FETCH_RUN;
+                end else if (fetch_catchup_w) begin
+                    // Behind the display — skip one line per cycle (no fetch)
+                    // until next_fetch_line_w is back ahead of the display.
+                    last_fetched_line_r <= next_fetch_line_w;
+                    fetch_line_base_r <= fetch_line_base_r + {10'd0, packed_width_r};
+                end else if (fetch_start_next_w) begin
+                    // Decoupled sequential fetch: always fetch last+1
                     // Use incremental addition instead of multiplication
                     // (packed_width_r only changes at vsync so this is always correct)
-                    last_fetched_line_r <= next_line_w;
-                    fetch_bank_r <= next_line_w[0];
+                    last_fetched_line_r <= next_fetch_line_w;
+                    fetch_bank_r <= next_fetch_line_w[2:0];
                     fetch_word_r <= 11'd0;
-                    fetch_beats_left_r <= 4'd0;
+                    issue_word_r <= 11'd0;
+                    in_flight_beats_r <= 4'd0;
+                    issue_spacing_r <= 4'd0;
                     fetch_line_base_r <= fetch_line_base_r + {10'd0, packed_width_r};
-                    fetch_addr_r <= fetch_line_base_r + {10'd0, packed_width_r};
-                    fetch_state_r <= FETCH_READ;
+                    issue_addr_r <= fetch_line_base_r + {10'd0, packed_width_r};
+                    fetch_state_r <= FETCH_RUN;
                 end
             end
 
-            FETCH_READ: begin
-                // Only proceed when write FIFO is not near full AND read port
-                // is available (CDC ready to accept).  Without the available
-                // check, the rd pulse is silently dropped and the FSM hangs
-                // in FETCH_WAIT waiting for ready beats that never come.
-                if (!fifo_busy_w && fb_read_port.available) begin
-                    fetch_beats_left_r <= fetch_use_burst_w ? 4'(FB_READ_BURST_WORDS) : 4'd1;
-                    fetch_state_r <= FETCH_WAIT;
+            FETCH_RUN: begin
+                // Issue side: queue the next burst into the CDC request FIFO
+                // while previous beats are still in flight. issue_ok_w gates
+                // on port availability, write-FIFO yield, occupancy, and the
+                // fairness spacing counter.
+                if (issue_ok_w) begin
+                    issue_word_r <= issue_word_r + {7'd0, issue_beats_w};
+                    issue_addr_r <= issue_addr_r + {17'd0, issue_beats_w};
+                    issue_spacing_r <= 4'(ISSUE_SPACING);
+                end else if (issue_spacing_r != 4'd0) begin
+                    issue_spacing_r <= issue_spacing_r - 4'd1;
                 end
-            end
 
-            FETCH_WAIT: begin
+                // In-flight beat tracking (issue and receive can coincide)
+                in_flight_beats_r <= in_flight_beats_r
+                                     + (issue_ok_w ? issue_beats_w : 4'd0)
+                                     - (fb_read_port.ready ? 4'd1 : 4'd0);
+
+                // Receive side: count beats; line complete when all received
                 if (fb_read_port.ready) begin
-                    if (fetch_word_r == packed_width_r - 11'd1) begin
+                    if (fetch_word_r == packed_width_r - 11'd1)
                         fetch_state_r <= FETCH_IDLE;
-                    end else begin
+                    else
                         fetch_word_r <= fetch_word_r + 11'd1;
-                        fetch_addr_r <= fetch_addr_r + 21'd1;
-                        fetch_beats_left_r <= fetch_beats_left_r - 4'd1;
-                        // Go through FETCH_GAP between bursts so lower-priority
-                        // ports (DOC, FB_WRITE) get a window to be serviced.
-                        fetch_state_r <= (fetch_beats_left_r == 4'd1) ? FETCH_GAP : FETCH_WAIT;
-                    end
                 end
-            end
-
-            FETCH_GAP: begin
-                // 1-cycle gap: port 0 has no queued request, arbiter can
-                // service other ports if they have pending requests.
-                fetch_state_r <= FETCH_READ;
             end
 
             default: fetch_state_r <= FETCH_IDLE;
@@ -728,13 +844,55 @@ module framebuffer_480p #(
         end
     end
 
-    // Drive read port
-    assign fb_read_port.addr    = fetch_addr_r + rd_buf_offset_r;
+    // =========================================================================
+    // Beat-balance detectors (sticky, never reset except by rst_n)
+    // =========================================================================
+    // Discriminates the two failure modes of the multi-outstanding read path:
+    //   - dbg_beat_extra_r: a ready beat arrived when no beat was expected
+    //     (state != FETCH_RUN, or in_flight == 0). Nonzero = the arbiter/CDC
+    //     DUPLICATED a request or delivered beats late across a line boundary.
+    //   - dbg_beat_timeout_r: beats outstanding but none arrived for ~19µs
+    //     (1024 cycles; legitimate latency is <1µs). Nonzero = a request or
+    //     its response was LOST.
+    reg [7:0]  dbg_beat_extra_r;
+    reg [7:0]  dbg_beat_timeout_r;
+    reg [10:0] beat_wait_cnt_r;
+    wire beat_unexpected_w = fb_read_port.ready &&
+                             ((fetch_state_r != FETCH_RUN) || (in_flight_beats_r == 4'd0));
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            dbg_beat_extra_r <= 8'd0;
+            dbg_beat_timeout_r <= 8'd0;
+            beat_wait_cnt_r <= 11'd0;
+        end else begin
+            if (beat_unexpected_w && dbg_beat_extra_r != 8'hFF)
+                dbg_beat_extra_r <= dbg_beat_extra_r + 8'd1;
+
+            if ((fetch_state_r == FETCH_RUN) && (in_flight_beats_r != 4'd0) &&
+                !fb_read_port.ready) begin
+                beat_wait_cnt_r <= beat_wait_cnt_r + 11'd1;
+                if (beat_wait_cnt_r == 11'h7FF) begin
+                    beat_wait_cnt_r <= 11'd0;
+                    if (dbg_beat_timeout_r != 8'hFF)
+                        dbg_beat_timeout_r <= dbg_beat_timeout_r + 8'd1;
+                end
+            end else begin
+                beat_wait_cnt_r <= 11'd0;
+            end
+        end
+    end
+
+    assign dbg_beat_extra_o = dbg_beat_extra_r;
+    assign dbg_beat_timeout_o = dbg_beat_timeout_r;
+
+    // Drive read port (issue side)
+    assign fb_read_port.addr    = issue_addr_r + rd_buf_offset_r;
     assign fb_read_port.data    = 32'd0;
     assign fb_read_port.byte_en = 4'b1111;
     assign fb_read_port.wr      = 1'b0;
-    assign fb_read_port.rd      = (fetch_state_r == FETCH_READ) && !fifo_busy_w && fb_read_port.available;
-    assign fb_read_port.burst   = fetch_use_burst_w;
+    assign fb_read_port.rd      = issue_ok_w;
+    assign fb_read_port.burst   = issue_burst_w;
 
     assign dbg_fifo_level_o = fifo_count_clamped_w;
     assign dbg_fifo_highwater_o = dbg_fifo_highwater_r;
@@ -746,9 +904,12 @@ module framebuffer_480p #(
     assign dbg_fifo_pop_o = dbg_fifo_pop_r[15:8];   // Upper byte: count / 256
     assign dbg_fifo_push_o = dbg_fifo_push_r[15:8]; // Upper byte: count / 256
     assign dbg_late_line_o = dbg_late_line_r;
-    assign dbg_line_not_ready_o = dbg_line_not_ready_r;
-    assign dbg_line_lag_max_o = dbg_line_lag_max_r;
+    assign dbg_line_not_ready_o = dbg_line_not_ready_frame_r;
+    assign dbg_line_lag_max_o = dbg_line_lag_frame_r;
+    assign dbg_line_not_ready_total_o = dbg_line_not_ready_total_r;
     assign dbg_ready_phase_err_o = dbg_ready_phase_err_r;
+    assign dbg_rd_fifo_max_o = dbg_rd_fifo_max_r;
+    assign dbg_rd_fifo_drop_o = dbg_rd_fifo_drop_r;
     assign dbg_vsync_raw_o = dbg_vsync_raw_r;
     assign dbg_frame_start_accept_o = dbg_frame_start_accept_r;
     assign dbg_frame_start_reject_o = dbg_frame_start_reject_r;
@@ -767,25 +928,28 @@ module framebuffer_480p #(
     // Line Buffer — 1 pixel per entry (matches DDR3 architecture)
     // =========================================================================
     //
-    // Single BRAM array: 2 banks x 1024 entries x 18 bits (RGB666).
+    // Single BRAM array: 8 banks x 1024 entries x 18 bits (RGB666).
     // Write port: clk (54 MHz) — serialized memory read responses
     // Read port: clk_pixel (27 MHz) — HDMI pixel output
     //
     // Stores 1 pixel per entry, serializing the 2-pixel words through a
     // small buffer on the write side.
 
-    reg [COLOR_BITS-1:0] line_buf [0:2047] /* synthesis syn_ramstyle="block_ram" */;
+    reg [COLOR_BITS-1:0] line_buf [0:8191] /* synthesis syn_ramstyle="block_ram" */;
 
     // ---- Write side (clk domain, 54 MHz) ----
     // Each 32-bit word contains 2 packed RGB565 pixels.
     // Ready can pulse on consecutive cycles during burst reads,
     // so we buffer pixels and drain 1 per cycle to the single-port BRAM.
 
-    wire lb_wr_w = fb_read_port.ready && (fetch_state_r == FETCH_WAIT);
+    wire lb_wr_w = fb_read_port.ready && (fetch_state_r == FETCH_RUN);
 
     // ---- Read FIFO: buffer raw 32-bit words (single write port) ----
-    localparam RD_FIFO_DEPTH = 8;
-    localparam RD_FIFO_ADDR_BITS = 3;
+    // 16 deep: holds one full 8-word burst plus extraction backlog, so the
+    // next burst can be issued while the previous one drains (occupancy
+    // guard in issue_ok_w enforces no-overflow).
+    localparam RD_FIFO_DEPTH = 16;
+    localparam RD_FIFO_ADDR_BITS = 4;
     reg [31:0] rd_fifo [0:RD_FIFO_DEPTH-1];
     reg [RD_FIFO_ADDR_BITS:0] rd_fifo_wr_ptr, rd_fifo_rd_ptr;
     wire [RD_FIFO_ADDR_BITS:0] rd_fifo_count = rd_fifo_wr_ptr - rd_fifo_rd_ptr;
@@ -872,7 +1036,7 @@ module framebuffer_480p #(
                     bp_sync_pending_r <= 1'b1;
 
                 if (fb_we_r) begin
-                    line_buf[{bypass_y_r[0], bypass_x_r[9:0]}] <= fb_data_r;
+                    line_buf[{bypass_y_r[2:0], bypass_x_r[9:0]}] <= fb_data_r;
                     if (bypass_x_r == fb_width - 11'd1) begin
                         bypass_x_r <= 11'd0;
                         // Apply frame sync at clean line boundary only
@@ -891,9 +1055,11 @@ module framebuffer_480p #(
     end endgenerate
 
     // ---- Read side (clk_pixel domain, 27 MHz) ----
-    // Bank = line parity, computed directly from hdmi_cy — no CDC needed.
+    // Bank = line[2:0], computed directly from hdmi_cy — no CDC needed.
+    // display_cy_offset_px_w[0] = raster sub-line (2x vertical scaling)
+    // display_cy_offset_px_w[3:1] = fb_line[2:0] = 8-bank index
     wire [9:0] display_cy_offset_px_w = hdmi_cy - v_border_px_r;
-    wire       rd_bank_w = display_cy_offset_px_w[1];
+    wire [2:0] rd_bank_w = display_cy_offset_px_w[3:1];
 
     // =========================================================================
     // Output path — clk_pixel domain (27 MHz)
@@ -932,7 +1098,7 @@ module framebuffer_480p #(
     wire [9:0]  next_fb_x_w = next_cx_w[9:0] - h_border_px_r[9:0];
 
     // Pipeline stage 1: address register + control flags (posedge N)
-    reg [10:0] lb_rd_addr;
+    reg [12:0] lb_rd_addr;
     reg in_active_s1_r;
     reg scanline_dim_s1_r;
 
@@ -940,7 +1106,7 @@ module framebuffer_480p #(
         if (next_in_h_active_w && in_v_active_px_w)
             lb_rd_addr <= {rd_bank_w, next_fb_x_w[9:0]};
         else
-            lb_rd_addr <= 11'd0;
+            lb_rd_addr <= 13'd0;
         in_active_s1_r <= next_in_h_active_w && in_v_active_px_w;
         scanline_dim_s1_r <= scanline_en && hdmi_cy[0];
     end

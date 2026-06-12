@@ -64,14 +64,14 @@ PLLA PLLA_inst (
 defparam PLLA_inst.FCLKIN = "27";
 defparam PLLA_inst.IDIV_SEL = 1;
 defparam PLLA_inst.FBDIV_SEL = 1;
-defparam PLLA_inst.ODIV0_SEL = 2;
+defparam PLLA_inst.ODIV0_SEL = 4;
 defparam PLLA_inst.ODIV1_SEL = 8;
-defparam PLLA_inst.ODIV2_SEL = 2;
+defparam PLLA_inst.ODIV2_SEL = 4;
 defparam PLLA_inst.ODIV3_SEL = 8;
 defparam PLLA_inst.ODIV4_SEL = 8;
 defparam PLLA_inst.ODIV5_SEL = 8;
 defparam PLLA_inst.ODIV6_SEL = 8;
-defparam PLLA_inst.MDIV_SEL = 32;
+defparam PLLA_inst.MDIV_SEL = 48;
 defparam PLLA_inst.MDIV_FRAC_SEL = 0;
 defparam PLLA_inst.ODIV0_FRAC_SEL = 0;
 defparam PLLA_inst.CLKOUT0_EN = "TRUE";

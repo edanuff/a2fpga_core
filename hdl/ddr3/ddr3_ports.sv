@@ -57,7 +57,13 @@ module ddr3_ports #(
     parameter [PORT_ADDR_WIDTH-1:0] PORT_BASE_ADDR [NUM_PORTS] = '{NUM_PORTS{0}},
     // Port index that uses 128-bit wide writes (-1 = none).
     // When active_port matches, S_WRITE uses the full 128-bit data with mask=0.
-    parameter integer WIDE_WR_PORT = -1
+    parameter integer WIDE_WR_PORT = -1,
+    // Port whose burst reads fetch TWO consecutive 128-bit words (8 beats)
+    // per granted request instead of one (4 beats). Doubles per-request
+    // read throughput for a latency-bound client (framebuffer line fetch)
+    // without queueing multiple CDC requests — the CDC sees one ordinary
+    // request per round trip. -1 disables.
+    parameter integer READ_BURST8_PORT = -1
 ) (
     input  wire clk_client,          // Client clock (54 MHz, from CLKDIV2)
     input  wire clk_ddr,             // DDR3 controller clock (108 MHz)
@@ -156,7 +162,10 @@ module ddr3_ports #(
             ddr3_port_cdc #(
                 .PORT_ADDR_WIDTH(PORT_ADDR_WIDTH),
                 .DATA_WIDTH(DATA_WIDTH),
-                .DQM_WIDTH(DQM_WIDTH)
+                .DQM_WIDTH(DQM_WIDTH),
+                // 16 entries: an 8-beat burst pushed at 81 MHz drains at
+                // 54 MHz — 8-deep left no margin against a stalled drain.
+                .RESP_FIFO_ADDR_BITS(4)
             ) u_cdc (
                 .clk_client       (clk_client),
                 .clk_ddr          (clk_ddr),
@@ -204,13 +213,19 @@ module ddr3_ports #(
 
     // Pre-computed DDR addresses per port (registered, breaks timing path).
     reg [DDR_ADDR_WIDTH-1:0] port_ddr_addr [NUM_PORTS];
+    // Second 128-bit word address for READ_BURST8_PORT (mapped_addr + 4
+    // 32-bit words = next 128-bit word). Same registered pipeline depth.
+    reg [DDR_ADDR_WIDTH-1:0] port_ddr_addr2 [NUM_PORTS];
     generate
         for (genvar gd = 0; gd < NUM_PORTS; gd++) begin : gen_ddr_addr
             always @(posedge clk_ddr or posedge rst) begin
-                if (rst)
+                if (rst) begin
                     port_ddr_addr[gd] <= '0;
-                else
+                    port_ddr_addr2[gd] <= '0;
+                end else begin
                     port_ddr_addr[gd] <= word_to_ddr_addr(mapped_addr[gd]);
+                    port_ddr_addr2[gd] <= word_to_ddr_addr(mapped_addr[gd] + 21'd4);
+                end
             end
         end
     endgenerate
@@ -229,6 +244,7 @@ module ddr3_ports #(
     localparam S_TEST_WR   = 4'd7;   // DDR3 loopback: write test pattern
     localparam S_TEST_RD   = 4'd8;   // DDR3 loopback: issue read
     localparam S_TEST_WAIT = 4'd9;   // DDR3 loopback: check result
+    localparam S_READ_CMD2 = 4'd10;  // Second 128-bit read for READ_BURST8_PORT
     reg [3:0] state;
     reg [PORT_IDX_WIDTH-1:0] active_port;
     reg                      active_wr;
@@ -237,6 +253,10 @@ module ddr3_ports #(
     reg [DDR_ADDR_WIDTH-1:0] active_ddr_addr;
     reg [DDR_DATA_WIDTH-1:0] rd_data_latched;
     reg [1:0]                beat_cnt;
+    // 8-beat read sequencing (READ_BURST8_PORT only)
+    reg                      active_burst8;     // This grant fetches 2 words
+    reg                      burst8_phase2;     // Second word in progress
+    reg [DDR_ADDR_WIDTH-1:0] active_ddr_addr2;  // Second word's DDR address
 
     // =========================================================================
     // DDR3 loopback test registers
@@ -318,6 +338,9 @@ module ddr3_ports #(
             active_burst   <= 1'b0;
             active_slot    <= 2'b0;
             active_ddr_addr <= '0;
+            active_ddr_addr2 <= '0;
+            active_burst8  <= 1'b0;
+            burst8_phase2  <= 1'b0;
             rd_data_latched <= '0;
             beat_cnt       <= 2'b0;
             test_done      <= 1'b0;
@@ -356,6 +379,11 @@ module ddr3_ports #(
                     if (cdc_req_pending[active_port]) begin
                         active_slot     <= mapped_addr[active_port][1:0];
                         active_ddr_addr <= port_ddr_addr[active_port];
+                        active_ddr_addr2 <= port_ddr_addr2[active_port];
+                        active_burst8   <= (READ_BURST8_PORT >= 0) &&
+                                           (active_port == READ_BURST8_PORT[PORT_IDX_WIDTH-1:0]) &&
+                                           active_burst && !active_wr;
+                        burst8_phase2   <= 1'b0;
                         state <= active_wr ? S_WRITE : S_READ_CMD;
                     end else begin
                         state <= S_IDLE;  // Ghost squashed
@@ -407,9 +435,22 @@ module ddr3_ports #(
                     if (active_burst) begin
                         beat_cnt <= beat_cnt + 2'd1;
                         if (beat_cnt == 2'd3)
-                            state <= S_DONE;
+                            state <= (active_burst8 && !burst8_phase2) ?
+                                     S_READ_CMD2 : S_DONE;
                     end else begin
                         state <= S_DONE;
+                    end
+                end
+
+                // Second 128-bit read for an 8-beat burst — beats 4-7 flow
+                // through the same S_READ_WAIT/S_RESPOND path, then S_DONE.
+                S_READ_CMD2: begin
+                    if (cmd_ready) begin
+                        cmd_en <= 1'b1;
+                        cmd    <= CMD_READ;
+                        addr   <= active_ddr_addr2;
+                        burst8_phase2 <= 1'b1;
+                        state  <= S_READ_WAIT;
                     end
                 end
 

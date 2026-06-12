@@ -63,7 +63,7 @@ wire pll_rst;
         .MDWDI(mdwdi)
     );
     defparam u_pll_init.CLK_PERIOD = 20;
-    defparam u_pll_init.MULTI_FAC = 32;
+    defparam u_pll_init.MULTI_FAC = 48;
 
 
 endmodule

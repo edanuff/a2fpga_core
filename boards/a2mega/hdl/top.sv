@@ -133,8 +133,9 @@ module top #(
 
     // Clocks
 
-    wire clk_logic_ddr_w;           // 54 MHz from CLKDIV2 (synchronous with DDR3)
-    wire clk_logic_w = clk_logic_ddr_w;
+    wire clk_logic_ddr_w;           // 54 MHz from CLKDIV2 (kept for debug, no longer drives logic)
+    wire clk_logic_pll_w;           // 54 MHz from board PLL CLKOUT2 (independent of DDR3)
+    wire clk_logic_w = clk_logic_pll_w;  // logic runs on independent PLL
     wire clk_lock_w;
     wire clk_pixel_w;
     wire clk_hdmi_w;
@@ -142,9 +143,9 @@ module top #(
 
     clk_pll clocks_pll (
         .lock(clk_lock_w), //output lock
-        .clkout0(clk_pixel_w), //output clkout0
-        .clkout1(clk_hdmi_w), //output clkout1
-        .clkout2(), //output clkout2 (unused — clk_logic from CLKDIV2)
+        .clkout0(clk_pixel_w), //output clkout0 (27 MHz pixel clock)
+        .clkout1(clk_hdmi_w), //output clkout1 (135 MHz TMDS)
+        .clkout2(clk_logic_pll_w), //output clkout2 (54 MHz logic — independent of DDR3)
         .clkin(clk) //input clkin
     );
 
@@ -362,7 +363,9 @@ module top #(
         .vgc_address_i(vgc_address_w),
         .vgc_rd_i(vgc_rd_w),
         .vgc_data_o(vgc_data_w),
-        .vgc_ready_o(vgc_ready_w)
+        .vgc_ready_o(vgc_ready_w),
+
+        .dbg_shadow_drop_o(shadow_dbg_drop_w)
     );
 
     // Slots
@@ -432,6 +435,8 @@ module top #(
     wire        vgc_fb_we_w;
     wire [17:0] vgc_fb_data_w;
     wire        vgc_fb_vsync_w;
+    wire [7:0]  vgc_dbg_missed_hsync_w;
+    wire [7:0]  shadow_dbg_drop_w;
 
     wire [7:0] rgb_r_w;
     wire [7:0] rgb_g_w;
@@ -503,7 +508,9 @@ module top #(
         .vgc_address_o(vgc_address_w),
         .vgc_rd_o(vgc_rd_w),
         .vgc_data_i(vgc_data_w),
-        .vgc_ready_i(vgc_ready_w)
+        .vgc_ready_i(vgc_ready_w),
+
+        .dbg_missed_hsync_o(vgc_dbg_missed_hsync_w)
     );
 
     framebuffer_writer #(
@@ -847,7 +854,7 @@ module top #(
 
     wire init_calib_complete_w;
     wire ddr_rst_w;
-    wire clk_x1_w;              // 108 MHz from DDR3 controller
+    wire clk_x1_w;              // 81 MHz from DDR3 controller (324/4)
     wire [10:0] hdmi_cx_w;      // HDMI raster X (0–857)
     wire [9:0]  hdmi_cy_w;      // HDMI raster Y (0–524)
     wire [23:0] fb_rgb_w;       // Current framebuffer RGB output
@@ -855,7 +862,7 @@ module top #(
     wire        overlay_en_w;   // DebugOverlay enable
 
     // -----------------------------------------------------------------
-    // DDR3 PLL — 432 MHz memory clock from 27 MHz input
+    // DDR3 PLL — 324 MHz memory clock from 27 MHz input
     // Uses pll_ddr3 wrapper with PLL_INIT for VCO calibration
     // No pll_mDRP_intf needed — bypass permanently disabled
     // -----------------------------------------------------------------
@@ -866,7 +873,7 @@ module top #(
     pll_ddr3 pll_ddr3_inst (
         .clkin(clk_pixel_w),           // 27 MHz from board PLL
         .clkout0(),                    // unused
-        .clkout2(memory_clk_w),        // 432 MHz to DDR3
+        .clkout2(memory_clk_w),        // 324 MHz to DDR3
         .lock(pll_lock_w),
         .mdopc(2'b00),                 // external MDRP unused
         .mdainc(1'b0),
@@ -917,7 +924,7 @@ module top #(
         .sr_ack          (),
         .ref_ack         (),
         .init_calib_complete(init_calib_complete_w),
-        .clk_out         (clk_x1_w),            // 108 MHz DDR3 app clock
+        .clk_out         (clk_x1_w),            // 81 MHz DDR3 app clock (324/4)
         .pll_lock        (pll_lock_w),
         .burst           (1'b1),
         .ddr_rst         (ddr_rst_w),
@@ -941,16 +948,14 @@ module top #(
     assign ddr_addr[15] = 1'b0;
 
     // -----------------------------------------------------------------
-    // CLKDIV /2: derive 54 MHz logic clock from DDR3 108 MHz
+    // CLKDIV /2: 81 MHz → 40.5 MHz (kept for debug, not used for logic)
+    // Logic clock now comes from independent board PLL (clk_logic_pll_w).
     // -----------------------------------------------------------------
-    // Synchronous: every 54 MHz rising edge coincides with a 108 MHz
-    // rising edge. This eliminates async CDC between clk_logic and
-    // clk_ddr — simple registered crossing is sufficient.
     CLKDIV clkdiv2_logic (
-        .HCLKIN(clk_x1_w),         // 108 MHz from DDR3 IP
+        .HCLKIN(clk_x1_w),         // 81 MHz from DDR3 IP
         .RESETN(~ddr_rst_w),       // Release when DDR3 PLL stable
         .CALIB(1'b0),
-        .CLKOUT(clk_logic_ddr_w)   // 54 MHz, phase-aligned
+        .CLKOUT(clk_logic_ddr_w)   // 40.5 MHz (unused — kept for debug)
     );
     defparam clkdiv2_logic.DIV_MODE = "2";
 
@@ -971,10 +976,11 @@ module top #(
             ENSONIQ_WORD_BASE,  // [4] DOC read
             ENSONIQ_WORD_BASE   // [5] GLU write
         }),
-        .WIDE_WR_PORT(FB_WRITE_PORT)
+        .WIDE_WR_PORT(FB_WRITE_PORT),
+        .READ_BURST8_PORT(FB_READ_PORT)
     ) u_ddr3_ports (
-        .clk_client      (clk_logic_w),     // 54 MHz from CLKDIV2 (synchronous)
-        .clk_ddr          (clk_x1_w),       // 108 MHz from DDR3 IP
+        .clk_client      (clk_logic_w),     // 54 MHz from board PLL (async to DDR3)
+        .clk_ddr          (clk_x1_w),       // 81 MHz from DDR3 IP
         .rst              (ddr_rst_w),
         .init_complete    (init_calib_complete_w),
 
@@ -1022,9 +1028,16 @@ module top #(
     wire [7:0] fb_dbg_line_not_ready_w;
     wire [7:0] fb_dbg_line_lag_max_w;
     wire [7:0] fb_dbg_ready_phase_err_w;
+    wire [7:0] fb_dbg_fetch_done_w;
+    wire [7:0] fb_dbg_fetch_start_w;
+    wire [7:0] fb_dbg_rd_fifo_max_w;
+    wire [7:0] fb_dbg_rd_fifo_drop_w;
+    wire [7:0] fb_dbg_line_not_ready_total_w;
+    wire [7:0] fb_dbg_beat_extra_w;
+    wire [7:0] fb_dbg_beat_timeout_w;
     framebuffer_480p #(
         .COLOR_BITS(18),
-        .FB_READ_BURST_WORDS(4),
+        .FB_READ_BURST_WORDS(8),
         .TEST_PATTERN(0)
     ) u_framebuffer (
         .clk              (clk_logic_w),
@@ -1056,8 +1069,8 @@ module top #(
         .dbg_fifo_level_o        (),
         .dbg_fifo_highwater_o    (fb_dbg_fifo_highwater_w),
         .dbg_fifo_overflow_o     (fb_dbg_fifo_overflow_w),
-        .dbg_fetch_start_o       (),
-        .dbg_fetch_done_o        (),
+        .dbg_fetch_start_o       (fb_dbg_fetch_start_w),
+        .dbg_fetch_done_o        (fb_dbg_fetch_done_w),
         .dbg_read_blocked_o      (fb_dbg_read_blocked_w),
         .dbg_yield_busy_o        (fb_dbg_yield_busy_w),
         .dbg_fifo_pop_o          (fb_dbg_fifo_pop_w),
@@ -1069,7 +1082,12 @@ module top #(
         .dbg_ready_phase_err_o   (fb_dbg_ready_phase_err_w),
         .dbg_vsync_raw_o         (),
         .dbg_frame_start_accept_o(),
-        .dbg_frame_start_reject_o()
+        .dbg_frame_start_reject_o(),
+        .dbg_rd_fifo_max_o       (fb_dbg_rd_fifo_max_w),
+        .dbg_rd_fifo_drop_o      (fb_dbg_rd_fifo_drop_w),
+        .dbg_line_not_ready_total_o (fb_dbg_line_not_ready_total_w),
+        .dbg_beat_extra_o        (fb_dbg_beat_extra_w),
+        .dbg_beat_timeout_o      (fb_dbg_beat_timeout_w)
     );
 
     // -----------------------------------------------------------------
@@ -1173,22 +1191,35 @@ module top #(
         // Hex 1: req_pending bitmask for all 6 ports
         dbg_hex_sync0[1] <= {2'b0, ddr3_dbg_req_pending_w};
                                                 dbg_hex_sync1[1] <= dbg_hex_sync0[1];
-        // Hex 2-3: scan_timer actual scanline
-        dbg_hex_sync0[2] <= {7'b0, scan_dbg_actual_w[8]};
+        // Hex 2: BEAT EXTRA (sticky) — read beats that arrived when none
+        // were expected. Nonzero = arbiter/CDC duplicated a request.
+        // (Was VGC missed-hsync, confirmed 00 — repurposed for the
+        // multi-outstanding read experiment.)
+        dbg_hex_sync0[2] <= fb_dbg_beat_extra_w;
                                                 dbg_hex_sync1[2] <= dbg_hex_sync0[2];
-        dbg_hex_sync0[3] <= scan_dbg_actual_w[7:0];
+        // Hex 3: LINE NOT READY TOTAL — cumulative since reset (sticky,
+        // saturates at FF). Nonzero = display read a line-buffer bank that
+        // held the wrong line at least once since power-up. Catches rare
+        // events the per-frame counters flash too briefly to read.
+        dbg_hex_sync0[3] <= fb_dbg_line_not_ready_total_w;
                                                 dbg_hex_sync1[3] <= dbg_hex_sync0[3];
-        // Hex 4: FIFO overflow (dropped pixel pairs per frame, saturating)
-        dbg_hex_sync0[4] <= fb_dbg_fifo_overflow_w;
+        // Hex 4: SHADOW WRITE DROPS (sticky) — CPU shadow writes lost
+        // because the 8-deep shadow write FIFO was full. Should stay 00;
+        // nonzero = port 3 is being starved longer than ~8 CPU writes.
+        dbg_hex_sync0[4] <= shadow_dbg_drop_w;
                                                 dbg_hex_sync1[4] <= dbg_hex_sync0[4];
-        // Hex 5: FIFO highwater (max fill level per frame, 0-255)
-        dbg_hex_sync0[5] <= fb_dbg_fifo_highwater_w;
+        // Hex 5: RD FIFO DROP — read beats dropped because rd_fifo was full.
+        // Nonzero = data loss in the read response path (corruption source).
+        dbg_hex_sync0[5] <= fb_dbg_rd_fifo_drop_w;
                                                 dbg_hex_sync1[5] <= dbg_hex_sync0[5];
-        // Hex 6: FIFO pop count (writes sent to DDR3 per frame, saturating 0-FF)
-        dbg_hex_sync0[6] <= fb_dbg_fifo_pop_w;
+        // Hex 6: LINE LAG MAX — peak display-vs-completed-line lag in lines.
+        // 0 = fetcher always ahead of display. Nonzero = fetcher falling
+        // behind; higher = worse. Clamped to 0xFF.
+        dbg_hex_sync0[6] <= fb_dbg_line_lag_max_w;
                                                 dbg_hex_sync1[6] <= dbg_hex_sync0[6];
-        // Hex 7: FIFO push count (128-bit words queued per frame, saturating 0-FF)
-        dbg_hex_sync0[7] <= fb_dbg_fifo_push_w;
+        // Hex 7: LINE NOT READY — primary symptom counter. Display-line
+        // advances where the expected line had not yet been fetched.
+        dbg_hex_sync0[7] <= fb_dbg_line_not_ready_w;
                                                 dbg_hex_sync1[7] <= dbg_hex_sync0[7];
         // Bits 0: framebuffer status flags
         dbg_bits0_sync0 <= fb_dbg_flags_w;

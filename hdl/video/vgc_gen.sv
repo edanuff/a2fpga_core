@@ -44,7 +44,12 @@ module vgc_gen (
     output reg [12:0] vgc_address_o,
     output reg        vgc_rd_o,
     input [31:0]      vgc_data_i,
-    input             vgc_ready_i
+    input             vgc_ready_i,
+
+    // Diagnostic: count of hsync events that arrived while we were
+    // still rendering a previous line (i.e. silently dropped lines).
+    // Resets on vsync; saturates at 8'hFF.
+    output reg [7:0]  dbg_missed_hsync_o
 );
 
     // =========================================================================
@@ -157,12 +162,24 @@ module vgc_gen (
             pix_sub_cnt_r <= 4'd0;
             prev_palette_r <= 4'd0;
             pix_out_cnt_r <= 10'd0;
+            dbg_missed_hsync_o <= 8'd0;
         end else begin
             vgc_rd_o <= 1'b0;
 
             // Frame boundary
             if (pixel_stream.vsync) begin
                 shrg_mode_r <= video_control_if.shrg_mode(a2mem_if.SHRG_MODE);
+                // Reset per-frame missed-hsync counter on vsync
+                dbg_missed_hsync_o <= 8'd0;
+            end
+
+            // Diagnostic: detect hsync arriving while we are NOT in
+            // ST_IDLE (i.e. still rendering the previous line). Such
+            // hsyncs are silently ignored, dropping a line.
+            // Only count when SHRG mode is actually active.
+            if (pixel_stream.hsync && shrg_mode_r && state_r != ST_IDLE) begin
+                if (dbg_missed_hsync_o != 8'hFF)
+                    dbg_missed_hsync_o <= dbg_missed_hsync_o + 8'd1;
             end
 
             case (state_r)
