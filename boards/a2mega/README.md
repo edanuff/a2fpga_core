@@ -30,3 +30,4 @@ Coming soon
   - [Scan timer design](docs/scan_timer_design.md)
   - [ESP32 OSPI protocol & design](docs/ESP32_OSPI_DESIGN.md)
   - [TransWarp GS reference](docs/twgs_reference.md)
+  - [TransWarp GS action plan](docs/twgs_action_plan.md)
