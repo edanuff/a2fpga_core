@@ -191,7 +191,7 @@ Unique advantages over the original TWGS worth exploiting:
 |---|---|---|
 | 0.1 | Fix `a2mega.gprj` absolute→relative paths (pre-existing rule violation; blocks anyone else building) | Buildable `.gprj`; verify with `/build` per `docs/setup-gowin-cli.md` |
 | 0.2 | Resolve `P65C816` provenance & license; add attribution headers or replace core | Note in `docs/` + headers |
-| 0.3 | Resolve remaining hardware items: **/VP drive path** (confirmed gap, §7.1 — decide board rev vs bodge vs run-without experiment) and ribbon/DIP-40 pin mapping. (Bank VCCIO: resolved, no conflict — §7.2) | Updated twgs docs; go/no-go for Phase 1 power-on |
+| 0.3 | Resolve remaining hardware items: **/VP drive path** (confirmed gap, §7.1 — fix in the next board rev; **not a development blocker**, the Phase 2.8a vector snapshot covers current boards) and ribbon/DIP-40 pin mapping. (Bank VCCIO: resolved, no conflict — §7.2) | Updated twgs docs; go/no-go for Phase 1 power-on. All gateware phases proceed on current-rev boards in parallel with the respin |
 | 0.4 | Choose simulation approach for mixed VHDL/SV (the core is VHDL). Options: nvc/GHDL for core-only opcode tests + Verilator for the SV bus engine with the core swapped for a behavioral stub; or a commercial mixed-language sim if available | `sim/` scaffold + CI-runnable smoke test |
 | 0.5 | Record architecture decisions as ADRs in `docs/adr/` (see §6) | ADR-1..4 |
 | 0.6 | Baseline resource/timing snapshot of current a2mega build (LUT/BSRAM/Fmax headroom for the core + engine) | Numbers in this doc |
