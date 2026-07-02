@@ -26,4 +26,32 @@ void disk_poll(void);
  * removed). Safe to call from the USB host thread. */
 void disk_request_remount(void);
 
+/* ---- menu accessors ------------------------------------------------------ */
+#include <stdbool.h>
+
+typedef struct {
+    bool mounted;
+    bool writable;
+    char name[32];     /* image filename (no volume prefix), or "" */
+    char detail[16];   /* short format/size tag, e.g. "DSK RW", "65535 BLK" */
+} disk_info_t;
+
+/* Snapshot mount state for floppy drive v (0/1) or HDD unit u (0/1). */
+void disk_get_floppy_info(int v, disk_info_t *out);
+void disk_get_hdd_info(int u, disk_info_t *out);
+
+/* True when the current FatFS backend is the USB stick (vs SD card). */
+bool disk_backend_is_usb(void);
+
+/* True while a requested remount has not finished yet. */
+bool disk_remount_pending(void);
+
+/* Async directory listing (FatFS is NOT re-entrant — FF_FS_REENTRANT=0 — so
+ * all filesystem access must run in the disk thread). Begin posts a request;
+ * poll returns -1 while pending, else the number of names filled. exts is a
+ * NULL-terminated list of extensions (no dot, case-insensitive). */
+#define DISK_LIST_MAX 24
+void disk_list_begin(const char *const *exts);
+int  disk_list_poll(char names[][32], int max);
+
 #endif

@@ -28,6 +28,7 @@
 
 #include "lwip/tcpip.h"   /* lwIP for the USB-Ethernet (CDC-ECM) net path */
 #include "lwip/netif.h"
+#include "lwip/netifapi.h"
 #include "lwip/dhcp.h"
 #include "lwip/etharp.h"
 #include "usbh_cdc_ecm.h"
@@ -38,6 +39,11 @@
 #include "diskio_host.h"    /* SD/USB FatFS backend (g_msc_class) */
 #include "usbh_msc.h"       /* USB Mass Storage host class */
 #include "osd_console.h"    /* shared boot/status console */
+#include "settings.h"       /* persisted preferences (flash) */
+#include "menu.h"           /* gamepad menu system */
+
+struct netif;
+static void net_apply_static(struct netif *nif);   /* defined below */
 #include <string.h>
 
 /* lwIP's LWIP_RAND() calls bl_rand() (normally from the SDK wifi/RF component,
@@ -225,29 +231,6 @@ static int xinput_send_init(struct usbh_xinput *xc)
     return ret;
 }
 
-static volatile bool g_menu_active = false;
-
-/* Select toggles the shared boot/status console on/off over the Apple II. */
-static void menu_show(void)
-{
-    osd_console_show();
-}
-
-/* Hand the display back to the live Apple II soft-switches. */
-static void menu_hide(void)
-{
-    osd_console_hide();
-}
-
-static void menu_toggle(void)
-{
-    g_menu_active = !g_menu_active;
-    if (g_menu_active) {
-        menu_show();
-    } else {
-        menu_hide();
-    }
-}
 
 /* Called by usbh_xinput.c when a controller enumerates. */
 void usbh_xinput_run(struct usbh_xinput *xinput_class)
@@ -364,16 +347,14 @@ static void xinput_thread(void *arg)
         }
         if (g_btn_fresh) {
             g_btn_fresh = false;
-            uint16_t b = g_btn_latest;
             dbg_stage(STG_REPORT);
-            fpga_spi_reg_write(DBG_BTN_LO, (uint8_t)(b & 0xFF));
-            fpga_spi_reg_write(DBG_BTN_HI, (uint8_t)(b >> 8));
-            uint16_t pressed = b & ~g_prev_buttons;   /* rising edges */
-            if (pressed & XINPUT_BACK) {              /* Select pressed */
-                menu_toggle();
-            }
-            g_prev_buttons = b;
+            fpga_spi_reg_write(DBG_BTN_LO, (uint8_t)(g_btn_latest & 0xFF));
+            fpga_spi_reg_write(DBG_BTN_HI, (uint8_t)(g_btn_latest >> 8));
+            g_prev_buttons = g_btn_latest;
         }
+        /* Menu system: edge detection + hold-repeat live inside; feed the
+         * current state every tick (repeat needs a time base, not events). */
+        menu_input(g_btn_latest);
         dbg_tick();                  /* heartbeat (thread context) */
         usb_osal_msleep(20);
     }
@@ -603,7 +584,10 @@ static void ecm_netif_setup_cb(void *ctx)
     netif_set_up(&g_ecm_netif);
     netif_set_link_up(&g_ecm_netif);
     g_netif_ready = true;
-    dhcp_start(&g_ecm_netif);
+    if (settings()->dhcp_enable)
+        dhcp_start(&g_ecm_netif);
+    else
+        net_apply_static(&g_ecm_netif);
 }
 
 /* Surface the DHCP IP once bound; until then show the live traffic counters so we
@@ -782,7 +766,10 @@ static void rtl_netif_setup_cb(void *ctx)
     netif_set_up(&g_rtl_netif);
     netif_set_link_up(&g_rtl_netif);
     g_netif_ready = true;
-    dhcp_start(&g_rtl_netif);
+    if (settings()->dhcp_enable)
+        dhcp_start(&g_rtl_netif);
+    else
+        net_apply_static(&g_rtl_netif);
 }
 
 /* Shared USB-Ethernet status overlay (used by every adapter's glue). Spawned by
@@ -1064,7 +1051,10 @@ static void asix_netif_setup_cb(void *ctx)
     netif_set_up(&g_asix_netif);
     netif_set_link_up(&g_asix_netif);
     g_netif_ready = true;
-    dhcp_start(&g_asix_netif);
+    if (settings()->dhcp_enable)
+        dhcp_start(&g_asix_netif);
+    else
+        net_apply_static(&g_asix_netif);
 }
 
 static void asix_netif_teardown_cb(void *ctx)
@@ -1101,6 +1091,75 @@ void usbh_asix_stop(struct usbh_asix *class)
     tcpip_callback(asix_netif_teardown_cb, NULL);
 }
 
+/* Apply the static address from settings to a netif (DHCP off). A zero IP
+ * means "not configured" and leaves the interface unaddressed. */
+static void net_apply_static(struct netif *nif)
+{
+    const a2_settings_t *st = settings();
+    if (!nif)
+        return;
+    if (!(st->static_ip[0] | st->static_ip[1] |
+          st->static_ip[2] | st->static_ip[3]))
+        return;
+    ip4_addr_t ip, mask, gw;
+    IP4_ADDR(&ip,   st->static_ip[0],   st->static_ip[1],
+                    st->static_ip[2],   st->static_ip[3]);
+    IP4_ADDR(&mask, st->static_mask[0], st->static_mask[1],
+                    st->static_mask[2], st->static_mask[3]);
+    IP4_ADDR(&gw,   st->static_gw[0],   st->static_gw[1],
+                    st->static_gw[2],   st->static_gw[3]);
+    netifapi_netif_set_addr(nif, &ip, &mask, &gw);
+}
+
+/* Menu hook: apply DHCP/static settings to the live default interface. */
+void menu_hook_net_apply(void)
+{
+    struct netif *nif = netif_default;
+    if (!nif)
+        return;
+    if (settings()->dhcp_enable) {
+        netifapi_dhcp_start(nif);
+    } else {
+        netifapi_dhcp_stop(nif);
+        net_apply_static(nif);
+    }
+}
+
+/* Network status lines for the menu (see menu.h). Uses the default netif. */
+int menu_hook_net_lines(char lines[][41], int max)
+{
+    int n = 0;
+    struct netif *nif = netif_default;
+    if (n < max) {
+        if (!nif) {
+            snprintf(lines[n++], 41, "NO NETWORK INTERFACE");
+            return n;
+        }
+        snprintf(lines[n++], 41, "LINK %s  (%c%c%d)",
+                 netif_is_link_up(nif) ? "UP" : "DOWN",
+                 nif->name[0], nif->name[1], nif->num);
+    }
+    char a[16];
+    if (n < max) {
+        ip4addr_ntoa_r(netif_ip4_addr(nif), a, sizeof(a));
+        snprintf(lines[n++], 41, "IP   %s", a);
+    }
+    if (n < max) {
+        ip4addr_ntoa_r(netif_ip4_netmask(nif), a, sizeof(a));
+        snprintf(lines[n++], 41, "MASK %s", a);
+    }
+    if (n < max) {
+        ip4addr_ntoa_r(netif_ip4_gw(nif), a, sizeof(a));
+        snprintf(lines[n++], 41, "GW   %s", a);
+    }
+    if (n < max) {
+        snprintf(lines[n++], 41, "MAC  %02X:%02X:%02X:%02X:%02X:%02X",
+                 nif->hwaddr[0], nif->hwaddr[1], nif->hwaddr[2],
+                 nif->hwaddr[3], nif->hwaddr[4], nif->hwaddr[5]);
+    }
+    return n;
+}
+
 int main(void)
 {
     board_init();
@@ -1114,9 +1173,16 @@ int main(void)
     dbg_stage(STG_FPGA_READY);
     if (ready) dbg_set(F_FPGA_READY);
 
-    osd_console_show();
-    osd_log("A2FPGA BL616 HOST  %s", MCU_BUILD_STR);
-    osd_log("BUILD " __DATE__ " " __TIME__);
+    /* Persisted preferences, then the gamepad menu that edits them. */
+    settings_init();
+    menu_init();
+
+    {
+        char dbg[41];
+        settings_debug_line(dbg, sizeof(dbg));
+        osd_log("SETTINGS: %s  %s",
+                settings_loaded_from_flash() ? "FLASH" : "DEFAULTS", dbg);
+    }
     osd_log("USB HOST: WAITING FOR DEVICE...");
     dbg_stage(STG_PRE_USB);
 

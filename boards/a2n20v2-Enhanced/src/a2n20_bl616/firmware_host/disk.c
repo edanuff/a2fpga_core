@@ -21,6 +21,7 @@
 #include "osd_console.h"   /* shared boot/status console */
 #include "bflb_mtimer.h"   /* bflb_mtimer_get_time_us — load-latency timing */
 #include "gcr_dsk.h"       /* on-the-fly .dsk/.do <-> 6-and-2 GCR nibble codec */
+#include "settings.h"      /* persisted image overrides + boot preference */
 
 /* ---- Volume register map (must match bl616_spi_connector.sv 0x40-0x5F) ---- */
 #define VOL_BASE(v)       (0x40u + (v) * 0x10u)
@@ -107,6 +108,13 @@ static uint32_t g_hdd_base[NHDD];       /* payload offset (.2mg header)  */
 static uint32_t g_hdd_blocks[NHDD];     /* size in 512-byte blocks       */
 static char     g_hdd_name[NHDD][32];
 static uint8_t  g_blockbuf[SECTOR_BYTES];
+
+/* Menu directory-listing request (see disk_list_begin/poll in disk.h). */
+static volatile bool          g_list_req;
+static volatile bool          g_list_done;
+static const char *const     *g_list_exts;
+static char                   g_list_names[DISK_LIST_MAX][32];
+static int                    g_list_count;
 
 /* Case-insensitive extension test ("dsk", "do", ...). */
 static bool has_ext(const char *name, const char *ext)
@@ -200,12 +208,25 @@ static void mount_drive(int v)
     strncpy(g_imgname[v], g_candidates[v][0], sizeof(g_imgname[v]) - 1);
     g_imgname[v][sizeof(g_imgname[v]) - 1] = '\0';
 
-    /* Try each candidate in order; first that opens AND resolves to a servable
-     * format wins. Prefer read-write so dirty tracks can flush; fall back to
-     * read-only. */
+    if (settings()->eject_mask & (1u << v))
+        return;   /* ejected from the menu: leave unmounted */
+
+    /* Candidate list: a persisted per-drive override (menu file picker) is
+     * tried first, then the built-in names. First that opens AND resolves to
+     * a servable format wins. Prefer read-write; fall back to read-only. */
+    char ovr[SETTINGS_NAME_LEN + 4];
+    const char *cands[NCAND + 1];
+    int ncand = 0;
+    if (settings()->disk_img[v][0]) {
+        snprintf(ovr, sizeof(ovr), "0:/%s", settings()->disk_img[v]);
+        cands[ncand++] = ovr;
+    }
+    for (int c = 0; c < NCAND; c++)
+        cands[ncand++] = g_candidates[v][c];
+
     int opened = 0;
-    for (int c = 0; c < NCAND && !opened; c++) {
-        const char *name = g_candidates[v][c];
+    for (int c = 0; c < ncand && !opened; c++) {
+        const char *name = cands[c];
         bool rw;
         if (f_open(&g_img[v], name, FA_READ | FA_WRITE) == FR_OK)
             rw = true;
@@ -278,8 +299,21 @@ static void mount_hdd(int u)
     strncpy(g_hdd_name[u], g_hdd_candidates[u][0], sizeof(g_hdd_name[u]) - 1);
     g_hdd_name[u][sizeof(g_hdd_name[u]) - 1] = '\0';
 
-    for (int c = 0; c < 3; c++) {
-        const char *name = g_hdd_candidates[u][c];
+    if (settings()->eject_mask & (1u << (4 + u)))
+        return;   /* ejected from the menu: leave unmounted */
+
+    char ovr[SETTINGS_NAME_LEN + 4];
+    const char *cands[4];
+    int ncand = 0;
+    if (settings()->hdd_img[u][0]) {
+        snprintf(ovr, sizeof(ovr), "0:/%s", settings()->hdd_img[u]);
+        cands[ncand++] = ovr;
+    }
+    for (int c = 0; c < 3; c++)
+        cands[ncand++] = g_hdd_candidates[u][c];
+
+    for (int c = 0; c < ncand; c++) {
+        const char *name = cands[c];
         bool rw;
         if (f_open(&g_hdd_img[u], name, FA_READ | FA_WRITE) == FR_OK)
             rw = true;
@@ -337,6 +371,7 @@ static void mount_hdd(int u)
  * startup and whenever a USB stick is attached/removed. Prefers the USB stick
  * if present, otherwise the SD card. */
 static volatile bool g_remount_req = true;
+static volatile bool g_remounting  = false;   /* disk_remount() running */
 
 /* Non-blocking console hide: disk_remount() schedules the "READY" screen to be
  * handed back to the Apple II after a readable delay, and disk_poll() performs
@@ -378,10 +413,20 @@ static void disk_remount(void)
     }
     f_mount(NULL, "0:", 0);
 
-    bool use_usb = (g_msc_class != NULL);
+    bool usb_present = (g_msc_class != NULL);
+    bool use_usb;
+    switch (settings()->boot_pref) {
+    case BOOT_PREF_USB: use_usb = true;  break;   /* wait for the stick */
+    case BOOT_PREF_SD:  use_usb = false; break;
+    default:            use_usb = usb_present;    /* AUTO */
+    }
+    if (use_usb && !usb_present) {
+        osd_log("DISK II: WAITING FOR USB STORAGE (PREF)");
+        return;   /* the USB attach hook triggers another remount */
+    }
     disk_io_set_backend_usb(use_usb);
     osd_log(use_usb ? "DISK II: USB MASS STORAGE"
-                    : "DISK II: NO USB - TRYING SD CARD");
+                    : "DISK II: SD CARD");
 
     FRESULT fr = f_mount(&g_fs, "0:", 1);
     if (fr != FR_OK) {
@@ -601,7 +646,9 @@ void disk_poll(void)
 {
     if (g_remount_req) {
         g_remount_req = false;
+        g_remounting  = true;
         disk_remount();
+        g_remounting  = false;
     }
 
     /* Non-blocking console hide (scheduled by disk_remount on a good mount). */
@@ -624,6 +671,25 @@ void disk_poll(void)
             for (int u = 0; u < NHDD; u++) any = any || g_hdd_mounted[u];
             if ((any && !g_remount_req) ||
                 bflb_mtimer_get_time_us() > 7000000u) {
+                /* Program the slot map JUST before the release — this late in
+                 * boot the SPI link is proven good (the mounts above ran over
+                 * it; writes issued from early main() were getting lost), and
+                 * the Apple II is still held in reset so the reconfig is
+                 * race-free. The registers double as the readable mirror the
+                 * menu's "NOW:" column uses. 0xFF = hardware default. */
+                for (int i = 0; i < 8; i++) {
+                    uint8_t c = settings()->slot_cards[i];
+                    if (c == 0xFF)
+                        c = settings_slot_hw_defaults[i];
+                    fpga_spi_reg_write((uint8_t)(0x60 + i), c);
+                }
+                fpga_spi_reg_write(0x6B, 1);   /* slotmaker reconfig strobe */
+                osd_log("SLOTS: %d %d %d %d %d %d %d %d",
+                        fpga_spi_reg_read(0x60), fpga_spi_reg_read(0x61),
+                        fpga_spi_reg_read(0x62), fpga_spi_reg_read(0x63),
+                        fpga_spi_reg_read(0x64), fpga_spi_reg_read(0x65),
+                        fpga_spi_reg_read(0x66), fpga_spi_reg_read(0x67));
+
                 fpga_spi_reg_write(0x2E, 1);   /* A2_RST_RELEASE */
                 s_released = true;
                 osd_log("A2: RESET RELEASED%s", any ? "" : " (NO MEDIA)");
@@ -631,8 +697,94 @@ void disk_poll(void)
         }
     }
 
+    /* Async directory listing for the menu (FatFS is not re-entrant, so the
+     * scan runs here, in the thread that owns the filesystem). */
+    if (g_list_req) {
+        g_list_count = 0;
+        DIR dir;
+        FILINFO fno;
+        if (f_opendir(&dir, "0:/") == FR_OK) {
+            while (g_list_count < DISK_LIST_MAX) {
+                if (f_readdir(&dir, &fno) != FR_OK || fno.fname[0] == '\0')
+                    break;
+                if (fno.fattrib & AM_DIR)
+                    continue;
+                if (fno.fname[0] == '.' || fno.fname[0] == '_')
+                    continue;
+                bool match = false;
+                for (int e = 0; g_list_exts[e] && !match; e++)
+                    match = has_ext(fno.fname, g_list_exts[e]);
+                if (!match)
+                    continue;
+                snprintf(g_list_names[g_list_count], 32, "%s", fno.fname);
+                g_list_count++;
+            }
+            f_closedir(&dir);
+        }
+        g_list_req  = false;
+        g_list_done = true;
+    }
+
     for (int v = 0; v < NDRV; v++)
         serve_drive(v);
     for (int u = 0; u < NHDD; u++)
         serve_hdd(u);
+}
+
+/* ---- menu accessors (see disk.h) ----------------------------------------- */
+void disk_get_floppy_info(int v, disk_info_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (v < 0 || v >= NDRV)
+        return;
+    out->mounted  = g_mounted[v];
+    out->writable = g_writable[v];
+    snprintf(out->name, sizeof(out->name), "%s",
+             g_imgname[v][0] ? g_imgname[v] + 3 : "");
+    if (g_mounted[v])
+        snprintf(out->detail, sizeof(out->detail), "%s %s",
+                 g_fmt[v] == FMT_NIB ? "NIB" :
+                 (g_order[v] == GCR_ORDER_PRODOS ? "PO" : "DSK"),
+                 g_writable[v] ? "RW" : "RO");
+}
+
+void disk_get_hdd_info(int u, disk_info_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (u < 0 || u >= NHDD)
+        return;
+    out->mounted  = g_hdd_mounted[u];
+    out->writable = g_hdd_writable[u];
+    snprintf(out->name, sizeof(out->name), "%s",
+             g_hdd_name[u][0] ? g_hdd_name[u] + 3 : "");
+    if (g_hdd_mounted[u])
+        snprintf(out->detail, sizeof(out->detail), "%luBLK %s",
+                 (unsigned long)g_hdd_blocks[u],
+                 g_hdd_writable[u] ? "RW" : "RO");
+}
+
+bool disk_backend_is_usb(void)
+{
+    return g_msc_class != NULL;   /* mirrors the active-backend choice */
+}
+
+bool disk_remount_pending(void)
+{
+    return g_remount_req || g_remounting;
+}
+
+void disk_list_begin(const char *const *exts)
+{
+    g_list_done = false;
+    g_list_exts = exts;
+    g_list_req  = true;           /* serviced by the next disk_poll */
+}
+
+int disk_list_poll(char names[][32], int max)
+{
+    if (!g_list_done)
+        return -1;
+    int n = g_list_count < max ? g_list_count : max;
+    memcpy(names, g_list_names, (size_t)n * 32);
+    return n;
 }

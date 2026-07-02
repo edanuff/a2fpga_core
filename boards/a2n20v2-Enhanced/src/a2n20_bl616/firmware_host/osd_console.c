@@ -22,6 +22,7 @@
 static char  s_lines[CON_ROWS][CON_COLS + 1];
 static int   s_count;
 static bool  s_visible;
+static bool  s_lockout;   /* menu owns the screen; buffer only */
 static usb_osal_mutex_t s_lock;
 
 /* The very first osd_log()/show() runs single-threaded at boot (the startup
@@ -82,10 +83,24 @@ void osd_console_show(void)
 {
     ensure_lock();
     usb_osal_mutex_take(s_lock);
+    if (s_lockout) {                 /* menu owns the screen: buffer only */
+        usb_osal_mutex_give(s_lock);
+        return;
+    }
     s_visible = true;
     repaint();
     fpga_spi_reg_write(REG_TEXT_MODE, 1);
     fpga_spi_reg_write(REG_VIDEO_ENABLE, 1);
+    usb_osal_mutex_give(s_lock);
+}
+
+void osd_console_set_lockout(bool lockout)
+{
+    ensure_lock();
+    usb_osal_mutex_take(s_lock);
+    s_lockout = lockout;
+    if (lockout)
+        s_visible = false;           /* menu will paint; logs buffer */
     usb_osal_mutex_give(s_lock);
 }
 
@@ -94,6 +109,10 @@ void osd_console_hide(void)
     ensure_lock();
     usb_osal_mutex_take(s_lock);
     s_visible = false;
-    fpga_spi_reg_write(REG_VIDEO_ENABLE, 0);   /* Apple II drives the video */
+    /* While the menu owns the screen (lockout), do NOT touch the video
+     * takeover — a background hide (e.g. disk_remount's scheduled hide)
+     * would otherwise yank the display back to the Apple II mid-menu. */
+    if (!s_lockout)
+        fpga_spi_reg_write(REG_VIDEO_ENABLE, 0);
     usb_osal_mutex_give(s_lock);
 }

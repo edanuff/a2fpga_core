@@ -32,6 +32,8 @@ target_sources(app PRIVATE
     disk.c
     diskio_host.c
     osd_console.c
+    settings.c
+    menu.c
     ../firmware/gcr_dsk.c
     ../firmware/fpga_spi.c
     ../firmware/fpga_screen.c
