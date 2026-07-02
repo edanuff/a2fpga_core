@@ -35,14 +35,18 @@ static void ensure_read_table(void)
     kReadByteReady = 1;
 }
 
-/* DOS 3.3 sector order (AppleWin ms_SectorNumber[eDOSOrder]): maps a physical
- * sector 0..15 (as it appears in order around the track / in the address field)
- * to the logical sector index stored in a DOS-order .dsk/.do file. Used both
- * ways: encode pulls physical P's data from file offset kDosOrder[P]*256;
- * decode stores physical P's recovered data to that same offset. */
-static const uint8_t kDosOrder[16] = {
-    0x00,0x08,0x01,0x09,0x02,0x0A,0x03,0x0B,
-    0x04,0x0C,0x05,0x0D,0x06,0x0E,0x07,0x0F
+/* Sector order tables (AppleWin ms_SectorNumber): map a physical sector 0..15
+ * (as it appears in order around the track / in the address field) to the
+ * 256-byte sector slot in the image file. Used both ways: encode pulls
+ * physical P's data from file offset order[P]*256; decode stores physical P's
+ * recovered data to that same offset. Index with gcr_order_t. */
+static const uint8_t kSectorOrder[2][16] = {
+    /* GCR_ORDER_DOS (.dsk/.do) — eDOSOrder */
+    { 0x00,0x08,0x01,0x09,0x02,0x0A,0x03,0x0B,
+      0x04,0x0C,0x05,0x0D,0x06,0x0E,0x07,0x0F },
+    /* GCR_ORDER_PRODOS (.po) — eProDOSOrder */
+    { 0x00,0x07,0x0E,0x06,0x0D,0x05,0x0C,0x04,
+      0x0B,0x03,0x0A,0x02,0x09,0x01,0x08,0x0F },
 };
 
 /* 4-and-4 codec (address field). */
@@ -144,11 +148,13 @@ static int decode62(const uint8_t in[343], uint8_t out[256])
     return 1;
 }
 
-/* ---- public: encode one DOS-order track -> 6656-byte nibble stream ------- */
+/* ---- public: encode one sector-image track -> 6656-byte nibble stream ---- */
 size_t gcr_encode_dos_track(const uint8_t dsk_track[DSK_TRACK_BYTES],
-                            uint8_t track, uint8_t volume,
+                            uint8_t track, uint8_t volume, gcr_order_t order,
                             uint8_t *out, size_t out_cap)
 {
+    const uint8_t *ord = kSectorOrder[order == GCR_ORDER_PRODOS ? 1 : 0];
+
     if (out_cap < GCR_TRACK_BYTES)
         return 0;
 
@@ -175,7 +181,7 @@ size_t gcr_encode_dos_track(const uint8_t dsk_track[DSK_TRACK_BYTES],
 
         /* data field: prologue + 343 six-and-two + epilogue */
         *p++ = kDataProlog[0]; *p++ = kDataProlog[1]; *p++ = kDataProlog[2];
-        code62(&dsk_track[kDosOrder[s] * 256], p);
+        code62(&dsk_track[ord[s] * 256], p);
         p += 343;
         *p++ = kEpilog[0]; *p++ = kEpilog[1]; *p++ = kEpilog[2];
 
@@ -194,8 +200,11 @@ size_t gcr_encode_dos_track(const uint8_t dsk_track[DSK_TRACK_BYTES],
 
 /* ---- public: decode a (possibly partially rewritten) nibble window -------- */
 uint16_t gcr_decode_dos_track(const uint8_t *nibbles, size_t len,
+                              gcr_order_t order,
                               uint8_t dsk_track[DSK_TRACK_BYTES])
 {
+    const uint8_t *ord = kSectorOrder[order == GCR_ORDER_PRODOS ? 1 : 0];
+
     if (len < 16)
         return 0;
 
@@ -241,7 +250,7 @@ uint16_t gcr_decode_dos_track(const uint8_t *nibbles, size_t len,
 
         uint8_t out256[256];
         if (decode62(d343, out256)) {
-            memcpy(&dsk_track[kDosOrder[sec] * 256], out256, 256);
+            memcpy(&dsk_track[ord[sec] * 256], out256, 256);
             mask |= (uint16_t)(1u << sec);
             if (mask == 0xFFFF)
                 break;

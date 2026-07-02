@@ -34,54 +34,139 @@
 #define VOL_WR(v)         (VOL_BASE(v) + 0xEu)   /* R: write request pending */
 #define VOL_ACK(v)        (VOL_BASE(v) + 0xFu)   /* W: acknowledge (strobe) */
 
+/* ---- ProDOS HDD volume registers (compact bank, bl616_spi_connector) ------
+ * 7-bit reg space is full, so read/write meanings overlap per address:
+ *   base+0  R: {wr, rd} request pending    W: CTL {readonly, mounted, ready}
+ *   base+1  R: LBA low  (ProDOS block #)   W: SIZE low  (blocks)
+ *   base+2  R: LBA high                    W: SIZE high
+ *   base+3  R: -                           W: ACK (strobe)
+ * Unit 0 at 0x26, unit 1 at 0x2A. */
+#define HDD_BASE(u)       (0x26u + (u) * 4u)
+#define HDD_REQ(u)        (HDD_BASE(u) + 0u)   /* R */
+#define HDD_LBA_L(u)      (HDD_BASE(u) + 1u)   /* R */
+#define HDD_LBA_H(u)      (HDD_BASE(u) + 2u)   /* R */
+#define HDD_CTL(u)        (HDD_BASE(u) + 0u)   /* W */
+#define HDD_SIZE_L(u)     (HDD_BASE(u) + 1u)   /* W */
+#define HDD_SIZE_H(u)     (HDD_BASE(u) + 2u)   /* W */
+#define HDD_ACK(u)        (HDD_BASE(u) + 3u)   /* W */
+#define HDD_CTL_READY     0x01u
+#define HDD_CTL_MOUNTED   0x02u
+#define HDD_CTL_READONLY  0x04u
+
 /* ---- SDRAM track windows (must match top.sv DISK_WORD_BASE + d*0x2000) ----
- * DISK_WORD_BASE = word 0x080000 = byte 0x200000; per-drive stride = 8KB. */
+ * DISK_WORD_BASE = word 0x080000 = byte 0x200000; per-drive stride = 8KB.
+ * HDD block windows follow at byte 0x204000, 512 bytes per unit. */
 #define DISK_WINDOW_BASE    0x200000u
 #define DISK_WINDOW_STRIDE  0x2000u
+#define HDD_WINDOW_BASE     0x204000u
+#define HDD_WINDOW_STRIDE   0x200u
 #define SECTOR_BYTES        512u
 #define MAX_TRACK_BYTES     0x1A00u   /* 6656 = 13 sectors */
 
-#define NDRV 2
+#define NDRV 2   /* Disk II floppy drives */
+#define NHDD 2   /* ProDOS HDD units      */
 
-/* Per-drive image format: .nib is streamed as-is (raw nibble track); .dsk/.do
- * is a DOS 3.3 sector image that gcr_dsk nibblizes on load / de-nibblizes on
- * flush. */
+/* Per-drive image format:
+ *   FMT_NIB — raw nibble track, streamed as-is
+ *   FMT_DSK — sector image (16*256 B/track) that gcr_dsk nibblizes on load /
+ *             de-nibblizes on flush; g_order[] gives the file's sector order
+ *             (.dsk/.do = DOS 3.3, .po = ProDOS)
+ * A .2mg is a 64-byte header wrapping one of the above; g_base[] carries the
+ * payload's byte offset within the file (0 for bare images). */
 typedef enum { FMT_NONE = 0, FMT_NIB, FMT_DSK } disk_fmt_t;
 
-/* Candidate images per drive, tried in order (first that opens wins). .dsk/.do
- * take priority over .nib. OSD/config selection can replace this later. */
-static const char *const g_candidates[NDRV][3] = {
-    { "0:/disk1.dsk", "0:/disk1.do", "0:/disk1.nib" },
-    { "0:/disk2.dsk", "0:/disk2.do", "0:/disk2.nib" },
+/* Candidate images per drive, tried in order (first that opens wins).
+ * Sector formats take priority over .nib. OSD/config selection later. */
+#define NCAND 5
+static const char *const g_candidates[NDRV][NCAND] = {
+    { "0:/disk1.dsk", "0:/disk1.do", "0:/disk1.po", "0:/disk1.2mg", "0:/disk1.nib" },
+    { "0:/disk2.dsk", "0:/disk2.do", "0:/disk2.po", "0:/disk2.2mg", "0:/disk2.nib" },
 };
 
-static FATFS      g_fs;
-static FIL        g_img[NDRV];
-static bool       g_mounted[NDRV];
-static bool       g_writable[NDRV];
-static disk_fmt_t g_fmt[NDRV];
-static char       g_imgname[NDRV][32];          /* resolved image path         */
-static uint8_t    g_trackbuf[MAX_TRACK_BYTES];  /* nibble track (SDRAM window) */
-static uint8_t    g_secbuf[DSK_TRACK_BYTES];    /* one .dsk track (16*256)     */
+static FATFS       g_fs;
+static FIL         g_img[NDRV];
+static bool        g_mounted[NDRV];
+static bool        g_writable[NDRV];
+static disk_fmt_t  g_fmt[NDRV];
+static gcr_order_t g_order[NDRV];                /* sector order for FMT_DSK    */
+static uint32_t    g_base[NDRV];                 /* payload offset (.2mg header)*/
+static char        g_imgname[NDRV][32];          /* resolved image path         */
+static uint8_t     g_trackbuf[MAX_TRACK_BYTES];  /* nibble track (SDRAM window) */
+static uint8_t     g_secbuf[DSK_TRACK_BYTES];    /* one sector track (16*256)   */
 
-/* Format from the filename extension (.nib -> FMT_NIB, .dsk/.do -> FMT_DSK). */
-static disk_fmt_t detect_format(const char *name)
+/* ProDOS HDD units: raw 512-byte block volumes (.hdv/.po/.2mg), served one
+ * block at a time, LBA 1:1 into the image payload. */
+static const char *const g_hdd_candidates[NHDD][3] = {
+    { "0:/hdd1.hdv", "0:/hdd1.po", "0:/hdd1.2mg" },
+    { "0:/hdd2.hdv", "0:/hdd2.po", "0:/hdd2.2mg" },
+};
+static FIL      g_hdd_img[NHDD];
+static bool     g_hdd_mounted[NHDD];
+static bool     g_hdd_writable[NHDD];
+static uint32_t g_hdd_base[NHDD];       /* payload offset (.2mg header)  */
+static uint32_t g_hdd_blocks[NHDD];     /* size in 512-byte blocks       */
+static char     g_hdd_name[NHDD][32];
+static uint8_t  g_blockbuf[SECTOR_BYTES];
+
+/* Case-insensitive extension test ("dsk", "do", ...). */
+static bool has_ext(const char *name, const char *ext)
 {
-    size_t n = strlen(name);
-    if (n >= 4) {
-        const char *e = name + n - 4;
-        if (e[0] == '.' &&
-            (e[1] | 0x20) == 'n' && (e[2] | 0x20) == 'i' && (e[3] | 0x20) == 'b')
-            return FMT_NIB;
-        if (e[0] == '.' &&
-            (e[1] | 0x20) == 'd' && (e[2] | 0x20) == 's' && (e[3] | 0x20) == 'k')
-            return FMT_DSK;
+    size_t n = strlen(name), x = strlen(ext);
+    if (n < x + 1 || name[n - x - 1] != '.')
+        return false;
+    for (size_t i = 0; i < x; i++)
+        if ((name[n - x + i] | 0x20) != (ext[i] | 0x20))
+            return false;
+    return true;
+}
+
+/* Format + sector order from the filename extension. .2mg is resolved from its
+ * header at mount time (see mount_drive). */
+static disk_fmt_t detect_format(const char *name, gcr_order_t *order)
+{
+    *order = GCR_ORDER_DOS;
+    if (has_ext(name, "nib"))
+        return FMT_NIB;
+    if (has_ext(name, "dsk") || has_ext(name, "do"))
+        return FMT_DSK;
+    if (has_ext(name, "po")) {
+        *order = GCR_ORDER_PRODOS;
+        return FMT_DSK;
     }
-    if (n >= 3) {
-        const char *e = name + n - 3;
-        if (e[0] == '.' && (e[1] | 0x20) == 'd' && (e[2] | 0x20) == 'o')
-            return FMT_DSK;
-    }
+    return FMT_NONE;
+}
+
+/* Parse a 2IMG (.2mg) header: 64-byte header, format word at 0x0C (0 = DOS
+ * order, 1 = ProDOS order, 2 = NIB), payload offset at 0x18, length at 0x1C.
+ * Only floppy-size payloads serve as Disk II volumes; block-device payloads
+ * belong to the (future) hard-disk path. Returns the format or FMT_NONE. */
+static disk_fmt_t parse_2mg(FIL *f, gcr_order_t *order, uint32_t *base,
+                            uint32_t *paylen)
+{
+    uint8_t h[64];
+    UINT br = 0;
+    if (f_lseek(f, 0) != FR_OK || f_read(f, h, sizeof h, &br) != FR_OK ||
+        br != sizeof h)
+        return FMT_NONE;
+    if (memcmp(h, "2IMG", 4) != 0)
+        return FMT_NONE;
+
+    uint32_t fmt = (uint32_t)h[0x0C] | ((uint32_t)h[0x0D] << 8) |
+                   ((uint32_t)h[0x0E] << 16) | ((uint32_t)h[0x0F] << 24);
+    uint32_t off = (uint32_t)h[0x18] | ((uint32_t)h[0x19] << 8) |
+                   ((uint32_t)h[0x1A] << 16) | ((uint32_t)h[0x1B] << 24);
+    uint32_t len = (uint32_t)h[0x1C] | ((uint32_t)h[0x1D] << 8) |
+                   ((uint32_t)h[0x1E] << 16) | ((uint32_t)h[0x1F] << 24);
+    if (off == 0)
+        off = 64;   /* some creators leave the offset field 0 */
+
+    *base   = off;
+    *paylen = len;
+    *order  = (fmt == 1) ? GCR_ORDER_PRODOS : GCR_ORDER_DOS;
+    if (fmt == 2)
+        return FMT_NIB;
+    if (fmt <= 1)
+        return FMT_DSK;
     return FMT_NONE;
 }
 
@@ -106,6 +191,8 @@ static void mount_drive(int v)
     g_mounted[v]  = false;
     g_writable[v] = false;
     g_fmt[v]      = FMT_NONE;
+    g_order[v]    = GCR_ORDER_DOS;
+    g_base[v]     = 0;
     fpga_spi_reg_write(VOL_READY(v), 0);
     fpga_spi_reg_write(VOL_MOUNTED(v), 0);
 
@@ -113,36 +200,137 @@ static void mount_drive(int v)
     strncpy(g_imgname[v], g_candidates[v][0], sizeof(g_imgname[v]) - 1);
     g_imgname[v][sizeof(g_imgname[v]) - 1] = '\0';
 
-    /* Try each candidate in order; first that opens wins. Prefer read-write so
-     * dirty tracks can flush; fall back to read-only. */
+    /* Try each candidate in order; first that opens AND resolves to a servable
+     * format wins. Prefer read-write so dirty tracks can flush; fall back to
+     * read-only. */
     int opened = 0;
-    for (int c = 0; c < 3 && !opened; c++) {
+    for (int c = 0; c < NCAND && !opened; c++) {
         const char *name = g_candidates[v][c];
-        if (f_open(&g_img[v], name, FA_READ | FA_WRITE) == FR_OK) {
-            g_writable[v] = true;  opened = 1;
-        } else if (f_open(&g_img[v], name, FA_READ) == FR_OK) {
-            g_writable[v] = false; opened = 1;
-        }
-        if (opened) {
-            strncpy(g_imgname[v], name, sizeof(g_imgname[v]) - 1);
-            g_imgname[v][sizeof(g_imgname[v]) - 1] = '\0';
-            g_fmt[v] = detect_format(name);
-        }
-    }
-    if (!opened)
-        return;
+        bool rw;
+        if (f_open(&g_img[v], name, FA_READ | FA_WRITE) == FR_OK)
+            rw = true;
+        else if (f_open(&g_img[v], name, FA_READ) == FR_OK)
+            rw = false;
+        else
+            continue;
 
-    uint32_t bytes  = (uint32_t)f_size(&g_img[v]);
-    uint32_t blocks = bytes / SECTOR_BYTES;
-    /* .dsk/.do: 35 trk * 16 * 256 = 143360 B; .nib: 35 * 6656 = 232960 B.
-     * VOL_SIZE is informational for a floppy (drive_ii.sv doesn't gate on it). */
-    osd_log("DISK II: D%d %s = %lu B (%s)", v + 1, g_imgname[v] + 3,
-            (unsigned long)bytes, g_fmt[v] == FMT_DSK ? "dsk" : "nib");
-    reg_write32(VOL_SIZE(v), blocks);
-    fpga_spi_reg_write(VOL_READONLY(v), g_writable[v] ? 0 : 1);
-    fpga_spi_reg_write(VOL_MOUNTED(v), 1);
-    fpga_spi_reg_write(VOL_READY(v), 1);
-    g_mounted[v] = true;
+        disk_fmt_t  fmt;
+        gcr_order_t order = GCR_ORDER_DOS;
+        uint32_t    base  = 0;
+        uint32_t    bytes = (uint32_t)f_size(&g_img[v]);
+
+        if (has_ext(name, "2mg")) {
+            uint32_t paylen = 0;
+            fmt = parse_2mg(&g_img[v], &order, &base, &paylen);
+            if (paylen)
+                bytes = paylen;
+            else if (bytes > base)
+                bytes -= base;
+            /* Only floppy-size payloads are Disk II volumes; larger 2mg images
+             * are block devices and belong to the hard-disk path. */
+            if (fmt == FMT_DSK && bytes != DSK_TRACK_BYTES * 35u) {
+                osd_log("DISK II: D%d %s not a 5.25 floppy (%lu B) - skip",
+                        v + 1, name + 3, (unsigned long)bytes);
+                fmt = FMT_NONE;
+            }
+        } else {
+            fmt = detect_format(name, &order);
+        }
+
+        if (fmt == FMT_NONE) {
+            f_close(&g_img[v]);
+            continue;
+        }
+
+        g_writable[v] = rw;
+        g_fmt[v]      = fmt;
+        g_order[v]    = order;
+        g_base[v]     = base;
+        strncpy(g_imgname[v], name, sizeof(g_imgname[v]) - 1);
+        g_imgname[v][sizeof(g_imgname[v]) - 1] = '\0';
+        opened = 1;
+
+        uint32_t blocks = bytes / SECTOR_BYTES;
+        /* .dsk/.do/.po: 35 trk * 16 * 256 = 143360 B; .nib: 35 * 6656 =
+         * 232960 B. VOL_SIZE is informational for a floppy. */
+        osd_log("DISK II: D%d %s = %lu B (%s%s)", v + 1, g_imgname[v] + 3,
+                (unsigned long)bytes,
+                fmt == FMT_NIB ? "nib" :
+                (order == GCR_ORDER_PRODOS ? "po" : "dsk"),
+                base ? " 2mg" : "");
+        reg_write32(VOL_SIZE(v), blocks);
+        fpga_spi_reg_write(VOL_READONLY(v), g_writable[v] ? 0 : 1);
+        fpga_spi_reg_write(VOL_MOUNTED(v), 1);
+        fpga_spi_reg_write(VOL_READY(v), 1);
+        g_mounted[v] = true;
+    }
+}
+
+/* ---- ProDOS HDD unit mount: raw 512-byte blocks, LBA 1:1 ----------------- */
+static void mount_hdd(int u)
+{
+    g_hdd_mounted[u]  = false;
+    g_hdd_writable[u] = false;
+    g_hdd_base[u]     = 0;
+    g_hdd_blocks[u]   = 0;
+    fpga_spi_reg_write(HDD_CTL(u), 0);
+
+    strncpy(g_hdd_name[u], g_hdd_candidates[u][0], sizeof(g_hdd_name[u]) - 1);
+    g_hdd_name[u][sizeof(g_hdd_name[u]) - 1] = '\0';
+
+    for (int c = 0; c < 3; c++) {
+        const char *name = g_hdd_candidates[u][c];
+        bool rw;
+        if (f_open(&g_hdd_img[u], name, FA_READ | FA_WRITE) == FR_OK)
+            rw = true;
+        else if (f_open(&g_hdd_img[u], name, FA_READ) == FR_OK)
+            rw = false;
+        else
+            continue;
+
+        uint32_t base  = 0;
+        uint32_t bytes = (uint32_t)f_size(&g_hdd_img[u]);
+
+        if (has_ext(name, "2mg")) {
+            /* Any ProDOS-order 2mg payload serves as a block device. */
+            gcr_order_t order;
+            uint32_t    paylen = 0;
+            disk_fmt_t  fmt = parse_2mg(&g_hdd_img[u], &order, &base, &paylen);
+            if (fmt != FMT_DSK || order != GCR_ORDER_PRODOS) {
+                /* DOS-order / NIB payloads are floppies, not block devices */
+                if (fmt == FMT_NONE || bytes < base) {
+                    f_close(&g_hdd_img[u]);
+                    continue;
+                }
+            }
+            if (paylen)
+                bytes = paylen;
+            else
+                bytes -= base;
+        }
+        /* .hdv / .po: raw ProDOS blocks from byte 0 */
+
+        uint32_t blocks = bytes / SECTOR_BYTES;
+        if (blocks == 0) {
+            f_close(&g_hdd_img[u]);
+            continue;
+        }
+        if (blocks > 0xFFFFu)
+            blocks = 0xFFFFu;   /* ProDOS volumes cap at 65535 blocks (32 MB) */
+
+        g_hdd_writable[u] = rw;
+        g_hdd_base[u]     = base;
+        g_hdd_blocks[u]   = blocks;
+        strncpy(g_hdd_name[u], name, sizeof(g_hdd_name[u]) - 1);
+        g_hdd_name[u][sizeof(g_hdd_name[u]) - 1] = '\0';
+
+        fpga_spi_reg_write(HDD_SIZE_L(u), (uint8_t)blocks);
+        fpga_spi_reg_write(HDD_SIZE_H(u), (uint8_t)(blocks >> 8));
+        fpga_spi_reg_write(HDD_CTL(u), HDD_CTL_READY | HDD_CTL_MOUNTED |
+                                       (rw ? 0 : HDD_CTL_READONLY));
+        g_hdd_mounted[u] = true;
+        return;
+    }
 }
 
 /* Re-evaluate the storage backend and (re)mount the images. Triggered at
@@ -182,6 +370,12 @@ static void disk_remount(void)
         fpga_spi_reg_write(VOL_READY(v), 0);
         fpga_spi_reg_write(VOL_MOUNTED(v), 0);
     }
+    for (int u = 0; u < NHDD; u++) {
+        if (g_hdd_mounted[u])
+            f_close(&g_hdd_img[u]);
+        g_hdd_mounted[u] = false;
+        fpga_spi_reg_write(HDD_CTL(u), 0);
+    }
     f_mount(NULL, "0:", 0);
 
     bool use_usb = (g_msc_class != NULL);
@@ -213,6 +407,15 @@ static void disk_remount(void)
             n_mounted++;
         } else {
             osd_log("DISK II: DRIVE %d %s NOT FOUND", v + 1, g_imgname[v] + 3);
+        }
+    }
+    for (int u = 0; u < NHDD; u++) {
+        mount_hdd(u);
+        if (g_hdd_mounted[u]) {
+            osd_log("HDD: UNIT %d %s MOUNTED (%lu BLK %s)", u + 1,
+                    g_hdd_name[u] + 3, (unsigned long)g_hdd_blocks[u],
+                    g_hdd_writable[u] ? "RW" : "RO");
+            n_mounted++;
         }
     }
 
@@ -277,21 +480,23 @@ static void serve_drive(int v)
             }
             if (g_fmt[v] == FMT_DSK) {
                 /* Decode the (possibly partly rewritten) nibble track back to
-                 * DOS-order sectors. Preload the current on-file track so any
+                 * file-order sectors. Preload the current on-file track so any
                  * sector that fails to decode keeps its existing bytes; gate the
                  * write on the found-mask so a bad decode never corrupts the
                  * image. */
                 uint32_t track = lba / 13u;
+                FSIZE_t  fpos  = (FSIZE_t)g_base[v] +
+                                 (FSIZE_t)track * DSK_TRACK_BYTES;
                 UINT br = 0;
-                if (f_lseek(&g_img[v], (FSIZE_t)track * DSK_TRACK_BYTES) == FR_OK)
+                if (f_lseek(&g_img[v], fpos) == FR_OK)
                     f_read(&g_img[v], g_secbuf, DSK_TRACK_BYTES, &br);
                 if (br < DSK_TRACK_BYTES)
                     memset(g_secbuf + br, 0, DSK_TRACK_BYTES - br);
                 uint16_t mask = gcr_decode_dos_track(g_trackbuf, MAX_TRACK_BYTES,
-                                                     g_secbuf);
+                                                     g_order[v], g_secbuf);
                 if (mask != 0) {
                     UINT bw = 0;
-                    if (f_lseek(&g_img[v], (FSIZE_t)track * DSK_TRACK_BYTES) == FR_OK) {
+                    if (f_lseek(&g_img[v], fpos) == FR_OK) {
                         f_write(&g_img[v], g_secbuf, DSK_TRACK_BYTES, &bw);
                         f_sync(&g_img[v]);
                     }
@@ -301,7 +506,8 @@ static void serve_drive(int v)
                             v + 1, (unsigned long)track, (unsigned)mask);
             } else {
                 UINT bw = 0;
-                if (f_lseek(&g_img[v], (FSIZE_t)lba * SECTOR_BYTES) == FR_OK) {
+                if (f_lseek(&g_img[v], (FSIZE_t)g_base[v] +
+                                       (FSIZE_t)lba * SECTOR_BYTES) == FR_OK) {
                     f_write(&g_img[v], g_trackbuf, nbyte, &bw);
                     f_sync(&g_img[v]);
                 }
@@ -311,19 +517,21 @@ static void serve_drive(int v)
         /* Load the requested track: image file -> SDRAM window. */
         uint32_t track = lba / 13u;
         if (g_fmt[v] == FMT_DSK) {
-            /* Read this track's 16*256 DOS-order sectors and nibblize them into
-             * the 6-and-2 GCR stream the window expects. */
+            /* Read this track's 16*256 file-order sectors and nibblize them
+             * into the 6-and-2 GCR stream the window expects. */
             UINT br = 0;
-            if (f_lseek(&g_img[v], (FSIZE_t)track * DSK_TRACK_BYTES) == FR_OK)
+            if (f_lseek(&g_img[v], (FSIZE_t)g_base[v] +
+                                   (FSIZE_t)track * DSK_TRACK_BYTES) == FR_OK)
                 f_read(&g_img[v], g_secbuf, DSK_TRACK_BYTES, &br);
             if (br < DSK_TRACK_BYTES)
                 memset(g_secbuf + br, 0, DSK_TRACK_BYTES - br);
             gcr_encode_dos_track(g_secbuf, (uint8_t)track, DSK_DEFAULT_VOLUME,
-                                 g_trackbuf, MAX_TRACK_BYTES);
+                                 g_order[v], g_trackbuf, MAX_TRACK_BYTES);
         } else {
             /* .nib: raw nibble stream, streamed as-is. */
             UINT br = 0;
-            if (f_lseek(&g_img[v], (FSIZE_t)lba * SECTOR_BYTES) == FR_OK)
+            if (f_lseek(&g_img[v], (FSIZE_t)g_base[v] +
+                                   (FSIZE_t)lba * SECTOR_BYTES) == FR_OK)
                 f_read(&g_img[v], g_trackbuf, nbyte, &br);
             if (br < nbyte) {
                 /* EOF: a zero-filled track has no sync/prologue nibbles, so RWTS
@@ -349,6 +557,46 @@ static void serve_drive(int v)
     fpga_spi_reg_write(VOL_ACK(v), 1);   /* request serviced — release the head */
 }
 
+/* Serve one ProDOS HDD unit: raw 512-byte blocks, LBA 1:1 into the image
+ * payload, one block per request through the unit's SDRAM window. */
+static void serve_hdd(int u)
+{
+    if (!g_hdd_mounted[u])
+        return;
+
+    uint8_t req = fpga_spi_reg_read(HDD_REQ(u)) & 0x03;
+    if (!req)
+        return;   /* nothing pending */
+
+    uint32_t lba = (uint32_t)fpga_spi_reg_read(HDD_LBA_L(u)) |
+                   ((uint32_t)fpga_spi_reg_read(HDD_LBA_H(u)) << 8);
+    uint32_t addr = HDD_WINDOW_BASE + (uint32_t)u * HDD_WINDOW_STRIDE;
+    FSIZE_t  fpos = (FSIZE_t)g_hdd_base[u] + (FSIZE_t)lba * SECTOR_BYTES;
+
+    if (req & 0x02) {
+        /* write: SDRAM window -> image file */
+        if (g_hdd_writable[u] && lba < g_hdd_blocks[u]) {
+            UINT bw = 0;
+            fpga_spi_xfer_read(FPGA_SPACE_SDRAM, addr, g_blockbuf, SECTOR_BYTES);
+            if (f_lseek(&g_hdd_img[u], fpos) == FR_OK) {
+                f_write(&g_hdd_img[u], g_blockbuf, SECTOR_BYTES, &bw);
+                f_sync(&g_hdd_img[u]);
+            }
+        }
+    } else {
+        /* read: image file -> SDRAM window */
+        UINT br = 0;
+        if (lba < g_hdd_blocks[u] &&
+            f_lseek(&g_hdd_img[u], fpos) == FR_OK)
+            f_read(&g_hdd_img[u], g_blockbuf, SECTOR_BYTES, &br);
+        if (br < SECTOR_BYTES)
+            memset(g_blockbuf + br, 0, SECTOR_BYTES - br);
+        fpga_spi_xfer_write(FPGA_SPACE_SDRAM, addr, g_blockbuf, SECTOR_BYTES);
+    }
+
+    fpga_spi_reg_write(HDD_ACK(u), 1);   /* request serviced */
+}
+
 void disk_poll(void)
 {
     if (g_remount_req) {
@@ -363,6 +611,28 @@ void disk_poll(void)
         osd_console_hide();
     }
 
+    /* Apple II reset release: the FPGA holds the Apple II in RESET from
+     * power-on (reg 0x2E, bl616_spi_connector) so the autoboot slot scan does
+     * not run before storage is up. Release as soon as a (re)mount has found
+     * at least one volume, or after a deadline so a machine with no media
+     * still boots. The FPGA has its own 15 s backstop should we never write. */
+    {
+        static bool s_released = false;
+        if (!s_released) {
+            bool any = false;
+            for (int v = 0; v < NDRV; v++) any = any || g_mounted[v];
+            for (int u = 0; u < NHDD; u++) any = any || g_hdd_mounted[u];
+            if ((any && !g_remount_req) ||
+                bflb_mtimer_get_time_us() > 7000000u) {
+                fpga_spi_reg_write(0x2E, 1);   /* A2_RST_RELEASE */
+                s_released = true;
+                osd_log("A2: RESET RELEASED%s", any ? "" : " (NO MEDIA)");
+            }
+        }
+    }
+
     for (int v = 0; v < NDRV; v++)
         serve_drive(v);
+    for (int u = 0; u < NHDD; u++)
+        serve_hdd(u);
 }

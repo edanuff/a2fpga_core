@@ -50,6 +50,9 @@ module top #(
     parameter bit UTHERNET2_ENABLE = 1,
     parameter bit [7:0] UTHERNET2_ID = 5,
 
+    parameter bit HDD_ENABLE = 1,
+    parameter bit [7:0] HDD_ID = 6,
+
     parameter bit ENSONIQ_ENABLE = 1,
     parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
@@ -218,7 +221,8 @@ module top #(
     `ifdef BL616_SPI
     localparam MCU_MEM_PORT = 4;
     localparam DISK_MEM_PORT = 5;   // Disk II track-on-demand window (read)
-    localparam NUM_PORTS = 6;
+    localparam HDD_MEM_PORT = 6;    // ProDOS HDD block window (read/write)
+    localparam NUM_PORTS = 7;
     `else
     localparam NUM_PORTS = 4;
     `endif
@@ -246,6 +250,10 @@ module top #(
     // free SDRAM at byte 0x200000 (word 0x080000). The MCU streams a track here
     // via XFER SPACE 1; drive d's window is byte 0x200000 + d*0x2000.
     localparam [PORT_ADDR_WIDTH-1:0] DISK_WORD_BASE    = 21'h080000;  // byte 0x200000
+    // ProDOS HDD block windows: 2 units x 512 bytes, one block each, right
+    // after the Disk II track windows. The MCU streams a block here via XFER
+    // SPACE 1; unit u's window is byte 0x204000 + u*0x200.
+    localparam [PORT_ADDR_WIDTH-1:0] HDD_WORD_BASE     = 21'h081000;  // byte 0x204000
 
     // Signals for the multiple ports
     mem_port_if #(
@@ -264,7 +272,8 @@ module top #(
     `ifdef BL616_SPI
         .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE,
                           ENSONIQ_WORD_BASE, ENSONIQ_WORD_BASE,
-                          SHADOW_WORD_BASE, DISK_WORD_BASE}),
+                          SHADOW_WORD_BASE, DISK_WORD_BASE,
+                          HDD_WORD_BASE}),
     `else
         .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE,
                           ENSONIQ_WORD_BASE, ENSONIQ_WORD_BASE}),
@@ -495,6 +504,28 @@ module top #(
         .volumes(volumes)
     );
 
+    drive_volume_if hdd_volumes[2]();
+
+    wire [7:0] hdd_d_w;
+    wire hdd_rd;
+
+    // ProDOS hard disk (block device). The card requests one 512-byte block
+    // at a time over hdd_volumes[] (compact BL616 regs 0x26-0x2D); the BL616
+    // serves it from a .hdv/.po image into the HDD_MEM_PORT SDRAM window via
+    // XFER SPACE 1, then pulses ack and the card streams it to the 6502
+    // through its sector buffer.
+    HDD #(
+        .ENABLE(HDD_ENABLE),
+        .ID(HDD_ID)
+    ) hdd (
+        .a2bus_if(a2bus_if),
+        .slot_if(slot_if),
+        .data_o(hdd_d_w),
+        .rd_en_o(hdd_rd),
+        .ram_hdd_if(mem_ports[HDD_MEM_PORT]),
+        .volumes(hdd_volumes)
+    );
+
     // Bus event FIFO
     wire        fifo_empty_w;
     wire        fifo_full_w;
@@ -550,6 +581,7 @@ module top #(
         .video_control_if(video_control_if),
         .slotmaker_config_if(slotmaker_config_if),
         .volumes(volumes),
+        .hdd_volumes(hdd_volumes),
         .mem_if(mem_ports[MCU_MEM_PORT]),
         .sdram_init_complete_i(sdram_init_complete),
         .mcu_ready_o(mcu_ready_w),
@@ -631,6 +663,9 @@ module top #(
 
     wire [7:0] diskii_d_w = 8'b0;
     wire diskii_rd = 1'b0;
+
+    wire [7:0] hdd_d_w = 8'b0;
+    wire hdd_rd = 1'b0;
 
     assign a2bus_control_if.ready = 1'b1;
 
@@ -1095,13 +1130,14 @@ module top #(
 
     // Data output
 
-    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || u2_rd || diskii_rd || cardrom_rd;
+    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || u2_rd || diskii_rd || hdd_rd || cardrom_rd;
 
     assign data_out_w = ssc_rd ? ssc_d_w :
         ssp_rd ? ssp_d_w :
         mb_rd ? mb_d_w :
         u2_rd ? u2_d_w :
         diskii_rd ? diskii_d_w :
+        hdd_rd ? hdd_d_w :
         cardrom_rd ? cardrom_d_w :
         a2bus_if.data;
 
