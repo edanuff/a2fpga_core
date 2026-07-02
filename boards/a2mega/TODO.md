@@ -16,9 +16,14 @@
 - [ ] Complete the FAT32 SD Card support
 - [ ] Enable configuration through a web-based UX rather than OSD
 - [ ] Investigate using the PPO interface to treat the FPGA as an LCD display
-- [ ] Investigate implementing IIgs acceleration (similar to Transwarp GS) —
-      see [docs/twgs_action_plan.md](docs/twgs_action_plan.md) for the gap analysis
-      and phased plan (Phase 0 open hardware questions block first power-on)
+- [ ] Implement IIgs acceleration (similar to Transwarp GS) —
+      see [docs/twgs_action_plan.md](docs/twgs_action_plan.md) for the phased plan.
+      Status: Phase 0/1 gateware landed (GS pin constraints, `hdl/twgs/` bus engine
+      + P65C816 core in the project, monitor-mode default). Next: verify a build
+      with `gw_sh` (not available in the authoring environment), then Phase 1
+      bench monitoring and Phase 2 bring-up with `TWGS_CPU_ENABLE=1`.
+      Hardware: /VP drive path needs a board rev (vector-snapshot workaround
+      in gateware covers current boards)
 - [ ] Implement and test SDRAM support
 
 ## Low Priority / Future

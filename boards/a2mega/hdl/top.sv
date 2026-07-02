@@ -41,6 +41,10 @@ module top #(
     parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
     parameter int GS = 0,                       // Apple IIgs mode
+
+    // TWGS - IIgs 65816 CPU socket interposer (docs/twgs_action_plan.md)
+    parameter bit TWGS_ENABLE = 1,              // Instantiate engine + enable monitor inputs
+    parameter bit TWGS_CPU_ENABLE = 0,          // Drive the socket as the CPU (Phase 2 bench builds only)
     parameter int ENABLE_FILTER = 0,            // Enable audio filtering
     parameter int ENABLE_DENOISE = 0,           // Enable denoise of clocks
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
@@ -123,7 +127,26 @@ module top #(
 
     // ESP32 Octal SPI interface
     input         esp_sclk,
-    inout  [7:0]  esp_data
+    inout  [7:0]  esp_data,
+
+    // IIgs 65816 CPU socket (GS connector J8, level-shifted via U8/U10/U11)
+    input         gs_ph2,
+    input         gs_reset_n,
+    input         gs_irq_n,
+    input         gs_nmi_n,
+    input         gs_abort_n,
+    input         gs_rdy,
+    input         gs_be,
+    input         gs_vp_n,       // input-only this board rev (twgs_action_plan.md 7.1)
+
+    output [15:0] gs_a,
+    inout  [7:0]  gs_d,
+    output        gs_rw,
+
+    output        gs_oe_n,       // U8 port 1 enable (control inputs, active low)
+    output        gs_data_oe_n,  // U8 port 2 enable (D0-7, active low)
+    output        gs_addr_oe_n,  // U11/U10 enable (A0-15 + R/W, active low)
+    output        gs_d_dir       // 1 = FPGA drives D0-7 toward the bus
 
 );
 
@@ -1319,25 +1342,60 @@ module top #(
     // - esp_video_control_if can replace video_control_if for OSD
     // - esp_volumes can be connected to disk drive infrastructure
 
-    /*
-    // Data bus IOBUF instantiation
-    wire [7:0] cpu_data_in;
-    wire [7:0] cpu_data_out;
-    wire       cpu_data_oe;
-    
-    // Gowin IOBUF primitive - adjust to match your library
-    genvar i;
-    generate
-        for (i = 0; i < 8; i = i + 1) begin : data_iobuf
-            IOBUF data_buf (
-                .O  (cpu_data_in[i]),
-                .IO (DATA[i]),
-                .I  (cpu_data_out[i]),
-                .OEN(~cpu_data_oe)      // Gowin OEN is active low
-            );
-        end
-    endgenerate
-    */
+    // TWGS - IIgs 65816 CPU socket interposer (docs/twgs_action_plan.md)
+    //
+    // With TWGS_CPU_ENABLE=0 (default) the engine never drives the socket:
+    // gs_addr_oe_n / gs_data_oe_n stay high (shifters disabled, external
+    // pullups guarantee this through FPGA configuration as well), and only
+    // the harmless control-input port of U8 is enabled for monitoring.
+
+    wire [7:0] gs_d_in_w;
+    wire [7:0] gs_d_out_w;
+    wire       gs_d_drive_w;
+
+    IOBUF gs_d_iobuf[7:0] (
+        .O  (gs_d_in_w),
+        .IO (gs_d),
+        .I  (gs_d_out_w),
+        .OEN(!gs_d_drive_w)     // Gowin OEN is active low
+    );
+
+    wire [31:0] twgs_ph2_count_w;
+    wire [23:0] twgs_addr_w;
+    wire [3:0]  twgs_state_w;
+    wire        twgs_veccap_done_w;
+
+    iigs_65816_wrapper iigs_65816 (
+        .clk_i            (clk_logic_w),
+        .device_reset_n_i (device_reset_n_w),
+
+        .monitor_enable_i (TWGS_ENABLE),
+        .cpu_enable_i     (TWGS_ENABLE && TWGS_CPU_ENABLE),
+
+        .gs_ph2_i         (gs_ph2),
+        .gs_reset_n_i     (gs_reset_n),
+        .gs_irq_n_i       (gs_irq_n),
+        .gs_nmi_n_i       (gs_nmi_n),
+        .gs_abort_n_i     (gs_abort_n),
+        .gs_rdy_i         (gs_rdy),
+        .gs_be_i          (gs_be),
+
+        .gs_a_o           (gs_a),
+        .gs_d_i           (gs_d_in_w),
+        .gs_d_o           (gs_d_out_w),
+        .gs_d_drive_o     (gs_d_drive_w),
+        .gs_rw_o          (gs_rw),
+
+        .gs_oe_n_o        (gs_oe_n),
+        .gs_data_oe_n_o   (gs_data_oe_n),
+        .gs_addr_oe_n_o   (gs_addr_oe_n),
+        .gs_d_dir_o       (gs_d_dir),
+
+        .dbg_ph2_count_o  (twgs_ph2_count_w),
+        .dbg_addr_o       (twgs_addr_w),
+        .dbg_state_o      (twgs_state_w),
+        .dbg_veccap_done_o(twgs_veccap_done_w)
+    );
 
 endmodule
 

@@ -227,6 +227,120 @@ IO_PORT "a2_a[14]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
 IO_LOC  "a2_a[15]" G17;
 IO_PORT "a2_a[15]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
 
+// IIgs 65816 CPU Socket Interposer (GS connector J8 via BTB2)
+//
+// Ball/bank assignments verified against the Tang Mega 60K SOM schematic
+// (docs/reference/tang_mega_60k_som_schematic.pdf): all GS pins are on
+// banks 5/6/7/8, whose VCCIO rails are fixed at 3.3V on the SOM.
+// The a2-mega board schematic's BANK3/4/5 net-name prefixes are stale.
+//
+// Level-shifter control (see docs/twgs_action_plan.md section 2.1):
+//   gs_oe_n      - active-low enable, U8 port 1: control inputs -> FPGA
+//   gs_data_oe_n - active-low enable, U8 port 2: D0-7 (direction = gs_d_dir)
+//   gs_addr_oe_n - active-low enable, U11 (A0-15 -> bus) and U10 (RW -> bus)
+//   gs_d_dir     - 1 = FPGA drives D0-7 to bus, 0 = bus drives FPGA
+// All three OE lines have external 4.7K pullups (safe/disabled at config).
+
+IO_LOC  "gs_oe_n" W15;
+IO_PORT "gs_oe_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "gs_data_oe_n" AB15;
+IO_PORT "gs_data_oe_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "gs_addr_oe_n" Y16;
+IO_PORT "gs_addr_oe_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "gs_d_dir" W21;
+IO_PORT "gs_d_dir" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+
+// GS socket control inputs (motherboard -> FPGA through U8 port 1)
+
+IO_LOC  "gs_ph2" AB17;
+IO_PORT "gs_ph2" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "gs_reset_n" U17;
+IO_PORT "gs_reset_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "gs_irq_n" Y17;
+IO_PORT "gs_irq_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "gs_nmi_n" N13;
+IO_PORT "gs_nmi_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "gs_abort_n" AA16;
+IO_PORT "gs_abort_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "gs_rdy" AB16;
+IO_PORT "gs_rdy" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "gs_be" N14;
+IO_PORT "gs_be" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// /VP is input-only on this board revision (see twgs_action_plan.md 7.1);
+// the FPGA cannot drive vector-pull to the motherboard until a board rev.
+
+IO_LOC  "gs_vp_n" AA15;
+IO_PORT "gs_vp_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// GS address bus (FPGA -> bus via U11, gated by gs_addr_oe_n)
+
+IO_LOC  "gs_a[0]" V17;
+IO_PORT "gs_a[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[1]" W17;
+IO_PORT "gs_a[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[2]" Y18;
+IO_PORT "gs_a[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[3]" Y19;
+IO_PORT "gs_a[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[4]" AA18;
+IO_PORT "gs_a[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[5]" AB18;
+IO_PORT "gs_a[5]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[6]" W19;
+IO_PORT "gs_a[6]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[7]" W20;
+IO_PORT "gs_a[7]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[8]" AB20;
+IO_PORT "gs_a[8]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[9]" AA21;
+IO_PORT "gs_a[9]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[10]" AB22;
+IO_PORT "gs_a[10]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[11]" Y22;
+IO_PORT "gs_a[11]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[12]" Y21;
+IO_PORT "gs_a[12]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[13]" AB21;
+IO_PORT "gs_a[13]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[14]" AA20;
+IO_PORT "gs_a[14]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_a[15]" AA19;
+IO_PORT "gs_a[15]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+// GS data bus (bidirectional via U8 port 2)
+
+IO_LOC  "gs_d[0]" N15;
+IO_PORT "gs_d[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_d[1]" M15;
+IO_PORT "gs_d[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_d[2]" M16;
+IO_PORT "gs_d[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_d[3]" N17;
+IO_PORT "gs_d[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_d[4]" V20;
+IO_PORT "gs_d[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_d[5]" U20;
+IO_PORT "gs_d[5]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_d[6]" M17;
+IO_PORT "gs_d[6]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "gs_d[7]" P17;
+IO_PORT "gs_d[7]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+// GS R/W (FPGA -> bus via U10, gated by gs_addr_oe_n)
+
+IO_LOC  "gs_rw" U18;
+IO_PORT "gs_rw" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
 // ESP32-S3 OSPI Lines
 
 IO_LOC  "esp_data[0]" E13;
