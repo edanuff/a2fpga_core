@@ -31,8 +31,8 @@ What exists today:
 
 What has to happen, in order:
 
-1. **Phase 0 — Groundwork:** resolve open hardware items (bank voltages, the
-   confirmed /VP drive gap — §7.1), core provenance, project hygiene, simulation
+1. **Phase 0 — Groundwork:** resolve the confirmed /VP drive gap (§7.1; bank
+   voltages are verified safe — §7.2), core provenance, project hygiene, simulation
    strategy.
 2. **Phase 1 — Passive bring-up:** pin constraints + tri-stated top-level ports +
    signal monitoring. No driving of the socket.
@@ -88,25 +88,31 @@ Address bus (BANK4):
 | FPGA_GS_A6 | W19 | FPGA_GS_A14 | AA20 |
 | FPGA_GS_A7 | W20 | FPGA_GS_A15 | AA19 |
 
-Data bus and control:
+Data bus and control (banks are the *true* GW5AT-60 banks from the Tang Mega 60K
+SOM schematic — the a2-mega schematic's `BANK3/4/5_*` net-label prefixes are stale
+and should be ignored):
 
 | Signal | Ball | Bank | Dir (FPGA) | Signal | Ball | Bank | Dir (FPGA) |
 |---|---|---|---|---|---|---|---|
-| FPGA_GS_D0 | N15 | 4 | bidir | FPGA_GS_NMI | N13 | 4 | in |
-| FPGA_GS_D1 | M15 | 3 | bidir | FPGA_GS_BE | N14 | 4 | in |
-| FPGA_GS_D2 | M16 | 3 | bidir | FPGA_GS_IRQ | Y17 | 5 | in |
-| FPGA_GS_D3 | N17 | 4 | bidir | FPGA_GS_PH2 | AB17 | 5 | in |
-| FPGA_GS_D4 | V20 | 4 | bidir | FPGA_GS_ABORT | AA16 | 5 | in |
-| FPGA_GS_D5 | U20 | 4 | bidir | FPGA_GS_RDY | AB16 | 5 | in |
-| FPGA_GS_D6 | M17 | 3 | bidir | FPGA_GS_VP | AA15 | 5 | in (⚠ §7.1) |
-| FPGA_GS_D7 | P17 | 4 | bidir | FPGA_GS_DATA_OE | AB15 | 5 | out |
-| FPGA_GS_RW | U18 | 4 | out | FPGA_GS_ADDR_OE | Y16 | 5 | out |
-| FPGA_GS_RESET | U17 | 4 | in | FPGA_GS_OE | W15 | 5 | out |
-| FPGA_GS_D_DIR | W21 | 4 | out | | | | |
+| FPGA_GS_D0 | N15 | 6 | bidir | FPGA_GS_NMI | N13 | 6 | in |
+| FPGA_GS_D1 | M15 | 5 | bidir | FPGA_GS_BE | N14 | 6 | in |
+| FPGA_GS_D2 | M16 | 5 | bidir | FPGA_GS_IRQ | Y17 | 7 | in |
+| FPGA_GS_D3 | N17 | 6 | bidir | FPGA_GS_PH2 | AB17 | 7 | in |
+| FPGA_GS_D4 | V20 | 8 | bidir | FPGA_GS_ABORT | AA16 | 7 | in |
+| FPGA_GS_D5 | U20 | 8 | bidir | FPGA_GS_RDY | AB16 | 7 | in |
+| FPGA_GS_D6 | M17 | 5 | bidir | FPGA_GS_VP | AA15 | 7 | in (⚠ §7.1) |
+| FPGA_GS_D7 | P17 | 6 | bidir | FPGA_GS_DATA_OE | AB15 | 8 | out |
+| FPGA_GS_RW | U18 | 8 | out | FPGA_GS_ADDR_OE | Y16 | 7 | out |
+| FPGA_GS_RESET | U17 | 8 | in | FPGA_GS_OE | W15 | 7 | out |
+| FPGA_GS_D_DIR | W21 | 7 | out | | | | |
+
+The address pins (table above) sit on banks 7/8 (AA21/AA20 = bank 7, the rest
+bank 8). **All GS pins are on banks 5/6/7/8, whose VCCIO rails (`VCCIO_45`,
+`VCCIO_678`) are fixed at 3.3 V on the SOM** — constrain everything
+`IO_TYPE=LVCMOS33`. See §7.2 (resolved).
 
 > ⚠ Verify ball numbers against the KiCad netlist before committing the `.cst`; the
-> table above was transcribed from the schematic PDF. See also the Bank 5 VCCIO
-> question in §7.2 — do not power a connected IIgs until resolved.
+> table above was transcribed from the schematic PDF.
 
 ---
 
@@ -185,7 +191,7 @@ Unique advantages over the original TWGS worth exploiting:
 |---|---|---|
 | 0.1 | Fix `a2mega.gprj` absolute→relative paths (pre-existing rule violation; blocks anyone else building) | Buildable `.gprj`; verify with `/build` per `docs/setup-gowin-cli.md` |
 | 0.2 | Resolve `P65C816` provenance & license; add attribution headers or replace core | Note in `docs/` + headers |
-| 0.3 | Resolve remaining hardware items: **/VP drive path** (confirmed gap, §7.1 — decide board rev vs bodge vs run-without experiment), Bank 5 VCCIO (§7.2), ribbon/DIP-40 pin mapping | Updated twgs docs; go/no-go for Phase 1 power-on |
+| 0.3 | Resolve remaining hardware items: **/VP drive path** (confirmed gap, §7.1 — decide board rev vs bodge vs run-without experiment) and ribbon/DIP-40 pin mapping. (Bank VCCIO: resolved, no conflict — §7.2) | Updated twgs docs; go/no-go for Phase 1 power-on |
 | 0.4 | Choose simulation approach for mixed VHDL/SV (the core is VHDL). Options: nvc/GHDL for core-only opcode tests + Verilator for the SV bus engine with the core swapped for a behavioral stub; or a commercial mixed-language sim if available | `sim/` scaffold + CI-runnable smoke test |
 | 0.5 | Record architecture decisions as ADRs in `docs/adr/` (see §6) | ADR-1..4 |
 | 0.6 | Baseline resource/timing snapshot of current a2mega build (LUT/BSRAM/Fmax headroom for the core + engine) | Numbers in this doc |
@@ -194,7 +200,7 @@ Unique advantages over the original TWGS worth exploiting:
 
 | # | Task | Notes |
 |---|---|---|
-| 1.1 | Add all `FPGA_GS_*` pins to `a2mega.cst` (§2.2 table) with IO_TYPE per resolved bank voltages | Outputs default tri-state |
+| 1.1 | Add all `FPGA_GS_*` pins to `a2mega.cst` (§2.2 table), `IO_TYPE=LVCMOS33` (all GS pins are on banks 5/6/7/8; `VCCIO_45`/`VCCIO_678` are fixed 3.3 V on the SOM — §7.2) | Outputs default tri-state |
 | 1.2 | Add GS ports to `top.sv`; hard-assert all three OE lines inactive at reset and until a "TWGS enable" config bit is set | Safety invariant: a bitstream with TWGS disabled must be electrically identical to today's board |
 | 1.3 | GS signal monitor module: count PH2 edges, measure fast/slow frequency (2.864 / 1.023 MHz), detect stretched cycles, observe RESET/IRQ/NMI/BE activity | Surface via DebugOverlay + UART |
 | 1.4 | Bench validation with the ribbon attached to a socketed IIgs **with the real 65C816 still installed on the motherboard side of the interposer** if the cable permits, else scope-only | Acceptance: measured PH2 matches expectations incl. cycle stretching |
@@ -338,16 +344,23 @@ ROM-IN, TWGS_SPEED, GOSLOW) is a good template for our DebugOverlay signal list.
 
 ### 7.2 Other open items
 
-1. **Bank 5 VCCIO conflict.** GS control pins (PH2, IRQ, ABORT, RDY, VP, and all
-   three OE/DIR outputs) sit on SOM "BANK5" balls. The existing `.cst` constrains
-   `button` (AB13) as LVCMOS15/`BANK_VCCIO=1.5` yet `uart_tx` (U15, also labeled
-   BANK5 on the SOM schematic) as LVCMOS33. The 164245 A-side drives 3.3 V. Confirm
-   from the Tang Mega 60K SOM schematic which BTB2 balls are on which bank and at
-   what VCCIO **before first power-on with the ribbon attached** — a 3.3 V drive
-   into a 1.5 V bank would damage the FPGA.
+1. **Bank VCCIO conflict — RESOLVED, no conflict.** Verified against the Tang Mega
+   60K SOM schematic (committed at
+   [`reference/tang_mega_60k_som_schematic.pdf`](reference/tang_mega_60k_som_schematic.pdf),
+   sheets 1, 3, 6). The a2-mega schematic's `BANK3/4/5` net-name prefixes are stale;
+   true banks: GS pins sit on banks 5/6/7/8. The SOM hard-wires `VCCIO_45` (banks
+   4/5, ferrite FB16) and `VCCIO_678` (banks 6/7/8, FB14) to **3.3 V**, and
+   `VCCIO_DDR` (banks **9/10/11** — sheet 3: "BANK 9,10,11 IO Voltage is 1.5V !!!")
+   to 1.5 V. The only 1.5 V balls on BTB2 are the bank-9 group (pins 52–86: Y13,
+   AA13, AB13, Y12, AB12, V10, W11, Y11, W10, AB11, AA11, AB10, AA10, AA9, W12),
+   which a2-mega leaves unconnected except `button` (AB13, already correctly
+   LVCMOS15); `rst` (F4) is bank 11, likewise correctly 1.5 V in the `.cst`.
+   **All `FPGA_GS_*` pins are 3.3 V-safe against the 164245 A-side; constrain
+   LVCMOS33.**
 2. **Bus parking while accelerated.** Unverified assumption that the FPI tolerates
-   repeated benign read cycles (it should — that's what a spinning CPU looks like),
-   and that Mega II refresh is CPU-independent. Validate early in Phase 4.
+   repeated benign read cycles (it should — that's what a spinning CPU looks like;
+   see also the §7.1 parking insight), and that Mega II refresh is CPU-independent.
+   Validate early in Phase 4.
 3. **CDC latency vs FPI setup expectations** (§ Phase 2.2). If 54 MHz sampling is
    too slow, mitigation paths exist (faster sample clock, IOB regs, PH2-derived
    clocking) but they touch clock architecture — schedule the analysis first.
@@ -406,6 +419,10 @@ level shifters, core accuracy) while remaining fully reversible for users.
   U32A 74F125 = R/W tri-state, GAL3 = VPB/VPA/VDA + bank-byte cycle decode,
   J1 = unused expansion connector (raw CPU pins incl. VDA/VPA/E/MLB/M-X),
   J2 = debug header
+- **Tang Mega 60K SOM schematic** (Sipeed, rev 1.0) — committed at
+  [`reference/tang_mega_60k_som_schematic.pdf`](reference/tang_mega_60k_som_schematic.pdf).
+  Sheet 1 = BTB connectors with true bank/ball names, sheet 3 = DDR3 + the
+  "BANK 9,10,11 IO Voltage is 1.5V" note, sheet 6 = FPGA power (VCCIO rail feeds)
 - [TransWarp GS — ReActiveMicro wiki](https://wiki.reactivemicro.com/TransWarp_GS) —
   GAL functions, cable notes ("not straight-through"), upgrade history
 - [TWGS manual (PDF)](https://downloads.reactivemicro.com/Apple%20II%20Items/Hardware/TransWarp_GS/TranswarpGS%20Manual.pdf)
