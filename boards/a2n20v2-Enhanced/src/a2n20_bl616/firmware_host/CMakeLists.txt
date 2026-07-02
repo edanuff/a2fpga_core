@@ -32,6 +32,7 @@ target_sources(app PRIVATE
     disk.c
     diskio_host.c
     osd_console.c
+    ../firmware/gcr_dsk.c
     ../firmware/fpga_spi.c
     ../firmware/fpga_screen.c
     # Disk II image serving: FatFS + SD-over-FPGA-SPI-tunnel (same set the FT2232
