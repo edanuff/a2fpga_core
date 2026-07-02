@@ -217,7 +217,8 @@ module top #(
     localparam DOC_MEM_PORT = 2;
     `ifdef BL616_SPI
     localparam MCU_MEM_PORT = 4;
-    localparam NUM_PORTS = 5;
+    localparam DISK_MEM_PORT = 5;   // Disk II track-on-demand window (read)
+    localparam NUM_PORTS = 6;
     `else
     localparam NUM_PORTS = 4;
     `endif
@@ -241,6 +242,10 @@ module top #(
 `ifdef ENSONIQ
     localparam [PORT_ADDR_WIDTH-1:0] ENSONIQ_WORD_BASE = 21'h010000;  // 128KB
 `endif
+    // Disk II track windows: 2 drives x 8KB, one resident track each. Lives in
+    // free SDRAM at byte 0x200000 (word 0x080000). The MCU streams a track here
+    // via XFER SPACE 1; drive d's window is byte 0x200000 + d*0x2000.
+    localparam [PORT_ADDR_WIDTH-1:0] DISK_WORD_BASE    = 21'h080000;  // byte 0x200000
 
     // Signals for the multiple ports
     mem_port_if #(
@@ -259,7 +264,7 @@ module top #(
     `ifdef BL616_SPI
         .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE,
                           ENSONIQ_WORD_BASE, ENSONIQ_WORD_BASE,
-                          SHADOW_WORD_BASE}),
+                          SHADOW_WORD_BASE, DISK_WORD_BASE}),
     `else
         .PORT_BASE_ADDR('{SHADOW_WORD_BASE, SHADOW_WORD_BASE,
                           ENSONIQ_WORD_BASE, ENSONIQ_WORD_BASE}),
@@ -471,20 +476,24 @@ module top #(
 
     drive_volume_if volumes[2]();
 
-    wire [7:0] diskii_d_w = 8'b0;
-    wire diskii_rd = 1'b0;
+    wire [7:0] diskii_d_w;
+    wire diskii_rd;
 
-    // Stub drive side of volumes (no DiskII controller yet with BL616)
-    assign volumes[0].active = 1'b0;
-    assign volumes[0].lba = 32'd0;
-    assign volumes[0].blk_cnt = 6'd0;
-    assign volumes[0].rd = 1'b0;
-    assign volumes[0].wr = 1'b0;
-    assign volumes[1].active = 1'b0;
-    assign volumes[1].lba = 32'd0;
-    assign volumes[1].blk_cnt = 6'd0;
-    assign volumes[1].rd = 1'b0;
-    assign volumes[1].wr = 1'b0;
+    // Disk II controller (track-on-demand). drive_ii drives the drive side of
+    // volumes[] (lba/blk_cnt/rd) on a seek; the BL616 (bl616_spi_connector
+    // volume regs 0x40-0x5F) streams the requested track into the
+    // DISK_MEM_PORT SDRAM window via XFER SPACE 1, then pulses ack.
+    DiskII #(
+        .ENABLE(DISK_II_ENABLE),
+        .ID(DISK_II_ID)
+    ) diskii (
+        .a2bus_if(a2bus_if),
+        .slot_if(slot_if),
+        .data_o(diskii_d_w),
+        .rd_en_o(diskii_rd),
+        .ram_disk_if(mem_ports[DISK_MEM_PORT]),
+        .volumes(volumes)
+    );
 
     // Bus event FIFO
     wire        fifo_empty_w;
