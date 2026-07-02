@@ -31,8 +31,9 @@ What exists today:
 
 What has to happen, in order:
 
-1. **Phase 0 — Groundwork:** resolve open hardware questions (bank voltages, /VP
-   direction), core provenance, project hygiene, simulation strategy.
+1. **Phase 0 — Groundwork:** resolve open hardware items (bank voltages, the
+   confirmed /VP drive gap — §7.1), core provenance, project hygiene, simulation
+   strategy.
 2. **Phase 1 — Passive bring-up:** pin constraints + tri-stated top-level ports +
    signal monitoring. No driving of the socket.
 3. **Phase 2 — Transparent CPU replacement at native speed.** The IIgs boots and runs
@@ -184,7 +185,7 @@ Unique advantages over the original TWGS worth exploiting:
 |---|---|---|
 | 0.1 | Fix `a2mega.gprj` absolute→relative paths (pre-existing rule violation; blocks anyone else building) | Buildable `.gprj`; verify with `/build` per `docs/setup-gowin-cli.md` |
 | 0.2 | Resolve `P65C816` provenance & license; add attribution headers or replace core | Note in `docs/` + headers |
-| 0.3 | Answer open hardware questions (§7): work the TWGS-schematic checklist (§7.1 — /VP, **VDA/VPA**, E, M/X, BE, cable pin order), then Bank 5 VCCIO (§7.2) | Updated twgs docs; go/no-go for Phase 1 power-on |
+| 0.3 | Resolve remaining hardware items: **/VP drive path** (confirmed gap, §7.1 — decide board rev vs bodge vs run-without experiment), Bank 5 VCCIO (§7.2), ribbon/DIP-40 pin mapping | Updated twgs docs; go/no-go for Phase 1 power-on |
 | 0.4 | Choose simulation approach for mixed VHDL/SV (the core is VHDL). Options: nvc/GHDL for core-only opcode tests + Verilator for the SV bus engine with the core swapped for a behavioral stub; or a commercial mixed-language sim if available | `sim/` scaffold + CI-runnable smoke test |
 | 0.5 | Record architecture decisions as ADRs in `docs/adr/` (see §6) | ADR-1..4 |
 | 0.6 | Baseline resource/timing snapshot of current a2mega build (LUT/BSRAM/Fmax headroom for the core + engine) | Numbers in this doc |
@@ -205,7 +206,7 @@ acceleration, no cache. Everything in later phases degrades to this mode.
 
 | # | Task | Notes |
 |---|---|---|
-| 2.1 | Fix wrapper: correct `P65C816` port map (`VPB`, `RDY_OUT`), single coherent RDY design, BE-driven tri-state, level-shifter OE/DIR ports, reset semantics | Rewrite `iigs_65816_wrapper.sv`; keep the PHI1 bank-address multiplex (it is required — FPI latches the bank from D0–D7 at PH2 rise) |
+| 2.1 | Fix wrapper: correct `P65C816` port map (`VPB`, `RDY_OUT`), single coherent RDY design, BE-driven tri-state, level-shifter OE/DIR ports, reset semantics; **connect and use the core's VPA/VDA** for cycle classification (the TWGS GAL3 equivalent — internal-operation cycles repeat the last address, vector-pull qualification for /VP when a drive path exists) | Rewrite `iigs_65816_wrapper.sv`; keep the PHI1 bank-address multiplex (it is required — FPI latches the bank from D0–D7 at PH2 rise) |
 | 2.2 | **Timing budget analysis** (design doc): W65C816S provides tADS/tBAS ≤ 40 ns after PH2 fall; our chain is PH2 sync (2–3 × 18.5 ns) + output reg + IOB + 164245 tpd ≈ 60–90 ns. **Confirmed** (Apple IIGS Tech Note #68, *Tips for I/O Expansion Slot Card Design*): the FPI captures the bank address in a latch that is *transparent while PH2 is low and closes at PH2 rise*, and holds the latch closed while RDY is low because the CPU emits an invalid bank address then; RDY must change only while PH2 is high. So the hard deadline for address + bank is PH2 rise (~175 ns after fall in fast mode), not the 40 ns a real chip provides — our 60–90 ns chain fits, but verify slow/stretched-cycle cases too. If margin is thin: sample PH2 on a faster clock (existing 135 MHz `clk_pixel_x5` or a dedicated PLL tap), use IOB registers, or clock the GS engine from PH2 directly via a BUFG | Doc + chosen mechanism; add `set_input_delay`/`set_output_delay` SDC constraints for the GS pins; bus engine must never change its RDY-dependent behavior mid-PHI1 |
 | 2.3 | Bus-cycle engine v1: CE-gate the core 1:1 with PH2 (one core step per bus cycle), PHI1 bank mux, write-data drive during PH2 high, read sample at PH2 fall, RDY stretch, `GS_BE` release | Evolution of current FSM |
 | 2.4 | Data-bus turnaround: dead-time states around `FPGA_GS_D_DIR` flips so the 164245 never fights the motherboard | Bus-contention checklist |
@@ -249,7 +250,7 @@ corner cases:
 | 4.2 | Decouple core clocking: run core on `clk_logic` with CE duty control (target 7–14 MHz effective first; headroom later), or async run-ahead with handshake to the bus engine |
 | 4.3 | Write-back FIFO + ordering rules: drain-before-I/O barrier, read-after-write hazard on uncached space, FIFO-full stall |
 | 4.4 | Bus-cycle generator: native-speed cycle replay (writes, uncached reads) synchronized to PH2, including slow (1 MHz) cycles for `$E0/$E1`/I-O per FPI stretching |
-| 4.5 | Bus parking policy while executing internally: hold a benign ROM address with R/W=read so FPI-visible cycles are side-effect-free; validate no I/O location is ever parked on |
+| 4.5 | Bus parking policy while executing internally: **re-present the last bus address with R/W=read**, imitating a real 65816 internal-operation cycle (verified safe — the TWGS cable carries no VDA/VPA, so the FPI must tolerate exactly these cycles; see §7.1). Guard: never park on a read-side-effect address (last access to `$C0xx` parks on the previous non-I/O address instead) |
 | 4.6 | Benchmarks: instruction-mix micro-benchmarks + period speed tests; target ≥ 2.5× stock at first release |
 
 ### Phase 5 — Coherency & safety
@@ -257,7 +258,7 @@ corner cases:
 | # | Task |
 |---|---|
 | 5.1 | Auto-slowdown triggers per TWGS §10: any `$C0xx` access, slot device windows (`$C090–$C0FF`, slots 4–7 configurable), during and shortly after disk I/O; implement as a throttle timer dropping to Fast/Normal |
-| 5.2 | DMA: the 65816 sits on the FPI's *fast side*; slot DMA happens on the Mega II *slow side*, so the halt mechanism visible at the CPU socket is expected to be **RDY deassertion / clock stretching, not BE** (BE is likely strapped high on the motherboard — verify against the TWGS schematic, §7.1). Honor RDY exactly per the FPI rule (changes only while PH2 high). Detect DMA from the **slot side** — `a2_dma_n` daisy chain into `apple_bus` — just as the original TWGS did from slot 3 (GAL8: "slot decoding, DMA/RDY"). For shadow coherency, snoop DMA write addresses via the slot-bus interface (it samples the bus independently of the CPU) and invalidate touched pages; conservative fallback: invalidate all shadowed RAM on any DMA burst. Keep `GS_BE`-triggered tri-state as a defensive path regardless |
+| 5.2 | DMA (TWGS-verified model, §7.1): honor **both** halt paths. (a) `GS_BE` — TWGS receives BE from the motherboard and gates its R/W and address drivers with it, so implement BE-deassert ⇒ release drivers combinationally, exactly as TWGS's 74F125/573-OC arrangement does. (b) RDY — honor per the FPI rule (RDY changes only while PH2 high; bank invalid while RDY low). Detect and classify DMA from the **slot side** — `a2_dma_n`/`a2_rdy_n` into `apple_bus` — which is precisely how TWGS did it (`SLOT_DMA`/`SLOT_RDY` into GAL8; the CPU cable carries no RDY at all). For shadow coherency, snoop DMA write addresses via the slot-bus interface (it samples the bus independently of the CPU) and invalidate touched pages; conservative fallback: invalidate all shadowed RAM on any DMA burst |
 | 5.3 | IRQ-aware throttling (TWGS "AppleTalk/IRQ ON"): when I-flag set (interrupts disabled) and code is polling I/O, drop to non-accelerated speed; direct P-register visibility makes this exact |
 | 5.4 | WAI/STP semantics: use core `RDY_OUT` to idle the bus engine correctly; wake on IRQ/NMI/ABORT |
 | 5.5 | ABORT support pass-through (the IIgs uses /ABORT for the Mega II?—verify actual usage; ensure at minimum it behaves as stock) |
@@ -301,34 +302,39 @@ corner cases:
 
 ## 7. Risks & Open Hardware Questions (resolve in Phase 0)
 
-### 7.1 Verification checklist against the original TWGS schematic
+### 7.1 Findings from the original TWGS schematic — checklist RESOLVED
 
-The authoritative cross-check for every socket-side question below is Geoff Body's
-reverse-engineered TWGS schematic
-([Schematic Release 1, ReActiveMicro](https://downloads.reactivemicro.com/Apple%20II%20Items/Hardware/TransWarp_GS/2016-01-17%20-%20ReActiveMicro%20-%20Transwarp%20GS%20-%20Geoff%20Body%20-%20Schematic%20Release%201.pdf),
-mirrored [at apple2.org.za](https://mirrors.apple2.org.za/ftp.apple.asimov.net/documentation/hardware/accelerators/transwarp-gs---schematic.pdf)).
-TWGS shipped and was compatible; whatever it drives or ignores at the CPU socket is
-the proven-sufficient signal set. **This PDF could not be fetched from the cloud
-sandbox (outbound network policy blocks these domains), so the following must be
-checked by someone with the file — recommend committing it to
-`boards/a2mega/docs/reference/` alongside this plan.** For each CPU-cable pin,
-record: driven by TWGS toward motherboard / received / not connected:
+Verified against Geoff Body's reverse-engineered TWGS schematic, Release 1, 2016
+(Eagle export; committed at
+[`reference/twgs_schematic_geoff_body_release1_2016.pdf`](reference/twgs_schematic_geoff_body_release1_2016.pdf),
+original from [ReActiveMicro](https://downloads.reactivemicro.com/Apple%20II%20Items/Hardware/TransWarp_GS/2016-01-17%20-%20ReActiveMicro%20-%20Transwarp%20GS%20-%20Geoff%20Body%20-%20Schematic%20Release%201.pdf)).
+TWGS shipped and was compatible, so what it drives or ignores at the CPU socket is
+the proven-sufficient signal set. The complete J5 "To CPU cable" pin set is:
+`GS_VP, GS_RESET, GS_ABORT, GS_IRQ, GS_PH2, GS_BE, GS_NMI, GS_RW, GS_D0–7,
+GS_A0–15, +5V, GND` — nothing else.
 
-| Check | Why it matters for a2mega |
-|---|---|
-| Does TWGS drive **/VP** down the cable? | a2mega routes `GS_VP` *into* the FPGA through U8's input-only group, so nothing can drive /VP to the motherboard. If TWGS drives it, a2mega needs a board rev or bodge; if TWGS leaves it n/c, close this risk. |
-| Does TWGS drive **VDA / VPA**? | **J8 marks VDA and VPA as no-connect.** If the FPI qualifies cycles with VDA/VPA (they exist precisely for memory-cycle qualification), floating them is either fatal (machine ignores all cycles) or dangerous (dummy/internal cycles get treated as real accesses to soft-switch/I-O addresses). This is potentially a *harder* problem than /VP — a real 65816 emits internal-operation cycles with garbage addresses that only VDA/VPA=00 marks as ignorable, and our "bus parking" plan (Phase 4.5) assumes the same escape hatch exists or isn't needed. |
-| Does TWGS drive **E** and **M/X**? | J8 shows E and MX present on the header but seemingly unwired. The soft core tracks E internally; if TWGS drives E, we need a path to present it. |
-| Is **BE** in the TWGS cable, and is it driven by the motherboard? | Determines whether socket-side DMA release is even a thing on the IIgs (see §5.2 — expectation is that RDY, not BE, is the halt mechanism, with BE strapped high). |
-| How does TWGS connect **RDY** (bidirectional? pulled?) | RDY is also a 65816 *output* during WAI; check whether TWGS buffers it one-way. |
-| Bank-address latch parts (74HCT573s) between card CPU and cable | Confirms the PHI1 bank-mux discipline and gives a reference implementation for our turnaround timing; search snippets confirm 573-family latches and a wire-link (U28 p12 → U44 p2) exist on the card. |
-| GAL1 (CPU clock) / GAL2 (write-back) / GAL8 (slot decode, DMA/RDY) input signals | GAL8's inputs show exactly which *slot* signals TWGS used for DMA/slowdown — the template for our `apple_bus`-side detection. Note TWGS's 8 GALs replace ~40 discrete 74-series ICs ([ReActiveMicro wiki](https://wiki.reactivemicro.com/TransWarp_GS)). |
-| CPU cable pin order | ReActiveMicro documents that the TWGS CPU cable is **not straight-through**. Independently verify J8 ribbon pin-mapping against the DIP-40 socket before first connection. |
+| Signal | TWGS (verified) | a2mega consequence |
+|---|---|---|
+| **/VP** | **In the cable, DRIVEN toward the motherboard** (`GS_VP`, J5 pin 1) by a 74F32 OR gate (U5C) — VPB from the on-card CPU, qualified by card logic so vector-pull only asserts on real GS bus cycles | ⚠ **Confirmed a2mega hardware gap.** J8's `GS_VP` enters the FPGA through U8's input-only group; nothing can drive /VP to the motherboard. AE deliberately buffered and drove this pin, so treat it as required: plan a board rev (or bodge wire from a spare 5 V driver) routing an FPGA output to /VP. Secondary experiment: measure what actually breaks with /VP floating (it is pulled up) to decide urgency. This is now the **top board-level action item.** |
+| **VDA / VPA** | **Not in the cable.** Consumed on-card only: GAL3 takes VPB + VPA + VDA + D0–7 (bank byte) for cycle qualification; they also appear on the unused expansion connector J1 | ✅ J8 leaving VDA/VPA n/c is correct — the motherboard never sees them. Our bus engine must do what GAL3 did: use the soft core's VPA/VDA outputs (P65C816 provides both; the current wrapper leaves them unconnected) to classify cycles. Also implies the FPI treats *every* socket cycle as valid — see the bus-parking note below. |
+| **E, M/X, MLB** | **Not in the cable** (routed only to expansion connector J1) | ✅ J8 n/c is correct; no path needed. |
+| **BE** | **In the cable, received from the motherboard**; OR-ed with conditioned GS_PH2 to gate the card's bus drivers — R/W is driven through a 74F125 *tri-state* buffer, addresses through 74HCT573 latches with OC control | ✅ a2mega matches: `GS_BE` is an FPGA input, and our OE topology (164245 enables + 74LV1T125 on R/W gated by `FPGA_GS_ADDR_OE`) mirrors TWGS's 573-OC/74F125 arrangement. Bus engine must release drivers on BE deassert. |
+| **RDY** | **Not in the cable.** TWGS taps `SLOT_RDY` and `SLOT_DMA` from its slot fingers (GAL8 domain) — DMA/RDY handling is done entirely from the slot side | ✅ Validates Phase 5.2's slot-side DMA/RDY detection via `apple_bus`. a2mega additionally has `GS_RDY` at the socket (same electrical net) — a superset; use whichever is cleaner. |
+| **PH2** | Received through 27 Ω series + RC (100 Ω/100 pF) + 74AC04, then synchronized into the card's 4× oscillator domain with 74AC74 double-flops (`GS_PH2_EARLY`/`X4_EARLY`) | ✅ Same CDC strategy as the wrapper (a2mega even has the matching 27 Ω series R52); conditioning moves into the FPGA. |
+| **IRQ / NMI / ABORT / RESET** | Received; GS_IRQ additionally feeds the GALs *and* runs directly to the on-card CPU's IRQB (IRQ-aware throttling taps) | ✅ Matches J8; soft core + speed logic both see IRQ, as planned in Phase 5.3. |
+| **Cable pin order** | J5 is emphatically **not** DIP-40 order (VP, RESET, ABORT, IRQ, PH2, BE, NMI, RW, then D/A interleaved) | Verify the a2mega ribbon/plug adapter maps J8's own ordering to the DIP-40 socket pin-for-pin before first connection. |
 
-What *was* confirmed this round (Apple IIGS Tech Note #68, expansion-card design):
-the FPI bank-address latch is transparent during PH2-low and closes at PH2 rise;
-RDY low ⇒ CPU bank address invalid, so the FPI freezes the latch; RDY may only
-change while PH2 is high. These are now baked into Phase 2.2/5.2.
+**Bus-parking insight (feeds Phase 4.5):** since the cable carries no VDA/VPA, the
+FPI necessarily tolerates the 65816's internal-operation cycles — which repeat the
+*last used address* with R/W high. So the provably-safe parking policy while
+executing from shadow is to re-present the last bus address, exactly imitating a
+real 65816 internal cycle — no "benign ROM address" heuristic needed.
+
+Also corroborated: Apple IIGS Tech Note #68 (expansion-card design): the FPI
+bank-address latch is transparent during PH2-low and closes at PH2 rise; RDY low ⇒
+CPU bank address invalid, so the FPI freezes the latch; RDY may only change while
+PH2 is high. Baked into Phase 2.2/5.2. TWGS's J2 debug header (TAG_MATCH, RAM-WE,
+ROM-IN, TWGS_SPEED, GOSLOW) is a good template for our DebugOverlay signal list.
 
 ### 7.2 Other open items
 
@@ -391,11 +397,15 @@ level shifters, core accuracy) while remaining fully reversible for users.
 - [twgs_reference.md](twgs_reference.md) — TWGS behavior model this plan implements
 - [sch/a2-mega.pdf](../sch/a2-mega.pdf) — board schematic (sheets 6 & 8 for GS path)
 - `hdl/twgs/` — existing core + wrapper draft
-- **TWGS schematic** (Geoff Body, Release 1, 2016) —
-  [ReActiveMicro](https://downloads.reactivemicro.com/Apple%20II%20Items/Hardware/TransWarp_GS/2016-01-17%20-%20ReActiveMicro%20-%20Transwarp%20GS%20-%20Geoff%20Body%20-%20Schematic%20Release%201.pdf),
-  [apple2.org.za mirror](https://mirrors.apple2.org.za/ftp.apple.asimov.net/documentation/hardware/accelerators/transwarp-gs---schematic.pdf)
-  — authoritative for §7.1; not yet reviewed page-by-page (fetch blocked from the
-  cloud sandbox); commit a copy under `docs/reference/` when available
+- **TWGS schematic** (Geoff Body, Release 1, 2016) — committed at
+  [`reference/twgs_schematic_geoff_body_release1_2016.pdf`](reference/twgs_schematic_geoff_body_release1_2016.pdf)
+  (original: [ReActiveMicro](https://downloads.reactivemicro.com/Apple%20II%20Items/Hardware/TransWarp_GS/2016-01-17%20-%20ReActiveMicro%20-%20Transwarp%20GS%20-%20Geoff%20Body%20-%20Schematic%20Release%201.pdf),
+  [apple2.org.za mirror](https://mirrors.apple2.org.za/ftp.apple.asimov.net/documentation/hardware/accelerators/transwarp-gs---schematic.pdf)).
+  Reviewed; findings in §7.1. Key landmarks on the sheet: J5 = "To CPU cable"
+  (GS_* nets), U15 = on-card W65C816S (PLCC-44), U5C 74F32 = /VP driver,
+  U32A 74F125 = R/W tri-state, GAL3 = VPB/VPA/VDA + bank-byte cycle decode,
+  J1 = unused expansion connector (raw CPU pins incl. VDA/VPA/E/MLB/M-X),
+  J2 = debug header
 - [TransWarp GS — ReActiveMicro wiki](https://wiki.reactivemicro.com/TransWarp_GS) —
   GAL functions, cable notes ("not straight-through"), upgrade history
 - [TWGS manual (PDF)](https://downloads.reactivemicro.com/Apple%20II%20Items/Hardware/TransWarp_GS/TranswarpGS%20Manual.pdf)
