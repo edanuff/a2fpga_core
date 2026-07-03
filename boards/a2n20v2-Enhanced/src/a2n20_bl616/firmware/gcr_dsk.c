@@ -40,13 +40,22 @@ static void ensure_read_table(void)
  * 256-byte sector slot in the image file. Used both ways: encode pulls
  * physical P's data from file offset order[P]*256; decode stores physical P's
  * recovered data to that same offset. Index with gcr_order_t. */
+/* CAUTION — the classic interleave footgun, which bit this codec once:
+ * physical sector P carries the file's sector order[P]. For DOS 3.3 order
+ * the canonical physical->logical map is {0,7,E,6,D,5,C,4,B,3,A,2,9,1,8,F};
+ * for ProDOS order it is {0,8,1,9,2,A,3,B,4,C,5,D,6,E,7,F}. (AppleWin's
+ * ms_SectorNumber rows list ProDOS FIRST — porting them as DOS-first swapped
+ * the two and broke every externally-created image while remaining perfectly
+ * self-consistent for our own decode->encode round trips. Proven against
+ * ProDOS boot0 in simulation: the swapped table BRKs at $09xx, the canonical
+ * one boots.) */
 static const uint8_t kSectorOrder[2][16] = {
-    /* GCR_ORDER_DOS (.dsk/.do) — eDOSOrder */
-    { 0x00,0x08,0x01,0x09,0x02,0x0A,0x03,0x0B,
-      0x04,0x0C,0x05,0x0D,0x06,0x0E,0x07,0x0F },
-    /* GCR_ORDER_PRODOS (.po) — eProDOSOrder */
+    /* GCR_ORDER_DOS (.dsk/.do) */
     { 0x00,0x07,0x0E,0x06,0x0D,0x05,0x0C,0x04,
       0x0B,0x03,0x0A,0x02,0x09,0x01,0x08,0x0F },
+    /* GCR_ORDER_PRODOS (.po) */
+    { 0x00,0x08,0x01,0x09,0x02,0x0A,0x03,0x0B,
+      0x04,0x0C,0x05,0x0D,0x06,0x0E,0x07,0x0F },
 };
 
 /* 4-and-4 codec (address field). */
