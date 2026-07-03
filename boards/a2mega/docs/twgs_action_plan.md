@@ -393,7 +393,7 @@ Everything hardware-related found across the TWGS/SOM/USB reviews, in one place:
    Phase 1/2: fit a 1–4.7 K pullup to +5 V on /VP at J8 pin 1 / the cable** to
    pin it deasserted (the vector snapshot then handles redirects alone);
    (ii) no 5 V source on the net, so FPGA pin tolerance is not a concern.
-   Recommended rev fix: **74LVC1G07 open-drain buffer + ~1 K pullup to 5 V**
+   Recommended rev fix: **74LVC1G07 (VCC=3.3 V) open-drain buffer + 549 Ω pullup to 5 V** (existing board BOM value; ~9 mA sink, release edge ~20–30 ns)
    (assert = pull low; deassert = true 5 V high via the pullup — which also
    supplies the pullup the motherboard lacks, keeping the line defined with the
    FPGA unconfigured; ~50 ns release edge). Alternative: TWGS-style 5 V-powered
