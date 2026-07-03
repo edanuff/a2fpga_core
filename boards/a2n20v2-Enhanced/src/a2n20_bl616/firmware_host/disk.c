@@ -144,6 +144,40 @@ static disk_fmt_t detect_format(const char *name, gcr_order_t *order)
     return FMT_NONE;
 }
 
+/* Sniff the sector order of a bare .dsk (the extension nominally means DOS
+ * 3.3 order, but many ProDOS disks circulate as ProDOS-order images named
+ * .dsk). Detection per the classic CiderPress/AppleWin heuristics:
+ *   - a DOS 3.3 VTOC at track 17 sector 0 (DOS-order file offset 0x11000):
+ *     35 tracks, 16 sectors, 256 bytes/sector markers
+ *   - else a ProDOS volume directory at block 2 (ProDOS-order file offset
+ *     0x400): storage type $F header, entry_length $27, entries/block $0D
+ * A DOS-order image of a ProDOS *filesystem* still sniffs as DOS order
+ * (ProDOS blocks are not contiguous in a DOS-order file), which is correct —
+ * the order describes the file layout, not the filesystem. Defaults to DOS
+ * order when neither signature is found. */
+static gcr_order_t sniff_dsk_order(FIL *f)
+{
+    uint8_t buf[256];
+    UINT br = 0;
+
+    if (f_lseek(f, 0x11000) == FR_OK &&
+        f_read(f, buf, sizeof(buf), &br) == FR_OK && br == sizeof(buf)) {
+        if (buf[0x34] == 35 && buf[0x35] == 16 &&
+            buf[0x36] == 0x00 && buf[0x37] == 0x01)
+            return GCR_ORDER_DOS;        /* DOS 3.3 VTOC found */
+    }
+
+    br = 0;
+    if (f_lseek(f, 0x400) == FR_OK &&
+        f_read(f, buf, sizeof(buf), &br) == FR_OK && br == sizeof(buf)) {
+        if ((buf[0x04] >> 4) == 0xF && (buf[0x04] & 0x0F) >= 1 &&
+            buf[0x23] == 0x27 && buf[0x24] == 0x0D)
+            return GCR_ORDER_PRODOS;     /* ProDOS volume directory found */
+    }
+
+    return GCR_ORDER_DOS;
+}
+
 /* Parse a 2IMG (.2mg) header: 64-byte header, format word at 0x0C (0 = DOS
  * order, 1 = ProDOS order, 2 = NIB), payload offset at 0x18, length at 0x1C.
  * Only floppy-size payloads serve as Disk II volumes; block-device payloads
@@ -256,6 +290,10 @@ static void mount_drive(int v)
             }
         } else {
             fmt = detect_format(name, &order);
+            /* Bare .dsk is ambiguous: sniff the actual sector order (.do and
+             * .po stay explicit). */
+            if (fmt == FMT_DSK && has_ext(name, "dsk"))
+                order = sniff_dsk_order(&g_img[v]);
         }
 
         if (fmt == FMT_NONE) {
