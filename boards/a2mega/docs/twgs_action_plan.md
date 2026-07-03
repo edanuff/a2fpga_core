@@ -343,6 +343,39 @@ CPU bank address invalid, so the FPI freezes the latch; RDY may only change whil
 PH2 is high. Baked into Phase 2.2/5.2. TWGS's J2 debug header (TAG_MATCH, RAM-WE,
 ROM-IN, TWGS_SPEED, GOSLOW) is a good template for our DebugOverlay signal list.
 
+### 7.2a Tang Mega 138K module cross-check (resolved)
+
+The a2-mega schematic's BTB net labels turn out to be copied verbatim from the
+**Tang Mega 138K** SOM documentation (`BANK4_Y22_IOB131B`, `BANK5_Y17`, …, match
+the 138K schematic exactly), which explains the stale-label confusion in §7.2:
+same balls, different chip, different banks. Verified against the 138K SOM
+schematic (committed at
+[`reference/tang_mega_138k_som_schematic.pdf`](reference/tang_mega_138k_som_schematic.pdf)):
+
+**138K rails:** `VCCIO2/3/4/5/10` = 3.3 V (FB15/FB16/FB14/FB13/FB12);
+`VCCIO67` (banks 6/7 = the 138K's DDR3 banks) = 1.5 V (FB11); `VCCX` = 1.8 V
+(FB23 from `1V8_VCCX`; the 3V3 option bead FB24 is DNP).
+
+**Result: every BTB pin the a2-mega uses is on a 3.3 V bank on *both* modules.**
+GS pins land on 138K banks 3/4/5, the slot bus on banks 2/3/4, HDMI/ESP32/dips/
+LEDs/uart on banks 2/3/5 — all 3.3 V. `rst` (F4) is on a 1.5 V rail on both
+modules (60K bank 11 / 138K bank 7) and is already constrained LVCMOS15. The
+1.5 V danger zones do not overlap any used signal:
+
+| Module | 1.5 V banks | BTB-visible 1.5 V pins | a2-mega usage |
+|---|---|---|---|
+| Mega 60K (GW5AT-60) | 9, 10, 11 (`VCCIO_DDR`) | BTB2 pins 52–86 (balls Y13…W12, incl. AB13) + F4 | all n/c except `button` (AB13, internal; LVCMOS15) |
+| Mega 138K (GW5AST-138) | 6, 7 (`VCCIO67`) | F4 (`CPU_RESET`) only | `rst` (LVCMOS15 ✓) |
+
+**Board keep-out rule for future revs:** never assign 3.3 V signals to BTB2
+pins 52–86 — they are 1.5 V on the 60K (fine on the 138K).
+
+**Porting a build to the 138K is gateware-only:** change the `.gprj` device to
+GW5AST-138 (PG484A), regenerate the DDR3 IP and rewrite the `ddr_*` constraints
+for the 138K's DDR wiring (banks 6/7, different balls — do not flash a 60K
+bitstream on a 138K), and flip `button` (AB13) to LVCMOS33 (bank 5 there).
+All GS/slot/HDMI/ESP32 pin constraints carry over unchanged.
+
 ### 7.2 Other open items
 
 1. **Bank VCCIO conflict — RESOLVED, no conflict.** Verified against the Tang Mega
