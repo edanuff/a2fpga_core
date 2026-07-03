@@ -376,6 +376,26 @@ for the 138K's DDR wiring (banks 6/7, different balls — do not flash a 60K
 bitstream on a 138K), and flip `button` (AB13) to LVCMOS33 (bank 5 there).
 All GS/slot/HDMI/ESP32 pin constraints carry over unchanged.
 
+### 7.2b Consolidated next-board-rev change list
+
+Everything hardware-related found across the TWGS/SOM/USB reviews, in one place:
+
+1. **/VP drive path** (§7.1): route an FPGA output to J8 /VP through a 5 V
+   driver, TWGS-style (qualified so it only asserts on genuine vector-pull bus
+   cycles). Gateware vector snapshot covers current boards meanwhile.
+2. **22 Ω series resistors on the USB 2.0 lines into the FPGA** (J1 D+/D− →
+   `USB_PHY_P/N`): the schematic today has only the ESD array (D2–D4) and 15 K
+   host pulldowns (R7/R9) — no series termination. USB FS requires a driver
+   output impedance of ~28–44 Ω; FPGA LVCMOS33 drivers are well below that, so
+   add ~22–27 Ω in series, placed close to the FPGA/SOM end of the trace.
+   (The USB-C port needs nothing — it goes to the ESP32-S3's integrated PHY.)
+3. **Verify USB_PHY net polarity naming:** the schematic wires D+ (USB-A pin 3)
+   to the net named `USB_PHY_N` and D− (pin 2) to `USB_PHY_P`. If intentional,
+   document it; otherwise rename (harmless electrically — GPIO bit-banged USB —
+   but a gateware polarity trap: J/K states and SE0 detection invert).
+4. **BTB2 pins 52–86 keep-out for 3.3 V signals** (§7.2a): 1.5 V on the Mega
+   60K (bank 9), 3.3 V on the 138K — leave n/c to stay dual-module compatible.
+
 ### 7.2 Other open items
 
 1. **Bank VCCIO conflict — RESOLVED, no conflict.** Verified against the Tang Mega
