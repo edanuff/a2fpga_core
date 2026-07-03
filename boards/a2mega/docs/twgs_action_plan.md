@@ -386,11 +386,20 @@ Everything hardware-related found across the TWGS/SOM/USB reviews, in one place:
    ~3.4 V highs suffice, but that is inference, not spec); (b) the line must
    default *deasserted* whenever the FPGA is unconfigured or reflashing;
    (c) a motherboard 5 V pullup, if present, would exceed FPGA pin tolerance.
-   Recommended: **74LVC1G07 open-drain buffer + ~1 K pullup to 5 V** (assert =
-   pull low; deassert = true 5 V high via pullup; safe default with FPGA dead;
-   ~50 ns release edge). Alternative: TWGS-style 5 V-powered 74AHCT1G32 with
-   its input pulled to the deasserted state. Gateware asserts only on genuine
-   vector-pull bus cycles. Vector snapshot covers current boards meanwhile.
+   **Verified on the IIgs schematic (Ed): the 65816 /VP pin runs point-to-point
+   to the FPI/CYA input with no pullup and no other junctions.** Consequences:
+   (i) on current boards the FPI input *floats* when the interposer is
+   installed — nondeterministic redirect behavior, so **bench bodge for
+   Phase 1/2: fit a 1–4.7 K pullup to +5 V on /VP at J8 pin 1 / the cable** to
+   pin it deasserted (the vector snapshot then handles redirects alone);
+   (ii) no 5 V source on the net, so FPGA pin tolerance is not a concern.
+   Recommended rev fix: **74LVC1G07 open-drain buffer + ~1 K pullup to 5 V**
+   (assert = pull low; deassert = true 5 V high via the pullup — which also
+   supplies the pullup the motherboard lacks, keeping the line defined with the
+   FPGA unconfigured; ~50 ns release edge). Alternative: TWGS-style 5 V-powered
+   74AHCT1G32 with its input pulled to the deasserted state. Gateware asserts
+   only on genuine vector-pull bus cycles. Vector snapshot covers current
+   boards meanwhile.
 2. **22 Ω series resistors on the USB 2.0 lines into the FPGA** (J1 D+/D− →
    `USB_PHY_P/N`): the schematic today has only the ESD array (D2–D4) and 15 K
    host pulldowns (R7/R9) — no series termination. USB FS requires a driver
