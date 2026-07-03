@@ -380,9 +380,17 @@ All GS/slot/HDMI/ESP32 pin constraints carry over unchanged.
 
 Everything hardware-related found across the TWGS/SOM/USB reviews, in one place:
 
-1. **/VP drive path** (§7.1): route an FPGA output to J8 /VP through a 5 V
-   driver, TWGS-style (qualified so it only asserts on genuine vector-pull bus
-   cycles). Gateware vector snapshot covers current boards meanwhile.
+1. **/VP drive path** (§7.1): /VP is point-to-point to the FPI (nothing else
+   drives it), so no transceiver is needed — but do not wire it raw to a 3.3 V
+   FPGA pin: (a) FPI V_IH is unspecified (TWGS's 74F32 TTL-level drive suggests
+   ~3.4 V highs suffice, but that is inference, not spec); (b) the line must
+   default *deasserted* whenever the FPGA is unconfigured or reflashing;
+   (c) a motherboard 5 V pullup, if present, would exceed FPGA pin tolerance.
+   Recommended: **74LVC1G07 open-drain buffer + ~1 K pullup to 5 V** (assert =
+   pull low; deassert = true 5 V high via pullup; safe default with FPGA dead;
+   ~50 ns release edge). Alternative: TWGS-style 5 V-powered 74AHCT1G32 with
+   its input pulled to the deasserted state. Gateware asserts only on genuine
+   vector-pull bus cycles. Vector snapshot covers current boards meanwhile.
 2. **22 Ω series resistors on the USB 2.0 lines into the FPGA** (J1 D+/D− →
    `USB_PHY_P/N`): the schematic today has only the ESD array (D2–D4) and 15 K
    host pulldowns (R7/R9) — no series termination. USB FS requires a driver
