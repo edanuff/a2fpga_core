@@ -1,0 +1,446 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1250" font-family="ui-monospace, Menlo, Consolas, monospace"><rect x="0" y="0" width="1500" height="1250" fill="#ffffff"/>
+<text x="60" y="48" font-size="24" fill="#1a1a1a" text-anchor="start" font-weight="bold">A2FPGA USB GAME-PORT DONGLE</text>
+<text x="60" y="74" font-size="14" fill="#777777" text-anchor="start">USB XInput gamepad → BL616 host → RP2040-Zero → AD5263 digipot / AHCT125 → Apple II game port</text>
+<text x="1440" y="48" font-size="16" fill="#7a1f1f" text-anchor="end" font-weight="bold">REV 0 — CONCEPT SCHEMATIC</text>
+<text x="1440" y="70" font-size="12" fill="#777777" text-anchor="end">NOT FOR LAYOUT — see notes</text>
+<line x1="60" y1="88" x2="1440" y2="88" stroke="#777777" stroke-width="1"/>
+<rect x="60" y="150" width="175" height="412" fill="#fdfcf7" stroke="#1a1a1a" stroke-width="1.8"/>
+<text x="60" y="142" font-size="15" fill="#7a1f1f" text-anchor="start" font-weight="bold">J1</text>
+<text x="147.5" y="170" font-size="14" fill="#1a1a1a" text-anchor="middle" font-weight="bold">GAME I/O</text>
+<text x="147.5" y="186" font-size="12" fill="#777777" text-anchor="middle">16-pin DIP plug</text>
+<text x="229" y="206" font-size="12" fill="#1a1a1a" text-anchor="end">+5V</text>
+<line x1="235" y1="202" x2="263" y2="202" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="197" font-size="10" fill="#777777" text-anchor="start">1</text>
+<text x="269" y="206" font-size="13" fill="#8b1a1a" text-anchor="start" font-weight="bold">+5V_A2</text>
+<text x="229" y="228" font-size="12" fill="#1a1a1a" text-anchor="end">PB0</text>
+<line x1="235" y1="224" x2="263" y2="224" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="219" font-size="10" fill="#777777" text-anchor="start">2</text>
+<text x="269" y="228" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SW0</text>
+<text x="229" y="250" font-size="12" fill="#1a1a1a" text-anchor="end">PB1</text>
+<line x1="235" y1="246" x2="263" y2="246" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="241" font-size="10" fill="#777777" text-anchor="start">3</text>
+<text x="269" y="250" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SW1</text>
+<text x="229" y="272" font-size="12" fill="#1a1a1a" text-anchor="end">PB2</text>
+<line x1="235" y1="268" x2="263" y2="268" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="263" font-size="10" fill="#777777" text-anchor="start">4</text>
+<text x="269" y="272" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SW2</text>
+<text x="229" y="294" font-size="12" fill="#1a1a1a" text-anchor="end">C040STB</text>
+<line x1="235" y1="290" x2="263" y2="290" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="285" font-size="10" fill="#777777" text-anchor="start">5</text>
+<line x1="259" y1="286" x2="267" y2="294" stroke="#777777" stroke-width="1.4"/>
+<line x1="259" y1="294" x2="267" y2="286" stroke="#777777" stroke-width="1.4"/>
+<text x="229" y="316" font-size="12" fill="#1a1a1a" text-anchor="end">GC0</text>
+<line x1="235" y1="312" x2="263" y2="312" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="307" font-size="10" fill="#777777" text-anchor="start">6</text>
+<text x="269" y="316" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL0</text>
+<text x="229" y="338" font-size="12" fill="#1a1a1a" text-anchor="end">GC2</text>
+<line x1="235" y1="334" x2="263" y2="334" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="329" font-size="10" fill="#777777" text-anchor="start">7</text>
+<text x="269" y="338" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL2</text>
+<text x="229" y="360" font-size="12" fill="#1a1a1a" text-anchor="end">GND</text>
+<line x1="235" y1="356" x2="263" y2="356" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="351" font-size="10" fill="#777777" text-anchor="start">8</text>
+<text x="269" y="360" font-size="13" fill="#333333" text-anchor="start" font-weight="bold">GND</text>
+<text x="229" y="382" font-size="12" fill="#1a1a1a" text-anchor="end">NC</text>
+<line x1="235" y1="378" x2="263" y2="378" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="373" font-size="10" fill="#777777" text-anchor="start">9</text>
+<line x1="259" y1="374" x2="267" y2="382" stroke="#777777" stroke-width="1.4"/>
+<line x1="259" y1="382" x2="267" y2="374" stroke="#777777" stroke-width="1.4"/>
+<text x="229" y="404" font-size="12" fill="#1a1a1a" text-anchor="end">GC1</text>
+<line x1="235" y1="400" x2="263" y2="400" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="395" font-size="10" fill="#777777" text-anchor="start">10</text>
+<text x="269" y="404" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL1</text>
+<text x="229" y="426" font-size="12" fill="#1a1a1a" text-anchor="end">GC3</text>
+<line x1="235" y1="422" x2="263" y2="422" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="417" font-size="10" fill="#777777" text-anchor="start">11</text>
+<text x="269" y="426" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL3</text>
+<text x="229" y="448" font-size="12" fill="#1a1a1a" text-anchor="end">AN3</text>
+<line x1="235" y1="444" x2="263" y2="444" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="439" font-size="10" fill="#777777" text-anchor="start">12</text>
+<line x1="259" y1="440" x2="267" y2="448" stroke="#777777" stroke-width="1.4"/>
+<line x1="259" y1="448" x2="267" y2="440" stroke="#777777" stroke-width="1.4"/>
+<text x="229" y="470" font-size="12" fill="#1a1a1a" text-anchor="end">AN2</text>
+<line x1="235" y1="466" x2="263" y2="466" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="461" font-size="10" fill="#777777" text-anchor="start">13</text>
+<line x1="259" y1="462" x2="267" y2="470" stroke="#777777" stroke-width="1.4"/>
+<line x1="259" y1="470" x2="267" y2="462" stroke="#777777" stroke-width="1.4"/>
+<text x="229" y="492" font-size="12" fill="#1a1a1a" text-anchor="end">AN1</text>
+<line x1="235" y1="488" x2="263" y2="488" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="483" font-size="10" fill="#777777" text-anchor="start">14</text>
+<line x1="259" y1="484" x2="267" y2="492" stroke="#777777" stroke-width="1.4"/>
+<line x1="259" y1="492" x2="267" y2="484" stroke="#777777" stroke-width="1.4"/>
+<text x="229" y="514" font-size="12" fill="#1a1a1a" text-anchor="end">AN0</text>
+<line x1="235" y1="510" x2="263" y2="510" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="505" font-size="10" fill="#777777" text-anchor="start">15</text>
+<line x1="259" y1="506" x2="267" y2="514" stroke="#777777" stroke-width="1.4"/>
+<line x1="259" y1="514" x2="267" y2="506" stroke="#777777" stroke-width="1.4"/>
+<text x="229" y="536" font-size="12" fill="#1a1a1a" text-anchor="end">NC</text>
+<line x1="235" y1="532" x2="263" y2="532" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="527" font-size="10" fill="#777777" text-anchor="start">16</text>
+<line x1="259" y1="528" x2="267" y2="536" stroke="#777777" stroke-width="1.4"/>
+<line x1="259" y1="536" x2="267" y2="528" stroke="#777777" stroke-width="1.4"/>
+<rect x="600" y="130" width="240" height="452" fill="#fdfcf7" stroke="#1a1a1a" stroke-width="1.8"/>
+<text x="600" y="122" font-size="15" fill="#7a1f1f" text-anchor="start" font-weight="bold">U2</text>
+<text x="720.0" y="150" font-size="14" fill="#1a1a1a" text-anchor="middle" font-weight="bold">AD5263BRUZ200</text>
+<text x="720.0" y="166" font-size="12" fill="#777777" text-anchor="middle">quad 200kΩ digipot</text>
+<text x="606" y="194" font-size="12" fill="#1a1a1a" text-anchor="start">VDD</text>
+<line x1="572" y1="190" x2="600" y2="190" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="572" y1="190" x2="572" y2="176" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="565" y1="176" x2="579" y2="176" stroke="#1a1a1a" stroke-width="2.2"/>
+<text x="572" y="170" font-size="12" fill="#8b1a1a" text-anchor="middle" font-weight="bold">+5V_A2</text>
+<text x="606" y="224" font-size="12" fill="#1a1a1a" text-anchor="start">SDI</text>
+<line x1="572" y1="220" x2="600" y2="220" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="566" y="224" font-size="13" fill="#1a4f8f" text-anchor="end" font-weight="bold">MOSI</text>
+<text x="606" y="254" font-size="12" fill="#1a1a1a" text-anchor="start">SCK</text>
+<line x1="572" y1="250" x2="600" y2="250" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="566" y="254" font-size="13" fill="#1a4f8f" text-anchor="end" font-weight="bold">SCK</text>
+<text x="606" y="284" font-size="12" fill="#1a1a1a" text-anchor="start">CS#</text>
+<line x1="572" y1="280" x2="600" y2="280" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="566" y="284" font-size="13" fill="#1a4f8f" text-anchor="end" font-weight="bold">CS#</text>
+<text x="606" y="314" font-size="12" fill="#1a1a1a" text-anchor="start">DIS</text>
+<line x1="572" y1="310" x2="600" y2="310" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="566" y="314" font-size="13" fill="#777777" text-anchor="end" font-weight="bold">SPI strap — note 5</text>
+<text x="606" y="344" font-size="12" fill="#1a1a1a" text-anchor="start">AD0</text>
+<line x1="572" y1="340" x2="600" y2="340" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="566" y="344" font-size="13" fill="#333333" text-anchor="end" font-weight="bold">GND</text>
+<text x="606" y="374" font-size="12" fill="#1a1a1a" text-anchor="start">AD1</text>
+<line x1="572" y1="370" x2="600" y2="370" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="566" y="374" font-size="13" fill="#333333" text-anchor="end" font-weight="bold">GND</text>
+<text x="606" y="404" font-size="12" fill="#1a1a1a" text-anchor="start">SDO</text>
+<line x1="572" y1="400" x2="600" y2="400" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="568" y1="396" x2="576" y2="404" stroke="#777777" stroke-width="1.4"/>
+<line x1="568" y1="404" x2="576" y2="396" stroke="#777777" stroke-width="1.4"/>
+<text x="560" y="404" font-size="13" fill="#777777" text-anchor="end" font-weight="bold">leave open — note 4</text>
+<text x="606" y="434" font-size="12" fill="#1a1a1a" text-anchor="start">VSS</text>
+<line x1="572" y1="430" x2="600" y2="430" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="566" y="434" font-size="13" fill="#333333" text-anchor="end" font-weight="bold">GND</text>
+<text x="606" y="464" font-size="12" fill="#1a1a1a" text-anchor="start">GND</text>
+<line x1="572" y1="460" x2="600" y2="460" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="566" y="464" font-size="13" fill="#333333" text-anchor="end" font-weight="bold">GND</text>
+<text x="834" y="200" font-size="12" fill="#1a1a1a" text-anchor="end">A1</text>
+<text x="834" y="232" font-size="12" fill="#1a1a1a" text-anchor="end">W1</text>
+<text x="834" y="264" font-size="12" fill="#1a1a1a" text-anchor="end">B1</text>
+<line x1="840" y1="196" x2="900" y2="196" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="900" y1="196" x2="900" y2="182" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="893" y1="182" x2="907" y2="182" stroke="#1a1a1a" stroke-width="2.2"/>
+<text x="900" y="176" font-size="12" fill="#8b1a1a" text-anchor="middle" font-weight="bold">+5V_A2</text>
+<line x1="840" y1="228" x2="918" y2="228" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="918" y1="228" x2="930" y2="228" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="930" y="221" width="40" height="14" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="970" y1="228" x2="982" y2="228" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="950" y="216" font-size="12" fill="#7a1f1f" text-anchor="middle">R1</text>
+<text x="950" y="250" font-size="12" fill="#777777" text-anchor="middle">100Ω</text>
+<line x1="982" y1="228" x2="1050" y2="228" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1056" y="232" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL0</text>
+<line x1="840" y1="260" x2="880" y2="260" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="880" y1="260" x2="880" y2="228" stroke="#1a1a1a" stroke-width="1.6"/>
+<circle cx="880" cy="228" r="3.2" fill="#1a1a1a"/>
+<text x="834" y="296" font-size="12" fill="#1a1a1a" text-anchor="end">A2</text>
+<text x="834" y="328" font-size="12" fill="#1a1a1a" text-anchor="end">W2</text>
+<text x="834" y="360" font-size="12" fill="#1a1a1a" text-anchor="end">B2</text>
+<line x1="840" y1="292" x2="900" y2="292" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="900" y1="292" x2="900" y2="278" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="893" y1="278" x2="907" y2="278" stroke="#1a1a1a" stroke-width="2.2"/>
+<text x="900" y="272" font-size="12" fill="#8b1a1a" text-anchor="middle" font-weight="bold">+5V_A2</text>
+<line x1="840" y1="324" x2="918" y2="324" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="918" y1="324" x2="930" y2="324" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="930" y="317" width="40" height="14" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="970" y1="324" x2="982" y2="324" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="950" y="312" font-size="12" fill="#7a1f1f" text-anchor="middle">R2</text>
+<text x="950" y="346" font-size="12" fill="#777777" text-anchor="middle">100Ω</text>
+<line x1="982" y1="324" x2="1050" y2="324" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1056" y="328" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL1</text>
+<line x1="840" y1="356" x2="880" y2="356" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="880" y1="356" x2="880" y2="324" stroke="#1a1a1a" stroke-width="1.6"/>
+<circle cx="880" cy="324" r="3.2" fill="#1a1a1a"/>
+<text x="834" y="392" font-size="12" fill="#1a1a1a" text-anchor="end">A3</text>
+<text x="834" y="424" font-size="12" fill="#1a1a1a" text-anchor="end">W3</text>
+<text x="834" y="456" font-size="12" fill="#1a1a1a" text-anchor="end">B3</text>
+<line x1="840" y1="388" x2="900" y2="388" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="900" y1="388" x2="900" y2="374" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="893" y1="374" x2="907" y2="374" stroke="#1a1a1a" stroke-width="2.2"/>
+<text x="900" y="368" font-size="12" fill="#8b1a1a" text-anchor="middle" font-weight="bold">+5V_A2</text>
+<line x1="840" y1="420" x2="918" y2="420" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="918" y1="420" x2="930" y2="420" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="930" y="413" width="40" height="14" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="970" y1="420" x2="982" y2="420" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="950" y="408" font-size="12" fill="#7a1f1f" text-anchor="middle">R3</text>
+<text x="950" y="442" font-size="12" fill="#777777" text-anchor="middle">100Ω</text>
+<line x1="982" y1="420" x2="1050" y2="420" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1056" y="424" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL2</text>
+<line x1="840" y1="452" x2="880" y2="452" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="880" y1="452" x2="880" y2="420" stroke="#1a1a1a" stroke-width="1.6"/>
+<circle cx="880" cy="420" r="3.2" fill="#1a1a1a"/>
+<text x="834" y="488" font-size="12" fill="#1a1a1a" text-anchor="end">A4</text>
+<text x="834" y="520" font-size="12" fill="#1a1a1a" text-anchor="end">W4</text>
+<text x="834" y="552" font-size="12" fill="#1a1a1a" text-anchor="end">B4</text>
+<line x1="840" y1="484" x2="900" y2="484" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="900" y1="484" x2="900" y2="470" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="893" y1="470" x2="907" y2="470" stroke="#1a1a1a" stroke-width="2.2"/>
+<text x="900" y="464" font-size="12" fill="#8b1a1a" text-anchor="middle" font-weight="bold">+5V_A2</text>
+<line x1="840" y1="516" x2="918" y2="516" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="918" y1="516" x2="930" y2="516" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="930" y="509" width="40" height="14" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="970" y1="516" x2="982" y2="516" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="950" y="504" font-size="12" fill="#7a1f1f" text-anchor="middle">R4</text>
+<text x="950" y="538" font-size="12" fill="#777777" text-anchor="middle">100Ω</text>
+<line x1="982" y1="516" x2="1050" y2="516" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1056" y="520" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL3</text>
+<line x1="840" y1="548" x2="880" y2="548" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="880" y1="548" x2="880" y2="516" stroke="#1a1a1a" stroke-width="1.6"/>
+<circle cx="880" cy="516" r="3.2" fill="#1a1a1a"/>
+<text x="920" y="588" font-size="12" fill="#777777" text-anchor="start" font-style="italic">power-up safe idle states (note 8)</text>
+<line x1="920" y1="620" x2="1155" y2="620" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="920" y1="620" x2="920" y2="606" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="913" y1="606" x2="927" y2="606" stroke="#1a1a1a" stroke-width="2.2"/>
+<text x="920" y="600" font-size="12" fill="#8b1a1a" text-anchor="middle" font-weight="bold">3V3</text>
+<circle cx="960" cy="620" r="3.2" fill="#1a1a1a"/>
+<line x1="960" y1="620" x2="960" y2="630" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="953" y="630" width="14" height="30" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="960" y1="660" x2="960" y2="670" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="971" y="643" font-size="12" fill="#7a1f1f" text-anchor="start">R5</text>
+<text x="971" y="657" font-size="12" fill="#777777" text-anchor="start">10k</text>
+<text x="960" y="686" font-size="13" fill="#1a4f8f" text-anchor="middle" font-weight="bold">CS#</text>
+<circle cx="1025" cy="620" r="3.2" fill="#1a1a1a"/>
+<line x1="1025" y1="620" x2="1025" y2="630" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="1018" y="630" width="14" height="30" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="1025" y1="660" x2="1025" y2="670" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1036" y="643" font-size="12" fill="#7a1f1f" text-anchor="start">R6</text>
+<text x="1036" y="657" font-size="12" fill="#777777" text-anchor="start">10k</text>
+<text x="1025" y="686" font-size="13" fill="#1a4f8f" text-anchor="middle" font-weight="bold">BTN0#</text>
+<circle cx="1090" cy="620" r="3.2" fill="#1a1a1a"/>
+<line x1="1090" y1="620" x2="1090" y2="630" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="1083" y="630" width="14" height="30" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="1090" y1="660" x2="1090" y2="670" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1101" y="643" font-size="12" fill="#7a1f1f" text-anchor="start">R7</text>
+<text x="1101" y="657" font-size="12" fill="#777777" text-anchor="start">10k</text>
+<text x="1090" y="686" font-size="13" fill="#1a4f8f" text-anchor="middle" font-weight="bold">BTN1#</text>
+<line x1="1155" y1="620" x2="1155" y2="630" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="1148" y="630" width="14" height="30" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="1155" y1="660" x2="1155" y2="670" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1166" y="643" font-size="12" fill="#7a1f1f" text-anchor="start">R8</text>
+<text x="1166" y="657" font-size="12" fill="#777777" text-anchor="start">10k</text>
+<text x="1155" y="686" font-size="13" fill="#1a4f8f" text-anchor="middle" font-weight="bold">BTN2#</text>
+<text x="1280" y="588" font-size="12" fill="#777777" text-anchor="start" font-style="italic">decoupling @ U2, U3</text>
+<line x1="1250" y1="620" x2="1415" y2="620" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1250" y1="620" x2="1250" y2="606" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1243" y1="606" x2="1257" y2="606" stroke="#1a1a1a" stroke-width="2.2"/>
+<text x="1250" y="600" font-size="12" fill="#8b1a1a" text-anchor="middle" font-weight="bold">+5V_A2</text>
+<circle cx="1295" cy="620" r="3.2" fill="#1a1a1a"/>
+<line x1="1295" y1="620" x2="1295" y2="641.0" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1284" y1="641.0" x2="1306" y2="641.0" stroke="#1a1a1a" stroke-width="2.4"/>
+<line x1="1284" y1="648.0" x2="1306" y2="648.0" stroke="#1a1a1a" stroke-width="2.4"/>
+<line x1="1295" y1="648.0" x2="1295" y2="672" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1309" y="640.0" font-size="12" fill="#7a1f1f" text-anchor="start">C1</text>
+<text x="1309" y="656.0" font-size="12" fill="#777777" text-anchor="start">10µF</text>
+<line x1="1295" y1="672" x2="1295" y2="682" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1286" y1="682" x2="1304" y2="682" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1289.5" y1="686" x2="1300.5" y2="686" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1293" y1="690" x2="1297" y2="690" stroke="#1a1a1a" stroke-width="2"/>
+<circle cx="1355" cy="620" r="3.2" fill="#1a1a1a"/>
+<line x1="1355" y1="620" x2="1355" y2="641.0" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1344" y1="641.0" x2="1366" y2="641.0" stroke="#1a1a1a" stroke-width="2.4"/>
+<line x1="1344" y1="648.0" x2="1366" y2="648.0" stroke="#1a1a1a" stroke-width="2.4"/>
+<line x1="1355" y1="648.0" x2="1355" y2="672" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1369" y="640.0" font-size="12" fill="#7a1f1f" text-anchor="start">C2</text>
+<text x="1369" y="656.0" font-size="12" fill="#777777" text-anchor="start">100nF</text>
+<line x1="1355" y1="672" x2="1355" y2="682" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1346" y1="682" x2="1364" y2="682" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1349.5" y1="686" x2="1360.5" y2="686" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1353" y1="690" x2="1357" y2="690" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1415" y1="620" x2="1415" y2="641.0" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1404" y1="641.0" x2="1426" y2="641.0" stroke="#1a1a1a" stroke-width="2.4"/>
+<line x1="1404" y1="648.0" x2="1426" y2="648.0" stroke="#1a1a1a" stroke-width="2.4"/>
+<line x1="1415" y1="648.0" x2="1415" y2="672" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1429" y="640.0" font-size="12" fill="#7a1f1f" text-anchor="start">C3</text>
+<text x="1429" y="656.0" font-size="12" fill="#777777" text-anchor="start">100nF</text>
+<line x1="1415" y1="672" x2="1415" y2="682" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1406" y1="682" x2="1424" y2="682" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1409.5" y1="686" x2="1420.5" y2="686" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1413" y1="690" x2="1417" y2="690" stroke="#1a1a1a" stroke-width="2"/>
+<rect x="60" y="710" width="175" height="266" fill="#fdfcf7" stroke="#1a1a1a" stroke-width="1.8"/>
+<text x="60" y="702" font-size="15" fill="#7a1f1f" text-anchor="start" font-weight="bold">J2</text>
+<text x="147.5" y="730" font-size="14" fill="#1a1a1a" text-anchor="middle" font-weight="bold">GAME I/O</text>
+<text x="147.5" y="746" font-size="12" fill="#777777" text-anchor="middle">DB9 male (alt.)</text>
+<text x="229" y="766" font-size="12" fill="#1a1a1a" text-anchor="end">PB1</text>
+<line x1="235" y1="762" x2="263" y2="762" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="757" font-size="10" fill="#777777" text-anchor="start">1</text>
+<text x="269" y="766" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SW1</text>
+<text x="229" y="790" font-size="12" fill="#1a1a1a" text-anchor="end">+5V</text>
+<line x1="235" y1="786" x2="263" y2="786" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="781" font-size="10" fill="#777777" text-anchor="start">2</text>
+<text x="269" y="790" font-size="13" fill="#8b1a1a" text-anchor="start" font-weight="bold">+5V_A2</text>
+<text x="229" y="814" font-size="12" fill="#1a1a1a" text-anchor="end">GND</text>
+<line x1="235" y1="810" x2="263" y2="810" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="805" font-size="10" fill="#777777" text-anchor="start">3</text>
+<text x="269" y="814" font-size="13" fill="#333333" text-anchor="start" font-weight="bold">GND</text>
+<text x="229" y="838" font-size="12" fill="#1a1a1a" text-anchor="end">GC2</text>
+<line x1="235" y1="834" x2="263" y2="834" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="829" font-size="10" fill="#777777" text-anchor="start">4</text>
+<text x="269" y="838" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL2</text>
+<text x="229" y="862" font-size="12" fill="#1a1a1a" text-anchor="end">GC0</text>
+<line x1="235" y1="858" x2="263" y2="858" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="853" font-size="10" fill="#777777" text-anchor="start">5</text>
+<text x="269" y="862" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL0</text>
+<text x="229" y="886" font-size="12" fill="#1a1a1a" text-anchor="end">PB2</text>
+<line x1="235" y1="882" x2="263" y2="882" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="877" font-size="10" fill="#777777" text-anchor="start">6</text>
+<text x="269" y="886" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SW2</text>
+<text x="229" y="910" font-size="12" fill="#1a1a1a" text-anchor="end">PB0</text>
+<line x1="235" y1="906" x2="263" y2="906" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="901" font-size="10" fill="#777777" text-anchor="start">7</text>
+<text x="269" y="910" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SW0</text>
+<text x="229" y="934" font-size="12" fill="#1a1a1a" text-anchor="end">GC1</text>
+<line x1="235" y1="930" x2="263" y2="930" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="925" font-size="10" fill="#777777" text-anchor="start">8</text>
+<text x="269" y="934" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL1</text>
+<text x="229" y="958" font-size="12" fill="#1a1a1a" text-anchor="end">GC3</text>
+<line x1="235" y1="954" x2="263" y2="954" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="239" y="949" font-size="10" fill="#777777" text-anchor="start">9</text>
+<text x="269" y="958" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">PDL3</text>
+<text x="60" y="998" font-size="12" fill="#777777" text-anchor="start" font-style="italic">J1 ∥ J2 — fit one (note 7)</text>
+<rect x="340" y="710" width="180" height="266" fill="#fdfcf7" stroke="#1a1a1a" stroke-width="1.8"/>
+<text x="340" y="702" font-size="15" fill="#7a1f1f" text-anchor="start" font-weight="bold">U1</text>
+<text x="430.0" y="730" font-size="14" fill="#1a1a1a" text-anchor="middle" font-weight="bold">RP2040-Zero</text>
+<text x="430.0" y="746" font-size="12" fill="#777777" text-anchor="middle">Waveshare module</text>
+<text x="514" y="766" font-size="12" fill="#1a1a1a" text-anchor="end">3V3</text>
+<line x1="520" y1="762" x2="548" y2="762" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="554" y="766" font-size="13" fill="#8b1a1a" text-anchor="start" font-weight="bold">3V3</text>
+<text x="514" y="790" font-size="12" fill="#1a1a1a" text-anchor="end">GND</text>
+<line x1="520" y1="786" x2="548" y2="786" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="554" y="790" font-size="13" fill="#333333" text-anchor="start" font-weight="bold">GND</text>
+<text x="514" y="814" font-size="12" fill="#1a1a1a" text-anchor="end">GP2</text>
+<line x1="520" y1="810" x2="548" y2="810" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="554" y="814" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SCK</text>
+<text x="514" y="838" font-size="12" fill="#1a1a1a" text-anchor="end">GP3</text>
+<line x1="520" y1="834" x2="548" y2="834" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="554" y="838" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">MOSI</text>
+<text x="514" y="862" font-size="12" fill="#1a1a1a" text-anchor="end">GP5</text>
+<line x1="520" y1="858" x2="548" y2="858" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="554" y="862" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">CS#</text>
+<text x="514" y="886" font-size="12" fill="#1a1a1a" text-anchor="end">GP6</text>
+<line x1="520" y1="882" x2="548" y2="882" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="554" y="886" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">BTN0#</text>
+<text x="514" y="910" font-size="12" fill="#1a1a1a" text-anchor="end">GP7</text>
+<line x1="520" y1="906" x2="548" y2="906" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="554" y="910" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">BTN1#</text>
+<text x="514" y="934" font-size="12" fill="#1a1a1a" text-anchor="end">GP8</text>
+<line x1="520" y1="930" x2="548" y2="930" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="554" y="934" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">BTN2#</text>
+<text x="350" y="810" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">USB-C ▯</text>
+<text x="350" y="826" font-size="11" fill="#777777" text-anchor="start">→ BL616 host</text>
+<text x="350" y="840" font-size="11" fill="#777777" text-anchor="start">(hub w/ gamepad)</text>
+<text x="350" y="964" font-size="11" fill="#7a1f1f" text-anchor="start">5V pin: N/C (note 1)</text>
+<rect x="700" y="710" width="220" height="288" fill="#fdfcf7" stroke="#1a1a1a" stroke-width="1.8"/>
+<text x="700" y="702" font-size="15" fill="#7a1f1f" text-anchor="start" font-weight="bold">U3</text>
+<text x="810.0" y="730" font-size="14" fill="#1a1a1a" text-anchor="middle" font-weight="bold">74AHCT125</text>
+<text x="810.0" y="746" font-size="12" fill="#777777" text-anchor="middle">quad 3-state buffer, 5V</text>
+<text x="706" y="764" font-size="12" fill="#1a1a1a" text-anchor="start">VCC</text>
+<line x1="672" y1="760" x2="700" y2="760" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="672" y1="760" x2="654" y2="760" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="706" y="786" font-size="12" fill="#1a1a1a" text-anchor="start">1A</text>
+<line x1="672" y1="782" x2="700" y2="782" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="672" y1="782" x2="654" y2="782" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="706" y="808" font-size="12" fill="#1a1a1a" text-anchor="start">1OE#</text>
+<line x1="672" y1="804" x2="700" y2="804" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="666" y="808" font-size="13" fill="#1a4f8f" text-anchor="end" font-weight="bold">BTN0#</text>
+<text x="706" y="830" font-size="12" fill="#1a1a1a" text-anchor="start">2A</text>
+<line x1="672" y1="826" x2="700" y2="826" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="672" y1="826" x2="654" y2="826" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="706" y="852" font-size="12" fill="#1a1a1a" text-anchor="start">2OE#</text>
+<line x1="672" y1="848" x2="700" y2="848" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="666" y="852" font-size="13" fill="#1a4f8f" text-anchor="end" font-weight="bold">BTN1#</text>
+<text x="706" y="874" font-size="12" fill="#1a1a1a" text-anchor="start">3A</text>
+<line x1="672" y1="870" x2="700" y2="870" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="672" y1="870" x2="654" y2="870" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="706" y="896" font-size="12" fill="#1a1a1a" text-anchor="start">3OE#</text>
+<line x1="672" y1="892" x2="700" y2="892" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="666" y="896" font-size="13" fill="#1a4f8f" text-anchor="end" font-weight="bold">BTN2#</text>
+<text x="706" y="918" font-size="12" fill="#1a1a1a" text-anchor="start">4A</text>
+<line x1="672" y1="914" x2="700" y2="914" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="666" y="918" font-size="13" fill="#333333" text-anchor="end" font-weight="bold">GND</text>
+<text x="706" y="940" font-size="12" fill="#1a1a1a" text-anchor="start">4OE#</text>
+<line x1="672" y1="936" x2="700" y2="936" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="666" y="940" font-size="13" fill="#8b1a1a" text-anchor="end" font-weight="bold">+5V_A2</text>
+<text x="706" y="962" font-size="12" fill="#1a1a1a" text-anchor="start">GND</text>
+<line x1="672" y1="958" x2="700" y2="958" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="666" y="962" font-size="13" fill="#333333" text-anchor="end" font-weight="bold">GND</text>
+<line x1="654" y1="760" x2="654" y2="870" stroke="#1a1a1a" stroke-width="1.6"/>
+<circle cx="654" cy="782" r="3.2" fill="#1a1a1a"/>
+<circle cx="654" cy="826" r="3.2" fill="#1a1a1a"/>
+<line x1="654" y1="760" x2="654" y2="746" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="647" y1="746" x2="661" y2="746" stroke="#1a1a1a" stroke-width="2.2"/>
+<text x="654" y="740" font-size="12" fill="#8b1a1a" text-anchor="middle" font-weight="bold">+5V_A2</text>
+<text x="914" y="786" font-size="12" fill="#1a1a1a" text-anchor="end">1Y</text>
+<line x1="920" y1="782" x2="948" y2="782" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="954" y="786" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SW0</text>
+<text x="914" y="830" font-size="12" fill="#1a1a1a" text-anchor="end">2Y</text>
+<line x1="920" y1="826" x2="948" y2="826" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="954" y="830" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SW1</text>
+<text x="914" y="874" font-size="12" fill="#1a1a1a" text-anchor="end">3Y</text>
+<line x1="920" y1="870" x2="948" y2="870" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="954" y="874" font-size="13" fill="#1a4f8f" text-anchor="start" font-weight="bold">SW2</text>
+<text x="914" y="918" font-size="12" fill="#1a1a1a" text-anchor="end">4Y</text>
+<line x1="920" y1="914" x2="948" y2="914" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="944" y1="910" x2="952" y2="918" stroke="#777777" stroke-width="1.4"/>
+<line x1="944" y1="918" x2="952" y2="910" stroke="#777777" stroke-width="1.4"/>
+<text x="1150" y="730" font-size="12" fill="#777777" text-anchor="start" font-style="italic">controller-present pull-downs (note 3)</text>
+<text x="1190" y="758" font-size="13" fill="#1a4f8f" text-anchor="middle" font-weight="bold">SW0</text>
+<line x1="1190" y1="762" x2="1190" y2="775" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1190" y1="775" x2="1190" y2="785" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="1183" y="785" width="14" height="30" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="1190" y1="815" x2="1190" y2="825" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1201" y="798" font-size="12" fill="#7a1f1f" text-anchor="start">R9</text>
+<text x="1201" y="812" font-size="12" fill="#777777" text-anchor="start">560Ω</text>
+<line x1="1190" y1="825" x2="1190" y2="835" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1181" y1="835" x2="1199" y2="835" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1184.5" y1="839" x2="1195.5" y2="839" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1188" y1="843" x2="1192" y2="843" stroke="#1a1a1a" stroke-width="2"/>
+<text x="1310" y="758" font-size="13" fill="#1a4f8f" text-anchor="middle" font-weight="bold">SW1</text>
+<line x1="1310" y1="762" x2="1310" y2="775" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1310" y1="775" x2="1310" y2="785" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="1303" y="785" width="14" height="30" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="1310" y1="815" x2="1310" y2="825" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1321" y="798" font-size="12" fill="#7a1f1f" text-anchor="start">R10</text>
+<text x="1321" y="812" font-size="12" fill="#777777" text-anchor="start">560Ω</text>
+<line x1="1310" y1="825" x2="1310" y2="835" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1301" y1="835" x2="1319" y2="835" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1304.5" y1="839" x2="1315.5" y2="839" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1308" y1="843" x2="1312" y2="843" stroke="#1a1a1a" stroke-width="2"/>
+<text x="1430" y="758" font-size="13" fill="#1a4f8f" text-anchor="middle" font-weight="bold">SW2</text>
+<line x1="1430" y1="762" x2="1430" y2="775" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1430" y1="775" x2="1430" y2="785" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="1423" y="785" width="14" height="30" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="1430" y1="815" x2="1430" y2="825" stroke="#1a1a1a" stroke-width="1.6"/>
+<text x="1441" y="798" font-size="12" fill="#7a1f1f" text-anchor="start">R11</text>
+<text x="1441" y="812" font-size="12" fill="#777777" text-anchor="start">560Ω</text>
+<line x1="1430" y1="825" x2="1430" y2="835" stroke="#1a1a1a" stroke-width="1.6"/>
+<line x1="1421" y1="835" x2="1439" y2="835" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1424.5" y1="839" x2="1435.5" y2="839" stroke="#1a1a1a" stroke-width="2"/>
+<line x1="1428" y1="843" x2="1432" y2="843" stroke="#1a1a1a" stroke-width="2"/>
+<rect x="60" y="1030" width="1080" height="215" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="1.8"/>
+<text x="76" y="1054" font-size="14" fill="#1a1a1a" text-anchor="start" font-weight="bold">NOTES</text>
+<text x="76" y="1076.0" font-size="11" fill="#333333" text-anchor="start">1. Power domains: U2/U3 run from the Apple's game-port +5V (verify against AD5263 min single-supply, ≥4.5V). U1 is powered by USB VBUS only; do NOT</text>
+<text x="76" y="1088.5" font-size="11" fill="#333333" text-anchor="start">   join the Zero's 5V pin to +5V_A2 (would back-feed the BL616 hub). Grounds are commoned at one point.</text>
+<text x="76" y="1101.0" font-size="11" fill="#333333" text-anchor="start">2. Paddle channels are rheostat-mode: A=+5V, wiper (+B tied) toward PDL pin. Firmware enforces wiper code ≥2 (≈1.6kΩ) to cap wiper current during the</text>
+<text x="76" y="1113.5" font-size="11" fill="#333333" text-anchor="start">   558 trigger/recharge; power-on preset is midscale = centered stick. R1-R4 add transient margin; offset ≈ 0.2 PDL count.</text>
+<text x="76" y="1126.0" font-size="11" fill="#333333" text-anchor="start">3. Buttons are ACTIVE-HIGH. U3 drives +5V only while pressed (OE# low) and is hi-Z when released, so it never fights the IIe/IIgs keyboard pull-downs</text>
+<text x="76" y="1138.5" font-size="11" fill="#333333" text-anchor="start">   on SW0/SW1 (Open/Closed-Apple). R9-R11 emulate the pull-downs a real controller carries — required on II/II+ where open SW inputs float high.</text>
+<text x="76" y="1151.0" font-size="11" fill="#333333" text-anchor="start">4. AD5263 SDO is open-drain referenced to VDD=5V — leave open; never route to the RP2040 (not 5V tolerant) without a 3.3V-only pull-up.</text>
+<text x="76" y="1163.5" font-size="11" fill="#333333" text-anchor="start">5. DIS pin selects SPI vs I²C — strap polarity and ALL U2 pin numbers must be verified against the ADI datasheet before layout (unreachable from the</text>
+<text x="76" y="1176.0" font-size="11" fill="#333333" text-anchor="start">   design sandbox; symbol uses logical names). AD0/AD1 are I²C address inputs — tie to GND for SPI use.</text>
+<text x="76" y="1188.5" font-size="11" fill="#333333" text-anchor="start">6. AD5263 digital inputs are TTL-threshold (VIH 2.4V @ VDD=5V) with internal level shift — 3.3V SPI from U1 is in spec. Same for U3 (AHCT inputs).</text>
+<text x="76" y="1201.0" font-size="11" fill="#333333" text-anchor="start">7. J1 (16-pin DIP) and J2 (DB9M) are wired in parallel; populate one per build. IIe rear DB9 carries only PDL0/1 + SW0/1; full 4-paddle/3-button</text>
+<text x="76" y="1213.5" font-size="11" fill="#333333" text-anchor="start">   needs J1 on the motherboard socket (II/II+/IIe) or a IIgs (either connector). J1 pin 5 ($C040 strobe) and AN0-AN3 are intentionally unused.</text>
+<text x="76" y="1226.0" font-size="11" fill="#333333" text-anchor="start">8. 10k pull-ups to 3V3 hold CS#/OE# inactive while the RP2040 boots. Digipot end-to-end tolerance is ±20-30%: keep a per-axis scale factor in settings.</text>
+<rect x="1160" y="1030" width="280" height="215" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.8"/>
+<line x1="1160" y1="1080" x2="1440" y2="1080" stroke="#1a1a1a" stroke-width="1"/>
+<line x1="1160" y1="1132" x2="1440" y2="1132" stroke="#1a1a1a" stroke-width="1"/>
+<line x1="1160" y1="1184" x2="1440" y2="1184" stroke="#1a1a1a" stroke-width="1"/>
+<text x="1172" y="1052" font-size="13" fill="#1a1a1a" text-anchor="start" font-weight="bold">A2FPGA PROJECT</text>
+<text x="1172" y="1070" font-size="12" fill="#777777" text-anchor="start">USB Game-Port Dongle</text>
+<text x="1172" y="1102" font-size="12" fill="#1a1a1a" text-anchor="start">SHEET: 1 / 1</text>
+<text x="1172" y="1120" font-size="12" fill="#1a1a1a" text-anchor="start">REV: 0 (concept)</text>
+<text x="1172" y="1154" font-size="12" fill="#1a1a1a" text-anchor="start">DATE: 2026-07-05</text>
+<text x="1172" y="1172" font-size="11" fill="#1a1a1a" text-anchor="start">DOC: docs/gameport-dongle.md</text>
+<text x="1172" y="1206" font-size="11" fill="#777777" text-anchor="start">DRAWN: Claude (a2fpga_core)</text></svg>
