@@ -5,8 +5,10 @@ button levels into the game port — the one place the signals can be faked on e
 model without touching the data bus. Companion to (not a replacement for) the planned
 **4play/SNES-MAX virtual card** in the FPGA, which is software-visible only to patched games.
 
-**Status:** rev 0 concept — schematic drawn, not laid out. See
-[Open items before layout](#open-items-before-layout).
+**Status:** rev 0 — KiCad project generated (schematic complete and
+netlist-verified, board not yet laid out): **[`hardware/gameport-dongle/`](../hardware/gameport-dongle/README.md)**.
+See [Open items before layout](#open-items-before-layout) and the mandatory
+checklist in the KiCad project README.
 
 ![Schematic](images/gameport-dongle-schematic.svg)
 
