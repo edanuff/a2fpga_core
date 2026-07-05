@@ -23,6 +23,6 @@
   )
   (setup (pad_to_mask_clearance 0))
   (net 0 "")
-  (gr_rect (start 100 100) (end 164 140) (stroke (width 0.15) (type default)) (layer "Edge.Cuts") (uuid 79f28605-a7e3-42f3-9b33-ad354069ea76))
-  (gr_text "A2FPGA game-port dongle rev 0\nplace parts via Update-PCB-from-Schematic (F8)" (at 102 104) (layer "Cmts.User") (uuid 9c81bfce-5297-41af-a067-1e07f627a9ea) (effects (font (size 1.5 1.5) (thickness 0.3)) (justify left)))
+  (gr_rect (start 100 100) (end 164 140) (stroke (width 0.15) (type default)) (layer "Edge.Cuts") (uuid fa21b822-1203-4bec-abd6-086545cbbcd2))
+  (gr_text "A2FPGA game-port dongle rev 0\nplace parts via Update-PCB-from-Schematic (F8)" (at 102 104) (layer "Cmts.User") (uuid 788fc678-e5b3-4862-a985-778e9d62c4e0) (effects (font (size 1.5 1.5) (thickness 0.3)) (justify left)))
 )
