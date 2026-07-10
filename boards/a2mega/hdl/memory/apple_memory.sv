@@ -450,11 +450,22 @@ module apple_memory #(
         end
     endfunction
 
+    // During SHR the legacy renderer's output is not displayed, but its
+    // fetches must still COMPLETE — a swallowed pulse wedges the generator
+    // until Apple reset (the PR #46 failure). They must not consume DDR3
+    // read slots either: vgc_gen's per-word fetch budget has no room for a
+    // second client on this port (live-verified: chronic misses garble the
+    // TransWarp splash shape while colors/animation stay correct). So while
+    // vgc_active_i is high, video-client requests complete IMMEDIATELY with
+    // dummy data: wedge-safe, zero port traffic, invisible (not displayed).
+    // vgc requests issued around an SHR exit complete for real — also
+    // wedge-safe, at the cost of one stray read at the transition.
+    wire vid_dummy_fire_w = (rd_state_r == RD_IDLE) && vid_req_r && vgc_active_i;
+
     // Grant selection: FSM idle, video client first (matches the
-    // apple_memory_sdram arbiter; only one generator's output is ever
-    // displayed, so the hidden client's added latency is harmless)
-    wire grant_vid_w = (rd_state_r == RD_IDLE) && vid_req_r;
-    wire grant_vgc_w = (rd_state_r == RD_IDLE) && !vid_req_r && vgc_req_r;
+    // apple_memory_sdram arbiter)
+    wire grant_vid_w = (rd_state_r == RD_IDLE) && vid_req_r && !vgc_active_i;
+    wire grant_vgc_w = (rd_state_r == RD_IDLE) && !grant_vid_w && vgc_req_r;
 
     // Issue DDR3 read (text non-burst or unified burst on cache miss);
     // cache hits respond without touching the port
@@ -489,7 +500,7 @@ module apple_memory #(
                 vid_req_r      <= 1'b1;
                 vid_req_addr_r <= video_address_i;
                 vid_req_bank_r <= video_bank_i;
-            end else if (vid_grant_fire_w) begin
+            end else if (vid_grant_fire_w || vid_dummy_fire_w) begin
                 vid_req_r <= 1'b0;
             end
             if (vgc_rd_i) begin
@@ -536,6 +547,11 @@ module apple_memory #(
             // Default: clear ready pulses each cycle
             video_ready_r <= 1'b0;
             vgc_ready_r   <= 1'b0;
+
+            // Hidden-renderer dummy completion (see vid_dummy_fire_w above):
+            // immediate ready, stale video_data_r — never displayed
+            if (vid_dummy_fire_w)
+                video_ready_r <= 1'b1;
 
             // Cache invalidation on writes to same unified group
             if (cache_inv_write)

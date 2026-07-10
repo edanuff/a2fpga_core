@@ -33,6 +33,20 @@ fpgaupdate takes .bin, flash.sh hardened (--verify/retries/procedure).
 
 Open issues, in priority order:
 
+- [ ] "Sparkle"/garble ROOT CAUSE identified (2026-07-10 live session):
+      apple_video_gen and vgc_gen are hard-real-time single-word-prefetch
+      consumers; a shadow read that misses its ~500ns slot makes the pixel
+      shifter reuse the PREVIOUS word (stale chunk). Occasional misses =
+      moving misplaced pixels on static screens (worst during disk-load
+      write streams); chronic misses (2 clients on one port during SHR) =
+      wholesale shape garble. No counter fires — data is correct, merely
+      late. FIX SHIPPED: shadow read to priority 0 (latency-critical; all
+      other clients are FIFO/line-buffered), shadow write to 1, FB 2/3;
+      hidden-renderer fetches complete immediately with dummy data during
+      SHR (wedge-safe, zero port traffic). RESIDUAL RISK: DRAM auto-refresh
+      (~350ns per 7.8us) + in-flight FB burst can still exceed the word
+      budget at low rate — if sparkle persists, deepen renderer prefetch
+      to 2 words (measure via viddbg + photos first)
 - [ ] Display sticks in SHR after the TransWarp GS power-up splash (reset
       recovers) — ROOT CAUSE from main PR #46 (hardware-validated on a
       IIgs+TWGS): read-FSM swallowed fetch pulses (vgc_active_i gating +

@@ -348,23 +348,30 @@ module top #(
     wire [31:0] vgc_data_w;
     wire vgc_ready_w;
 
-    // DDR3 memory port allocation (single unified array for all clients):
-    //   0 = FB write (highest priority — prevents FIFO overflow/pixel drops)
-    //   1 = FB read  (scanline prefetch, line-buffer absorbs latency)
-    //   2 = Shadow write (CPU) — ABOVE the shadow read: a starved write is
-    //       DROPPED and corrupts shadow memory permanently (live-debugged:
-    //       the TransWarp SHR splash saturated the drop counter at 0xFF
-    //       behind back-to-back generator bursts on the read port; a hires
-    //       game dropped writes as stray stale pixels). A starved read only
-    //       delays a fetch the generators wait on anyway. CPU writes arrive
-    //       at most one per ~1us, so they barely dent read bandwidth.
-    //   3 = Shadow read (apple_video_gen + vgc_gen)
+    // DDR3 memory port allocation (single unified array for all clients).
+    //
+    // Priority = latency criticality, NOT bandwidth. apple_video_gen and
+    // vgc_gen are hard-real-time: they emit pixels at fixed cadence from a
+    // single-word prefetch, so a shadow read that misses its ~500ns slot
+    // makes the shifter reuse the previous word — seen on hardware as
+    // "sparkle" (occasional misses: moving misplaced pixels on static
+    // screens, worst during disk loads) or wholesale shape garble (chronic
+    // misses during SHR). No counter fires: the data is correct, merely
+    // late. Every other client tolerates latency by construction: the FB
+    // writer has a deep accumulator FIFO, the FB reader prefetches whole
+    // lines into a line buffer, CPU shadow writes sit in a 16-deep FIFO
+    // (drops instrumented at dbg reg 0x74).
+    //
+    //   0 = Shadow read  (apple_video_gen + vgc_gen — latency-critical)
+    //   1 = Shadow write (CPU; FIFO absorbs stalls, drops counted)
+    //   2 = FB write     (accumulator FIFO; overflow counted per frame)
+    //   3 = FB read      (line-buffered prefetch; line-not-ready counted)
     //   4 = DOC (Ensoniq wavetable read)
     //   5 = GLU (Ensoniq write)
-    localparam FB_WRITE_PORT   = 0;
-    localparam FB_READ_PORT    = 1;
-    localparam SHADOW_WRITE_PORT = 2;
-    localparam SHADOW_READ_PORT  = 3;
+    localparam SHADOW_READ_PORT  = 0;
+    localparam SHADOW_WRITE_PORT = 1;
+    localparam FB_WRITE_PORT   = 2;
+    localparam FB_READ_PORT    = 3;
     localparam DOC_MEM_PORT      = 4;
     localparam GLU_MEM_PORT      = 5;
     localparam NUM_DDR3_PORTS    = 6;
@@ -1092,10 +1099,10 @@ module top #(
         .NUM_PORTS(NUM_DDR3_PORTS),
         .DDR_ADDR_WIDTH(29),
         .PORT_BASE_ADDR('{
-            FB_WORD_BASE,       // [0] FB write (highest priority)
-            FB_WORD_BASE,       // [1] FB read
-            SHADOW_WORD_BASE,   // [2] Shadow write
-            SHADOW_WORD_BASE,   // [3] Shadow read
+            SHADOW_WORD_BASE,   // [0] Shadow read (highest priority)
+            SHADOW_WORD_BASE,   // [1] Shadow write
+            FB_WORD_BASE,       // [2] FB write
+            FB_WORD_BASE,       // [3] FB read
             ENSONIQ_WORD_BASE,  // [4] DOC read
             ENSONIQ_WORD_BASE   // [5] GLU write
         }),
