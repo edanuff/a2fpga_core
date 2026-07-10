@@ -280,8 +280,8 @@ static void cmd_process(String cmd) {
         Serial.printf("C029 writes=%u last=0x%02X\n", v[1], v[2]);
         Serial.printf("vgc missed hsync/frame=%u  shadow-write drops=%u (sticky)\n", v[3], v[4]);
         Serial.printf("fb flags=0x%02X  ddr3 resp-fifo overflow=0x%02X (bit=port, sticky)\n", v[5], v[6]);
-        Serial.printf("shadow rd fsm=0x%02X: pending=%d is_vgc=%d cache_valid=%d state=%d\n",
-                      v[7], !!(v[7] & 0x80), !!(v[7] & 0x40), !!(v[7] & 0x20), v[7] & 0x07);
+        Serial.printf("shadow rd fsm=0x%02X: vid_req=%d is_vgc=%d cache_valid=%d vgc_req=%d state=%d\n",
+                      v[7], !!(v[7] & 0x80), !!(v[7] & 0x40), !!(v[7] & 0x20), !!(v[7] & 0x10), v[7] & 0x07);
 
     } else if (cmd.startsWith("spir ")) {
         String toks[16];

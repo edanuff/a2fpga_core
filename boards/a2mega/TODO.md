@@ -34,9 +34,17 @@ fpgaupdate takes .bin, flash.sh hardened (--verify/retries/procedure).
 Open issues, in priority order:
 
 - [ ] Display sticks in SHR after the TransWarp GS power-up splash (reset
-      recovers; regression vs pre-port builds) — instrumented via OSPI
-      debug regs 0x70-0x77 + `viddbg` CLI: read C029 write count/last +
-      SHRG/use_vgc while stuck to localize (missed bus write vs display mux)
+      recovers) — ROOT CAUSE from main PR #46 (hardware-validated on a
+      IIgs+TWGS): read-FSM swallowed fetch pulses (vgc_active_i gating +
+      busy-FSM drops with both generators fetching), wedging a generator
+      until reset; the shared framebuffer then freezes on the splash.
+      FIX PORTED: per-client request latches, classify by client+latched
+      address, a request once latched always completes. VERIFY on hw;
+      `viddbg` regs 0x70-0x77 confirm (C029 count, SHRG/use_vgc, rd FSM)
+- [ ] Cold-boot polish from PR #46 worth porting later: seed the shadow
+      text page with 0xA0 at first reset release (DDR3 noise until the
+      ROM clears it; OSD console masks it today), and require two writer
+      vsyncs before unblanking the FB after reset release
 - [ ] SHR and hires rendering scrambled (text clean → scanout OK).
       HIRES root cause FOUND + FIXED: format_hires_data assembled
       {main,aux,main,aux} but the shared apple_video_gen contract is

@@ -219,7 +219,7 @@ module esp32_ospi_connector #(
     localparam REG_DBG_SHADOW_DROP= 7'h74;
     localparam REG_DBG_FB_FLAGS   = 7'h75;
     localparam REG_DBG_RESP_OVFL  = 7'h76;  // bit n = DDR3 port n resp-FIFO overflow
-    localparam REG_DBG_SHADOW_RD  = 7'h77;  // {pending,is_vgc,cache_valid,2'b0,rd_state}
+    localparam REG_DBG_SHADOW_RD  = 7'h77;  // {vid_req,is_vgc,cache_valid,vgc_req,0,rd_state}
 
     localparam REG_U2_DOORBELL  = 7'h7A;
 
