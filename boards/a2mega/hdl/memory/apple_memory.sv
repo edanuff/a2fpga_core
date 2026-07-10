@@ -281,12 +281,16 @@ module apple_memory #(
     //      busy overwrote the deferred slot — older write lost.
     //   2. A new write_en on the same cycle the deferred write drained was
     //      never stored — new write lost.
-    // All writes now transit the FIFO in strict order. Depth 8 absorbs
-    // worst-case port-busy stretches (~1µs behind an 8-beat FB read burst)
-    // at the CPU's ~0.36-1µs/write rate. Forced to registers: the head and
-    // the coherency scan below need combinational access to all entries.
-    localparam SW_FIFO_DEPTH = 8;
-    localparam SW_FIFO_ADDR_BITS = 3;
+    // All writes now transit the FIFO in strict order. Depth 16: depth 8
+    // overflowed on live hardware (drop counter saturated at 0xFF) while the
+    // TransWarp GS painted its SHR splash behind back-to-back generator
+    // bursts — fixed primarily by raising the shadow-WRITE port above the
+    // shadow-read port in the DDR3 arbiter (see top.sv port allocation);
+    // the deeper FIFO is margin on top at ~460 extra FFs. Forced to
+    // registers: the head and the coherency scan below need combinational
+    // access to all entries.
+    localparam SW_FIFO_DEPTH = 16;
+    localparam SW_FIFO_ADDR_BITS = 4;
     // Entry: {byte_en[56:53], addr[52:32], data[31:0]}
     reg [56:0] sw_fifo [0:SW_FIFO_DEPTH-1] /* synthesis syn_ramstyle="registers" */;
     reg [SW_FIFO_DEPTH-1:0] sw_valid_r;

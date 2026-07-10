@@ -351,14 +351,20 @@ module top #(
     // DDR3 memory port allocation (single unified array for all clients):
     //   0 = FB write (highest priority — prevents FIFO overflow/pixel drops)
     //   1 = FB read  (scanline prefetch, line-buffer absorbs latency)
-    //   2 = Shadow read  (apple_video_gen)
-    //   3 = Shadow write (CPU)
+    //   2 = Shadow write (CPU) — ABOVE the shadow read: a starved write is
+    //       DROPPED and corrupts shadow memory permanently (live-debugged:
+    //       the TransWarp SHR splash saturated the drop counter at 0xFF
+    //       behind back-to-back generator bursts on the read port; a hires
+    //       game dropped writes as stray stale pixels). A starved read only
+    //       delays a fetch the generators wait on anyway. CPU writes arrive
+    //       at most one per ~1us, so they barely dent read bandwidth.
+    //   3 = Shadow read (apple_video_gen + vgc_gen)
     //   4 = DOC (Ensoniq wavetable read)
     //   5 = GLU (Ensoniq write)
     localparam FB_WRITE_PORT   = 0;
     localparam FB_READ_PORT    = 1;
-    localparam SHADOW_READ_PORT  = 2;
-    localparam SHADOW_WRITE_PORT = 3;
+    localparam SHADOW_WRITE_PORT = 2;
+    localparam SHADOW_READ_PORT  = 3;
     localparam DOC_MEM_PORT      = 4;
     localparam GLU_MEM_PORT      = 5;
     localparam NUM_DDR3_PORTS    = 6;
@@ -1088,8 +1094,8 @@ module top #(
         .PORT_BASE_ADDR('{
             FB_WORD_BASE,       // [0] FB write (highest priority)
             FB_WORD_BASE,       // [1] FB read
-            SHADOW_WORD_BASE,   // [2] Shadow read
-            SHADOW_WORD_BASE,   // [3] Shadow write
+            SHADOW_WORD_BASE,   // [2] Shadow write
+            SHADOW_WORD_BASE,   // [3] Shadow read
             ENSONIQ_WORD_BASE,  // [4] DOC read
             ENSONIQ_WORD_BASE   // [5] GLU write
         }),
