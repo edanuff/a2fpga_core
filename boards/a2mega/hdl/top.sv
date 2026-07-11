@@ -479,6 +479,7 @@ module top #(
     wire [17:0] vgc_fb_data_w;
     wire        vgc_fb_vsync_w;
     wire [7:0]  vgc_dbg_missed_hsync_w;
+    wire [7:0]  vgc_dbg_starved_w;
     wire [7:0]  shadow_dbg_drop_w;
 
     wire [7:0] rgb_r_w;
@@ -553,7 +554,8 @@ module top #(
         .vgc_data_i(vgc_data_w),
         .vgc_ready_i(vgc_ready_w),
 
-        .dbg_missed_hsync_o(vgc_dbg_missed_hsync_w)
+        .dbg_missed_hsync_o(vgc_dbg_missed_hsync_w),
+        .dbg_starved_o(vgc_dbg_starved_w)
     );
 
     framebuffer_writer #(
@@ -1746,6 +1748,7 @@ module top #(
         .dbg_fb_flags_i(fb_dbg_flags_w),
         .dbg_resp_ovfl_i(dbg_resp_ovfl_sync1),
         .dbg_shadow_rd_i(shadow_dbg_rd_state_w),
+        .dbg_vgc_starved_i(vgc_dbg_starved_w),
 
         .dbg_mem_addr_o(dbg_mem_addr_w),
         .dbg_mem_go_o(dbg_mem_go_w),

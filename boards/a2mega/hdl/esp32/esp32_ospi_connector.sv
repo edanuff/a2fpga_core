@@ -72,6 +72,7 @@ module esp32_ospi_connector #(
     input  wire [7:0]  dbg_fb_flags_i,      // framebuffer live status flags
     input  wire [7:0]  dbg_resp_ovfl_i,     // per-port CDC resp overflow (sticky)
     input  wire [7:0]  dbg_shadow_rd_i,     // apple_memory read FSM snapshot
+    input  wire [7:0]  dbg_vgc_starved_i,   // vgc_gen stale-word swaps per frame
 
     // DDR3 debug read window (ddr3_debug_reader on idle port 4)
     output wire [20:0] dbg_mem_addr_o,
@@ -237,6 +238,7 @@ module esp32_ospi_connector #(
     localparam REG_DBG_FB_FLAGS   = 7'h75;
     localparam REG_DBG_RESP_OVFL  = 7'h76;  // bit n = DDR3 port n resp-FIFO overflow
     localparam REG_DBG_SHADOW_RD  = 7'h77;  // {vid_req,is_vgc,cache_valid,vgc_req,0,rd_state}
+    localparam REG_DBG_VGC_STARVED= 7'h78;  // vgc stale-word swaps per frame
 
     localparam REG_U2_DOORBELL  = 7'h7A;
 
@@ -538,6 +540,7 @@ module esp32_ospi_connector #(
             REG_DBG_FB_FLAGS:   reg_rdata = dbg_fb_flags_i;
             REG_DBG_RESP_OVFL:  reg_rdata = dbg_resp_ovfl_i;
             REG_DBG_SHADOW_RD:  reg_rdata = dbg_shadow_rd_i;
+            REG_DBG_VGC_STARVED: reg_rdata = dbg_vgc_starved_i;
 
             // ProDOS HDD compact bank
             REG_HDD0_REQ_CTL: reg_rdata = {6'b0, hdd_volumes[0].wr, hdd_volumes[0].rd};
