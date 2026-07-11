@@ -82,7 +82,13 @@ static const ospi_pins_t OSPI_PINS = {
     .cs   = -1,     // no CS — the protocol uses sync-pattern framing
 };
 
-static const int SPI_HZ = 4 * 1000 * 1000;  // reg path is clean at 8 MHz but
+static const int SPI_HZ = 1 * 1000 * 1000;  // TEMP 1 MHz: the debug-window build
+                                            // lengthened the unconstrained
+                                            // reg_rdata -> SCLK response path and
+                                            // the link died at 4 MHz; restore 4M
+                                            // after the response path is
+                                            // registered in fabric.
+                                            // (reg path is clean at 8 MHz but
                                              // XFER payload reads outrun the
                                              // proto's 1-byte read pipeline
                                              // above ~4 MHz (FF fill) — add a
@@ -282,6 +288,47 @@ static void cmd_process(String cmd) {
         Serial.printf("fb flags=0x%02X  ddr3 resp-fifo overflow=0x%02X (bit=port, sticky)\n", v[5], v[6]);
         Serial.printf("shadow rd fsm=0x%02X: vid_req=%d is_vgc=%d cache_valid=%d vgc_req=%d state=%d\n",
                       v[7], !!(v[7] & 0x80), !!(v[7] & 0x40), !!(v[7] & 0x20), !!(v[7] & 0x10), v[7] & 0x07);
+
+    } else if (cmd.startsWith("ddrd ")) {
+        // Dump DDR3 words via the debug read window (regs 0x34-0x3B).
+        // Usage: ddrd <word_addr> <word_count>   (addr in hex or dec)
+        String toks[16];
+        int nt = split_ws(cmd, toks, 16);
+        if (nt < 3) {
+            Serial.println("Usage: ddrd <word_addr> <words>");
+            return;
+        }
+        if (!a2spi_is_ready()) {
+            esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+            if (err != ESP_OK) {
+                Serial.printf("ddrd: init error: %s\n", esp_err_to_name(err));
+                return;
+            }
+        }
+        uint32_t addr, count;
+        if (!parse_u32(toks[1], addr) || addr > 0x1FFFFF ||
+            !parse_u32(toks[2], count) || count == 0 || count > 65536) {
+            Serial.println("ddrd: bad args (addr 0..0x1FFFFF, words 1..65536)");
+            return;
+        }
+        a2spi_reg_write(0x34, addr & 0xFF);
+        a2spi_reg_write(0x35, (addr >> 8) & 0xFF);
+        a2spi_reg_write(0x36, (addr >> 16) & 0x1F);
+        for (uint32_t w = 0; w < count; w++) {
+            a2spi_reg_write(0x37, 1);                 // GO (addr auto-incs)
+            uint8_t busy = 1, st;
+            for (int t = 0; t < 100 && busy; t++)
+                a2spi_reg_read_status(0x37, &busy, &st);
+            if (busy) { Serial.printf("\nddrd: timeout at word %lu\n", (unsigned long)w); return; }
+            uint8_t d0, d1, d2, d3;
+            a2spi_reg_read_status(0x38, &d0, &st);
+            a2spi_reg_read_status(0x39, &d1, &st);
+            a2spi_reg_read_status(0x3A, &d2, &st);
+            a2spi_reg_read_status(0x3B, &d3, &st);
+            if ((w & 7) == 0) Serial.printf("\n%06lX:", (unsigned long)(addr + w));
+            Serial.printf(" %02X%02X%02X%02X", d3, d2, d1, d0);
+        }
+        Serial.println("\nddrd: done");
 
     } else if (cmd.startsWith("spir ")) {
         String toks[16];

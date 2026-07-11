@@ -606,6 +606,14 @@ module top #(
 
     // 64KB sound RAM backed by BSRAM (DDR3 ports kept but idle)
 
+    // With USE_BSRAM=1 the DOC never touches DDR3 — park its interface on a
+    // dummy instance and give port 4 to the ESP32 DDR3 debug read window.
+    mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32))
+        doc_idle_if();
+    assign doc_idle_if.available = 1'b0;
+    assign doc_idle_if.ready     = 1'b0;
+    assign doc_idle_if.q         = 32'd0;
+
     sound_glu #(
         .ENABLE(ENSONIQ_ENABLE),
         .MONO_MIX(ENSONIQ_MONO_MIX),
@@ -623,7 +631,39 @@ module top #(
         .debug_osc_halt_o(doc_osc_halt_w),
 
         .glu_mem_if(ddr3_mem_ports[GLU_MEM_PORT]),
-        .doc_mem_if(ddr3_mem_ports[DOC_MEM_PORT])
+        .doc_mem_if(doc_idle_if)
+    );
+
+    wire [20:0] dbg_mem_addr_w;
+    wire        dbg_mem_go_w;
+    wire        dbg_mem_busy_w;
+    wire [31:0] dbg_mem_data_w;
+
+    // Discrete member wiring — passing ddr3_mem_ports[4] into a module port
+    // hits Gowin's interface-array flattening bug (see ddr3_ports.sv note);
+    // the first build attempt with an interface port killed the OSPI link.
+    wire        dbg_mem_rd_w;
+    wire [20:0] dbg_mem_port_addr_w;
+
+    assign ddr3_mem_ports[DOC_MEM_PORT].rd      = dbg_mem_rd_w;
+    assign ddr3_mem_ports[DOC_MEM_PORT].wr      = 1'b0;
+    assign ddr3_mem_ports[DOC_MEM_PORT].addr    = dbg_mem_port_addr_w;
+    assign ddr3_mem_ports[DOC_MEM_PORT].data    = 32'd0;
+    assign ddr3_mem_ports[DOC_MEM_PORT].byte_en = 4'b1111;
+    assign ddr3_mem_ports[DOC_MEM_PORT].burst   = 1'b0;
+
+    ddr3_debug_reader u_ddr3_dbg_reader (
+        .clk    (clk_logic_w),
+        .rst_n  (device_reset_n_w),
+        .mem_rd_o        (dbg_mem_rd_w),
+        .mem_addr_o      (dbg_mem_port_addr_w),
+        .mem_available_i (ddr3_mem_ports[DOC_MEM_PORT].available),
+        .mem_ready_i     (ddr3_mem_ports[DOC_MEM_PORT].ready),
+        .mem_q_i         (ddr3_mem_ports[DOC_MEM_PORT].q),
+        .addr_i (dbg_mem_addr_w),
+        .req_i  (dbg_mem_go_w),
+        .busy_o (dbg_mem_busy_w),
+        .data_o (dbg_mem_data_w)
     );
 
     // SuperSprite
@@ -1103,7 +1143,8 @@ module top #(
             SHADOW_WORD_BASE,   // [1] Shadow write
             FB_WORD_BASE,       // [2] FB write
             FB_WORD_BASE,       // [3] FB read
-            ENSONIQ_WORD_BASE,  // [4] DOC read
+            21'h000000,         // [4] DDR3 debug reader (absolute addresses;
+                                //     Ensoniq runs from BSRAM, port was idle)
             ENSONIQ_WORD_BASE   // [5] GLU write
         }),
         .WIDE_WR_PORT(FB_WRITE_PORT),
@@ -1705,6 +1746,11 @@ module top #(
         .dbg_fb_flags_i(fb_dbg_flags_w),
         .dbg_resp_ovfl_i(dbg_resp_ovfl_sync1),
         .dbg_shadow_rd_i(shadow_dbg_rd_state_w),
+
+        .dbg_mem_addr_o(dbg_mem_addr_w),
+        .dbg_mem_go_o(dbg_mem_go_w),
+        .dbg_mem_busy_i(dbg_mem_busy_w),
+        .dbg_mem_data_i(dbg_mem_data_w),
 
         .w5100_host_wr(u2_host_wr_w),
         .w5100_host_addr(u2_host_addr_w),
