@@ -33,7 +33,25 @@ fpgaupdate takes .bin, flash.sh hardened (--verify/retries/procedure).
 
 Open issues, in priority order:
 
-- [ ] "Sparkle"/garble ROOT CAUSE identified (2026-07-10 live session):
+- [ ] SHR VERDICT (2026-07-10 live session, Spy Hunter static splash
+      clean and stable): the SHR garble was vgc_gen's never-stall word
+      swap — a semantic change imported with the a2n20v2 direct_display
+      redesign — emitting STALE words when DDR3 fetches missed the
+      16-pixel window and phase-slipping the rest of the line. FIXED:
+      stall-on-late-word restored (active low during the stall; the
+      framebuffer_writer pauses cleanly; BSRAM boards never stall), plus
+      a vgc next-group prefetch in apple_memory (odd-word arming) and a
+      pipelined issue path for clk_logic timing. REMAINING: stalls/frame
+      still saturate 255 during SHR (prefetch mostly not winning —
+      investigate pf idle-slot availability vs vid dummy churn);
+      invisible now but margin-reducing. MOTION-SHR untested (needs
+      menu/gamepad to mount GS game images — the standing gate)
+- [ ] FLASH REPAIR PENDING: config flash holds a half-written image
+      (interrupted openFPGALoader write); board runs from SRAM — power
+      loss needs a re-SRAM-load. openFPGALoader writes lose to the
+      config-retry loop; repair via ESP32 bit-bang fpgaupdate (menu) or
+      SRAM-load-then-flash in a fresh power window
+- [ ] Old "sparkle"/garble notes (superseded by the above): (2026-07-10 live session):
       apple_video_gen and vgc_gen are hard-real-time single-word-prefetch
       consumers; a shadow read that misses its ~500ns slot makes the pixel
       shifter reuse the PREVIOUS word (stale chunk). Occasional misses =
