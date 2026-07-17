@@ -31,6 +31,7 @@
 #include "menu.h"
 #include "usbh_xinput.h"
 #include "telnetd.h"
+#include "fpga_spi.h"
 
 #define TELNET_PORT     23
 #define TEE_LINES       32
@@ -77,6 +78,74 @@ static int tn_send(int fd, const void *buf, int len)
 static void tn_puts(int fd, const char *s)
 {
     tn_send(fd, s, (int)strlen(s));
+}
+
+/* ---- bus-event FIFO snapshot (diagnostic; 'd' in the console) -------------
+ * The gateware samples every Apple II bus cycle into a 512-deep event FIFO
+ * (packet bytes = flags, data, addr_lo, addr_hi; flags bit7 = R/W_n). Capture
+ * is gated by reg 0x79 (enable) / 0x78 (mode, 0 = everything); entries stream
+ * out of XFER SPACE 2 (FPGA_SPACE_FIFO, 4 bytes/entry, auto-popped). We drain
+ * any stale entries, arm a fresh window, freeze it, and print the recent fetch
+ * addresses -- so we can see what the 6502 is actually doing when the machine
+ * is hung: looping in $F8xx (autostart/monitor), parked at the reset vector,
+ * or off in garbage. Snapshot on demand, not a continuous stream. */
+static uint16_t fifo_count_rd(void)
+{
+    return (uint16_t)fpga_spi_reg_read(0x71) |
+           ((uint16_t)(fpga_spi_reg_read(0x72) & 1) << 8);
+}
+
+static void bus_snapshot(int fd)
+{
+    static uint8_t buf[64 * 4];
+    char line[80];
+
+    fpga_spi_reg_write(0x79, 0);                 /* stop capture */
+    /* drain any stale entries via XFER SPACE 2 (auto-pops 4 bytes/entry) */
+    for (int guard = 0; guard < 16; guard++) {
+        uint16_t stale = fifo_count_rd();
+        if (!stale) break;
+        if (stale > 64) stale = 64;
+        fpga_spi_xfer_read(FPGA_SPACE_FIFO, 0, buf, stale * 4);
+    }
+    /* arm a fresh capture window, let the bus run briefly, then freeze */
+    fpga_spi_reg_write(0x78, 0);                 /* mode = everything */
+    fpga_spi_reg_write(0x79, 1);
+    usb_osal_msleep(3);
+    fpga_spi_reg_write(0x79, 0);
+
+    uint8_t  st  = fpga_spi_reg_read(0x06);      /* [6]=SDRAM_RDY [5]=RESET_N */
+    uint16_t cnt = fifo_count_rd();
+    snprintf(line, sizeof(line),
+             "\r\n-- BUS SNAPSHOT --  RESET_N=%d  SDRAM_RDY=%d  entries=%u\r\n",
+             (st >> 5) & 1, (st >> 6) & 1, cnt);
+    tn_puts(fd, line);
+
+    if (cnt == 0) {
+        tn_puts(fd, " (no bus activity captured -- CPU may be held in reset)\r\n");
+        return;
+    }
+    uint16_t n = cnt > 64 ? 64 : cnt;
+    fpga_spi_xfer_read(FPGA_SPACE_FIFO, 0, buf, n * 4);
+
+    uint16_t amin = 0xFFFF, amax = 0x0000;
+    for (uint16_t i = 0; i < n; i++) {
+        uint8_t  f = buf[i * 4 + 0];
+        uint8_t  d = buf[i * 4 + 1];
+        uint16_t a = (uint16_t)buf[i * 4 + 2] |
+                     ((uint16_t)buf[i * 4 + 3] << 8);
+        if (a < amin) amin = a;
+        if (a > amax) amax = a;
+        if (i < 40) {
+            snprintf(line, sizeof(line), " %04X %c %02X\r\n",
+                     a, (f & 0x80) ? 'R' : 'W', d);
+            tn_puts(fd, line);
+        }
+    }
+    snprintf(line, sizeof(line),
+             "-- addr range $%04X..$%04X over %u cycles (col2 = R/W) --\r\n",
+             amin, amax, n);
+    tn_puts(fd, line);
 }
 
 /* Render one 40-char row of Apple II screen codes as ANSI. Inverse video
@@ -154,7 +223,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2n20v2-Enhanced remote console\r\n"
-                "keys: c=console m=menu q=quit\r\n"
+                "keys: c=console m=menu d=bus-snapshot q=quit\r\n"
                 "menu: up/down move, right/enter=ok, left/esc/b=back,\r\n"
                 "      y=view, s=select, [ ]=+/-16\r\n\r\n");
 
@@ -206,6 +275,10 @@ static void session(int fd)
             }
             if (esc_st == 0 && ch == 'q')
                 return;
+            if (esc_st == 0 && ch == 'd' && !menu_mode) {
+                bus_snapshot(fd);          /* diagnostic bus-address snapshot */
+                continue;
+            }
             if (esc_st == 0 && ch == 'c' && menu_mode) {
                 menu_mode = false;
                 tn_puts(fd, "\x1b[0m\x1b[2J\x1b[H-- console --\r\n");
