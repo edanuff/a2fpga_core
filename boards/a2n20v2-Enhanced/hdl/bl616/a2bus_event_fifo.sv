@@ -48,16 +48,22 @@ module a2bus_event_fifo #(
 
     wire capture_trigger_w = bus_cycle_w & capture_this_cycle;
 
-    // Packet formation: [ADDR:16][DATA:8][FLAGS:8]
+    // Packet formation: [ADDR:16][DATA:8][CTRL:8]
+    // CTRL byte captures the full Apple II control-line set per cycle so the
+    // event FIFO doubles as a logic analyzer (no external scope needed):
+    //   [7]=rw_n(1=rd) [6]=/INH [5]=/RESET [4]=/IRQ [3]=/NMI [2]=/DMA
+    //   [1]=/RDY [0]=m2sel_n .  The control lines are active-low (0=asserted).
     wire [31:0] packet_data_w = {
         a2bus_if.addr,
         a2bus_if.data,
         a2bus_if.rw_n,
-        a2bus_if.m2sel_n,
-        a2bus_if.m2b0,
-        a2bus_if.sw_gs,
-        3'b000,
-        1'b0
+        a2bus_if.control_inh_n,
+        a2bus_if.control_reset_n,
+        a2bus_if.control_irq_n,
+        a2bus_if.control_nmi_n,
+        a2bus_if.control_dma_n,
+        a2bus_if.control_rdy_n,
+        a2bus_if.m2sel_n
     };
 
     // -------------------------------------------------------

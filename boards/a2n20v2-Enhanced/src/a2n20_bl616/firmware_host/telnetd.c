@@ -82,7 +82,9 @@ static void tn_puts(int fd, const char *s)
 
 /* ---- bus-event FIFO snapshot (diagnostic; 'd' in the console) -------------
  * The gateware samples every Apple II bus cycle into a 512-deep event FIFO
- * (packet bytes = flags, data, addr_lo, addr_hi; flags bit7 = R/W_n). Capture
+ * (packet bytes = ctrl, data, addr_lo, addr_hi; ctrl = full control-line set
+ * [7]rw_n [6]/INH [5]/RESET [4]/IRQ [3]/NMI [2]/DMA [1]/RDY [0]m2sel_n, so the
+ * FIFO doubles as a logic analyzer -- no external scope needed). Capture
  * is gated by reg 0x79 (enable) / 0x78 (mode, 0 = everything); entries stream
  * out of XFER SPACE 2 (FPGA_SPACE_FIFO, 4 bytes/entry, auto-popped). We drain
  * any stale entries, arm a fresh window, freeze it, and print the recent fetch
@@ -128,7 +130,12 @@ static void bus_snapshot(int fd)
     uint16_t n = cnt > 64 ? 64 : cnt;
     fpga_spi_xfer_read(FPGA_SPACE_FIFO, 0, buf, n * 4);
 
+    /* CTRL byte (col "ctl"): [7]rw_n [6]/INH [5]/RESET [4]/IRQ [3]/NMI
+     * [2]/DMA [1]/RDY [0]m2sel_n.  Control lines active-low (0 = asserted);
+     * the decoded column flags each ASSERTED line (letter) else '-'. */
+    tn_puts(fd, " addr rw dat ctl  INH RST IRQ NMI DMA RDY\r\n");
     uint16_t amin = 0xFFFF, amax = 0x0000;
+    uint16_t rst_a = 0, inh_a = 0;
     for (uint16_t i = 0; i < n; i++) {
         uint8_t  f = buf[i * 4 + 0];
         uint8_t  d = buf[i * 4 + 1];
@@ -136,16 +143,51 @@ static void bus_snapshot(int fd)
                      ((uint16_t)buf[i * 4 + 3] << 8);
         if (a < amin) amin = a;
         if (a > amax) amax = a;
+        if (!((f >> 6) & 1)) inh_a++;
+        if (!((f >> 5) & 1)) rst_a++;
         if (i < 40) {
-            snprintf(line, sizeof(line), " %04X %c %02X\r\n",
-                     a, (f & 0x80) ? 'R' : 'W', d);
+            snprintf(line, sizeof(line),
+                     " %04X %c  %02X %02X   %c   %c   %c   %c   %c   %c\r\n",
+                     a, (f & 0x80) ? 'R' : 'W', d, f,
+                     ((f >> 6) & 1) ? '-' : 'I',    /* /INH   */
+                     ((f >> 5) & 1) ? '-' : 'R',    /* /RESET */
+                     ((f >> 4) & 1) ? '-' : 'Q',    /* /IRQ   */
+                     ((f >> 3) & 1) ? '-' : 'N',    /* /NMI   */
+                     ((f >> 2) & 1) ? '-' : 'D',    /* /DMA   */
+                     ((f >> 1) & 1) ? '-' : 'Y');   /* /RDY   */
             tn_puts(fd, line);
         }
     }
     snprintf(line, sizeof(line),
-             "-- addr range $%04X..$%04X over %u cycles (col2 = R/W) --\r\n",
-             amin, amax, n);
+             "-- range $%04X..$%04X, %u cyc; RESET asserted %u/%u, "
+             "INH asserted %u/%u --\r\n",
+             amin, amax, n, rst_a, n, inh_a, n);
     tn_puts(fd, line);
+}
+
+/* ---- scope mode: continuous bus stream ('s' toggles) ---------------------
+ * While active, capture stays armed and each poll iteration drains whatever
+ * the FIFO holds and prints it live (addr rw data ctl-hex), so the console
+ * acts as a rolling logic-analyzer trace. Sampled, not every-cycle: the FIFO
+ * (512 deep) refills as we drain, so bursty CPUs may skip cycles between
+ * dumps -- fine for watching where execution sits. */
+static void scope_dump_batch(int fd)
+{
+    static uint8_t buf[64 * 4];
+    char line[40];
+    uint16_t cnt = fifo_count_rd();
+    if (!cnt) return;
+    uint16_t n = cnt > 64 ? 64 : cnt;
+    fpga_spi_xfer_read(FPGA_SPACE_FIFO, 0, buf, n * 4);
+    for (uint16_t i = 0; i < n; i++) {
+        uint8_t  f = buf[i * 4 + 0];
+        uint8_t  d = buf[i * 4 + 1];
+        uint16_t a = (uint16_t)buf[i * 4 + 2] |
+                     ((uint16_t)buf[i * 4 + 3] << 8);
+        snprintf(line, sizeof(line), "%04X %c %02X %02X\r\n",
+                 a, (f & 0x80) ? 'R' : 'W', d, f);
+        tn_puts(fd, line);
+    }
 }
 
 /* Render one 40-char row of Apple II screen codes as ANSI. Inverse video
@@ -223,11 +265,12 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2n20v2-Enhanced remote console\r\n"
-                "keys: c=console m=menu d=bus-snapshot q=quit\r\n"
+                "keys: c=console m=menu d=bus-snapshot s=scope q=quit\r\n"
                 "menu: up/down move, right/enter=ok, left/esc/b=back,\r\n"
                 "      y=view, s=select, [ ]=+/-16\r\n\r\n");
 
     bool menu_mode = false;
+    bool scope_mode = false;
     int esc_st = 0, iac_st = 0;
     uint32_t last_paint = 0;
 
@@ -279,6 +322,20 @@ static void session(int fd)
                 bus_snapshot(fd);          /* diagnostic bus-address snapshot */
                 continue;
             }
+            if (esc_st == 0 && ch == 's' && !menu_mode) {
+                scope_mode = !scope_mode;  /* continuous bus stream */
+                if (scope_mode) {
+                    fpga_spi_reg_write(0x78, 0);   /* mode = everything */
+                    fpga_spi_reg_write(0x79, 1);   /* arm capture */
+                    tn_puts(fd, "\r\n-- SCOPE on (s = stop) --\r\n"
+                                " addr rw dat ctl  ctl=[7]rw[6]INH[5]RST"
+                                "[4]IRQ[3]NMI[2]DMA[1]RDY[0]M2\r\n");
+                } else {
+                    fpga_spi_reg_write(0x79, 0);   /* stop capture */
+                    tn_puts(fd, "-- SCOPE off --\r\n");
+                }
+                continue;
+            }
             if (esc_st == 0 && ch == 'c' && menu_mode) {
                 menu_mode = false;
                 tn_puts(fd, "\x1b[0m\x1b[2J\x1b[H-- console --\r\n");
@@ -304,7 +361,9 @@ static void session(int fd)
             }
         }
 
-        if (menu_mode) {
+        if (scope_mode) {
+            scope_dump_batch(fd);          /* continuous bus stream */
+        } else if (menu_mode) {
             if (!menu_mcu_view_active()) {
                 /* B at the root menu (or SELECT) handed the display back
                  * to the Apple II — mirror that instead of showing a
