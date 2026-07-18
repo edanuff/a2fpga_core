@@ -92,6 +92,16 @@ int bt_format(char *buf, int buflen)
         }
         uint32_t fpga_ms = g_bt[s].fpga_ticks / FPGA_TICKS_PER_MS;
         uint32_t mcu_ms  = g_bt[s].mcu_us / 1000u;
+        /* Plausibility guard: the whole boot window is far under 60 s, so a
+         * near-full-scale fpga_ms (e.g. 79536 = counter max / early-boot SPI
+         * read glitch returning 0xFF bytes) is bogus. Flag it, keep mcu_ms
+         * (authoritative), and exclude it from the delta chain. */
+        if (fpga_ms > 60000u) {
+            n += snprintf(buf + n, buflen - n,
+                          "  %-22s (wrap?%6u)   --- %9u   (fpga read glitch; use mcu_ms)\r\n",
+                          bt_name((bt_stage_t)s), fpga_ms, mcu_ms);
+            continue;
+        }
         if (have_prev) {
             n += snprintf(buf + n, buflen - n,
                           "  %-22s %7u  %+6d %9u\r\n",

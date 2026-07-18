@@ -282,7 +282,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2n20v2-Enhanced remote console\r\n"
-                "keys: c=console m=menu d=snapshot s=scope t=trigger b=boot-timeline q=quit\r\n"
+                "keys: c=console m=menu d=snapshot s=scope t=trigger o=oneshot b=boot-timeline q=quit\r\n"
                 "menu: up/down move, right/enter=ok, left/esc/b=back,\r\n"
                 "      y=view, s=select, [ ]=+/-16\r\n\r\n");
 
@@ -361,7 +361,7 @@ static void session(int fd)
             if (esc_st == 0 && ch == 't' && !menu_mode) {
                 /* cycle the FIFO freeze-trigger; freezes the rolling buffer on
                  * the first matching address so 'd' shows the run-up to it. */
-                if (++trig_sel > 2) trig_sel = -1;
+                if (++trig_sel > 3) trig_sel = -1;
                 fpga_spi_reg_write(0x1A, 0);   /* disarm -> clear frozen */
                 uint16_t ta = 0, tm = 0;
                 const char *nm = "off (rolling)";
@@ -372,6 +372,8 @@ static void session(int fd)
                             nm = "$FFFE (BRK/IRQ vector fetch)"; break;
                     case 2: ta = 0x0000; tm = 0xFFFF;
                             nm = "$0000 (jump-to-zero / BRK)"; break;
+                    case 3: ta = 0xFFFC; tm = 0xFFFF;
+                            nm = "$FFFC (RESET vector fetch)"; break;
                     default: break;            /* -1: off */
                 }
                 if (trig_sel >= 0) {
@@ -385,6 +387,18 @@ static void session(int fd)
                 snprintf(tl, sizeof(tl), "\r\n-- TRIGGER %s%s --\r\n",
                          trig_sel < 0 ? "" : "armed: freeze on ", nm);
                 tn_puts(fd, tl);
+                continue;
+            }
+            if (esc_st == 0 && ch == 'o' && !menu_mode) {
+                /* Toggle FIFO oneshot (reg 0x1F, v3 gateware). Oneshot=1
+                 * (config default) freezes the buffer when full, keeping the
+                 * FIRST 512 bus cycles after /RES release; 0 = rolling
+                 * (keep the last 512). Note 'd' DRAINS the buffer, so the
+                 * first-512 boot capture is readable once per power-cycle. */
+                uint8_t os = fpga_spi_reg_read(0x1F) & 0x01;
+                fpga_spi_reg_write(0x1F, os ? 0 : 1);
+                tn_puts(fd, (os ? "\r\n-- ROLLING (last-512) --\r\n"
+                                : "\r\n-- ONESHOT ON (first-512) --\r\n"));
                 continue;
             }
             if (esc_st == 0 && ch == 'c' && menu_mode) {

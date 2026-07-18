@@ -853,6 +853,15 @@ static int usb_leaf_count(struct usbh_hub *hub)
 }
 void disk_poll(void)
 {
+    /* Stamp the actual Apple /RES release the moment it is observable -- the
+     * FPGA can release on its own native timer (v2+ gateware) BEFORE any 0x2E
+     * write, so poll from the top of every tick rather than from the release
+     * path (which made the stamp an upper bound). One reg read per 2 ms tick,
+     * and only until the release is seen. */
+    if (!bt_reset_released() &&
+        (fpga_spi_reg_read(0x06) & FPGA_STATUS_A2BUS_RESET_N))
+        bt_mark(BT_RST_RELEASED);
+
     if (g_remount_req) {
         g_remount_req = false;
         g_remounting  = true;
@@ -924,12 +933,9 @@ void disk_poll(void)
                 osd_log("A2: RESET RELEASED%s%s", any ? "" : " (NO MEDIA)",
                         rst_ok ? "" : " (0x2E UNCONFIRMED)");
             }
-        } else if (!bt_reset_released()) {
-            /* Release committed; confirm the Apple II /RES line actually came
-             * out of reset (reg 0x06 bit5) and stamp the timeline. */
-            if (fpga_spi_reg_read(0x06) & FPGA_STATUS_A2BUS_RESET_N)
-                bt_mark(BT_RST_RELEASED);
         }
+        /* (BT_RST_RELEASED is stamped at the top of disk_poll, independent of
+         * this release path -- the FPGA may release on its own timer.) */
     }
 
     /* Async directory listing for the menu (FatFS is not re-entrant, so the
