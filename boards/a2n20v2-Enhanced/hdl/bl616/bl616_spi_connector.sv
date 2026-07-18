@@ -206,6 +206,12 @@ module bl616_spi_connector #(
     //   - the absolute backstop expires (MCU alive but never released).
     localparam RST_MCU_ALIVE_WAIT = CLOCK_SPEED_HZ * 3;   // MCU first SPI contact
     localparam RST_HOLD_BACKSTOP  = CLOCK_SPEED_HZ * 15;  // never hold forever
+    // EXPERIMENT (LC power-on-bank-flip; Fork B root-cause audit): release Apple
+    // /RES at a native-like ~250 ms instead of parking it for seconds. The
+    // extended /RES hold is the ONLY Apple-bus difference FPGA presence imposes
+    // at power-up; this tests whether a native-length reset stops the Language
+    // Card banking itself in (RAM-read, /INH over the motherboard $F8 ROM).
+    localparam RST_NATIVE_HOLD    = CLOCK_SPEED_HZ / 4;   // ~250 ms
     localparam RST_CW = $clog2(RST_HOLD_BACKSTOP + 1);
     reg               a2_rst_release_r;   // set by reg 0x2E write
     reg [RST_CW-1:0]  rst_hold_cnt_r;
@@ -219,7 +225,7 @@ module bl616_spi_connector #(
                             (rst_hold_cnt_r >= RST_MCU_ALIVE_WAIT[RST_CW-1:0]);
     assign a2bus_control_if.reset_hold =
         !(a2_rst_release_r || rst_mcu_absent_w ||
-          rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0]);
+          rst_hold_cnt_r >= RST_NATIVE_HOLD[RST_CW-1:0]);
 
     // -------------------------------------------------------
     // Constants
@@ -1019,7 +1025,7 @@ module bl616_spi_connector #(
             led_o            <= 5'd0;
             ws2812_o         <= 1'b0;
             capture_mode_o   <= 3'd0;
-            capture_enable_o <= 1'b0;
+            capture_enable_o <= 1'b1;   // EXPERIMENT: arm capture at FPGA config so the reset window is observable (Fork B: it was a blind spot until MCU wrote 0x79)
             trig_enable_o    <= 1'b0;
             trig_addr_o      <= 16'd0;
             trig_mask_o      <= 16'd0;
