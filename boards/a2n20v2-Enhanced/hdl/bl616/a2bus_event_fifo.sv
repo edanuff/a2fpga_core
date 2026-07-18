@@ -92,22 +92,29 @@ module a2bus_event_fifo #(
     end
     assign fifo_rdata = fifo_rdata_r;
 
-    // Write port
+    // Write port -- ROLLING: always writes; when full it overwrites the oldest
+    // (rd_ptr advances below). This keeps the LAST FIFO_DEPTH cycles, so after
+    // the CPU halts/hangs the buffer holds the run-up to the stall (the jump
+    // target + the halting opcode), rather than the start of capture.
     always @(posedge a2bus_if.clk_logic) begin
         if (!a2bus_if.system_reset_n) begin
             wr_ptr_r <= 0;
-        end else if (capture_trigger_w && !fifo_full) begin
+        end else if (capture_trigger_w) begin
             fifo_mem[wr_addr] <= packet_data_w;
             wr_ptr_r <= wr_ptr_r + 1;
         end
     end
 
-    // Read port (pop)
+    // Read pointer: during rolling capture, drop the oldest when full; during
+    // read-out (capture disabled -> capture_trigger_w=0) advance on pop. The
+    // two never fire together (firmware freezes capture before draining).
     always @(posedge a2bus_if.clk_logic) begin
         if (!a2bus_if.system_reset_n) begin
             rd_ptr_r <= 0;
+        end else if (capture_trigger_w && fifo_full) begin
+            rd_ptr_r <= rd_ptr_r + 1;          // rolling: overwrite oldest
         end else if (fifo_pop && !fifo_empty) begin
-            rd_ptr_r <= rd_ptr_r + 1;
+            rd_ptr_r <= rd_ptr_r + 1;          // read-out pop
         end
     end
 

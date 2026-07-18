@@ -93,76 +93,84 @@ static void tn_puts(int fd, const char *s)
  * or off in garbage. Snapshot on demand, not a continuous stream. */
 static uint16_t fifo_count_rd(void)
 {
+    /* reg 0x70: [7]=empty [6]=full. When full the 9-bit count wraps to 0
+     * (512 & 0x1FF), so read the full flag first (rolling buffer sits full). */
+    uint8_t stat = fpga_spi_reg_read(0x70);
+    if (stat & 0x40) return 512;                 /* full */
     return (uint16_t)fpga_spi_reg_read(0x71) |
            ((uint16_t)(fpga_spi_reg_read(0x72) & 1) << 8);
 }
 
 static void bus_snapshot(int fd)
 {
-    static uint8_t buf[64 * 4];
+    static uint8_t buf[512 * 4];   /* whole rolling window */
     char line[80];
 
-    fpga_spi_reg_write(0x79, 0);                 /* stop capture */
-    /* drain any stale entries via XFER SPACE 2 (auto-pops 4 bytes/entry) */
-    for (int guard = 0; guard < 16; guard++) {
-        uint16_t stale = fifo_count_rd();
-        if (!stale) break;
-        if (stale > 64) stale = 64;
-        fpga_spi_xfer_read(FPGA_SPACE_FIFO, 0, buf, stale * 4);
-    }
-    /* arm a fresh capture window, let the bus run briefly, then freeze */
-    fpga_spi_reg_write(0x78, 0);                 /* mode = everything */
-    fpga_spi_reg_write(0x79, 1);
-    usb_osal_msleep(3);
-    fpga_spi_reg_write(0x79, 0);
+    /* The FIFO captures continuously (rolling: keeps the last ~512 cycles).
+     * Freeze it, read the frozen window = the run-up to *now* (or, if the CPU
+     * has halted/hung, the run-up to the stall -- the jump target + halting
+     * opcode), then re-arm. No fresh-window arming, so a hang is caught. */
+    fpga_spi_reg_write(0x79, 0);                 /* freeze rolling capture */
 
     uint8_t  st  = fpga_spi_reg_read(0x06);      /* [6]=SDRAM_RDY [5]=RESET_N */
     uint16_t cnt = fifo_count_rd();
     snprintf(line, sizeof(line),
-             "\r\n-- BUS SNAPSHOT --  RESET_N=%d  SDRAM_RDY=%d  entries=%u\r\n",
-             (st >> 5) & 1, (st >> 6) & 1, cnt);
+             "\r\n-- BUS SNAPSHOT (last %u cycles) --  RESET_N=%d  SDRAM_RDY=%d\r\n",
+             cnt, (st >> 5) & 1, (st >> 6) & 1);
     tn_puts(fd, line);
 
     if (cnt == 0) {
-        tn_puts(fd, " (no bus activity captured -- CPU may be held in reset)\r\n");
+        tn_puts(fd, " (rolling buffer empty -- no bus cycles since last read)\r\n");
+        fpga_spi_reg_write(0x79, 1);             /* re-arm */
         return;
     }
-    uint16_t n = cnt > 64 ? 64 : cnt;
+    /* Read the whole window (oldest..newest). The FIFO streams oldest-first,
+     * so the LAST entries are the most recent = the run-up to the hang. */
+    uint16_t n = cnt > 512 ? 512 : cnt;
     fpga_spi_xfer_read(FPGA_SPACE_FIFO, 0, buf, n * 4);
 
-    /* CTRL byte (col "ctl"): [7]rw_n [6]/INH [5]/RESET [4]/IRQ [3]/NMI
-     * [2]/DMA [1]/RDY [0]m2sel_n.  Control lines active-low (0 = asserted);
-     * the decoded column flags each ASSERTED line (letter) else '-'. */
-    tn_puts(fd, " addr rw dat ctl  INH RST IRQ NMI DMA RDY\r\n");
+    /* stats over the whole window */
     uint16_t amin = 0xFFFF, amax = 0x0000;
     uint16_t rst_a = 0, inh_a = 0;
     for (uint16_t i = 0; i < n; i++) {
         uint8_t  f = buf[i * 4 + 0];
-        uint8_t  d = buf[i * 4 + 1];
         uint16_t a = (uint16_t)buf[i * 4 + 2] |
                      ((uint16_t)buf[i * 4 + 3] << 8);
         if (a < amin) amin = a;
         if (a > amax) amax = a;
         if (!((f >> 6) & 1)) inh_a++;
         if (!((f >> 5) & 1)) rst_a++;
-        if (i < 40) {
-            snprintf(line, sizeof(line),
-                     " %04X %c  %02X %02X   %c   %c   %c   %c   %c   %c\r\n",
-                     a, (f & 0x80) ? 'R' : 'W', d, f,
-                     ((f >> 6) & 1) ? '-' : 'I',    /* /INH   */
-                     ((f >> 5) & 1) ? '-' : 'R',    /* /RESET */
-                     ((f >> 4) & 1) ? '-' : 'Q',    /* /IRQ   */
-                     ((f >> 3) & 1) ? '-' : 'N',    /* /NMI   */
-                     ((f >> 2) & 1) ? '-' : 'D',    /* /DMA   */
-                     ((f >> 1) & 1) ? '-' : 'Y');   /* /RDY   */
-            tn_puts(fd, line);
-        }
+    }
+
+    /* print the NEWEST up-to-40 in chronological order -- the last line is the
+     * final bus cycle before the CPU stopped (jump target / halting opcode).
+     * CTRL: [7]rw_n [6]/INH [5]/RESET [4]/IRQ [3]/NMI [2]/DMA [1]/RDY [0]m2sel_n
+     * (active-low; decoded columns flag each ASSERTED line, else '-'). */
+    uint16_t show  = n > 40 ? 40 : n;
+    uint16_t start = n - show;
+    tn_puts(fd, " addr rw dat ctl  INH RST IRQ NMI DMA RDY  (newest last)\r\n");
+    for (uint16_t i = start; i < n; i++) {
+        uint8_t  f = buf[i * 4 + 0];
+        uint8_t  d = buf[i * 4 + 1];
+        uint16_t a = (uint16_t)buf[i * 4 + 2] |
+                     ((uint16_t)buf[i * 4 + 3] << 8);
+        snprintf(line, sizeof(line),
+                 " %04X %c  %02X %02X   %c   %c   %c   %c   %c   %c\r\n",
+                 a, (f & 0x80) ? 'R' : 'W', d, f,
+                 ((f >> 6) & 1) ? '-' : 'I',    /* /INH   */
+                 ((f >> 5) & 1) ? '-' : 'R',    /* /RESET */
+                 ((f >> 4) & 1) ? '-' : 'Q',    /* /IRQ   */
+                 ((f >> 3) & 1) ? '-' : 'N',    /* /NMI   */
+                 ((f >> 2) & 1) ? '-' : 'D',    /* /DMA   */
+                 ((f >> 1) & 1) ? '-' : 'Y');   /* /RDY   */
+        tn_puts(fd, line);
     }
     snprintf(line, sizeof(line),
              "-- range $%04X..$%04X, %u cyc; RESET asserted %u/%u, "
              "INH asserted %u/%u --\r\n",
              amin, amax, n, rst_a, n, inh_a, n);
     tn_puts(fd, line);
+    fpga_spi_reg_write(0x79, 1);                 /* resume rolling capture */
 }
 
 /* ---- scope mode: continuous bus stream ('s' toggles) ---------------------
@@ -324,16 +332,14 @@ static void session(int fd)
             }
             if (esc_st == 0 && ch == 's' && !menu_mode) {
                 scope_mode = !scope_mode;  /* continuous bus stream */
-                if (scope_mode) {
-                    fpga_spi_reg_write(0x78, 0);   /* mode = everything */
-                    fpga_spi_reg_write(0x79, 1);   /* arm capture */
+                /* capture runs continuously (rolling); scope just toggles
+                 * whether we stream it -- do not disable capture on exit. */
+                if (scope_mode)
                     tn_puts(fd, "\r\n-- SCOPE on (s = stop) --\r\n"
                                 " addr rw dat ctl  ctl=[7]rw[6]INH[5]RST"
                                 "[4]IRQ[3]NMI[2]DMA[1]RDY[0]M2\r\n");
-                } else {
-                    fpga_spi_reg_write(0x79, 0);   /* stop capture */
+                else
                     tn_puts(fd, "-- SCOPE off --\r\n");
-                }
                 continue;
             }
             if (esc_st == 0 && ch == 'c' && menu_mode) {
@@ -413,6 +419,12 @@ static void telnetd_thread(void *arg)
      * DHCP time). netif_default appearing means core init long finished. */
     while (netif_default == NULL)
         usb_osal_msleep(200);
+
+    /* Arm the rolling bus-event capture up front so the FIFO always holds the
+     * last ~512 Apple II cycles -- when the CPU hangs, 'd' then reads the
+     * run-up to the stall even though the client connects afterwards. */
+    fpga_spi_reg_write(0x78, 0);   /* capture mode = everything */
+    fpga_spi_reg_write(0x79, 1);   /* capture enable */
 
     int lfd = lwip_socket(AF_INET, SOCK_STREAM, 0);
     if (lfd < 0)
