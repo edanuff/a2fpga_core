@@ -119,6 +119,14 @@ static void bus_snapshot(int fd)
              cnt, (st >> 5) & 1, (st >> 6) & 1);
     tn_puts(fd, line);
 
+    uint8_t trg = fpga_spi_reg_read(0x1A);       /* [0]=armed [1]=matched */
+    if (trg & 0x01) {
+        snprintf(line, sizeof(line), " trigger armed, %s\r\n",
+                 (trg & 0x02) ? "FIRED (window ends at the trigger cycle)"
+                              : "not yet fired (window = latest cycles)");
+        tn_puts(fd, line);
+    }
+
     if (cnt == 0) {
         tn_puts(fd, " (rolling buffer empty -- no bus cycles since last read)\r\n");
         fpga_spi_reg_write(0x79, 1);             /* re-arm */
@@ -273,12 +281,13 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2n20v2-Enhanced remote console\r\n"
-                "keys: c=console m=menu d=bus-snapshot s=scope q=quit\r\n"
+                "keys: c=console m=menu d=snapshot s=scope t=trigger q=quit\r\n"
                 "menu: up/down move, right/enter=ok, left/esc/b=back,\r\n"
                 "      y=view, s=select, [ ]=+/-16\r\n\r\n");
 
     bool menu_mode = false;
     bool scope_mode = false;
+    int  trig_sel = -1;        /* -1=off; cycles through trig_presets via 't' */
     int esc_st = 0, iac_st = 0;
     uint32_t last_paint = 0;
 
@@ -340,6 +349,35 @@ static void session(int fd)
                                 "[4]IRQ[3]NMI[2]DMA[1]RDY[0]M2\r\n");
                 else
                     tn_puts(fd, "-- SCOPE off --\r\n");
+                continue;
+            }
+            if (esc_st == 0 && ch == 't' && !menu_mode) {
+                /* cycle the FIFO freeze-trigger; freezes the rolling buffer on
+                 * the first matching address so 'd' shows the run-up to it. */
+                if (++trig_sel > 2) trig_sel = -1;
+                fpga_spi_reg_write(0x1A, 0);   /* disarm -> clear frozen */
+                uint16_t ta = 0, tm = 0;
+                const char *nm = "off (rolling)";
+                switch (trig_sel) {
+                    case 0: ta = 0xC080; tm = 0xFFF0;
+                            nm = "$C08x (LC soft-switch)"; break;
+                    case 1: ta = 0xFFFE; tm = 0xFFFF;
+                            nm = "$FFFE (BRK/IRQ vector fetch)"; break;
+                    case 2: ta = 0x0000; tm = 0xFFFF;
+                            nm = "$0000 (jump-to-zero / BRK)"; break;
+                    default: break;            /* -1: off */
+                }
+                if (trig_sel >= 0) {
+                    fpga_spi_reg_write(0x1B, ta & 0xFF);
+                    fpga_spi_reg_write(0x1C, ta >> 8);
+                    fpga_spi_reg_write(0x1D, tm & 0xFF);
+                    fpga_spi_reg_write(0x1E, tm >> 8);
+                    fpga_spi_reg_write(0x1A, 1);   /* arm */
+                }
+                char tl[80];
+                snprintf(tl, sizeof(tl), "\r\n-- TRIGGER %s%s --\r\n",
+                         trig_sel < 0 ? "" : "armed: freeze on ", nm);
+                tn_puts(fd, tl);
                 continue;
             }
             if (esc_st == 0 && ch == 'c' && menu_mode) {

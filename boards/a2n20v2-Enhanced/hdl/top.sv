@@ -708,6 +708,10 @@ module top #(
     wire        fifo_pop_w;
     wire [2:0]  capture_mode_w;
     wire        capture_enable_w;
+    wire        trig_enable_w;
+    wire [15:0] trig_addr_w;
+    wire [15:0] trig_mask_w;
+    wire        trig_matched_w;
 
     a2bus_event_fifo #(
         .ENABLE(1'b1)
@@ -719,7 +723,11 @@ module top #(
         .fifo_rdata(fifo_rdata_w),
         .fifo_pop(fifo_pop_w),
         .capture_enable(capture_enable_w),
-        .capture_mode(capture_mode_w)
+        .capture_mode(capture_mode_w),
+        .trig_enable(trig_enable_w),
+        .trig_addr(trig_addr_w),
+        .trig_mask(trig_mask_w),
+        .trig_matched(trig_matched_w)
     );
 
     // BL616 SPI connector -- drives LED and WS2812 internally
@@ -785,6 +793,10 @@ module top #(
         .fifo_pop(fifo_pop_w),
         .capture_mode_o(capture_mode_w),
         .capture_enable_o(capture_enable_w),
+        .trig_enable_o(trig_enable_w),
+        .trig_addr_o(trig_addr_w),
+        .trig_mask_o(trig_mask_w),
+        .trig_matched_i(trig_matched_w),
         .w5100_host_wr(u2_host_wr_w),
         .w5100_host_addr(u2_host_addr_w),
         .w5100_host_wdata(u2_host_wdata_w),

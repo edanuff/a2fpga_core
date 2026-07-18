@@ -16,7 +16,15 @@ module a2bus_event_fifo #(
 
     // Control
     input  wire        capture_enable,
-    input  wire [2:0]  capture_mode
+    input  wire [2:0]  capture_mode,
+
+    // Trigger: when armed, freeze the rolling buffer on the first cycle whose
+    // address matches (addr & trig_mask) == (trig_addr & trig_mask), so the
+    // buffer holds the ~512 cycles leading up to (and including) that event.
+    input  wire        trig_enable,
+    input  wire [15:0] trig_addr,
+    input  wire [15:0] trig_mask,
+    output wire        trig_matched
 );
 
     // Bus capture timing
@@ -46,7 +54,25 @@ module a2bus_event_fifo #(
         endcase
     end
 
-    wire capture_trigger_w = bus_cycle_w & capture_this_cycle;
+    wire capture_trigger_cond_w = bus_cycle_w & capture_this_cycle;
+
+    // Trigger / freeze: once armed and a matching address is seen, latch
+    // frozen_r to stop capture -- the rolling buffer then holds the run-up to
+    // the event. Disarming (trig_enable=0) clears it (that's how firmware
+    // re-arms). The matching cycle itself is still captured (frozen_r updates
+    // the cycle after the hit).
+    reg  frozen_r;
+    wire trig_hit_w = trig_enable & capture_trigger_cond_w & ~frozen_r &
+                      (((a2bus_if.addr ^ trig_addr) & trig_mask) == 16'h0000);
+    always @(posedge a2bus_if.clk_logic) begin
+        if (!a2bus_if.system_reset_n) frozen_r <= 1'b0;
+        else if (!trig_enable)        frozen_r <= 1'b0;
+        else if (trig_hit_w)          frozen_r <= 1'b1;
+    end
+    assign trig_matched = frozen_r;
+
+    // Effective capture strobe: gated off once frozen.
+    wire capture_trigger_w = capture_trigger_cond_w & ~frozen_r;
 
     // Packet formation: [ADDR:16][DATA:8][CTRL:8]
     // CTRL byte captures the full Apple II control-line set per cycle so the
