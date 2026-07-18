@@ -325,11 +325,17 @@ module bl616_spi_connector #(
     // Interface assignments -- A2 bus control
     // -------------------------------------------------------
     // Bus-ready: normally the firmware's explicit reg 0x30 write (or the
-    // standalone fallback when no MCU exists). The reset-hold backstop also
-    // forces it so a crashed MCU that latched mcu_ready can never leave the
-    // Apple bus interface parked in IO_INIT forever.
+    // standalone fallback when no MCU exists).
+    // EXPERIMENT v2 (native-short reset): the bridge SM stays parked in IO_INIT
+    // -- driving nothing, so Apple /RES stays held by the CPLD default -- until
+    // `ready`. The reg 0x30 (A2BUS_READY) write is issued in early main() where
+    // SPI writes are lost, so `ready` was falling through to the 15s backstop
+    // -> bridge started (and /RES released) only at 15s, defeating the
+    // reset_hold native-short change. Assert `ready` on the same ~250ms native
+    // timer so the bridge starts and /RES releases native-length, independent
+    // of the fragile MCU write. (This is also the intended decoupled behavior.)
     assign a2bus_control_if.ready = a2bus_ready_r || standalone_r ||
-                                    (rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0]);
+                                    (rst_hold_cnt_r >= RST_NATIVE_HOLD[RST_CW-1:0]);
     assign cardrom_release_o = cardrom_release_r;
 
     // -------------------------------------------------------
