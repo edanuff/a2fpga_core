@@ -24,7 +24,13 @@ module a2bus_event_fifo #(
     input  wire        trig_enable,
     input  wire [15:0] trig_addr,
     input  wire [15:0] trig_mask,
-    output wire        trig_matched
+    output wire        trig_matched,
+
+    // Oneshot: when set, the FIFO fills once and FREEZES when full (keeps the
+    // FIRST 512 captured cycles) instead of rolling (keeping the last 512).
+    // Armed at config it captures the first 512 bus cycles after /RES release
+    // -- the reset-vector fetch and boot run-up -- with no trigger needed.
+    input  wire        oneshot
 );
 
     // Bus capture timing
@@ -71,8 +77,11 @@ module a2bus_event_fifo #(
     end
     assign trig_matched = frozen_r;
 
-    // Effective capture strobe: gated off once frozen.
-    wire capture_trigger_w = capture_trigger_cond_w & ~frozen_r;
+    // Effective capture strobe: gated off once frozen, and (in oneshot mode)
+    // once full -- which also disables the rolling oldest-drop below, so the
+    // buffer holds the FIRST 512 cycles until drained.
+    wire capture_trigger_w = capture_trigger_cond_w & ~frozen_r &
+                             ~(oneshot & fifo_full);
 
     // Packet formation: [ADDR:16][DATA:8][CTRL:8]
     // CTRL byte captures the full Apple II control-line set per cycle so the

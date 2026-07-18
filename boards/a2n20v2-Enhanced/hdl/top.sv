@@ -712,6 +712,7 @@ module top #(
     wire [15:0] trig_addr_w;
     wire [15:0] trig_mask_w;
     wire        trig_matched_w;
+    wire        oneshot_w;
 
     a2bus_event_fifo #(
         .ENABLE(1'b1)
@@ -727,7 +728,8 @@ module top #(
         .trig_enable(trig_enable_w),
         .trig_addr(trig_addr_w),
         .trig_mask(trig_mask_w),
-        .trig_matched(trig_matched_w)
+        .trig_matched(trig_matched_w),
+        .oneshot(oneshot_w)
     );
 
     // BL616 SPI connector -- drives LED and WS2812 internally
@@ -793,6 +795,7 @@ module top #(
         .fifo_pop(fifo_pop_w),
         .capture_mode_o(capture_mode_w),
         .capture_enable_o(capture_enable_w),
+        .oneshot_o(oneshot_w),
         .trig_enable_o(trig_enable_w),
         .trig_addr_o(trig_addr_w),
         .trig_mask_o(trig_mask_w),

@@ -73,6 +73,7 @@ module bl616_spi_connector #(
     output wire        fifo_pop,
     output reg  [2:0]  capture_mode_o,
     output reg         capture_enable_o,
+    output reg         oneshot_o,
     output reg         trig_enable_o,
     output reg  [15:0] trig_addr_o,
     output reg  [15:0] trig_mask_o,
@@ -866,6 +867,7 @@ module bl616_spi_connector #(
             7'h1C: reg_rdata = trig_addr_o[15:8];
             7'h1D: reg_rdata = trig_mask_o[7:0];
             7'h1E: reg_rdata = trig_mask_o[15:8];
+            7'h1F: reg_rdata = {7'b0, oneshot_o};
 
             // Page 2: Video colors & keyboard
             7'h20: reg_rdata = {4'b0, text_color_r};
@@ -1032,6 +1034,7 @@ module bl616_spi_connector #(
             ws2812_o         <= 1'b0;
             capture_mode_o   <= 3'd0;
             capture_enable_o <= 1'b1;   // EXPERIMENT: arm capture at FPGA config so the reset window is observable (Fork B: it was a blind spot until MCU wrote 0x79)
+            oneshot_o        <= 1'b1;   // EXPERIMENT v3: freeze on full -> keep the FIRST 512 bus cycles after /RES release (reset-vector fetch + boot run-up); write reg 0x1F=0 to restore rolling
             trig_enable_o    <= 1'b0;
             trig_addr_o      <= 16'd0;
             trig_mask_o      <= 16'd0;
@@ -1176,6 +1179,7 @@ module bl616_spi_connector #(
                     7'h1C: trig_addr_o[15:8] <= reg_wdata;
                     7'h1D: trig_mask_o[7:0]  <= reg_wdata;
                     7'h1E: trig_mask_o[15:8] <= reg_wdata;
+                    7'h1F: oneshot_o         <= reg_wdata[0];
 
                     // Uthernet2 doorbell clear (write-1-to-clear sockets 0-3)
                     7'h7A: w5100_cmd_clr_r <= reg_wdata[3:0];
