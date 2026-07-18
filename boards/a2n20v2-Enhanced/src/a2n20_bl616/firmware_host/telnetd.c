@@ -32,6 +32,7 @@
 #include "usbh_xinput.h"
 #include "telnetd.h"
 #include "fpga_spi.h"
+#include "boot_timeline.h"   /* 'b' = boot-milestone timeline */
 
 #define TELNET_PORT     23
 #define TEE_LINES       32
@@ -281,7 +282,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2n20v2-Enhanced remote console\r\n"
-                "keys: c=console m=menu d=snapshot s=scope t=trigger q=quit\r\n"
+                "keys: c=console m=menu d=snapshot s=scope t=trigger b=boot-timeline q=quit\r\n"
                 "menu: up/down move, right/enter=ok, left/esc/b=back,\r\n"
                 "      y=view, s=select, [ ]=+/-16\r\n\r\n");
 
@@ -337,6 +338,12 @@ static void session(int fd)
                 return;
             if (esc_st == 0 && ch == 'd' && !menu_mode) {
                 bus_snapshot(fd);          /* diagnostic bus-address snapshot */
+                continue;
+            }
+            if (esc_st == 0 && ch == 'b' && !menu_mode) {
+                char tl[640];
+                bt_format(tl, sizeof(tl)); /* boot-milestone timeline */
+                tn_puts(fd, tl);
                 continue;
             }
             if (esc_st == 0 && ch == 's' && !menu_mode) {
