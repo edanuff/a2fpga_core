@@ -182,6 +182,77 @@ static void bus_snapshot(int fd)
     fpga_spi_reg_write(0x79, 1);                 /* resume rolling capture */
 }
 
+/* Full-buffer variant ('D'): same freeze/read flow as bus_snapshot, but prints
+ * ALL entries oldest-first -- boot forensics for the v3 oneshot capture, where
+ * the buffer holds the FIRST 512 bus cycles from bridge-start/reset-release and
+ * the interesting part is the beginning, not the newest 40. Output is paced in
+ * 32-line chunks (tn_send already blocks on the TCP window; the sleep just lets
+ * lwIP drain so one 31 KB burst doesn't stall the poll loop). */
+static void bus_dump_full(int fd)
+{
+    static uint8_t buf[512 * 4];
+    char line[80];
+
+    fpga_spi_reg_write(0x79, 0);                 /* freeze capture */
+
+    uint8_t  st  = fpga_spi_reg_read(0x06);
+    uint16_t cnt = fifo_count_rd();
+    snprintf(line, sizeof(line),
+             "\r\n-- BUS DUMP (all %u cycles, oldest first) --  RESET_N=%d  SDRAM_RDY=%d\r\n",
+             cnt, (st >> 5) & 1, (st >> 6) & 1);
+    tn_puts(fd, line);
+
+    uint8_t trg = fpga_spi_reg_read(0x1A);
+    if (trg & 0x01) {
+        snprintf(line, sizeof(line), " trigger armed, %s\r\n",
+                 (trg & 0x02) ? "FIRED (window ends at the trigger cycle)"
+                              : "not yet fired");
+        tn_puts(fd, line);
+    }
+    if (fpga_spi_reg_read(0x1F) & 0x01)
+        tn_puts(fd, " oneshot ON: window = first cycles after capture start\r\n");
+
+    if (cnt == 0) {
+        tn_puts(fd, " (buffer empty)\r\n");
+        fpga_spi_reg_write(0x79, 1);
+        return;
+    }
+    uint16_t n = cnt > 512 ? 512 : cnt;
+    fpga_spi_xfer_read(FPGA_SPACE_FIFO, 0, buf, n * 4);
+
+    uint16_t amin = 0xFFFF, amax = 0x0000;
+    uint16_t rst_a = 0, inh_a = 0;
+    tn_puts(fd, "  idx addr rw dat ctl  INH RST IRQ NMI DMA RDY\r\n");
+    for (uint16_t i = 0; i < n; i++) {
+        uint8_t  f = buf[i * 4 + 0];
+        uint8_t  d = buf[i * 4 + 1];
+        uint16_t a = (uint16_t)buf[i * 4 + 2] |
+                     ((uint16_t)buf[i * 4 + 3] << 8);
+        if (a < amin) amin = a;
+        if (a > amax) amax = a;
+        if (!((f >> 6) & 1)) inh_a++;
+        if (!((f >> 5) & 1)) rst_a++;
+        snprintf(line, sizeof(line),
+                 " %4u %04X %c  %02X %02X   %c   %c   %c   %c   %c   %c\r\n",
+                 i, a, (f & 0x80) ? 'R' : 'W', d, f,
+                 ((f >> 6) & 1) ? '-' : 'I',    /* /INH   */
+                 ((f >> 5) & 1) ? '-' : 'R',    /* /RESET */
+                 ((f >> 4) & 1) ? '-' : 'Q',    /* /IRQ   */
+                 ((f >> 3) & 1) ? '-' : 'N',    /* /NMI   */
+                 ((f >> 2) & 1) ? '-' : 'D',    /* /DMA   */
+                 ((f >> 1) & 1) ? '-' : 'Y');   /* /RDY   */
+        tn_puts(fd, line);
+        if ((i & 31) == 31)
+            usb_osal_msleep(2);                  /* let lwIP drain the chunk */
+    }
+    snprintf(line, sizeof(line),
+             "-- range $%04X..$%04X, %u cyc; RESET asserted %u/%u, "
+             "INH asserted %u/%u --\r\n",
+             amin, amax, n, rst_a, n, inh_a, n);
+    tn_puts(fd, line);
+    fpga_spi_reg_write(0x79, 1);                 /* resume capture */
+}
+
 /* ---- scope mode: continuous bus stream ('s' toggles) ---------------------
  * While active, capture stays armed and each poll iteration drains whatever
  * the FIFO holds and prints it live (addr rw data ctl-hex), so the console
@@ -282,7 +353,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2n20v2-Enhanced remote console\r\n"
-                "keys: c=console m=menu d=snapshot s=scope t=trigger o=oneshot b=boot-timeline q=quit\r\n"
+                "keys: c=console m=menu d=snapshot D=full dump s=scope t=trigger o=oneshot b=boot-timeline q=quit\r\n"
                 "menu: up/down move, right/enter=ok, left/esc/b=back,\r\n"
                 "      y=view, s=select, [ ]=+/-16\r\n\r\n");
 
@@ -338,6 +409,10 @@ static void session(int fd)
                 return;
             if (esc_st == 0 && ch == 'd' && !menu_mode) {
                 bus_snapshot(fd);          /* diagnostic bus-address snapshot */
+                continue;
+            }
+            if (esc_st == 0 && ch == 'D' && !menu_mode) {
+                bus_dump_full(fd);         /* whole buffer, oldest first */
                 continue;
             }
             if (esc_st == 0 && ch == 'b' && !menu_mode) {
