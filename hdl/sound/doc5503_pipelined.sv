@@ -24,71 +24,111 @@
 // before clk_count_r == 7, i.e. within ~7/8 of an oscillator cycle (~978 ns
 // at 7.159 MHz). That budget is comfortable for BSRAM (1-2 clk) but is NOT
 // safe for DDR3 through the a2mega arbiter/CDC stack, whose worst-case
-// read tail (in-flight burst grant drain + tRFC refresh collision + CDC
-// round trip) is ~1.0-1.2 us. A missed deadline in the baseline produces a
-// 0x80 (silence) substitution — under DDR3 contention that would happen
-// routinely, not exceptionally.
+// read tail is ~1.0-1.2 us.
 //
 // This variant decouples fetch from consume:
 //
-//   * During oscillator k's service slot the FSM CONSUMES the byte that was
-//     fetched for k during its PREVIOUS service slot (held in a 32-entry
-//     result store), runs the full baseline semantics on it (zero-byte
-//     halt, output, mix, ACC += FC, overflow/one-shot/swap handling), and
-//     then ISSUES the next fetch fire-and-forget from the just-updated
-//     accumulator.
-//   * The fetch therefore has until k's NEXT service slot to land:
-//     (N_enabled + 2) x 1.117 us  >=  3.35 us  (vs 1.2 us worst-case DDR3).
-//   * A fetch that outlives a full service period degrades to repeating the
-//     previous sample for one slot (counted in dbg_stale_fetch_o) and
-//     self-heals when the data arrives.
+//   * During oscillator k's service slot the FSM CONSUMES data that was
+//     fetched for k earlier (held in a per-oscillator word cache), runs
+//     the full baseline slot semantics on it (zero-byte halt, output, mix,
+//     ACC += FC, overflow/one-shot/swap handling), and then — only when
+//     the walk crosses a 32-bit word boundary — ISSUES the next fetch
+//     fire-and-forget from the just-updated accumulator.
+//   * A fetch has until k's NEXT service slot to land:
+//     (N_enabled + 2) x 1.117 us >= 3.35 us (vs 1.2 us worst-case DDR3).
+//   * A fetch that outlives a full service period degrades to serving the
+//     cached (stale) word for one slot (counted in dbg_stale_fetch_o,
+//     halt-on-zero suppressed for that byte) and self-heals on arrival.
 //
-// PREFETCH-WHILE-HALTED (the trick that removes the output delay):
+// =============================================================================
+// FETCH TRAFFIC POLICY (hardware-driven revision)
+// =============================================================================
 //
-//   Halted oscillators still occupy scan slots. During a halted service
-//   slot this variant issues a low-rate prefetch of mem[wtp | 0] — the
-//   byte the oscillator will need first whenever it is (re)started, since
-//   every un-halt path in the DOC (host control write with halt=0,
-//   swap-mode partner start) zeroes the accumulator. The prefetch is
-//   re-issued only while the stored tag does not match, so a halted
-//   oscillator converges to ONE extra memory read and then goes quiet.
+// The first prototype issued one single-word DDR3 read per service slot
+// (~895 kHz continuously, including re-priming halted oscillators every
+// scan). On a2mega hardware that occupied 50-90% of the serialized
+// ddr3_ports arbiter (each grant blocks ~600-1000 ns non-preemptibly) and
+// starved the framebuffer reader — FB priority does not help, because the
+// CDC round trip prevents the FB port from staying continuously pending,
+// so an always-pending DOC steals alternate grants. Visible result:
+// missed FB line deadlines and display corruption whenever music played.
 //
-//   With the result store primed before an oscillator starts, the first
-//   consumed sample is available in the oscillator's FIRST service slot —
-//   so the pipelined variant produces its samples in the SAME service slots
-//   as the baseline, not one slot later. The one-service-period pipeline
-//   manifests only as *data staleness*: a fetched byte reflects wavetable
-//   memory contents (and the WTP/RTS address-mapping registers) as of one
-//   service period before it is heard. See the design doc:
-//   boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md
+// Revised policy — three mechanisms cut traffic to ~1/4 fetch per slot
+// with typical frequencies, and to near zero when idle:
 //
-// RESULT-STORE TAGGING RULES (correctness-critical):
+//   1. PER-OSCILLATOR WORD CACHE. Fetches return full 32-bit words (see
+//      interface notes below). Each oscillator caches its last word
+//      {data[31:0], tag = wave_addr[15:2], valid, src_run}; the byte lane
+//      (wave_addr[1:0]) is selected at consume time inside this module.
+//      A running oscillator issues a fetch only when the post-ACC address
+//      leaves the last-issued word — sequential table walks with address
+//      steps <= 1 byte/sample fetch once per 4 samples (~224k reads/s
+//      worst case with all 32 oscillators running, ~15-20% arbiter
+//      occupancy at 600-1000 ns/grant, vs ~50-90% before).
+//   2. PRIME-ONCE FOR HALTED OSCILLATORS. Every un-halt path in this DOC
+//      zeroes the accumulator, so a restarting oscillator always needs
+//      the word at mem[wtp | 0] first. That word is prefetched ONCE per
+//      priming EVENT — halt entry, host WTP/RTS write, cache flush,
+//      reset — via a per-oscillator prime_pending bit, not re-checked
+//      every scan pass. An idle system generates no steady-state DDR3
+//      traffic at all.
+//   3. FLUSH-DRIVEN INVALIDATION. sound_glu pulses cache_flush_i on every
+//      GLU sound-RAM write. A flush marks every oscillator's last-issued
+//      word invalid (forcing a running oscillator to re-fetch at its next
+//      service slot) and sets all prime_pending bits, WITHOUT clearing
+//      the cached data: the stale word remains consumable, so a mid-music
+//      GLU write costs at most ~one service period of stale samples (the
+//      same class of race as CPU-vs-DOC DRAM access on real hardware)
+//      rather than a centerline click. Re-priming of halted oscillators
+//      is deferred until PRIME_COOLDOWN_SLOTS service slots after the
+//      last flush, so bulk sample uploads (back-to-back 1 MHz writes) do
+//      not cause a prime storm; running oscillators do refresh once per
+//      service period during an upload burst, preserving correctness.
 //
-//   Each of the 32 result-store entries holds {data[7:0], tag[15:0] = wave
-//   address fetched, valid, src_run}. src_run=1 marks data fetched by a
-//   RUNNING oscillator's own pipeline; src_run=0 marks halted-prefetch data.
+// PREFETCH PRIMING removes the output delay entirely: with the first word
+// primed before an oscillator starts, its first sample is consumed in its
+// FIRST service slot — the same slot in which the baseline fetches and
+// plays it. The one-service-period pipeline manifests only as *data
+// staleness* (GLU-write visibility, WTP/RTS address-mapping changes, and
+// SYNC restarts landing between fetch and consume — one sample per event).
+// See boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md.
 //
-//   * Running oscillator, src_run entry: consume UNCONDITIONALLY. The entry
-//     is the byte this oscillator's own previous slot issued; even if the
-//     accumulator was rewritten in between (SYNC-mode partner restart, host
-//     control write), that byte is the correct delayed-stream sample. A tag
-//     mismatch here means either a late/dropped fetch (one-sample repeat,
-//     counted) or an external ACC/WTP/RTS rewrite (benign, counted).
-//   * Running oscillator, prefetch entry: consume ONLY on tag match with
-//     the address the baseline would fetch this slot. This is what makes
-//     note-on/swap starts sample-exact.
-//   * No valid entry / tag mismatch on prefetch: output 0x80 (centerline
-//     silence) for one sample and DO NOT evaluate halt-on-zero. (The real
-//     5503 emits exactly this centerline sample at a swap-mode switch —
-//     see R. Belmont's notes in MAME es5503.cpp — so this degraded case
-//     matches real-silicon behavior.)
-//   * Every halted service slot clears the entry's src_run bit. This
-//     prevents a spuriously-consumed stale byte (worst case a stale 0x00 →
-//     instant re-halt at note-on) when an oscillator is halted and later
-//     restarted: after halting, only tag-matched data may be consumed.
-//   * A host control write that clears the halt bit also clears src_run
-//     (same reason; covers halt-set/halt-clear pairs inside one service
-//     period where no halted slot intervenes).
+// WORD-CACHE CONSUME RULES (correctness-critical):
+//
+//   * Running oscillator, tag hit: consume the addressed byte lane;
+//     halt-on-zero active. (Exact — the common case.)
+//   * Running oscillator, src_run entry with tag MISS (late fetch, or an
+//     external ACC rewrite such as a SYNC-mode partner restart): consume
+//     the expected lane of the stale word for continuity, count it in
+//     dbg_stale_fetch_o, and SUPPRESS halt-on-zero — an unvisited lane of
+//     a stale word may legitimately contain 0x00 and must not fake a
+//     terminator. (A genuinely missed 0x00 terminator under overload
+//     degrades to halting at table end via the overflow path — bounded.)
+//   * No valid entry / prefetch entry with tag miss: output centerline
+//     0x80 for one sample, halt-on-zero suppressed. (The real 5503 emits
+//     exactly this centerline sample at a swap-mode switch — see
+//     R. Belmont's notes in MAME es5503.cpp.)
+//   * Every halted service slot clears the entry's src_run bit, and a
+//     host control write that clears the halt bit does the same: after a
+//     halt, only tag-matched data may be consumed, so a stale 0x00
+//     terminator can never instantly re-halt a freshly started
+//     oscillator.
+//
+// INTERFACE (differences from baseline doc5503):
+//
+//   * wave_address_o is a BYTE address; the memory client must fetch the
+//     32-bit word at wave_address_o[15:2] and return it UNMODIFIED on
+//     wave_data_word_i with a wave_data_ready_i pulse (one pulse per
+//     wave_rd_o, strictly in order). For the a2mega DDR3 path this is
+//     simply doc_mem_if.q — no byte-lane offset FIFO is needed in
+//     sound_glu any more (lane selection happens here).
+//   * wave_data_i (legacy byte return) is retained for port compatibility
+//     but is UNUSED by this module; tie it off.
+//   * wave_available_i: memory port can accept a request (ddr3_port_cdc
+//     'available'; tie 1 for BSRAM).
+//   * cache_flush_i: pulse (>= 1 clk_i) on any GLU sound-RAM write;
+//     asserting it repeatedly / holding it high during write bursts is
+//     safe and intended.
 //
 // Requires osc_reg_ram from doc5503.sv (compile both files together).
 //
@@ -96,7 +136,10 @@
 
 module doc5503_pipelined #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
-    parameter int DOC_CLOCK_SPEED_HZ = 7_159_090 // 7.15909 MHz
+    parameter int DOC_CLOCK_SPEED_HZ = 7_159_090, // 7.15909 MHz
+    // Service slots of GLU-write silence required before halted-oscillator
+    // re-priming resumes (coalesces bulk sample uploads into one re-prime).
+    parameter int PRIME_COOLDOWN_SLOTS = 64
 ) (
     input clk_i,
     input reset_n_i,
@@ -109,11 +152,14 @@ module doc5503_pipelined #(
     input [7:0] data_i,
     output reg [7:0] data_o,
 
-    output reg [15:0] wave_address_o,
+    output reg [15:0] wave_address_o,   // BYTE address; client fetches word [15:2]
     output reg wave_rd_o,
-    input wave_available_i,        // Memory port can accept a request (tie 1 for BSRAM)
+    input wave_available_i,             // Memory port can accept a request (tie 1 for BSRAM)
     input wave_data_ready_i,
-    input [7:0] wave_data_i,
+    input [7:0] wave_data_i,            // LEGACY, unused — lane select is internal
+    input [31:0] wave_data_word_i,      // Full 32-bit word at wave_address_o[15:2]
+
+    input cache_flush_i,                // Pulse on any GLU sound-RAM write
 
     output signed [15:0] mono_mix_o,
     output signed [15:0] left_mix_o,
@@ -128,10 +174,14 @@ module doc5503_pipelined #(
     output [7:0] debug_osc_halt_o, // Debug output for oscillator halt register
 
     // Pipelined-fetch diagnostics (wrap-around counters)
-    output [7:0] dbg_prime_miss_o,  // Consumed 0x80 because no primed data was available
-    output [7:0] dbg_stale_fetch_o, // Consumed a src_run byte whose tag mismatched (late fetch or ACC rewrite)
-    output [7:0] dbg_fetch_drop_o   // Fetch request dropped: internal FIFO full (should stay 0)
+    output [7:0]  dbg_prime_miss_o,  // Consumed 0x80 because no primed data was available
+    output [7:0]  dbg_stale_fetch_o, // Consumed a src_run word whose tag mismatched (late fetch or ACC rewrite)
+    output [7:0]  dbg_fetch_drop_o,  // Fetch request dropped: internal FIFO full (should stay 0)
+    output [15:0] dbg_fetch_count_o  // Total fetches issued (traffic verification)
 );
+
+    // Unused legacy input (see interface notes)
+    wire _unused_wave_data_w = &{1'b0, wave_data_i};
 
     reg [7:0] host_addr_r;         // Address register for host access
     reg [7:0] host_data_r;        // Data register for host access
@@ -176,14 +226,14 @@ module doc5503_pipelined #(
 
     // Oscillator registers as RAM (see doc5503.sv for discussion)
 
-    reg [4:0] ram_fl_osc_r;         // RAM oscillator for frequency low operation
-    reg [4:0] ram_fh_osc_r;         // RAM oscillator for frequency high operation
-    reg [4:0] ram_vol_osc_r;        // RAM oscillator for volume operation
-    reg [4:0] ram_wds_osc_r;        // RAM oscillator for waveform data sample operation
-    reg [4:0] ram_wtp_osc_r;        // RAM oscillator for waveform table pointer operation
-    reg [4:0] ram_control_osc_r;    // RAM oscillator for control operation
-    reg [4:0] ram_rts_osc_r;        // RAM oscillator for resolution table size operation
-    reg [4:0] ram_acc_osc_r;        // RAM oscillator for accumulator operation
+    reg [4:0] ram_fl_osc_r;
+    reg [4:0] ram_fh_osc_r;
+    reg [4:0] ram_vol_osc_r;
+    reg [4:0] ram_wds_osc_r;
+    reg [4:0] ram_wtp_osc_r;
+    reg [4:0] ram_control_osc_r;
+    reg [4:0] ram_rts_osc_r;
+    reg [4:0] ram_acc_osc_r;
 
     reg ram_fl_we_r;
     reg ram_fh_we_r;
@@ -325,22 +375,43 @@ module doc5503_pipelined #(
     reg signed [17:0] curr_output_r;
 
     // =========================================================================
-    // Per-oscillator fetch result store
+    // Per-oscillator word cache
     // =========================================================================
-    // 32 x {valid, src_run, tag[15:0], data[7:0]} — infers as FFs/LUTRAM.
+    // 32 x {word[31:0], tag[13:0] = wave_addr[15:2], valid, src_run}
+    // plus fetch-policy bookkeeping:
+    //   prime_pending : this halted oscillator needs (re)priming with the
+    //                   word at mem[wtp | 0] (set on halt entry, host
+    //                   WTP/RTS write, cache flush, reset; cleared when
+    //                   the prime fetch is enqueued)
+    //   issued_valid / last_issued_word : word address of the most recent
+    //                   successfully enqueued fetch — running oscillators
+    //                   issue only when the walk leaves this word; a cache
+    //                   flush clears issued_valid to force one refresh
+    //                   per oscillator
 
-    reg [31:0]  fetch_valid_r;
-    reg [31:0]  fetch_src_run_r;
-    reg [15:0]  fetch_tag_r  [32];
-    reg [7:0]   fetch_data_r [32];
+    reg [31:0]  cache_valid_r;
+    reg [31:0]  cache_src_run_r;
+    reg [13:0]  cache_tag_r  [32];
+    reg [31:0]  cache_word_r [32];
+
+    reg [31:0]  prime_pending_r;
+    reg [31:0]  issued_valid_r;
+    reg [13:0]  last_issued_word_r [32];
+
+    // Slots of GLU-write silence before halted re-priming resumes
+    localparam int COOLDOWN_W = (PRIME_COOLDOWN_SLOTS <= 1) ? 1
+                                : $clog2(PRIME_COOLDOWN_SLOTS + 1);
+    reg [COOLDOWN_W-1:0] flush_cooldown_r;
+
+    // Effective byte address of the most recently consumed sample
+    // ({cache tag, lane}) — diagnostics / simulation logging only.
+    reg [15:0] consume_addr_r;
 
     // =========================================================================
     // Fetch request FIFO (issue side of the fire-and-forget pipeline)
     // =========================================================================
     // Depth 8, three pointers: wr (enqueue by FSM), issue (sent to memory
-    // port), ret (retired by wave_data_ready_i, in order). The memory port
-    // (ddr3_port_cdc) queues up to 2 requests and returns responses in
-    // order, so ret lags issue by at most 2 in practice.
+    // port), ret (retired by wave_data_ready_i, in order).
 
     localparam int FQ_DEPTH = 8;
     reg [4:0]  fq_osc_r  [FQ_DEPTH];
@@ -352,12 +423,14 @@ module doc5503_pipelined #(
 
     wire fq_full_w = (3'(fq_wr_ptr_r + 3'd1) == fq_ret_ptr_r);
 
-    reg [7:0] dbg_prime_miss_r;
-    reg [7:0] dbg_stale_fetch_r;
-    reg [7:0] dbg_fetch_drop_r;
+    reg [7:0]  dbg_prime_miss_r;
+    reg [7:0]  dbg_stale_fetch_r;
+    reg [7:0]  dbg_fetch_drop_r;
+    reg [15:0] dbg_fetch_count_r;
     assign dbg_prime_miss_o  = dbg_prime_miss_r;
     assign dbg_stale_fetch_o = dbg_stale_fetch_r;
     assign dbg_fetch_drop_o  = dbg_fetch_drop_r;
+    assign dbg_fetch_count_o = dbg_fetch_count_r;
 
     // Address the baseline implementation would fetch for the current
     // oscillator this service slot: (ACC >> shift) OR'd with the masked
@@ -493,18 +566,23 @@ module doc5503_pipelined #(
             halt_zero_r <= 1'b0;
             halt_overflow_r <= 1'b0;
             issue_addr_r <= '0;
+            consume_addr_r <= '0;
 
             host_request_pending_r <= 1'b0;
             device_response_pending_r <= 1'b0;
 
-            fetch_valid_r <= '0;
-            fetch_src_run_r <= '0;
+            cache_valid_r <= '0;
+            cache_src_run_r <= '0;
+            prime_pending_r <= '1;      // every oscillator needs one prime
+            issued_valid_r <= '0;
+            flush_cooldown_r <= '0;
             fq_wr_ptr_r <= '0;
             fq_issue_ptr_r <= '0;
             fq_ret_ptr_r <= '0;
             dbg_prime_miss_r <= '0;
             dbg_stale_fetch_r <= '0;
             dbg_fetch_drop_r <= '0;
+            dbg_fetch_count_r <= '0;
 
             // Reset all oscillator RAM control signals
 
@@ -565,19 +643,33 @@ module doc5503_pipelined #(
             ram_acc_we_r <= 1'b0;
 
             // -----------------------------------------------------------------
+            // Cache flush (GLU sound-RAM write): force one refresh per
+            // running oscillator (issued_valid), schedule one re-prime per
+            // halted oscillator (prime_pending, deferred by the cooldown so
+            // bulk uploads coalesce). Cached words stay CONSUMABLE — the
+            // stale-data window is bounded by one service period for
+            // running oscillators.
+            // -----------------------------------------------------------------
+            if (cache_flush_i) begin
+                issued_valid_r <= '0;
+                prime_pending_r <= '1;
+                flush_cooldown_r <= COOLDOWN_W'(PRIME_COOLDOWN_SLOTS);
+            end else if (cycle_start_r && (flush_cooldown_r != 0)) begin
+                flush_cooldown_r <= flush_cooldown_r - 1'd1;
+            end
+
+            // -----------------------------------------------------------------
             // Fetch retire: attribute the in-order memory response to the
             // oldest issued request. Runs every clk_i, independent of the
-            // FSM state (returns may land during refresh slots or while a
-            // different oscillator is being serviced). Placed BEFORE the
-            // FSM case so that FSM writes to the result store (src_run
-            // downgrade on a halted slot, host clear) win same-cycle
-            // conflicts on the same entry.
+            // FSM state. Placed BEFORE the FSM case so that FSM writes to
+            // the cache (src_run downgrade on a halted slot, host clear)
+            // win same-cycle conflicts on the same entry.
             // -----------------------------------------------------------------
             if (wave_data_ready_i && (fq_ret_ptr_r != fq_issue_ptr_r)) begin
-                fetch_data_r[fq_osc_r[fq_ret_ptr_r]]    <= wave_data_i;
-                fetch_tag_r[fq_osc_r[fq_ret_ptr_r]]     <= fq_addr_r[fq_ret_ptr_r];
-                fetch_valid_r[fq_osc_r[fq_ret_ptr_r]]   <= 1'b1;
-                fetch_src_run_r[fq_osc_r[fq_ret_ptr_r]] <= fq_src_r[fq_ret_ptr_r];
+                cache_word_r[fq_osc_r[fq_ret_ptr_r]]    <= wave_data_word_i;
+                cache_tag_r[fq_osc_r[fq_ret_ptr_r]]     <= fq_addr_r[fq_ret_ptr_r][15:2];
+                cache_valid_r[fq_osc_r[fq_ret_ptr_r]]   <= 1'b1;
+                cache_src_run_r[fq_osc_r[fq_ret_ptr_r]] <= fq_src_r[fq_ret_ptr_r];
                 fq_ret_ptr_r <= fq_ret_ptr_r + 3'd1;
             end
 
@@ -590,6 +682,7 @@ module doc5503_pipelined #(
                 wave_rd_o <= 1'b1;
                 wave_address_o <= fq_addr_r[fq_issue_ptr_r];
                 fq_issue_ptr_r <= fq_issue_ptr_r + 3'd1;
+                dbg_fetch_count_r <= dbg_fetch_count_r + 16'd1;
             end
 
             case (cycle_state_r)
@@ -614,6 +707,23 @@ module doc5503_pipelined #(
             dbg_fetch_drop_r <= dbg_fetch_drop_r + 8'd1;
         end
     endtask: fetch_enqueue
+
+    // Running-oscillator issue with word-granularity gating: enqueue only
+    // when the target address leaves the last successfully issued word (or
+    // a cache flush invalidated the issue bookkeeping). On FIFO-full the
+    // bookkeeping is NOT updated, so the request retries at the next
+    // boundary check.
+    task automatic issue_running(input logic [4:0] osc, input logic [15:0] addr);
+        if (!issued_valid_r[osc] || (last_issued_word_r[osc] != addr[15:2])) begin
+            if (!fq_full_w) begin
+                fetch_enqueue(osc, addr, 1'b1);
+                last_issued_word_r[osc] <= addr[15:2];
+                issued_valid_r[osc] <= 1'b1;
+            end else begin
+                dbg_fetch_drop_r <= dbg_fetch_drop_r + 8'd1;
+            end
+        end
+    endtask: issue_running
 
     task automatic host_request();
         // Handles CPU register read/write access to DOC registers
@@ -656,6 +766,9 @@ module doc5503_pipelined #(
                             ram_wtp_osc_r <= host_addr_r[4:0];
                             ram_wtp_din_r <= host_data_r;
                             ram_wtp_we_r <= 1'b1;
+                            // Pipelined variant: the halted-prime address
+                            // depends on WTP — schedule a re-prime.
+                            prime_pending_r[host_addr_r[4:0]] <= 1'b1;
                         end
                         3'b101: begin                               // $A0-BF
                             ram_control_osc_r <= host_addr_r[4:0];
@@ -669,13 +782,19 @@ module doc5503_pipelined #(
                                 // write invalidates RUN-sourced data so a
                                 // stale in-flight byte cannot be consumed
                                 // (tag check governs from here on).
-                                fetch_src_run_r[host_addr_r[4:0]] <= 1'b0;
+                                cache_src_run_r[host_addr_r[4:0]] <= 1'b0;
+                            end else begin
+                                // Host halt entry: schedule one prime so
+                                // the next note-on starts sample-exact.
+                                prime_pending_r[host_addr_r[4:0]] <= 1'b1;
                             end
                         end
                         3'b110: begin                               // $C0-DF
                             ram_rts_osc_r <= host_addr_r[4:0];
                             ram_rts_din_r <= host_data_r;
                             ram_rts_we_r <= 1'b1;
+                            // RTS changes the prime address mapping too.
+                            prime_pending_r[host_addr_r[4:0]] <= 1'b1;
                         end
                     endcase
                 end
@@ -907,38 +1026,35 @@ module doc5503_pipelined #(
     endtask: osc_load_next_control
 
     task automatic osc_consume();
-        // Consume the byte fetched for this oscillator during its previous
-        // service slot, applying the result-store tagging rules from the
-        // header. Replaces the baseline's in-slot fetch (OSC_REQUEST_DATA /
-        // OSC_HANDLE_DATA) — the memory round trip already happened.
-        //
-        // expected_addr_w is the address the BASELINE would fetch this
-        // slot; for a continuously-running oscillator it equals the address
-        // this oscillator's own previous slot issued (the ACC value written
-        // at the end of slot n-1 is the ACC value read at slot n).
+        // Consume the addressed byte lane of this oscillator's cached
+        // word, applying the consume rules from the header. Replaces the
+        // baseline's in-slot fetch (OSC_REQUEST_DATA / OSC_HANDLE_DATA).
 
         automatic logic [15:0] expected_addr_w = wave_addr_f(curr_acc_r);
-        automatic logic entry_valid_w = fetch_valid_r[curr_osc_r];
-        automatic logic entry_run_w = fetch_src_run_r[curr_osc_r];
-        automatic logic entry_match_w = (fetch_tag_r[curr_osc_r] == expected_addr_w);
-        automatic logic [7:0] entry_data_w = fetch_data_r[curr_osc_r];
+        automatic logic [13:0] expected_word_w = expected_addr_w[15:2];
+        automatic logic [1:0]  lane_w = expected_addr_w[1:0];
+        automatic logic entry_valid_w = cache_valid_r[curr_osc_r];
+        automatic logic entry_run_w = cache_src_run_r[curr_osc_r];
+        automatic logic entry_match_w = (cache_tag_r[curr_osc_r] == expected_word_w);
+        automatic logic [7:0] entry_data_w = cache_word_r[curr_osc_r][8*lane_w +: 8];
 
         if (!halt_w) begin
             // Default resume address for paths that skip OSC_ACC (zero-byte
             // consumption followed by a partner-swap retrigger).
             issue_addr_r <= expected_addr_w;
 
-            if (entry_valid_w && (entry_run_w || entry_match_w)) begin
-                // Consume. RUN-sourced data is consumed even on tag
-                // mismatch (late fetch → one-sample repeat; external
-                // ACC/WTP/RTS rewrite → the correct delayed-stream byte).
-                if (entry_run_w && !entry_match_w) begin
-                    dbg_stale_fetch_r <= dbg_stale_fetch_r + 8'd1;
-                end
+            if (entry_valid_w && (entry_match_w || entry_run_w)) begin
+                consume_addr_r <= {cache_tag_r[curr_osc_r], lane_w};
                 ram_wds_we_r <= 1'b1;
                 ram_wds_din_r <= entry_data_w;
                 curr_wds_r <= entry_data_w;
-                if (entry_data_w == 8'h00) begin
+                if (entry_run_w && !entry_match_w) begin
+                    // Stale consume (late fetch, or external ACC/WTP/RTS
+                    // rewrite): keep continuity with a nearby old byte but
+                    // never evaluate halt-on-zero on an unvisited lane.
+                    dbg_stale_fetch_r <= dbg_stale_fetch_r + 8'd1;
+                    osc_state_r <= OSC_OUT;
+                end else if (entry_data_w == 8'h00) begin
                     halt_zero_r <= 1'b1;                            // Set halt zero flag
                     osc_state_r <= OSC_HALT;
                 end else begin
@@ -968,18 +1084,21 @@ module doc5503_pipelined #(
             // 1. Downgrade RUN-sourced data — after a halt, only
             //    tag-matched data may be consumed (a stale byte, worst
             //    case a stale 0x00 terminator, must not play at restart).
-            fetch_src_run_r[curr_osc_r] <= 1'b0;
+            cache_src_run_r[curr_osc_r] <= 1'b0;
 
-            // 2. Prefetch priming: every un-halt path zeroes the
-            //    accumulator, so the next byte this oscillator will need
-            //    is mem[wtp | 0]. Keep the result store primed with it.
-            //    Re-issue only while the stored tag mismatches, so a
-            //    parked oscillator settles to a single memory read.
-            begin
+            // 2. Prime-once: if a priming event is pending (halt entry,
+            //    WTP/RTS write, cache flush, reset) and the post-flush
+            //    cooldown has expired, fetch the word at mem[wtp | 0] —
+            //    the first word every un-halt path will need (all un-halt
+            //    paths zero the accumulator). ONE fetch per event; a
+            //    parked oscillator generates no steady-state traffic.
+            if (prime_pending_r[curr_osc_r] && (flush_cooldown_r == 0)
+                && !fq_full_w) begin
                 automatic logic [15:0] prime_addr_w = wave_addr_f(24'd0);
-                if (!(entry_valid_w && (fetch_tag_r[curr_osc_r] == prime_addr_w))) begin
-                    fetch_enqueue(curr_osc_r, prime_addr_w, 1'b0);
-                end
+                fetch_enqueue(curr_osc_r, prime_addr_w, 1'b0);
+                prime_pending_r[curr_osc_r] <= 1'b0;
+                last_issued_word_r[curr_osc_r] <= prime_addr_w[15:2];
+                issued_valid_r[curr_osc_r] <= 1'b1;
             end
 
             // When halted, skip OUT and return to IDLE state
@@ -1035,8 +1154,8 @@ module doc5503_pipelined #(
 
     task automatic osc_acc();
         // Baseline accumulator update, plus: compute the address of the
-        // NEXT fetch from the post-update accumulator and issue it
-        // fire-and-forget when this oscillator keeps running.
+        // NEXT sample from the post-update accumulator and issue a fetch
+        // only when it leaves the last-issued 32-bit word.
 
         automatic logic [24:0] temp_acc = curr_acc_r + {curr_fh_r, curr_fl_r};
         automatic int high_bit_w = 17 + curr_res_w;
@@ -1054,7 +1173,7 @@ module doc5503_pipelined #(
             // the fetch is issued there if it survives.
             osc_state_r <= OSC_HALT;
         end else begin
-            fetch_enqueue(curr_osc_r, new_addr_w, 1'b1);
+            issue_running(curr_osc_r, new_addr_w);
             osc_state_r <= OSC_IDLE;
         end
     endtask: osc_acc
@@ -1078,7 +1197,8 @@ module doc5503_pipelined #(
 
     task automatic osc_halt_one_shot_or_zero_byte();
         // Baseline halt-decision logic, plus fetch issue for the
-        // free-run/sync overflow case where the oscillator keeps running.
+        // free-run/sync overflow case where the oscillator keeps running,
+        // and prime scheduling when the oscillator halts.
 
         automatic logic will_halt_w = curr_mode_w[0] || halt_zero_r;
         automatic logic goto_retrigger_w =
@@ -1102,16 +1222,23 @@ module doc5503_pipelined #(
                 osc_state_r <= OSC_RETRIGGER;
             end else if (!will_halt_w) begin
                 // Free-run / sync-AM table-end overflow: oscillator keeps
-                // running from the wrapped accumulator — issue its fetch.
-                fetch_enqueue(curr_osc_r, issue_addr_r, 1'b1);
+                // running from the wrapped accumulator — issue its fetch
+                // (word-gated; a wrap almost always crosses words).
+                issue_running(curr_osc_r, issue_addr_r);
             end
+        end
+
+        // Halt entry: schedule one prime so the next start (swap-back or
+        // host note-on) finds mem[wtp | 0] cached.
+        if (will_halt_w && !goto_retrigger_w) begin
+            prime_pending_r[curr_osc_r] <= 1'b1;
         end
     endtask: osc_halt_one_shot_or_zero_byte
 
     task automatic osc_start_partner();
-        // Identical to baseline. The partner's first byte (mem[wtp | 0])
-        // is already primed in its result store by prefetch-while-halted;
-        // no fetch is issued here.
+        // Identical to baseline. The partner's first word (mem[wtp | 0])
+        // was primed into its cache when it halted; no fetch is issued
+        // here.
 
         ram_control_osc_r <= partner_osc_w;                         // set target oscillator to partner
         ram_control_we_r <= 1'b1;                                   // write to control register
@@ -1134,7 +1261,7 @@ module doc5503_pipelined #(
         ram_control_we_r <= 1'b1;                                   // write to control register
         ram_control_din_r <= {curr_control_r[7:1], 1'b0};           // set halt bit to zero
 
-        fetch_enqueue(curr_osc_r, issue_addr_r, 1'b1);
+        issue_running(curr_osc_r, issue_addr_r);
 
         osc_state_r <= OSC_IDLE;
     endtask: osc_retrigger
