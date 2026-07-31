@@ -40,7 +40,8 @@ import sys
 from collections import defaultdict
 
 SCAN_WINDOW = 40   # slots; loose upper bound on one service period
-STRESS_PHASES = {8, 9}
+STRESS_PHASES = {9, 10}
+ALL32_PHASE = 8  # all-32-oscillator FB-contention phase (traffic assertion)
 
 
 def parse_log(path):
@@ -75,6 +76,9 @@ def parse_events(path):
     regw = []     # (slot, reg, val)
     phases = {}   # phase -> slot
     countp = {}   # phase -> (prime, stale, drop) at phase start
+    traffic = {}  # mark n -> (fetches, slots) during the preceding phase
+    fbm = {}      # mark n -> FB line-deadline misses during the preceding phase
+    fbtotal = None
     counters = None
     with open(path) as f:
         for ln in f:
@@ -89,15 +93,23 @@ def parse_events(path):
                 phases[int(t[1])] = int(t[2])
             elif t[0] == "COUNTP":
                 countp[int(t[1])] = tuple(int(x) for x in t[2:5])
+            elif t[0] == "TRAFFIC":
+                # reported AT mark n; covers the phase interval ENDING at n
+                traffic[int(t[1])] = (int(t[2]), int(t[3]))
+            elif t[0] == "FBM":
+                fbm[int(t[1])] = int(t[2])
+            elif t[0] == "FBTOTAL":
+                fbtotal = (int(t[1]), int(t[2]))
             elif t[0] == "COUNTERS":
                 counters = tuple(int(x) for x in t[1:4])
-    return glu, regw, phases, countp, counters
+    return glu, regw, phases, countp, counters, traffic, fbm, fbtotal
 
 
 def main():
     base = parse_log("base.log")
     pipe = parse_log("pipe.log")
-    glu, regw, phases, countp, counters = parse_events("events.log")
+    (glu, regw, phases, countp, counters,
+     traffic, fbm, fbtotal) = parse_events("events.log")
 
     phase_starts = sorted(phases.items(), key=lambda kv: kv[1])
 
@@ -122,6 +134,10 @@ def main():
     def recent_ctrl_write(slot, osc):
         return any(0 <= slot - s <= SCAN_WINDOW and o == osc
                    for (s, o) in ctrl_writes)
+
+    def recent_glu_write(slot):
+        # flush + cooldown can defer re-priming; allow a wide window
+        return any(0 <= slot - gs <= 3 * SCAN_WINDOW for (gs, _, _, _) in glu)
 
     def recent_wtp_rts(slot):
         return any(0 <= slot - s <= SCAN_WINDOW for s in wtp_rts_writes)
@@ -167,7 +183,7 @@ def main():
                         f"  W osc{osc} slot{s} ph{ph}: base={b} pipe={p} ** {reason}")
 
             if p is None:
-                if recent_ctrl_write(s, osc) or stressed:
+                if recent_ctrl_write(s, osc) or recent_glu_write(s) or stressed:
                     stats["PRIME_MISS"] += 1
                     details.append(f"  W osc{osc} slot{s} ph{ph}: prime miss (base={b})")
                 else:
@@ -314,19 +330,60 @@ def main():
         print(f"    phase {ph}: {by_phase[ph]} differing scans")
 
     # ------------------------------------------------------------------
-    # Counter policy: fetch drops (internal FIFO overflow) are tolerated
-    # only during the forced-overload window (phase 8 up to phase 9's
-    # recovery checkpoint at phase 10).
+    # Counter / traffic / FB-deadline policy.
+    #
+    # Phase marks report cumulative counters (COUNTP) and per-interval
+    # traffic (TRAFFIC at mark n = fetches during the phase ENDING at n)
+    # and FB misses (FBM, same convention). Stress phase is 9; recovery
+    # phase 10 must already be clean.
     # ------------------------------------------------------------------
+    if traffic:
+        print("Fetch traffic per phase interval (fetches/slot):")
+        for n in sorted(traffic):
+            f_, sl = traffic[n]
+            rate = f_ / sl if sl else 0.0
+            khz = rate * 894.886  # slots/s in thousands
+            print(f"    interval ending at mark {n}: {f_} fetches / {sl} slots "
+                  f"= {rate:.3f}/slot (~{khz:.0f}k fetches/s)")
+        # All-32 phase (interval reported at mark 9): must be word-cache
+        # rate, not per-slot rate. The TB's FC mix includes steps up to
+        # ~1.9 bytes/sample, so the bound is 0.35/slot (~313k/s); a
+        # step<=1 population runs at <=0.25/slot (~224k/s). The old
+        # per-slot policy would be 1.0/slot here.
+        if 9 in traffic and traffic[9][1] > 1000:
+            f_, sl = traffic[9]
+            if f_ / sl > 0.35:
+                print(f"** all-32 fetch rate {f_/sl:.3f}/slot exceeds 0.35 ** FAIL")
+                fails += 1
+        # Idle/config interval (mark 1): prime-once only, near-zero traffic
+        if 1 in traffic and traffic[1][0] > 100:
+            print(f"** idle-phase traffic {traffic[1][0]} fetches "
+                  f"(prime-once should be ~a dozen) ** FAIL")
+            fails += 1
+
+    if fbm:
+        print("FB line-deadline misses per phase interval:")
+        for n in sorted(fbm):
+            print(f"    interval ending at mark {n}: {fbm[n]}")
+        for n, misses in fbm.items():
+            if misses and n != 10:   # only the stress interval may miss
+                print(f"** FB misses outside stress interval (mark {n}: "
+                      f"{misses}) ** FAIL")
+                fails += 1
+    if fbtotal:
+        print(f"FB totals: {fbtotal[0]} lines, {fbtotal[1]} missed")
+
     if counters:
         print(f"DUT counters: prime_miss={counters[0]} stale_fetch={counters[1]} "
               f"fetch_drop={counters[2]}")
-        drop_at_p8 = countp.get(8, (0, 0, 0))[2]
-        if drop_at_p8 != 0:
-            print(f"** fetch drops before stress phase 8 ({drop_at_p8}) ** FAIL")
+        drop_pre_stress = countp.get(9, (0, 0, 0))[2]
+        if drop_pre_stress != 0:
+            print(f"** fetch drops before stress phase ({drop_pre_stress}) ** FAIL")
             fails += 1
-        drop_at_p10 = countp.get(10, counters if len(counters) == 3 else (0, 0, 0))
-        # drops between P8 and P10 are the designed overload degradation
+        if 11 in countp and 10 in countp and countp[11][2] != countp[10][2]:
+            print(f"** fetch drops during recovery phase "
+                  f"({countp[11][2] - countp[10][2]}) ** FAIL")
+            fails += 1
 
     if details:
         print("\nClassified deviation details (first 120):")
