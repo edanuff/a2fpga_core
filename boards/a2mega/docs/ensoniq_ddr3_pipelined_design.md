@@ -1,10 +1,14 @@
 # Ensoniq DOC5503 with DDR3-backed wavetable RAM: pipelined-fetch design
 
-Status: **rev 2 — DOC semantics hardware-proven; fetch-traffic policy
-revised after the rev-1 hardware run saturated the DDR3 arbiter and starved
-the framebuffer (see §11); rev 2 re-validated in differential simulation
-including an arbiter-contention + FB-deadline model — GO for
-re-integration**
+Status: **rev 3 — rev 2's word cache improved but did not fix the hardware
+(stale storm + residual FB corruption); the real DDR3 port contract was
+then derived from the RTL cycle-by-cycle (§12), revealing the failure is
+lowest-priority service-TAIL latency plus a framebuffer CAPACITY margin
+that DOC scheduling cannot create. Rev 3: 16-byte-line burst fetches
+(~4× less arbiter occupancy again), two-line store with lookahead issue
+(deadline ×16), and FB-aware issue gating. Re-validated against the
+corrected contention model, which also reproduces the rev-2 field failure
+— GO for re-integration**
 Prototype RTL: `hdl/sound/doc5503_pipelined.sv`
 Differential sim: `sim/doc5503/` (see its README for how to run)
 
@@ -49,10 +53,23 @@ priming for halted oscillators (near-zero idle traffic), and
 re-validated in simulation with an explicit arbiter-contention model and a
 competing FB line-fetch client: all-32-oscillator traffic ≈ 277k fetches/s
 (vs 895k), zero FB line-deadline misses outside forced overload, zero
-fetch drops in all phases. Recommendation: **GO** — re-integrate on
-a2mega with the rev-2 interface (§8), reclaim the 32 BSRAM blocks, keep
-the BSRAM path available behind a per-board parameter until hardware A/B
-confirms both audio and display.
+fetch drops in all phases.
+
+**Hardware update (rev 3):** rev 2 on hardware improved but did not fix the
+failure (stale storm, drops, residual FB corruption). The DDR3 port
+contract was then derived cycle-by-cycle from the CDC/arbiter/framebuffer
+RTL (§12): the DOC is the lowest-priority client of a ~90%-utilized
+serialized arbiter whose service tails reach tens of µs, and the FB's line
+fetch consumes most of each line window — FB integrity is a CAPACITY
+question that DOC scheduling cannot fix, only cheaper grants can. Rev 3:
+**16-byte-line 4-beat burst fetches** (~4× occupancy cut again, to ~2.6%
+with all 32 oscillators), a **two-line store with lookahead issue**
+(deadline ×16, absorbing the tails), and **FB-aware issue gating**. The
+corrected contention model reproduces the rev-2 field failure (2019/2337
+FB line deadlines missed) and rev 3 passes it clean (0 missed, 0 drops).
+Recommendation: **GO** — re-integrate with the rev-3 interface (§8),
+reclaim the 32 BSRAM blocks, keep the BSRAM path behind a per-board
+parameter until hardware confirms both audio and display.
 
 ## 2. Timing budget
 
@@ -219,7 +236,8 @@ write timing, so this is not an artifact class.
 | 10 | FC=0 oscillator (frozen ACC) | handled | Rev 2: a frozen walk never crosses a word boundary, so no re-fetch — GLU updates reach it via the flush path (issued_valid cleared → one refresh at its next service). |
 | 11 | E1 shrink strands in-flight fetches | handled | Retires into the result store; entry remains tag-consistent for re-entry. |
 | 12 | IRQ timing shift | N/A | No IRQ generation in this RTL (§4). |
-| 13 | **Arbiter saturation / FB starvation** (rev-1 field failure) | **real system-level bug — fixed in rev 2** | Per-slot single-word fetches (~895 kHz) occupied 50-90% of the serialized arbiter; FB priority did not protect it because the CDC round trip lets an always-pending DOC steal alternate grants. Fixed by word cache + prime-once + flush invalidation (§11); re-validated against an explicit contention + FB-deadline model: 0 FB misses outside forced overload, 0 drops anywhere. |
+| 13 | **Arbiter saturation / FB starvation** (rev-1 field failure) | **real system-level bug — mitigated in rev 2, FIXED in rev 3** | Per-slot single-word fetches (~895 kHz) occupied 50-90% of the serialized arbiter. Rev 2's word cache (~9%) was still on the FB's capacity knife edge and its 1-period deadline was inside the lowest-priority service tail (§12). Rev 3: 16-byte-line burst fetches (~2.6% occupancy), lookahead (deadline ×16), FB-aware gating — 0 FB misses / 0 drops in the corrected contention model that reproduces the rev-2 failure. |
+| 16 | Jump fetch (table wrap / retarget) stale under gating at very small E1 | benign, counted | Jump fetches keep the 1-service-period path; with E1 tiny (deadline < gate escape) a wrap fetch can consume stale once per event (observed once at E1=4). One counted sample; unrealistic config (music + tiny E1 + SHR display). |
 | 14 | Stale word served with an unvisited 0x00 lane (word-cache variant of #1) | handled | halt-on-zero is SUPPRESSED on any tag-miss consume — a stale lane can never fake a terminator. A genuinely missed terminator under overload degrades to a table-end halt (bounded; would surface as a C-record mismatch — none observed). |
 | 15 | GLU write bursts during active playback | bounded | Each flush clears issue bookkeeping → running oscillators refresh once per service period during the burst (correctness kept); halted re-priming is deferred by a cooldown (`PRIME_COOLDOWN_SLOTS`) so uploads don't cause prime storms. Sustained upload+playback approaches rev-1 traffic for the RUNNING subset only — rare on real software (uploads precede playback). |
 
@@ -298,30 +316,33 @@ the non-stress phases identical across seeds.
   (E-high fetch, E-low output). The pipelined variant preserves the
   observable per-slot sequence; only the memory epoch of the data moves.
 
-## 8. Integration sketch (a2mega) — rev 2 interface
+## 8. Integration sketch (a2mega) — rev 3 interface
 
 1. **`sound_glu.sv`** (`USE_DDR3_PIPELINED` branch — this REPLACES the
-   rev-1 wiring):
-   - Address mapping unchanged: `doc_mem_if.addr = {7'b0,
-     wave_addr_w[15:2]}` (the DOC emits a byte address; the port fetches
-     the containing 32-bit word), `doc_mem_if.rd = doc_mem_rd_w`,
-     `wave_available_i = doc_mem_if.available`.
-   - **Return the full word**: register `doc_mem_if.q` →
-     `wave_data_word_i[31:0]` with a 1-clk `wave_data_ready_i` pulse on
-     `doc_mem_if.ready`. Byte-lane selection now happens INSIDE
-     `doc5503_pipelined` (it knows `addr[1:0]` per request), so the rev-1
-     **4-deep byte-lane offset FIFO is DELETED** — no offset tracking in
-     sound_glu at all. Tie the legacy `wave_data_i` byte input to 8'h00.
-   - **Flush hookup**: `cache_flush_i = glu_mem_wr_r` (the registered
-     sound-RAM write strobe; one pulse per GLU write, before/while the
-     write enters the port-5 write queue). Holding it high across a write
-     burst is safe. Exact port diff for the branch:
+   rev-1/rev-2 wiring):
+   - **Burst reads**: `doc_mem_if.addr = {7'b0, wave_addr_w[15:2]}` with
+     `doc_mem_if.burst = 1'b1`. `wave_address_o` is now always 16-byte
+     aligned (addr[3:0] = 0, so the port word address has addr[1:0] = 0,
+     satisfying the CDC's burst-alignment requirement). Each request
+     returns FOUR response beats.
+   - **Forward the beats verbatim**: register `doc_mem_if.q` →
+     `wave_data_word_i[31:0]` with one `wave_data_ready_i` pulse per beat
+     (i.e. exactly the existing q/ready registering — four pulses arrive
+     per request). Byte-lane selection happens INSIDE `doc5503_pipelined`;
+     no offset tracking in sound_glu. Tie the legacy `wave_data_i` to
+     8'h00.
+   - **Flush hookup**: `cache_flush_i = glu_mem_wr_r` (one pulse per GLU
+     sound-RAM write; holding high across a burst is safe).
+   - **FB hint**: thread a new 1-bit input through sound_glu to
+     `fb_fetch_active_i` (see item 1b). Tie 0 if unavailable (gating
+     disabled; correctness unaffected).
      ```
      .wave_available_i (doc_mem_if.available),
-     .wave_data_ready_i(doc_word_ready_r),   // <= doc_mem_if.ready, registered
+     .wave_data_ready_i(doc_beat_ready_r),   // <= doc_mem_if.ready, registered
      .wave_data_i      (8'h00),
-     .wave_data_word_i (doc_word_r),         // <= doc_mem_if.q, registered
+     .wave_data_word_i (doc_beat_r),         // <= doc_mem_if.q, registered
      .cache_flush_i    (glu_mem_wr_r),
+     .fb_fetch_active_i(fb_fetch_active_i),  // new sound_glu input
      ```
    - Note the DDR3 copy of sound RAM is written via port 5 with a queue:
      a cache_flush at write-ISSUE time (glu_mem_wr_r) precedes the DDR3
@@ -330,6 +351,11 @@ the non-stress phases identical across seeds.
      lands inside that window — bounded by the same one-service-period
      staleness class, and only during active uploads. If ever audible,
      pulse the flush at queue-drain (gq_pop) instead; both are correct.
+
+1b. **`framebuffer_480p.sv`**: add a 1-bit output
+   `fetch_active_o = (fetch_state_r == FETCH_RUN)` (the state register at
+   line ~505) and wire it in `top.sv` through sound_glu to the DOC's
+   `fb_fetch_active_i`. One line in each file.
 2. **`top.sv`**: reclaim arbiter port 4 (`DOC_MEM_PORT`) for the DOC
    (`PORT_BASE_ADDR[4] = ENSONIQ_WORD_BASE`), and move `ddr3_debug_reader`
    to a new port 6 (`NUM_DDR3_PORTS = 7`) — its traffic is manual/rare so
@@ -357,11 +383,12 @@ the non-stress phases identical across seeds.
 
 ## 9. Remaining work before (re-)bring-up
 
-1. **Re-do the `sound_glu.sv` branch to the rev-2 interface** (§8.1): word
-   return (`wave_data_word_i` ← `doc_mem_if.q`), `cache_flush_i` ←
-   `glu_mem_wr_r`, and DELETE the rev-1 byte-lane offset FIFO (lane
-   selection moved into the DOC). `top.sv` port-4 wiring is unchanged from
-   rev 1.
+1. **Re-do the `sound_glu.sv` branch to the rev-3 interface** (§8.1):
+   `doc_mem_if.burst = 1` with 16-byte-aligned addresses, forward all four
+   response beats on `wave_data_word_i`/`wave_data_ready_i`,
+   `cache_flush_i` ← `glu_mem_wr_r`, thread `fb_fetch_active_i` (new
+   `fetch_active_o` from framebuffer_480p, §8.1b), and delete any
+   byte-lane offset handling. `top.sv` port-4 wiring otherwise unchanged.
 2. Gowin build + timing closure check (the new logic is small: ~1.9 kbit of
    FF/LUTRAM cache/bookkeeping + an 8-deep 22-bit FIFO; no new clock
    domains).
@@ -490,3 +517,149 @@ crossing swap handoffs and mid-word 0x00 terminators; all sample
 deviations classified). Fetch issue decisions are deterministic — the
 total fetch count is identical across random seeds. Seeds 1, 42, 7777 all
 PASS.
+
+NOTE (rev 3): §11.3's re-validation used a contention model that later
+proved optimistic against the real port contract (it modeled the FB as
+unable to keep its port pending and used generic 600-1000 ns grants).
+Rev 2 improved hardware behavior but did not fix it. §12 supersedes this
+section's model and re-validation.
+
+## 12. Hardware finding (rev 2 → rev 3): the real port contract, service
+## tails, and the framebuffer capacity margin
+
+### 12.1 Rev-2 field data
+
+Arkanoid title, music playing, rev-2 build (timing-clean): stale_fetch =
+0xDF and climbing (audible corruption — the stale-repeat fallback engaging
+continuously), fetch_drop = 0x2D (the "must stay 0" invariant broken), FB
+line_not_ready = 0x24 with visible display distortion (improved from rev
+1's 0x6B, still failing). Idle traffic (prime-once) appeared fixed.
+
+### 12.2 Exact round-trip accounting (from the RTL, not a model)
+
+`hdl/ddr3/ddr3_port_cdc.sv`:
+
+- The request FIFO is 2-entry (`REQ_PTR_WIDTH = 2`, `req_fifo_packed[0:1]`,
+  lines 116-117/165); `client_available = init && !full` with full at
+  occupancy 2 (lines 196-197). So the port is **2-outstanding**, not 1 —
+  BUT requests are serviced strictly single-file: the DDR-side capture
+  registers hold ONE request (`pending_r`), and the next queued request is
+  captured only after the arbiter's `req_done` (lines 317-327), through a
+  BSRAM-read/unpack/pending pipeline of ~3 ddr cycles plus arbiter
+  re-scan.
+- Request path, client fire → arbiter-visible pending: wr-pointer gray 2FF
+  sync (lines 241-249, ~2-3 ddr) + BSRAM issue/unpack/capture/pending
+  (comment lines 262-267: T..T+4) ≈ **7-8 ddr cycles** (~90-100 ns).
+- Response path, `resp_valid` → `client_ready`: resp FIFO push, wr-gray
+  2FF sync into clk_client (lines 414-423), then a 2-stage BSRAM-read
+  drain (lines 436-456) ≈ **4-5 client cycles** (~80-90 ns).
+  `client_ready` is a **single-cycle pulse per beat** (lines 443-459).
+- `available` reassertion after `req_done`: rd-pointer gray 2FF back-sync
+  (lines 175-183) ≈ 2-3 client cycles.
+
+`hdl/ddr3/ddr3_ports.sv` (arbiter, all states non-preemptible per grant):
+
+- Non-burst/4-beat read grant: S_IDLE pick (1) + S_LOAD (1) + S_READ_CMD
+  (1) + S_READ_WAIT (controller latency K, calibrated ~20 ddr from the
+  known ~550 ns uncontended round trip) + S_RESPOND (1 or 4 beats) +
+  S_DONE (1): **~25-30 ddr ≈ 310-370 ns**; a 4-beat burst adds only ~3
+  ddr — this is why rev 3 fetches 16 bytes per grant.
+- FB burst8 grant (READ_BURST8_PORT): two CMD+WAIT rounds + 8 respond
+  beats: **~52 ddr ≈ 640 ns**, and `framebuffer_480p.sv` issues them
+  back-to-back (2-deep CDC pipelining, comment lines 493-496), so a
+  640-wide line (320 words at 2 px/word, `packed_width_r` line 487) =
+  **40 burst8 grants ≈ 1440+ clk_logic of the 1712-clk line window**.
+- Static priority scan picks the lowest pending index (S_IDLE, lines
+  363-374): shadow read (0), shadow write (1), FB write (2), FB read (3)
+  all outrank the DOC (4).
+
+Worst-case single-fetch tail behind one FB burst8 grant + a tRFC refresh
+collision: ~8 (req path) + 52 (FB grant drain) + 30 (own grant) + 21
+(tRFC 260 ns) ddr + response path ≈ **~1.6 µs**; behind FB catch-up plus
+shadow/write traffic the tail is unbounded-ish: the DOC is the lowest-
+priority client of an arbiter running at ~90%+ utilization during active
+display, so its service tail scales like 1/(1-ρ) — tens of µs, past the
+rev-2 one-service-period deadline. And every DOC grant taken during a
+line fetch directly lengthens the FB's already-marginal line time.
+
+### 12.3 The two real constraints (and why rev-2's fix was insufficient)
+
+1. **DOC correctness is a LATENCY question**: the deadline must exceed
+   the lowest-priority service tail (tens of µs). Rev 2's word cache cut
+   traffic but kept a ~1-service-period deadline → stale storm + drops.
+2. **FB integrity is a CAPACITY question**: with FB's 2-line prefetch
+   cushion, what matters is total offered load vs serialized arbiter
+   capacity. Word-granularity DOC traffic (~0.31 grants/slot × ~26 ddr)
+   costs ~9% of the arbiter — right at the FB's thin margin. Scheduling
+   (gating) only moves grants around; it cannot create capacity.
+   **Quantified answer to "does (a)+(c) alone fix FB": no** — in the
+   corrected model, word-granularity all-32 traffic missed ~580 of ~590
+   line deadlines with lookahead and gating both active. The per-grant
+   COST had to drop.
+
+### 12.4 Rev-3 architecture
+
+1. **16-byte cache lines via 4-beat burst reads** — a grant costs ~the
+   same whether it returns 4 or 16 bytes, so occupancy drops ~4× again:
+   all-32 measured 0.078 fetches/slot ≈ **70k grants/s ≈ 2.6%** of
+   arbiter time (vs ~9% rev 2, 50-90% rev 1). Idle: 20 fetches total for
+   a whole config phase (prime-once retained).
+2. **Two-line store + lookahead issue** — slots direct-mapped by
+   wave_addr[4] (consecutive lines alternate, prefetch never evicts the
+   consumed line); the next line is issued when the walk address two
+   samples ahead first lands in it. Deadline for step ≤ 1 walks:
+   **~16 service periods** (~0.6 ms at 32 oscillators) — far beyond any
+   arbiter tail. Jumps (wrap/retarget/SYNC restart) keep the 1-period
+   crossing path: rare single-sample stales remain possible under
+   extreme contention (observed once at a table wrap during an E1=4
+   window where the gate escape exceeded the 5-slot deadline) — counted,
+   benign.
+3. **FB-aware issue gating** (`fb_fetch_active_i` from framebuffer_480p
+   FETCH_RUN) with a drain-until-empty age escape
+   (`FB_GATE_ESCAPE_SLOTS` = 8): DOC grants land in per-line residual
+   and vblank; a naive single-issue escape was measured to cap gated
+   throughput below demand and jam the queue — the hysteresis matters.
+4. Fetch FIFO deepened to 16 so clustered crossings from many
+   oscillators drain over a gated line harmlessly.
+5. One new consume rule forced by line granularity: tag-miss (stale)
+   consumes SUPPRESS halt-on-zero — an unvisited lane of a stale line
+   may legitimately be 0x00 (failure mode #14 generalized).
+
+### 12.5 Re-validation with the corrected model
+
+The testbench's memory model now implements §12.2 directly: single-file
+2-outstanding DOC port with the derived request/response/available
+timings; FB engine with 40 back-to-back 35-clk burst8 grants per line,
+2-line prefetch, continuous catch-up, 240-active/22-vblank line frames;
+a ~6% background client above DOC priority; 3% tRFC grant extensions.
+Aggregate high-priority utilization ~90% of active-display time.
+
+- **Rev-2 reproduction** (`-DREV2_MODE +nogate`: lookahead off, gating
+  off, synthetic word-granularity DOC-class load at rev-2's measured
+  0.31 grants/slot): **2019 of 2337 FB line deadlines missed** — chronic
+  display corruption, qualitatively matching the field failure. The
+  DOC-side stale/drop storm follows from the same numbers for rev-2's
+  1-period deadline (§12.3.1); the intermediate word-cache runs under
+  this model showed the storm directly (drops > 130, stales > 180).
+- **Rev 3** (seeds 1/42/7777, deterministic fetch counts): correctness
+  PASS to the same standard as before — 36,336 paired samples, C-record
+  streams (halt/swap/retrigger) bit-identical in every phase, all
+  deviations in the documented classes (2 ADDR_MAP_DELAY, 1 PRIME_MISS,
+  13 SYNC_RESTART incl. stress-phase wrap overlaps, 9 SYNC_AM_VOL,
+  stress-only degradation) — now including line-crossing loop wraps,
+  swap handoffs, and mid-line 0x00 terminators. **FB: 2337 line windows,
+  0 misses in every phase including all-32 and forced overload.
+  Counters: fetch_drop = 0 everywhere; prime_miss = 1 (designed);
+  stales pre-stress ≤ 13, all classified.**
+
+### 12.6 Residual risks / notes
+
+- The controller read latency K (~20 ddr) is calibrated, not measured;
+  the rev-3 margins (deadline ×16, occupancy 2.6%) do not depend on its
+  exact value.
+- Sustained GLU upload bursts during playback still cost one refresh per
+  running oscillator per service period (failure mode #15) — now 16-byte
+  refreshes, so ~4× cheaper than rev 2.
+- If `fb_fetch_active_i` is tied off, correctness and traffic are
+  unchanged; only the FB-crispness benefit of gating is lost — at 2.6%
+  occupancy the impact is small, but wire it: it is one line per file.

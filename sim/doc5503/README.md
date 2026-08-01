@@ -1,54 +1,59 @@
 # doc5503 pipelined-fetch differential simulation
 
-Differential testbench proving that `hdl/sound/doc5503_pipelined.sv` (the
-DDR3-latency-tolerant, pipelined-fetch DOC5503 with a per-oscillator word
-cache) is architecturally equivalent to the baseline `hdl/sound/doc5503.sv`,
-modulo a small set of documented, classified deviations — AND that its DDR3
-fetch traffic no longer starves a competing framebuffer client on a
-serialized arbiter (the failure the first prototype hit on a2mega hardware).
+Differential testbench proving that `hdl/sound/doc5503_pipelined.sv` (rev
+3: DDR3-latency-tolerant DOC5503 with per-oscillator 16-byte line cache,
+lookahead issue, and FB-aware gating) is architecturally equivalent to the
+baseline `hdl/sound/doc5503.sv`, modulo a small set of documented,
+classified deviations — AND that it coexists with the framebuffer on the
+REAL serialized DDR3 arbiter contract (which broke revs 1 and 2 on a2mega
+hardware).
 
-See `boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md` for the full design
-analysis these results back.
+See `boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md` (§11-§12) for
+the hardware history and the line-cited port-contract accounting this
+model implements.
 
 ## Running
 
 Requires Icarus Verilog (`brew install icarus-verilog`) and python3:
 
 ```
-./run.sh            # compile, simulate, classify
-vvp tb_doc5503_diff.vvp +seed=N   # re-run with a different latency seed
+./run.sh                            # repro check + rev-3 suite + classifier
+vvp tb_doc5503_diff.vvp +seed=N     # rev-3 suite with a different seed
 ```
 
-`compare.py` exits nonzero if any difference between the two implementations
-falls outside the expected deviation classes, if fetch traffic exceeds the
-word-cache budget, or if the FB client misses a line deadline outside the
-forced-overload stress phase.
+`run.sh` first compiles `-DREV2_MODE` and runs with `+nogate` — lookahead
+off, FB gating off, plus a synthetic word-granularity DOC-class load at
+rev-2's measured fetch rate — and REQUIRES chronic FB line-deadline misses
+(reproducing the rev-2 field failure). It then runs the rev-3 build, which
+must PASS `compare.py`: bit-exact-modulo-classified-deviations correctness,
+fetch-traffic bounds, zero FB misses outside forced overload, zero drops
+before the stress phase.
 
-## Structure
+## The memory model (corrected, rev 3)
 
-- `tb_doc5503_diff.sv` — instantiates BOTH DUTs on the same 54 MHz clock,
-  7.159 MHz clock-enable DDS, host register bus, and shared 64 KB wavetable
-  contents. The baseline gets a 2-clk BSRAM-class memory model. The
-  pipelined DUT gets a **serialized-arbiter contention model** reflecting
-  the a2mega `ddr3_ports` reality:
-  - each grant occupies the server non-preemptibly for 600–1000 ns;
-  - a competing FB client with strictly higher priority needs 16 word
-    grants per 31.7 µs line window but — like the real CDC — can keep only
-    one request pending at a time with a turnaround gap, which is exactly
-    why a continuously-pending DOC steals alternate grants on hardware;
-  - the DOC port accepts ≤2 outstanding requests (`ddr3_port_cdc`),
-    responses in order, 32-bit **word** data sampled at grant completion
-    (worst-case staleness). GLU writes pulse the DUT's `cache_flush_i`.
-- `compare.py` — pairs the logged architectural event streams by service
-  slot and classifies every difference; also asserts the traffic and
-  FB-deadline policies (see its docstring).
+Derived cycle-by-cycle from `hdl/ddr3/ddr3_port_cdc.sv`,
+`hdl/ddr3/ddr3_ports.sv`, and `hdl/video/framebuffer_480p.sv`, calibrated
+with controller read latency K≈20 ddr cycles (matches the known ~550 ns
+uncontended round trip):
 
-Event streams logged from both DUTs (via hierarchical references to the
-register-file write strobes, so no DUT modifications are needed): `W`
-(per-oscillator sample stream: consumed byte, volume, effective address),
-`C` (control writes: every halt, swap handoff, retrigger — must match
-EXACTLY, this is the swap-drift check), `V` (volume writes incl. SYNC_AM
-modulation), `M` (final mixes per scan).
+- DOC port: 2-entry CDC request FIFO (available deasserts at occupancy 2),
+  strictly single-file service; request arbiter-visible ~6 clk after the
+  rd pulse; next queued request visible ~4 clk after req_done; 4-beat
+  burst grant of ~29 ddr ≈ 20 clk_logic, non-preemptible; four response
+  beats delivered one/clk starting ~3 clk after completion.
+- FB client (priority above DOC): 640-wide line = 320 words = 40 burst8
+  grants of ~35 clk each, issued BACK-TO-BACK (the 2-deep CDC keeps the
+  port pending ~3 clk after each completion — the real reason FB priority
+  alone never protected the display from a chatty DOC). 2-line prefetch,
+  continuous catch-up when behind, 240 active + 22 vblank lines per frame.
+- Background client (shadow reads/writes + FB writes): 12-clk grants,
+  ~6% duty, above DOC priority.
+- 3% of FB/DOC grants +14 clk (tRFC refresh collision).
+- GLU writes pulse `cache_flush_i`; the TB drives `fb_fetch_active_i`
+  from the FB engine's fetch-in-progress state.
+
+Aggregate high-priority utilization is ~90% of active-display time: the
+DOC lives on the leftovers, exactly as on hardware.
 
 ## Test phases
 
@@ -56,70 +61,62 @@ modulation), `M` (final mixes per scan).
 |-------|----------|
 | 0 | Configuration writes, all oscillators halted (prime-once fetches) |
 | 1 | Steady free-run, 3 oscillators, different FC/RTS/table sizes |
-| 2 | One-shot sample with mid-word 0x00 terminator (halt-on-zero timing) |
-| 3 | Swap-mode looped pair, 30,000 slots (~50+ loop iterations — drift check); mid-word terminators |
+| 2 | One-shot sample with mid-line 0x00 terminator (halt-on-zero timing) |
+| 3 | Swap-mode looped pair, 30,000 slots (~50+ loop iterations — drift check) |
 | 4 | SYNC/AM pair: hard-sync accumulator restarts + AM volume modulation |
 | 5 | Mid-stream register writes: FC sweep, volume ramp, WTP retarget, RTS change, halt toggle, control rewrite on a running oscillator |
 | 6 | E1 oscillator-count changes mid-playback (grow, shrink, restore) |
 | 7 | GLU wavetable writes to a playing region, with cache_flush_i per write |
-| 8 | **ALL 32 oscillators running against the FB client** — traffic + line-deadline assertion phase |
+| 8 | **ALL 32 oscillators running against the FB engine** — traffic + line-deadline assertion phase |
 | 9 | Overload stress: 10% of DOC grants forced to ~6.1 µs against a 4.47 µs service period (stale-repeat fallback) |
-| 10 | Recovery check after overload (must re-sync; FB misses must stop) |
+| 10 | Recovery check after overload (must re-sync) |
 
 ## Result (as of this commit; seeds 1, 42, 7777 all PASS)
 
 ```
-W records: 36336 paired, 90-103 differ (seed-dependent stress counts)
-    ADDR_MAP_DELAY: 2        (WTP retarget: one sample fetched with old mapping)
-    PRIME_MISS: 1            (control rewrite on running osc — designed)
-    SYNC_RESTART: 9          (one modulator sample per hard-sync restart)
-    SYNC_AM_VOL: 9           (AM fallout of SYNC_RESTART)
-    STRESS_DEGRADED + LATE_FETCH_LAG + STALE_REPEAT: stress phase only
+Rev-2 reproduction (REV2_MODE + nogate):  2019 / 2337 FB line deadlines
+    missed — chronic display corruption, matching the field failure.
+
+Rev 3:
+W records: 36336 paired, ~50 differ
+    ADDR_MAP_DELAY: 2      (WTP retarget: one sample fetched with old mapping)
+    PRIME_MISS: 1          (control rewrite on running osc — designed)
+    SYNC_RESTART: 13       (one modulator sample per hard-sync restart, plus
+                            stress/small-E1 wrap-fetch overlaps — see doc)
+    SYNC_AM_VOL: 9         (AM fallout of SYNC_RESTART)
+    STRESS_DEGRADED: ~26   (forced-overload phase only)
 C records: IDENTICAL (122 events)  <- halt/swap/retrigger timing bit-exact,
                                       zero swap-loop drift, even under stress
 V records: 1616 events, 9 sync-restart AM deviations, 0 unclassified
-M records: 5562 scans; differing scans only at classified deviations and
-           during forced overload; recovery phase clean
 
-Traffic (fetch issues are DETERMINISTIC — identical across seeds):
-    idle/config phase:      13 fetches total (prime-once; ~zero steady traffic)
-    all-32 phase:           0.309 fetch/slot ≈ 277k fetches/s for a mixed-FC
-                            population with steps up to 1.9 bytes/sample
-                            (steps <=1 give <=0.25/slot ≈ 224k/s); the old
-                            per-slot policy was 1.0/slot ≈ 895k/s
-FB client:                  2536 line windows, 0 misses outside the forced
-                            stress interval (1 miss during it, recovers)
-DUT counters:               fetch_drop = 0 in ALL phases, including stress;
-                            prime_miss = 1 (designed); stales stress-only
+Traffic (fetch issues DETERMINISTIC — identical across seeds, 3154 total):
+    idle/config phase:  20 fetches total (prime-once; ~zero steady traffic)
+    all-32 phase:       0.078 fetch/slot ≈ 70k grants/s ≈ 2.6% arbiter
+                        (rev 2 word cache: ~0.31/slot ≈ 9%; rev 1: 1.0/slot)
+FB: 2337 line windows, 0 missed — in EVERY phase, including all-32 and
+    the forced-overload stress phase.
+Counters: fetch_drop = 0 everywhere; prime_miss = 1; stales pre-stress <= 13.
 ```
 
-Outside the forced-overload phase, the pipelined variant is bit-exact AND
-time-aligned with the baseline (not delayed): prefetch-priming means each
-oscillator's first sample lands in the same service slot as the baseline's.
-The pipeline manifests only as data staleness (GLU-write visibility,
-WTP/RTS address-mapping changes, SYNC restarts between fetch and consume),
-one sample per event. Notably, the flush-driven refresh closed the GLU-write
-race window completely in these runs (no GLU_RACE samples observed — the
-re-fetch lands before the stale lane is consumed); the class remains in the
-classifier for latency mixes where the window stays open.
+Outside forced overload the pipelined variant remains bit-exact AND
+time-aligned with the baseline (prefetch priming puts each oscillator's
+first sample in the same service slot as the baseline's); the pipeline
+manifests only as one-sample data staleness at the documented event
+classes.
 
 ## Notes / coverage caveats
 
-- The RTS-change scenario in phase 5 uses values with the same effective
-  shift (9), so it exercises the mask/size change but not a shift change;
-  the address-mapping-delay mechanism is identical to WTP (verified).
-- Host writes are synchronized to service-slot starts by the TB. Writes
-  landing within a few clk_i of the (different) internal fetch/consume
-  points can apply one slot apart between the two implementations — an
-  inherent ns-level knife edge, not a pipelined-specific artifact.
-- Under forced overload a few lagged samples evade the exact-match lag
-  classifier (the diagnostic address field can be refreshed by an in-flight
-  retire between the consume decision and the log strobe) — those land in
-  the stress-phase-only `STRESS_DEGRADED` catch-all; volume equality and
-  C-record identity remain strictly enforced in every phase. A missed 0x00
-  terminator under overload degrades to a table-end halt (bounded), which
-  would surface as a C mismatch — none observed.
-- The FB client model uses 16 single-word grants per line as specified for
-  the contention study; the real a2mega FB reader uses 8-beat burst grants
-  and is therefore strictly easier to satisfy than this model.
+- The RTS-change scenario keeps the effective shift constant (mask/size
+  change only); the address-mapping-delay mechanism is identical to WTP.
+- Host writes are TB-synchronized to service-slot starts (sub-slot
+  register-application knife edge is inherent to any implementation).
+- Under forced overload a few lagged samples land in the stress-only
+  `STRESS_DEGRADED` catch-all (diagnostic address field can be refreshed
+  by an in-flight retire between consume and log strobe); volume equality
+  and C-record identity are strictly enforced in every phase.
+- Wrap/retarget jump fetches keep a 1-service-period deadline; at very
+  small E1 with gating active a wrap fetch can go stale once per event
+  (classified; unrealistic config).
+- The controller read latency K is calibrated, not measured; rev-3
+  margins (deadline ×16, ~2.6% occupancy) are insensitive to it.
 - Host writes to the $60-7F data registers are not exercised.

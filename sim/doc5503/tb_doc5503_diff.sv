@@ -1,26 +1,18 @@
 // Differential testbench: baseline doc5503 (fast BSRAM-class memory) vs
-// doc5503_pipelined (word cache + serialized DDR3 arbiter contention model
-// with a competing framebuffer client).
+// doc5503_pipelined rev 3 (16-byte line cache + lookahead + FB gating),
+// against a contention model derived cycle-by-cycle from the real
+// ddr3_port_cdc / ddr3_ports / framebuffer_480p RTL (see the model comment
+// block below and design doc §12 for the line-cited accounting).
 //
 // Both DUTs share clk / clk_en / reset and the host register bus, and both
 // memory models read the SAME wavetable byte array, so any divergence in the
 // logged architectural event streams is caused by the pipelined fetch, not
 // by stimulus skew.
 //
-// The pipelined DUT's memory model reflects the a2mega ddr3_ports reality
-// that broke the first prototype on hardware:
-//   * a serialized server — each grant occupies the arbiter NON-PREEMPTIBLY
-//     for 600-1000 ns (uniform), regardless of requester;
-//   * a competing FB client with strictly higher priority that needs 16
-//     word grants per 31.7 us line window, but (like the real CDC) can only
-//     keep ONE request pending at a time with a turnaround gap between its
-//     own grants — which is why a continuously-pending DOC steals alternate
-//     grants and halves FB throughput;
-//   * the DOC port accepts at most 2 outstanding requests (ddr3_port_cdc),
-//     responses strictly in order, 32-bit word data sampled at grant
-//     completion (worst-case staleness).
 // The TB counts FB line-deadline misses; outside the forced-overload stress
-// phase they must be zero with all 32 oscillators running.
+// phase they must be zero with all 32 oscillators running. Compiling with
+// -DREV2_MODE and running with +nogate reproduces the rev-2 field failure
+// (lookahead off, gating off, synthetic word-granularity DOC-class load).
 //
 // Logged event streams (see compare.py for the grammar):
 //   W slot osc data vol addr   — waveform-data-sample register file write
@@ -127,120 +119,233 @@ module tb_doc5503_diff;
     );
 
     // ---------------------------------------------------------------------
-    // Pipelined DUT + serialized-arbiter contention model
+    // Pipelined DUT + corrected arbiter/CDC contention model (rev 3)
+    //
+    // Derived cycle-by-cycle from hdl/ddr3/ddr3_port_cdc.sv and
+    // hdl/ddr3/ddr3_ports.sv (see design doc §12 for line-cited
+    // accounting), calibrated with controller read latency K ~= 20 ddr
+    // cycles so an uncontended DOC read lands at the known ~550 ns:
+    //   * DOC port: 2-entry CDC request FIFO (available deasserts at
+    //     occupancy 2), requests serviced strictly single-file; a request
+    //     becomes arbiter-visible ~6 clk after the rd pulse; after
+    //     req_done the next queued request is visible ~4 clk later and
+    //     the freed slot reaches 'available' after a 2FF sync.
+    //   * DOC grant (4-beat burst read, 16 bytes): 29 ddr ~= 20 clk_logic
+    //     non-preemptible; the four response beats reach the client
+    //     starting ~3 clk after grant completion, one per clk.
+    //   * FB client (priority ABOVE DOC): a 640-wide line = 320 words =
+    //     40 burst8 grants of 52 ddr ~= 35 clk each, issued back-to-back
+    //     (2-deep CDC keeps it pending ~3 clk after each completion).
+    //     Line fetch alone ~= 1440 clk of the 1712-clk line window. FB
+    //     prefetches up to 2 lines ahead and runs CONTINUOUSLY when
+    //     behind (catch-up). Lines 240..261 of each 262-line frame are
+    //     vblank (no fetch).
+    //   * Background client (shadow reads/writes + FB writes, priority
+    //     ABOVE DOC): 12-clk grants at ~6% duty.
+    //   * 3% of FB/DOC grants take +14 clk (tRFC refresh collision).
+    // Aggregate high-priority utilization during active display is ~90%,
+    // so rev-2-rate DOC traffic (~9%) sits exactly on the knife edge —
+    // matching the field failure. `+nogate` (with REV2_MODE compiled in)
+    // reproduces it; the rev-3 DUT must pass.
     // ---------------------------------------------------------------------
-    integer grant_min = 33;      // ~600 ns @ 54 MHz
-    integer grant_max = 54;      // ~1000 ns
     integer outlier_pct = 0;     // % of DOC grants stretched (stress phase)
     integer outlier_len = 330;   // ~6.1 us
     integer rseed = 1;
+    reg gate_en = 1;
     initial begin
         if ($value$plusargs("seed=%d", rseed))
             $display("Using random seed %0d", rseed);
+        if ($test$plusargs("nogate")) begin
+            gate_en = 0;
+            $display("FB-activity gating DISABLED (+nogate)");
+        end
     end
+
+`ifdef REV2_MODE
+    localparam bit PIPE_LOOKAHEAD = 1'b0;
+`else
+    localparam bit PIPE_LOOKAHEAD = 1'b1;
+`endif
+
+    localparam DOC_GRANT   = 20;   // 29 ddr: LOAD+CMD+WAIT(20)+4xRESP+DONE (4-beat burst)
+    localparam FB_GRANT    = 35;   // 52 ddr: burst8 (2x CMD+WAIT + 8 RESP)
+    localparam BG_GRANT    = 12;
+    localparam REFRESH_EXTRA = 14; // ~260 ns tRFC collision
+    localparam LINE_CLKS   = 1712; // 31.7 us
+    localparam LINE_WORDS  = 320;  // 640-wide, 2 px/word
+    localparam FRAME_LINES = 262;
+    localparam ACTIVE_LINES = 240;
 
     wire [15:0] p_addr;
     wire        p_rd;
     reg         p_ready = 0;
     reg  [31:0] p_q_word = 0;
+    reg         p_avail = 0;
 
-    // DOC request queue (arrival order; <=2 outstanding enforced via p_avail)
-    localparam MQ = 8;
-    reg [15:0] q_addr [0:MQ-1];
-    reg [2:0]  q_head = 0, q_tail = 0;
-    reg [3:0]  q_count = 0;
-    integer    cyc = 0;
-    reg        p_avail = 0;
+    integer cyc = 0;
 
-    // Serialized server: 0 = idle, 1 = FB grant, 2 = DOC grant
-    reg [1:0]  srv_kind = 0;
-    integer    srv_busy_until = 0;
-    reg [15:0] srv_doc_addr = 0;
+    // DOC CDC model: 4-deep ring, availability enforces <=2 outstanding
+    reg [15:0] dq_addr [0:3];
+    integer    dq_vis  [0:3];
+    reg [1:0]  dq_hd = 0, dq_tl = 0;
+    integer    dq_cnt = 0;        // accepted, not yet req_done
+    integer    resp_at = -1;
+    reg [127:0] resp_line = 0;
+    integer    resp_beats = 0;    // beats remaining to deliver
 
-    // FB client: 16 word grants per line window; can keep only ONE request
-    // pending at a time with a CDC-turnaround gap between its own grants.
-    localparam FB_WINDOW = 1712;    // 31.7 us @ 54 MHz
-    localparam FB_GAP    = 8;       // CDC turnaround between FB grants
-    reg        fb_enabled = 0;
-    integer    fb_win_timer = 0;
-    integer    fb_remaining = 0;
-    integer    fb_gap = 0;
-    integer    fb_miss = 0;
-    integer    fb_lines = 0;
+    // Serialized server: 0 idle, 1 FB, 2 DOC, 3 BG, 4 synthetic rev-2 load
+    reg [2:0]  srv_kind = 0;
+    integer    srv_end = 0;
+    reg [15:0] srv_addr = 0;
+
+`ifdef REV2_MODE
+    // Rev-2 traffic emulator: the rev-2 DUT issued single-WORD fetches at
+    // ~0.31/slot (vs the line cache's ~0.078). Model the extra ~0.23/slot
+    // of word-granularity grants as a synthetic client at DOC-class
+    // priority (above the real DOC in the pick order, standing in for the
+    // DOC's own extra requests that would be ahead in line).
+    integer synth_next_at = 0;
+    localparam SYNTH_GRANT = 17;   // single-word grant (26 ddr)
+`endif
+
+    // FB line-fetch engine
+    integer fb_words_left = 0;
+    integer fb_next_ok_at = 0;
+    integer disp_abs = 0;         // absolute display line counter
+    integer fetched_abs = 1;      // vblank-start equivalent: 2-line cushion prefetched
+    integer line_timer = 0;
+    integer fb_miss = 0;
+    integer fb_lines = 0;
+    wire fb_active_w = (fb_words_left > 0);
+
+    // Background high-priority client
+    integer bg_next_at = 200;
 
     integer glen;
-    reg pop_v, push_v, freed_v;
+    reg doc_completing_v;
+
+    function automatic integer line_in_frame(input integer abs_line);
+        line_in_frame = abs_line % FRAME_LINES;
+    endfunction
 
     always @(posedge clk) begin
         cyc <= cyc + 1;
         p_ready <= 0;
-        pop_v = 0;
-        push_v = 0;
-        freed_v = (srv_kind != 0) && (cyc >= srv_busy_until);
+        doc_completing_v = 0;
 
-        // FB line window bookkeeping
-        if (fb_enabled) begin
-            if (fb_win_timer == 0) begin
-                if (fb_remaining > 0) fb_miss <= fb_miss + 1;
+        // Display line advance + line-not-ready check
+        if (line_timer == LINE_CLKS - 1) begin
+            line_timer <= 0;
+            disp_abs <= disp_abs + 1;
+            if (line_in_frame(disp_abs + 1) < ACTIVE_LINES) begin
                 fb_lines <= fb_lines + 1;
-                fb_remaining <= 16;
-                fb_win_timer <= FB_WINDOW - 1;
-            end else begin
-                fb_win_timer <= fb_win_timer - 1;
+                if (fetched_abs < disp_abs + 1) fb_miss <= fb_miss + 1;
             end
-            if (fb_gap > 0) fb_gap <= fb_gap - 1;
+        end else begin
+            line_timer <= line_timer + 1;
+        end
+
+        // FB fetch scheduling: vblank lines complete instantly; active
+        // lines fetch when within the 2-line prefetch limit (continuous
+        // when behind = catch-up)
+        if (fb_words_left == 0) begin
+            if (line_in_frame(fetched_abs + 1) >= ACTIVE_LINES) begin
+                fetched_abs <= fetched_abs + 1;      // vblank line: nothing to do
+            end else if (fetched_abs + 1 <= disp_abs + 2) begin
+                fb_words_left <= LINE_WORDS;          // start fetching next line
+                fb_next_ok_at <= cyc;
+            end
         end
 
         // Grant completion
-        if (freed_v) begin
-            if (srv_kind == 2) begin
-                // DOC word returned; data sampled NOW (worst-case staleness)
-                p_q_word <= {mem[{srv_doc_addr[15:2], 2'b11}],
-                             mem[{srv_doc_addr[15:2], 2'b10}],
-                             mem[{srv_doc_addr[15:2], 2'b01}],
-                             mem[{srv_doc_addr[15:2], 2'b00}]};
-                p_ready <= 1;
-            end else begin
-                fb_remaining <= fb_remaining - 1;
-                fb_gap <= FB_GAP;
-            end
+        if (srv_kind != 0 && cyc >= srv_end) begin
+            case (srv_kind)
+                3'd1: begin // FB burst8: 8 words delivered
+                    fb_words_left <= fb_words_left - 8;
+                    if (fb_words_left <= 8) fetched_abs <= fetched_abs + 1;
+                    fb_next_ok_at <= cyc + 3;         // 2-deep CDC re-pend
+                end
+                3'd2: begin // DOC: req_done — free CDC slot, schedule resp
+                    // 4-beat burst: the whole aligned 16-byte line, sampled
+                    // at completion time (beat 0 = bytes 0-3)
+                    resp_line <= {mem[{srv_addr[15:4], 4'hF}], mem[{srv_addr[15:4], 4'hE}],
+                                  mem[{srv_addr[15:4], 4'hD}], mem[{srv_addr[15:4], 4'hC}],
+                                  mem[{srv_addr[15:4], 4'hB}], mem[{srv_addr[15:4], 4'hA}],
+                                  mem[{srv_addr[15:4], 4'h9}], mem[{srv_addr[15:4], 4'h8}],
+                                  mem[{srv_addr[15:4], 4'h7}], mem[{srv_addr[15:4], 4'h6}],
+                                  mem[{srv_addr[15:4], 4'h5}], mem[{srv_addr[15:4], 4'h4}],
+                                  mem[{srv_addr[15:4], 4'h3}], mem[{srv_addr[15:4], 4'h2}],
+                                  mem[{srv_addr[15:4], 4'h1}], mem[{srv_addr[15:4], 4'h0}]};
+                    resp_beats <= 4;
+                    resp_at <= cyc + 3;
+                    dq_cnt <= dq_cnt - 1 + (p_rd ? 1 : 0);
+                    doc_completing_v = 1;
+                    // next queued request becomes arbiter-visible later
+                    if (dq_cnt > 1) dq_vis[dq_hd] <= (dq_vis[dq_hd] > cyc + 4)
+                                                     ? dq_vis[dq_hd] : cyc + 4;
+                end
+                3'd3: begin // background client
+                    bg_next_at <= cyc + 90 + ({$random(rseed)} % 120);
+                end
+`ifdef REV2_MODE
+                3'd4: begin // synthetic rev-2 word-granularity load
+                    synth_next_at <= cyc + 230 + ({$random(rseed)} % 56);
+                end
+`endif
+                default: ;
+            endcase
             srv_kind <= 0;
-        end
-
-        // Grant issue (only when idle this cycle; a freed server re-grants
-        // next cycle — models the arbiter's S_DONE/S_IDLE hop)
-        if (srv_kind == 0 && !freed_v) begin
-            if (fb_enabled && fb_remaining > 0 && fb_gap == 0) begin
-                glen = grant_min + ({$random(rseed)} % (grant_max - grant_min + 1));
+        end else if (srv_kind == 0) begin
+            // Grant pick (1-cycle S_DONE/S_IDLE hop modeled by the
+            // completion branch above taking a full cycle)
+            if (cyc >= bg_next_at) begin
+                srv_kind <= 3;
+                srv_end <= cyc + BG_GRANT;
+            end else if (fb_active_w && cyc >= fb_next_ok_at) begin
+                glen = FB_GRANT;
+                if (({$random(rseed)} % 100) < 3) glen = glen + REFRESH_EXTRA;
                 srv_kind <= 1;
-                srv_busy_until <= cyc + glen;
-            end else if (q_count != 0) begin
-                glen = grant_min + ({$random(rseed)} % (grant_max - grant_min + 1));
+                srv_end <= cyc + glen;
+`ifdef REV2_MODE
+            end else if (cyc >= synth_next_at) begin
+                srv_kind <= 3'd4;
+                srv_end <= cyc + SYNTH_GRANT;
+`endif
+            end else if (dq_cnt > 0 && cyc >= dq_vis[dq_hd] && resp_at < 0) begin
+                glen = DOC_GRANT;
+                if (({$random(rseed)} % 100) < 3) glen = glen + REFRESH_EXTRA;
                 if (({$random(rseed)} % 100) < outlier_pct) glen = outlier_len;
                 srv_kind <= 2;
-                srv_doc_addr <= q_addr[q_head];
-                srv_busy_until <= cyc + glen;
-                q_head <= q_head + 3'd1;
-                pop_v = 1;
+                srv_addr <= dq_addr[dq_hd];
+                dq_hd <= dq_hd + 2'd1;
+                srv_end <= cyc + glen;
             end
         end
 
-        // DOC request accept
+        // Response delivery to client: 4 beats, one per clk, single-file
+        if (resp_at >= 0 && cyc >= resp_at && resp_beats > 0) begin
+            p_q_word <= resp_line[31:0];
+            resp_line <= {32'h0, resp_line[127:32]};
+            p_ready <= 1;
+            resp_beats <= resp_beats - 1;
+            if (resp_beats == 1) resp_at <= -1;
+        end
+
+        // DOC request accept (client fired only when p_avail was high)
         if (p_rd) begin
-            if (q_count >= MQ) begin
-                $display("FATAL: DOC request queue overflow at cyc %0d", cyc);
+            if (dq_cnt >= 2 && !doc_completing_v) begin
+                $display("FATAL: DOC port over-subscribed at cyc %0d", cyc);
                 $finish;
             end
-            q_addr[q_tail] <= p_addr;
-            q_tail <= q_tail + 3'd1;
-            push_v = 1;
+            dq_addr[dq_tl] <= p_addr;
+            dq_vis[dq_tl] <= cyc + 6;   // req CDC sync + capture + pending
+            dq_tl <= dq_tl + 2'd1;
+            if (!doc_completing_v) dq_cnt <= dq_cnt + 1;
         end
 
-        q_count <= q_count + (push_v ? 4'd1 : 4'd0) - (pop_v ? 4'd1 : 4'd0);
-        // Conservative availability: <=2 DOC requests outstanding
-        // (queued + in service), mirroring the ddr3_port_cdc request FIFO
-        p_avail <= (q_count + (push_v ? 1 : 0) - (pop_v ? 1 : 0)
-                    + ((srv_kind == 2 && !freed_v) ? 1 : 0)) < 2;
+        // Availability: <=2 outstanding; reassertion after req_done lags
+        // by the 2FF gray sync (registered here = ~1-2 clk, close enough)
+        p_avail <= (dq_cnt + (p_rd ? 1 : 0) - (doc_completing_v ? 1 : 0)) < 2;
     end
 
     // Flush pulse to the pipelined DUT (GLU sound-RAM write)
@@ -255,7 +360,9 @@ module tb_doc5503_diff;
     wire [7:0] dbg_prime_miss, dbg_stale_fetch, dbg_fetch_drop;
     wire [15:0] dbg_fetch_count;
 
-    doc5503_pipelined dut_pipe (
+    doc5503_pipelined #(
+        .FETCH_LOOKAHEAD(PIPE_LOOKAHEAD)
+    ) dut_pipe (
         .clk_i(clk),
         .reset_n_i(reset_n),
         .clk_en_i(clk_en),
@@ -271,6 +378,7 @@ module tb_doc5503_diff;
         .wave_data_i(8'h00),
         .wave_data_word_i(p_q_word),
         .cache_flush_i(cache_flush),
+        .fb_fetch_active_i(fb_active_w && gate_en),
         .mono_mix_o(p_mono),
         .left_mix_o(p_left),
         .right_mix_o(p_right),
@@ -466,7 +574,6 @@ module tb_doc5503_diff;
 
         repeat (20) @(posedge clk);
         reset_n = 1;
-        fb_enabled = 1;          // FB client contends from the start
 
         // Let CYCLE_RESET finish and a few scans run
         wait_slots(8);
