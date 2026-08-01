@@ -120,3 +120,7 @@ classes.
 - The controller read latency K is calibrated, not measured; rev-3
   margins (deadline ×16, ~2.6% occupancy) are insensitive to it.
 - Host writes to the $60-7F data registers are not exercised.
+- Rev 3.1: the {tag, line} cache payload moved from flip-flops into an
+  inferred synchronous-read RAM (`doc_cache_ram`) after a GW5AT-60
+  placement failure; the suite was re-run in full and is result-identical
+  (design doc §12.7).
