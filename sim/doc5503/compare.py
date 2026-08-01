@@ -345,15 +345,15 @@ def main():
             khz = rate * 894.886  # slots/s in thousands
             print(f"    interval ending at mark {n}: {f_} fetches / {sl} slots "
                   f"= {rate:.3f}/slot (~{khz:.0f}k fetches/s)")
-        # All-32 phase (interval reported at mark 9): must be word-cache
-        # rate, not per-slot rate. The TB's FC mix includes steps up to
-        # ~1.9 bytes/sample, so the bound is 0.35/slot (~313k/s); a
-        # step<=1 population runs at <=0.25/slot (~224k/s). The old
-        # per-slot policy would be 1.0/slot here.
+        # All-32 phase (interval reported at mark 9): must be 16-byte-line
+        # cache rate. A step<=1 population runs at <=1/16 per slot
+        # (~56k/s); the TB's mix includes steps up to ~1.9 bytes/sample.
+        # Bound 0.12/slot (~107k/s); rev 2's word cache measured ~0.31 and
+        # rev 1's per-slot policy 1.0.
         if 9 in traffic and traffic[9][1] > 1000:
             f_, sl = traffic[9]
-            if f_ / sl > 0.35:
-                print(f"** all-32 fetch rate {f_/sl:.3f}/slot exceeds 0.35 ** FAIL")
+            if f_ / sl > 0.12:
+                print(f"** all-32 fetch rate {f_/sl:.3f}/slot exceeds 0.12 ** FAIL")
                 fails += 1
         # Idle/config interval (mark 1): prime-once only, near-zero traffic
         if 1 in traffic and traffic[1][0] > 100:

@@ -93,6 +93,58 @@
 // SYNC restarts landing between fetch and consume — one sample per event).
 // See boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md.
 //
+// =============================================================================
+// SCHEDULING AROUND THE REAL ARBITER CONTRACT (rev 3, hardware-driven)
+// =============================================================================
+//
+// Rev-2 hardware testing showed the true constraint is not average traffic
+// but SERVICE-TAIL LATENCY: the DOC is the lowest-priority client of a
+// statically-prioritized, serialized arbiter that runs at ~90%+ utilization
+// during active display (shadow video reads/writes, framebuffer writes, and
+// a framebuffer line fetch of ~40 non-preemptible burst8 grants per 31.7 us
+// line). Port-4 service tails reach tens of microseconds — beyond the rev-2
+// one-service-period deadline — and every DOC grant taken during a line
+// fetch directly lengthens the FB's already-marginal line time. Field
+// symptoms: stale_fetch storm + fetch drops + FB line_not_ready.
+//
+// Rev 3 addresses both directions:
+//
+//   1. 16-BYTE CACHE LINES FETCHED AS 4-BEAT BURSTS. A serialized-arbiter
+//      grant costs ~the same whether it returns 4 bytes or 16 (the
+//      controller round trip dominates; 3 extra response beats add ~3
+//      cycles at 81 MHz), so each fetch now uses the mem-port's 4-beat
+//      burst read (one aligned 128-bit DDR3 word) and fills a 16-byte
+//      line. Sequential walks at address steps <= 1 byte/sample fetch
+//      once per 16 samples: all 32 oscillators running costs ~56-70k
+//      grants/s ~= 2-3% of arbiter time (vs ~9% for the rev-2 word cache
+//      and 50-90% for rev 1) — decisively below the framebuffer's
+//      capacity margin, which the corrected contention model showed is a
+//      CAPACITY question that scheduling alone cannot fix.
+//   2. TWO-LINE RESULT STORE + LOOKAHEAD ISSUE. Each oscillator's store
+//      holds two 16-byte lines, direct-mapped by wave_addr[4]
+//      (consecutive lines alternate slots, so prefetching the next line
+//      never evicts the line being consumed). At each ACC update the
+//      module computes the walk address two further samples ahead; when
+//      that lands in the NEXT line (and only then — a +2-line skip would
+//      collide with the current line's slot and is left to the normal
+//      crossing path), the fetch is issued early. For address steps <= 1
+//      byte/sample this converts the fetch deadline from ~1 service
+//      period to ~16, absorbing the arbiter's multi-us lowest-priority
+//      service tails. Jump fetches (table wrap, WTP retarget, SYNC
+//      restart) still use the 1-period crossing path and may go stale
+//      under extreme contention — one counted sample per event.
+//   3. FB-AWARE ISSUE GATING (fb_fetch_active_i). While the framebuffer
+//      line fetch is active, DOC issue is held so DOC grants land in the
+//      per-line residual and vertical blanking instead of stretching the
+//      line fetch. Once the oldest queued fetch has waited
+//      FB_GATE_ESCAPE_SLOTS service slots, the gate is forced open until
+//      the queue drains (a single-issue escape would cap gated
+//      throughput below demand and jam the queue). Tie fb_fetch_active_i
+//      low to disable gating.
+//   4. The internal fetch FIFO is 16 deep: a burst of near-simultaneous
+//      line crossings from many oscillators drains over multiple slots
+//      (or a whole gated display line) harmlessly under lookahead slack.
+//
 // WORD-CACHE CONSUME RULES (correctness-critical):
 //
 //   * Running oscillator, tag hit: consume the addressed byte lane;
@@ -116,12 +168,15 @@
 //
 // INTERFACE (differences from baseline doc5503):
 //
-//   * wave_address_o is a BYTE address; the memory client must fetch the
-//     32-bit word at wave_address_o[15:2] and return it UNMODIFIED on
-//     wave_data_word_i with a wave_data_ready_i pulse (one pulse per
-//     wave_rd_o, strictly in order). For the a2mega DDR3 path this is
-//     simply doc_mem_if.q — no byte-lane offset FIFO is needed in
-//     sound_glu any more (lane selection happens here).
+//   * wave_address_o is a BYTE address, always 16-byte aligned; the
+//     memory client must issue a 4-beat BURST read of the 128-bit DDR3
+//     word at wave_address_o[15:4] (mem_port_if: addr = {7'b0,
+//     wave_address_o[15:2]}, burst = 1 — addr[1:0] is 0 by alignment)
+//     and forward the four response beats UNMODIFIED on wave_data_word_i,
+//     one wave_data_ready_i pulse per beat, strictly in order (beat 0 =
+//     bytes 0-3). For the a2mega DDR3 path this is simply doc_mem_if.q /
+//     doc_mem_if.ready — no byte-lane handling is needed in sound_glu
+//     (lane selection happens here).
 //   * wave_data_i (legacy byte return) is retained for port compatibility
 //     but is UNUSED by this module; tie it off.
 //   * wave_available_i: memory port can accept a request (ddr3_port_cdc
@@ -139,7 +194,14 @@ module doc5503_pipelined #(
     parameter int DOC_CLOCK_SPEED_HZ = 7_159_090, // 7.15909 MHz
     // Service slots of GLU-write silence required before halted-oscillator
     // re-priming resumes (coalesces bulk sample uploads into one re-prime).
-    parameter int PRIME_COOLDOWN_SLOTS = 64
+    parameter int PRIME_COOLDOWN_SLOTS = 64,
+    // 1 = issue next-word fetches two samples ahead of the walk (rev 3);
+    // 0 = issue only at the actual word crossing (rev-2 behavior, kept for
+    // the differential testbench's failure-reproduction mode).
+    parameter bit FETCH_LOOKAHEAD = 1'b1,
+    // Max service slots the oldest queued fetch may be held by the
+    // framebuffer-activity gate before issuing anyway.
+    parameter int FB_GATE_ESCAPE_SLOTS = 8
 ) (
     input clk_i,
     input reset_n_i,
@@ -160,6 +222,12 @@ module doc5503_pipelined #(
     input [31:0] wave_data_word_i,      // Full 32-bit word at wave_address_o[15:2]
 
     input cache_flush_i,                // Pulse on any GLU sound-RAM write
+
+    // Framebuffer line-fetch-active hint (framebuffer_480p fetch_state_r ==
+    // FETCH_RUN). While high, fetch issue is deferred (with an age escape)
+    // so DOC grants do not lengthen the marginal FB line fetch. Tie low to
+    // disable gating.
+    input fb_fetch_active_i,
 
     output signed [15:0] mono_mix_o,
     output signed [15:0] left_mix_o,
@@ -375,28 +443,40 @@ module doc5503_pipelined #(
     reg signed [17:0] curr_output_r;
 
     // =========================================================================
-    // Per-oscillator word cache
+    // Per-oscillator line cache — TWO 16-byte slots per oscillator (rev 3)
     // =========================================================================
-    // 32 x {word[31:0], tag[13:0] = wave_addr[15:2], valid, src_run}
-    // plus fetch-policy bookkeeping:
+    // 32 x 2 x {line[127:0], tag[11:0] = wave_addr[15:4], valid, src_run},
+    // direct-mapped by wave_addr[4] (bit 0 of the line address), so
+    // consecutive lines alternate slots and a next-line prefetch never
+    // evicts the line currently being consumed. Entry index = {osc, tag[0]}.
+    // Fetch-policy bookkeeping:
     //   prime_pending : this halted oscillator needs (re)priming with the
     //                   word at mem[wtp | 0] (set on halt entry, host
     //                   WTP/RTS write, cache flush, reset; cleared when
     //                   the prime fetch is enqueued)
-    //   issued_valid / last_issued_word : word address of the most recent
-    //                   successfully enqueued fetch — running oscillators
-    //                   issue only when the walk leaves this word; a cache
-    //                   flush clears issued_valid to force one refresh
-    //                   per oscillator
+    //   issued_valid / last_issued_word : PER CACHE SLOT (64 entries),
+    //                   the word address of the most recent successfully
+    //                   enqueued fetch targeting that slot — an issue
+    //                   happens only when the wanted word differs from
+    //                   what that slot already has in flight/cached (a
+    //                   single per-oscillator record cannot represent
+    //                   "issued one word ahead" without spuriously
+    //                   re-issuing the current word). A cache flush
+    //                   clears issued_valid to force refreshes.
 
-    reg [31:0]  cache_valid_r;
-    reg [31:0]  cache_src_run_r;
-    reg [13:0]  cache_tag_r  [32];
-    reg [31:0]  cache_word_r [32];
+    reg [63:0]  cache_valid_r;
+    reg [63:0]  cache_src_run_r;
+    reg [11:0]  cache_tag_r  [64];
+    reg [127:0] cache_line_r [64];
 
     reg [31:0]  prime_pending_r;
-    reg [31:0]  issued_valid_r;
-    reg [13:0]  last_issued_word_r [32];
+    reg [63:0]  issued_valid_r;
+    reg [11:0]  last_issued_word_r [64];
+
+    // Burst-beat assembly: the memory client returns each 16-byte line as
+    // four 32-bit beats (one wave_data_ready_i pulse each, in order).
+    reg [1:0]   beat_cnt_r;
+    reg [95:0]  beat_accum_r;
 
     // Slots of GLU-write silence before halted re-priming resumes
     localparam int COOLDOWN_W = (PRIME_COOLDOWN_SLOTS <= 1) ? 1
@@ -413,15 +493,26 @@ module doc5503_pipelined #(
     // Depth 8, three pointers: wr (enqueue by FSM), issue (sent to memory
     // port), ret (retired by wave_data_ready_i, in order).
 
-    localparam int FQ_DEPTH = 8;
+    localparam int FQ_DEPTH = 16;
     reg [4:0]  fq_osc_r  [FQ_DEPTH];
     reg [15:0] fq_addr_r [FQ_DEPTH];
     reg        fq_src_r  [FQ_DEPTH];
-    reg [2:0]  fq_wr_ptr_r;
-    reg [2:0]  fq_issue_ptr_r;
-    reg [2:0]  fq_ret_ptr_r;
+    reg [3:0]  fq_wr_ptr_r;
+    reg [3:0]  fq_issue_ptr_r;
+    reg [3:0]  fq_ret_ptr_r;
 
-    wire fq_full_w = (3'(fq_wr_ptr_r + 3'd1) == fq_ret_ptr_r);
+    wire fq_full_w = (4'(fq_wr_ptr_r + 4'd1) == fq_ret_ptr_r);
+
+    // FB-gate age escape with drain hysteresis: count service slots the
+    // queue has been held by the framebuffer gate; once the head ages past
+    // the escape, FORCE the gate open until the queue fully drains (a
+    // single-issue escape would cap gated throughput at 1/ESCAPE slots —
+    // below steady demand — and jam the queue).
+    localparam int GATE_W = (FB_GATE_ESCAPE_SLOTS <= 1) ? 1
+                            : $clog2(FB_GATE_ESCAPE_SLOTS + 1);
+    reg [GATE_W-1:0] issue_wait_r;
+    reg gate_forced_r;
+    wire gate_open_w = !fb_fetch_active_i || gate_forced_r;
 
     reg [7:0]  dbg_prime_miss_r;
     reg [7:0]  dbg_stale_fetch_r;
@@ -579,6 +670,10 @@ module doc5503_pipelined #(
             fq_wr_ptr_r <= '0;
             fq_issue_ptr_r <= '0;
             fq_ret_ptr_r <= '0;
+            issue_wait_r <= '0;
+            gate_forced_r <= 1'b0;
+            beat_cnt_r <= '0;
+            beat_accum_r <= '0;
             dbg_prime_miss_r <= '0;
             dbg_stale_fetch_r <= '0;
             dbg_fetch_drop_r <= '0;
@@ -666,23 +761,43 @@ module doc5503_pipelined #(
             // win same-cycle conflicts on the same entry.
             // -----------------------------------------------------------------
             if (wave_data_ready_i && (fq_ret_ptr_r != fq_issue_ptr_r)) begin
-                cache_word_r[fq_osc_r[fq_ret_ptr_r]]    <= wave_data_word_i;
-                cache_tag_r[fq_osc_r[fq_ret_ptr_r]]     <= fq_addr_r[fq_ret_ptr_r][15:2];
-                cache_valid_r[fq_osc_r[fq_ret_ptr_r]]   <= 1'b1;
-                cache_src_run_r[fq_osc_r[fq_ret_ptr_r]] <= fq_src_r[fq_ret_ptr_r];
-                fq_ret_ptr_r <= fq_ret_ptr_r + 3'd1;
+                if (beat_cnt_r != 2'd3) begin
+                    beat_accum_r[32*beat_cnt_r +: 32] <= wave_data_word_i;
+                    beat_cnt_r <= beat_cnt_r + 2'd1;
+                end else begin
+                    cache_line_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}]    <= {wave_data_word_i, beat_accum_r};
+                    cache_tag_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}]     <= fq_addr_r[fq_ret_ptr_r][15:4];
+                    cache_valid_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}]   <= 1'b1;
+                    cache_src_run_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}] <= fq_src_r[fq_ret_ptr_r];
+                    fq_ret_ptr_r <= fq_ret_ptr_r + 4'd1;
+                    beat_cnt_r <= 2'd0;
+                end
             end
 
             // -----------------------------------------------------------------
             // Fetch issue: send the oldest unissued request to the memory
-            // port whenever it can accept one. One request per two clk_i
-            // max; the DDR3 CDC queues up to two.
+            // port whenever it can accept one AND the framebuffer gate is
+            // open (not in a line fetch, or the head has aged past the
+            // escape). One request per two clk_i max; the DDR3 CDC queues
+            // up to two.
             // -----------------------------------------------------------------
-            if ((fq_issue_ptr_r != fq_wr_ptr_r) && wave_available_i && !wave_rd_o) begin
+            if ((fq_issue_ptr_r != fq_wr_ptr_r) && wave_available_i && !wave_rd_o
+                && gate_open_w) begin
                 wave_rd_o <= 1'b1;
-                wave_address_o <= fq_addr_r[fq_issue_ptr_r];
-                fq_issue_ptr_r <= fq_issue_ptr_r + 3'd1;
+                wave_address_o <= {fq_addr_r[fq_issue_ptr_r][15:4], 4'b0};
+                fq_issue_ptr_r <= fq_issue_ptr_r + 4'd1;
                 dbg_fetch_count_r <= dbg_fetch_count_r + 16'd1;
+            end
+            if (fq_issue_ptr_r == fq_wr_ptr_r) begin
+                issue_wait_r <= '0;
+                gate_forced_r <= 1'b0;
+            end else if (!gate_forced_r && fb_fetch_active_i && cycle_start_r) begin
+                if (issue_wait_r >= GATE_W'(FB_GATE_ESCAPE_SLOTS)) begin
+                    gate_forced_r <= 1'b1;
+                    issue_wait_r <= '0;
+                end else begin
+                    issue_wait_r <= issue_wait_r + 1'd1;
+                end
             end
 
             case (cycle_state_r)
@@ -702,23 +817,24 @@ module doc5503_pipelined #(
             fq_osc_r[fq_wr_ptr_r]  <= osc;
             fq_addr_r[fq_wr_ptr_r] <= addr;
             fq_src_r[fq_wr_ptr_r]  <= src_run;
-            fq_wr_ptr_r <= fq_wr_ptr_r + 3'd1;
+            fq_wr_ptr_r <= fq_wr_ptr_r + 4'd1;
         end else begin
             dbg_fetch_drop_r <= dbg_fetch_drop_r + 8'd1;
         end
     endtask: fetch_enqueue
 
     // Running-oscillator issue with word-granularity gating: enqueue only
-    // when the target address leaves the last successfully issued word (or
-    // a cache flush invalidated the issue bookkeeping). On FIFO-full the
-    // bookkeeping is NOT updated, so the request retries at the next
+    // when the target word differs from what its cache slot already has
+    // issued/cached (or a flush invalidated the bookkeeping). On FIFO-full
+    // the bookkeeping is NOT updated, so the request retries at the next
     // boundary check.
     task automatic issue_running(input logic [4:0] osc, input logic [15:0] addr);
-        if (!issued_valid_r[osc] || (last_issued_word_r[osc] != addr[15:2])) begin
+        automatic logic [5:0] idx_w = {osc, addr[4]};
+        if (!issued_valid_r[idx_w] || (last_issued_word_r[idx_w] != addr[15:4])) begin
             if (!fq_full_w) begin
                 fetch_enqueue(osc, addr, 1'b1);
-                last_issued_word_r[osc] <= addr[15:2];
-                issued_valid_r[osc] <= 1'b1;
+                last_issued_word_r[idx_w] <= addr[15:4];
+                issued_valid_r[idx_w] <= 1'b1;
             end else begin
                 dbg_fetch_drop_r <= dbg_fetch_drop_r + 8'd1;
             end
@@ -779,10 +895,11 @@ module doc5503_pipelined #(
                                 ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
                                 ram_acc_we_r <= 1'b1;
                                 // Pipelined variant: any un-halting control
-                                // write invalidates RUN-sourced data so a
-                                // stale in-flight byte cannot be consumed
-                                // (tag check governs from here on).
-                                cache_src_run_r[host_addr_r[4:0]] <= 1'b0;
+                                // write invalidates RUN-sourced data (both
+                                // slots) so a stale in-flight byte cannot be
+                                // consumed (tag check governs from here on).
+                                cache_src_run_r[{host_addr_r[4:0], 1'b0}] <= 1'b0;
+                                cache_src_run_r[{host_addr_r[4:0], 1'b1}] <= 1'b0;
                             end else begin
                                 // Host halt entry: schedule one prime so
                                 // the next note-on starts sample-exact.
@@ -1031,12 +1148,13 @@ module doc5503_pipelined #(
         // baseline's in-slot fetch (OSC_REQUEST_DATA / OSC_HANDLE_DATA).
 
         automatic logic [15:0] expected_addr_w = wave_addr_f(curr_acc_r);
-        automatic logic [13:0] expected_word_w = expected_addr_w[15:2];
-        automatic logic [1:0]  lane_w = expected_addr_w[1:0];
-        automatic logic entry_valid_w = cache_valid_r[curr_osc_r];
-        automatic logic entry_run_w = cache_src_run_r[curr_osc_r];
-        automatic logic entry_match_w = (cache_tag_r[curr_osc_r] == expected_word_w);
-        automatic logic [7:0] entry_data_w = cache_word_r[curr_osc_r][8*lane_w +: 8];
+        automatic logic [11:0] expected_line_w = expected_addr_w[15:4];
+        automatic logic [3:0]  lane_w = expected_addr_w[3:0];
+        automatic logic [5:0]  entry_idx_w = {curr_osc_r, expected_line_w[0]};
+        automatic logic entry_valid_w = cache_valid_r[entry_idx_w];
+        automatic logic entry_run_w = cache_src_run_r[entry_idx_w];
+        automatic logic entry_match_w = (cache_tag_r[entry_idx_w] == expected_line_w);
+        automatic logic [7:0] entry_data_w = cache_line_r[entry_idx_w][8*lane_w +: 8];
 
         if (!halt_w) begin
             // Default resume address for paths that skip OSC_ACC (zero-byte
@@ -1044,7 +1162,7 @@ module doc5503_pipelined #(
             issue_addr_r <= expected_addr_w;
 
             if (entry_valid_w && (entry_match_w || entry_run_w)) begin
-                consume_addr_r <= {cache_tag_r[curr_osc_r], lane_w};
+                consume_addr_r <= {cache_tag_r[entry_idx_w], lane_w};
                 ram_wds_we_r <= 1'b1;
                 ram_wds_din_r <= entry_data_w;
                 curr_wds_r <= entry_data_w;
@@ -1081,10 +1199,11 @@ module doc5503_pipelined #(
             end
 
             // Pipelined additions:
-            // 1. Downgrade RUN-sourced data — after a halt, only
-            //    tag-matched data may be consumed (a stale byte, worst
+            // 1. Downgrade RUN-sourced data in BOTH slots — after a halt,
+            //    only tag-matched data may be consumed (a stale byte, worst
             //    case a stale 0x00 terminator, must not play at restart).
-            cache_src_run_r[curr_osc_r] <= 1'b0;
+            cache_src_run_r[{curr_osc_r, 1'b0}] <= 1'b0;
+            cache_src_run_r[{curr_osc_r, 1'b1}] <= 1'b0;
 
             // 2. Prime-once: if a priming event is pending (halt entry,
             //    WTP/RTS write, cache flush, reset) and the post-flush
@@ -1097,8 +1216,8 @@ module doc5503_pipelined #(
                 automatic logic [15:0] prime_addr_w = wave_addr_f(24'd0);
                 fetch_enqueue(curr_osc_r, prime_addr_w, 1'b0);
                 prime_pending_r[curr_osc_r] <= 1'b0;
-                last_issued_word_r[curr_osc_r] <= prime_addr_w[15:2];
-                issued_valid_r[curr_osc_r] <= 1'b1;
+                last_issued_word_r[{curr_osc_r, prime_addr_w[4]}] <= prime_addr_w[15:4];
+                issued_valid_r[{curr_osc_r, prime_addr_w[4]}] <= 1'b1;
             end
 
             // When halted, skip OUT and return to IDLE state
@@ -1162,6 +1281,13 @@ module doc5503_pipelined #(
         automatic logic overflow = temp_acc[high_bit_w];
         automatic logic [23:0] new_acc_w = temp_acc[23:0] & curr_acc_mask_w;
         automatic logic [15:0] new_addr_w = wave_addr_f(new_acc_w);
+        // Lookahead: the walk address two further samples ahead. Masking
+        // once after both adds is exact here (FC <= 0xFFFF, acc mask >=
+        // 0x1FFFF, so the sum cannot cross the wrap boundary twice).
+        automatic logic [23:0] la_acc_w =
+            24'(new_acc_w + {curr_fh_r, curr_fl_r} + {curr_fh_r, curr_fl_r})
+            & curr_acc_mask_w;
+        automatic logic [15:0] la_addr_w = wave_addr_f(la_acc_w);
         halt_overflow_r <= overflow;
         ram_acc_we_r <= 1'b1;
         ram_acc_din_r <= new_acc_w;                             // wrap around address
@@ -1173,7 +1299,22 @@ module doc5503_pipelined #(
             // the fetch is issued there if it survives.
             osc_state_r <= OSC_HALT;
         end else begin
-            issue_running(curr_osc_r, new_addr_w);
+            automatic logic [5:0] w1_idx_w = {curr_osc_r, new_addr_w[4]};
+            automatic logic w1_need_w = !issued_valid_r[w1_idx_w]
+                || (last_issued_word_r[w1_idx_w] != new_addr_w[15:4]);
+            if (w1_need_w) begin
+                // Crossing (or jump/flush refresh) NOW: needed by the next
+                // service slot — the 1-service-period path.
+                issue_running(curr_osc_r, new_addr_w);
+            end else if (FETCH_LOOKAHEAD
+                         && (la_addr_w[15:4] == 12'(new_addr_w[15:4] + 12'd1))) begin
+                // Next-line prefetch, two samples ahead of the crossing.
+                // The +1-line guard keeps the target in the OPPOSITE cache
+                // slot (never evicts the line being consumed); larger skips
+                // fall back to the crossing path above. issue_running's
+                // per-slot check makes this idempotent.
+                issue_running(curr_osc_r, la_addr_w);
+            end
             osc_state_r <= OSC_IDLE;
         end
     endtask: osc_acc
