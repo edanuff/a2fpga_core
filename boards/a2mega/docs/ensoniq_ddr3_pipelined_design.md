@@ -663,3 +663,34 @@ Aggregate high-priority utilization ~90% of active-display time.
 - If `fb_fetch_active_i` is tied off, correctness and traffic are
   unchanged; only the FB-crispness benefit of gating is lost — at 2.6%
   occupancy the impact is small, but wire it: it is one line per file.
+
+### 12.7 Storage restructuring (rev 3.1 — Gowin placement fix)
+
+Rev 3's line cache as a flat FF array (`reg [127:0] cache_line_r [64]` +
+64x12 tags, read combinationally from the main FSM block) synthesized to
+~9.7k registers and failed GW5AT-60B placement (`PR0003: 847 REG(s)
+unPlaced`). Restructured:
+
+- The {tag[11:0], line[127:0]} payload (64 x 140 = 8,960 bits) now lives
+  in `doc_cache_ram`, a simple-dual-port synchronous-read memory using
+  the repo's proven inference idiom (separate write/read always blocks,
+  full-word writes, no reset, `syn_ramstyle="distributed_ram"`): ~140
+  RAM16 CFUs as distributed SSRAM, or a single BSRAM if the tools prefer
+  (8,960 < 18,432 bits — either way a2mega still nets ~27-31 freed BSRAM
+  blocks vs `ensoniq_bsram`).
+- Packing the TAG with the line keeps them atomically coherent across the
+  1-cycle read latency: a retire landing on the read-sample edge can at
+  worst pair one-cycle-newer valid/src FLAG bits with old {tag,line},
+  which resolves as a benign counted stale/prime-miss — never a wrong
+  tag-accept.
+- No FSM change was needed: the read address depends only on
+  curr_acc/wtp/rts, which settle at the end of OSC_LOAD_REGISTERS — two
+  clk_i before OSC_CONSUME samples the read data.
+- Remaining ADDED flip-flop cost vs baseline doc5503 ~= **1.54k FF**:
+  per-slot issue bookkeeping 768 (last_issued_word, combinational on the
+  issue path — kept in FFs deliberately) + valid/src/issued/prime flags
+  224 + fetch FIFO 364 + beat assembly 98 + misc/debug ~90. Under the
+  2k target.
+- Differential suite re-run in full after the timing change: identical
+  results (same deterministic fetch counts, same counters, PASS on seeds
+  1/42/7777, rev-2 repro still fails as required).

@@ -463,11 +463,39 @@ module doc5503_pipelined #(
     //                   "issued one word ahead" without spuriously
     //                   re-issuing the current word). A cache flush
     //                   clears issued_valid to force refreshes.
+    //
+    // STORAGE (Gowin placement, rev 3.1): the {tag, line} payload — 64 x
+    // 140 bits — lives in an inferred distributed RAM (doc_cache_ram,
+    // separate write/read always blocks, synchronous read), NOT in flip-
+    // flops: as a flat FF array it cost ~9k registers and failed GW5AT-60
+    // placement. Packing the tag WITH the line keeps them atomically
+    // coherent across the 1-cycle read latency, so a retire landing on
+    // the read-sample edge can never pair a new tag with old data (the
+    // valid/src flag bits, which may be one cycle newer, only ever cause
+    // a benign counted stale/prime-miss, never a wrong tag-accept). The
+    // read address depends only on curr_acc_r/curr_wtp_r/curr_rts_r,
+    // which settle two clk_i before OSC_CONSUME samples the read data —
+    // no extra FSM state is needed. Flag/bookkeeping bits stay in FFs
+    // (combinational access on the issue path).
 
     reg [63:0]  cache_valid_r;
     reg [63:0]  cache_src_run_r;
-    reg [11:0]  cache_tag_r  [64];
-    reg [127:0] cache_line_r [64];
+
+    // {tag[11:0], line[127:0]} storage
+    wire         cram_we_w;
+    wire [5:0]   cram_waddr_w;
+    wire [139:0] cram_wdata_w;
+    wire [5:0]   cram_raddr_w;
+    wire [139:0] cram_rdata_w;
+
+    doc_cache_ram cache_ram (
+        .clk_i(clk_i),
+        .we_i(cram_we_w),
+        .waddr_i(cram_waddr_w),
+        .wdata_i(cram_wdata_w),
+        .raddr_i(cram_raddr_w),
+        .rdata_o(cram_rdata_w)
+    );
 
     reg [31:0]  prime_pending_r;
     reg [63:0]  issued_valid_r;
@@ -534,6 +562,26 @@ module doc5503_pipelined #(
         ptr = {ptr_hi_mask & curr_wtp_r, 8'b0};
         return 16'(acc >> curr_shift_w) | ptr;
     endfunction
+
+    // ---------------------------------------------------------------------
+    // Cache RAM wiring.
+    // Write: fires on the retire of a request's 4th beat, same edge as the
+    // valid/src flag updates (tag and line stay atomically coherent).
+    // Read: the consume-side entry address depends only on curr_* register
+    // state, which settles at the end of OSC_LOAD_REGISTERS — two clk_i
+    // before OSC_CONSUME samples cram_rdata_w — so the synchronous read
+    // needs no extra FSM state.
+    // ---------------------------------------------------------------------
+    wire retire_last_beat_w = wave_data_ready_i
+                              && (fq_ret_ptr_r != fq_issue_ptr_r)
+                              && (beat_cnt_r == 2'd3)
+                              && reset_n_i;
+    assign cram_we_w    = retire_last_beat_w;
+    assign cram_waddr_w = {fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]};
+    assign cram_wdata_w = {fq_addr_r[fq_ret_ptr_r][15:4], wave_data_word_i, beat_accum_r};
+
+    wire [15:0] consume_pre_addr_w = wave_addr_f(curr_acc_r);
+    assign cram_raddr_w = {curr_osc_r, consume_pre_addr_w[4]};
 
     // Use 24-bit accumulators for mixing to provide more headroom and prevent clipping
     localparam int MIXER_SUM_RESOLUTION = 24;
@@ -765,8 +813,9 @@ module doc5503_pipelined #(
                     beat_accum_r[32*beat_cnt_r +: 32] <= wave_data_word_i;
                     beat_cnt_r <= beat_cnt_r + 2'd1;
                 end else begin
-                    cache_line_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}]    <= {wave_data_word_i, beat_accum_r};
-                    cache_tag_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}]     <= fq_addr_r[fq_ret_ptr_r][15:4];
+                    // {tag, line} written into doc_cache_ram this same edge
+                    // via the combinational cram_* wires below; only the
+                    // flag bits live here.
                     cache_valid_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}]   <= 1'b1;
                     cache_src_run_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}] <= fq_src_r[fq_ret_ptr_r];
                     fq_ret_ptr_r <= fq_ret_ptr_r + 4'd1;
@@ -1147,14 +1196,19 @@ module doc5503_pipelined #(
         // word, applying the consume rules from the header. Replaces the
         // baseline's in-slot fetch (OSC_REQUEST_DATA / OSC_HANDLE_DATA).
 
+        // cram_rdata_w holds the {tag, line} payload for entry
+        // {curr_osc_r, expected_line_w[0]} — the synchronous RAM read was
+        // addressed via cram_raddr_w and sampled on the way into this
+        // state (see the cache-RAM wiring comment).
         automatic logic [15:0] expected_addr_w = wave_addr_f(curr_acc_r);
         automatic logic [11:0] expected_line_w = expected_addr_w[15:4];
         automatic logic [3:0]  lane_w = expected_addr_w[3:0];
         automatic logic [5:0]  entry_idx_w = {curr_osc_r, expected_line_w[0]};
+        automatic logic [11:0] entry_tag_w = cram_rdata_w[139:128];
         automatic logic entry_valid_w = cache_valid_r[entry_idx_w];
         automatic logic entry_run_w = cache_src_run_r[entry_idx_w];
-        automatic logic entry_match_w = (cache_tag_r[entry_idx_w] == expected_line_w);
-        automatic logic [7:0] entry_data_w = cache_line_r[entry_idx_w][8*lane_w +: 8];
+        automatic logic entry_match_w = (entry_tag_w == expected_line_w);
+        automatic logic [7:0] entry_data_w = cram_rdata_w[8*lane_w +: 8];
 
         if (!halt_w) begin
             // Default resume address for paths that skip OSC_ACC (zero-byte
@@ -1162,7 +1216,7 @@ module doc5503_pipelined #(
             issue_addr_r <= expected_addr_w;
 
             if (entry_valid_w && (entry_match_w || entry_run_w)) begin
-                consume_addr_r <= {cache_tag_r[entry_idx_w], lane_w};
+                consume_addr_r <= {entry_tag_w, lane_w};
                 ram_wds_we_r <= 1'b1;
                 ram_wds_din_r <= entry_data_w;
                 curr_wds_r <= entry_data_w;
@@ -1406,5 +1460,35 @@ module doc5503_pipelined #(
 
         osc_state_r <= OSC_IDLE;
     endtask: osc_retrigger
+
+endmodule
+
+// Line-cache payload storage for doc5503_pipelined: 64 x {tag[11:0],
+// line[127:0]}, simple-dual-port, synchronous read. Uses the repo's proven
+// Gowin-safe inference idiom (see hdl/support/sdpram32.sv /
+// boards/a2mega/hdl/sound/ensoniq_bsram.sv): separate write and read
+// always blocks, full-word writes (no read-modify-write), no reset on the
+// array — infers distributed SSRAM (or BSRAM) instead of ~9k flip-flops,
+// which failed GW5AT-60 placement when this lived in a flat FF array.
+module doc_cache_ram (
+    input  wire         clk_i,
+    input  wire         we_i,
+    input  wire [5:0]   waddr_i,
+    input  wire [139:0] wdata_i,
+    input  wire [5:0]   raddr_i,
+    output wire [139:0] rdata_o
+);
+    reg [139:0] mem [0:63] /*synthesis syn_ramstyle="distributed_ram"*/;
+
+    always @(posedge clk_i) begin
+        if (we_i)
+            mem[waddr_i] <= wdata_i;
+    end
+
+    reg [139:0] rdata_r;
+    always @(posedge clk_i)
+        rdata_r <= mem[raddr_i];
+
+    assign rdata_o = rdata_r;
 
 endmodule
