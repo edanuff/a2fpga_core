@@ -141,9 +141,18 @@
 //      the queue drains (a single-issue escape would cap gated
 //      throughput below demand and jam the queue). Tie fb_fetch_active_i
 //      low to disable gating.
-//   4. The internal fetch FIFO is 16 deep: a burst of near-simultaneous
-//      line crossings from many oscillators drains over multiple slots
+//   4. The internal fetch FIFO (8 deep) lets a burst of near-simultaneous
+//      line crossings from many oscillators drain over multiple slots
 //      (or a whole gated display line) harmlessly under lookahead slack.
+//
+// STORAGE (GW5AT-60 placement, revs 3.1/3.2): all wide per-oscillator
+// state lives in inferred RAM, not flip-flops — doc_cache_ram (64 x
+// {tag, 128-bit line}) and two doc_lu_ram (32 x 12 last-issued-line
+// bookkeeping, one per cache-slot parity, read at address curr_osc_r,
+// which is stable all slot). Only flag bits, the 8-deep fetch FIFO, and
+// narrow working registers remain as FFs (~0.7k added vs baseline). The
+// flat-FF version of this state cost ~9.7k registers and failed
+// placement at 88% CLS.
 //
 // WORD-CACHE CONSUME RULES (correctness-critical):
 //
@@ -499,7 +508,45 @@ module doc5503_pipelined #(
 
     reg [31:0]  prime_pending_r;
     reg [63:0]  issued_valid_r;
-    reg [11:0]  last_issued_word_r [64];
+
+    // last-issued line-address bookkeeping (rev 3.2): one 32x12 RAM per
+    // cache-slot parity instead of a 64x12 FF array (768 FF -> RAM). Read
+    // address is simply curr_osc_r — stable for the whole service slot,
+    // so the synchronous read needs no scheduling at all (data valid from
+    // the slot's second clk_i; first use is at OSC_ACC, ~7 clk_i in).
+    // Single writer per clk_i: issue_running (OSC_ACC / halt chain /
+    // retrigger) and the prime path (halted OSC_CONSUME) never coincide,
+    // and at most one issue fires per slot, so the registered write
+    // strobe (+1 clk_i) commits a full scan before that oscillator's
+    // bookkeeping is read again. issued_valid_r stays in FFs (flush must
+    // clear all 64 bits in one cycle).
+    reg        lu_we0_r, lu_we1_r;
+    reg [4:0]  lu_waddr_r;
+    reg [11:0] lu_wdata_r;
+    wire [11:0] lu_rdata0_w, lu_rdata1_w;
+
+    doc_lu_ram lu_ram0 (
+        .clk_i(clk_i),
+        .we_i(lu_we0_r),
+        .waddr_i(lu_waddr_r),
+        .wdata_i(lu_wdata_r),
+        .raddr_i(curr_osc_r),
+        .rdata_o(lu_rdata0_w)
+    );
+
+    doc_lu_ram lu_ram1 (
+        .clk_i(clk_i),
+        .we_i(lu_we1_r),
+        .waddr_i(lu_waddr_r),
+        .wdata_i(lu_wdata_r),
+        .raddr_i(curr_osc_r),
+        .rdata_o(lu_rdata1_w)
+    );
+
+    // Last-issued line address for a given (this-oscillator) byte address
+    function automatic logic [11:0] lu_sel_f(input logic [15:0] addr);
+        return addr[4] ? lu_rdata1_w : lu_rdata0_w;
+    endfunction
 
     // Burst-beat assembly: the memory client returns each 16-byte line as
     // four 32-bit beats (one wave_data_ready_i pulse each, in order).
@@ -521,15 +568,18 @@ module doc5503_pipelined #(
     // Depth 8, three pointers: wr (enqueue by FSM), issue (sent to memory
     // port), ret (retired by wave_data_ready_i, in order).
 
-    localparam int FQ_DEPTH = 16;
+    // Rev 3.2: 8 deep (lookahead + gating drain analysis keeps occupancy
+    // shallow; the drop counter guards and drops self-heal) and 12-bit
+    // LINE addresses per entry (byte-lane bits were never consumed).
+    localparam int FQ_DEPTH = 8;
     reg [4:0]  fq_osc_r  [FQ_DEPTH];
-    reg [15:0] fq_addr_r [FQ_DEPTH];
+    reg [11:0] fq_line_r [FQ_DEPTH];
     reg        fq_src_r  [FQ_DEPTH];
-    reg [3:0]  fq_wr_ptr_r;
-    reg [3:0]  fq_issue_ptr_r;
-    reg [3:0]  fq_ret_ptr_r;
+    reg [2:0]  fq_wr_ptr_r;
+    reg [2:0]  fq_issue_ptr_r;
+    reg [2:0]  fq_ret_ptr_r;
 
-    wire fq_full_w = (4'(fq_wr_ptr_r + 4'd1) == fq_ret_ptr_r);
+    wire fq_full_w = (3'(fq_wr_ptr_r + 3'd1) == fq_ret_ptr_r);
 
     // FB-gate age escape with drain hysteresis: count service slots the
     // queue has been held by the framebuffer gate; once the head ages past
@@ -542,13 +592,15 @@ module doc5503_pipelined #(
     reg gate_forced_r;
     wire gate_open_w = !fb_fetch_active_i || gate_forced_r;
 
-    reg [7:0]  dbg_prime_miss_r;
-    reg [7:0]  dbg_stale_fetch_r;
-    reg [7:0]  dbg_fetch_drop_r;
+    // 4-bit wrap counters (rev 3.2 register diet), zero-padded to keep
+    // the 8-bit output ports (interface unchanged).
+    reg [3:0]  dbg_prime_miss_r;
+    reg [3:0]  dbg_stale_fetch_r;
+    reg [3:0]  dbg_fetch_drop_r;
     reg [15:0] dbg_fetch_count_r;
-    assign dbg_prime_miss_o  = dbg_prime_miss_r;
-    assign dbg_stale_fetch_o = dbg_stale_fetch_r;
-    assign dbg_fetch_drop_o  = dbg_fetch_drop_r;
+    assign dbg_prime_miss_o  = {4'b0, dbg_prime_miss_r};
+    assign dbg_stale_fetch_o = {4'b0, dbg_stale_fetch_r};
+    assign dbg_fetch_drop_o  = {4'b0, dbg_fetch_drop_r};
     assign dbg_fetch_count_o = dbg_fetch_count_r;
 
     // Address the baseline implementation would fetch for the current
@@ -577,8 +629,8 @@ module doc5503_pipelined #(
                               && (beat_cnt_r == 2'd3)
                               && reset_n_i;
     assign cram_we_w    = retire_last_beat_w;
-    assign cram_waddr_w = {fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]};
-    assign cram_wdata_w = {fq_addr_r[fq_ret_ptr_r][15:4], wave_data_word_i, beat_accum_r};
+    assign cram_waddr_w = {fq_osc_r[fq_ret_ptr_r], fq_line_r[fq_ret_ptr_r][0]};
+    assign cram_wdata_w = {fq_line_r[fq_ret_ptr_r], wave_data_word_i, beat_accum_r};
 
     wire [15:0] consume_pre_addr_w = wave_addr_f(curr_acc_r);
     assign cram_raddr_w = {curr_osc_r, consume_pre_addr_w[4]};
@@ -722,6 +774,10 @@ module doc5503_pipelined #(
             gate_forced_r <= 1'b0;
             beat_cnt_r <= '0;
             beat_accum_r <= '0;
+            lu_we0_r <= 1'b0;
+            lu_we1_r <= 1'b0;
+            lu_waddr_r <= '0;
+            lu_wdata_r <= '0;
             dbg_prime_miss_r <= '0;
             dbg_stale_fetch_r <= '0;
             dbg_fetch_drop_r <= '0;
@@ -759,6 +815,8 @@ module doc5503_pipelined #(
         end else begin
 
             wave_rd_o <= '0;
+            lu_we0_r <= 1'b0;
+            lu_we1_r <= 1'b0;
 
             if (host_access_r) begin
                 host_request_pending_r <= 1'b1;
@@ -816,9 +874,9 @@ module doc5503_pipelined #(
                     // {tag, line} written into doc_cache_ram this same edge
                     // via the combinational cram_* wires below; only the
                     // flag bits live here.
-                    cache_valid_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}]   <= 1'b1;
-                    cache_src_run_r[{fq_osc_r[fq_ret_ptr_r], fq_addr_r[fq_ret_ptr_r][4]}] <= fq_src_r[fq_ret_ptr_r];
-                    fq_ret_ptr_r <= fq_ret_ptr_r + 4'd1;
+                    cache_valid_r[{fq_osc_r[fq_ret_ptr_r], fq_line_r[fq_ret_ptr_r][0]}]   <= 1'b1;
+                    cache_src_run_r[{fq_osc_r[fq_ret_ptr_r], fq_line_r[fq_ret_ptr_r][0]}] <= fq_src_r[fq_ret_ptr_r];
+                    fq_ret_ptr_r <= fq_ret_ptr_r + 3'd1;
                     beat_cnt_r <= 2'd0;
                 end
             end
@@ -833,8 +891,8 @@ module doc5503_pipelined #(
             if ((fq_issue_ptr_r != fq_wr_ptr_r) && wave_available_i && !wave_rd_o
                 && gate_open_w) begin
                 wave_rd_o <= 1'b1;
-                wave_address_o <= {fq_addr_r[fq_issue_ptr_r][15:4], 4'b0};
-                fq_issue_ptr_r <= fq_issue_ptr_r + 4'd1;
+                wave_address_o <= {fq_line_r[fq_issue_ptr_r], 4'b0};
+                fq_issue_ptr_r <= fq_issue_ptr_r + 3'd1;
                 dbg_fetch_count_r <= dbg_fetch_count_r + 16'd1;
             end
             if (fq_issue_ptr_r == fq_wr_ptr_r) begin
@@ -864,11 +922,11 @@ module doc5503_pipelined #(
                                  input logic src_run);
         if (!fq_full_w) begin
             fq_osc_r[fq_wr_ptr_r]  <= osc;
-            fq_addr_r[fq_wr_ptr_r] <= addr;
+            fq_line_r[fq_wr_ptr_r] <= addr[15:4];
             fq_src_r[fq_wr_ptr_r]  <= src_run;
-            fq_wr_ptr_r <= fq_wr_ptr_r + 4'd1;
+            fq_wr_ptr_r <= fq_wr_ptr_r + 3'd1;
         end else begin
-            dbg_fetch_drop_r <= dbg_fetch_drop_r + 8'd1;
+            dbg_fetch_drop_r <= dbg_fetch_drop_r + 4'd1;
         end
     endtask: fetch_enqueue
 
@@ -879,13 +937,16 @@ module doc5503_pipelined #(
     // boundary check.
     task automatic issue_running(input logic [4:0] osc, input logic [15:0] addr);
         automatic logic [5:0] idx_w = {osc, addr[4]};
-        if (!issued_valid_r[idx_w] || (last_issued_word_r[idx_w] != addr[15:4])) begin
+        if (!issued_valid_r[idx_w] || (lu_sel_f(addr) != addr[15:4])) begin
             if (!fq_full_w) begin
                 fetch_enqueue(osc, addr, 1'b1);
-                last_issued_word_r[idx_w] <= addr[15:4];
+                lu_we0_r <= ~addr[4];
+                lu_we1_r <= addr[4];
+                lu_waddr_r <= osc;
+                lu_wdata_r <= addr[15:4];
                 issued_valid_r[idx_w] <= 1'b1;
             end else begin
-                dbg_fetch_drop_r <= dbg_fetch_drop_r + 8'd1;
+                dbg_fetch_drop_r <= dbg_fetch_drop_r + 4'd1;
             end
         end
     endtask: issue_running
@@ -1224,7 +1285,7 @@ module doc5503_pipelined #(
                     // Stale consume (late fetch, or external ACC/WTP/RTS
                     // rewrite): keep continuity with a nearby old byte but
                     // never evaluate halt-on-zero on an unvisited lane.
-                    dbg_stale_fetch_r <= dbg_stale_fetch_r + 8'd1;
+                    dbg_stale_fetch_r <= dbg_stale_fetch_r + 4'd1;
                     osc_state_r <= OSC_OUT;
                 end else if (entry_data_w == 8'h00) begin
                     halt_zero_r <= 1'b1;                            // Set halt zero flag
@@ -1239,7 +1300,7 @@ module doc5503_pipelined #(
                 // switch.) Note: like the baseline's timeout path, the wds
                 // register is not updated.
                 curr_wds_r <= 8'h80;
-                dbg_prime_miss_r <= dbg_prime_miss_r + 8'd1;
+                dbg_prime_miss_r <= dbg_prime_miss_r + 4'd1;
                 osc_state_r <= OSC_OUT;
             end
 
@@ -1270,7 +1331,10 @@ module doc5503_pipelined #(
                 automatic logic [15:0] prime_addr_w = wave_addr_f(24'd0);
                 fetch_enqueue(curr_osc_r, prime_addr_w, 1'b0);
                 prime_pending_r[curr_osc_r] <= 1'b0;
-                last_issued_word_r[{curr_osc_r, prime_addr_w[4]}] <= prime_addr_w[15:4];
+                lu_we0_r <= ~prime_addr_w[4];
+                lu_we1_r <= prime_addr_w[4];
+                lu_waddr_r <= curr_osc_r;
+                lu_wdata_r <= prime_addr_w[15:4];
                 issued_valid_r[{curr_osc_r, prime_addr_w[4]}] <= 1'b1;
             end
 
@@ -1355,7 +1419,7 @@ module doc5503_pipelined #(
         end else begin
             automatic logic [5:0] w1_idx_w = {curr_osc_r, new_addr_w[4]};
             automatic logic w1_need_w = !issued_valid_r[w1_idx_w]
-                || (last_issued_word_r[w1_idx_w] != new_addr_w[15:4]);
+                || (lu_sel_f(new_addr_w) != new_addr_w[15:4]);
             if (w1_need_w) begin
                 // Crossing (or jump/flush refresh) NOW: needed by the next
                 // service slot — the 1-service-period path.
@@ -1486,6 +1550,32 @@ module doc_cache_ram (
     end
 
     reg [139:0] rdata_r;
+    always @(posedge clk_i)
+        rdata_r <= mem[raddr_i];
+
+    assign rdata_o = rdata_r;
+
+endmodule
+
+// Last-issued-line bookkeeping storage for doc5503_pipelined: 32 x 12,
+// simple-dual-port, synchronous read (one instance per cache-slot parity).
+// Same Gowin-safe inference idiom as doc_cache_ram.
+module doc_lu_ram (
+    input  wire        clk_i,
+    input  wire        we_i,
+    input  wire [4:0]  waddr_i,
+    input  wire [11:0] wdata_i,
+    input  wire [4:0]  raddr_i,
+    output wire [11:0] rdata_o
+);
+    reg [11:0] mem [0:31] /*synthesis syn_ramstyle="distributed_ram"*/;
+
+    always @(posedge clk_i) begin
+        if (we_i)
+            mem[waddr_i] <= wdata_i;
+    end
+
+    reg [11:0] rdata_r;
     always @(posedge clk_i)
         rdata_r <= mem[raddr_i];
 

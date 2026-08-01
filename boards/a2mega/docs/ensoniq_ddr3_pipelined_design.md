@@ -694,3 +694,44 @@ unPlaced`). Restructured:
 - Differential suite re-run in full after the timing change: identical
   results (same deterministic fetch counts, same counters, PASS on seeds
   1/42/7777, rev-2 repro still fails as required).
+
+### 12.8 Register diet (rev 3.2 — second GW5AT-60 placement fix)
+
+Rev 3.1 still failed placement (847-1009 REG unplaced across attempts) at
+88% CLS: doc_cache_ram extracted to RAM correctly, but ~1.5k added FFs of
+bookkeeping could not be legalized at that slice pressure. Rev 3.2 sheds
+~950 more FFs with no architecture or interface change:
+
+- `last_issued_word_r` (64x12 = 768 FF) → two `doc_lu_ram` instances
+  (32x12 each, one per cache-slot parity), synchronous read at address
+  `curr_osc_r` — stable for the entire service slot, so the read needs no
+  scheduling (data valid by the slot's 2nd clk_i; first use at OSC_ACC,
+  ~7 clk_i in). Writes go through a registered strobe (+1 clk_i);
+  verified safe because at most ONE issue/prime bookkeeping write fires
+  per service slot and the next read of that oscillator's entry is a
+  full scan later. `issued_valid_r` stays in FFs (a flush must clear all
+  64 bits in one cycle).
+- Fetch FIFO: 16 → 8 deep, and entries store 12-bit LINE addresses
+  (the byte-lane bits were never consumed): 364 → 153 FF.
+- prime/stale/drop debug counters: 8 → 4 bits, zero-padded to keep the
+  8-bit ports (interface unchanged); `dbg_fetch_count_o` stays 16-bit
+  (field traffic regression tool).
+
+Added-FF audit (vs baseline doc5503), rev 3.2:
+
+| Item | FF |
+|---|---|
+| RAM output registers (cache 140 + 2x lu 12) | 164 |
+| Flag bits (valid/src/issued/prime) | 224 |
+| Fetch FIFO (8 x 18 + pointers) | 153 |
+| Burst-beat assembly | 98 |
+| lu write staging (we/addr/data) | 19 |
+| Working regs (issue/consume addr, cooldown, gate) | 44 |
+| Debug counters | 28 |
+| **Total added** | **~730 FF** (~9.7 kbit in inferred RAM) |
+
+Full suite re-run: PASS on seeds 1/42/7777 to the same standards, FB
+2337/2337 deadlines, drops 0, rev-2 repro gate intact. One deterministic
+delta: 2 fewer total fetches (3152 vs 3154), isolated to the E1-change
+phase — redundant re-issues deduped by the one-cycle bookkeeping
+visibility; the comparator confirms zero consumed-sample impact.
