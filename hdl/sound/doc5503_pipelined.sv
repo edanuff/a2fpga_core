@@ -194,7 +194,13 @@
 //     asserting it repeatedly / holding it high during write bursts is
 //     safe and intended.
 //
-// Requires osc_reg_ram from doc5503.sv (compile both files together).
+// Self-contained: the oscillator register banks use osc_reg_ram_dp
+// (defined below) — synchronous-read dual-port BSRAM, because the GW5A
+// family has NO SSRAM/distributed-RAM resource (GowinSynthesis RP0007;
+// the baseline's async-read osc_reg_ram falls back to ~2.8k flip-flops
+// there). Port A serves the FSM (shared read/write address, exactly the
+// baseline access pattern with control-read addresses launched one state
+// early); port B serves host register reads.
 //
 // =============================================================================
 
@@ -339,78 +345,110 @@ module doc5503_pipelined #(
     wire [7:0] ram_rts_dout_w;
     wire [23:0] ram_acc_dout_w;
 
+    // Host-read port (bank port B). host_raddr_r PERSISTS until the next
+    // host read, so the synchronous port-B data is valid from two clk_i
+    // after a host read request FOREVER — the delayed device_response can
+    // consume it at any later invocation with no staleness window and no
+    // interference with the FSM's port-A addresses.
+    reg  [4:0]  host_raddr_r;
+    reg         host_read_wait_r;
+    wire [7:0]  ram_fl_hdout_w;
+    wire [7:0]  ram_fh_hdout_w;
+    wire [7:0]  ram_vol_hdout_w;
+    wire [7:0]  ram_wds_hdout_w;
+    wire [7:0]  ram_wtp_hdout_w;
+    wire [7:0]  ram_control_hdout_w;
+    wire [7:0]  ram_rts_hdout_w;
+    wire [23:0] ram_acc_hdout_w;
+
     // Instantiate the RAMs for each oscillator register (shared with doc5503.sv)
 
     // $00-1F : Frequency Low Register
-    osc_reg_ram fl_ram (
+    osc_reg_ram_dp fl_ram (
         .clk_i(clk_i),
-        .osc_i(ram_fl_osc_r),
-        .we_i(ram_fl_we_r),
-        .data_i(ram_fl_din_r),
-        .data_o(ram_fl_dout_w)
+        .a_addr_i(ram_fl_osc_r),
+        .a_we_i(ram_fl_we_r),
+        .a_din_i(ram_fl_din_r),
+        .a_dout_o(ram_fl_dout_w),
+        .b_addr_i(host_raddr_r),
+        .b_dout_o(ram_fl_hdout_w)
     );
 
     // $20-3F : Frequency High Register
-    osc_reg_ram fh_ram (
+    osc_reg_ram_dp fh_ram (
         .clk_i(clk_i),
-        .osc_i(ram_fh_osc_r),
-        .we_i(ram_fh_we_r),
-        .data_i(ram_fh_din_r),
-        .data_o(ram_fh_dout_w)
+        .a_addr_i(ram_fh_osc_r),
+        .a_we_i(ram_fh_we_r),
+        .a_din_i(ram_fh_din_r),
+        .a_dout_o(ram_fh_dout_w),
+        .b_addr_i(host_raddr_r),
+        .b_dout_o(ram_fh_hdout_w)
     );
 
     // $40-5F : Volume Register
-    osc_reg_ram vol_ram (
+    osc_reg_ram_dp vol_ram (
         .clk_i(clk_i),
-        .osc_i(ram_vol_osc_r),
-        .we_i(ram_vol_we_r),
-        .data_i(ram_vol_din_r),
-        .data_o(ram_vol_dout_w)
+        .a_addr_i(ram_vol_osc_r),
+        .a_we_i(ram_vol_we_r),
+        .a_din_i(ram_vol_din_r),
+        .a_dout_o(ram_vol_dout_w),
+        .b_addr_i(host_raddr_r),
+        .b_dout_o(ram_vol_hdout_w)
     );
 
     // $60-7F : Waveform Data Sample Register
-    osc_reg_ram wds_ram (
+    osc_reg_ram_dp wds_ram (
         .clk_i(clk_i),
-        .osc_i(ram_wds_osc_r),
-        .we_i(ram_wds_we_r),
-        .data_i(ram_wds_din_r),
-        .data_o(ram_wds_dout_w)
+        .a_addr_i(ram_wds_osc_r),
+        .a_we_i(ram_wds_we_r),
+        .a_din_i(ram_wds_din_r),
+        .a_dout_o(ram_wds_dout_w),
+        .b_addr_i(host_raddr_r),
+        .b_dout_o(ram_wds_hdout_w)
     );
 
     // $80-9F : Waveform Table Pointer Register
-    osc_reg_ram wtp_ram (
+    osc_reg_ram_dp wtp_ram (
         .clk_i(clk_i),
-        .osc_i(ram_wtp_osc_r),
-        .we_i(ram_wtp_we_r),
-        .data_i(ram_wtp_din_r),
-        .data_o(ram_wtp_dout_w)
+        .a_addr_i(ram_wtp_osc_r),
+        .a_we_i(ram_wtp_we_r),
+        .a_din_i(ram_wtp_din_r),
+        .a_dout_o(ram_wtp_dout_w),
+        .b_addr_i(host_raddr_r),
+        .b_dout_o(ram_wtp_hdout_w)
     );
 
     // $A0-BF : Control Register
-    osc_reg_ram control_ram (
+    osc_reg_ram_dp control_ram (
         .clk_i(clk_i),
-        .osc_i(ram_control_osc_r),
-        .we_i(ram_control_we_r),
-        .data_i(ram_control_din_r),
-        .data_o(ram_control_dout_w)
+        .a_addr_i(ram_control_osc_r),
+        .a_we_i(ram_control_we_r),
+        .a_din_i(ram_control_din_r),
+        .a_dout_o(ram_control_dout_w),
+        .b_addr_i(host_raddr_r),
+        .b_dout_o(ram_control_hdout_w)
     );
 
     // $C0-DF : Resolution Table Size Register
-    osc_reg_ram rts_ram (
+    osc_reg_ram_dp rts_ram (
         .clk_i(clk_i),
-        .osc_i(ram_rts_osc_r),
-        .we_i(ram_rts_we_r),
-        .data_i(ram_rts_din_r),
-        .data_o(ram_rts_dout_w)
+        .a_addr_i(ram_rts_osc_r),
+        .a_we_i(ram_rts_we_r),
+        .a_din_i(ram_rts_din_r),
+        .a_dout_o(ram_rts_dout_w),
+        .b_addr_i(host_raddr_r),
+        .b_dout_o(ram_rts_hdout_w)
     );
 
     // $E0-FF : Oscillator Accumulator Register
-    osc_reg_ram #(.DATA_WIDTH(24)) acc_ram (
+    osc_reg_ram_dp #(.DATA_WIDTH(24)) acc_ram (
         .clk_i(clk_i),
-        .osc_i(ram_acc_osc_r),
-        .we_i(ram_acc_we_r),
-        .data_i(ram_acc_din_r),
-        .data_o(ram_acc_dout_w)
+        .a_addr_i(ram_acc_osc_r),
+        .a_we_i(ram_acc_we_r),
+        .a_din_i(ram_acc_din_r),
+        .a_dout_o(ram_acc_dout_w),
+        .b_addr_i(host_raddr_r),
+        .b_dout_o(ram_acc_hdout_w)
     );
 
     // Current oscillator state, copied from the register file at the start of each cycle
@@ -761,6 +799,8 @@ module doc5503_pipelined #(
 
             host_request_pending_r <= 1'b0;
             device_response_pending_r <= 1'b0;
+            host_raddr_r <= '0;
+            host_read_wait_r <= 1'b0;
 
             cache_valid_r <= '0;
             cache_src_run_r <= '0;
@@ -842,6 +882,12 @@ module doc5503_pipelined #(
             ram_control_we_r <= 1'b0;
             ram_rts_we_r <= 1'b0;
             ram_acc_we_r <= 1'b0;
+
+            // Host-read response delay stage (see host_request read branch)
+            if (host_read_wait_r) begin
+                host_read_wait_r <= 1'b0;
+                device_response_pending_r <= 1'b1;
+            end
 
             // -----------------------------------------------------------------
             // Cache flush (GLU sound-RAM write): force one refresh per
@@ -1026,20 +1072,15 @@ module doc5503_pipelined #(
                     endcase
                 end
             end else begin
-                // Host read access to oscillator registers
-                device_response_pending_r <= 1'b1;
-
-                if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
-                    case (host_addr_r[7:5])
-                        3'b000: ram_fl_osc_r <= host_addr_r[4:0];
-                        3'b001: ram_fh_osc_r <= host_addr_r[4:0];
-                        3'b010: ram_vol_osc_r <= host_addr_r[4:0];
-                        3'b011: ram_wds_osc_r <= host_addr_r[4:0];
-                        3'b100: ram_wtp_osc_r <= host_addr_r[4:0];
-                        3'b101: ram_control_osc_r <= host_addr_r[4:0];
-                        3'b110: ram_rts_osc_r <= host_addr_r[4:0];
-                    endcase
-                end
+                // Host read access to oscillator registers: latch the
+                // port-B read address (it persists until the next host
+                // read) and arm the response one cycle later than the
+                // baseline so the synchronous port-B data is valid when
+                // device_response consumes it — at X+2 or ANY later
+                // invocation (no staleness window, and the FSM's port-A
+                // addresses are never touched).
+                host_raddr_r <= host_addr_r[4:0];
+                host_read_wait_r <= 1'b1;
             end
 
         end
@@ -1055,25 +1096,25 @@ module doc5503_pipelined #(
                     // Read from oscillator registers
                     case (host_addr_r[7:5])
                         3'b000: begin                               // $00-1F
-                            data_o <= ram_fl_dout_w;
+                            data_o <= ram_fl_hdout_w;
                         end
                         3'b001: begin                               // $20-3F
-                            data_o <= ram_fh_dout_w;
+                            data_o <= ram_fh_hdout_w;
                         end
                         3'b010: begin                               // $40-5F
-                            data_o <= ram_vol_dout_w;
+                            data_o <= ram_vol_hdout_w;
                         end
                         3'b011: begin                               // $60-7F
-                            data_o <= ram_wds_dout_w;
+                            data_o <= ram_wds_hdout_w;
                         end
                         3'b100: begin                               // $80-9F
-                            data_o <= ram_wtp_dout_w;
+                            data_o <= ram_wtp_hdout_w;
                         end
                         3'b101: begin                               // $A0-BF
-                            data_o <= ram_control_dout_w;
+                            data_o <= ram_control_hdout_w;
                         end
                         3'b110: begin                               // $C0-DF
-                            data_o <= ram_rts_dout_w;
+                            data_o <= ram_rts_hdout_w;
                         end
                     endcase
                 end else if (host_addr_r == 8'hE0) begin
@@ -1222,6 +1263,14 @@ module doc5503_pipelined #(
         halt_zero_r <= 1'b0;
         halt_overflow_r <= 1'b0;
 
+        // Synchronous-read banks (GW5A has no SSRAM): each control-bank
+        // read address is launched ONE STATE EARLIER than in the baseline
+        // so the registered-read data lands in the same state the baseline
+        // consumed it. The RAM samples pre-edge register values, so the
+        // curr_osc default (asserted since slot start) still yields the
+        // CURRENT oscillator's registers during OSC_LOAD_REGISTERS.
+        ram_control_osc_r <= partner_osc_w;
+
         osc_state_r <= OSC_LOAD_REGISTERS;
     endtask: osc_start
 
@@ -1235,20 +1284,21 @@ module doc5503_pipelined #(
         curr_rts_r <= ram_rts_dout_w;                // Resolution/table size
         curr_acc_r <= ram_acc_dout_w;                // Accumulator
 
-        ram_control_osc_r <= partner_osc_w;
+        ram_control_osc_r <= curr_osc_r + 1'b1;      // launch next-control read
 
         osc_state_r <= OSC_LOAD_PARTNER_CONTROL;
     endtask: osc_load_registers
 
     task automatic osc_load_partner_control();
         partner_control_r <= ram_control_dout_w;
-        ram_control_osc_r <= curr_osc_r + 1'b1;
+        ram_control_osc_r <= curr_osc_r - 1'b1;      // launch prev-control read
         osc_state_r <= OSC_LOAD_NEXT_CONTROL;
     endtask: osc_load_partner_control
 
     task automatic osc_load_next_control();
         next_control_r <= ram_control_dout_w;
-        ram_control_osc_r <= curr_osc_r - 1'b1;
+        // prev-control read already launched in OSC_LOAD_PARTNER_CONTROL;
+        // its data lands during OSC_CONSUME (prev_control_r load there)
         osc_state_r <= OSC_CONSUME;
     endtask: osc_load_next_control
 
@@ -1542,7 +1592,7 @@ module doc_cache_ram (
     input  wire [5:0]   raddr_i,
     output wire [139:0] rdata_o
 );
-    reg [139:0] mem [0:63] /*synthesis syn_ramstyle="distributed_ram"*/;
+    reg [139:0] mem [0:63] /*synthesis syn_ramstyle="block_ram"*/;
 
     always @(posedge clk_i) begin
         if (we_i)
@@ -1568,7 +1618,7 @@ module doc_lu_ram (
     input  wire [4:0]  raddr_i,
     output wire [11:0] rdata_o
 );
-    reg [11:0] mem [0:31] /*synthesis syn_ramstyle="distributed_ram"*/;
+    reg [11:0] mem [0:31] /*synthesis syn_ramstyle="block_ram"*/;
 
     always @(posedge clk_i) begin
         if (we_i)
@@ -1580,5 +1630,44 @@ module doc_lu_ram (
         rdata_r <= mem[raddr_i];
 
     assign rdata_o = rdata_r;
+
+endmodule
+
+// Oscillator register bank for doc5503_pipelined: 32 x DATA_WIDTH,
+// dual-read-port with SYNCHRONOUS reads, inferred as BSRAM (block_ram) —
+// the GW5A family has no SSRAM/distributed RAM (GowinSynthesis RP0007),
+// so the baseline osc_reg_ram's async-read LUT-RAM idiom cannot map there.
+// Port A: FSM read/write on the shared per-bank address register (write
+// and read never need the same-edge new data — verified against every
+// consumer). Port B: host register reads (read-only, persistent address).
+// Same Gowin-safe pattern as doc_cache_ram: separate always blocks, no
+// read-modify-write, no array reset.
+module osc_reg_ram_dp #(
+    parameter int DATA_WIDTH = 8
+) (
+    input  wire                  clk_i,
+    input  wire [4:0]            a_addr_i,
+    input  wire                  a_we_i,
+    input  wire [DATA_WIDTH-1:0] a_din_i,
+    output wire [DATA_WIDTH-1:0] a_dout_o,
+    input  wire [4:0]            b_addr_i,
+    output wire [DATA_WIDTH-1:0] b_dout_o
+);
+    reg [DATA_WIDTH-1:0] mem [0:31] /*synthesis syn_ramstyle="block_ram"*/;
+
+    always @(posedge clk_i) begin
+        if (a_we_i)
+            mem[a_addr_i] <= a_din_i;
+    end
+
+    reg [DATA_WIDTH-1:0] a_dout_r;
+    always @(posedge clk_i)
+        a_dout_r <= mem[a_addr_i];
+    assign a_dout_o = a_dout_r;
+
+    reg [DATA_WIDTH-1:0] b_dout_r;
+    always @(posedge clk_i)
+        b_dout_r <= mem[b_addr_i];
+    assign b_dout_o = b_dout_r;
 
 endmodule

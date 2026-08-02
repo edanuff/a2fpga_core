@@ -79,6 +79,7 @@ def parse_events(path):
     traffic = {}  # mark n -> (fetches, slots) during the preceding phase
     fbm = {}      # mark n -> FB line-deadline misses during the preceding phase
     fbtotal = None
+    hostread = None
     counters = None
     with open(path) as f:
         for ln in f:
@@ -100,16 +101,18 @@ def parse_events(path):
                 fbm[int(t[1])] = int(t[2])
             elif t[0] == "FBTOTAL":
                 fbtotal = (int(t[1]), int(t[2]))
+            elif t[0] == "HOSTREAD":
+                hostread = (int(t[1]), int(t[2]))
             elif t[0] == "COUNTERS":
                 counters = tuple(int(x) for x in t[1:4])
-    return glu, regw, phases, countp, counters, traffic, fbm, fbtotal
+    return glu, regw, phases, countp, counters, traffic, fbm, fbtotal, hostread
 
 
 def main():
     base = parse_log("base.log")
     pipe = parse_log("pipe.log")
     (glu, regw, phases, countp, counters,
-     traffic, fbm, fbtotal) = parse_events("events.log")
+     traffic, fbm, fbtotal, hostread) = parse_events("events.log")
 
     phase_starts = sorted(phases.items(), key=lambda kv: kv[1])
 
@@ -235,10 +238,12 @@ def main():
                     stats["LATE_FETCH_LAG"] += 1
                     continue
 
-            # hard-sync restart: baseline plays the table-start byte
-            # (accumulator portion of the address is zero) while the
-            # pipelined variant plays the delayed-stream byte
-            if (ba & 0x00FF) == 0 and pa != ba:
+            # hard-sync restart or late table-wrap jump fetch: baseline
+            # plays a byte from the table's FIRST 16-byte line (accumulator
+            # portion of the address just [re]started) while the pipelined
+            # variant plays the delayed-stream/stale byte — one sample per
+            # restart/wrap event (design doc failure modes #5/#16)
+            if (ba & 0x00FF) < 16 and pa != ba:
                 stats["SYNC_RESTART"] += 1
                 sync_restarts.add((s, osc))
                 details.append(f"  W osc{osc} slot{s} ph{ph}: sync restart base={b} pipe={p}")
@@ -372,6 +377,12 @@ def main():
                 fails += 1
     if fbtotal:
         print(f"FB totals: {fbtotal[0]} lines, {fbtotal[1]} missed")
+
+    if hostread is not None:
+        print(f"Host readback: {hostread[0]} ok, {hostread[1]} mismatches")
+        if hostread[1] != 0:
+            print("** host readback mismatches ** FAIL")
+            fails += 1
 
     if counters:
         print(f"DUT counters: prime_miss={counters[0]} stale_fetch={counters[1]} "

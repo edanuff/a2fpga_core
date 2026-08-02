@@ -475,6 +475,32 @@ module tb_doc5503_diff;
         end
     endtask
 
+    // Host register READ from both DUTs simultaneously; compares data_o
+    // after both response paths settle (baseline: 1-cycle response;
+    // pipelined: 2-cycle via the synchronous bank port B). Only called on
+    // registers that are stable at the call site, so the comparison is
+    // deterministic.
+    integer hostread_ok = 0;
+    integer hostread_errs = 0;
+    task doc_rd(input [7:0] a);
+        begin
+            @(posedge clk);
+            while (!dut_base.cycle_start_r) @(posedge clk);
+            @(negedge clk);
+            addr_i = a; cs_n = 0; we_n = 1;
+            @(negedge clk);
+            cs_n = 1;
+            repeat (30) @(posedge clk);
+            if (b_data_o !== p_data_o) begin
+                $display("HOSTREAD MISMATCH addr=%02x base=%02x pipe=%02x slot=%0d",
+                         a, b_data_o, p_data_o, slot);
+                hostread_errs = hostread_errs + 1;
+            end else begin
+                hostread_ok = hostread_ok + 1;
+            end
+        end
+    endtask
+
     // Wavetable memory write (models a GLU sound-RAM write: both DUTs'
     // memory models see the new contents at the same instant, and the
     // pipelined DUT gets its cache_flush_i pulse)
@@ -617,6 +643,21 @@ module tb_doc5503_diff;
         doc_wr(8'hC8, 8'h00); doc_wr(8'hA8, 8'h05);   // halted, sync_am
 
         wait_slots(40);                 // let prime-once fetches land
+
+        // Host register readback verification (all oscillators halted and
+        // stable): exercises the pipelined variant's bank port-B read path
+        for (k = 0; k < 6; k = k + 1) begin
+            doc_rd(8'h00 + k[7:0]);     // FL
+            doc_rd(8'h20 + k[7:0]);     // FH
+            doc_rd(8'h40 + k[7:0]);     // vol
+            doc_rd(8'h80 + k[7:0]);     // WTP
+            doc_rd(8'hA0 + k[7:0]);     // control
+            doc_rd(8'hC0 + k[7:0]);     // RTS
+        end
+        doc_rd(8'hE0);
+        doc_rd(8'hE1);
+        $display("HOSTREAD check: %0d ok, %0d mismatches", hostread_ok, hostread_errs);
+        $fdisplay(fe_f, "HOSTREAD %0d %0d", hostread_ok, hostread_errs);
 
         // ================= P1: steady multi-osc free-run ================
         phase_mark(1);
