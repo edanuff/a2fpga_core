@@ -40,8 +40,11 @@ import sys
 from collections import defaultdict
 
 SCAN_WINDOW = 40   # slots; loose upper bound on one service period
-STRESS_PHASES = {9, 10}
+STRESS_PHASES = {10, 11}
 ALL32_PHASE = 8  # all-32-oscillator FB-contention phase (traffic assertion)
+GLU_WINDOW = 100  # slots; line-cache write visibility is <= 2 service
+                  # periods (dirty-detect <=1, fresh consume <=2): 2 x 34
+                  # slots at all-32, plus margin
 
 
 def parse_log(path):
@@ -148,7 +151,7 @@ def main():
     def glu_race(slot, addr, pipe_data):
         """Pipe played the pre-write value of an address written recently."""
         for (gs, gold, gnew) in glu_by_addr.get(addr, []):
-            if 0 <= slot - gs <= SCAN_WINDOW and pipe_data == gold:
+            if 0 <= slot - gs <= GLU_WINDOW and pipe_data == gold:
                 return True
         return False
 
@@ -360,6 +363,14 @@ def main():
             if f_ / sl > 0.12:
                 print(f"** all-32 fetch rate {f_/sl:.3f}/slot exceeds 0.12 ** FAIL")
                 fails += 1
+        # Write-storm interval (reported at mark 10): targeted invalidation
+        # must keep traffic bounded — no more than ~2x the quiescent all-32
+        # rate (bulk invalidation measured ~1 fetch/slot here).
+        if 10 in traffic and traffic[10][1] > 1000:
+            f_, sl = traffic[10]
+            if f_ / sl > 0.16:
+                print(f"** write-storm fetch rate {f_/sl:.3f}/slot exceeds 0.16 ** FAIL")
+                fails += 1
         # Idle/config interval (mark 1): prime-once only, near-zero traffic
         if 1 in traffic and traffic[1][0] > 100:
             print(f"** idle-phase traffic {traffic[1][0]} fetches "
@@ -371,7 +382,7 @@ def main():
         for n in sorted(fbm):
             print(f"    interval ending at mark {n}: {fbm[n]}")
         for n, misses in fbm.items():
-            if misses and n != 10:   # only the stress interval may miss
+            if misses and n != 11:   # only the stress interval may miss
                 print(f"** FB misses outside stress interval (mark {n}: "
                       f"{misses}) ** FAIL")
                 fails += 1
@@ -387,13 +398,13 @@ def main():
     if counters:
         print(f"DUT counters: prime_miss={counters[0]} stale_fetch={counters[1]} "
               f"fetch_drop={counters[2]}")
-        drop_pre_stress = countp.get(9, (0, 0, 0))[2]
+        drop_pre_stress = countp.get(10, (0, 0, 0))[2]
         if drop_pre_stress != 0:
             print(f"** fetch drops before stress phase ({drop_pre_stress}) ** FAIL")
             fails += 1
-        if 11 in countp and 10 in countp and countp[11][2] != countp[10][2]:
+        if 12 in countp and 11 in countp and countp[12][2] != countp[11][2]:
             print(f"** fetch drops during recovery phase "
-                  f"({countp[11][2] - countp[10][2]}) ** FAIL")
+                  f"({countp[12][2] - countp[11][2]}) ** FAIL")
             fails += 1
 
     if details:

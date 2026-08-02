@@ -846,3 +846,69 @@ probe's own shift register in fabric.
 Re-census after rev 3.4: unchanged — 1,621 DFF, 14 BSRAM. Full
 differential suite + rev-2 repro gate re-run: PASS on seeds 1/42/7777,
 host readback 38/38, FB 2339/2339, drops 0.
+
+### 12.11 Targeted invalidation (rev 3.5): cache-flush storms during playback
+
+Priority-swap hardware results (DOC port above FB, gating off, rev-3.2
+module): DOC memory health fully restored (stale=0, drop=0, much-improved
+audio) but FB line_not_ready WORSENED to 0x36 with corruption correlated
+to multi-oscillator passages. Root cause: bulk invalidation. The
+"sound-RAM writes only happen during loading" assumption is FALSE —
+Arkanoid and many IIgs titles stream sound RAM DURING playback at up to
+~1 MHz. Every write cleared all 64 issued_valid bits, so every running
+oscillator refetched each service period — rev-1-class traffic, now
+ABOVE the FB in priority. The priority swap had merely moved the
+collateral damage from the DOC to the FB; bulk invalidation was the
+shared root cause.
+
+Rev-3.5 scheme (option b+c hybrid — smallest of the candidates):
+
+- The GLU write's line address arrives on a NEW input,
+  `cache_flush_addr_i[15:0]` (sound_glu wires
+  `.cache_flush_addr_i({glu_mem_addr_r[13:0], 2'b00})` next to the
+  existing `.cache_flush_i(glu_mem_wr_r)` — the only integration delta).
+- Writes accumulate a [lo, hi] LINE range in generation A; once per scan
+  A rotates into B (invariant: a write during scan n is in A for later
+  services of scan n and in B throughout scan n+1, so every running
+  oscillator checks it within one service period).
+- At each running service slot, the oscillator's two cached/issued line
+  addresses are ALREADY at hand (lu_rdata0/1_w, read every slot at
+  curr_osc_r) — no CAM, no extra RAM port. On a range hit, only that
+  slot's issued_valid clears; the refetch issues at the same slot's
+  OSC_ACC. Halted oscillators keep the prime_pending + cooldown path
+  (one re-prime per oscillator after writes quiesce).
+- VISIBILITY SEMANTICS (documented class updated): dirty detection <= 1
+  service period after the write; fresh data consumed <= 2 periods (was
+  <= 1 with bulk flush — the line cache adds one period of lazy
+  detection). The comparator's GLU-race window is 2 periods + margin.
+- Cost: ~52 FF (two {lo, hi, valid} range generations) + eight 12-bit
+  comparators. Census: 1,671 DFF / 14 BSRAM (rev 3.4: 1,621).
+- KNOWN CONSERVATISM: the range is a superset — SCATTERED pokes to
+  distant lines (e.g. alternating writes to two far-apart voices'
+  tables) balloon the range and can regenerate refetch traffic up to the
+  bulk-invalidation worst case (never worse than rev 3.4's shipped
+  behavior, and it self-clears within 2 scans of the last write).
+  Sequential streams — the realistic pattern, auto-increment pointer —
+  keep the range a few lines wide. If hardware ever shows the scatter
+  regime, the named follow-up is an exact 8-deep write-line FIFO checked
+  alongside the ranges, overflowing into the range (adds ~100 FF).
+
+Validation (corrected contention model, main-tree config: DOC priority
+above FB, gating disabled):
+
+- NEW TB phase 9: 900 sequential byte writes at ~1 write/us in bursts,
+  arbitrary bus phase, walking through tables that playing oscillators
+  are consuming, sustained ~35 scan rounds during all-32 playback.
+  Results (seeds 1/42/7777, deterministic): storm-phase traffic
+  0.086 fetch/slot vs 0.078 quiescent (+10%; bulk invalidation measured
+  ~1/slot here — asserted bound 0.16); FB 2383/2383 line deadlines met
+  in EVERY phase including the storm; drops 0; C-record streams
+  bit-identical (900 mid-playback writes perturb no halt/swap event);
+  4 GLU_RACE samples — the first live coverage of that class, all
+  within the <= 2-period window; host readback 38/38.
+- GATING VERDICT: stays OFF. With the DOC above the FB, gating no longer
+  protects anything (the DOC wins arbitration anyway) and its convoy
+  formation was harmful; with targeted invalidation the write-storm
+  traffic collapses, so the FB holds its deadlines from below. The
+  fb_fetch_active_i port remains (tie 0), harmless and available if a
+  future board wants the old priority order.

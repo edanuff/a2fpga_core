@@ -151,13 +151,13 @@ module tb_doc5503_diff;
     integer outlier_pct = 0;     // % of DOC grants stretched (stress phase)
     integer outlier_len = 330;   // ~6.1 us
     integer rseed = 1;
-    reg gate_en = 1;
+    reg gate_en = 0;   // main-tree config: fb_fetch_active_i tied 0
     initial begin
         if ($value$plusargs("seed=%d", rseed))
             $display("Using random seed %0d", rseed);
-        if ($test$plusargs("nogate")) begin
-            gate_en = 0;
-            $display("FB-activity gating DISABLED (+nogate)");
+        if ($test$plusargs("gate")) begin
+            gate_en = 1;
+            $display("FB-activity gating ENABLED (+gate)");
         end
     end
 
@@ -298,14 +298,11 @@ module tb_doc5503_diff;
         end else if (srv_kind == 0) begin
             // Grant pick (1-cycle S_DONE/S_IDLE hop modeled by the
             // completion branch above taking a full cycle)
+            // Main-tree priority config: shadow/background (0-1) > DOC (2)
+            // > FB read — the DOC now sits ABOVE the framebuffer.
             if (cyc >= bg_next_at) begin
                 srv_kind <= 3;
                 srv_end <= cyc + BG_GRANT;
-            end else if (fb_active_w && cyc >= fb_next_ok_at) begin
-                glen = FB_GRANT;
-                if (({$random(rseed)} % 100) < 3) glen = glen + REFRESH_EXTRA;
-                srv_kind <= 1;
-                srv_end <= cyc + glen;
 `ifdef REV2_MODE
             end else if (cyc >= synth_next_at) begin
                 srv_kind <= 3'd4;
@@ -318,6 +315,11 @@ module tb_doc5503_diff;
                 srv_kind <= 2;
                 srv_addr <= dq_addr[dq_hd];
                 dq_hd <= dq_hd + 2'd1;
+                srv_end <= cyc + glen;
+            end else if (fb_active_w && cyc >= fb_next_ok_at) begin
+                glen = FB_GRANT;
+                if (({$random(rseed)} % 100) < 3) glen = glen + REFRESH_EXTRA;
+                srv_kind <= 1;
                 srv_end <= cyc + glen;
             end
         end
@@ -348,8 +350,9 @@ module tb_doc5503_diff;
         p_avail <= (dq_cnt + (p_rd ? 1 : 0) - (doc_completing_v ? 1 : 0)) < 2;
     end
 
-    // Flush pulse to the pipelined DUT (GLU sound-RAM write)
+    // Flush pulse + written byte address to the pipelined DUT (GLU write)
     reg cache_flush = 0;
+    reg [15:0] cache_flush_addr = 0;
 
     wire signed [15:0] p_mono, p_left, p_right;
     wire signed [15:0] p_chan[16];
@@ -378,6 +381,7 @@ module tb_doc5503_diff;
         .wave_data_i(8'h00),
         .wave_data_word_i(p_q_word),
         .cache_flush_i(cache_flush),
+        .cache_flush_addr_i(cache_flush_addr),
         .fb_fetch_active_i(fb_active_w && gate_en),
         .mono_mix_o(p_mono),
         .left_mix_o(p_left),
@@ -509,6 +513,7 @@ module tb_doc5503_diff;
             $fdisplay(fe_f, "G %0d %04x %02x %02x", slot, a, mem[a], d);
             mem[a] = d;
             @(negedge clk);
+            cache_flush_addr = a;
             cache_flush = 1;
             @(negedge clk);
             cache_flush = 0;
@@ -761,18 +766,33 @@ module tb_doc5503_diff;
         end
         wait_slots(20000);              // ~590 scans, ~700 FB lines
 
-        // ================= P9: stale-repeat stress ======================
+        // ================= P9: GLU write storm DURING all-32 playback ===
+        // Realistic streaming: sequential byte writes at ~1 write/us in
+        // bursts, at ARBITRARY bus phase (not slot-synchronized), walking
+        // through tables that playing oscillators are consuming. This is
+        // the scenario every earlier phase missed — bulk invalidation
+        // regenerated rev-1-class traffic here; targeted invalidation
+        // must keep traffic near quiescent and FB deadlines clean.
         phase_mark(9);
+        for (k = 0; k < 900; k = k + 1) begin
+            glu_wr(16'h1900 + k[15:0], 8'h80 | k[6:0]);   // never 0x00
+            repeat (40 + ({$random(rseed)} % 28)) @(posedge clk);
+            if ((k % 60) == 59) repeat (1000) @(posedge clk);
+        end
+        wait_slots(200);                // drain: dirty ranges rotate clear
+
+        // ================= P10: stale-repeat stress =====================
+        phase_mark(10);
         doc_wr(8'hE1, 8'h02);           // osc_max = 1 → 4-slot scan (4.47 us)
         wait_slots(50);
         outlier_pct = 10;               // 10% of DOC grants take ~6.1 us
         wait_slots(3000);
         outlier_pct = 0;                // recovery: must re-sync
         wait_slots(50);
-        phase_mark(10);
+        phase_mark(11);
         wait_slots(400);
 
-        phase_mark(11);
+        phase_mark(12);
         $display("FINAL: prime_miss=%0d stale_fetch=%0d fetch_drop=%0d fetches=%0d fb_lines=%0d fb_miss=%0d",
                  dbg_prime_miss, dbg_stale_fetch, dbg_fetch_drop,
                  dbg_fetch_count, fb_lines, fb_miss);
