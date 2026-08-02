@@ -1247,10 +1247,19 @@ module doc5503_pipelined #(
 
     task automatic osc_idle();
         osc_state_r <= OSC_IDLE;
-        host_access();
 
         if (cycle_start_r) begin
+            // Do NOT process host requests on the boundary cycle: a host
+            // WRITE processed here would leave a bank's port-A address on
+            // the host target during OSC_START, and the synchronous read
+            // sampled at the START->LOAD_REGISTERS edge would load the
+            // WRONG oscillator's registers for this slot. The pending
+            // flag holds the request for the next idle window (same-slot
+            // application semantics are preserved — the service chain
+            // always runs before the idle tail).
             osc_state_r <= OSC_START;
+        end else begin
+            host_access();
         end
 
     endtask : osc_idle
@@ -1660,9 +1669,19 @@ module osc_reg_ram_dp #(
             mem[a_addr_i] <= a_din_i;
     end
 
+    // Port-A read is DISABLED during a port-A write (the read-during-write
+    // value is proven don't-care for every consumer): the output holds its
+    // previous value on write cycles, which is exactly BSRAM WRITE_MODE
+    // 2'b00 — the unguarded same-address read+write inferred an SP port
+    // with WRITE_MODE 2'b10 (read-before-write), which GW5A rejects at
+    // placement (PA2122). Freeze-edge audit: no bank's a_we_i is ever high
+    // during a state whose exit edge samples a JUST-CHANGED read address
+    // (chain states set no bank we; host processing is barred from the
+    // cycle_start boundary cycle in osc_idle).
     reg [DATA_WIDTH-1:0] a_dout_r;
     always @(posedge clk_i)
-        a_dout_r <= mem[a_addr_i];
+        if (!a_we_i)
+            a_dout_r <= mem[a_addr_i];
     assign a_dout_o = a_dout_r;
 
     reg [DATA_WIDTH-1:0] b_dout_r;
