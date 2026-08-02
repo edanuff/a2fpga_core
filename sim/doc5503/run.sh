@@ -14,7 +14,7 @@ SRCS="../../hdl/sound/doc5503.sv ../../hdl/sound/doc5503_pipelined.sv tb_doc5503
 
 echo "=== rev-2 failure reproduction (REV2_MODE + nogate) ==="
 iverilog -g2012 -DREV2_MODE -o tb_rev2repro.vvp $SRCS
-vvp tb_rev2repro.vvp +nogate | tee repro_run.log | grep -E "FINAL|PHASE 9|PHASE 10"
+vvp tb_rev2repro.vvp +nogate | tee repro_run.log | grep -E "FINAL|PHASE 10|PHASE 11"
 python3 - <<'EOF'
 miss = 0
 for ln in open("repro_run.log"):

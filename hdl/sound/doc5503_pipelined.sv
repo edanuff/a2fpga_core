@@ -190,9 +190,14 @@
 //     but is UNUSED by this module; tie it off.
 //   * wave_available_i: memory port can accept a request (ddr3_port_cdc
 //     'available'; tie 1 for BSRAM).
-//   * cache_flush_i: pulse (>= 1 clk_i) on any GLU sound-RAM write;
-//     asserting it repeatedly / holding it high during write bursts is
-//     safe and intended.
+//   * cache_flush_i: pulse (>= 1 clk_i) on any GLU sound-RAM write, with
+//     the written BYTE address on cache_flush_addr_i (sound_glu:
+//     .cache_flush_i(glu_mem_wr_r),
+//     .cache_flush_addr_i({glu_mem_addr_r[13:0], 2'b00})). Rev 3.5:
+//     invalidation is TARGETED via a dirty line range — bulk invalidation
+//     stormed the arbiter on titles that stream sound RAM during playback.
+//     A write is dirty-detected within one service period and consumed
+//     fresh within two; holding the pulse across bursts is safe.
 //
 // Self-contained: the oscillator register banks use osc_reg_ram_dp
 // (defined below) — synchronous-read dual-port BSRAM, because the GW5A
@@ -237,6 +242,7 @@ module doc5503_pipelined #(
     input [31:0] wave_data_word_i,      // Full 32-bit word at wave_address_o[15:2]
 
     input cache_flush_i,                // Pulse on any GLU sound-RAM write
+    input [15:0] cache_flush_addr_i,    // BYTE address of that write (bits [15:4] used)
 
     // Framebuffer line-fetch-active hint (framebuffer_480p fetch_state_r ==
     // FETCH_RUN). While high, fetch issue is deferred (with an age escape)
@@ -596,6 +602,40 @@ module doc5503_pipelined #(
                                 : $clog2(PRIME_COOLDOWN_SLOTS + 1);
     reg [COOLDOWN_W-1:0] flush_cooldown_r;
 
+    // -----------------------------------------------------------------
+    // Targeted invalidation: two-generation DIRTY LINE RANGE (rev 3.5).
+    // Bulk invalidation on every GLU write caused fetch storms on titles
+    // that stream sound RAM DURING playback (up to ~1 MHz): every write
+    // forced every running oscillator to refetch each service period.
+    // Instead, writes accumulate a [lo, hi] line-address range in
+    // generation A; once per scan A rotates into B. At each running
+    // service slot the oscillator's two cached/issued line addresses —
+    // already at hand in lu_rdata0/1_w — are compared against A ∪ B;
+    // only on a hit is that slot's issued_valid cleared (one refetch).
+    // Invariant: a write during scan n is in A for services later in
+    // scan n and in B throughout scan n+1, so every running oscillator
+    // checks it within one service period. Visibility semantics: dirty
+    // detection <= 1 service period after the write, fresh data consumed
+    // <= 2 periods (the refetch issues in the detecting slot). The range
+    // is conservative (a superset), which costs only occasional extra
+    // refetches; sequential streaming writes keep it a few lines wide.
+    // Halted oscillators are covered by prime_pending + cooldown as
+    // before (one re-prime per oscillator after writes quiesce).
+    // -----------------------------------------------------------------
+    reg [11:0] dirty_a_lo_r, dirty_a_hi_r;
+    reg        dirty_a_v_r;
+    reg [11:0] dirty_b_lo_r, dirty_b_hi_r;
+    reg        dirty_b_v_r;
+    wire [11:0] flush_line_w = cache_flush_addr_i[15:4];
+
+    // Once-per-scan generation rotation point
+    wire dirty_rotate_w = cycle_start_r && (cycle_state_r == CYCLE_REFRESH_1);
+
+    function automatic logic dirty_hit_f(input logic [11:0] line);
+        return (dirty_a_v_r && (line >= dirty_a_lo_r) && (line <= dirty_a_hi_r))
+            || (dirty_b_v_r && (line >= dirty_b_lo_r) && (line <= dirty_b_hi_r));
+    endfunction
+
     // Effective byte address of the most recently consumed sample
     // ({cache tag, lane}) — diagnostics / simulation logging only.
     reg [15:0] consume_addr_r;
@@ -807,6 +847,12 @@ module doc5503_pipelined #(
             prime_pending_r <= '1;      // every oscillator needs one prime
             issued_valid_r <= '0;
             flush_cooldown_r <= '0;
+            dirty_a_v_r <= 1'b0;
+            dirty_b_v_r <= 1'b0;
+            dirty_a_lo_r <= '0;
+            dirty_a_hi_r <= '0;
+            dirty_b_lo_r <= '0;
+            dirty_b_hi_r <= '0;
             fq_wr_ptr_r <= '0;
             fq_issue_ptr_r <= '0;
             fq_ret_ptr_r <= '0;
@@ -890,15 +936,37 @@ module doc5503_pipelined #(
             end
 
             // -----------------------------------------------------------------
-            // Cache flush (GLU sound-RAM write): force one refresh per
-            // running oscillator (issued_valid), schedule one re-prime per
-            // halted oscillator (prime_pending, deferred by the cooldown so
-            // bulk uploads coalesce). Cached words stay CONSUMABLE — the
-            // stale-data window is bounded by one service period for
-            // running oscillators.
+            // Cache flush (GLU sound-RAM write): accumulate the written
+            // LINE into dirty range A (targeted invalidation happens at
+            // each oscillator's service slot — see the dirty-range block
+            // comment) and schedule halted re-primes (cooldown-deferred).
+            // Cached lines stay CONSUMABLE; NO bulk issued_valid clear —
+            // that caused rev-3.4's write-storm fetch traffic.
             // -----------------------------------------------------------------
+            begin
+                if (dirty_rotate_w) begin
+                    dirty_b_lo_r <= dirty_a_lo_r;
+                    dirty_b_hi_r <= dirty_a_hi_r;
+                    dirty_b_v_r  <= dirty_a_v_r;
+                    if (cache_flush_i) begin
+                        dirty_a_lo_r <= flush_line_w;
+                        dirty_a_hi_r <= flush_line_w;
+                        dirty_a_v_r  <= 1'b1;
+                    end else begin
+                        dirty_a_v_r  <= 1'b0;
+                    end
+                end else if (cache_flush_i) begin
+                    if (!dirty_a_v_r) begin
+                        dirty_a_lo_r <= flush_line_w;
+                        dirty_a_hi_r <= flush_line_w;
+                        dirty_a_v_r  <= 1'b1;
+                    end else begin
+                        if (flush_line_w < dirty_a_lo_r) dirty_a_lo_r <= flush_line_w;
+                        if (flush_line_w > dirty_a_hi_r) dirty_a_hi_r <= flush_line_w;
+                    end
+                end
+            end
             if (cache_flush_i) begin
-                issued_valid_r <= '0;
                 prime_pending_r <= '1;
                 flush_cooldown_r <= COOLDOWN_W'(PRIME_COOLDOWN_SLOTS);
             end else if (cycle_start_r && (flush_cooldown_r != 0)) begin
@@ -1334,6 +1402,16 @@ module doc5503_pipelined #(
             // Default resume address for paths that skip OSC_ACC (zero-byte
             // consumption followed by a partner-swap retrigger).
             issue_addr_r <= expected_addr_w;
+
+            // Targeted GLU-write invalidation: this oscillator's two
+            // cached/issued line addresses are already being read from the
+            // lu RAMs at curr_osc_r — compare against the dirty ranges and
+            // clear only hit slots (the refetch issues at THIS slot's
+            // OSC_ACC, so fresh data is consumed within <= 2 periods).
+            if (dirty_hit_f(lu_rdata0_w))
+                issued_valid_r[{curr_osc_r, 1'b0}] <= 1'b0;
+            if (dirty_hit_f(lu_rdata1_w))
+                issued_valid_r[{curr_osc_r, 1'b1}] <= 1'b0;
 
             if (entry_valid_w && (entry_match_w || entry_run_w)) begin
                 consume_addr_r <= {entry_tag_w, lane_w};
