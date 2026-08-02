@@ -803,3 +803,46 @@ Census after rev 3.3 (GW5AT-60B, synthesis-only):
   total sound-subsystem BSRAM is 14 vs the 32 of ensoniq_bsram.
 - Sim: full suite + rev-2 repro gate re-run, PASS on seeds 1/42/7777,
   host readback 38/38, FB 2339/2339 line deadlines, drops 0.
+
+### 12.10 BSRAM write-mode legality (rev 3.4) + a boundary bug the audit caught
+
+Rev 3.3 failed at PLACEMENT with the known project-wide Gowin gotcha
+(`PA2122: Not support (SP) WRITE_MODE = 2'b10`): `osc_reg_ram_dp`'s port-A
+read and write share one address net, so inference merged them into a
+single port with Verilog read-old semantics = WRITE_MODE 2'b10
+(read-before-write), which GW5A BSRAM rejects. Since the read-during-write
+value is proven don't-care for every consumer, the port-A read register is
+now gated `if (!a_we_i)` — output holds during writes, which is exactly
+WRITE_MODE 2'b00. `doc_cache_ram` / `doc_lu_ram` (separate address nets,
+the ensoniq_bsram SDPB idiom) were already legal.
+
+Freeze-edge audit for the gated read (the output now also holds during
+same-bank writes to OTHER addresses): harmless whenever the read address
+has been stable ≥2 cycles (frozen value = previous sample of the same
+address); the only dangerous edges are the service chain's
+address-changing edges, and no bank write-enable can be high during those
+states — EXCEPT one path the audit exposed as a REAL rev-3.3 bug
+independent of write modes: a host WRITE processed on the last idle cycle
+before a slot boundary leaves that bank's port-A address on the host
+target during OSC_START, so the synchronous read sampled at the
+START→LOAD_REGISTERS edge loads the WRONG oscillator's registers for one
+slot (wrong FC/volume/control — potentially a spurious mode change). The
+differential TB missed it because its host writes are slot-start
+synchronized. Fixed: `osc_idle` never processes host requests on the
+cycle_start cycle (the pending flag defers to the next idle window;
+same-slot application semantics preserved since the service chain always
+runs before the idle tail). This restores ≥1 cycle of address-stability
+margin at every chain sampling edge.
+
+VERIFICATION METHODOLOGY (upgraded, now the standard): synthesis PASS +
+netlist DFF census is necessary but NOT sufficient — BSRAM write-mode
+legality only surfaces at PnR. Every new RAM shape must survive a
+PnR-THROUGH probe: a tiny top instantiating the RAM (serialized I/O keeps
+pin count trivial), `run all` on the target part. The probe for all four
+doc5503_pipelined shapes (bank 8-bit, bank 24-bit, cache 64x140, lu
+32x12) passes placement + routing with zero PA2122: 12 BSRAM, only the
+probe's own shift register in fabric.
+
+Re-census after rev 3.4: unchanged — 1,621 DFF, 14 BSRAM. Full
+differential suite + rev-2 repro gate re-run: PASS on seeds 1/42/7777,
+host readback 38/38, FB 2339/2339, drops 0.
