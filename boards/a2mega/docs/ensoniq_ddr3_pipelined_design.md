@@ -735,3 +735,71 @@ Full suite re-run: PASS on seeds 1/42/7777 to the same standards, FB
 delta: 2 fewer total fetches (3152 vs 3154), isolated to the E1-change
 phase — redundant re-issues deduped by the one-cycle bookkeeping
 visibility; the comparator confirms zero consumed-sample impact.
+
+### 12.9 RAM inference ground truth (rev 3.3): GW5A has NO SSRAM
+
+Netlist analysis of the rev-3.1/3.2 placement failures produced two
+findings, both resolved here. Verification methodology lesson (now the
+standard): on Gowin, "Extracting RAM for identifier" is RECOGNITION, not
+MAPPING — the only trustworthy checks are a DFF census of the synthesized
+.vg netlist (count `^\s+DFF\w*` lines) and the SSRAM/BSRAM rows of the
+resource summary.
+
+1. `syn_ramstyle="distributed_ram"` on the 64/32-deep sync-read arrays
+   silently fell back to flip-flops (doc_cache_ram alone = 9,036 DFFs in
+   the failing netlists). Both arrays now carry
+   `syn_ramstyle="block_ram"` (mirrored from the main tree).
+
+2. The oscillator register banks were flip-flops too — and controlled
+   synthesis-only experiments prove this is NOT caused by anything in
+   doc5503_pipelined (the suspected extra read port does not exist; the
+   pipelined module reads the bank outputs in exactly the same 34 places
+   as the baseline):
+
+   | Experiment | Device | RAM16 | BSRAM | DFF |
+   |---|---|---|---|---|
+   | baseline doc5503 | GW2AR-18 (control) | 40 | 0 | 1,125 |
+   | baseline doc5503, UNMODIFIED | GW5AT-60B | **0** | 0 | **3,652** |
+   | doc5503_pipelined (pre-fix) | GW5AT-60B | 0 | 6 | 4,218 |
+   | direct RAM16SDP4 instantiation | GW5AT-60B | — | — | **ERROR RP0007: "There is no SSRAM resource in current device"** |
+
+   The GW5A (Arora V) family has NO distributed-RAM resource at all: the
+   a2n20v2 SSRAM contract is physically unsatisfiable on this device for
+   ANY module, including the baseline. The banks can only be RAM as
+   BSRAM (synchronous read).
+
+Rev 3.3 restructure (doc5503_pipelined only; the baseline keeps its
+proven GW2A idiom for the Tang Nano boards):
+
+- New `osc_reg_ram_dp`: 32 x DATA_WIDTH dual-port BSRAM. Port A serves
+  the FSM through the existing shared per-bank address register (write
+  timing unchanged; sync-read is transparent because the RAM samples
+  pre-edge register values). The control-read chain's three address
+  launches each move ONE STATE EARLIER (partner -> OSC_START, next ->
+  LOAD_REGISTERS, prev -> LOAD_PARTNER_CONTROL) so every datum lands in
+  the state that already consumed it; the curr_osc default covers
+  OSC_LOAD_REGISTERS' main-bank reads. Verified no consumer reads a bank
+  the cycle immediately after writing the same address.
+- Port B serves HOST reads with a dedicated persistent address register
+  (host_raddr_r): data becomes valid two clk_i after the request and
+  stays valid until the next host read, so the one-stage-delayed
+  device_response can consume it at ANY later invocation — no staleness
+  window, and zero interference with port-A addresses (the rev-3.2-era
+  analysis showed a shared-port host-read scheme has an unavoidable
+  address-clobber race with the load chain at slot boundaries).
+- The differential testbench gained a host-readback phase (38 register
+  reads compared between baseline and pipelined — the read path was
+  previously unexercised) and the jump-stale classifier now covers wrap
+  samples anywhere in the table's first line (failure mode #16's stale
+  can land on offset 1+, not only offset 0).
+
+Census after rev 3.3 (GW5AT-60B, synthesis-only):
+
+- doc5503_pipelined: **1,621 DFF** (vs 4,218 pre-fix, and vs 3,652 for
+  the BASELINE on this device — the pipelined module is now ~2,030 DFF
+  smaller than the module it replaces) and **14 BSRAM** (8 bank DPBs +
+  4 doc_cache_ram + 2 doc_lu_ram — true dual-port inference confirmed,
+  no duplication). Combined with the a2mega wavetable moving to DDR3,
+  total sound-subsystem BSRAM is 14 vs the 32 of ensoniq_bsram.
+- Sim: full suite + rev-2 repro gate re-run, PASS on seeds 1/42/7777,
+  host readback 38/38, FB 2339/2339 line deadlines, drops 0.
