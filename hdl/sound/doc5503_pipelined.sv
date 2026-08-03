@@ -846,6 +846,25 @@ module doc5503_pipelined #(
     // OSC_ACC with the post-update ACC's address (the normal case).
     reg [15:0] issue_addr_r;
 
+    // Staged issue-decision pipeline (rev 3.8 timing): the single-cycle
+    // cone curr_acc_r -> add -> mask -> barrel shift -> lookahead adds ->
+    // second shift -> lu compares -> issued_valid enables failed 54 MHz
+    // (-0.941 ns). Every input (curr_acc/fl/fh/rts/wtp) is stable from
+    // OSC_LOAD_REGISTERS onward and none is mutated mid-slot, so the
+    // derivation is staged across the three states before OSC_ACC:
+    //   LOAD_PARTNER : acc_next_r (add+mask), acc_next_ovf_r
+    //   LOAD_NEXT    : w1_addr_r (shift of acc_next_r),
+    //                  la_acc_r (two more adds + mask)
+    //   CONSUME      : la_addr_r (shift of la_acc_r)
+    // OSC_ACC then works register-to-register (12-bit compares only).
+    // Decisions land in the SAME states as before with the SAME values —
+    // slot-level semantics unchanged (sims bit-identical).
+    reg [23:0] acc_next_r;
+    reg        acc_next_ovf_r;
+    reg [23:0] la_acc_r;
+    reg [15:0] w1_addr_r;
+    reg [15:0] la_addr_r;
+
     reg host_request_pending_r = 1'b0;
     reg device_response_pending_r = 1'b0;
 
@@ -857,6 +876,11 @@ module doc5503_pipelined #(
             halt_zero_r <= 1'b0;
             halt_overflow_r <= 1'b0;
             issue_addr_r <= '0;
+            acc_next_r <= '0;
+            acc_next_ovf_r <= 1'b0;
+            la_acc_r <= '0;
+            w1_addr_r <= '0;
+            la_addr_r <= '0;
             consume_addr_r <= '0;
 
             host_request_pending_r <= 1'b0;
@@ -1416,9 +1440,13 @@ module doc5503_pipelined #(
     endtask: osc_load_registers
 
     task automatic osc_load_partner_control();
+        automatic logic [24:0] temp_acc_w = curr_acc_r + {curr_fh_r, curr_fl_r};
         partner_control_r <= ram_control_dout_w;
         // BSRAM mode: launch prev-control read; FF mode: baseline next
         ram_control_osc_r <= BANKS_IN_BSRAM ? (curr_osc_r - 1'b1) : (curr_osc_r + 1'b1);
+        // Issue-decision stage 1: post-update accumulator and overflow
+        acc_next_r <= temp_acc_w[23:0] & curr_acc_mask_w;
+        acc_next_ovf_r <= temp_acc_w[17 + curr_res_w];
         osc_state_r <= OSC_LOAD_NEXT_CONTROL;
     endtask: osc_load_partner_control
 
@@ -1430,6 +1458,12 @@ module doc5503_pipelined #(
         if (!BANKS_IN_BSRAM) begin
             ram_control_osc_r <= curr_osc_r - 1'b1;
         end
+        // Issue-decision stage 2: next-sample address; lookahead ACC
+        // (masking once after both adds is exact — see osc_acc's original
+        // note: the sum cannot cross the wrap boundary twice)
+        w1_addr_r <= wave_addr_f(acc_next_r);
+        la_acc_r <= 24'(acc_next_r + {curr_fh_r, curr_fl_r} + {curr_fh_r, curr_fl_r})
+                    & curr_acc_mask_w;
         osc_state_r <= OSC_CONSUME;
     endtask: osc_load_next_control
 
@@ -1451,6 +1485,10 @@ module doc5503_pipelined #(
         automatic logic entry_run_w = cache_src_run_r[entry_idx_w];
         automatic logic entry_match_w = (entry_tag_w == expected_line_w);
         automatic logic [7:0] entry_data_w = cram_rdata_r[8*lane_w +: 8];
+
+        // Issue-decision stage 3: lookahead address (barrel shift of the
+        // staged lookahead accumulator). Unconditional — inputs stable.
+        la_addr_r <= wave_addr_f(la_acc_r);
 
         if (!halt_w) begin
             // Default resume address for paths that skip OSC_ACC (zero-byte
@@ -1584,44 +1622,35 @@ module doc5503_pipelined #(
         // NEXT sample from the post-update accumulator and issue a fetch
         // only when it leaves the last-issued 32-bit word.
 
-        automatic logic [24:0] temp_acc = curr_acc_r + {curr_fh_r, curr_fl_r};
-        automatic int high_bit_w = 17 + curr_res_w;
-        automatic logic overflow = temp_acc[high_bit_w];
-        automatic logic [23:0] new_acc_w = temp_acc[23:0] & curr_acc_mask_w;
-        automatic logic [15:0] new_addr_w = wave_addr_f(new_acc_w);
-        // Lookahead: the walk address two further samples ahead. Masking
-        // once after both adds is exact here (FC <= 0xFFFF, acc mask >=
-        // 0x1FFFF, so the sum cannot cross the wrap boundary twice).
-        automatic logic [23:0] la_acc_w =
-            24'(new_acc_w + {curr_fh_r, curr_fl_r} + {curr_fh_r, curr_fl_r})
-            & curr_acc_mask_w;
-        automatic logic [15:0] la_addr_w = wave_addr_f(la_acc_w);
-        halt_overflow_r <= overflow;
+        // All operands staged in LP/LN/CONSUME (see the stage-pipeline
+        // comment): this state is register-to-register — 12-bit compares
+        // into the issued_valid/fetch-queue enables only.
+        halt_overflow_r <= acc_next_ovf_r;
         ram_acc_we_r <= 1'b1;
-        ram_acc_din_r <= new_acc_w;                             // wrap around address
-        issue_addr_r <= new_addr_w;
+        ram_acc_din_r <= acc_next_r;                            // wrap around address
+        issue_addr_r <= w1_addr_r;
 
-        if (overflow) begin
+        if (acc_next_ovf_r) begin
             // Whether the oscillator continues depends on the mode
             // (evaluated in OSC_HALT_ONE_SHOT_OR_ZERO_BYTE / OSC_RETRIGGER);
             // the fetch is issued there if it survives.
             osc_state_r <= OSC_HALT;
         end else begin
-            automatic logic [5:0] w1_idx_w = {curr_osc_r, new_addr_w[4]};
+            automatic logic [5:0] w1_idx_w = {curr_osc_r, w1_addr_r[4]};
             automatic logic w1_need_w = !issued_valid_r[w1_idx_w]
-                || (lu_sel_f(new_addr_w) != new_addr_w[15:4]);
+                || (lu_sel_f(w1_addr_r) != w1_addr_r[15:4]);
             if (w1_need_w) begin
                 // Crossing (or jump/flush refresh) NOW: needed by the next
                 // service slot — the 1-service-period path.
-                issue_running(curr_osc_r, new_addr_w);
+                issue_running(curr_osc_r, w1_addr_r);
             end else if (FETCH_LOOKAHEAD
-                         && (la_addr_w[15:4] == 12'(new_addr_w[15:4] + 12'd1))) begin
+                         && (la_addr_r[15:4] == 12'(w1_addr_r[15:4] + 12'd1))) begin
                 // Next-line prefetch, two samples ahead of the crossing.
                 // The +1-line guard keeps the target in the OPPOSITE cache
                 // slot (never evicts the line being consumed); larger skips
                 // fall back to the crossing path above. issue_running's
                 // per-slot check makes this idempotent.
-                issue_running(curr_osc_r, la_addr_w);
+                issue_running(curr_osc_r, la_addr_r);
             end
             osc_state_r <= OSC_IDLE;
         end
