@@ -457,17 +457,23 @@ module doc5503_pipelined #(
         .b_dout_o(ram_acc_hdout_w)
     );
 
-    // Current oscillator state, copied from the register file at the start of each cycle
-    reg [7:0] curr_fl_r;
-    reg [7:0] curr_fh_r;
-    reg [7:0] curr_vol_r;
-    reg [7:0] curr_wds_r;
-    reg [7:0] curr_wtp_r;
-    reg [7:0] curr_control_r;
-    reg [7:0] curr_rts_r;
-    reg [7:0] partner_control_r;
-    reg [7:0] next_control_r;
-    reg [7:0] prev_control_r;
+    // Current oscillator state, copied from the register file at the start of each cycle.
+    // syn_preserve: GowinSynthesis retimes these capture registers INTO the
+    // bank BSRAMs' output registers (netlist showed fl_ram's output port
+    // becoming curr_fl_r directly), which launches the ACC-add / issue-
+    // decision cones from a slow BSRAM Q and fails 54 MHz closure
+    // (-0.277 ns family fl_ram -> fq_*). These FFs ARE the intended
+    // fabric pipeline stage — keep them out of the primitives.
+    (* syn_preserve = 1 *) reg [7:0] curr_fl_r;
+    (* syn_preserve = 1 *) reg [7:0] curr_fh_r;
+    (* syn_preserve = 1 *) reg [7:0] curr_vol_r;
+    (* syn_preserve = 1 *) reg [7:0] curr_wds_r;
+    (* syn_preserve = 1 *) reg [7:0] curr_wtp_r;
+    (* syn_preserve = 1 *) reg [7:0] curr_control_r;
+    (* syn_preserve = 1 *) reg [7:0] curr_rts_r;
+    (* syn_preserve = 1 *) reg [7:0] partner_control_r;
+    (* syn_preserve = 1 *) reg [7:0] next_control_r;
+    (* syn_preserve = 1 *) reg [7:0] prev_control_r;
 
     reg [4:0] curr_osc_r;
     wire curr_osc_odd_w = curr_osc_r[0];
@@ -492,7 +498,7 @@ module doc5503_pipelined #(
     wire prev_halt_w = prev_control_r[0];
     wire [1:0] prev_mode_w = prev_control_r[2:1];
 
-    reg [23:0] curr_acc_r;
+    (* syn_preserve = 1 *) reg [23:0] curr_acc_r;
     reg signed [17:0] curr_output_r;
 
     // =========================================================================
@@ -589,7 +595,7 @@ module doc5503_pipelined #(
 
     // Last-issued line address for a given (this-oscillator) byte address
     function automatic logic [11:0] lu_sel_f(input logic [15:0] addr);
-        return addr[4] ? lu_rdata1_w : lu_rdata0_w;
+        return addr[4] ? lu_rdata1_r : lu_rdata0_r;
     endfunction
 
     // Burst-beat assembly: the memory client returns each 16-byte line as
@@ -627,6 +633,21 @@ module doc5503_pipelined #(
     reg [11:0] dirty_b_lo_r, dirty_b_hi_r;
     reg        dirty_b_v_r;
     wire [11:0] flush_line_w = cache_flush_addr_i[15:4];
+
+    // Fabric pipeline registers on the BSRAM read outputs (timing: BSRAM
+    // clock-to-out must feed exactly one fabric FF, not the issue/consume
+    // comb cones). Functionally free: both sources are stable at least
+    // one cycle before their first consumer (see the rev-3.1 cache-read
+    // and rev-3.2 lu-read scheduling analyses); a retire landing in the
+    // extra cycle simply means the coherent {tag, line} pair from one
+    // cycle earlier is consumed — the same benign-stale classes as before.
+    reg [139:0] cram_rdata_r;
+    reg [11:0]  lu_rdata0_r, lu_rdata1_r;
+    always @(posedge clk_i) begin
+        cram_rdata_r <= cram_rdata_w;
+        lu_rdata0_r  <= lu_rdata0_w;
+        lu_rdata1_r  <= lu_rdata1_w;
+    end
 
     // Once-per-scan generation rotation point
     wire dirty_rotate_w = cycle_start_r && (cycle_state_r == CYCLE_REFRESH_1);
@@ -1392,11 +1413,11 @@ module doc5503_pipelined #(
         automatic logic [11:0] expected_line_w = expected_addr_w[15:4];
         automatic logic [3:0]  lane_w = expected_addr_w[3:0];
         automatic logic [5:0]  entry_idx_w = {curr_osc_r, expected_line_w[0]};
-        automatic logic [11:0] entry_tag_w = cram_rdata_w[139:128];
+        automatic logic [11:0] entry_tag_w = cram_rdata_r[139:128];
         automatic logic entry_valid_w = cache_valid_r[entry_idx_w];
         automatic logic entry_run_w = cache_src_run_r[entry_idx_w];
         automatic logic entry_match_w = (entry_tag_w == expected_line_w);
-        automatic logic [7:0] entry_data_w = cram_rdata_w[8*lane_w +: 8];
+        automatic logic [7:0] entry_data_w = cram_rdata_r[8*lane_w +: 8];
 
         if (!halt_w) begin
             // Default resume address for paths that skip OSC_ACC (zero-byte
@@ -1408,9 +1429,9 @@ module doc5503_pipelined #(
             // lu RAMs at curr_osc_r — compare against the dirty ranges and
             // clear only hit slots (the refetch issues at THIS slot's
             // OSC_ACC, so fresh data is consumed within <= 2 periods).
-            if (dirty_hit_f(lu_rdata0_w))
+            if (dirty_hit_f(lu_rdata0_r))
                 issued_valid_r[{curr_osc_r, 1'b0}] <= 1'b0;
-            if (dirty_hit_f(lu_rdata1_w))
+            if (dirty_hit_f(lu_rdata1_r))
                 issued_valid_r[{curr_osc_r, 1'b1}] <= 1'b0;
 
             if (entry_valid_w && (entry_match_w || entry_run_w)) begin

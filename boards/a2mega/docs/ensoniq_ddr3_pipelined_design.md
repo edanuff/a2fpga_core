@@ -912,3 +912,47 @@ above FB, gating disabled):
   traffic collapses, so the FB holds its deadlines from below. The
   fb_fetch_active_i port remains (tie 0), harmless and available if a
   future board wants the old priority order.
+
+### 12.12 Timing closure (rev 3.6): BSRAM-Q launch paths
+
+Rev 3.5 failed 54 MHz closure (worst -0.277 ns, dominant family
+`fl_ram/mem -> fq_src_r_*`). Netlist analysis showed the mechanism was
+subtler than a missing pipeline stage: GowinSynthesis RETIMED the
+LOAD-chain capture registers INTO the bank BSRAMs' output registers (the
+fl_ram instance's output port literally became curr_fl_r), collapsing the
+RTL's intended two-stage read path to one — so the ACC add, wave_addr_f,
+lu compares and fetch-queue enable cones all launched from a slow BSRAM
+clock-to-out (~2.5 ns) instead of a fabric FF.
+
+Fix (no interface or scheduling change):
+
+- `(* syn_preserve = 1 *)` on all eleven LOAD-chain capture registers
+  (curr_fl/fh/vol/wds/wtp/control/rts/acc, partner/next/prev_control):
+  these ARE the pipeline stage; the attribute stops the absorption.
+  Verified in the re-synthesized netlist: the banks' outputs are module
+  wires again and the capture registers are fabric DFFs.
+- Fabric re-registration of the remaining BSRAM read outputs before any
+  deep logic: cram_rdata_r (140 b) and lu_rdata0/1_r (12 b each),
+  sampled every cycle. Functionally free by the margins already proven
+  in §12.7/§12.8 scheduling analyses (cache data correct one state
+  before OSC_CONSUME; lu data correct from the slot's 2nd cycle, first
+  used ~7 cycles in). Hazard re-check: a retire landing in the extra
+  cycle means the coherent one-cycle-older {tag, line} pair is consumed
+  — the same benign counted classes; the lu write path already had no
+  same-slot read-after-write (§12.8), and +1 cycle of read lag keeps
+  that invariant (next read of an oscillator's bookkeeping is a full
+  scan away).
+- Result by construction: every BSRAM Q in the module feeds exactly one
+  fabric FF (bank port A -> curr_*_r; cram/lu -> pipeline regs; bank
+  port B -> the shallow host data_o mux, flagged as the only residual
+  BSRAM-Q cone — trivial depth). All deep cones launch from fabric FFs
+  with the full 18.5 ns.
+- Census: 1,744 DFF (+73 for the pipeline FFs) / 14 BSRAM.
+- On the secondary family (ddr3_port_cdc req FIFO, -0.258): concur it is
+  congestion collateral — that path is pre-existing and outside this
+  module; flag it back if it survives this fix.
+
+Full suite + repro gate re-run: PASS on seeds 1/42/7777, results
+bit-identical to rev 3.5 (same deterministic fetch counts and counters —
+the re-registration consumes the same stable values one RAM-cycle
+earlier). Host readback 38/38; FB 2383/2383; drops 0; lint clean.
