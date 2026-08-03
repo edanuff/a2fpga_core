@@ -956,3 +956,62 @@ Full suite + repro gate re-run: PASS on seeds 1/42/7777, results
 bit-identical to rev 3.5 (same deterministic fetch counts and counters —
 the re-registration consumes the same stable values one RAM-cycle
 earlier). Host readback 38/38; FB 2383/2383; drops 0; lint clean.
+
+### 12.13 The audible-distortion audit (rev 3.7): swap-on-arrival + the
+### FF-bank discrimination knob
+
+Hardware A/B: baseline+BSRAM wavetable perfect; rev-3.6 pipelined build
+audibly distorted with video clean and ALL visible memory counters clean
+(stale=0, drop=0, traffic normal). Two co-equal hypotheses were audited.
+
+**Consume-hole hypothesis (dirty-range invalidate-then-refetch): REFUTED
+as stated, but the audit found the real emitter nearby.** The rev-3.5
+dirty-range hit clears only issued_valid — issue-side bookkeeping that
+the consume path never consults; cache_valid_r is cleared NOWHERE except
+reset, and retire replaces {tag, line} atomically. Dirty-hit lines were
+already served stale until replacement arrived (fetch-then-replace). The
+REAL emitter: the two cache_src_run_r CLEAR paths (host control write
+with halt=0; halted-service downgrade). A control write with halt=0 to a
+RUNNING oscillator — per-frame retriggers/CA rewrites in real titles —
+reset ACC and cleared src_run, so the next consume prime-missed:
+one 0x80 pop per write, invisible on the stale/drop counters. Several
+voices at frame rate = sustained crackle matching the symptom exactly.
+These clears were rev-1 relics: their hazard (stale 0x00 consumed at
+restart -> spurious instant halt) has been structurally covered since the
+line cache introduced the consume invariant — halt-on-zero fires ONLY on
+tag-matched entries (a match guarantees genuine memory content of the
+expected address); every mismatched consume is zero-suppressed and
+counted stale. Rev 3.7 removes both clears: every restart-window consume
+now serves the stale line (documented staleness class) until fresh f(0)
+data lands. The only permitted 0x80 is a true cold start.
+
+**Register-path hypothesis (rev-3.3/3.4 bank restructure, rev-3.6
+re-registration): audited, not reproduced in sim, knob delivered
+anyway.** New TB phase P11 sweeps volume writes, CA rewrites and
+retriggers across EVERY cycle offset of the service slot (58 offsets x 3
+write classes), hitting the boundary and all three chain-launch points,
+during multi-oscillator playback: C-record streams bit-identical (288
+events), zero volume-application skew events, all W diffs in the
+documented classes. Additionally P10 runs 12 frames of realistic
+frame-periodic writes (6-voice volume sweeps + 4 retriggers on running
+oscillators + concurrent sample-RAM streaming) during all-32 playback.
+Because a sim-invisible synthesis-level divergence cannot be excluded,
+rev 3.7 adds the hardware-discriminating parameter **BANKS_IN_BSRAM**
+(default 1): 0 falls back to rev-3.2-style async-read FF banks
+(osc_reg_ram from doc5503.sv — that file must stay in the a2mega file
+list) with the ORIGINAL baseline chain launches and 1-cycle shared-port
+host reads, while keeping all cache/invalidation/timing work. Cost of
+the fallback: ~2.8k FF (placement headroom exists: 26.3k used of the
+28.6k that placed before). Both modes run the full differential suite in
+run.sh and produce bit-identical results (same 80 classified diffs, same
+deterministic 4,598 fetches).
+
+New hard assertion: **prime_miss == 0 for the entire run** — this TB
+primes everything, so any 0x80 outside true cold start fails the suite.
+Results (seeds 1/42/7777, both bank modes): prime_miss=0, stale/drop
+counters 0 at run end (retrigger stale-consumes counted then wrapped),
+FB 2943-2944/2943-2944 line deadlines, host readback 38/38, 62
+SYNC_RESTART one-sample stale consumes at retriggers (replacing what
+were 62 audible 0x80 pops), C-records identical everywhere. Census
+(BSRAM mode): 1,745 DFF / 14 BSRAM. Interface unchanged; prime_miss is
+being restored to the hardware overlay for confirmation.

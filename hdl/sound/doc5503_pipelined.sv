@@ -169,11 +169,18 @@
 //     0x80 for one sample, halt-on-zero suppressed. (The real 5503 emits
 //     exactly this centerline sample at a swap-mode switch — see
 //     R. Belmont's notes in MAME es5503.cpp.)
-//   * Every halted service slot clears the entry's src_run bit, and a
-//     host control write that clears the halt bit does the same: after a
-//     halt, only tag-matched data may be consumed, so a stale 0x00
-//     terminator can never instantly re-halt a freshly started
-//     oscillator.
+//   * SWAP-ON-ARRIVAL (rev 3.7): NO path may clear a cache entry's
+//     validity or consume-eligibility while replacement data is still in
+//     flight. Dirty-range hits, restart ACC resets and cooldown re-primes
+//     all leave the entry valid and consumable (serving the documented
+//     one-to-two-period-stale data) until retire atomically replaces
+//     {tag, line}. The ONLY permitted 0x80 is a true cold start (no valid
+//     data ever fetched, or a prefetch-sourced entry whose tag mismatches
+//     after a table retarget). The stale-0x00 restart hazard is covered
+//     structurally: halt-on-zero fires ONLY on tag-matched entries —
+//     a match guarantees the byte is genuine memory content of the
+//     expected address — and every mismatched consume is zero-suppressed
+//     and counted in dbg_stale_fetch_o.
 //
 // INTERFACE (differences from baseline doc5503):
 //
@@ -221,7 +228,16 @@ module doc5503_pipelined #(
     parameter bit FETCH_LOOKAHEAD = 1'b1,
     // Max service slots the oldest queued fetch may be held by the
     // framebuffer-activity gate before issuing anyway.
-    parameter int FB_GATE_ESCAPE_SLOTS = 8
+    parameter int FB_GATE_ESCAPE_SLOTS = 8,
+    // 1 (default): oscillator register banks in dual-port BSRAM with the
+    //   rev-3.3 shifted read chain and port-B host reads (GW5A has no
+    //   SSRAM; FF banks cost ~2.8k flip-flops there).
+    // 0: rev-3.2-style fallback — banks as async-read FF/LUT arrays
+    //   (osc_reg_ram from doc5503.sv) with the ORIGINAL baseline read
+    //   timing (chain launches and 1-cycle host reads). Hardware
+    //   discrimination knob: register handling is then baseline-
+    //   equivalent while all cache/invalidation/timing work is kept.
+    parameter bit BANKS_IN_BSRAM = 1'b1
 ) (
     input clk_i,
     input reset_n_i,
@@ -367,95 +383,80 @@ module doc5503_pipelined #(
     wire [7:0]  ram_rts_hdout_w;
     wire [23:0] ram_acc_hdout_w;
 
-    // Instantiate the RAMs for each oscillator register (shared with doc5503.sv)
-
-    // $00-1F : Frequency Low Register
-    osc_reg_ram_dp fl_ram (
-        .clk_i(clk_i),
-        .a_addr_i(ram_fl_osc_r),
-        .a_we_i(ram_fl_we_r),
-        .a_din_i(ram_fl_din_r),
-        .a_dout_o(ram_fl_dout_w),
-        .b_addr_i(host_raddr_r),
-        .b_dout_o(ram_fl_hdout_w)
-    );
-
-    // $20-3F : Frequency High Register
-    osc_reg_ram_dp fh_ram (
-        .clk_i(clk_i),
-        .a_addr_i(ram_fh_osc_r),
-        .a_we_i(ram_fh_we_r),
-        .a_din_i(ram_fh_din_r),
-        .a_dout_o(ram_fh_dout_w),
-        .b_addr_i(host_raddr_r),
-        .b_dout_o(ram_fh_hdout_w)
-    );
-
-    // $40-5F : Volume Register
-    osc_reg_ram_dp vol_ram (
-        .clk_i(clk_i),
-        .a_addr_i(ram_vol_osc_r),
-        .a_we_i(ram_vol_we_r),
-        .a_din_i(ram_vol_din_r),
-        .a_dout_o(ram_vol_dout_w),
-        .b_addr_i(host_raddr_r),
-        .b_dout_o(ram_vol_hdout_w)
-    );
-
-    // $60-7F : Waveform Data Sample Register
-    osc_reg_ram_dp wds_ram (
-        .clk_i(clk_i),
-        .a_addr_i(ram_wds_osc_r),
-        .a_we_i(ram_wds_we_r),
-        .a_din_i(ram_wds_din_r),
-        .a_dout_o(ram_wds_dout_w),
-        .b_addr_i(host_raddr_r),
-        .b_dout_o(ram_wds_hdout_w)
-    );
-
-    // $80-9F : Waveform Table Pointer Register
-    osc_reg_ram_dp wtp_ram (
-        .clk_i(clk_i),
-        .a_addr_i(ram_wtp_osc_r),
-        .a_we_i(ram_wtp_we_r),
-        .a_din_i(ram_wtp_din_r),
-        .a_dout_o(ram_wtp_dout_w),
-        .b_addr_i(host_raddr_r),
-        .b_dout_o(ram_wtp_hdout_w)
-    );
-
-    // $A0-BF : Control Register
-    osc_reg_ram_dp control_ram (
-        .clk_i(clk_i),
-        .a_addr_i(ram_control_osc_r),
-        .a_we_i(ram_control_we_r),
-        .a_din_i(ram_control_din_r),
-        .a_dout_o(ram_control_dout_w),
-        .b_addr_i(host_raddr_r),
-        .b_dout_o(ram_control_hdout_w)
-    );
-
-    // $C0-DF : Resolution Table Size Register
-    osc_reg_ram_dp rts_ram (
-        .clk_i(clk_i),
-        .a_addr_i(ram_rts_osc_r),
-        .a_we_i(ram_rts_we_r),
-        .a_din_i(ram_rts_din_r),
-        .a_dout_o(ram_rts_dout_w),
-        .b_addr_i(host_raddr_r),
-        .b_dout_o(ram_rts_hdout_w)
-    );
-
-    // $E0-FF : Oscillator Accumulator Register
-    osc_reg_ram_dp #(.DATA_WIDTH(24)) acc_ram (
-        .clk_i(clk_i),
-        .a_addr_i(ram_acc_osc_r),
-        .a_we_i(ram_acc_we_r),
-        .a_din_i(ram_acc_din_r),
-        .a_dout_o(ram_acc_dout_w),
-        .b_addr_i(host_raddr_r),
-        .b_dout_o(ram_acc_hdout_w)
-    );
+    // Instantiate the oscillator register banks.
+    // BANKS_IN_BSRAM=1: dual-port BSRAM (osc_reg_ram_dp, defined below).
+    // BANKS_IN_BSRAM=0: async-read FF/LUT banks (osc_reg_ram — requires
+    // doc5503.sv in the file list) with hdout aliased to the shared-port
+    // dout, restoring baseline-identical register-read behavior.
+    generate
+    if (BANKS_IN_BSRAM) begin : gen_banks_bsram
+        osc_reg_ram_dp fl_ram (
+            .clk_i(clk_i), .a_addr_i(ram_fl_osc_r), .a_we_i(ram_fl_we_r),
+            .a_din_i(ram_fl_din_r), .a_dout_o(ram_fl_dout_w),
+            .b_addr_i(host_raddr_r), .b_dout_o(ram_fl_hdout_w));
+        osc_reg_ram_dp fh_ram (
+            .clk_i(clk_i), .a_addr_i(ram_fh_osc_r), .a_we_i(ram_fh_we_r),
+            .a_din_i(ram_fh_din_r), .a_dout_o(ram_fh_dout_w),
+            .b_addr_i(host_raddr_r), .b_dout_o(ram_fh_hdout_w));
+        osc_reg_ram_dp vol_ram (
+            .clk_i(clk_i), .a_addr_i(ram_vol_osc_r), .a_we_i(ram_vol_we_r),
+            .a_din_i(ram_vol_din_r), .a_dout_o(ram_vol_dout_w),
+            .b_addr_i(host_raddr_r), .b_dout_o(ram_vol_hdout_w));
+        osc_reg_ram_dp wds_ram (
+            .clk_i(clk_i), .a_addr_i(ram_wds_osc_r), .a_we_i(ram_wds_we_r),
+            .a_din_i(ram_wds_din_r), .a_dout_o(ram_wds_dout_w),
+            .b_addr_i(host_raddr_r), .b_dout_o(ram_wds_hdout_w));
+        osc_reg_ram_dp wtp_ram (
+            .clk_i(clk_i), .a_addr_i(ram_wtp_osc_r), .a_we_i(ram_wtp_we_r),
+            .a_din_i(ram_wtp_din_r), .a_dout_o(ram_wtp_dout_w),
+            .b_addr_i(host_raddr_r), .b_dout_o(ram_wtp_hdout_w));
+        osc_reg_ram_dp control_ram (
+            .clk_i(clk_i), .a_addr_i(ram_control_osc_r), .a_we_i(ram_control_we_r),
+            .a_din_i(ram_control_din_r), .a_dout_o(ram_control_dout_w),
+            .b_addr_i(host_raddr_r), .b_dout_o(ram_control_hdout_w));
+        osc_reg_ram_dp rts_ram (
+            .clk_i(clk_i), .a_addr_i(ram_rts_osc_r), .a_we_i(ram_rts_we_r),
+            .a_din_i(ram_rts_din_r), .a_dout_o(ram_rts_dout_w),
+            .b_addr_i(host_raddr_r), .b_dout_o(ram_rts_hdout_w));
+        osc_reg_ram_dp #(.DATA_WIDTH(24)) acc_ram (
+            .clk_i(clk_i), .a_addr_i(ram_acc_osc_r), .a_we_i(ram_acc_we_r),
+            .a_din_i(ram_acc_din_r), .a_dout_o(ram_acc_dout_w),
+            .b_addr_i(host_raddr_r), .b_dout_o(ram_acc_hdout_w));
+    end else begin : gen_banks_ff
+        osc_reg_ram fl_ram (
+            .clk_i(clk_i), .osc_i(ram_fl_osc_r), .we_i(ram_fl_we_r),
+            .data_i(ram_fl_din_r), .data_o(ram_fl_dout_w));
+        osc_reg_ram fh_ram (
+            .clk_i(clk_i), .osc_i(ram_fh_osc_r), .we_i(ram_fh_we_r),
+            .data_i(ram_fh_din_r), .data_o(ram_fh_dout_w));
+        osc_reg_ram vol_ram (
+            .clk_i(clk_i), .osc_i(ram_vol_osc_r), .we_i(ram_vol_we_r),
+            .data_i(ram_vol_din_r), .data_o(ram_vol_dout_w));
+        osc_reg_ram wds_ram (
+            .clk_i(clk_i), .osc_i(ram_wds_osc_r), .we_i(ram_wds_we_r),
+            .data_i(ram_wds_din_r), .data_o(ram_wds_dout_w));
+        osc_reg_ram wtp_ram (
+            .clk_i(clk_i), .osc_i(ram_wtp_osc_r), .we_i(ram_wtp_we_r),
+            .data_i(ram_wtp_din_r), .data_o(ram_wtp_dout_w));
+        osc_reg_ram control_ram (
+            .clk_i(clk_i), .osc_i(ram_control_osc_r), .we_i(ram_control_we_r),
+            .data_i(ram_control_din_r), .data_o(ram_control_dout_w));
+        osc_reg_ram rts_ram (
+            .clk_i(clk_i), .osc_i(ram_rts_osc_r), .we_i(ram_rts_we_r),
+            .data_i(ram_rts_din_r), .data_o(ram_rts_dout_w));
+        osc_reg_ram #(.DATA_WIDTH(24)) acc_ram (
+            .clk_i(clk_i), .osc_i(ram_acc_osc_r), .we_i(ram_acc_we_r),
+            .data_i(ram_acc_din_r), .data_o(ram_acc_dout_w));
+        assign ram_fl_hdout_w      = ram_fl_dout_w;
+        assign ram_fh_hdout_w      = ram_fh_dout_w;
+        assign ram_vol_hdout_w     = ram_vol_dout_w;
+        assign ram_wds_hdout_w     = ram_wds_dout_w;
+        assign ram_wtp_hdout_w     = ram_wtp_dout_w;
+        assign ram_control_hdout_w = ram_control_dout_w;
+        assign ram_rts_hdout_w     = ram_rts_dout_w;
+        assign ram_acc_hdout_w     = ram_acc_dout_w;
+    end
+    endgenerate
 
     // Current oscillator state, copied from the register file at the start of each cycle.
     // syn_preserve: GowinSynthesis retimes these capture registers INTO the
@@ -1139,12 +1140,18 @@ module doc5503_pipelined #(
                                 ram_acc_osc_r <= host_addr_r[4:0];
                                 ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
                                 ram_acc_we_r <= 1'b1;
-                                // Pipelined variant: any un-halting control
-                                // write invalidates RUN-sourced data (both
-                                // slots) so a stale in-flight byte cannot be
-                                // consumed (tag check governs from here on).
-                                cache_src_run_r[{host_addr_r[4:0], 1'b0}] <= 1'b0;
-                                cache_src_run_r[{host_addr_r[4:0], 1'b1}] <= 1'b0;
+                                // Rev 3.7: NO src_run invalidation here.
+                                // Retriggers of RUNNING oscillators (per-
+                                // frame on real titles) must consume the
+                                // stale cached line until fresh f(0) data
+                                // arrives — the old clear degraded every
+                                // such write to an audible 0x80 prime miss
+                                // (invisible on stale/drop counters). The
+                                // rev-1 stale-0x00 hazard is structurally
+                                // covered by the consume invariant:
+                                // halt-on-zero fires ONLY on tag-matched
+                                // entries; every mismatched consume is
+                                // zero-suppressed and counted stale.
                             end else begin
                                 // Host halt entry: schedule one prime so
                                 // the next note-on starts sample-exact.
@@ -1161,15 +1168,32 @@ module doc5503_pipelined #(
                     endcase
                 end
             end else begin
-                // Host read access to oscillator registers: latch the
-                // port-B read address (it persists until the next host
-                // read) and arm the response one cycle later than the
-                // baseline so the synchronous port-B data is valid when
-                // device_response consumes it — at X+2 or ANY later
-                // invocation (no staleness window, and the FSM's port-A
-                // addresses are never touched).
-                host_raddr_r <= host_addr_r[4:0];
-                host_read_wait_r <= 1'b1;
+                if (BANKS_IN_BSRAM) begin
+                    // Host read access: latch the port-B read address (it
+                    // persists until the next host read) and arm the
+                    // response one cycle later than the baseline so the
+                    // synchronous port-B data is valid when
+                    // device_response consumes it — at X+2 or ANY later
+                    // invocation (no staleness window, and the FSM's
+                    // port-A addresses are never touched).
+                    host_raddr_r <= host_addr_r[4:0];
+                    host_read_wait_r <= 1'b1;
+                end else begin
+                    // FF banks: baseline-original shared-port read with
+                    // 1-cycle response.
+                    device_response_pending_r <= 1'b1;
+                    if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
+                        case (host_addr_r[7:5])
+                            3'b000: ram_fl_osc_r <= host_addr_r[4:0];
+                            3'b001: ram_fh_osc_r <= host_addr_r[4:0];
+                            3'b010: ram_vol_osc_r <= host_addr_r[4:0];
+                            3'b011: ram_wds_osc_r <= host_addr_r[4:0];
+                            3'b100: ram_wtp_osc_r <= host_addr_r[4:0];
+                            3'b101: ram_control_osc_r <= host_addr_r[4:0];
+                            3'b110: ram_rts_osc_r <= host_addr_r[4:0];
+                        endcase
+                    end
+                end
             end
 
         end
@@ -1361,13 +1385,16 @@ module doc5503_pipelined #(
         halt_zero_r <= 1'b0;
         halt_overflow_r <= 1'b0;
 
-        // Synchronous-read banks (GW5A has no SSRAM): each control-bank
-        // read address is launched ONE STATE EARLIER than in the baseline
-        // so the registered-read data lands in the same state the baseline
+        // Synchronous-read banks (BSRAM mode): each control-bank read
+        // address is launched ONE STATE EARLIER than in the baseline so
+        // the registered-read data lands in the same state the baseline
         // consumed it. The RAM samples pre-edge register values, so the
         // curr_osc default (asserted since slot start) still yields the
         // CURRENT oscillator's registers during OSC_LOAD_REGISTERS.
-        ram_control_osc_r <= partner_osc_w;
+        // FF mode (BANKS_IN_BSRAM=0): baseline-original launch points.
+        if (BANKS_IN_BSRAM) begin
+            ram_control_osc_r <= partner_osc_w;
+        end
 
         osc_state_r <= OSC_LOAD_REGISTERS;
     endtask: osc_start
@@ -1382,21 +1409,27 @@ module doc5503_pipelined #(
         curr_rts_r <= ram_rts_dout_w;                // Resolution/table size
         curr_acc_r <= ram_acc_dout_w;                // Accumulator
 
-        ram_control_osc_r <= curr_osc_r + 1'b1;      // launch next-control read
+        // BSRAM mode: launch next-control read; FF mode: baseline partner
+        ram_control_osc_r <= BANKS_IN_BSRAM ? (curr_osc_r + 1'b1) : partner_osc_w;
 
         osc_state_r <= OSC_LOAD_PARTNER_CONTROL;
     endtask: osc_load_registers
 
     task automatic osc_load_partner_control();
         partner_control_r <= ram_control_dout_w;
-        ram_control_osc_r <= curr_osc_r - 1'b1;      // launch prev-control read
+        // BSRAM mode: launch prev-control read; FF mode: baseline next
+        ram_control_osc_r <= BANKS_IN_BSRAM ? (curr_osc_r - 1'b1) : (curr_osc_r + 1'b1);
         osc_state_r <= OSC_LOAD_NEXT_CONTROL;
     endtask: osc_load_partner_control
 
     task automatic osc_load_next_control();
         next_control_r <= ram_control_dout_w;
-        // prev-control read already launched in OSC_LOAD_PARTNER_CONTROL;
-        // its data lands during OSC_CONSUME (prev_control_r load there)
+        // BSRAM mode: prev-control read already launched in
+        // OSC_LOAD_PARTNER_CONTROL (data lands during OSC_CONSUME);
+        // FF mode: baseline launches it here.
+        if (!BANKS_IN_BSRAM) begin
+            ram_control_osc_r <= curr_osc_r - 1'b1;
+        end
         osc_state_r <= OSC_CONSUME;
     endtask: osc_load_next_control
 
@@ -1472,13 +1505,12 @@ module doc5503_pipelined #(
             end
 
             // Pipelined additions:
-            // 1. Downgrade RUN-sourced data in BOTH slots — after a halt,
-            //    only tag-matched data may be consumed (a stale byte, worst
-            //    case a stale 0x00 terminator, must not play at restart).
-            cache_src_run_r[{curr_osc_r, 1'b0}] <= 1'b0;
-            cache_src_run_r[{curr_osc_r, 1'b1}] <= 1'b0;
-
-            // 2. Prime-once: if a priming event is pending (halt entry,
+            // (Rev 3.7: the former RUN-source downgrade on halted slots is
+            // REMOVED — a restart before the prime retires now consumes
+            // the stale line, zero-suppressed on tag mismatch, instead of
+            // emitting 0x80. Swap-on-arrival: cached data stays
+            // consumable until its replacement actually lands.)
+            // Prime-once: if a priming event is pending (halt entry,
             //    WTP/RTS write, cache flush, reset) and the post-flush
             //    cooldown has expired, fetch the word at mem[wtp | 0] —
             //    the first word every un-halt path will need (all un-halt

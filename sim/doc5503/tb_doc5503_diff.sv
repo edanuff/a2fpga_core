@@ -166,6 +166,11 @@ module tb_doc5503_diff;
 `else
     localparam bit PIPE_LOOKAHEAD = 1'b1;
 `endif
+`ifdef FFBANKS_MODE
+    localparam bit PIPE_BANKS_BSRAM = 1'b0;   // rev-3.2-style FF banks
+`else
+    localparam bit PIPE_BANKS_BSRAM = 1'b1;
+`endif
 
     localparam DOC_GRANT   = 20;   // 29 ddr: LOAD+CMD+WAIT(20)+4xRESP+DONE (4-beat burst)
     localparam FB_GRANT    = 35;   // 52 ddr: burst8 (2x CMD+WAIT + 8 RESP)
@@ -364,7 +369,8 @@ module tb_doc5503_diff;
     wire [15:0] dbg_fetch_count;
 
     doc5503_pipelined #(
-        .FETCH_LOOKAHEAD(PIPE_LOOKAHEAD)
+        .FETCH_LOOKAHEAD(PIPE_LOOKAHEAD),
+        .BANKS_IN_BSRAM(PIPE_BANKS_BSRAM)
     ) dut_pipe (
         .clk_i(clk),
         .reset_n_i(reset_n),
@@ -502,6 +508,23 @@ module tb_doc5503_diff;
             end else begin
                 hostread_ok = hostread_ok + 1;
             end
+        end
+    endtask
+
+    // Host register write launched at a controlled cycle OFFSET within a
+    // service slot — sweeps the write phase across every alignment of the
+    // slot pipeline (boundary, chain launch points, idle tail).
+    task doc_wr_at(input [7:0] a, input [7:0] d, input integer off);
+        begin
+            @(posedge clk);
+            while (!dut_base.cycle_start_r) @(posedge clk);
+            repeat (off) @(posedge clk);
+            $fdisplay(fe_f, "R %0d %02x %02x", slot, a, d);
+            @(negedge clk);
+            addr_i = a; data_i = d; cs_n = 0; we_n = 0;
+            @(negedge clk);
+            cs_n = 1; we_n = 1;
+            @(posedge clk);
         end
     endtask
 
@@ -781,18 +804,60 @@ module tb_doc5503_diff;
         end
         wait_slots(200);                // drain: dirty ranges rotate clear
 
-        // ================= P10: stale-repeat stress =====================
+        // ================= P10: frame-periodic host writes + GLU stream =
+        // Realistic title behavior (Arkanoid-class): every "frame",
+        // volume sweeps on several oscillators plus RETRIGGERS (control
+        // writes with halt=0) on RUNNING oscillators, concurrent with
+        // continued sample-RAM streaming — all during all-32 playback.
+        // Swap-on-arrival requirement: ZERO prime misses here; retrigger
+        // consumes serve the stale line until fresh f(0) data lands.
         phase_mark(10);
+        for (k = 0; k < 12; k = k + 1) begin
+            // volume sweep on six oscillators
+            doc_wr(8'h40, 8'(8'hF0 - k*8'h08));
+            doc_wr(8'h4A, 8'(8'h30 + k*8'h08));
+            doc_wr(8'h4B, 8'(8'h40 + k*8'h04));
+            doc_wr(8'h4C, 8'(8'hC0 - k*8'h08));
+            doc_wr(8'h4D, 8'(8'h80 ^ (k[7:0]*8'h11)));
+            doc_wr(8'h4E, 8'(8'h60 + k*8'h05));
+            // retriggers on four RUNNING oscillators
+            doc_wr(8'hA9, 8'h00);
+            doc_wr(8'hAA, 8'h00);
+            doc_wr(8'hAB, 8'h00);
+            doc_wr(8'hAC, 8'h00);
+            // concurrent sample-RAM stream (arbitrary phase)
+            glu_wr(16'h1B00 + (k[15:0]*16'h20), 8'h80 | k[6:0]);
+            glu_wr(16'h1B10 + (k[15:0]*16'h20), 8'h90 | k[6:0]);
+            wait_slots(1400);            // ~one "frame"
+        end
+
+        // ================= P11: exhaustive write-phase sweep ============
+        // Volume writes and retriggers launched at EVERY cycle offset
+        // within the slot period, hitting the boundary and all three
+        // chain-launch points — the register-path corruption audit.
+        phase_mark(11);
+        for (k = 0; k < 58; k = k + 1) begin
+            doc_wr_at(8'h41, 8'(8'h80 + k[7:0]), k);   // volume, running osc1
+            wait_slots(3);
+            doc_wr_at(8'hA0, 8'h20, k);                // CA-rewrite/retrigger, RUNNING osc0
+            wait_slots(3);
+            doc_wr_at(8'hA9, 8'h00, k);                // retrigger, running osc9
+            wait_slots(4);
+        end
+        wait_slots(100);
+
+        // ================= P12: stale-repeat stress =====================
+        phase_mark(12);
         doc_wr(8'hE1, 8'h02);           // osc_max = 1 → 4-slot scan (4.47 us)
         wait_slots(50);
         outlier_pct = 10;               // 10% of DOC grants take ~6.1 us
         wait_slots(3000);
         outlier_pct = 0;                // recovery: must re-sync
         wait_slots(50);
-        phase_mark(11);
+        phase_mark(13);
         wait_slots(400);
 
-        phase_mark(12);
+        phase_mark(14);
         $display("FINAL: prime_miss=%0d stale_fetch=%0d fetch_drop=%0d fetches=%0d fb_lines=%0d fb_miss=%0d",
                  dbg_prime_miss, dbg_stale_fetch, dbg_fetch_drop,
                  dbg_fetch_count, fb_lines, fb_miss);
