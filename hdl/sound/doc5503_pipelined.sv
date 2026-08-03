@@ -237,7 +237,18 @@ module doc5503_pipelined #(
     //   timing (chain launches and 1-cycle host reads). Hardware
     //   discrimination knob: register handling is then baseline-
     //   equivalent while all cache/invalidation/timing work is kept.
-    parameter bit BANKS_IN_BSRAM = 1'b1
+    parameter bit BANKS_IN_BSRAM = 1'b1,
+    // Post-reset response-drain window (clk_i cycles of wave_data_ready_i
+    // silence required before the first fetch may issue). The module can
+    // reset (system/Apple reset) while the arbiter/CDC still carry an
+    // in-flight burst whose tail beats arrive AFTER reset deasserts; if
+    // any such orphan were counted into a new request's beat group the
+    // line framing would slip PERMANENTLY (every sample plausible-but-
+    // wrong, all counters clean). The quiet window reloads on every
+    // straggler, so issues start only once the response path is provably
+    // empty. 1024 clk ~= 19 us, far beyond any real tail. 0 disables
+    // (testbench failure-reproduction only).
+    parameter int RESET_DRAIN_CLKS = 1024
 ) (
     input clk_i,
     input reset_n_i,
@@ -282,7 +293,8 @@ module doc5503_pipelined #(
     output [7:0]  dbg_prime_miss_o,  // Consumed 0x80 because no primed data was available
     output [7:0]  dbg_stale_fetch_o, // Consumed a src_run word whose tag mismatched (late fetch or ACC rewrite)
     output [7:0]  dbg_fetch_drop_o,  // Fetch request dropped: internal FIFO full (should stay 0)
-    output [15:0] dbg_fetch_count_o  // Total fetches issued (traffic verification)
+    output [15:0] dbg_fetch_count_o, // Total fetches issued (traffic verification)
+    output [7:0]  dbg_frame_resync_o // Beat-framing orphans discarded / resyncs (0 after boot)
 );
 
     // Unused legacy input (see interface notes)
@@ -601,8 +613,21 @@ module doc5503_pipelined #(
 
     // Burst-beat assembly: the memory client returns each 16-byte line as
     // four 32-bit beats (one wave_data_ready_i pulse each, in order).
+    // FRAMING IS SELF-SYNCHRONIZING (rev 3.9): the beat counter belongs
+    // to the request-FIFO head only — pulses with no in-flight head are
+    // ORPHANS (discarded + counted), the counter resyncs to 0 whenever
+    // the in-flight queue is empty, and after reset no fetch issues
+    // until the response path has been quiet for RESET_DRAIN_CLKS (so a
+    // pre-reset burst tail can never be counted into a post-reset line).
     reg [1:0]   beat_cnt_r;
     reg [95:0]  beat_accum_r;
+
+    localparam int DRAIN_W = (RESET_DRAIN_CLKS <= 1) ? 1
+                             : $clog2(RESET_DRAIN_CLKS + 1);
+    reg [DRAIN_W-1:0] drain_cnt_r;
+    reg               drain_done_r;
+    reg [7:0]         dbg_frame_resync_r;
+    assign dbg_frame_resync_o = dbg_frame_resync_r;
 
     // Slots of GLU-write silence before halted re-priming resumes
     localparam int COOLDOWN_W = (PRIME_COOLDOWN_SLOTS <= 1) ? 1
@@ -906,6 +931,9 @@ module doc5503_pipelined #(
             gate_forced_r <= 1'b0;
             beat_cnt_r <= '0;
             beat_accum_r <= '0;
+            drain_cnt_r <= DRAIN_W'(RESET_DRAIN_CLKS);
+            drain_done_r <= (RESET_DRAIN_CLKS == 0);
+            dbg_frame_resync_r <= '0;
             lu_we0_r <= 1'b0;
             lu_we1_r <= 1'b0;
             lu_waddr_r <= '0;
@@ -1026,6 +1054,29 @@ module doc5503_pipelined #(
             // the cache (src_run downgrade on a halted slot, host clear)
             // win same-cycle conflicts on the same entry.
             // -----------------------------------------------------------------
+            // Post-reset drain: hold fetch issue until the response path
+            // has been quiet for the full window (reloaded by stragglers).
+            if (!drain_done_r) begin
+                if (wave_data_ready_i)
+                    drain_cnt_r <= DRAIN_W'(RESET_DRAIN_CLKS);
+                else if (drain_cnt_r != 0)
+                    drain_cnt_r <= drain_cnt_r - 1'd1;
+                else
+                    drain_done_r <= 1'b1;
+            end
+
+            // Beat-framing self-synchronization: pulses without an
+            // in-flight head are orphans — discard and count them; and
+            // whenever the in-flight queue is empty the beat counter
+            // resyncs to 0 (a non-zero count there is itself a slip).
+            if (wave_data_ready_i && (fq_ret_ptr_r == fq_issue_ptr_r)) begin
+                dbg_frame_resync_r <= dbg_frame_resync_r + 8'd1;
+            end
+            if ((fq_ret_ptr_r == fq_issue_ptr_r) && (beat_cnt_r != 2'd0)) begin
+                beat_cnt_r <= 2'd0;
+                dbg_frame_resync_r <= dbg_frame_resync_r + 8'd1;
+            end
+
             if (wave_data_ready_i && (fq_ret_ptr_r != fq_issue_ptr_r)) begin
                 if (beat_cnt_r != 2'd3) begin
                     beat_accum_r[32*beat_cnt_r +: 32] <= wave_data_word_i;
@@ -1049,7 +1100,7 @@ module doc5503_pipelined #(
             // up to two.
             // -----------------------------------------------------------------
             if ((fq_issue_ptr_r != fq_wr_ptr_r) && wave_available_i && !wave_rd_o
-                && gate_open_w) begin
+                && gate_open_w && drain_done_r) begin
                 wave_rd_o <= 1'b1;
                 wave_address_o <= {fq_line_r[fq_issue_ptr_r], 4'b0};
                 fq_issue_ptr_r <= fq_issue_ptr_r + 3'd1;

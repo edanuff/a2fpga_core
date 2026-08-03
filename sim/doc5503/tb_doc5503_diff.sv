@@ -171,6 +171,11 @@ module tb_doc5503_diff;
 `else
     localparam bit PIPE_BANKS_BSRAM = 1'b1;
 `endif
+`ifdef NODRAIN_MODE
+    localparam int PIPE_DRAIN_CLKS = 0;       // framing-slip repro: no drain
+`else
+    localparam int PIPE_DRAIN_CLKS = 1024;
+`endif
 
     localparam DOC_GRANT   = 20;   // 29 ddr: LOAD+CMD+WAIT(20)+4xRESP+DONE (4-beat burst)
     localparam FB_GRANT    = 35;   // 52 ddr: burst8 (2x CMD+WAIT + 8 RESP)
@@ -329,13 +334,16 @@ module tb_doc5503_diff;
             end
         end
 
-        // Response delivery to client: 4 beats, one per clk, single-file
+        // Response delivery to client: 4 beats, single-file, with random
+        // 0-2 idle cycles between beats (imperfect-delivery realism —
+        // grouped but not necessarily back-to-back)
         if (resp_at >= 0 && cyc >= resp_at && resp_beats > 0) begin
             p_q_word <= resp_line[31:0];
             resp_line <= {32'h0, resp_line[127:32]};
             p_ready <= 1;
             resp_beats <= resp_beats - 1;
             if (resp_beats == 1) resp_at <= -1;
+            else resp_at <= cyc + 1 + ({$random(rseed)} % 3);
         end
 
         // DOC request accept (client fired only when p_avail was high)
@@ -367,10 +375,12 @@ module tb_doc5503_diff;
     wire [7:0] p_data_o;
     wire [7:0] dbg_prime_miss, dbg_stale_fetch, dbg_fetch_drop;
     wire [15:0] dbg_fetch_count;
+    wire [7:0] dbg_frame_resync;
 
     doc5503_pipelined #(
         .FETCH_LOOKAHEAD(PIPE_LOOKAHEAD),
-        .BANKS_IN_BSRAM(PIPE_BANKS_BSRAM)
+        .BANKS_IN_BSRAM(PIPE_BANKS_BSRAM),
+        .RESET_DRAIN_CLKS(PIPE_DRAIN_CLKS)
     ) dut_pipe (
         .clk_i(clk),
         .reset_n_i(reset_n),
@@ -400,7 +410,8 @@ module tb_doc5503_diff;
         .dbg_prime_miss_o(dbg_prime_miss),
         .dbg_stale_fetch_o(dbg_stale_fetch),
         .dbg_fetch_drop_o(dbg_fetch_drop),
-        .dbg_fetch_count_o(dbg_fetch_count)
+        .dbg_fetch_count_o(dbg_fetch_count),
+        .dbg_frame_resync_o(dbg_frame_resync)
     );
 
     // ---------------------------------------------------------------------
@@ -420,8 +431,49 @@ module tb_doc5503_diff;
 
     localparam [1:0] ST_OSC = 2'b01;
     localparam [1:0] ST_R1  = 2'b11;
+    localparam [1:0] ST_R0  = 2'b10;
 
     reg logging = 0;
+
+    // -----------------------------------------------------------------
+    // ABSOLUTE CADENCE EQUALITY (permanent assertion class).
+    // The stream comparator aligns by service-slot INDEX and provably
+    // cannot see a wall-clock cadence divergence (slots stretched or
+    // slipped => bit-identical values at a different emission rate =
+    // pitch shift on silicon). Assert, EVERY clk_i cycle, that both
+    // DUTs' slot machines are in lockstep — slot starts, slot state,
+    // oscillator sequencing, sub-slot clk_en count — and that the
+    // mix-output update strobes (REFRESH_0, timer==15) coincide exactly.
+    // This is strictly stronger than recorded timestamp lists.
+    // -----------------------------------------------------------------
+    integer cadence_errs = 0;
+    integer mix_upd_count = 0;
+    wire b_mixupd_w = (dut_base.cycle_state_r == ST_R0)
+                      && (dut_base.cycle_timer_r < 'd16)
+                      && (dut_base.cycle_timer_r[3:0] == 4'hF);
+    wire p_mixupd_w = (dut_pipe.cycle_state_r == ST_R0)
+                      && (dut_pipe.cycle_timer_r < 'd16)
+                      && (dut_pipe.cycle_timer_r[3:0] == 4'hF);
+    always @(posedge clk) begin
+        if (reset_n) begin
+            if (dut_base.cycle_start_r !== dut_pipe.cycle_start_r
+             || dut_base.cycle_state_r !== dut_pipe.cycle_state_r
+             || dut_base.curr_osc_r    !== dut_pipe.curr_osc_r
+             || dut_base.clk_count_r   !== dut_pipe.clk_count_r
+             || b_mixupd_w !== p_mixupd_w) begin
+                if (cadence_errs < 10)
+                    $display("CADENCE MISMATCH at cyc %0d slot %0d (start %b/%b state %b/%b osc %0d/%0d cnt %0d/%0d mix %b/%b)",
+                             cyc, slot,
+                             dut_base.cycle_start_r, dut_pipe.cycle_start_r,
+                             dut_base.cycle_state_r, dut_pipe.cycle_state_r,
+                             dut_base.curr_osc_r, dut_pipe.curr_osc_r,
+                             dut_base.clk_count_r, dut_pipe.clk_count_r,
+                             b_mixupd_w, p_mixupd_w);
+                cadence_errs = cadence_errs + 1;
+            end
+            if (b_mixupd_w) mix_upd_count = mix_upd_count + 1;
+        end
+    end
 
     always @(posedge clk) begin
         if (logging) begin
@@ -857,12 +909,54 @@ module tb_doc5503_diff;
         phase_mark(13);
         wait_slots(400);
 
+        // ================= P14: RESET WITH IN-FLIGHT BURST ==============
+        // The orphan-tail scenario: force one very slow DOC grant, strike
+        // reset mid-burst, and let the model (whose arbiter/CDC state
+        // survives module reset, as on silicon) deliver the four tail
+        // beats long after reset deasserts — after post-reset prime
+        // issues would already be queued without the drain gate. With
+        // RESET_DRAIN_CLKS the orphans are discarded+counted and framing
+        // stays clean; with the NODRAIN repro build the tail is counted
+        // into the first post-reset request = permanent entry skew.
         phase_mark(14);
+        $fdisplay(fe_f, "FRSYNC_PRE %0d", dbg_frame_resync);
+        outlier_pct = 100; outlier_len = 400;   // next grant: ~7.4 us
+        wait (srv_kind == 3'd2);
+        outlier_pct = 0;
+        repeat (58) @(posedge clk);             // mid-burst
+        logging = 0;                            // suppress half-reset log artifacts
+        repeat (2) @(posedge clk);
+        reset_n = 0;
+        repeat (12) @(posedge clk);
+        reset_n = 1;
+        wait_slots(4);                          // past CYCLE_RESET's init-write slot
+        logging = 1;
+        wait_slots(56);                         // covers drain window + tail
+        // Minimal re-init (post-reset both DUTs are factory-state).
+        // Deliberately WITHOUT any prime_pending-setting write for osc0
+        // (no control-halt, no WTP/RTS — the reset defaults are already
+        // wtp=0/rts=0): a re-prime would heal an orphan-corrupted line
+        // before playback and mask the framing defect this phase exists
+        // to detect. The boot prime (prime_pending resets to all-ones)
+        // is the one that must be delivered uncorrupted.
+        doc_wr(8'hE1, 8'h12);
+        doc_wr(8'h00, 8'h00); doc_wr(8'h20, 8'h02); doc_wr(8'h40, 8'hFF);
+        wait_slots(30);
+        doc_wr(8'hA0, 8'h00);                   // osc0 plays again
+        wait_slots(2000);
+        $display("FRSYNC after reset phase: %0d (orphan beats discarded)",
+                 dbg_frame_resync);
+        $fdisplay(fe_f, "FRSYNC %0d", dbg_frame_resync);
+
+        phase_mark(15);
         $display("FINAL: prime_miss=%0d stale_fetch=%0d fetch_drop=%0d fetches=%0d fb_lines=%0d fb_miss=%0d",
                  dbg_prime_miss, dbg_stale_fetch, dbg_fetch_drop,
                  dbg_fetch_count, fb_lines, fb_miss);
         $fdisplay(fe_f, "COUNTERS %0d %0d %0d",
                   dbg_prime_miss, dbg_stale_fetch, dbg_fetch_drop);
+        $display("CADENCE: %0d mix-update strobes, %0d lockstep mismatches",
+                 mix_upd_count, cadence_errs);
+        $fdisplay(fe_f, "CADENCE %0d %0d", mix_upd_count, cadence_errs);
         $fdisplay(fe_f, "FBTOTAL %0d %0d", fb_lines, fb_miss);
 
         $fclose(fb_f);

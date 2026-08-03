@@ -1053,3 +1053,64 @@ BIT-IDENTICAL to rev 3.7 (same 80 classified diffs, same deterministic
 4,598 fetches, prime_miss = 0, drops = 0, FB all deadlines, host
 readback 38/38). Census: 1,814 DFF (+69 staging FFs) / 14 BSRAM. Lint
 clean. Interface unchanged.
+
+### 12.15 Cadence + beat-framing audit (rev 3.9)
+
+**Cadence audit (secondary check, now permanent):** the slot machine is
+free-running by construction — the clk_en/8 counter and slot advance
+never consult the FSM, the timing-generator blocks are BYTE-IDENTICAL to
+the baseline's (verified programmatically), the cycle_start preemption
+dispatch is identical, and the pipelined FSM contains ZERO wait states
+(the baseline's OSC_HANDLE_DATA memory wait is the only one in either
+design; the pipelined chain is max 12 states of a ~60-clk slot). New
+permanent assertion class: every clk_i cycle, both DUTs' slot machines
+must be in lockstep (cycle_start, cycle_state, curr_osc, clk_count) and
+the mix-update strobes must coincide — 6,314 scans, 0 mismatches, held
+across a mid-run reset. A wall-clock cadence divergence (the class the
+slot-indexed stream comparator provably cannot see) is now impossible to
+miss in sim.
+
+**Beat-framing audit (was the lead hypothesis):** the line assembly
+counts four wave_data_ready_i pulses with no framing marker.
+Findings: (a) mid-stream, the CDC delivers exactly 4 in-order beats per
+request (arbiter pushes 4 per grant; drain free-runs; our <=8 in-flight
+beats cannot overflow the 16-deep response FIFO), and the TB response
+model now delivers beats with random 0-2 idle-cycle gaps (imperfect-
+delivery realism) — handled. (b) The pre-existing retire guard
+(fq_ret != fq_issue) already silently discards orphans arriving with an
+EMPTY in-flight queue, so a reset-orphan tail causes a TRANSIENT
+corruption (the first post-reset request retires with the pre-reset
+burst's data under its own tag — plausible-but-wrong samples, all
+counters clean), not a permanent slip: the skew self-bounds at the next
+queue-empty gap. Rev 3.9 closes even the transient window and makes
+framing self-synchronizing and OBSERVABLE:
+- RESET_DRAIN_CLKS (default 1024 ~= 19 us): after reset, no fetch issues
+  until the response path has been quiet for the full window (reloaded
+  by stragglers) — a pre-reset burst tail can never be counted into a
+  post-reset line. Un-issued FIFO entries do not open the retire window
+  (the guard uses the ISSUE pointer), so orphans during drain are
+  discarded even with requests already queued.
+- Orphan pulses and empty-queue beat-counter resyncs are counted in a
+  new dbg_frame_resync_o[7:0] (expected 0 in steady state; smallcounts
+  only around reset).
+- New TB phase P14: reset asserted mid-burst with an orchestrated slow
+  grant so the 4-beat tail lands ~7 us post-reset. Fixed build: 4
+  orphans discarded, post-reset stream bit-clean, cadence lockstep held
+  across the reset. NODRAIN repro build (RESET_DRAIN_CLKS=0, run.sh-
+  gated): the tail fills the boot prime — 16 plausible-but-wrong samples
+  with ALL COUNTERS CLEAN, the field signature in miniature. The repro
+  scenario deliberately avoids prime_pending-setting re-init writes
+  (control-halt/WTP/RTS re-primes heal the corruption — which also
+  bounds the real-world exposure of this defect).
+
+**Double-issue audit:** at most one enqueue per slot per oscillator by
+construction (prime path and ACC path are in mutually exclusive states;
+w1/lookahead is an else-if; dirty hits clear bookkeeping but never
+enqueue; per-slot issued bookkeeping dedupes crossings). Per-frame fetch
+rate is observable via dbg_fetch_count_o (16-bit) for the overlay.
+
+Verdict on the field failure: the RTL cadence is clean and the framing
+defect found is transient-at-reset, not the persistent from-first-note
+distortion. The co-simulation with the REAL sound_glu/CDC/arbiter RTL
+(§12.16) supersedes the synthetic port model as the primary rig for the
+remaining hunt.

@@ -37,3 +37,15 @@ echo "=== rev-3 differential suite (FF-bank fallback, BANKS_IN_BSRAM=0) ==="
 iverilog -g2012 -DFFBANKS_MODE -o tb_ffbanks.vvp $SRCS
 vvp tb_ffbanks.vvp
 python3 compare.py
+
+echo "=== framing-slip reproduction (NODRAIN_MODE: reset drain disabled) ==="
+iverilog -g2012 -DNODRAIN_MODE -o tb_nodrain.vvp $SRCS
+vvp tb_nodrain.vvp > nodrain_run.log 2>&1 || true
+if python3 compare.py > nodrain_cmp.log 2>&1; then
+    echo "FRAMING REPRO FAILED: expected the post-reset orphan tail to slip"
+    echo "line framing (comparator should reject the post-reset stream)"
+    exit 1
+else
+    echo "FRAMING REPRO OK: without the drain gate the orphan tail corrupts"
+    grep -E "UNCLASSIFIED|RESULT" nodrain_cmp.log | tail -3
+fi
