@@ -40,7 +40,7 @@ import sys
 from collections import defaultdict
 
 SCAN_WINDOW = 40   # slots; loose upper bound on one service period
-STRESS_PHASES = {10, 11}
+STRESS_PHASES = {12, 13}
 ALL32_PHASE = 8  # all-32-oscillator FB-contention phase (traffic assertion)
 GLU_WINDOW = 100  # slots; line-cache write visibility is <= 2 service
                   # periods (dirty-detect <=1, fresh consume <=2): 2 x 34
@@ -203,12 +203,18 @@ def main():
             pd, pv, pa = p
 
             if bv != pv:
-                # volume difference — only acceptable as AM fallout of an
-                # accepted SYNC_RESTART on the modulator (osc-1) recently
+                # volume difference — acceptable as (a) AM fallout of an
+                # accepted SYNC_RESTART on the modulator (osc-1), or (b)
+                # a host volume write to this oscillator applied on the
+                # other side of this slot's register-load point (sub-slot
+                # application knife edge, exercised by the phase sweep)
                 if any((rs, osc - 1) in sync_restarts and 0 <= s - rs <= SCAN_WINDOW
                        for rs in range(max(0, s - SCAN_WINDOW), s + 1)):
                     stats["SYNC_AM_VOL"] += 1
                     details.append(f"  W osc{osc} slot{s} ph{ph}: AM vol fallout base={b} pipe={p}")
+                elif any(0 <= s - ws <= 2 and (wr & 0x1F) == osc and wv in (bv, pv)
+                         for (ws, wr, wv) in regw if 0x40 <= wr <= 0x5F):
+                    stats["HOST_APPLY_SKEW"] += 1
                 else:
                     fail("volume differs")
                 continue
@@ -382,7 +388,7 @@ def main():
         for n in sorted(fbm):
             print(f"    interval ending at mark {n}: {fbm[n]}")
         for n, misses in fbm.items():
-            if misses and n != 11:   # only the stress interval may miss
+            if misses and n != 13:   # only the stress interval may miss
                 print(f"** FB misses outside stress interval (mark {n}: "
                       f"{misses}) ** FAIL")
                 fails += 1
@@ -398,13 +404,20 @@ def main():
     if counters:
         print(f"DUT counters: prime_miss={counters[0]} stale_fetch={counters[1]} "
               f"fetch_drop={counters[2]}")
-        drop_pre_stress = countp.get(10, (0, 0, 0))[2]
+        drop_pre_stress = countp.get(12, (0, 0, 0))[2]
         if drop_pre_stress != 0:
             print(f"** fetch drops before stress phase ({drop_pre_stress}) ** FAIL")
             fails += 1
-        if 12 in countp and 11 in countp and countp[12][2] != countp[11][2]:
+        if 14 in countp and 13 in countp and countp[14][2] != countp[13][2]:
             print(f"** fetch drops during recovery phase "
-                  f"({countp[12][2] - countp[11][2]}) ** FAIL")
+                  f"({countp[14][2] - countp[13][2]}) ** FAIL")
+            fails += 1
+        # Swap-on-arrival hard assertion: the ONLY permitted 0x80 is a
+        # true cold start; this TB primes everything, so prime_miss must
+        # be exactly zero across the whole run (incl. retrigger storms).
+        if counters[0] != 0:
+            print(f"** prime_miss = {counters[0]} (must be 0: no consume "
+                  f"hole may open outside true cold start) ** FAIL")
             fails += 1
 
     if details:

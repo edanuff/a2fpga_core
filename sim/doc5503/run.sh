@@ -14,7 +14,7 @@ SRCS="../../hdl/sound/doc5503.sv ../../hdl/sound/doc5503_pipelined.sv tb_doc5503
 
 echo "=== rev-2 failure reproduction (REV2_MODE + nogate) ==="
 iverilog -g2012 -DREV2_MODE -o tb_rev2repro.vvp $SRCS
-vvp tb_rev2repro.vvp +nogate | tee repro_run.log | grep -E "FINAL|PHASE 10|PHASE 11"
+vvp tb_rev2repro.vvp +nogate | tee repro_run.log | grep -E "FINAL|PHASE 12|PHASE 13"
 python3 - <<'EOF'
 miss = 0
 for ln in open("repro_run.log"):
@@ -28,8 +28,12 @@ if miss < 200:
 print(f"REPRO OK: rev-2-class traffic causes {miss} FB line-deadline misses")
 EOF
 
-echo "=== rev-3 differential suite ==="
+echo "=== rev-3 differential suite (BSRAM banks) ==="
 iverilog -g2012 -o tb_doc5503_diff.vvp $SRCS
 vvp tb_doc5503_diff.vvp
+python3 compare.py
 
+echo "=== rev-3 differential suite (FF-bank fallback, BANKS_IN_BSRAM=0) ==="
+iverilog -g2012 -DFFBANKS_MODE -o tb_ffbanks.vvp $SRCS
+vvp tb_ffbanks.vvp
 python3 compare.py
