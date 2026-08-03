@@ -1015,3 +1015,41 @@ SYNC_RESTART one-sample stale consumes at retriggers (replacing what
 were 62 audible 0x80 pops), C-records identical everywhere. Census
 (BSRAM mode): 1,745 DFF / 14 BSRAM. Interface unchanged; prime_miss is
 being restored to the hardware overlay for confirmation.
+
+### 12.14 Staged issue decision (rev 3.8): the curr_acc -> issued_valid cone
+
+Rev 3.7 failed closure structurally (158 endpoints, worst -0.941 ns),
+dominant family curr_acc_r -> issued_valid_r[*]: OSC_ACC evaluated, in
+one cycle, the 25-bit ACC add, mask, a variable barrel shift
+(wave_addr_f), two further lookahead adds, a SECOND barrel shift, and
+the lu/lookahead compares into the 64 issued_valid clock-enables.
+
+Fix: stage the derivation across the three FSM states preceding OSC_ACC
+— legal because every input (curr_acc/fl/fh/rts/wtp) is loaded at
+OSC_LOAD_REGISTERS and none is mutated mid-slot (the only mid-slot
+curr_* writes are curr_control_r at HALT_OS and curr_wds_r at CONSUME,
+neither an input to this chain — rev-3.4 hazard discipline re-checked):
+
+- OSC_LOAD_PARTNER_CONTROL: acc_next_r = (acc + FC) & mask, plus the
+  overflow bit (one add + mask).
+- OSC_LOAD_NEXT_CONTROL: w1_addr_r = wave_addr_f(acc_next_r) (one
+  barrel shift) and la_acc_r = (acc_next + 2FC) & mask (two adds; the
+  single final mask is exact per the original wrap argument).
+- OSC_CONSUME: la_addr_r = wave_addr_f(la_acc_r) (one barrel shift),
+  staged unconditionally so the SYNC_AM-odd path (which skips OSC_MIX)
+  sees it too.
+- OSC_ACC is now register-to-register: acc RAM write data, overflow
+  branch, and the crossing/lookahead decisions consume staged FFs with
+  only 12-bit compares (lu match; la == w1+1 guard) in the cone — an
+  estimated 4-5 LUT levels versus the former add + two-barrel-shift
+  chain. Decisions land in the SAME states with the SAME values, so
+  slot-level semantics are unchanged.
+- The dirty-range compares (rev 3.5) already launch from the registered
+  lu_rdata0/1_r at OSC_CONSUME (shallow); their visibility window is
+  untouched (<= 2 service periods).
+
+Verification: full suite (both bank modes) and seeds 1/42/7777 —
+BIT-IDENTICAL to rev 3.7 (same 80 classified diffs, same deterministic
+4,598 fetches, prime_miss = 0, drops = 0, FB all deadlines, host
+readback 38/38). Census: 1,814 DFF (+69 staging FFs) / 14 BSRAM. Lint
+clean. Interface unchanged.
