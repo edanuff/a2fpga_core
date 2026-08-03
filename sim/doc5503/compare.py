@@ -83,6 +83,9 @@ def parse_events(path):
     fbm = {}      # mark n -> FB line-deadline misses during the preceding phase
     fbtotal = None
     hostread = None
+    cadence = None
+    frsync_pre = None
+    frsync = None
     counters = None
     with open(path) as f:
         for ln in f:
@@ -106,16 +109,23 @@ def parse_events(path):
                 fbtotal = (int(t[1]), int(t[2]))
             elif t[0] == "HOSTREAD":
                 hostread = (int(t[1]), int(t[2]))
+            elif t[0] == "CADENCE":
+                cadence = (int(t[1]), int(t[2]))
+            elif t[0] == "FRSYNC_PRE":
+                frsync_pre = int(t[1])
+            elif t[0] == "FRSYNC":
+                frsync = int(t[1])
             elif t[0] == "COUNTERS":
                 counters = tuple(int(x) for x in t[1:4])
-    return glu, regw, phases, countp, counters, traffic, fbm, fbtotal, hostread
+    return (glu, regw, phases, countp, counters, traffic, fbm, fbtotal,
+            hostread, cadence, frsync_pre, frsync)
 
 
 def main():
     base = parse_log("base.log")
     pipe = parse_log("pipe.log")
-    (glu, regw, phases, countp, counters,
-     traffic, fbm, fbtotal, hostread) = parse_events("events.log")
+    (glu, regw, phases, countp, counters, traffic, fbm, fbtotal,
+     hostread, cadence, frsync_pre, frsync) = parse_events("events.log")
 
     phase_starts = sorted(phases.items(), key=lambda kv: kv[1])
 
@@ -394,6 +404,26 @@ def main():
                 fails += 1
     if fbtotal:
         print(f"FB totals: {fbtotal[0]} lines, {fbtotal[1]} missed")
+
+    if cadence is not None:
+        print(f"Cadence: {cadence[0]} mix-update strobes, {cadence[1]} lockstep mismatches")
+        if cadence[1] != 0 or cadence[0] == 0:
+            print("** cadence lockstep violated (or no mix strobes) ** FAIL")
+            fails += 1
+    else:
+        print("** no CADENCE record in events.log ** FAIL")
+        fails += 1
+
+    if frsync_pre is not None:
+        print(f"Frame resyncs: {frsync_pre} before the reset phase, "
+              f"{frsync} after (orphan tail discarded)")
+        if frsync_pre != 0:
+            print("** frame resyncs before the reset phase ** FAIL")
+            fails += 1
+        if frsync is not None and frsync == 0:
+            print("** reset phase produced no orphan discards — "
+                  "scenario did not exercise the tail window ** FAIL")
+            fails += 1
 
     if hostread is not None:
         print(f"Host readback: {hostread[0]} ok, {hostread[1]} mismatches")
