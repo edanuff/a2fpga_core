@@ -49,10 +49,14 @@ and downstream:
 ```
 +5V ──► U5  TLV1117-33 (LDO)  ──► D8 SCHOTTKY 20V 2A ──► +3V3        (p.3)
 +5V ──► 74ALVC164245  VCC(B)  (Apple-II-side of the bus transceivers) (p.2)
-+5V ──► Tang Mega SOM (BTB pins 93/94)
++5V ──► Tang Mega SOM, BTB2 connector pins 93/94                        (p.6)
 +5V ──► J1 USB-A VBUS         (the card *sources* 5 V to a downstream USB device)
-+3V3 ─► 74ALVC164245 VCC(A), ESP32-S3-MINI-1-N8 pin 3, SOM (BTB pins 45/46), LSF0108PW VREF_A
++3V3 ─► 74ALVC164245 VCC(A), ESP32-S3-MINI-1-N8 pin 3, LSF0108PW VREF_A
++3V3 ─► Tang Mega SOM, BTB2 connector pins 45/46                        (p.6)
 ```
+
+The SOM has no supply of its own — **all** FPGA power comes from the carrier's `+5V`/`+3V3`
+nets, so the SOM is powered whenever either source is present.
 
 **Consequences (INFERRED, but from an unambiguous topology):**
 
