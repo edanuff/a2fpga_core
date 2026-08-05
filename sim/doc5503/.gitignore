@@ -2,3 +2,6 @@
 *.log
 *.vcd
 repro_run.log
+obj_dir/
+cosim_run.log
+nodrain_*.log
