@@ -5,34 +5,34 @@
 1. PnR Messages
 
   <Report Title>: PnR Report
-  <Design File>: /Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/elated-mccarthy-0b684e/boards/a2mega/impl/gwsynthesis/a2mega.vg
-  <Physical Constraints File>: /Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/elated-mccarthy-0b684e/boards/a2mega/hdl/a2mega.cst
-  <Timing Constraints File>: /Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/elated-mccarthy-0b684e/boards/a2mega/hdl/a2mega.sdc
+  <Design File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2mega/impl/gwsynthesis/a2mega.vg
+  <Physical Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2mega/hdl/a2mega.cst
+  <Timing Constraints File>: /Users/edanuff/GitHub/a2fpga_core/boards/a2mega/hdl/a2mega.sdc
   <Tool Version>: V1.9.12.01
   <Part Number>: GW5AT-LV60PG484AC1/I0
   <Device>: GW5AT-60
   <Device Version>: B
-  <Created Time>:Fri Jul 10 18:52:43 2026
+  <Created Time>:Mon Aug  3 22:08:50 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 36s, Elapsed time = 0h 0m 44s
-    Placement Phase 1: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
-    Placement Phase 2: CPU time = 0h 1m 24s, Elapsed time = 0h 1m 36s
-    Placement Phase 3: CPU time = 0h 0m 18s, Elapsed time = 0h 0m 18s
-    Total Placement: CPU time = 0h 2m 21s, Elapsed time = 0h 2m 43s
+    Placement Phase 0: CPU time = 0h 0m 50s, Elapsed time = 0h 1m 1s
+    Placement Phase 1: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 6s
+    Placement Phase 2: CPU time = 0h 3m 0s, Elapsed time = 0h 3m 42s
+    Placement Phase 3: CPU time = 0h 2m 3s, Elapsed time = 0h 2m 39s
+    Total Placement: CPU time = 0h 5m 59s, Elapsed time = 0h 7m 28s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.01s, Elapsed time = 0h 0m 0.01s
-    Routing Phase 1: CPU time = 0h 0m 53s, Elapsed time = 0h 0m 54s
-    Routing Phase 2: CPU time = 0h 0m 0.309s, Elapsed time = 0h 0m 0.31s
+    Routing Phase 0: CPU time = 0h 0m 0.037s, Elapsed time = 0h 0m 0.05s
+    Routing Phase 1: CPU time = 0h 2m 44s, Elapsed time = 0h 3m 28s
+    Routing Phase 2: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 54s, Elapsed time = 0h 0m 54s
+    Total Routing: CPU time = 0h 2m 45s, Elapsed time = 0h 3m 29s
  Generate output files:
-    CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+    CPU time = 0h 0m 16s, Elapsed time = 0h 0m 18s
 
- Total Time and Memory Usage: CPU time = 0h 3m 19s, Elapsed time = 0h 3m 40s, Peak memory usage = 2626MB
+ Total Time and Memory Usage: CPU time = 0h 9m 0s, Elapsed time = 0h 11m 15s, Peak memory usage = 3326MB
 
 
 3. Resource Usage Summary
@@ -40,19 +40,19 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 24607/59904                         |  42%
-    --LUT,ALU,ROM16           | 24607(22559 LUT, 2024 ALU, 24 ROM16)| -
+  Logic                       | 26460/59904                         |  45%
+    --LUT,ALU,ROM16           | 26460(23048 LUT, 3388 ALU, 24 ROM16)| -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 27488/60780                         |  46%
+  Register                    | 26341/60780                         |  44%
     --Logic Register as Latch | 0/59904                             |  0%
-    --Logic Register as FF    | 27445/59904                         |  46%
+    --Logic Register as FF    | 26299/59904                         |  44%
     --I/O Register as Latch   | 0/876                               |  0%
-    --I/O Register as FF      | 43/876                              |  5%
-  CLS                         | 26235/29952                         |  88%
-  I/O Port                    | 130/297                             |  44%
-  I/O Buf                     | 111                                 | -
+    --I/O Register as FF      | 42/876                              |  5%
+  CLS                         | 26199/29952                         |  88%
+  I/O Port                    | 129/297                             |  44%
+  I/O Buf                     | 110                                 | -
     --Input Buf               | 29                                  | -
-    --Output Buf              | 46                                  | -
+    --Output Buf              | 45                                  | -
     --Inout Buf               | 36                                  | -
   IOLOGIC                     | 67/293                              | 23%
     --IDES8_MEM               | 16
@@ -60,12 +60,13 @@
     --OSER8_MEM               | 20
     --OSER10                  | 3
     --IODELAY                 | 16
-  BSRAM                       | 106/118                             | 90%
-    --SP                      | 2
-    --SDPB                    | 68
+  BSRAM                       | 102/118                             | 87%
+    --SP                      | 10
+    --SDPB                    | 48
+    --SDPX9B                  | 9
     --DPB                     | 29
     --DPX9B                   | 2
-    --pROM                    | 5
+    --pROM                    | 4
   DSP                         | 4/118                               | 4%
     --MULT12X12               | 8
   ================================================================================
@@ -86,7 +87,7 @@
   bank 7   | 7/24        | 30%         
   bank 8   | 1/24        | 5%          
   bank 9   | 23/66       | 35%         
-  bank 10  | 17/25       | 68%         
+  bank 10  | 16/25       | 64%         
   bank 11  | 12/25       | 48%         
   bank 12  | 0/4         | 0%          
   ======================================
@@ -112,16 +113,16 @@
   -------------------------------------------
   Signal         | Global Clock   | Location
   -------------------------------------------
-  clk_d          | PRIMARY        |  PTR0 PTR1 PTR2 PTR3 PBR0 PBR1 PBR3
+  clk_d          | PRIMARY        |  PTR0 PTR1 PTR3 PBR1 PBR2 PBR3
   clk_pixel_w    | PRIMARY        |  PTR0 PTR1 PTR2 PTR3 PBR1 PBR2
   a2bus_if.clk_pixel| PRIMARY        |  PTR0 PTR1 PTR2 PTR3 PBR0 PBR1 PBR2 PBR3
   clk_usb_w      | PRIMARY        |  PTR2 PTR3 PBR2
-  clk_x1_w       | PRIMARY        |  PTR0 PTR1 PTR2 PBR0 PBR1
-  u_ddr3/gw3_top/u_gwmc_top/gw_wr_data0/wr_fifo/mem_2485| PRIMARY        |  PTR0 PBR0
+  clk_x1_w       | PRIMARY        |  PTR0 PTR1 PBR0 PBR1
   u_ddr3/gw3_top/u_gwmc_top/gw_wr_data0/wr_fifo/mem_2487| PRIMARY        |  PTR0 PBR0
-  usb_hid_host/n659_3| PRIMARY        |  PTR2
+  u_ddr3/gw3_top/u_gwmc_top/gw_wr_data0/wr_fifo/mem_2495| PRIMARY        |  PTR0 PBR0
+  hdmi_inst/true_hdmi_output.packet_picker/n4077_4| PRIMARY        |  PTR1 PTR2
   a2bus_if.device_reset_n| LW             |  -
-  n1290_7        | LW             |  -
+  n27_7          | LW             |  -
   ddr_rst_w      | LW             |  -
   supersprite/vdp/f18a_core/reset_n_r| LW             |  -
   supersprite/vdp/f18a_core/inst_cpu/n931_6| LW             |  -
@@ -214,7 +215,6 @@ ddr_addr[11]       | -         | H3/11         | Y          | out   | IOL43[A] |
 ddr_addr[12]       | -         | K4/10         | Y          | out   | IOL48[A] | GCLKT_17        | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_addr[13]       | -         | K1/11         | Y          | out   | IOL35[A] | LPLL0_T_IN0/LPLL0_T_FB0 | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_addr[14]       | -         | D1/11         | Y          | out   | IOL27[B] | -               | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
-ddr_addr[15]       | -         | R1/10         | Y          | out   | IOL63[A] | LPLL1_T_IN0     | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_bank[0]        | -         | P5/10         | Y          | out   | IOL66[A] | LPLL1_T_IN1/LPLL1_T_FB0 | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_bank[1]        | -         | P2/10         | Y          | out   | IOL68[A] | LPLL1_T_IN2/LPLL1_T_FB0 | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
 ddr_bank[2]        | -         | M6/10         | Y          | out   | IOL70[A] | BPLL0_T_IN0     | SSTL15_I   | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5        | MEDIUM        | NONE          | NONE         
@@ -265,8 +265,8 @@ esp_data[4]        | -         | C13/1         | Y          | io    | IOT93[A] |
 esp_data[5]        | -         | B13/1         | Y          | io    | IOT93[B] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
 esp_data[6]        | -         | A13/1         | Y          | io    | IOT95[A] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
 esp_data[7]        | -         | A14/1         | Y          | io    | IOT95[B] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
-usb_dp             | -         | H13/4         | Y          | io    | IOR20[A] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
-usb_dm             | -         | G13/4         | Y          | io    | IOR20[B] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
+usb_dp             | -         | G13/4         | Y          | io    | IOR20[B] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
+usb_dm             | -         | H13/4         | Y          | io    | IOR20[A] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
 ==========================================================================================================================================================================================================================
 
 
@@ -503,7 +503,7 @@ L5/10    | ddr_ras            | out   | IOL59[A] | -               | SSTL15_I | 
 L4/10    | ddr_cas            | out   | IOL59[B] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
 N4/10    | -                  | in    | IOL61[A] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 N3/10    | -                  | in    | IOL61[B] | -               | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
-R1/10    | ddr_addr[15]       | out   | IOL63[A] | LPLL1_T_IN0     | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
+R1/10    | -                  | in    | IOL63[A] | LPLL1_T_IN0     | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 P1/10    | -                  | in    | IOL63[B] | LPLL1_C_IN0     | LVCMOS15 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | OFF          
 L6/10    | ddr_reset_n        | out   | IOL65[A] | -               | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
 P5/10    | ddr_bank[0]        | out   | IOL66[A] | LPLL1_T_IN1/LPLL1_T_FB0 | SSTL15_I | 12    | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 1.5   | MEDIUM        | NONE          | NONE         
@@ -527,8 +527,8 @@ G11/3    | -                  | in    | IOR9[A]  | DONE            | LVCMOS33 | 
 N12/3    | -                  | in    | IOR9[B]  | RECONFIG_N      | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 U8/3     | -                  | in    | IOR11[A] | TPLL1_T_IN0/TPLL1_T_FB1 | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 U9/3     | -                  | in    | IOR11[B] | MODE2/TPLL1_C_IN0/TPLL1_C_FB1 | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
-H13/4    | usb_dp             | io    | IOR20[A] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
-G13/4    | usb_dm             | io    | IOR20[B] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
+H13/4    | usb_dm             | io    | IOR20[A] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
+G13/4    | usb_dp             | io    | IOR20[B] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 J15/4    | tmds_d_p[1]        | out   | IOR22[A] | -               | LVCMOS33D | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | NONE         
 H15/4    | tmds_d_n[1]        | out   | IOR22[B] | -               | LVCMOS33D | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | NONE         
 G15/4    | tmds_clk_p         | out   | IOR24[A] | -               | LVCMOS33D | 8     | NONE      | OFF       | OFF        | OFF        | FAST      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | NONE         
