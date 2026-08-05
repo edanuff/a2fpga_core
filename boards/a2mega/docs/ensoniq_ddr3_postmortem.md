@@ -73,7 +73,7 @@ was pointed out to be available all along.
 | 2 | Word cache (4× cut), prime-once, flush-on-write | Better; stale=DF storms, drops, FB lines still missed | The sim's port model (≤2 outstanding, 600–1000 ns) was optimistic vs the real CDC (single-file service, ~1.6 µs tails behind FB line trains at ~90% utilization). Models must be derived from RTL, not assumed. |
 | 3 | 16-byte line bursts, two-line/osc cache, lookahead (deadline ≈16 periods), FB gating | (via 3.x fixes) corruption moved to frame bottom, 9 late lines | Corrected model *reproduced* rev-2's field failure (2019/2337 lines missed) — the first time sim and silicon agreed. Gating created convoys: deferred fetches discharged exactly at line-fetch start. |
 | 3.1–3.2 | Storage/FF diet | Placement kept failing | See defects #4–5: the RAM that wasn't. |
-| 3.3–3.4 | Register banks → dual-port BSRAM; write-mode idiom; boundary-write bug fix | — | GW5A has **no SSRAM at all** (RP0008/RP0007, verified empirically); the baseline DOC's distributed-RAM contract was silently costing ~2.8k FF on this die since day one. |
+| 3.3–3.4 | Register banks → dual-port BSRAM; write-mode idiom; boundary-write bug fix | — | Gowin EDA **V1.9.12.01 rejects all SSRAM on GW5A** (RP0008/RP0007, verified empirically — but see the 2026-08-05 correction below: this is a TOOL limitation, at least for GW5AT-60B); the baseline DOC's distributed-RAM contract was silently costing ~2.8k FF on this die since day one. |
 | 3.5 | Targeted dirty-range invalidation (~52 FF) replacing bulk flush | — | Bulk flush on every GLU write ≈ rev-1 traffic during play-while-write titles. |
 | 3.6 | `syn_preserve` + fabric re-registration of all BSRAM outputs | Priority-swap build: **DOC counters finally all clean**; FB still 0x36 late lines; audio still distorted | Synthesis had *retimed the existing pipeline registers into the BSRAM output registers*, silently converting two-stage paths into launch-from-BSRAM-Q. |
 | — | DOC priority above FB, gating deleted | Video clean at last (Hex 7=00), audio still distorted, **all counters clean** | Convoy diagnosis confirmed. And the stage was set for the real lesson: every remaining instrument said the memory system was healthy. |
@@ -97,12 +97,28 @@ Eight distinct defects (excluding the flashing saga), by where they hid:
 4. **`syn_ramstyle="distributed_ram"` silently produces flip-flops on
    GW5A** (rev 3.0–3.2, toolchain trap): "Extracting RAM" in the log means
    *recognition, not mapping*; 9,036 FFs shipped as "RAM." Only a netlist
-   DFF census revealed it. Root fact: **the GW5A family has no distributed
+   DFF census revealed it. Root fact (CORRECTED 2026-08-05 — see below):
+   **under Gowin EDA V1.9.12.01, no GW5A part maps distributed
    RAM**, verified by direct RAM16SDP4 instantiation → `RP0007`.
 5. **The baseline DOC's SSRAM contract was already broken on a2mega**
-   (pre-existing): the pains-taken register-bank inference was physically
-   unsatisfiable on Arora V; ~2.8k FF silently, in every prior a2mega
-   build. The campaign's DPB rework made the DOC *smaller* than baseline.
+   (pre-existing): the pains-taken register-bank inference did not map on
+   Arora V under the installed toolchain; ~2.8k FF silently, in every
+   prior a2mega build. The campaign's DPB rework made the DOC *smaller*
+   than baseline.
+
+   > **CORRECTION (2026-08-05): "no SSRAM on GW5A" is a TOOLCHAIN
+   > limitation, not (necessarily) silicon.** UG300-1.3.6E's
+   > RAM16-unsupported list names GW5AST-138B/GW5A(T/S)-138B, GW5AT-75B
+   > and the 25A-revision parts — **GW5AT-60B is absent, i.e. documented
+   > as supporting RAM16.** Differential probes (2026-08-05, EDA
+   > V1.9.12.01): GW2AR-18C synthesizes RAM16SDP4 ✓; GW5A-25A → RP0007
+   > (agrees with the doc); **GW5AT-60B → RP0007 (contradicts the
+   > doc)**. Newer EDA exists (≥V1.9.12.02). Pending: re-run the probe
+   > on the newest EDA — if it passes, the 60B register banks move to
+   > distributed RAM16 (the original GW2A architecture: ~40 CFUs, zero
+   > BSRAM, zero FF arrays), with the 138B keeping FF banks per its
+   > documented lack of the primitives. Credit: the user caught this by
+   > reading UG300 against our "no SSRAM" claim.
 6. **BSRAM WRITE_MODE=2'b10 rejection at PnR** (rev 3.3): a
    placement-phase-only error invisible to synthesis + census checks;
    fixed with the repo's separate-block idiom; methodology now mandates a
