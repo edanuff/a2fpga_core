@@ -113,12 +113,21 @@ Eight distinct defects (excluding the flashing saga), by where they hid:
    > as supporting RAM16.** Differential probes (2026-08-05, EDA
    > V1.9.12.01): GW2AR-18C synthesizes RAM16SDP4 ✓; GW5A-25A → RP0007
    > (agrees with the doc); **GW5AT-60B → RP0007 (contradicts the
-   > doc)**. Newer EDA exists (≥V1.9.12.02). Pending: re-run the probe
-   > on the newest EDA — if it passes, the 60B register banks move to
-   > distributed RAM16 (the original GW2A architecture: ~40 CFUs, zero
-   > BSRAM, zero FF arrays), with the 138B keeping FF banks per its
-   > documented lack of the primitives. Credit: the user caught this by
-   > reading UG300 against our "no SSRAM" claim.
+   > doc)**. Further isolation (same day): feeding PnR a pre-synthesized
+   > netlist containing RAM16SDP4 (bypassing GowinSynthesis) fails with
+   > **PA2085 "No 'RAM16SDP4' resource in current device"** — the
+   > placer's own site database also models the 60B as SSRAM-less, and
+   > the IP generator offers only ROM16. So the ENTIRE V1.9.12.01 stack
+   > consistently contradicts UG300 Table 5-1's note (which excludes
+   > only the 138B/75B/25A parts — making the 60 the sole Arora V die
+   > documented WITH SSRAM). Escalated to Gowin support; until they
+   > resolve doc-vs-database, FF banks stand as the correct
+   > implementation, with RAM16 banks as the drop-in upgrade if support
+   > materializes. UG300 also lists BSRAM "byte-enable" as a feature —
+   > untested via direct primitive parameters (the packed-record probe
+   > tested inference only); relevant only if record packing revives.
+   > Credit: the user caught this by reading UG300 against our "no
+   > SSRAM" claim.
 6. **BSRAM WRITE_MODE=2'b10 rejection at PnR** (rev 3.3): a
    placement-phase-only error invisible to synthesis + census checks;
    fixed with the repo's separate-block idiom; methodology now mandates a
