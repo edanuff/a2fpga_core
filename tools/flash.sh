@@ -54,7 +54,11 @@ esac
 cmd=("$LOADER" "${tag[@]}")
 if [[ "$mode" == "flash" ]]; then
     if [[ "$esp32s3" == "1" ]]; then
-        cmd+=(--bulk-erase -f --verify)  # ESP32S3 bridge: erase + write + read-back verify
+        # NOTE: --bulk-erase is a NO-OP when combined with -f (openFPGALoader
+        # guards it with bit_file.empty(); main.cpp:650). Sector erases still
+        # happen inside erase_and_prog. Run --bulk-erase as a SEPARATE
+        # invocation (no -f) when a true full-chip erase is needed.
+        cmd+=(-f --verify)  # ESP32S3 bridge: write + read-back verify
     else
         cmd+=(-f)                  # write to SPI flash (persistent)
     fi
@@ -83,7 +87,15 @@ if [[ "$esp32s3" == "1" && "$mode" == "flash" ]]; then
         echo "!! attempt $attempt failed; retrying..."
         sleep 3
     done
-    echo "!! all flash attempts failed — try replugging the USB (bridge reset) and rerun"
+    echo "!! all flash attempts failed."
+    # Diagnostic snapshot: does the failure sit at the USB/ESP32 bridge layer
+    # (open fails) or the FPGA TAP layer (bridge opens, no/garbage IDCODE)?
+    # Discriminates the intermittent wedge classes — record with the failure.
+    echo "!! diagnostic: low-speed detect probe:"
+    openFPGALoader -c esp32s3 --freq 500000 --detect 2>&1 | tail -4 | sed 's/^/!!   /'
+    echo "!! Flash with the Apple II POWERED OFF (validated procedure), replug"
+    echo "!! USB (cold boot), and rerun."
+    echo "!! See boards/a2mega/docs/jtag_flash_reliability.md"
     exit 1
 else
     "${cmd[@]}"

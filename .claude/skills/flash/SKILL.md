@@ -38,6 +38,11 @@ connected before running, unless the user already said to go ahead.
 
 ## Notes
 
+- **a2mega: the Apple II must be POWERED OFF to flash.** Slot 5V feeds the card's +5V
+  rail through Schottky D1 (no isolation), so with the machine on, a USB replug is NOT
+  a power cycle — the FPGA/ESP32 stay alive on slot power and the JTAG chain stays
+  wedged after flash-phase operations. Flash with the machine off; power on to test.
+  See [boards/a2mega/docs/jtag_flash_reliability.md](../../../boards/a2mega/docs/jtag_flash_reliability.md).
 - **a2mega (DDR3): power-cycle the board between flashes.** Reprogramming without a power
   cycle can fail DDR3 init and produce a black screen that looks like a logic bug, not a
   programming failure. The script prints this reminder. See [docs/gotchas.md](../../../docs/gotchas.md).
