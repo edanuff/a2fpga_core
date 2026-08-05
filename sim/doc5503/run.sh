@@ -38,6 +38,17 @@ iverilog -g2012 -DFFBANKS_MODE -o tb_ffbanks.vvp $SRCS
 vvp tb_ffbanks.vvp
 python3 compare.py
 
+echo "=== CO-SIMULATION: real sound_glu + CDC + arbiter vs BSRAM reference ==="
+verilator --binary --timing -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-UNSIGNED \
+    -Wno-CASEINCOMPLETE -Wno-TIMESCALEMOD -Wno-fatal -j 4 \
+    --top-module tb_cosim -o tb_cosim \
+    ../../hdl/bus/a2bus_if.sv ../../hdl/memory/mem_port_if.sv \
+    ../../hdl/sound/doc5503.sv ../../hdl/sound/doc5503_pipelined.sv \
+    ../../hdl/sound/sound_glu.sv ../../boards/a2mega/hdl/sound/ensoniq_bsram.sv \
+    ../../hdl/ddr3/ddr3_port_cdc.sv ../../hdl/ddr3/ddr3_ports.sv tb_cosim.sv
+./obj_dir/tb_cosim | tee cosim_run.log | grep -E "PHASE|COSIM"
+grep -q "COSIM RESULT: PASS" cosim_run.log || { echo "COSIM FAILED"; exit 1; }
+
 echo "=== framing-slip reproduction (NODRAIN_MODE: reset drain disabled) ==="
 iverilog -g2012 -DNODRAIN_MODE -o tb_nodrain.vvp $SRCS
 vvp tb_nodrain.vvp > nodrain_run.log 2>&1 || true
