@@ -878,7 +878,7 @@ module doc5503 #(
     task automatic cycle_osc();
         // Force oscillator state machine to idle state if at the start of a cycle
         automatic osc_state_e osc_state_w;
-        osc_state_w = cycle_start_r ? OSC_IDLE : osc_state_r;
+        osc_state_w = osc_state_e'(cycle_start_r ? OSC_IDLE : osc_state_r);
         case (osc_state_w)
             OSC_IDLE: osc_idle();
             OSC_START: osc_start();

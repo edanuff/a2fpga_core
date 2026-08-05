@@ -1,0 +1,4 @@
+*.vvp
+*.log
+*.vcd
+repro_run.log
