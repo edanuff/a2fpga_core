@@ -661,7 +661,14 @@ module top #(
         // FB + 32-deep queue) and the write-drop counter finally visible.
         .USE_BSRAM(0),
         .USE_DDR3_PIPELINED(1),
-        .DOC_BANKS_IN_BSRAM(1),
+        // FF register banks: 0 BSRAM vs ~2k FF. The DPB/packed-record banks
+        // (BANKS_IN_BSRAM=1) spend 6 blocks at low fill for state the fabric
+        // holds comfortably (regs at 44%); GW5A has no distributed RAM, so
+        // FFs are the honest medium for a 320-byte register file. The FF
+        // path is baseline-equivalent read timing and is co-validated by
+        // every suite run (both modes). See ensoniq_ddr3_pipelined_design.md
+        // for the 1-block scheduled-SDPB endpoint if BSRAM pressure returns.
+        .DOC_BANKS_IN_BSRAM(0),
         .GLU_WR_ACK_AVAIL(1)   // DDR3 CDC never pulses ready on writes
     ) sg (
         .a2bus_if(a2bus_if),
