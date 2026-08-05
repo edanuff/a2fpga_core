@@ -86,6 +86,7 @@ def parse_events(path):
     cadence = None
     frsync_pre = None
     frsync = None
+    satcheck = None
     counters = None
     with open(path) as f:
         for ln in f:
@@ -115,17 +116,19 @@ def parse_events(path):
                 frsync_pre = int(t[1])
             elif t[0] == "FRSYNC":
                 frsync = int(t[1])
+            elif t[0] == "SATCHECK":
+                satcheck = int(t[1])
             elif t[0] == "COUNTERS":
                 counters = tuple(int(x) for x in t[1:4])
     return (glu, regw, phases, countp, counters, traffic, fbm, fbtotal,
-            hostread, cadence, frsync_pre, frsync)
+            hostread, cadence, frsync_pre, frsync, satcheck)
 
 
 def main():
     base = parse_log("base.log")
     pipe = parse_log("pipe.log")
     (glu, regw, phases, countp, counters, traffic, fbm, fbtotal,
-     hostread, cadence, frsync_pre, frsync) = parse_events("events.log")
+     hostread, cadence, frsync_pre, frsync, satcheck) = parse_events("events.log")
 
     phase_starts = sorted(phases.items(), key=lambda kv: kv[1])
 
@@ -423,6 +426,12 @@ def main():
         if frsync is not None and frsync == 0:
             print("** reset phase produced no orphan discards — "
                   "scenario did not exercise the tail window ** FAIL")
+            fails += 1
+
+    if satcheck is not None:
+        print(f"Mixer saturation check: {satcheck} errors")
+        if satcheck != 0:
+            print("** mixer saturation/monotonicity violated ** FAIL")
             fails += 1
 
     if hostread is not None:
