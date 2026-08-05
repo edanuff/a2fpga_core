@@ -798,6 +798,21 @@ module doc5503_pipelined #(
     localparam int TOP_BIT_OFFSET = 6;   // Skip this many bits from the top of the accumulator
     localparam int WINDOW_SIZE = 15;     // Use this many bits for magnitude
 
+    // Saturating window extraction (rev 3.10): the raw bit-slice wraps
+    // once the 24-bit mix sum exceeds the 18-bit window (~8 full-scale
+    // voices) — audible wrap distortion on tracker-class music (VAMPS,
+    // 8-14 voices). Clamp to full scale instead: the slice is faithful
+    // iff the bits above the window top all replicate the sign.
+    function automatic logic signed [15:0] sat_window_f(
+        input logic signed [MIXER_SUM_RESOLUTION-1:0] v);
+        if (v[MIXER_SUM_RESOLUTION-1 -: TOP_BIT_OFFSET]
+            == {TOP_BIT_OFFSET{v[MIXER_SUM_RESOLUTION-1]}})
+            return {v[MIXER_SUM_RESOLUTION-1],
+                    v[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]};
+        else
+            return v[MIXER_SUM_RESOLUTION-1] ? 16'h8000 : 16'h7FFF;
+    endfunction
+
     reg signed [15:0] channel_r[16];
     assign channel_o = channel_r;
     reg signed [MIXER_SUM_RESOLUTION-1:0] next_channel_r[16];
@@ -1444,24 +1459,12 @@ module doc5503_pipelined #(
                 device_response();
             end
 
-            channel_r[cycle_timer_r[3:0]] <= {
-                next_channel_r[cycle_timer_r[3:0]][MIXER_SUM_RESOLUTION-1],
-                next_channel_r[cycle_timer_r[3:0]][MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-            };
+            channel_r[cycle_timer_r[3:0]] <= sat_window_f(next_channel_r[cycle_timer_r[3:0]]);
 
             if (cycle_timer_r[3:0] == 4'hF) begin
-                mono_mix_r <= {
-                    next_mono_mix_r[MIXER_SUM_RESOLUTION-1],
-                    next_mono_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                };
-                left_mix_r <= {
-                    next_left_mix_r[MIXER_SUM_RESOLUTION-1],
-                    next_left_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                };
-                right_mix_r <= {
-                    next_right_mix_r[MIXER_SUM_RESOLUTION-1],
-                    next_right_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                };
+                mono_mix_r  <= sat_window_f(next_mono_mix_r);
+                left_mix_r  <= sat_window_f(next_left_mix_r);
+                right_mix_r <= sat_window_f(next_right_mix_r);
             end
         end else begin
             // use remaining time to process host access

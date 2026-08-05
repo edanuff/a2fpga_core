@@ -544,6 +544,8 @@ module tb_doc5503_diff;
     // deterministic.
     integer hostread_ok = 0;
     integer hostread_errs = 0;
+    integer sat_errs = 0;
+    integer sat_prev = 0;
     task doc_rd(input [7:0] a);
         begin
             @(posedge clk);
@@ -658,6 +660,9 @@ module tb_doc5503_diff;
                 mem[16'h0C00 + i] = (i * 11 + 3) & 8'hFF;
                 if (mem[16'h0C00 + i] == 8'h00) mem[16'h0C00 + i] = 8'h03;
             end
+            // T8 @0x3000: constant 0xFF table (max positive samples) for
+            // the mixer-saturation phase
+            for (i = 0; i < 256; i = i + 1) mem[16'h3000 + i] = 8'hFF;
             // T7 @0x1000-0x2FFF: 8KB region shared by the all-32 phase
             // (pages 0x10-0x2F, one 256B table per oscillator)
             for (i = 0; i < 8192; i = i + 1) begin
@@ -948,7 +953,51 @@ module tb_doc5503_diff;
                  dbg_frame_resync);
         $fdisplay(fe_f, "FRSYNC %0d", dbg_frame_resync);
 
+        // ================= P15: mixer saturation (>8 hot voices) ========
+        // All voices play a constant-0xFF table at full volume: per-voice
+        // contribution = 0x7F * 0xFF = 32385 per scan. The raw window
+        // slice wraps at 8.09 voices; the pipelined DUT must CLAMP:
+        // mono_mix == min(N*32385 >> 3, 32767), monotonic in N, never
+        // negative. (Baseline keeps the legacy wrap — M-record diffs here
+        // are intentional and report-only.)
         phase_mark(15);
+        doc_wr(8'hE1, 8'h20);           // osc_max = 16 -> oscs 0..16
+        for (k = 0; k < 16; k = k + 1) begin
+            doc_wr(8'h00 + k[7:0], 8'h00);   // FL
+            doc_wr(8'h20 + k[7:0], 8'h02);   // FH: FC=0x0200
+            doc_wr(8'h40 + k[7:0], 8'hFF);   // vol max
+            doc_wr(8'h80 + k[7:0], 8'h30);   // T8
+            doc_wr(8'hC0 + k[7:0], 8'h00);   // 256B
+            doc_wr(8'hA0 + k[7:0], 8'h01);   // halted
+        end
+        wait_slots(60);                 // prime
+        begin : sat_check
+            integer nvoice;
+            integer exp_mix;
+            integer got;
+            for (nvoice = 1; nvoice <= 16; nvoice = nvoice + 1) begin
+                doc_wr(8'hA0 + nvoice[7:0] - 8'd1, 8'h00);  // enable voice n-1
+                wait_slots(60);
+                got = $signed(dut_pipe.mono_mix_o);
+                exp_mix = (nvoice * 32385) >> 3;
+                if (exp_mix > 32767) exp_mix = 32767;
+                if (got < exp_mix - 8 || got > exp_mix + 8) begin
+                    $display("SAT FAIL: %0d voices: mono=%0d expected ~%0d",
+                             nvoice, got, exp_mix);
+                    sat_errs = sat_errs + 1;
+                end
+                if (got < sat_prev) begin
+                    $display("SAT FAIL: non-monotonic at %0d voices (%0d < %0d)",
+                             nvoice, got, sat_prev);
+                    sat_errs = sat_errs + 1;
+                end
+                sat_prev = got;
+            end
+        end
+        $display("SATCHECK: %0d errors", sat_errs);
+        $fdisplay(fe_f, "SATCHECK %0d", sat_errs);
+
+        phase_mark(16);
         $display("FINAL: prime_miss=%0d stale_fetch=%0d fetch_drop=%0d fetches=%0d fb_lines=%0d fb_miss=%0d",
                  dbg_prime_miss, dbg_stale_fetch, dbg_fetch_drop,
                  dbg_fetch_count, fb_lines, fb_miss);

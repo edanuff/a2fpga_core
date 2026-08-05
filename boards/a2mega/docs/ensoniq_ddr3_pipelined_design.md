@@ -1114,3 +1114,77 @@ defect found is transient-at-reset, not the persistent from-first-note
 distortion. The co-simulation with the REAL sound_glu/CDC/arbiter RTL
 (§12.16) supersedes the synthetic port model as the primary rig for the
 remaining hunt.
+
+### 12.16 Register-file packing (rev 3.10) — probe evidence and the
+### achievable design
+
+The requested single byte-enabled 32x80 record is EMPIRICALLY IMPOSSIBLE
+on GW5A. PnR probe evidence (probe-through mandate, §12.10):
+
+- A 32x80 array with per-lane write enables is implemented by
+  GowinSynthesis as TEN per-lane DPBs (no native byte-enable mapping
+  exists), each additionally inferring illegal WRITE_MODE 2'b10
+  (PA2122) — 10 blocks, worse than the 8 it would replace.
+- True-dual-port width is capped (~16 b/port on the 18 kbit block), so
+  ANY dual-port record costs 2 blocks per 32 bits of width; "one BSRAM"
+  cannot hold an 80-bit dual-ported record.
+- A two-parity single-block lu merge (two write blocks on one array)
+  does not infer at all (792 DFFs).
+
+The structurally-free packing: fl/fh/wtp/rts are written ONLY by host
+and reset — never by the slot pipeline — so they share one 32x32
+dual-port record (2 physical DPBs replacing 4). Port A: pipeline reads
+(these addresses never diverge from curr-default in the chain) +
+full-record cycle_reset writes + the host-RMW write. Port B: the
+persistent host-read address, which also supplies the RMW composition
+data. Host writes to the four fields become a race-free 4-cycle
+read-compose-write (no pipeline writer exists to race; host ops are
+>= 1 us apart), and the port-A read-freeze idiom returns the correct
+curr record to any chain sampling edge coinciding with the fire cycle.
+acc/control/vol/wds keep their per-bank form — the swap/sync-critical
+pipeline write timing is untouched.
+
+Census: module 14 -> 12 BSRAM, 1,798 DFF (net -16). Full five-leg suite
+PASS both bank modes; host readback 38/38 including the RMW'd fields.
+
+Deeper options (documented, not taken — risk vs 1-3 further blocks):
+- 11 blocks: convert host-readable banks to SDPB (1W1R) and schedule
+  ALL host reads through pipeline-idle cycles with latched responses
+  (replumbs the persistent-read semantics).
+- 9 blocks: full 80-bit compose-write record — every pipeline write
+  composes the whole record from a slot shadow; the three CROSS-record
+  writers (SYNC_AM volume, SYNC restart prev-acc, swap partner
+  control+acc) each need a scheduled read-compose-write in the
+  hardware-verified swap/sync state machinery, plus a port-B
+  micro-arbiter. Highest reclaim, highest re-verification burden.
+
+### 12.17 Mixer headroom (rev 3.10): saturating window extraction
+
+Hardware-observed (pre-existing, both DOC variants): tracker-class
+music (8-14 voices) wraps the mix. Two wrap points:
+1. THIS MODULE (fixed here): the window extraction sliced bits
+   [23:18|17:3] of the 24-bit sums; beyond ~8 full-scale voices
+   (sum >= 2^18) the slice wraps. Now saturating (sat_window_f): the
+   slice is faithful iff the TOP_BIT_OFFSET bits above the window all
+   replicate the sign, else clamp to +/-full-scale. Applied to all
+   three mixes and the 16 channel outputs. Baseline doc5503 is NOT
+   touched (shared with field-validated GS boards). New TB phase P15:
+   1..16 voices on a constant-max table assert
+   mono == min(N*32385 >> 3, 32767) +/-8, monotonic — 0 errors, hard
+   comparator gate (SATCHECK).
+2. SOUND_GLU (spec for the integrator — not in this repo's mirror):
+   - Saturating parameterized output stage replacing the bare `<<< 1`:
+     `parameter int OUTPUT_BOOST_SHIFT = 1` (GS default preserves the
+     field-validated x2 loudness); compute the shift into
+     (16+SHIFT)-bit precision and clamp to 16 bits:
+     `audio_l_reg <= sat16({{S{left_mix_w[15]}}, left_mix_w} <<< S);`
+   - Master volume ($C03C[3:0]): the commented-out mapping
+     (`4'd4 - volume_w[3:2]`, vol>=12 -> 0) is defective on
+     inspection — only 4 coarse steps with a discontinuity (no
+     shift=1 value), which plausibly is why it was abandoned. INFERRED
+     correct semantics (needs hardware listening validation): the GS
+     volume drives the 5503 VREF DAC, approximately linear amplitude —
+     implement `out = mix * (vol + 1) / 16` (16x5 multiply, >>4),
+     giving 16 monotonic steps with vol=15 unity. Ship behind
+     `parameter bit ENABLE_MASTER_VOLUME = 0` so default loudness is
+     untouched until validated.
