@@ -104,6 +104,8 @@ module framebuffer_480p #(
     output logic [7:0]  dbg_line_not_ready_o,  // Display line-starts before line fully fetched
     output logic [7:0]  dbg_line_lag_max_o,    // Max display-vs-fetched line lag per frame
     output logic [7:0]  dbg_ready_phase_err_o, // Read ready pulses outside FETCH_RUN
+    output logic        fetch_active_o,        // High while line fetch issues bursts
+                                               // (pipelined-DOC issue gating hint)
     output logic [7:0]  dbg_vsync_raw_o,       // Raw fb_vsync pulses seen in this frame
     output logic [7:0]  dbg_frame_start_accept_o, // Accepted frame starts in this frame
     output logic [7:0]  dbg_frame_start_reject_o, // Rejected fb_vsync pulses in this frame
@@ -500,6 +502,7 @@ module framebuffer_480p #(
     // reads, CPU shadow writes, DOC) are not starved during a line fetch.
     localparam FETCH_IDLE    = 1'b0;
     localparam FETCH_RUN     = 1'b1;
+    assign fetch_active_o = (fetch_state_r == FETCH_RUN);
     localparam ISSUE_SPACING = 8;
 
     reg        fetch_state_r;

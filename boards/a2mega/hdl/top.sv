@@ -114,7 +114,12 @@ module top #(
     input  uart_rx,
 
     // ddr3 interface
-    output [15:0] ddr_addr, //ROW_WIDTH=16
+    // ROW_WIDTH=15: H5TQ4G63EFR (4Gb x16) has A[14:0]. A 16th bit (ball R1
+    // on the 60K pinout) appeared in early references but corresponds to no
+    // DDR3 pin — and on the GW5AST-138B die R1 sits in the UART's 3.3V bank,
+    // so constraining it at 1.5V breaks the build. Removed on both variants
+    // (nand2mario's shipped 60K design also uses [14:0] only).
+    output [14:0] ddr_addr,
 	output [2:0] ddr_bank, //BANK_WIDTH=3
 	output ddr_cs,
 	output ddr_ras,
@@ -144,31 +149,35 @@ module top #(
     assign hdmi_sda = 1'b1;
     assign hdmi_cec = 1'b0;
 
-    // Clocks
+    // Clocks — all PLLs live in board_plls, a per-SOM-variant module:
+    // clocks_60b.sv (GW5AT-60B: PLLA + mDRP pll_stop glue) or
+    // clocks_138b.sv (GW5AST-138B: PLL + PLL_INIT, pll_stop -> enclk2).
+    // The .gprj file list selects which variant is built.
 
-    wire clk_logic_pll_w;           // 54 MHz from board PLL CLKOUT2 (independent of DDR3)
+    wire clk_logic_pll_w;           // 54 MHz from board PLL (independent of DDR3)
     wire clk_logic_w = clk_logic_pll_w;  // logic runs on independent PLL
     wire clk_lock_w;
     wire clk_pixel_w;
     wire clk_hdmi_w;
-    wire clk_27M_w;
 
-    clk_pll clocks_pll (
-        .lock(clk_lock_w), //output lock
-        .clkout0(clk_pixel_w), //output clkout0 (27 MHz pixel clock)
-        .clkout1(clk_hdmi_w), //output clkout1 (135 MHz TMDS)
-        .clkout2(clk_logic_pll_w), //output clkout2 (54 MHz logic — independent of DDR3)
-        .clkin(clk) //input clkin
-    );
-
-    // Dedicated USB host clock — usb_hid_host needs crystal-accurate 60 MHz
-    wire clk_usb_w;
+    wire clk_usb_w;                 // 60 MHz USB host clock
     wire usb_pll_lock_w;
 
-    pll_usb pll_usb_inst (
-        .lock(usb_pll_lock_w),
-        .clkout0(clk_usb_w), //output clkout0 (60 MHz USB host clock)
-        .clkin(clk) //input clkin
+    wire memory_clk_w;              // 324 MHz to DDR3 controller
+    wire pll_lock_w;                // DDR3 PLL lock
+    wire pll_stop_w;                // DDR3 IP clock-stop request
+
+    board_plls u_board_plls (
+        .clk           (clk),
+        .pll_stop      (pll_stop_w),
+        .clk_pixel     (clk_pixel_w),
+        .clk_hdmi      (clk_hdmi_w),
+        .clk_logic     (clk_logic_pll_w),
+        .clk_lock      (clk_lock_w),
+        .clk_usb       (clk_usb_w),
+        .usb_pll_lock  (usb_pll_lock_w),
+        .memory_clk    (memory_clk_w),
+        .ddr3_pll_lock (pll_lock_w)
     );
 
     /*
@@ -247,7 +256,6 @@ module top #(
     wire sw_scanlines_w = !dip_switches_n[0];
     wire sw_apple_speaker_w = !dip_switches_n[1];
     wire sw_slot_7_w = !dip_switches_n[2];
-    wire sw_gs_w = !dip_switches_n[3];
 
     wire [7:0] a2_d_buf_w;
     wire data_out_en_w;
@@ -368,13 +376,28 @@ module top #(
     //   3 = FB read      (line-buffered prefetch; line-not-ready counted)
     //   4 = DOC (Ensoniq wavetable read)
     //   5 = GLU (Ensoniq write)
+    // DOC sits ABOVE the FB ports: its rev-3 traffic is tiny (~70k grants/s,
+    // 4-beat reads) so it costs the FB at most a few short grants per line,
+    // while FB-priority + deferral gating caused convoy formation — deferred
+    // DOC fetches drained exactly when the next line fetch wanted to start,
+    // slipping lines cumulatively toward frame bottom (hardware: 9 late
+    // lines/frame, bottom-of-screen corruption).
+    // GLU sound-RAM writes sit ABOVE the FB ports. The FB read port has a
+    // request pending almost continuously during active display (40
+    // back-to-back grants per line), so under static priority a lower GLU
+    // port is starved for milliseconds while the Apple II uploads samples
+    // at ~1 write/us — overflowing the write queue and silently corrupting
+    // the wavetable. Its traffic is rare and short (single word) outside
+    // upload bursts. A dropped write is unrecoverable; a delayed FB line
+    // is not.
     localparam SHADOW_READ_PORT  = 0;
     localparam SHADOW_WRITE_PORT = 1;
-    localparam FB_WRITE_PORT   = 2;
-    localparam FB_READ_PORT    = 3;
-    localparam DOC_MEM_PORT      = 4;
-    localparam GLU_MEM_PORT      = 5;
-    localparam NUM_DDR3_PORTS    = 6;
+    localparam DOC_MEM_PORT      = 2;
+    localparam GLU_MEM_PORT      = 3;
+    localparam FB_WRITE_PORT   = 4;
+    localparam FB_READ_PORT    = 5;
+    localparam DBG_MEM_PORT      = 6;
+    localparam NUM_DDR3_PORTS    = 7;
 
     // DDR3 memory map — word address offsets (32-bit word addressing)
     // Applied per-port inside ddr3_ports via PORT_BASE_ADDR parameter.
@@ -498,7 +521,7 @@ module top #(
 
         .a2mem_if(a2mem_if),
         .video_control_if(video_control_if),
-        .sw_gs_i(!dip_switches_n[3]),
+        .sw_gs_i(a2bus_if.sw_gs),
 
         .pixel_stream(apple_ps),
 
@@ -606,20 +629,40 @@ module top #(
     wire [1:0] doc_osc_mode_w[8];
     wire [7:0] doc_osc_halt_w;
 
-    // 64KB sound RAM backed by BSRAM (DDR3 ports kept but idle)
-
-    // With USE_BSRAM=1 the DOC never touches DDR3 — park its interface on a
-    // dummy instance and give port 4 to the ESP32 DDR3 debug read window.
-    mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32))
-        doc_idle_if();
-    assign doc_idle_if.available = 1'b0;
-    assign doc_idle_if.ready     = 1'b0;
-    assign doc_idle_if.q         = 32'd0;
+    // 64KB sound RAM backed by DDR3 via the pipelined-fetch DOC5503:
+    // fetches issue during an oscillator's service slot and are consumed at
+    // its next service (deadline >= 3.35 us vs ~1.2 us worst-case DDR3 tail).
+    // Differential-sim validated; see
+    // boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md. Frees the 32
+    // BSRAM blocks previously used by ensoniq_bsram.
+    wire [7:0] doc_dbg_prime_miss_w;
+    wire [7:0] doc_dbg_stale_fetch_w;
+    wire [7:0] doc_dbg_fetch_drop_w;
+    wire [15:0] doc_dbg_fetch_count_w;
+    wire fb_fetch_active_w;   // from u_framebuffer: line fetch issuing bursts
+    // Request instrumentation (declare BEFORE the sg instantiation —
+    // referencing these in port connections first creates disconnected
+    // implicit nets; Gowin only warns, EX3638, and everything reads zero)
+    wire [7:0]  glu_wq_drops_w;   // sound-RAM write-queue overflow drops
+    wire [15:0] doc_dbg_req_count_w;
+    wire [7:0]  doc_dbg_req_mingap_w;
+    reg         doc_dbg_vsync_d_r;
+    wire        doc_dbg_frame_tick_w = fb_vsync_mux_w && !doc_dbg_vsync_d_r;
 
     sound_glu #(
         .ENABLE(ENSONIQ_ENABLE),
         .MONO_MIX(ENSONIQ_MONO_MIX),
-        .USE_BSRAM(1)
+        // A/B result 2026-08-02: USE_BSRAM(1) = audibly perfect on the same
+        // hardware/title; pipelined DDR3 = distorted with clean memory
+        // counters. Distortion is introduced by the pipelined variant, not
+        // inherited. Diagnosis in progress (consume-hole 0x80s vs register-
+        // bank restructure); prime_miss is on overlay Hex 4 to discriminate.
+        // DDR3 build with the GLU write-starvation fix (port priority above
+        // FB + 32-deep queue) and the write-drop counter finally visible.
+        .USE_BSRAM(0),
+        .USE_DDR3_PIPELINED(1),
+        .DOC_BANKS_IN_BSRAM(1),
+        .GLU_WR_ACK_AVAIL(1)   // DDR3 CDC never pulses ready on writes
     ) sg (
         .a2bus_if(a2bus_if),
         .data_o(sg_d_w),
@@ -633,35 +676,64 @@ module top #(
         .debug_osc_halt_o(doc_osc_halt_w),
 
         .glu_mem_if(ddr3_mem_ports[GLU_MEM_PORT]),
-        .doc_mem_if(doc_idle_if)
+        .glu_wq_drops_o(glu_wq_drops_w),
+        .doc_mem_if(ddr3_mem_ports[DOC_MEM_PORT]),
+        // Gating disabled: with DOC above the FB ports, deferral is not only
+        // unnecessary but harmful (convoy formation — see priority comment).
+        // Keep fb_fetch_active_w wired in case a future config re-enables.
+        .fb_fetch_active_i(1'b0),
+
+        .dbg_doc_prime_miss_o(doc_dbg_prime_miss_w),
+        .dbg_doc_stale_fetch_o(doc_dbg_stale_fetch_w),
+        .dbg_doc_fetch_drop_o(doc_dbg_fetch_drop_w),
+        .dbg_doc_fetch_count_o(doc_dbg_fetch_count_w),
+        .dbg_frame_tick_i(doc_dbg_frame_tick_w),
+        .dbg_doc_req_count_o(doc_dbg_req_count_w),
+        .dbg_doc_req_mingap_o(doc_dbg_req_mingap_w)
     );
+
+    // Per-frame latching for the request instrumentation (clk_logic domain)
+    reg [15:0]  doc_dbg_req_prev_r;
+    reg [15:0]  doc_dbg_req_frame_r;   // requests in the last full frame
+    reg [7:0]   doc_dbg_mingap_frame_r; // min inter-request gap last frame
+    always_ff @(posedge clk_logic_w) begin
+        doc_dbg_vsync_d_r <= fb_vsync_mux_w;
+        if (doc_dbg_frame_tick_w) begin
+            doc_dbg_req_frame_r    <= doc_dbg_req_count_w - doc_dbg_req_prev_r;
+            doc_dbg_req_prev_r     <= doc_dbg_req_count_w;
+            doc_dbg_mingap_frame_r <= doc_dbg_req_mingap_w; // pre-reset value
+        end
+    end
 
     wire [20:0] dbg_mem_addr_w;
     wire        dbg_mem_go_w;
     wire        dbg_mem_busy_w;
     wire [31:0] dbg_mem_data_w;
 
-    // Discrete member wiring — passing ddr3_mem_ports[4] into a module port
-    // hits Gowin's interface-array flattening bug (see ddr3_ports.sv note);
-    // the first build attempt with an interface port killed the OSPI link.
+    // Discrete member wiring — passing this array element into the debug
+    // reader's interface port hit Gowin's interface-array flattening bug
+    // (see ddr3_ports.sv note); the first build attempt with an interface
+    // port killed the OSPI link. (sound_glu takes array elements as
+    // interface ports without issue — proven on a2n20v2-GS — so the bug is
+    // specific to this module's wiring; keep the discrete style here.)
     wire        dbg_mem_rd_w;
     wire [20:0] dbg_mem_port_addr_w;
 
-    assign ddr3_mem_ports[DOC_MEM_PORT].rd      = dbg_mem_rd_w;
-    assign ddr3_mem_ports[DOC_MEM_PORT].wr      = 1'b0;
-    assign ddr3_mem_ports[DOC_MEM_PORT].addr    = dbg_mem_port_addr_w;
-    assign ddr3_mem_ports[DOC_MEM_PORT].data    = 32'd0;
-    assign ddr3_mem_ports[DOC_MEM_PORT].byte_en = 4'b1111;
-    assign ddr3_mem_ports[DOC_MEM_PORT].burst   = 1'b0;
+    assign ddr3_mem_ports[DBG_MEM_PORT].rd      = dbg_mem_rd_w;
+    assign ddr3_mem_ports[DBG_MEM_PORT].wr      = 1'b0;
+    assign ddr3_mem_ports[DBG_MEM_PORT].addr    = dbg_mem_port_addr_w;
+    assign ddr3_mem_ports[DBG_MEM_PORT].data    = 32'd0;
+    assign ddr3_mem_ports[DBG_MEM_PORT].byte_en = 4'b1111;
+    assign ddr3_mem_ports[DBG_MEM_PORT].burst   = 1'b0;
 
     ddr3_debug_reader u_ddr3_dbg_reader (
         .clk    (clk_logic_w),
         .rst_n  (device_reset_n_w),
         .mem_rd_o        (dbg_mem_rd_w),
         .mem_addr_o      (dbg_mem_port_addr_w),
-        .mem_available_i (ddr3_mem_ports[DOC_MEM_PORT].available),
-        .mem_ready_i     (ddr3_mem_ports[DOC_MEM_PORT].ready),
-        .mem_q_i         (ddr3_mem_ports[DOC_MEM_PORT].q),
+        .mem_available_i (ddr3_mem_ports[DBG_MEM_PORT].available),
+        .mem_ready_i     (ddr3_mem_ports[DBG_MEM_PORT].ready),
+        .mem_q_i         (ddr3_mem_ports[DBG_MEM_PORT].q),
         .addr_i (dbg_mem_addr_w),
         .req_i  (dbg_mem_go_w),
         .busy_o (dbg_mem_busy_w),
@@ -1046,66 +1118,11 @@ module top #(
     wire        overlay_en_w;   // DebugOverlay enable
 
     // -----------------------------------------------------------------
-    // DDR3 PLL — 324 MHz memory clock from 27 MHz input
-    // Uses pll_ddr3 wrapper with PLL_INIT for VCO calibration
-    // No pll_mDRP_intf needed — bypass permanently disabled
-    // -----------------------------------------------------------------
-    wire memory_clk_w;
-    wire pll_lock_w;
-    wire pll_stop_w;
-
-    // Raw PLLA wrapper (no PLL_INIT): on GW5AT-60 the DDR3 IP's pll_stop
-    // output MUST actually stop memory_clk during init — the controller's
-    // Sync_mod stops the clock, releases its dividers, and restarts it to
-    // phase-align the /4 domains (IPUG281 §4.4.4). The 60K PLLA has no
-    // enclk, so pll_stop acts through the PLL's mDRP port via
-    // pll_mDRP_intf. The previous generated wrapper routed the mDRP bus
-    // through PLL_INIT permanently (bypass mux), making pll_stop a silent
-    // no-op: cold-boot calibration then relied on luck-of-the-GSR phase
-    // alignment (the intermittent dead-DDR3 boots), and any rst_n re-init
-    // was guaranteed to fail. Raw PLLA + wired mDRP matches Sipeed's and
-    // nand2mario's shipped designs on this exact part.
-    wire       mdrp_inc_w;
-    wire [1:0] mdrp_op_w;
-    wire [7:0] mdrp_wdata_w;
-    wire [7:0] mdrp_rdata_w;
-
-    pll_ddr3_MOD pll_ddr3_inst (
-        .clkin(clk_pixel_w),           // 27 MHz from board PLL
-        .clkout0(),                    // unused
-        .clkout2(memory_clk_w),        // 324 MHz to DDR3
-        .lock(pll_lock_w),
-        .mdclk(clk),                   // 50 MHz board crystal = IP clk domain
-        .mdopc(mdrp_op_w),
-        .mdainc(mdrp_inc_w),
-        .mdwdi(mdrp_wdata_w),
-        .mdrdo(mdrp_rdata_w),
-        .reset(~clk_lock_w)
-    );
-
-    // pll_stop -> mDRP glue (refdesign pattern): pulse wr on either edge
-    // of pll_stop, gated by PLL lock; pll_mDRP_intf turns each pulse into
-    // the register write that stops/starts CLKOUT2.
-    reg pll_lock_mdrp_sync0, pll_lock_mdrp_sync1;
-    reg pll_stop_d_r, mdrp_wr_r;
-    always @(posedge clk) begin
-        pll_lock_mdrp_sync0 <= pll_lock_w;
-        pll_lock_mdrp_sync1 <= pll_lock_mdrp_sync0;
-        pll_stop_d_r <= pll_stop_w;
-        mdrp_wr_r    <= pll_lock_mdrp_sync1 ? (pll_stop_w ^ pll_stop_d_r) : 1'b0;
-    end
-
-    pll_mDRP_intf u_pll_mDRP_intf (
-        .clk(clk),
-        .rst_n(clk_lock_w),
-        .pll_lock(pll_lock_mdrp_sync1),
-        .wr(mdrp_wr_r),
-        .mdrp_inc(mdrp_inc_w),
-        .mdrp_op(mdrp_op_w),
-        .mdrp_wdata(mdrp_wdata_w),
-        .mdrp_rdata(mdrp_rdata_w)
-    );
-
+    // DDR3 PLL — 324 MHz memory clock, generated inside board_plls (see
+    // clocks_60b.sv / clocks_138b.sv for the per-SOM pll_stop mechanism:
+    // mDRP glue on the 60B PLLA, direct enclk2 gating on the 138B PLL).
+    // memory_clk_w / pll_lock_w / pll_stop_w are declared in the Clocks
+    // section above.
     // -----------------------------------------------------------------
     // DDR3 reset sequencer + calibration watchdog
     // -----------------------------------------------------------------
@@ -1227,7 +1244,7 @@ module top #(
         .pll_lock        (pll_lock_w),
         .burst           (1'b1),
         .ddr_rst         (ddr_rst_w),
-        .O_ddr_addr      (ddr_addr[14:0]),
+        .O_ddr_addr      (ddr_addr),
         .O_ddr_ba        (ddr_bank),
         .O_ddr_cs_n      (ddr_cs),
         .O_ddr_ras_n     (ddr_ras),
@@ -1244,8 +1261,6 @@ module top #(
         .IO_ddr_dqs_n    (ddr_dqs_n)
     );
 
-    assign ddr_addr[15] = 1'b0;
-
     // -----------------------------------------------------------------
     // DDR3 Multi-Port Arbiter
     // -----------------------------------------------------------------
@@ -1258,11 +1273,16 @@ module top #(
         .PORT_BASE_ADDR('{
             SHADOW_WORD_BASE,   // [0] Shadow read (highest priority)
             SHADOW_WORD_BASE,   // [1] Shadow write
-            FB_WORD_BASE,       // [2] FB write
-            FB_WORD_BASE,       // [3] FB read
-            21'h000000,         // [4] DDR3 debug reader (absolute addresses;
-                                //     Ensoniq runs from BSRAM, port was idle)
-            ENSONIQ_WORD_BASE   // [5] GLU write
+            ENSONIQ_WORD_BASE,  // [2] DOC wavetable read (above FB: tiny
+                                //     traffic, short grants; see localparam
+                                //     comment)
+            ENSONIQ_WORD_BASE,  // [3] GLU sound-RAM write (above FB: a
+                                //     dropped write corrupts the wavetable
+                                //     permanently)
+            FB_WORD_BASE,       // [4] FB write
+            FB_WORD_BASE,       // [5] FB read
+            21'h000000          // [6] DDR3 debug reader (absolute addresses,
+                                //     manual/rare traffic; lowest priority)
         }),
         .WIDE_WR_PORT(FB_WRITE_PORT),
         .READ_BURST8_PORT(FB_READ_PORT)
@@ -1370,6 +1390,7 @@ module top #(
         .dbg_line_not_ready_o    (fb_dbg_line_not_ready_w),
         .dbg_line_lag_max_o      (fb_dbg_line_lag_max_w),
         .dbg_ready_phase_err_o   (fb_dbg_ready_phase_err_w),
+        .fetch_active_o          (fb_fetch_active_w),
         .dbg_vsync_raw_o         (),
         .dbg_frame_start_accept_o(),
         .dbg_frame_start_reject_o(),
@@ -1756,6 +1777,27 @@ module top #(
         // Hex 1: req_pending bitmask for all 6 ports
         dbg_hex_sync0[1] <= {2'b0, ddr3_dbg_req_pending_w};
                                                 dbg_hex_sync1[1] <= dbg_hex_sync0[1];
+        // Hex 2: DOC REQUESTS PER FRAME, high byte (count >> 8). Ground
+        // truth of DOC memory demand, comparable across configs. Expected:
+        // BSRAM baseline all-32 ≈ 0x3A (1 request/slot, ~14.9k/frame);
+        // pipelined rev-3 ≈ 0x04 (~1.2k/frame). ~2x the expected value
+        // convicts double-issue.
+        dbg_hex_sync0[2] <= doc_dbg_req_frame_r[15:8];
+                                                dbg_hex_sync1[2] <= dbg_hex_sync0[2];
+        // Hex 3: GLU SOUND-RAM WRITE DROPS (sticky) — sample bytes lost
+        // because the write queue overflowed while the port was starved.
+        // THE KEY COUNTER: nonzero = the wavetable in DDR3 is corrupt, and
+        // the DOC will faithfully play wrong-but-plausible samples
+        // (harmonic distortion) with every DOC-side counter reading clean.
+        // Never observable before — this port was left unconnected.
+        // (Was: DOC STALE FETCH, measured 00 during distortion.)
+        dbg_hex_sync0[3] <= glu_wq_drops_w;
+                                                dbg_hex_sync1[3] <= dbg_hex_sync0[3];
+        // Hex 6: DOC FETCH DROP — fetch request dropped, internal FIFO
+        // full. Must stay 00 (design invariant).
+        dbg_hex_sync0[6] <= doc_dbg_fetch_drop_w;
+                                                dbg_hex_sync1[6] <= dbg_hex_sync0[6];
+`ifdef DOC_KEEP_FB_DEBUG_HEX  // original display-debug counters, disabled
         // Hex 2: BEAT EXTRA (sticky) — read beats that arrived when none
         // were expected. Nonzero = arbiter/CDC duplicated a request.
         // (Was VGC missed-hsync, confirmed 00 — repurposed for the
@@ -1768,20 +1810,27 @@ module top #(
         // events the per-frame counters flash too briefly to read.
         dbg_hex_sync0[3] <= fb_dbg_line_not_ready_total_w;
                                                 dbg_hex_sync1[3] <= dbg_hex_sync0[3];
-        // Hex 4: SHADOW WRITE DROPS (sticky) — CPU shadow writes lost
-        // because the 8-deep shadow write FIFO was full. Should stay 00;
-        // nonzero = port 3 is being starved longer than ~8 CPU writes.
-        dbg_hex_sync0[4] <= shadow_dbg_drop_w;
+`endif
+        // Hex 4: DOC MIN INTER-REQUEST GAP last frame, in clk_logic cycles
+        // (x18.5 ns; 0xFF = no requests). Ground truth of the tightest
+        // request spacing the memory path must service. Expected: BSRAM
+        // baseline ≈ 0x3C (one request per 60-cycle slot); values well
+        // below ~0x30 mean multiple requests per slot (burst issue or
+        // double-issue). (Was: DOC PRIME MISS — measured 00 during
+        // distortion, hypothesis retired.)
+        dbg_hex_sync0[4] <= doc_dbg_mingap_frame_r;
                                                 dbg_hex_sync1[4] <= dbg_hex_sync0[4];
         // Hex 5: RD FIFO DROP — read beats dropped because rd_fifo was full.
         // Nonzero = data loss in the read response path (corruption source).
         dbg_hex_sync0[5] <= fb_dbg_rd_fifo_drop_w;
                                                 dbg_hex_sync1[5] <= dbg_hex_sync0[5];
+`ifdef DOC_KEEP_FB_DEBUG_HEX
         // Hex 6: LINE LAG MAX — peak display-vs-completed-line lag in lines.
         // 0 = fetcher always ahead of display. Nonzero = fetcher falling
         // behind; higher = worse. Clamped to 0xFF.
         dbg_hex_sync0[6] <= fb_dbg_line_lag_max_w;
                                                 dbg_hex_sync1[6] <= dbg_hex_sync0[6];
+`endif
         // Hex 7: LINE NOT READY — primary symptom counter. Display-line
         // advances where the expected line had not yet been fetched.
         dbg_hex_sync0[7] <= fb_dbg_line_not_ready_w;

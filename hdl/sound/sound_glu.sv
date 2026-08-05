@@ -23,7 +23,26 @@
 module sound_glu #(
     parameter bit ENABLE = 1'b1,
     parameter bit MONO_MIX = 1'b0, // If true, mono mix is used instead of stereo
-    parameter bit USE_BSRAM = 1'b0 // If true, use on-chip BSRAM instead of DDR3 for sound RAM
+    parameter bit USE_BSRAM = 1'b0, // If true, use on-chip BSRAM instead of DDR3 for sound RAM
+    // If true (and USE_BSRAM=0), use the pipelined-fetch DOC5503 variant that
+    // tolerates DDR3 read latency (issue at service slot N, consume at N+1).
+    // See boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md.
+    parameter bit USE_DDR3_PIPELINED = 1'b0,
+    // Passed to doc5503_pipelined: 1 = oscillator register banks in DPB
+    // BSRAMs (rev 3.3+), 0 = rev-3.2-style FF banks with baseline read
+    // timing (hardware discriminator for the register-path question).
+    parameter bit DOC_BANKS_IN_BSRAM = 1'b1,
+    // How the sound-RAM write queue knows a write was taken.
+    //   0 = `ready` pulse (hdl/sdram/mem_port_cdc.sv — a2n20v2-GS: the
+    //       SDRAM CDC pulses ready on write completion).
+    //   1 = `available` handshake (hdl/ddr3/ddr3_port_cdc.sv — a2mega:
+    //       the DDR3 arbiter's S_WRITE goes straight to S_DONE and NEVER
+    //       asserts resp_valid, so client_ready NEVER pulses for a write.
+    //       Waiting on it wedges the queue: `wr` sticks high, the
+    //       level-sensitive CDC re-fires the same write forever, the read
+    //       pointer never advances, and every later sample byte is
+    //       dropped — the wavetable in DDR3 is never written.)
+    parameter bit GLU_WR_ACK_AVAIL = 1'b0
 ) (
     a2bus_if.slave a2bus_if,
 
@@ -40,8 +59,29 @@ module sound_glu #(
     mem_port_if.client glu_mem_if,
     mem_port_if.client doc_mem_if,
 
-    output [7:0] glu_wq_drops_o   // sound-RAM write-queue overflow drops (diagnostics)
-    
+    // Pipelined-DOC FB-aware issue gating (rev 3): high while the
+    // framebuffer line fetch is actively issuing bursts. Tie 0 if unused
+    // (gating disabled; correctness unaffected).
+    input fb_fetch_active_i,
+
+    output [7:0] glu_wq_drops_o,  // sound-RAM write-queue overflow drops (diagnostics)
+
+    // Pipelined-DOC diagnostics (all zero in USE_DDR3_PIPELINED=0 configs).
+    // Expected all-zero on hardware in steady state; see design doc.
+    output [7:0] dbg_doc_prime_miss_o,
+    output [7:0] dbg_doc_stale_fetch_o,
+    output [7:0] dbg_doc_fetch_drop_o,
+    output [15:0] dbg_doc_fetch_count_o,
+
+    // Ground-truth instrumentation at the DOC wave_* seam — measures the
+    // DOC's ACTUAL memory-request behavior identically in BSRAM and
+    // DDR3-pipelined configs (doc_mem_rd_w is the request strobe in both),
+    // so numbers are directly comparable across builds.
+    input  dbg_frame_tick_i,             // 1-cycle pulse per video frame
+    output [15:0] dbg_doc_req_count_o,   // free-running request counter
+    output [7:0]  dbg_doc_req_mingap_o   // min clk_logic cycles between
+                                         // requests since last frame tick
+                                         // (x18.5 ns; 0xFF = none seen)
 );
 
     reg [7:0] sound_control_r;      // Sound Control Register
@@ -111,7 +151,12 @@ module sound_glu #(
             // audible as corrupted waveforms. Queue write jobs in a small
             // FIFO and drain one at a time instead. This also latches the
             // write data, which was previously combinational off the bus.
-            localparam GQ_DEPTH = 8;
+            // Deep enough to ride out arbiter starvation during uploads.
+            // The queue arrays infer as RAM, so depth is cheap. A DROPPED
+            // WRITE PERMANENTLY CORRUPTS THE WAVETABLE — the DOC then
+            // fetches wrong-but-plausible bytes forever (harmonic
+            // distortion) with every DOC-side counter reading clean.
+            localparam GQ_DEPTH = 32;
             reg [20:0] gq_addr_r [GQ_DEPTH-1:0];
             reg [31:0] gq_data_r [GQ_DEPTH-1:0];
             reg [3:0]  gq_be_r   [GQ_DEPTH-1:0];
@@ -123,7 +168,10 @@ module sound_glu #(
 
             wire gq_room_w = (gq_cnt_r < ($clog2(GQ_DEPTH)+1)'(GQ_DEPTH));
             wire gq_push_w = glu_mem_wr_r && gq_room_w;
-            wire gq_pop_w = gq_wr_r && glu_mem_if.ready;
+            // Write-taken indication — see GLU_WR_ACK_AVAIL.
+            wire gq_ack_w = GLU_WR_ACK_AVAIL ? glu_mem_if.available
+                                             : glu_mem_if.ready;
+            wire gq_pop_w = gq_wr_r && gq_ack_w;
 
             always_ff @(posedge a2bus_if.clk_logic) begin
                 if (!a2bus_if.system_reset_n) begin
@@ -148,7 +196,7 @@ module sound_glu #(
                     // Hold wr until the completion pulse; one dead cycle
                     // between jobs gives the controller a fresh edge.
                     if (gq_wr_r) begin
-                        if (glu_mem_if.ready) begin
+                        if (gq_ack_w) begin
                             gq_wr_r <= 1'b0;
                             gq_rp_r <= gq_rp_r + 1'b1;
                         end
@@ -234,6 +282,7 @@ module sound_glu #(
     end
 
     reg [7:0] wave_data_r;
+    reg [31:0] wave_data_word_r;   // rev-2 pipelined path: full-word response
     reg wave_data_ready_r;
 
     generate
@@ -275,8 +324,28 @@ module sound_glu #(
                 end
             end
 
+        end else if (USE_DDR3_PIPELINED) begin : gen_doc_ddr3_pipe
+            // Pipelined-fetch DDR3 path (rev 3): the DOC fetches 16-byte
+            // LINES as 4-beat bursts (addresses are 16-byte aligned) —
+            // byte-lane selection and the per-oscillator line cache live
+            // inside doc5503_pipelined. This module forwards requests and
+            // registers each of the four word beats verbatim (in order).
+            assign doc_mem_if.wr = '0;
+            assign doc_mem_if.data = '0;
+            assign doc_mem_if.byte_en = 4'b1111;
+            assign doc_mem_if.addr = {7'b0, wave_addr_w[15:2]};
+            assign doc_mem_if.rd = ENABLE && doc_mem_rd_w;
+            assign doc_mem_if.burst = 1'b1;
+
+            always_ff @(posedge a2bus_if.clk_logic) begin
+                wave_data_ready_r <= 1'b0;
+                if (doc_mem_if.ready) begin
+                    wave_data_word_r  <= doc_mem_if.q;
+                    wave_data_ready_r <= 1'b1;
+                end
+            end
         end else begin : gen_doc_ddr3
-            // Original DDR3 path
+            // Original DDR3 path (single outstanding read)
             assign doc_mem_if.wr = '0;
             assign doc_mem_if.data = '0;
             assign doc_mem_if.byte_en = 4'b1111;
@@ -294,6 +363,31 @@ module sound_glu #(
         end
     endgenerate
 
+    // Request-rate/spacing instrumentation (config-independent)
+    reg [15:0] dbg_req_count_r;
+    reg [7:0]  dbg_gap_cnt_r;
+    reg [7:0]  dbg_min_gap_r;
+    always_ff @(posedge a2bus_if.clk_logic) begin
+        if (!a2bus_if.system_reset_n) begin
+            dbg_req_count_r <= '0;
+            dbg_gap_cnt_r   <= 8'hFF;
+            dbg_min_gap_r   <= 8'hFF;
+        end else begin
+            if (doc_mem_rd_w) begin
+                dbg_req_count_r <= dbg_req_count_r + 16'd1;
+                if (dbg_gap_cnt_r < dbg_min_gap_r)
+                    dbg_min_gap_r <= dbg_gap_cnt_r;
+                dbg_gap_cnt_r <= 8'd0;
+            end else if (dbg_gap_cnt_r != 8'hFF) begin
+                dbg_gap_cnt_r <= dbg_gap_cnt_r + 8'd1;
+            end
+            if (dbg_frame_tick_i)
+                dbg_min_gap_r <= 8'hFF;   // top.sv samples before this reset
+        end
+    end
+    assign dbg_doc_req_count_o  = dbg_req_count_r;
+    assign dbg_doc_req_mingap_o = dbg_min_gap_r;
+
     wire signed [15:0] mono_mix_w;
     wire signed [15:0] left_mix_w;
     wire signed [15:0] right_mix_w;
@@ -308,29 +402,74 @@ module sound_glu #(
     wire [7:0] debug_osc_halt_w;
     assign debug_osc_halt_o = debug_osc_halt_w;
 
-    doc5503 #(
-    ) doc5503 (
-        .clk_i(a2bus_if.clk_logic),
-        .reset_n_i(a2bus_if.system_reset_n),
-        .clk_en_i(a2bus_if.clk_7M_posedge),
-        .cs_n_i(~doc_wr_r),
-        .we_n_i(1'b0),
-        .addr_i(doc_addr_r),
-        .data_i(a2bus_if.data),
-        .data_o(doc_data_o_w),
-        .wave_address_o(wave_addr_w),
-        .wave_rd_o(doc_mem_rd_w),
-        .wave_data_ready_i(wave_data_ready_r),
-        .wave_data_i(wave_data_r),
-        .left_mix_o(left_mix_w),
-        .right_mix_o(right_mix_w),
-        .mono_mix_o(mono_mix_w),
-        .channel_o(),
-        .ready_o(),
-        .debug_osc_en_o(debug_doc_osc_en_w),
-        .debug_osc_mode_o(debug_osc_mode_w),
-        .debug_osc_halt_o(debug_osc_halt_w)
-    );
+    generate
+        if (USE_DDR3_PIPELINED && !USE_BSRAM) begin : gen_doc_pipelined
+            doc5503_pipelined #(
+                .BANKS_IN_BSRAM(DOC_BANKS_IN_BSRAM)
+            ) doc5503 (
+                .clk_i(a2bus_if.clk_logic),
+                .reset_n_i(a2bus_if.system_reset_n),
+                .clk_en_i(a2bus_if.clk_7M_posedge),
+                .cs_n_i(~doc_wr_r),
+                .we_n_i(1'b0),
+                .addr_i(doc_addr_r),
+                .data_i(a2bus_if.data),
+                .data_o(doc_data_o_w),
+                .wave_address_o(wave_addr_w),
+                .wave_rd_o(doc_mem_rd_w),
+                .wave_available_i(doc_mem_if.available),
+                .wave_data_ready_i(wave_data_ready_r),
+                .wave_data_i(8'h00),                // legacy, unused in rev 2
+                .wave_data_word_i(wave_data_word_r),
+                .cache_flush_i(glu_mem_wr_r),       // GLU sound-RAM write pulse
+                // Written BYTE address for targeted (dirty-range) cache
+                // invalidation — bulk flush on every write caused refetch
+                // storms during play-while-writing titles (rev 3.5).
+                .cache_flush_addr_i({glu_mem_addr_r[13:0], 2'b00}),
+                .fb_fetch_active_i(fb_fetch_active_i),
+                .left_mix_o(left_mix_w),
+                .right_mix_o(right_mix_w),
+                .mono_mix_o(mono_mix_w),
+                .channel_o(),
+                .ready_o(),
+                .debug_osc_en_o(debug_doc_osc_en_w),
+                .debug_osc_mode_o(debug_osc_mode_w),
+                .debug_osc_halt_o(debug_osc_halt_w),
+                .dbg_prime_miss_o(dbg_doc_prime_miss_o),
+                .dbg_stale_fetch_o(dbg_doc_stale_fetch_o),
+                .dbg_fetch_drop_o(dbg_doc_fetch_drop_o),
+                .dbg_fetch_count_o(dbg_doc_fetch_count_o)
+            );
+        end else begin : gen_doc_baseline
+            assign dbg_doc_prime_miss_o  = 8'd0;
+            assign dbg_doc_stale_fetch_o = 8'd0;
+            assign dbg_doc_fetch_drop_o  = 8'd0;
+            assign dbg_doc_fetch_count_o = 16'd0;
+            doc5503 #(
+            ) doc5503 (
+                .clk_i(a2bus_if.clk_logic),
+                .reset_n_i(a2bus_if.system_reset_n),
+                .clk_en_i(a2bus_if.clk_7M_posedge),
+                .cs_n_i(~doc_wr_r),
+                .we_n_i(1'b0),
+                .addr_i(doc_addr_r),
+                .data_i(a2bus_if.data),
+                .data_o(doc_data_o_w),
+                .wave_address_o(wave_addr_w),
+                .wave_rd_o(doc_mem_rd_w),
+                .wave_data_ready_i(wave_data_ready_r),
+                .wave_data_i(wave_data_r),
+                .left_mix_o(left_mix_w),
+                .right_mix_o(right_mix_w),
+                .mono_mix_o(mono_mix_w),
+                .channel_o(),
+                .ready_o(),
+                .debug_osc_en_o(debug_doc_osc_en_w),
+                .debug_osc_mode_o(debug_osc_mode_w),
+                .debug_osc_halt_o(debug_osc_halt_w)
+            );
+        end
+    endgenerate
 
     // Volume is inverted for right shift (0 is min volume, 15 is max volume)
     // IIgs volume control ranges from 0-15, invert for right shift (0=lots of shift, 15=no shift)

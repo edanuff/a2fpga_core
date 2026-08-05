@@ -10,23 +10,22 @@
         <File path="hdl/esp32/esp32_ospi_connector.sv" type="file.verilog" enable="1"/>
         <File path="hdl/esp32/esp32_ospi_proto_proc.sv" type="file.verilog" enable="1"/>
         <File path="hdl/esp32/osd_text_overlay.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/ddr3_memory_interface/ddr3_memory_interface.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/clk_pll.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/pll_ddr3.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/pll_ddr3_mod.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/pll_hdmi.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/pll_mDRP_intf.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/pll_usb.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/ddr3_memory_interface/ddr3_memory_interface.v" type="file.verilog" enable="1"/>
+        <File path="hdl/clocks_60b.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/gowin_pll/clk_pll.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/gowin_pll/pll_ddr3_mod.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/gowin_pll/pll_mDRP_intf.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/gowin_pll/pll_usb.v" type="file.verilog" enable="1"/>
         <File path="hdl/hdmi/serializer.sv" type="file.verilog" enable="1"/>
         <File path="hdl/memory/apple_memory.sv" type="file.verilog" enable="1"/>
         <File path="hdl/sound/iir_filter.v" type="file.verilog" enable="1"/>
         <File path="hdl/top.sv" type="file.verilog" enable="1"/>
         <File path="hdl/usb_hid_host/usb_hid_host.v" type="file.verilog" enable="1"/>
         <File path="hdl/usb_hid_host/usb_hid_host_rom.v" type="file.verilog" enable="1"/>
-        <File path="src/pll_init.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/bus/a2bus_control_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/bus/a2bus_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/bus/a2bus_timing.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/bus/gs_detector.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/ddr3/ddr3_port_cdc.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/ddr3/ddr3_ports.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/debug/debugoverlay.sv" type="file.verilog" enable="1"/>
@@ -57,6 +56,7 @@
         <File path="../../hdl/sound/audio_timing.sv" type="file.verilog" enable="1"/>
         <File path="hdl/sound/ensoniq_bsram.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/doc5503.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sound/doc5503_pipelined.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/sound_glu.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/ssc/super_serial_card.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/supersprite/supersprite.sv" type="file.verilog" enable="1"/>
