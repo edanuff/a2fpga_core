@@ -32,6 +32,16 @@ module sound_glu #(
     // BSRAMs (rev 3.3+), 0 = rev-3.2-style FF banks with baseline read
     // timing (hardware discriminator for the register-path question).
     parameter bit DOC_BANKS_IN_BSRAM = 1'b1,
+    // Output stage gain: audio = sat16(mix <<< OUTPUT_BOOST_SHIFT).
+    // Default 1 preserves the field-validated GS x2 loudness — but now
+    // CLAMPED instead of wrapping (tracker-class music with 8-14 voices
+    // wrapped audibly; see design doc 12.17).
+    parameter int OUTPUT_BOOST_SHIFT = 1,
+    // Honor the $C03C[3:0] master volume as linear amplitude:
+    // out = mix * (vol+1)/16 (INFERRED mapping — the original commented-out
+    // shift mapping was defective; needs hardware listening validation
+    // before enabling by default).
+    parameter bit ENABLE_MASTER_VOLUME = 1'b0,
     // How the sound-RAM write queue knows a write was taken.
     //   0 = `ready` pulse (hdl/sdram/mem_port_cdc.sv — a2n20v2-GS: the
     //       SDRAM CDC pulses ready on write completion).
@@ -474,31 +484,53 @@ module sound_glu #(
         end
     endgenerate
 
-    // Volume is inverted for right shift (0 is min volume, 15 is max volume)
-    // IIgs volume control ranges from 0-15, invert for right shift (0=lots of shift, 15=no shift)
-    logic [3:0] volume_shift_w = volume_w < 12 ? 4'd4 - {2'b0, volume_w[3:2]} : 4'd0;
-    
+    // Output stage (design doc 12.17): optional master volume, then boost
+    // shift computed in widened precision and SATURATED to 16 bits — the
+    // old bare `<<< 1` WRAPPED on overflow, which is what tracker-class
+    // music (8-14 voices) exposed as harsh distortion.
+    //
+    // Master volume ($C03C[3:0]) as linear amplitude: mix * (vol+1)/16,
+    // vol=15 = unity. INFERRED mapping (the original shift-based mapping,
+    // now removed, was defective: 4 coarse steps with a discontinuity).
+    // Off by default until validated by listening test.
+    localparam int OB = OUTPUT_BOOST_SHIFT;
+
+    function automatic signed [15:0] sat16(input signed [21:0] v);
+        if (v > 22'sd32767)       sat16 = 16'sd32767;
+        else if (v < -22'sd32768) sat16 = -16'sd32768;
+        else                      sat16 = v[15:0];
+    endfunction
+
+    function automatic signed [15:0] out_stage(input signed [15:0] mix);
+        logic signed [5:0]  volp1;   // (vol+1): 1..16, kept signed so the
+                                     // multiply below stays signed x signed
+        logic signed [21:0] scaled;
+        logic signed [21:0] boosted;
+        volp1 = signed'({2'b00, volume_w}) + 6'sd1;
+        if (ENABLE_MASTER_VOLUME)
+            scaled = (22'(mix) * 22'(volp1)) >>> 4;
+        else
+            scaled = 22'(mix);
+        boosted = scaled <<< OB;
+        out_stage = sat16(boosted);
+    endfunction
+
     // Output registers for audio with zero-centering preserved
     reg signed [15:0] audio_l_reg;
     reg signed [15:0] audio_r_reg;
-    
+
     // Assign outputs from registers
     assign audio_l_o = audio_l_reg;
     assign audio_r_o = audio_r_reg;
-    
+
     always_ff @(posedge a2bus_if.clk_logic) begin
-        // Apply volume control by right shifting the mix values
-        //audio_l_reg <= left_mix_w >>> volume_shift_w;
-        //audio_r_reg <= right_mix_w >>> volume_shift_w;
-
         if (MONO_MIX) begin
-            audio_l_reg <= mono_mix_w <<< 1;
-            audio_r_reg <= mono_mix_w <<< 1; 
+            audio_l_reg <= out_stage(mono_mix_w);
+            audio_r_reg <= out_stage(mono_mix_w);
         end else begin
-            audio_l_reg <= left_mix_w <<< 1;
-            audio_r_reg <= right_mix_w <<< 1;
+            audio_l_reg <= out_stage(left_mix_w);
+            audio_r_reg <= out_stage(right_mix_w);
         end
-
     end
     //assign audio_l_o = channel_w[0] >>> (4'd15 - volume_w);
     //assign audio_r_o = channel_w[0] >>> (4'd15 - volume_w);
