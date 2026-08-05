@@ -8,14 +8,51 @@ hardware.
 
 ---
 
+> **CORRECTION 2 (2026-08-04, supersedes the power-topology framing):** two
+> facts break the original conclusion. (a) Field failures occurred on
+> **USB-only power with the machine off — including immediately after a fresh
+> replug/cold boot** — so the wedge is intermittent and not gated by host
+> power at all. (b) **USB power and slot power land on the same +5V net**
+> (§3), so a power-source-based explanation of the machine-ON rule proves too
+> much: it would forbid USB programming equally. What actually differs with
+> the machine on is **bus signal ACTIVITY, not power** — which promotes §"pin
+> sharing" from secondary finding to PRIME suspect for the machine-on rule:
+> Apple II bus signals sit on GW5A configuration-function pins (SSPI_CS/CLK,
+> SI/SO, D04–D08, EMCCLK), and a live toggling bus driving the config port
+> during flash operations is a coherent mechanism. The machine-off
+> intermittent failures remain UNEXPLAINED (bridge-side vs TAP-side — run
+> `--detect --freq 500000` at next fresh-boot failure to discriminate before
+> retrying). E4 (`--reset` after flash) remains worth one bench test. The
+> machine-off flashing rule stands as validated operating procedure.
+>
+> **PRIME SUSPECT FOUND (2026-08-04): openFPGALoader v1.0.0 toggleClk bug.**
+> The installed openFPGALoader was v1.0.0. Exactly ONE esp_usb_jtag change
+> exists between v1.0.0 and v1.1.1: upstream commit `d654a9d`
+> ("toggleClk: ignore tdi/tms and keep these pins to the current state").
+> In v1.0.0, `toggleClk()` overwrote the driver's stored default TMS/TDI
+> with the caller's values (typically 0) — so the long clock-toggle runs
+> the Gowin flash protocol depends on (RTI clocking, SPI-over-JTAG waits)
+> silently corrupted the TMS level of every subsequent buffered command,
+> walking the TAP into a garbage state. Mechanism matches the field
+> signature exactly: flash-phase operations complete but leave the chain
+> dead ("TDO stuck at 0" / "no device found") until a cold boot re-syncs
+> the TAP; only the handful of esp_usb_jtag boards in existence ever hit
+> this path. **openFPGALoader upgraded to v1.1.1 (brew) 2026-08-04.**
+> Validation: the next several flash cycles should no longer need the
+> replug ritual. If any wedge still occurs, flash.sh's automatic low-speed
+> detect probe classifies it, and the board's own ESP32 bridge sketch
+> (boards/a2mega/src/esp32_usb_jtag/) becomes the next suspect.
+
 ## 1. Symptom
 
 Flashing the a2mega bitstream with `tools/flash.sh a2mega`
 (`openFPGALoader -c esp32s3 --bulk-erase -f --verify …`) fails in a host-power-dependent
 pattern:
 
-- With the host Apple II **powered ON**, JTAG operations essentially never succeed.
-- With the host Apple II **powered OFF**, flashing succeeds — typically first try.
+- With the host Apple II **powered ON**, JTAG operations essentially never succeed
+  (known operating procedure — flash with the machine off).
+- With the host Apple II **powered OFF**, flashing succeeds — typically first try
+  after a cold boot; the recurring failure is the SECOND operation without one.
 - Historically the ritual was "unplug and replug the USB cable, then it works again".
   Observed error messages, in varying order:
   - `Error: no device found` (bridge opens, chain scan finds nothing)
