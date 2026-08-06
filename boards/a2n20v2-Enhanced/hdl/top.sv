@@ -480,7 +480,6 @@ module top #(
     wire sw_scanlines_w = !dip_switches_n_w[0];
     wire sw_apple_speaker_w = !dip_switches_n_w[1];
     wire sw_slot_7_w = !dip_switches_n_w[2];
-    wire sw_gs_w = !dip_switches_n_w[3];
 
     IOBUF a2_bridge_d_iobuf[7:0] (
         .O  (a2_bridge_d_buf_w),
@@ -732,6 +731,28 @@ module top #(
         .oneshot(oneshot_w)
     );
 
+    // Bus timing profiler -- cross-machine phi0/M2 timing statistics (reg 0x6F)
+    wire [6:0] prof_index_w;
+    wire       prof_arm_w;
+    wire       prof_clear_w;
+    wire [7:0] prof_stat_byte_w;
+
+    bus_timing_profiler bus_timing_profiler (
+        .clk_i(clk_logic_w),
+        .rst_n_i(device_reset_n_w),
+        .phi0_i(a2bus_if.phi0),
+        .phi0_posedge_i(a2bus_if.phi0_posedge),
+        .phi1_posedge_i(a2bus_if.phi1_posedge),
+        .addr_i(a2bus_if.addr),
+        .rw_n_i(a2bus_if.rw_n),
+        .m2sel_n_i(a2bus_if.m2sel_n),
+        .m2b0_i(a2bus_if.m2b0),
+        .clear_i(prof_clear_w),
+        .armed_i(prof_arm_w),
+        .stat_index_i(prof_index_w),
+        .stat_byte_o(prof_stat_byte_w)
+    );
+
     // BL616 SPI connector -- drives LED and WS2812 internally
     wire [4:0] mcu_led_w;
     wire       mcu_ws2812_w;
@@ -800,6 +821,10 @@ module top #(
         .trig_addr_o(trig_addr_w),
         .trig_mask_o(trig_mask_w),
         .trig_matched_i(trig_matched_w),
+        .prof_index_o(prof_index_w),
+        .prof_arm_o(prof_arm_w),
+        .prof_clear_o(prof_clear_w),
+        .prof_stat_byte_i(prof_stat_byte_w),
         .w5100_host_wr(u2_host_wr_w),
         .w5100_host_addr(u2_host_addr_w),
         .w5100_host_wdata(u2_host_wdata_w),
@@ -1005,7 +1030,7 @@ module top #(
 
         .a2mem_if(a2mem_if),
         .video_control_if(video_control_if),
-        .sw_gs_i(sw_gs_w),
+        .sw_gs_i(a2bus_if.sw_gs),
 
         .pixel_stream(apple_ps),
 
@@ -1332,7 +1357,7 @@ module top #(
 
             .a2mem_if(a2mem_if),
             .video_control_if(video_control_if),
-            .sw_gs_i(sw_gs_w),
+            .sw_gs_i(a2bus_if.sw_gs),
 
             .pixel_stream(apple_ps),
 

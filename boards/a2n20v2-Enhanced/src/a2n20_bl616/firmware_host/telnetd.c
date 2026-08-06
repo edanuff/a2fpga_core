@@ -253,6 +253,78 @@ static void bus_dump_full(int fd)
     fpga_spi_reg_write(0x79, 1);                 /* resume capture */
 }
 
+/* ---- 'p' -- bus timing profiler (reg 0x6F, single-register indexed) -------
+ * Prints phi0/cycle-timing statistics for cross-machine comparison, then
+ * clears+arms a fresh window so consecutive presses measure the interval
+ * between them. The KEY stat is "phi0 anomalies" (cycles whose phi0_posedge
+ * count != 1) -- nonzero on a machine whose FPI SYNC/STRETCH shaping the FPGA
+ * mis-counts (the ROM01-IIgs Disk II / Uthernet failure hypothesis). */
+static uint32_t prof_rd(int base, int n)
+{
+    uint32_t v = 0;
+    for (int i = 0; i < n; i++) {
+        fpga_spi_reg_write(0x6F, (uint8_t)((base + i) & 0x7F));
+        v |= (uint32_t)fpga_spi_reg_read(0x6F) << (8 * i);
+    }
+    return v;
+}
+
+static void bus_profile(int fd)
+{
+    char line[160];
+    uint8_t  status    = (uint8_t)prof_rd(0x00, 1);
+    uint32_t total     = prof_rd(0x01, 4);
+    uint32_t anom      = prof_rd(0x05, 4);
+    uint16_t clen_min  = (uint16_t)prof_rd(0x09, 2);
+    uint16_t clen_max  = (uint16_t)prof_rd(0x0B, 2);
+    uint16_t ph0h_min  = (uint16_t)prof_rd(0x0D, 2);
+    uint16_t ph0h_max  = (uint16_t)prof_rd(0x0F, 2);
+    uint32_t io_cyc    = prof_rd(0x11, 4);
+    uint32_t io_anom   = prof_rd(0x15, 4);
+    uint32_t m2sel     = prof_rd(0x19, 4);
+    uint32_t m2b0      = prof_rd(0x1D, 4);
+    uint8_t  last_p    = (uint8_t)prof_rd(0x21, 1);
+    uint16_t clen_last = (uint16_t)prof_rd(0x22, 2);
+    uint32_t h_runt    = prof_rd(0x24, 4);
+    uint32_t h_nom     = prof_rd(0x28, 4);
+    uint32_t h_s1      = prof_rd(0x2C, 4);
+    uint32_t h_s2      = prof_rd(0x30, 4);
+
+    tn_puts(fd, "\r\n=== BUS TIMING PROFILE (since last 'p' / power-on) ===\r\n");
+    snprintf(line, sizeof(line),
+             " armed=%d overflow=%d  total_cycles=%lu\r\n",
+             status & 1, (status >> 1) & 1, (unsigned long)total);
+    tn_puts(fd, line);
+    snprintf(line, sizeof(line),
+             " phi0 anomalies (edges/cycle != 1): %lu   <-- KEY (want 0)\r\n",
+             (unsigned long)anom);
+    tn_puts(fd, line);
+    snprintf(line, sizeof(line),
+             " cycle len (54MHz ticks): min=%u max=%u last=%u  (nominal ~52)\r\n",
+             clen_min, clen_max, clen_last);
+    tn_puts(fd, line);
+    snprintf(line, sizeof(line),
+             " phi0 high ticks: min=%u max=%u   last phi0 count=%u\r\n",
+             ph0h_min, ph0h_max, last_p);
+    tn_puts(fd, line);
+    snprintf(line, sizeof(line),
+             " I/O $C0xx cycles=%lu  I/O phi0 anomalies=%lu\r\n",
+             (unsigned long)io_cyc, (unsigned long)io_anom);
+    tn_puts(fd, line);
+    snprintf(line, sizeof(line),
+             " M2SEL asserted=%lu  M2B0 set=%lu\r\n",
+             (unsigned long)m2sel, (unsigned long)m2b0);
+    tn_puts(fd, line);
+    snprintf(line, sizeof(line),
+             " cyclelen hist: runt(<48)=%lu nom(48-54)=%lu s1(55-64)=%lu s2(>=65)=%lu\r\n",
+             (unsigned long)h_runt, (unsigned long)h_nom,
+             (unsigned long)h_s1, (unsigned long)h_s2);
+    tn_puts(fd, line);
+
+    fpga_spi_reg_write(0x6F, 0x81);              /* clear + re-arm a fresh window */
+    tn_puts(fd, " [window cleared + re-armed]\r\n");
+}
+
 /* ---- scope mode: continuous bus stream ('s' toggles) ---------------------
  * While active, capture stays armed and each poll iteration drains whatever
  * the FIFO holds and prints it live (addr rw data ctl-hex), so the console
@@ -353,7 +425,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2n20v2-Enhanced remote console\r\n"
-                "keys: c=console m=menu d=snapshot D=full dump s=scope t=trigger o=oneshot b=boot-timeline q=quit\r\n"
+                "keys: c=console m=menu d=snapshot D=full dump s=scope t=trigger o=oneshot p=bus-profile b=boot-timeline q=quit\r\n"
                 "menu: up/down move, right/enter=ok, left/esc/b=back,\r\n"
                 "      y=view, s=select, [ ]=+/-16\r\n\r\n");
 
@@ -474,6 +546,10 @@ static void session(int fd)
                 fpga_spi_reg_write(0x1F, os ? 0 : 1);
                 tn_puts(fd, (os ? "\r\n-- ROLLING (last-512) --\r\n"
                                 : "\r\n-- ONESHOT ON (first-512) --\r\n"));
+                continue;
+            }
+            if (esc_st == 0 && ch == 'p' && !menu_mode) {
+                bus_profile(fd);                 /* phi0/M2 timing stats (reg 0x6F) */
                 continue;
             }
             if (esc_st == 0 && ch == 'c' && menu_mode) {

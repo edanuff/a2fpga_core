@@ -8,6 +8,8 @@
         <File path="../../hdl/bus/a2bus_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/bus/a2bus_control_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/bus/a2bus_timing.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/bus/gs_detector.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/bus/bus_timing_profiler.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/debug/debugoverlay.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/disk/apple_disk.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/disk/drive_ii.sv" type="file.verilog" enable="1"/>

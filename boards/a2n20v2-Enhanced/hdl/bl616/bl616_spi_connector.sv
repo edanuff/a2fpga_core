@@ -79,6 +79,15 @@ module bl616_spi_connector #(
     output reg  [15:0] trig_mask_o,
     input  wire        trig_matched_i,
 
+    // Bus timing profiler (reg 0x6F, single-register indexed):
+    //   write 0x6F: bit7=0 -> set read index [6:0]; bit7=1 -> command
+    //     (0x81 = clear+arm/start, 0x80 = stop/freeze)
+    //   read  0x6F: the stat byte at the current index (see bus_timing_profiler)
+    output reg  [6:0]  prof_index_o,
+    output reg         prof_arm_o,
+    output reg         prof_clear_o,
+    input  wire [7:0]  prof_stat_byte_i,
+
     // Uthernet2 (W5100) backing store -- SPI memory SPACE 3 (port B of the card)
     output wire        w5100_host_wr,
     output wire [15:0] w5100_host_addr,    // W5100 address (0x0000-0x7FFF)
@@ -961,6 +970,9 @@ module bl616_spi_connector #(
             7'h6D: reg_rdata = sd_rx_data_w;
             7'h6E: reg_rdata = {7'b0, sd_busy_w};
 
+            // Bus timing profiler indexed read-out
+            7'h6F: reg_rdata = prof_stat_byte_i;
+
             // Page 7: Bus event FIFO
             7'h70: reg_rdata = {fifo_empty, fifo_full, 6'b0};
             7'h71: reg_rdata = fifo_count[7:0];
@@ -1053,9 +1065,13 @@ module bl616_spi_connector #(
             sd_tx_data_r     <= 8'hFF;
             sd_tx_start_r    <= 1'b0;
             w5100_cmd_clr_r  <= 4'd0;
+            prof_index_o     <= 7'd0;
+            prof_arm_o       <= 1'b1;   // accumulate from power-on; firmware clears to start a window
+            prof_clear_o     <= 1'b0;
         end else begin
             // One-shot clears
             cardrom_release_r <= 1'b0;
+            prof_clear_o      <= 1'b0;
             volume_ack_r[0]   <= 1'b0;
             volume_ack_r[1]   <= 1'b0;
             hdd_ack_r[0]      <= 1'b0;
@@ -1173,6 +1189,17 @@ module bl616_spi_connector #(
                     end
 
                     // SD card registers
+                    // Bus timing profiler control (indexed port)
+                    7'h6F: begin
+                        if (reg_wdata[7]) begin
+                            // command: bit0=1 -> clear+arm (start window); bit0=0 -> stop
+                            prof_arm_o   <= reg_wdata[0];
+                            prof_clear_o <= reg_wdata[0];
+                        end else begin
+                            prof_index_o <= reg_wdata[6:0];
+                        end
+                    end
+
                     7'h6C: begin
                         sd_cs_n_r     <= reg_wdata[0];
                         sd_slow_clk_r <= reg_wdata[1];
