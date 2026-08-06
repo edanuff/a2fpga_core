@@ -60,3 +60,8 @@ src/cardrom/cardrom
 *.m4a
 *.wav
 *.mov
+
+# Gowin PnR route databases — regenerable intermediates, ~100-140 MB on
+# GW5A parts (exceeds GitHub's file limit). The .fs bitstream and reports
+# are the tracked build products.
+boards/*/impl/pnr/*.pr
