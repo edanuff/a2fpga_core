@@ -72,6 +72,7 @@ module sound_glu #(
     output [7:0] dbg_doc_stale_fetch_o,
     output [7:0] dbg_doc_fetch_drop_o,
     output [15:0] dbg_doc_fetch_count_o,
+    output [7:0] dbg_doc_frame_resync_o,  // rev 3.9 beat-framing resyncs
 
     // Ground-truth instrumentation at the DOC wave_* seam — measures the
     // DOC's ACTUAL memory-request behavior identically in BSRAM and
@@ -438,13 +439,15 @@ module sound_glu #(
                 .dbg_prime_miss_o(dbg_doc_prime_miss_o),
                 .dbg_stale_fetch_o(dbg_doc_stale_fetch_o),
                 .dbg_fetch_drop_o(dbg_doc_fetch_drop_o),
-                .dbg_fetch_count_o(dbg_doc_fetch_count_o)
+                .dbg_fetch_count_o(dbg_doc_fetch_count_o),
+                .dbg_frame_resync_o(dbg_doc_frame_resync_o)
             );
         end else begin : gen_doc_baseline
             assign dbg_doc_prime_miss_o  = 8'd0;
             assign dbg_doc_stale_fetch_o = 8'd0;
             assign dbg_doc_fetch_drop_o  = 8'd0;
             assign dbg_doc_fetch_count_o = 16'd0;
+            assign dbg_doc_frame_resync_o = 8'd0;
             doc5503 #(
             ) doc5503 (
                 .clk_i(a2bus_if.clk_logic),

@@ -1053,3 +1053,138 @@ BIT-IDENTICAL to rev 3.7 (same 80 classified diffs, same deterministic
 4,598 fetches, prime_miss = 0, drops = 0, FB all deadlines, host
 readback 38/38). Census: 1,814 DFF (+69 staging FFs) / 14 BSRAM. Lint
 clean. Interface unchanged.
+
+### 12.15 Cadence + beat-framing audit (rev 3.9)
+
+**Cadence audit (secondary check, now permanent):** the slot machine is
+free-running by construction — the clk_en/8 counter and slot advance
+never consult the FSM, the timing-generator blocks are BYTE-IDENTICAL to
+the baseline's (verified programmatically), the cycle_start preemption
+dispatch is identical, and the pipelined FSM contains ZERO wait states
+(the baseline's OSC_HANDLE_DATA memory wait is the only one in either
+design; the pipelined chain is max 12 states of a ~60-clk slot). New
+permanent assertion class: every clk_i cycle, both DUTs' slot machines
+must be in lockstep (cycle_start, cycle_state, curr_osc, clk_count) and
+the mix-update strobes must coincide — 6,314 scans, 0 mismatches, held
+across a mid-run reset. A wall-clock cadence divergence (the class the
+slot-indexed stream comparator provably cannot see) is now impossible to
+miss in sim.
+
+**Beat-framing audit (was the lead hypothesis):** the line assembly
+counts four wave_data_ready_i pulses with no framing marker.
+Findings: (a) mid-stream, the CDC delivers exactly 4 in-order beats per
+request (arbiter pushes 4 per grant; drain free-runs; our <=8 in-flight
+beats cannot overflow the 16-deep response FIFO), and the TB response
+model now delivers beats with random 0-2 idle-cycle gaps (imperfect-
+delivery realism) — handled. (b) The pre-existing retire guard
+(fq_ret != fq_issue) already silently discards orphans arriving with an
+EMPTY in-flight queue, so a reset-orphan tail causes a TRANSIENT
+corruption (the first post-reset request retires with the pre-reset
+burst's data under its own tag — plausible-but-wrong samples, all
+counters clean), not a permanent slip: the skew self-bounds at the next
+queue-empty gap. Rev 3.9 closes even the transient window and makes
+framing self-synchronizing and OBSERVABLE:
+- RESET_DRAIN_CLKS (default 1024 ~= 19 us): after reset, no fetch issues
+  until the response path has been quiet for the full window (reloaded
+  by stragglers) — a pre-reset burst tail can never be counted into a
+  post-reset line. Un-issued FIFO entries do not open the retire window
+  (the guard uses the ISSUE pointer), so orphans during drain are
+  discarded even with requests already queued.
+- Orphan pulses and empty-queue beat-counter resyncs are counted in a
+  new dbg_frame_resync_o[7:0] (expected 0 in steady state; smallcounts
+  only around reset).
+- New TB phase P14: reset asserted mid-burst with an orchestrated slow
+  grant so the 4-beat tail lands ~7 us post-reset. Fixed build: 4
+  orphans discarded, post-reset stream bit-clean, cadence lockstep held
+  across the reset. NODRAIN repro build (RESET_DRAIN_CLKS=0, run.sh-
+  gated): the tail fills the boot prime — 16 plausible-but-wrong samples
+  with ALL COUNTERS CLEAN, the field signature in miniature. The repro
+  scenario deliberately avoids prime_pending-setting re-init writes
+  (control-halt/WTP/RTS re-primes heal the corruption — which also
+  bounds the real-world exposure of this defect).
+
+**Double-issue audit:** at most one enqueue per slot per oscillator by
+construction (prime path and ACC path are in mutually exclusive states;
+w1/lookahead is an else-if; dirty hits clear bookkeeping but never
+enqueue; per-slot issued bookkeeping dedupes crossings). Per-frame fetch
+rate is observable via dbg_fetch_count_o (16-bit) for the overlay.
+
+Verdict on the field failure: the RTL cadence is clean and the framing
+defect found is transient-at-reset, not the persistent from-first-note
+distortion. The co-simulation with the REAL sound_glu/CDC/arbiter RTL
+(§12.16) supersedes the synthetic port model as the primary rig for the
+remaining hunt.
+
+### 12.16 Register-file packing (rev 3.10) — probe evidence and the
+### achievable design
+
+The requested single byte-enabled 32x80 record is EMPIRICALLY IMPOSSIBLE
+on GW5A. PnR probe evidence (probe-through mandate, §12.10):
+
+- A 32x80 array with per-lane write enables is implemented by
+  GowinSynthesis as TEN per-lane DPBs (no native byte-enable mapping
+  exists), each additionally inferring illegal WRITE_MODE 2'b10
+  (PA2122) — 10 blocks, worse than the 8 it would replace.
+- True-dual-port width is capped (~16 b/port on the 18 kbit block), so
+  ANY dual-port record costs 2 blocks per 32 bits of width; "one BSRAM"
+  cannot hold an 80-bit dual-ported record.
+- A two-parity single-block lu merge (two write blocks on one array)
+  does not infer at all (792 DFFs).
+
+The structurally-free packing: fl/fh/wtp/rts are written ONLY by host
+and reset — never by the slot pipeline — so they share one 32x32
+dual-port record (2 physical DPBs replacing 4). Port A: pipeline reads
+(these addresses never diverge from curr-default in the chain) +
+full-record cycle_reset writes + the host-RMW write. Port B: the
+persistent host-read address, which also supplies the RMW composition
+data. Host writes to the four fields become a race-free 4-cycle
+read-compose-write (no pipeline writer exists to race; host ops are
+>= 1 us apart), and the port-A read-freeze idiom returns the correct
+curr record to any chain sampling edge coinciding with the fire cycle.
+acc/control/vol/wds keep their per-bank form — the swap/sync-critical
+pipeline write timing is untouched.
+
+Census: module 14 -> 12 BSRAM, 1,798 DFF (net -16). Full five-leg suite
+PASS both bank modes; host readback 38/38 including the RMW'd fields.
+
+Deeper options (documented, not taken — risk vs 1-3 further blocks):
+- 11 blocks: convert host-readable banks to SDPB (1W1R) and schedule
+  ALL host reads through pipeline-idle cycles with latched responses
+  (replumbs the persistent-read semantics).
+- 9 blocks: full 80-bit compose-write record — every pipeline write
+  composes the whole record from a slot shadow; the three CROSS-record
+  writers (SYNC_AM volume, SYNC restart prev-acc, swap partner
+  control+acc) each need a scheduled read-compose-write in the
+  hardware-verified swap/sync state machinery, plus a port-B
+  micro-arbiter. Highest reclaim, highest re-verification burden.
+
+### 12.17 Mixer headroom (rev 3.10): saturating window extraction
+
+Hardware-observed (pre-existing, both DOC variants): tracker-class
+music (8-14 voices) wraps the mix. Two wrap points:
+1. THIS MODULE (fixed here): the window extraction sliced bits
+   [23:18|17:3] of the 24-bit sums; beyond ~8 full-scale voices
+   (sum >= 2^18) the slice wraps. Now saturating (sat_window_f): the
+   slice is faithful iff the TOP_BIT_OFFSET bits above the window all
+   replicate the sign, else clamp to +/-full-scale. Applied to all
+   three mixes and the 16 channel outputs. Baseline doc5503 is NOT
+   touched (shared with field-validated GS boards). New TB phase P15:
+   1..16 voices on a constant-max table assert
+   mono == min(N*32385 >> 3, 32767) +/-8, monotonic — 0 errors, hard
+   comparator gate (SATCHECK).
+2. SOUND_GLU (spec for the integrator — not in this repo's mirror):
+   - Saturating parameterized output stage replacing the bare `<<< 1`:
+     `parameter int OUTPUT_BOOST_SHIFT = 1` (GS default preserves the
+     field-validated x2 loudness); compute the shift into
+     (16+SHIFT)-bit precision and clamp to 16 bits:
+     `audio_l_reg <= sat16({{S{left_mix_w[15]}}, left_mix_w} <<< S);`
+   - Master volume ($C03C[3:0]): the commented-out mapping
+     (`4'd4 - volume_w[3:2]`, vol>=12 -> 0) is defective on
+     inspection — only 4 coarse steps with a discontinuity (no
+     shift=1 value), which plausibly is why it was abandoned. INFERRED
+     correct semantics (needs hardware listening validation): the GS
+     volume drives the 5503 VREF DAC, approximately linear amplitude —
+     implement `out = mix * (vol + 1) / 16` (16x5 multiply, >>4),
+     giving 16 monotonic steps with vol=15 unity. Ship behind
+     `parameter bit ENABLE_MASTER_VOLUME = 0` so default loudness is
+     untouched until validated.

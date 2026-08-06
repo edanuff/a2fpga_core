@@ -237,7 +237,18 @@ module doc5503_pipelined #(
     //   timing (chain launches and 1-cycle host reads). Hardware
     //   discrimination knob: register handling is then baseline-
     //   equivalent while all cache/invalidation/timing work is kept.
-    parameter bit BANKS_IN_BSRAM = 1'b1
+    parameter bit BANKS_IN_BSRAM = 1'b1,
+    // Post-reset response-drain window (clk_i cycles of wave_data_ready_i
+    // silence required before the first fetch may issue). The module can
+    // reset (system/Apple reset) while the arbiter/CDC still carry an
+    // in-flight burst whose tail beats arrive AFTER reset deasserts; if
+    // any such orphan were counted into a new request's beat group the
+    // line framing would slip PERMANENTLY (every sample plausible-but-
+    // wrong, all counters clean). The quiet window reloads on every
+    // straggler, so issues start only once the response path is provably
+    // empty. 1024 clk ~= 19 us, far beyond any real tail. 0 disables
+    // (testbench failure-reproduction only).
+    parameter int RESET_DRAIN_CLKS = 1024
 ) (
     input clk_i,
     input reset_n_i,
@@ -282,7 +293,8 @@ module doc5503_pipelined #(
     output [7:0]  dbg_prime_miss_o,  // Consumed 0x80 because no primed data was available
     output [7:0]  dbg_stale_fetch_o, // Consumed a src_run word whose tag mismatched (late fetch or ACC rewrite)
     output [7:0]  dbg_fetch_drop_o,  // Fetch request dropped: internal FIFO full (should stay 0)
-    output [15:0] dbg_fetch_count_o  // Total fetches issued (traffic verification)
+    output [15:0] dbg_fetch_count_o, // Total fetches issued (traffic verification)
+    output [7:0]  dbg_frame_resync_o // Beat-framing orphans discarded / resyncs (0 after boot)
 );
 
     // Unused legacy input (see interface notes)
@@ -374,6 +386,20 @@ module doc5503_pipelined #(
     // interference with the FSM's port-A addresses.
     reg  [4:0]  host_raddr_r;
     reg         host_read_wait_r;
+
+    // Host-write RMW for the packed read-only quad (rev 3.10): fl/fh/wtp/
+    // rts host writes read the target record via port B (host_raddr_r,
+    // data valid two cycles after arming), substitute the written lane,
+    // and fire a full-record port-A write. Race-free: host ops are >=1 us
+    // apart and no pipeline writer touches these fields; the port-A read
+    // freeze during the fire cycle returns the still-correct curr record
+    // to any coincident chain sampling edge (address was curr-default for
+    // >=1 cycle beforehand).
+    reg  [1:0]  roq_rmw_wait_r;
+    reg         roq_rmw_pend_r;
+    reg         roq_rmw_fire_r;
+    reg  [1:0]  roq_rmw_lane_r;   // 0 fl, 1 fh, 2 wtp, 3 rts
+    reg  [7:0]  roq_rmw_data_r;
     wire [7:0]  ram_fl_hdout_w;
     wire [7:0]  ram_fh_hdout_w;
     wire [7:0]  ram_vol_hdout_w;
@@ -390,14 +416,40 @@ module doc5503_pipelined #(
     // dout, restoring baseline-identical register-read behavior.
     generate
     if (BANKS_IN_BSRAM) begin : gen_banks_bsram
-        osc_reg_ram_dp fl_ram (
-            .clk_i(clk_i), .a_addr_i(ram_fl_osc_r), .a_we_i(ram_fl_we_r),
-            .a_din_i(ram_fl_din_r), .a_dout_o(ram_fl_dout_w),
-            .b_addr_i(host_raddr_r), .b_dout_o(ram_fl_hdout_w));
-        osc_reg_ram_dp fh_ram (
-            .clk_i(clk_i), .a_addr_i(ram_fh_osc_r), .a_we_i(ram_fh_we_r),
-            .a_din_i(ram_fh_din_r), .a_dout_o(ram_fh_dout_w),
-            .b_addr_i(host_raddr_r), .b_dout_o(ram_fh_hdout_w));
+        // Packed read-only quad (rev 3.10): fl/fh/wtp/rts are written ONLY
+        // by host and reset — never by the slot pipeline — so they share
+        // ONE 32x32 record (2 physical DPBs at the 16-bit TDP port-width
+        // limit, replacing 4). Port A: pipeline reads (address only ever
+        // curr-default or cycle_reset timer — the chain never diverges
+        // these banks) + full-record reset writes + the host-RMW write.
+        // Port B: persistent host-read address — which also supplies the
+        // RMW composition data (no pipeline writer exists to race).
+        // Lanes: 0 fl, 1 fh, 2 wtp, 3 rts.
+        wire [31:0] roq_dout_w, roq_hdout_w;
+        wire roq_reset_we_w = ram_fl_we_r & ram_fh_we_r
+                            & ram_wtp_we_r & ram_rts_we_r; // cycle_reset only
+        wire [31:0] roq_rmw_din_w = {
+            (roq_rmw_lane_r == 2'd3) ? roq_rmw_data_r : roq_hdout_w[31:24],
+            (roq_rmw_lane_r == 2'd2) ? roq_rmw_data_r : roq_hdout_w[23:16],
+            (roq_rmw_lane_r == 2'd1) ? roq_rmw_data_r : roq_hdout_w[15:8],
+            (roq_rmw_lane_r == 2'd0) ? roq_rmw_data_r : roq_hdout_w[7:0]};
+        osc_reg_ram_dp #(.DATA_WIDTH(32)) roquad_ram (
+            .clk_i(clk_i),
+            .a_addr_i(roq_rmw_fire_r ? host_raddr_r : ram_fl_osc_r),
+            .a_we_i(roq_reset_we_w | roq_rmw_fire_r),
+            .a_din_i(roq_rmw_fire_r ? roq_rmw_din_w
+                     : {ram_rts_din_r, ram_wtp_din_r, ram_fh_din_r, ram_fl_din_r}),
+            .a_dout_o(roq_dout_w),
+            .b_addr_i(host_raddr_r),
+            .b_dout_o(roq_hdout_w));
+        assign ram_fl_dout_w   = roq_dout_w[7:0];
+        assign ram_fh_dout_w   = roq_dout_w[15:8];
+        assign ram_wtp_dout_w  = roq_dout_w[23:16];
+        assign ram_rts_dout_w  = roq_dout_w[31:24];
+        assign ram_fl_hdout_w  = roq_hdout_w[7:0];
+        assign ram_fh_hdout_w  = roq_hdout_w[15:8];
+        assign ram_wtp_hdout_w = roq_hdout_w[23:16];
+        assign ram_rts_hdout_w = roq_hdout_w[31:24];
         osc_reg_ram_dp vol_ram (
             .clk_i(clk_i), .a_addr_i(ram_vol_osc_r), .a_we_i(ram_vol_we_r),
             .a_din_i(ram_vol_din_r), .a_dout_o(ram_vol_dout_w),
@@ -406,18 +458,10 @@ module doc5503_pipelined #(
             .clk_i(clk_i), .a_addr_i(ram_wds_osc_r), .a_we_i(ram_wds_we_r),
             .a_din_i(ram_wds_din_r), .a_dout_o(ram_wds_dout_w),
             .b_addr_i(host_raddr_r), .b_dout_o(ram_wds_hdout_w));
-        osc_reg_ram_dp wtp_ram (
-            .clk_i(clk_i), .a_addr_i(ram_wtp_osc_r), .a_we_i(ram_wtp_we_r),
-            .a_din_i(ram_wtp_din_r), .a_dout_o(ram_wtp_dout_w),
-            .b_addr_i(host_raddr_r), .b_dout_o(ram_wtp_hdout_w));
         osc_reg_ram_dp control_ram (
             .clk_i(clk_i), .a_addr_i(ram_control_osc_r), .a_we_i(ram_control_we_r),
             .a_din_i(ram_control_din_r), .a_dout_o(ram_control_dout_w),
             .b_addr_i(host_raddr_r), .b_dout_o(ram_control_hdout_w));
-        osc_reg_ram_dp rts_ram (
-            .clk_i(clk_i), .a_addr_i(ram_rts_osc_r), .a_we_i(ram_rts_we_r),
-            .a_din_i(ram_rts_din_r), .a_dout_o(ram_rts_dout_w),
-            .b_addr_i(host_raddr_r), .b_dout_o(ram_rts_hdout_w));
         osc_reg_ram_dp #(.DATA_WIDTH(24)) acc_ram (
             .clk_i(clk_i), .a_addr_i(ram_acc_osc_r), .a_we_i(ram_acc_we_r),
             .a_din_i(ram_acc_din_r), .a_dout_o(ram_acc_dout_w),
@@ -601,8 +645,21 @@ module doc5503_pipelined #(
 
     // Burst-beat assembly: the memory client returns each 16-byte line as
     // four 32-bit beats (one wave_data_ready_i pulse each, in order).
+    // FRAMING IS SELF-SYNCHRONIZING (rev 3.9): the beat counter belongs
+    // to the request-FIFO head only — pulses with no in-flight head are
+    // ORPHANS (discarded + counted), the counter resyncs to 0 whenever
+    // the in-flight queue is empty, and after reset no fetch issues
+    // until the response path has been quiet for RESET_DRAIN_CLKS (so a
+    // pre-reset burst tail can never be counted into a post-reset line).
     reg [1:0]   beat_cnt_r;
     reg [95:0]  beat_accum_r;
+
+    localparam int DRAIN_W = (RESET_DRAIN_CLKS <= 1) ? 1
+                             : $clog2(RESET_DRAIN_CLKS + 1);
+    reg [DRAIN_W-1:0] drain_cnt_r;
+    reg               drain_done_r;
+    reg [7:0]         dbg_frame_resync_r;
+    assign dbg_frame_resync_o = dbg_frame_resync_r;
 
     // Slots of GLU-write silence before halted re-priming resumes
     localparam int COOLDOWN_W = (PRIME_COOLDOWN_SLOTS <= 1) ? 1
@@ -740,6 +797,21 @@ module doc5503_pipelined #(
 
     localparam int TOP_BIT_OFFSET = 6;   // Skip this many bits from the top of the accumulator
     localparam int WINDOW_SIZE = 15;     // Use this many bits for magnitude
+
+    // Saturating window extraction (rev 3.10): the raw bit-slice wraps
+    // once the 24-bit mix sum exceeds the 18-bit window (~8 full-scale
+    // voices) — audible wrap distortion on tracker-class music (VAMPS,
+    // 8-14 voices). Clamp to full scale instead: the slice is faithful
+    // iff the bits above the window top all replicate the sign.
+    function automatic logic signed [15:0] sat_window_f(
+        input logic signed [MIXER_SUM_RESOLUTION-1:0] v);
+        if (v[MIXER_SUM_RESOLUTION-1 -: TOP_BIT_OFFSET]
+            == {TOP_BIT_OFFSET{v[MIXER_SUM_RESOLUTION-1]}})
+            return {v[MIXER_SUM_RESOLUTION-1],
+                    v[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]};
+        else
+            return v[MIXER_SUM_RESOLUTION-1] ? 16'h8000 : 16'h7FFF;
+    endfunction
 
     reg signed [15:0] channel_r[16];
     assign channel_o = channel_r;
@@ -887,6 +959,11 @@ module doc5503_pipelined #(
             device_response_pending_r <= 1'b0;
             host_raddr_r <= '0;
             host_read_wait_r <= 1'b0;
+            roq_rmw_wait_r <= '0;
+            roq_rmw_pend_r <= 1'b0;
+            roq_rmw_fire_r <= 1'b0;
+            roq_rmw_lane_r <= '0;
+            roq_rmw_data_r <= '0;
 
             cache_valid_r <= '0;
             cache_src_run_r <= '0;
@@ -906,6 +983,9 @@ module doc5503_pipelined #(
             gate_forced_r <= 1'b0;
             beat_cnt_r <= '0;
             beat_accum_r <= '0;
+            drain_cnt_r <= DRAIN_W'(RESET_DRAIN_CLKS);
+            drain_done_r <= (RESET_DRAIN_CLKS == 0);
+            dbg_frame_resync_r <= '0;
             lu_we0_r <= 1'b0;
             lu_we1_r <= 1'b0;
             lu_waddr_r <= '0;
@@ -981,6 +1061,18 @@ module doc5503_pipelined #(
                 device_response_pending_r <= 1'b1;
             end
 
+            // Read-only-quad host-write RMW sequencer: wait for the port-B
+            // record read, then fire the composed full-record write.
+            roq_rmw_fire_r <= 1'b0;
+            if (roq_rmw_pend_r) begin
+                if (roq_rmw_wait_r != 0) begin
+                    roq_rmw_wait_r <= roq_rmw_wait_r - 1'd1;
+                end else begin
+                    roq_rmw_pend_r <= 1'b0;
+                    roq_rmw_fire_r <= 1'b1;
+                end
+            end
+
             // -----------------------------------------------------------------
             // Cache flush (GLU sound-RAM write): accumulate the written
             // LINE into dirty range A (targeted invalidation happens at
@@ -1026,6 +1118,29 @@ module doc5503_pipelined #(
             // the cache (src_run downgrade on a halted slot, host clear)
             // win same-cycle conflicts on the same entry.
             // -----------------------------------------------------------------
+            // Post-reset drain: hold fetch issue until the response path
+            // has been quiet for the full window (reloaded by stragglers).
+            if (!drain_done_r) begin
+                if (wave_data_ready_i)
+                    drain_cnt_r <= DRAIN_W'(RESET_DRAIN_CLKS);
+                else if (drain_cnt_r != 0)
+                    drain_cnt_r <= drain_cnt_r - 1'd1;
+                else
+                    drain_done_r <= 1'b1;
+            end
+
+            // Beat-framing self-synchronization: pulses without an
+            // in-flight head are orphans — discard and count them; and
+            // whenever the in-flight queue is empty the beat counter
+            // resyncs to 0 (a non-zero count there is itself a slip).
+            if (wave_data_ready_i && (fq_ret_ptr_r == fq_issue_ptr_r)) begin
+                dbg_frame_resync_r <= dbg_frame_resync_r + 8'd1;
+            end
+            if ((fq_ret_ptr_r == fq_issue_ptr_r) && (beat_cnt_r != 2'd0)) begin
+                beat_cnt_r <= 2'd0;
+                dbg_frame_resync_r <= dbg_frame_resync_r + 8'd1;
+            end
+
             if (wave_data_ready_i && (fq_ret_ptr_r != fq_issue_ptr_r)) begin
                 if (beat_cnt_r != 2'd3) begin
                     beat_accum_r[32*beat_cnt_r +: 32] <= wave_data_word_i;
@@ -1049,7 +1164,7 @@ module doc5503_pipelined #(
             // up to two.
             // -----------------------------------------------------------------
             if ((fq_issue_ptr_r != fq_wr_ptr_r) && wave_available_i && !wave_rd_o
-                && gate_open_w) begin
+                && gate_open_w && drain_done_r) begin
                 wave_rd_o <= 1'b1;
                 wave_address_o <= {fq_line_r[fq_issue_ptr_r], 4'b0};
                 fq_issue_ptr_r <= fq_issue_ptr_r + 3'd1;
@@ -1129,14 +1244,30 @@ module doc5503_pipelined #(
                     // Oscillator Registers
                     case (host_addr_r[7:5])
                         3'b000: begin                               // $00-1F
-                            ram_fl_osc_r <= host_addr_r[4:0];
-                            ram_fl_din_r <= host_data_r;
-                            ram_fl_we_r <= 1'b1;
+                            if (BANKS_IN_BSRAM) begin
+                                host_raddr_r <= host_addr_r[4:0];
+                                roq_rmw_lane_r <= 2'd0;
+                                roq_rmw_data_r <= host_data_r;
+                                roq_rmw_wait_r <= 2'd2;
+                                roq_rmw_pend_r <= 1'b1;
+                            end else begin
+                                ram_fl_osc_r <= host_addr_r[4:0];
+                                ram_fl_din_r <= host_data_r;
+                                ram_fl_we_r <= 1'b1;
+                            end
                         end
                         3'b001: begin                               // $20-3F
-                            ram_fh_osc_r <= host_addr_r[4:0];
-                            ram_fh_din_r <= host_data_r;
-                            ram_fh_we_r <= 1'b1;
+                            if (BANKS_IN_BSRAM) begin
+                                host_raddr_r <= host_addr_r[4:0];
+                                roq_rmw_lane_r <= 2'd1;
+                                roq_rmw_data_r <= host_data_r;
+                                roq_rmw_wait_r <= 2'd2;
+                                roq_rmw_pend_r <= 1'b1;
+                            end else begin
+                                ram_fh_osc_r <= host_addr_r[4:0];
+                                ram_fh_din_r <= host_data_r;
+                                ram_fh_we_r <= 1'b1;
+                            end
                         end
                         3'b010: begin                               // $40-5F
                             ram_vol_osc_r <= host_addr_r[4:0];
@@ -1149,9 +1280,17 @@ module doc5503_pipelined #(
                             ram_wds_we_r <= 1'b1;
                         end
                         3'b100: begin                               // $80-9F
-                            ram_wtp_osc_r <= host_addr_r[4:0];
-                            ram_wtp_din_r <= host_data_r;
-                            ram_wtp_we_r <= 1'b1;
+                            if (BANKS_IN_BSRAM) begin
+                                host_raddr_r <= host_addr_r[4:0];
+                                roq_rmw_lane_r <= 2'd2;
+                                roq_rmw_data_r <= host_data_r;
+                                roq_rmw_wait_r <= 2'd2;
+                                roq_rmw_pend_r <= 1'b1;
+                            end else begin
+                                ram_wtp_osc_r <= host_addr_r[4:0];
+                                ram_wtp_din_r <= host_data_r;
+                                ram_wtp_we_r <= 1'b1;
+                            end
                             // Pipelined variant: the halted-prime address
                             // depends on WTP — schedule a re-prime.
                             prime_pending_r[host_addr_r[4:0]] <= 1'b1;
@@ -1183,9 +1322,17 @@ module doc5503_pipelined #(
                             end
                         end
                         3'b110: begin                               // $C0-DF
-                            ram_rts_osc_r <= host_addr_r[4:0];
-                            ram_rts_din_r <= host_data_r;
-                            ram_rts_we_r <= 1'b1;
+                            if (BANKS_IN_BSRAM) begin
+                                host_raddr_r <= host_addr_r[4:0];
+                                roq_rmw_lane_r <= 2'd3;
+                                roq_rmw_data_r <= host_data_r;
+                                roq_rmw_wait_r <= 2'd2;
+                                roq_rmw_pend_r <= 1'b1;
+                            end else begin
+                                ram_rts_osc_r <= host_addr_r[4:0];
+                                ram_rts_din_r <= host_data_r;
+                                ram_rts_we_r <= 1'b1;
+                            end
                             // RTS changes the prime address mapping too.
                             prime_pending_r[host_addr_r[4:0]] <= 1'b1;
                         end
@@ -1312,24 +1459,12 @@ module doc5503_pipelined #(
                 device_response();
             end
 
-            channel_r[cycle_timer_r[3:0]] <= {
-                next_channel_r[cycle_timer_r[3:0]][MIXER_SUM_RESOLUTION-1],
-                next_channel_r[cycle_timer_r[3:0]][MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-            };
+            channel_r[cycle_timer_r[3:0]] <= sat_window_f(next_channel_r[cycle_timer_r[3:0]]);
 
             if (cycle_timer_r[3:0] == 4'hF) begin
-                mono_mix_r <= {
-                    next_mono_mix_r[MIXER_SUM_RESOLUTION-1],
-                    next_mono_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                };
-                left_mix_r <= {
-                    next_left_mix_r[MIXER_SUM_RESOLUTION-1],
-                    next_left_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                };
-                right_mix_r <= {
-                    next_right_mix_r[MIXER_SUM_RESOLUTION-1],
-                    next_right_mix_r[MIXER_SUM_RESOLUTION-1-TOP_BIT_OFFSET -: WINDOW_SIZE]
-                };
+                mono_mix_r  <= sat_window_f(next_mono_mix_r);
+                left_mix_r  <= sat_window_f(next_left_mix_r);
+                right_mix_r <= sat_window_f(next_right_mix_r);
             end
         end else begin
             // use remaining time to process host access
@@ -1848,5 +1983,48 @@ module osc_reg_ram_dp #(
     always @(posedge clk_i)
         b_dout_r <= mem[b_addr_i];
     assign b_dout_o = b_dout_r;
+
+endmodule
+// Merged last-issued bookkeeping (rev 3.10): both cache-slot parities in
+// ONE address-partitioned DPB (parity 0 at {0,osc}, parity 1 at {1,osc}),
+// one port per parity. Each port continuously reads its parity at the
+// current oscillator and occasionally writes (single bookkeeping write
+// per cycle by construction); the read register holds for the one write
+// cycle (WRITE_MODE 2'b00 idiom) — safe under the rev-3.2 invariant (the
+// next read of an oscillator entry is a full scan away).
+module doc_lu_ram2 (
+    input  wire        clk_i,
+    input  wire        a_we_i,
+    input  wire [4:0]  a_waddr_i,
+    input  wire [11:0] a_wdata_i,
+    input  wire [4:0]  a_raddr_i,
+    output wire [11:0] a_rdata_o,
+    input  wire        b_we_i,
+    input  wire [4:0]  b_waddr_i,
+    input  wire [11:0] b_wdata_i,
+    input  wire [4:0]  b_raddr_i,
+    output wire [11:0] b_rdata_o
+);
+    reg [11:0] mem [0:63] /*synthesis syn_ramstyle="block_ram"*/;
+
+    always @(posedge clk_i) begin
+        if (a_we_i)
+            mem[{1'b0, a_waddr_i}] <= a_wdata_i;
+    end
+    reg [11:0] a_rdata_r;
+    always @(posedge clk_i)
+        if (!a_we_i)
+            a_rdata_r <= mem[{1'b0, a_raddr_i}];
+    assign a_rdata_o = a_rdata_r;
+
+    always @(posedge clk_i) begin
+        if (b_we_i)
+            mem[{1'b1, b_waddr_i}] <= b_wdata_i;
+    end
+    reg [11:0] b_rdata_r;
+    always @(posedge clk_i)
+        if (!b_we_i)
+            b_rdata_r <= mem[{1'b1, b_raddr_i}];
+    assign b_rdata_o = b_rdata_r;
 
 endmodule
