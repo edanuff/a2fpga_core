@@ -54,3 +54,25 @@ build environment") — it detects what's installed and guides the rest. Referen
 - PRs: state motivation, affected boards, build/tool versions; attach logs or screenshots
   for visual/audio changes. Keep diffs scoped.
 - Before committing `.gprj` changes, verify all paths are relative.
+
+## Multiple agent sessions (IMPORTANT)
+
+Several agent sessions often run against this repo concurrently. Rules for any
+automated/agent session (Claude Code or otherwise):
+
+- **Do not work directly on `main`'s checkout.** For anything beyond reading,
+  create a worktree with its own branch (`git worktree add`) and work there.
+  Exception: a session the user has explicitly designated as the primary/bench
+  session for build-flash-test cycles.
+- **`main` is append-only.** Never `reset`, `rebase`, or force-move `main` or
+  any shared branch — even to clean up your own mistake. A bad commit on a
+  shared branch gets `revert`ed, or you park your work on a branch and ASK THE
+  USER before any history rewrite. (Incident 2026-08-05: a session reset main
+  to drop its own mistaken commit and silently orphaned six commits another
+  session had stacked above it. Recovery required reflog surgery.)
+- **Diagnostic/exploratory work is never committed to `main`** — put it on a
+  `diag/...` branch from the start. If a commit message needs the words "NOT
+  FOR MERGE", it must not be on a shared branch.
+- Merges into `main` happen deliberately, at user direction, from a session
+  that has checked `git status`/`git log` immediately beforehand — other
+  sessions' commits may have landed since you last looked.
