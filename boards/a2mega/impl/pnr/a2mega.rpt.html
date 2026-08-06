@@ -83,7 +83,7 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 </tr>
 <tr>
 <td class="label">Created Time</td>
-<td>Mon Aug  3 22:08:49 2026
+<td>Wed Aug  5 13:26:40 2026
 </td>
 </tr>
 <tr>
@@ -97,24 +97,24 @@ table.detail_table th.label {  min-width: 8%; width: 8%; }
 <tr>
 <td class="label">Place & Route Process</td>
 <td>Running placement:
-   Placement Phase 0: CPU time = 0h 0m 50s, Elapsed time = 0h 1m 1s
-   Placement Phase 1: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 6s
-   Placement Phase 2: CPU time = 0h 3m 0s, Elapsed time = 0h 3m 42s
-   Placement Phase 3: CPU time = 0h 2m 3s, Elapsed time = 0h 2m 39s
-   Total Placement: CPU time = 0h 5m 59s, Elapsed time = 0h 7m 28s
+   Placement Phase 0: CPU time = 0h 0m 48s, Elapsed time = 0h 0m 54s
+   Placement Phase 1: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
+   Placement Phase 2: CPU time = 0h 2m 31s, Elapsed time = 0h 3m 7s
+   Placement Phase 3: CPU time = 0h 1m 52s, Elapsed time = 0h 2m 19s
+   Total Placement: CPU time = 0h 5m 16s, Elapsed time = 0h 6m 25s
 Running routing:
-   Routing Phase 0: CPU time = 0h 0m 0.037s, Elapsed time = 0h 0m 0.05s
-   Routing Phase 1: CPU time = 0h 2m 44s, Elapsed time = 0h 3m 28s
+   Routing Phase 0: CPU time = 0h 0m 0.041s, Elapsed time = 0h 0m 0.047s
+   Routing Phase 1: CPU time = 0h 2m 52s, Elapsed time = 0h 3m 28s
    Routing Phase 2: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
    Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-   Total Routing: CPU time = 0h 2m 45s, Elapsed time = 0h 3m 29s
+   Total Routing: CPU time = 0h 2m 54s, Elapsed time = 0h 3m 29s
 Generate output files:
-   CPU time = 0h 0m 16s, Elapsed time = 0h 0m 18s
+   CPU time = 0h 0m 10s, Elapsed time = 0h 0m 12s
 </td>
 </tr>
 <tr>
 <td class="label">Total Time and Memory Usage</td>
-<td>CPU time = 0h 9m 0s, Elapsed time = 0h 11m 15s, Peak memory usage = 3326MB</td>
+<td>CPU time = 0h 8m 20s, Elapsed time = 0h 10m 6s, Peak memory usage = 2369MB</td>
 </tr>
 </table>
 <br/>
@@ -129,12 +129,12 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Logic</td>
-<td>26460/59904</td>
-<td>45%</td>
+<td>28236/59904</td>
+<td>48%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --LUT,ALU,ROM16</td>
-<td>26460(23048 LUT, 3388 ALU, 24 ROM16)</td>
+<td>28236(24767 LUT, 3445 ALU, 24 ROM16)</td>
 <td>-</td>
 </tr>
 <tr>
@@ -144,8 +144,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">Register</td>
-<td>26341/60780</td>
-<td>44%</td>
+<td>28935/60780</td>
+<td>48%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as Latch</td>
@@ -154,8 +154,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --Logic Register as FF</td>
-<td>26299/59904</td>
-<td>44%</td>
+<td>28893/59904</td>
+<td>49%</td>
 </tr>
 <tr>
 <td class="label">&nbsp &nbsp --I/O Register as Latch</td>
@@ -169,8 +169,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">CLS</td>
-<td>26199/29952</td>
-<td>88%</td>
+<td>27201/29952</td>
+<td>91%</td>
 </tr>
 <tr>
 <td class="label">I/O Port</td>
@@ -204,8 +204,8 @@ Generate output files:
 </tr>
 <tr>
 <td class="label">BSRAM</td>
-<td>10 SP<br/>48 SDPB<br/>9 SDPX9B<br/>29 DPB<br/>2 DPX9B<br/>4 pROM<br/></td>
-<td>87%</td>
+<td>2 SP<br/>48 SDPB<br/>9 SDPX9B<br/>29 DPB<br/>2 DPX9B<br/>4 pROM<br/></td>
+<td>80%</td>
 </tr>
 <tr>
 <td class="label">DSP</td>
@@ -337,7 +337,7 @@ Generate output files:
 <tr>
 <td class="label">clk_usb_w</td>
 <td>PRIMARY</td>
-<td> PTR2 PTR3 PBR2</td>
+<td> PTR2 PTR3 PBR1 PBR2</td>
 </tr>
 <tr>
 <td class="label">clk_x1_w</td>
@@ -345,19 +345,19 @@ Generate output files:
 <td> PTR0 PTR1 PBR0 PBR1</td>
 </tr>
 <tr>
-<td class="label">u_ddr3/gw3_top/u_gwmc_top/gw_wr_data0/wr_fifo/mem_2487</td>
+<td class="label">mockingboard/pb_l_o[2]</td>
 <td>PRIMARY</td>
-<td> PTR0 PBR0</td>
+<td> PBR2</td>
 </tr>
 <tr>
-<td class="label">u_ddr3/gw3_top/u_gwmc_top/gw_wr_data0/wr_fifo/mem_2495</td>
+<td class="label">mockingboard/pb_r_o[2]</td>
 <td>PRIMARY</td>
-<td> PTR0 PBR0</td>
+<td> PBR2</td>
 </tr>
 <tr>
-<td class="label">hdmi_inst/true_hdmi_output.packet_picker/n4077_4</td>
+<td class="label">u_ddr3/gw3_top/u_gwmc_top/gw_wr_data0/wr_fifo/mem_2475</td>
 <td>PRIMARY</td>
-<td> PTR1 PTR2</td>
+<td> PTR0 PBR0</td>
 </tr>
 <tr>
 <td class="label">a2bus_if.device_reset_n</td>
@@ -390,12 +390,12 @@ Generate output files:
 <td> -</td>
 </tr>
 <tr>
-<td class="label">u_ddr3/gw3_top/u_gwmc_top/gw_wr_data0/wr_fifo/mem_2481</td>
+<td class="label">u_framebuffer/rstn_clk_sync_r[1]</td>
 <td>LW</td>
 <td> -</td>
 </tr>
 <tr>
-<td class="label">u_framebuffer/rstn_clk_sync_r[1]</td>
+<td class="label">hdmi_inst/true_hdmi_output.packet_picker/n4077_4</td>
 <td>LW</td>
 <td> -</td>
 </tr>
