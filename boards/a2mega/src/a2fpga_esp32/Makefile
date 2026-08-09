@@ -13,6 +13,14 @@ ARDUINO_CLI = arduino-cli
 # Board FQBN with specific settings
 FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=8M,PSRAM=disabled,PartitionScheme=default_8MB
 
+# Board revision (see board_pins.h): 103 = 1.0a3 (USB-C DP), 102 = 1.0a2/1.0a2a.
+# Defaults to 103 in board_pins.h; set BOARD_REV=102 to build for older boards.
+BOARD_REV ?=
+ifneq ($(BOARD_REV),)
+REV_FLAGS = --build-property compiler.c.extra_flags=-DA2MEGA_BOARD_REV=$(BOARD_REV) \
+            --build-property compiler.cpp.extra_flags=-DA2MEGA_BOARD_REV=$(BOARD_REV)
+endif
+
 # Source files
 SKETCH = a2fpga_esp32.ino
 CPP_FILES = a2fpga_jtag.cpp
@@ -24,7 +32,7 @@ HEADER_FILES = a2fpga_jtag.h a2fpga_ospi_link.h a2fpga_spi_service.h \
                a2fpga_regs.h fpga_link.h fpga_screen.h osd_console.h menu.h \
                net_status.h settings.h disk.h gcr_dsk.h w5100.h \
                wifi_bridge.h fpga_jtag.h fpgaupdate.h ftpd.h \
-               fusb302.h usb_pd.h usbc_port.h esp32s3_integration.h
+               board_pins.h fusb302.h usb_pd.h usbc_port.h esp32s3_integration.h
 ALL_SOURCES = $(SKETCH) $(CPP_FILES) $(C_FILES) $(HEADER_FILES)
 
 # Default target
@@ -41,7 +49,7 @@ init:
 .PHONY: compile
 compile:
 	@echo "Compiling $(PROJECT_NAME) with files: $(ALL_SOURCES)"
-	$(ARDUINO_CLI) compile --fqbn $(FQBN) --build-path ./build $(SKETCH)
+	$(ARDUINO_CLI) compile --fqbn $(FQBN) $(REV_FLAGS) --build-path ./build $(SKETCH)
 
 # Upload to ESP32
 .PHONY: upload

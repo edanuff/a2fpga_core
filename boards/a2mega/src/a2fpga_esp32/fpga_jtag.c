@@ -38,13 +38,11 @@
 #include "soc/gpio_struct.h"
 
 #include "fpga_jtag.h"
-
-#define PIN_TCK 40
-#define PIN_TMS 41
-#define PIN_TDI 42
-#define PIN_TDO 45
+#include "board_pins.h"
 
 /* All four pins are >= 32, so they live in the out1/in1 register bank. */
+_Static_assert(PIN_TCK >= 32 && PIN_TMS >= 32 && PIN_TDI >= 32 && PIN_TDO >= 32,
+               "bit-banged JTAG assumes all pins in the out1/in1 bank");
 #define TCK_BIT (1u << (PIN_TCK - 32))
 #define TMS_BIT (1u << (PIN_TMS - 32))
 #define TDI_BIT (1u << (PIN_TDI - 32))

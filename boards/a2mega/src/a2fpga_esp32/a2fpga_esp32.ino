@@ -21,7 +21,10 @@
  */
 
 #include <Arduino.h>
+#include "board_pins.h"
+#if A2MEGA_HAS_SD
 #include <SD_MMC.h>
+#endif
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h"
 #include "a2fpga_jtag.h"
@@ -45,44 +48,24 @@
 #include <stdlib.h>
 
 // ============================================================================
-// Pin Assignments (a2-mega schematic p.3, "ESP32 & I/O")
+// Pin Assignments — see board_pins.h (revision-selected: 1.0a2a vs 1.0a3)
 // ============================================================================
 
-// Serial interface to the FPGA
-#define PIN_RXD  44
-#define PIN_TXD  43
+#include "board_pins.h"
+
 #define BAUD 115200
-
-// Configuration done signal from the FPGA
-#define PIN_FPGA_DONE  48
-
-// JTAG interface to the FPGA (shared: USB bridge and fpga_jtag.c self-update)
-const int PIN_TCK  = 40;
-const int PIN_TMS  = 41;
-const int PIN_TDI  = 42;
-const int PIN_TDO  = 45;
-const int PIN_SRST = 3;  // unused and unconnected, but required by the JTAG bridge
-
-// Micro-SD slot (4-bit SDMMC)
-#define PIN_SD_CLK  37
-#define PIN_SD_CMD  36
-#define PIN_SD_D0   38
-#define PIN_SD_D1   39
-#define PIN_SD_D2   35   // verify at bring-up (schematic pin 31 net inferred)
-#define PIN_SD_D3   34
-#define PIN_SD_DET  46   // low when a card is inserted
 
 // Octal SPI interface to the FPGA
 static const ospi_pins_t OSPI_PINS = {
-    .sclk = 47,     // ESP32_OPI_CLK
-    .d0   = 1,      // ESP32_OPI_D0
-    .d1   = 2,
-    .d2   = 4,
-    .d3   = 5,
-    .d4   = 6,
-    .d5   = 7,
-    .d6   = 8,
-    .d7   = 9,
+    .sclk = PIN_OPI_CLK,
+    .d0   = PIN_OPI_D0,
+    .d1   = PIN_OPI_D1,
+    .d2   = PIN_OPI_D2,
+    .d3   = PIN_OPI_D3,
+    .d4   = PIN_OPI_D4,
+    .d5   = PIN_OPI_D5,
+    .d6   = PIN_OPI_D6,
+    .d7   = PIN_OPI_D7,
     .cs   = -1,     // no CS — the protocol uses sync-pattern framing
 };
 
@@ -620,8 +603,17 @@ static void cmd_process(String cmd) {
         Serial.printf("  TXD:  %d\n", PIN_TXD);
         Serial.println("Other:");
         Serial.printf("  FPGA_DONE: %d\n", PIN_FPGA_DONE);
+        Serial.printf("  Board rev: %d\n", A2MEGA_BOARD_REV);
+#if A2MEGA_HAS_SD
         Serial.printf("  SD:   CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d DET=%d\n",
                       PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3, PIN_SD_DET);
+#endif
+#if A2MEGA_HAS_USBC_PD
+        Serial.printf("  I2C:  SCL=%d SDA=%d FUSB_INT=%d\n",
+                      PIN_I2C_SCL, PIN_I2C_SDA, PIN_FUSB_INT);
+        Serial.printf("  USB-C: VBUS_SRC_EN=%d HPD_OUT=%d\n",
+                      PIN_VBUS_SRC_EN, PIN_DP_HPD_OUT);
+#endif
 
     } else if (cmd == "exit") {
         cli_mode = false;
@@ -702,6 +694,7 @@ extern "C" void menu_hook_net_apply(void) {
     Serial.printf("[net] applied %s config\n", s->dhcp_enable ? "DHCP" : "static IP");
 }
 
+#if A2MEGA_HAS_SD
 static bool mount_sd() {
     pinMode(PIN_SD_DET, INPUT_PULLUP);
     SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3);
@@ -717,6 +710,15 @@ static bool mount_sd() {
     Serial.println("[sd] mounted (4-bit mode)");
     return true;
 }
+#else
+// 1.0a3 has no SD slot. Storage will come from a LittleFS partition mounted
+// at the same /sdcard VFS prefix (disk.c/ftpd.c/fpgaupdate.c are all plain
+// POSIX on that prefix) — until then there is simply no filesystem.
+static bool mount_sd() {
+    Serial.println("[sd] no SD slot on this board rev");
+    return false;
+}
+#endif
 
 // WiFi configuration file: wifi.txt on the SD card (root, with
 // /sdcard/A2FPGA/wifi.txt as a fallback location).
@@ -890,6 +892,18 @@ void setup() {
     cli_mode = false;
 
     pinMode(PIN_FPGA_DONE, INPUT_PULLUP);
+
+#if A2MEGA_HAS_USBC_PD
+    // Pin down the USB-C power-path controls before anything else runs.
+    // VBUS_SRC_EN (strapping pin, external pull-down) must stay low unless
+    // we deliberately source 5 V out the port; HPD to the FPGA idles low
+    // until the PD stack reports a DisplayPort sink.
+    pinMode(PIN_VBUS_SRC_EN, OUTPUT);
+    digitalWrite(PIN_VBUS_SRC_EN, LOW);
+    pinMode(PIN_DP_HPD_OUT, OUTPUT);
+    digitalWrite(PIN_DP_HPD_OUT, LOW);
+    pinMode(PIN_FUSB_INT, INPUT);   // open-drain, external pull-up R19
+#endif
 
     start_subsystems();
 }
