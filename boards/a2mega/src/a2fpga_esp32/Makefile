@@ -22,9 +22,11 @@ REV_FLAGS = --build-property compiler.c.extra_flags=-DA2MEGA_BOARD_REV=102 \
 else
 # no_ota partitions: 2 MB app + 1.875 MB "spiffs" (LittleFS) — the largest
 # FS a 4 MB part allows with app headroom. No OTA pair: the ESP32 reflashes
-# over its own USB-C. NB an uncompressed GW5AT-60 bitstream (~2.6 MB) does
-# NOT fit the FS — the menu FPGA-update-from-file path needs a compressed
-# image or streaming; PC-driven JTAG via the bridge is unaffected.
+# over its own USB-C. FPGA update-from-file streams the bitstream to JTAG
+# (staging a ~2.6 MB image in MCU flash is wasteful and doesn't fit here);
+# PC-driven JTAG via the bridge is unaffected. The board footprint accepts
+# either MINI variant — an N8-fitted 1.0a3 builds with BOARD_REV=103 plus
+# the 102 flash settings if that ever comes up.
 FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=4M,PSRAM=enabled,PartitionScheme=no_ota
 REV_FLAGS =
 endif

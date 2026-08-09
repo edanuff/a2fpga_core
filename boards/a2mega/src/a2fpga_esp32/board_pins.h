@@ -29,8 +29,9 @@
 // ---------------------------------------------------------------------------
 // 1.0a3 — USB-C DP Alt Mode board (no SD, no USB-A, no HDMI)
 // Module: ESP32-S3-MINI-1-N4R2 (4 MB flash + 2 MB quad PSRAM, as on the
-// a2p25) — NOT the N8 of earlier revs. Build with the matching Makefile
-// FQBN (FlashSize=4M, PSRAM=enabled, PartitionScheme=no_ota).
+// a2p25). The footprint is pin-compatible with the 1.0a2x N8, so either
+// variant can be fitted; the as-shipped 1.0a3 build is FlashSize=4M,
+// PSRAM=enabled, PartitionScheme=no_ota (see Makefile).
 // ---------------------------------------------------------------------------
 #define A2MEGA_HAS_SD       0
 #define A2MEGA_HAS_USBC_PD  1
