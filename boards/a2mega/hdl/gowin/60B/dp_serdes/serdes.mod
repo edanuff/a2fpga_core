@@ -1,0 +1,24 @@
+-type SERDES
+-path /Users/edanuff/GitHub/DisplayPort_Verilog/examples/tang_mega/src/serdes/
+-file_type vlg
+-file_name dp_serdes
+-mod_name dp_serdes
+-series GW5AT
+-device GW5AT-60
+-device_version B
+-package PBGA484A
+-part_number GW5AT-LV60PG484AC1/I0
+
+
+-global_reset enable
+-protocol_module_name0 dp_phy
+-dp_phyprotocol_module_type customized
+-dp_phyQ0Lane2 true
+-dp_phyQ0Lane3 true
+-dp_phyClock_Correction None
+-dp_phyWord_Alignment false
+-dp_phyRX_Channel_Bonding None
+-dp_phyEnableDRP true
+-dp_phyDRPPorts true
+-dp_phyTX_Encoding_Mode OFF
+-dp_phyRX_Decoding_Mode OFF
