@@ -24,6 +24,8 @@
 #include "board_pins.h"
 #if A2MEGA_HAS_SD
 #include <SD_MMC.h>
+#else
+#include <LittleFS.h>
 #endif
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h"
@@ -766,12 +768,20 @@ static bool mount_sd() {
     return true;
 }
 #else
-// 1.0a3 has no SD slot. Storage will come from a LittleFS partition mounted
-// at the same /sdcard VFS prefix (disk.c/ftpd.c/fpgaupdate.c are all plain
-// POSIX on that prefix) — until then there is simply no filesystem.
+// 1.0a3 has no SD slot. Storage is a LittleFS on the 1.5 MB "spiffs" flash
+// partition, mounted at the same /sdcard VFS prefix so disk.c / ftpd.c /
+// fpgaupdate.c (all plain POSIX on that prefix) work unchanged. Disk images
+// arrive over FTP once WiFi is up.
 static bool mount_sd() {
-    Serial.println("[sd] no SD slot on this board rev");
-    return false;
+    if (!LittleFS.begin(true /* format on first use */, "/sdcard", 10,
+                        "spiffs")) {
+        Serial.println("[fs] LittleFS mount FAILED");
+        return false;
+    }
+    Serial.printf("[fs] LittleFS at /sdcard: %u KB used of %u KB\n",
+                  (unsigned)(LittleFS.usedBytes() / 1024),
+                  (unsigned)(LittleFS.totalBytes() / 1024));
+    return true;
 }
 #endif
 
@@ -879,7 +889,11 @@ static void start_subsystems() {
 
     osd_console_show();
     osd_log("A2MEGA ESP32 %s %s", __DATE__, __TIME__);
+#if A2MEGA_HAS_SD
     osd_log(sd_mounted ? "SD CARD MOUNTED" : "NO SD CARD");
+#else
+    osd_log(sd_mounted ? "FLASH FS MOUNTED" : "FLASH FS FAILED");
+#endif
 
     disk_init();
     menu_init();
