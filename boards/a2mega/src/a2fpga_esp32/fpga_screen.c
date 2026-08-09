@@ -27,6 +27,8 @@
 #define OSD_SIZE  (SCREEN_W * SCREEN_H)          /* 960 bytes */
 
 static uint8_t s_shadow[OSD_SIZE];               /* local copy (space is WO) */
+static volatile uint32_t s_gen;                  /* bumped on any shadow write
+                                                    (telnet mirror repaint cue) */
 static int cursor_h = 0;
 static int cursor_v = 0;
 /* VT100-style deferred wrap: filling the last column arms this flag instead
@@ -61,6 +63,7 @@ static uint32_t screen_addr(int x, int y)
 void fpga_screen_clear(void)
 {
     memset(s_shadow, 0xA0, OSD_SIZE);
+    s_gen++;
     fpga_mem_write(A2SPACE_OSD, 0, s_shadow, OSD_SIZE);
     wrap_pending = false;
     cursor_h = 0;
@@ -72,6 +75,7 @@ static void scroll_up(void)
 {
     memmove(s_shadow, s_shadow + SCREEN_W, OSD_SIZE - SCREEN_W);
     memset(s_shadow + OSD_SIZE - SCREEN_W, 0xA0, SCREEN_W);
+    s_gen++;
     fpga_mem_write(A2SPACE_OSD, 0, s_shadow, OSD_SIZE);
 }
 
@@ -108,6 +112,7 @@ void fpga_screen_putchar(uint8_t c)
 
     uint32_t addr = screen_addr(cursor_h, cursor_v);
     s_shadow[addr] = screen_code(c);
+    s_gen++;
     fpga_mem_write(A2SPACE_OSD, addr, &s_shadow[addr], 1);
 
     cursor_h++;
@@ -146,6 +151,7 @@ void fpga_screen_puts(const char *str)
         }
 
         s_shadow[screen_addr(cursor_h, cursor_v)] = screen_code(c);
+        s_gen++;
         count++;
 
         cursor_h++;
@@ -183,4 +189,19 @@ void fpga_screen_goto(int x, int y)
 void fpga_screen_set_inverse(bool inverse)
 {
     inverse_mode = inverse;
+}
+
+/* Read access to the shadow for the telnet menu mirror. Rows may be read
+ * while a paint is in flight (torn frame); the mirror repaints on the next
+ * generation bump, so this stays lock-free. */
+const uint8_t *fpga_screen_shadow_row(int y)
+{
+    if (y < 0) y = 0;
+    if (y >= SCREEN_H) y = SCREEN_H - 1;
+    return &s_shadow[(uint32_t)y * SCREEN_W];
+}
+
+uint32_t fpga_screen_shadow_gen(void)
+{
+    return s_gen;
 }

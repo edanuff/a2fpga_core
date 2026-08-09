@@ -1060,10 +1060,36 @@ static void handle_button(uint16_t btn)
     paint();
 }
 
+/* Buttons queued from other threads (telnet mirror). OR-ed into the next
+ * menu_input() call, so remote keys ride the same edge detection as the
+ * pad. Safe from any thread (single word, consumed once). */
+static volatile uint16_t s_inject;
+static volatile bool     s_req_menu_view;
+
+void menu_inject(uint16_t buttons)
+{
+    s_inject |= buttons;
+}
+
+void menu_request_menu_view(void)
+{
+    s_req_menu_view = true;
+}
+
 void menu_input(uint16_t buttons)
 {
     if (s_fw_installing)
         return;   /* install page owns the screen until the core reloads */
+
+    uint16_t inj = s_inject;
+    s_inject = 0;
+    buttons |= inj;
+
+    if (s_req_menu_view) {
+        s_req_menu_view = false;
+        if (s_view != VIEW_MENU)
+            enter_view(VIEW_MENU);
+    }
 
     uint16_t pressed = buttons & (uint16_t)~s_prev_buttons;
     s_prev_buttons = buttons;

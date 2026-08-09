@@ -41,6 +41,7 @@
 #include "fpga_jtag.h"
 #include "fpgaupdate.h"
 #include "ftpd.h"
+#include "telnetd.h"
 #include "esp_err.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -324,6 +325,42 @@ static void cmd_process(String cmd) {
             uint8_t pr = 0;
             esp_wifi_get_protocol(WIFI_IF_STA, &pr);
             Serial.printf("wifiproto: current=0x%02X (b=1 g=2 n=4)\n", pr);
+        }
+
+    } else if (cmd == "wifi" || cmd.startsWith("wifi ")) {
+        // Set/show WiFi credentials in NVS. Primary config path on 1.0a3
+        // (no SD card, so no wifi.txt); also handy on older boards.
+        String toks[3];
+        int nt = split_ws(cmd, toks, 3);
+        if (nt < 2) {
+            a2_settings_t *s = settings();
+            Serial.printf("wifi: ssid '%s' (%s)\n",
+                          s->wifi_ssid[0] ? s->wifi_ssid : "(unset)",
+                          net_connected() ? "connected" :
+                          net_ssid()[0]   ? "joining"   : "not started");
+            Serial.println("Usage: wifi <ssid> [psk]   (no spaces in ssid;"
+                           " omit psk for open networks)");
+        } else {
+            a2_settings_t *s = settings();
+            strlcpy(s->wifi_ssid, toks[1].c_str(), sizeof(s->wifi_ssid));
+            strlcpy(s->wifi_psk, nt >= 3 ? toks[2].c_str() : "",
+                    sizeof(s->wifi_psk));
+            bool saved = settings_save();
+            Serial.printf("wifi: ssid '%s' %s\n", s->wifi_ssid,
+                          saved ? "saved" : "SAVE FAILED");
+            if (!net_ssid()[0]) {
+                // Bridge never started (booted unconfigured): start it now.
+                if (wifi_bridge_init(s->wifi_ssid, s->wifi_psk)) {
+                    osd_log("WIFI: JOINING %s (%s)", s->wifi_ssid,
+                            s->dhcp_enable ? "DHCP" : "STATIC IP");
+                    ftpd_init();
+                    telnetd_init();
+                } else {
+                    Serial.println("wifi: bridge init failed");
+                }
+            } else {
+                Serial.println("wifi: saved; 'restart' to apply the new network");
+            }
         }
 
     } else if (cmd == "net") {
@@ -615,6 +652,12 @@ static void cmd_process(String cmd) {
                       PIN_VBUS_SRC_EN, PIN_DP_HPD_OUT);
 #endif
 
+    } else if (cmd == "restart") {
+        Serial.println("Restarting...");
+        Serial.flush();
+        delay(100);
+        ESP.restart();
+
     } else if (cmd == "exit") {
         cli_mode = false;
         Serial.println("Exiting CLI mode. Returning to serial forwarding mode.");
@@ -631,6 +674,9 @@ static void cmd_process(String cmd) {
         Serial.println("  spiw <space> <addr> <inc> <b0> [b1 ...]  - Write to FPGA");
         Serial.println("  meminfo   - Show memory usage");
         Serial.println("  pins      - Show pin assignments");
+        Serial.println("  wifi [<ssid> [psk]] - Show/set WiFi credentials (NVS)");
+        Serial.println("  net       - Show WiFi/IP status");
+        Serial.println("  restart   - Reboot the ESP32");
         Serial.println("  exit      - Return to serial forwarding mode");
         Serial.println("  help      - Show this help");
 
@@ -839,12 +885,17 @@ static void start_subsystems() {
         if (wifi_bridge_init(s->wifi_ssid, s->wifi_psk)) {
             osd_log("WIFI: JOINING %s (%s)", s->wifi_ssid,
                     s->dhcp_enable ? "DHCP" : "STATIC IP");
-            ftpd_init();   /* FTP file drop for /sdcard once WiFi is up */
+            ftpd_init();     /* FTP file drop for /sdcard once WiFi is up */
+            telnetd_init();  /* remote console/menu mirror on port 23 */
         } else {
             osd_log("WIFI: INIT FAILED");
         }
     } else {
+#if A2MEGA_HAS_SD
         osd_log("WIFI: NOT CONFIGURED (WIFI.TXT)");
+#else
+        osd_log("WIFI: NOT CONFIGURED (CLI: WIFI <SSID> <PSK>)");
+#endif
     }
 
     // DDR3 calibration telemetry: status reg bit1 = init_calib_complete,

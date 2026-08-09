@@ -21,6 +21,7 @@
 #include "fpga_link.h"
 #include "fpga_screen.h"
 #include "osd_console.h"
+#include "telnetd.h"
 
 static const char *TAG = "console";
 
@@ -71,6 +72,8 @@ void osd_log(const char *fmt, ...)
     for (char *p = line; *p; p++)
         if (*p >= 'a' && *p <= 'z')
             *p = (char)(*p - 32);
+
+    telnetd_console_tee(line);   /* ring-buffered; never blocks on the net */
 
     if (s_count < CON_ROWS) {
         strcpy(s_lines[s_count++], line);
@@ -125,4 +128,19 @@ void osd_console_hide(void)
     if (!s_lockout)
         fpga_reg_write(A2REG_VIDEO_ENABLE, 0);
     xSemaphoreGive(s_lock);
+}
+
+/* Copy up to max buffered lines (oldest first) for the telnet backlog
+ * replay. Rows are CON_COLS wide + NUL; snap must be char[max][40]. */
+int osd_console_snapshot(char snap[][40], int max)
+{
+    ensure_lock();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    int n = s_count < max ? s_count : max;
+    for (int i = 0; i < n; i++) {
+        strncpy(snap[i], s_lines[i], 39);
+        snap[i][39] = 0;
+    }
+    xSemaphoreGive(s_lock);
+    return n;
 }
