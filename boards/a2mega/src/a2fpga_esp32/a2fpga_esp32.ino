@@ -11,13 +11,18 @@
  *   - USB JTAG bridge for PC-driven FPGA programming (openFPGALoader)
  *   - Serial forwarding to FPGA; CLI mode for diagnostics ("+++")
  *
- * Board: a2mega (ESP32-S3-MINI-1-N8, 8 MB flash, no PSRAM)
+ * Board: a2mega. The ESP32 module varies by board revision (board_pins.h):
+ *   1.0a3   ESP32-S3-MINI-1-N4R2 — 4 MB flash + 2 MB quad PSRAM (same
+ *           module as the a2p25; PSRAM available for large buffers)
+ *   1.0a2x  ESP32-S3-MINI-1-N8   — 8 MB flash, no PSRAM
  *
- * Arduino IDE Settings:
+ * Arduino IDE Settings (the Makefile encodes these per revision):
  *   - Board: ESP32S3 Dev Module
  *   - USB Mode: Hardware CDC and JTAG
  *   - USB CDC On Boot: Enabled
  *   - CPU Frequency: 240MHz
+ *   - Flash/PSRAM/Partitions: per module above (1.0a3: 4M, PSRAM enabled,
+ *     no_ota; 1.0a2x: 8M, PSRAM disabled, default_8MB)
  */
 
 #include <Arduino.h>
@@ -768,10 +773,12 @@ static bool mount_sd() {
     return true;
 }
 #else
-// 1.0a3 has no SD slot. Storage is a LittleFS on the 1.5 MB "spiffs" flash
-// partition, mounted at the same /sdcard VFS prefix so disk.c / ftpd.c /
-// fpgaupdate.c (all plain POSIX on that prefix) work unchanged. Disk images
-// arrive over FTP once WiFi is up.
+// 1.0a3 has no SD slot. Storage is a LittleFS on the 1.875 MB "spiffs"
+// flash partition (no_ota scheme on the N4R2's 4 MB part), mounted at the
+// same /sdcard VFS prefix so disk.c / ftpd.c / fpgaupdate.c (all plain
+// POSIX on that prefix) work unchanged. Disk images arrive over FTP once
+// WiFi is up. An uncompressed FPGA bitstream (~2.6 MB) does not fit —
+// see the Makefile note.
 static bool mount_sd() {
     if (!LittleFS.begin(true /* format on first use */, "/sdcard", 10,
                         "spiffs")) {

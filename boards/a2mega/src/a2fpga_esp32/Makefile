@@ -1,7 +1,9 @@
 # ESP32-S3 Arduino CLI Makefile
 # A2FPGA ESP32 co-processor firmware (a2mega board)
 
-# Configuration - ESP32-S3-MINI-1-N8 module on the a2mega (8M flash, no PSRAM)
+# Module varies by board revision (BOARD_REV below):
+#   1.0a3   ESP32-S3-MINI-1-N4R2 — 4 MB flash + 2 MB quad PSRAM
+#   1.0a2x  ESP32-S3-MINI-1-N8   — 8 MB flash, no PSRAM
 BOARD = esp32s3
 PORT ?= /dev/cu.usbmodem*
 BAUD = 115200
@@ -10,15 +12,21 @@ PROJECT_NAME = a2fpga_esp32
 # Arduino CLI executable (assumes it's in PATH)
 ARDUINO_CLI = arduino-cli
 
-# Board FQBN with specific settings
+# Board revision (see board_pins.h): 103 = 1.0a3 (USB-C DP, N4R2 module),
+# 102 = 1.0a2/1.0a2a (N8 module). Set BOARD_REV=102 to build for old boards.
+BOARD_REV ?= 103
+ifeq ($(BOARD_REV),102)
 FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=8M,PSRAM=disabled,PartitionScheme=default_8MB
-
-# Board revision (see board_pins.h): 103 = 1.0a3 (USB-C DP), 102 = 1.0a2/1.0a2a.
-# Defaults to 103 in board_pins.h; set BOARD_REV=102 to build for older boards.
-BOARD_REV ?=
-ifneq ($(BOARD_REV),)
-REV_FLAGS = --build-property compiler.c.extra_flags=-DA2MEGA_BOARD_REV=$(BOARD_REV) \
-            --build-property compiler.cpp.extra_flags=-DA2MEGA_BOARD_REV=$(BOARD_REV)
+REV_FLAGS = --build-property compiler.c.extra_flags=-DA2MEGA_BOARD_REV=102 \
+            --build-property compiler.cpp.extra_flags=-DA2MEGA_BOARD_REV=102
+else
+# no_ota partitions: 2 MB app + 1.875 MB "spiffs" (LittleFS) — the largest
+# FS a 4 MB part allows with app headroom. No OTA pair: the ESP32 reflashes
+# over its own USB-C. NB an uncompressed GW5AT-60 bitstream (~2.6 MB) does
+# NOT fit the FS — the menu FPGA-update-from-file path needs a compressed
+# image or streaming; PC-driven JTAG via the bridge is unaffected.
+FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=4M,PSRAM=enabled,PartitionScheme=no_ota
+REV_FLAGS =
 endif
 
 # Source files
