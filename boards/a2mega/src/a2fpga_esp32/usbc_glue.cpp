@@ -1,0 +1,273 @@
+/*
+ * usbc_glue — board glue between the vendored USB-C PD stack (usbc_port.c /
+ * fusb302.c, from DisplayPort_Verilog usb-c/) and the a2mega 1.0a3 hardware.
+ *
+ * The vendored esp32s3_integration.c skeleton assumes a GPIO-mode TUSB1046A;
+ * the 1.0a3 board straps the mux into I2C mode (I2C_EN pulled up, CTL/HPD
+ * pins NC), so this file provides its own usbc_port_hal_t instead:
+ *
+ *   - FUSB302B (0x22) + TUSB1046A (0x12) share one I2C bus (Wire on
+ *     IO1=SCL / IO2=SDA).
+ *   - DP enable = TUSB1046A General reg 0x0A: CTLSEL[1:0]=10 (four-lane DP)
+ *     | FLIPSEL per orientation | HPDIN_OVRRIDE (pin 23 is NC). Disable =
+ *     CTLSEL=01. RX EQ stays at defaults; AUX snooping (on by default)
+ *     trims active lanes to whatever the FPGA trains. (usb-c/SPEC.md §6.)
+ *   - HPD to the FPGA is a real wire (PIN_DP_HPD_OUT -> gateware
+ *     hotplug_decode): level driven directly, IRQ = 0.75 ms low pulse
+ *     generated here (SPEC.md §8; 0.5-1.0 ms window).
+ *   - VBUS sourcing = TPS2553 EN on PIN_VBUS_SRC_EN (1 A limit in hardware).
+ *
+ * The PD policy task runs at 1 kHz and is woken immediately by the FUSB302B
+ * INT_N falling edge, per the usbc_port_task() contract.
+ */
+#include "board_pins.h"
+
+#if A2MEGA_HAS_USBC_PD
+
+#include <Arduino.h>
+#include <Wire.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+
+extern "C" {
+#include "usbc_port.h"
+#include "osd_console.h"
+}
+#include "usbc_glue.h"
+
+#define TUSB1046_I2C_ADDR   0x12
+#define TUSB1046_REG_GENERAL 0x0A
+#define TUSB_GEN_CTLSEL_USB3 0x01   /* DP lanes off (as-built disable state) */
+#define TUSB_GEN_CTLSEL_DP4  0x02   /* four-lane DP, pin assignment C/E */
+#define TUSB_GEN_FLIPSEL     0x04
+#define TUSB_GEN_HPDIN_OVR   0x08   /* ignore the (NC) HPDIN pin */
+
+static usbc_port_t s_port;
+static SemaphoreHandle_t s_wake;
+static bool s_running;
+
+/* Status mirrors for the CLI / telnet 'pd' command. */
+static volatile bool s_hpd_level;
+static volatile bool s_vbus_on;
+static volatile bool s_dp_mux_on;
+static volatile bool s_fpga_dp_en;
+
+/* ---- I2C (shared bus: FUSB302B + TUSB1046A) ------------------------------ */
+
+static int i2c_read(void *ctx, uint8_t address, uint8_t reg,
+                    uint8_t *data, size_t length)
+{
+    (void)ctx;
+    Wire.beginTransmission(address);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0)
+        return -1;
+    size_t got = Wire.requestFrom(address, (uint8_t)length);
+    if (got != length)
+        return -1;
+    for (size_t i = 0; i < length; i++)
+        data[i] = (uint8_t)Wire.read();
+    return 0;
+}
+
+static int i2c_write(void *ctx, uint8_t address, uint8_t reg,
+                     const uint8_t *data, size_t length)
+{
+    (void)ctx;
+    Wire.beginTransmission(address);
+    Wire.write(reg);
+    for (size_t i = 0; i < length; i++)
+        Wire.write(data[i]);
+    return Wire.endTransmission(true) == 0 ? 0 : -1;
+}
+
+static void io_delay_us(void *ctx, uint32_t us)
+{
+    (void)ctx;
+    delayMicroseconds(us);
+}
+
+static int tusb_write_general(uint8_t v)
+{
+    return i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_GENERAL, &v, 1);
+}
+
+/* ---- HAL callbacks ------------------------------------------------------- */
+
+static uint32_t hal_millis(void *ctx)
+{
+    (void)ctx;
+    return (uint32_t)millis();
+}
+
+static void hal_set_vbus(void *ctx, bool enable)
+{
+    (void)ctx;
+    /* Strapping pin: held low by R29 at reset; only ever driven here. */
+    digitalWrite(PIN_VBUS_SRC_EN, enable ? HIGH : LOW);
+    s_vbus_on = enable;
+}
+
+static void hal_set_usb_role(void *ctx, usbc_usb_role_t role)
+{
+    (void)ctx;
+    /* The ESP32-S3's own USB (IO19/20, hardwired to the connector) is the
+     * flashing/console CDC device; there is no role switch to perform on
+     * this board. Recorded for visibility only. */
+    Serial.printf("[usbc] usb role -> %s\n",
+                  role == USBC_USB_ROLE_HOST ? "host" :
+                  role == USBC_USB_ROLE_DEVICE ? "device" : "off");
+}
+
+static void hal_set_tusb1046(void *ctx, bool dp_enable, bool flipped)
+{
+    (void)ctx;
+    uint8_t v;
+    if (dp_enable)
+        v = TUSB_GEN_CTLSEL_DP4 | TUSB_GEN_HPDIN_OVR |
+            (flipped ? TUSB_GEN_FLIPSEL : 0);
+    else
+        v = TUSB_GEN_CTLSEL_USB3 | TUSB_GEN_HPDIN_OVR;
+    if (tusb_write_general(v) != 0)
+        Serial.println("[usbc] TUSB1046A general reg write FAILED");
+    s_dp_mux_on = dp_enable;
+}
+
+static void hal_set_tusb_hpd(void *ctx, bool level)
+{
+    (void)ctx;
+    (void)level;
+    /* I2C mode: pin 23 is NC and HPDIN_OVRRIDE is set — the mux never sees
+     * HPD; lane trimming rides the AUX snooper. Nothing to do. */
+}
+
+static void hal_set_fpga_dp_enable(void *ctx, bool enable)
+{
+    (void)ctx;
+    /* Gateware-side DP gating hook (SPEC.md §9: hold the DP source in
+     * reset until DP Configure is ACKed). The bring-up gateware keys off
+     * HPD alone; when a gate is added it will be an OSPI register write
+     * here. Recorded for the status command meanwhile. */
+    s_fpga_dp_en = enable;
+}
+
+static void hal_set_fpga_hpd(void *ctx, bool level)
+{
+    (void)ctx;
+    digitalWrite(PIN_DP_HPD_OUT, level ? HIGH : LOW);
+    s_hpd_level = level;
+}
+
+static void hal_pulse_fpga_hpd_irq(void *ctx)
+{
+    (void)ctx;
+    /* IRQ_HPD = 0.5-1.0 ms low pulse while HPD is otherwise high
+     * (hotplug_decode's IRQ threshold is 0.5 ms, disconnect is 2 ms). */
+    if (!s_hpd_level)
+        return;
+    digitalWrite(PIN_DP_HPD_OUT, LOW);
+    delayMicroseconds(750);
+    digitalWrite(PIN_DP_HPD_OUT, HIGH);
+}
+
+static void hal_log(void *ctx, usbc_log_level_t level, const char *message)
+{
+    (void)ctx;
+    Serial.printf("[usbc] %s\n", message);
+    if (level >= USBC_LOG_WARNING)
+        osd_log("USBC: %s", message);
+}
+
+/* ---- task + interrupt ---------------------------------------------------- */
+
+static void IRAM_ATTR fusb_int_isr(void)
+{
+    BaseType_t woke = pdFALSE;
+    if (s_wake)
+        xSemaphoreGiveFromISR(s_wake, &woke);
+    if (woke)
+        portYIELD_FROM_ISR();
+}
+
+static void usbc_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        /* 1 ms cadence, woken early by INT_N falling. */
+        xSemaphoreTake(s_wake, pdMS_TO_TICKS(1));
+        usbc_port_task(&s_port);
+    }
+}
+
+/* ---- public -------------------------------------------------------------- */
+
+extern "C" bool usbc_pd_init(void)
+{
+    if (s_running)
+        return true;
+
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
+
+    /* Park the mux in its documented disable state (DP lanes off, HPDIN
+     * ignored) before PD policy starts. A NAK here usually means the board
+     * is unpowered on the 3.3 V rail or the mux is missing. */
+    if (tusb_write_general(TUSB_GEN_CTLSEL_USB3 | TUSB_GEN_HPDIN_OVR) != 0)
+        Serial.println("[usbc] warning: TUSB1046A (0x12) not responding");
+
+    fusb302_io_t io = {};
+    io.context = NULL;
+    io.read = i2c_read;
+    io.write = i2c_write;
+    io.delay_us = io_delay_us;
+
+    usbc_port_hal_t hal = {};
+    hal.context = NULL;
+    hal.millis = hal_millis;
+    hal.set_vbus_source = hal_set_vbus;
+    hal.set_usb_role = hal_set_usb_role;
+    hal.set_tusb1046 = hal_set_tusb1046;
+    hal.set_tusb_hpd = hal_set_tusb_hpd;
+    hal.set_fpga_dp_enable = hal_set_fpga_dp_enable;
+    hal.set_fpga_hpd = hal_set_fpga_hpd;
+    hal.pulse_fpga_hpd_irq = hal_pulse_fpga_hpd_irq;
+    hal.log = hal_log;
+
+    usbc_port_config_t config;
+    usbc_port_default_config(&config);   /* 5 V / 1 A single PDO */
+
+    if (usbc_port_init(&s_port, &config, &hal, &io,
+                       FUSB302_I2C_ADDRESS_DEFAULT) != 0) {
+        Serial.println("[usbc] FUSB302B (0x22) init FAILED");
+        osd_log("USBC: PD PHY NOT FOUND");
+        return false;
+    }
+    if (usbc_port_enable(&s_port) != 0) {
+        Serial.println("[usbc] port enable FAILED");
+        return false;
+    }
+
+    s_wake = xSemaphoreCreateBinary();
+    attachInterrupt(digitalPinToInterrupt(PIN_FUSB_INT), fusb_int_isr, FALLING);
+    xTaskCreatePinnedToCore(usbc_task, "usbc_pd", 4096, NULL, 6, NULL, 1);
+    s_running = true;
+    osd_log("USBC: PD STACK UP");
+    return true;
+}
+
+extern "C" void usbc_pd_status(void)
+{
+    if (!s_running) {
+        Serial.println("pd: stack not running");
+        return;
+    }
+    Serial.printf("pd: state %s\n", usbc_port_state_name(s_port.state));
+    Serial.printf("    orientation CC%d, HPD %d, VBUS-src %d, mux-DP %d, "
+                  "fpga-dp-en %d\n",
+                  s_port.polarity == FUSB302_POLARITY_CC2 ? 2 : 1,
+                  (int)s_hpd_level, (int)s_vbus_on, (int)s_dp_mux_on,
+                  (int)s_fpga_dp_en);
+}
+
+#endif /* A2MEGA_HAS_USBC_PD */

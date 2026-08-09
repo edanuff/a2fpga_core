@@ -42,6 +42,7 @@
 #include "fpgaupdate.h"
 #include "ftpd.h"
 #include "telnetd.h"
+#include "usbc_glue.h"
 #include "esp_err.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -652,6 +653,11 @@ static void cmd_process(String cmd) {
                       PIN_VBUS_SRC_EN, PIN_DP_HPD_OUT);
 #endif
 
+#if A2MEGA_HAS_USBC_PD
+    } else if (cmd == "pd") {
+        usbc_pd_status();
+#endif
+
     } else if (cmd == "restart") {
         Serial.println("Restarting...");
         Serial.flush();
@@ -676,6 +682,9 @@ static void cmd_process(String cmd) {
         Serial.println("  pins      - Show pin assignments");
         Serial.println("  wifi [<ssid> [psk]] - Show/set WiFi credentials (NVS)");
         Serial.println("  net       - Show WiFi/IP status");
+#if A2MEGA_HAS_USBC_PD
+        Serial.println("  pd        - Show USB-C PD / DP Alt Mode status");
+#endif
         Serial.println("  restart   - Reboot the ESP32");
         Serial.println("  exit      - Return to serial forwarding mode");
         Serial.println("  help      - Show this help");
@@ -954,6 +963,10 @@ void setup() {
     pinMode(PIN_DP_HPD_OUT, OUTPUT);
     digitalWrite(PIN_DP_HPD_OUT, LOW);
     pinMode(PIN_FUSB_INT, INPUT);   // open-drain, external pull-up R19
+
+    // PD policy (FUSB302B + TUSB1046A) is independent of the FPGA link and
+    // time-bound once a partner attaches — start it before the subsystems.
+    usbc_pd_init();
 #endif
 
     start_subsystems();
