@@ -110,6 +110,8 @@ module apple_memory #(
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
             SWITCHES_IIE <= '{8{1'b0}};
+        end else if (sw_gs_rise_w) begin
+            SWITCHES_IIE <= '{8{1'b0}};
         end else if (!a2bus_if.rw_n && (a2bus_if.phi1_posedge) && (a2bus_if.addr[15:4] == 12'hC00) && !a2bus_if.m2sel_n) begin
             SWITCHES_IIE[a2bus_if.addr[3:1]] <= a2bus_if.addr[0];
         end else if (!a2bus_if.rw_n && (a2bus_if.phi1_posedge) && (a2bus_if.addr == 16'hC068) && !a2bus_if.m2sel_n) begin
@@ -123,6 +125,9 @@ module apple_memory #(
         if (!a2bus_if.device_reset_n) begin
             a2mem_if.BACKGROUND_COLOR <= 4'h0;
             a2mem_if.TEXT_COLOR <= 4'hF;
+        end else if (sw_gs_rise_w) begin
+            a2mem_if.BACKGROUND_COLOR <= 4'h0;
+            a2mem_if.TEXT_COLOR <= 4'hF;
         end else if (write_strobe && (a2bus_if.addr == 16'hC022)) begin
             a2mem_if.BACKGROUND_COLOR <= a2bus_if.data[3:0];
             a2mem_if.TEXT_COLOR <= a2bus_if.data[7:4];
@@ -132,6 +137,8 @@ module apple_memory #(
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.device_reset_n) begin
         if (!a2bus_if.device_reset_n) begin
             a2mem_if.BORDER_COLOR <= 4'h0;
+        end else if (sw_gs_rise_w) begin
+            a2mem_if.BORDER_COLOR <= 4'h0;
         end else if (write_strobe && (a2bus_if.addr == 16'hC034)) begin
             a2mem_if.BORDER_COLOR <= a2bus_if.data[3:0];
         end
@@ -140,6 +147,8 @@ module apple_memory #(
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
             a2mem_if.MONOCHROME_MODE <= 1'b0;
+        end else if (sw_gs_rise_w) begin
+            a2mem_if.MONOCHROME_MODE <= 1'b0;
         end else if (write_strobe && (a2bus_if.addr == 16'hC021)) begin
             a2mem_if.MONOCHROME_MODE <= a2bus_if.data[7];
         end
@@ -147,6 +156,10 @@ module apple_memory #(
 
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
+            a2mem_if.MONOCHROME_DHIRES_MODE <= 1'b0;
+            a2mem_if.LINEARIZE_MODE <= 1'b0;
+            a2mem_if.SHRG_MODE <= 1'b0;
+        end else if (sw_gs_rise_w) begin
             a2mem_if.MONOCHROME_DHIRES_MODE <= 1'b0;
             a2mem_if.LINEARIZE_MODE <= 1'b0;
             a2mem_if.SHRG_MODE <= 1'b0;
@@ -159,6 +172,9 @@ module apple_memory #(
 
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
+            INTC8ROM <= 1'b0;
+            SLOTROM <= 3'b0;
+        end else if (sw_gs_rise_w) begin
             INTC8ROM <= 1'b0;
             SLOTROM <= 3'b0;
         end else if ((a2bus_if.phi1_posedge) && (a2bus_if.addr == 16'hCFFF) && !a2bus_if.m2sel_n) begin

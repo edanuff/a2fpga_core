@@ -480,7 +480,6 @@ module top #(
     wire sw_scanlines_w = !dip_switches_n_w[0];
     wire sw_apple_speaker_w = !dip_switches_n_w[1];
     wire sw_slot_7_w = !dip_switches_n_w[2];
-    wire sw_gs_w = !dip_switches_n_w[3];
 
     IOBUF a2_bridge_d_iobuf[7:0] (
         .O  (a2_bridge_d_buf_w),
@@ -488,6 +487,8 @@ module top #(
         .I  (a2_bridge_d_o_w),
         .OEN(!a2_bridge_d_oe_w)
     );
+
+    wire [7:0] gs_status_w;
 
     apple_bus #(
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
@@ -522,7 +523,8 @@ module top #(
 
         .dip_switches_n_o(dip_switches_n_w),
 
-        .sleep_o(sleep_w)
+        .sleep_o(sleep_w),
+        .gs_status_o(gs_status_w)
     );
 
     // Memory
@@ -1005,7 +1007,7 @@ module top #(
 
         .a2mem_if(a2mem_if),
         .video_control_if(video_control_if),
-        .sw_gs_i(sw_gs_w),
+        .sw_gs_i(a2bus_if.sw_gs),
 
         .pixel_stream(apple_ps),
 
@@ -1332,7 +1334,7 @@ module top #(
 
             .a2mem_if(a2mem_if),
             .video_control_if(video_control_if),
-            .sw_gs_i(sw_gs_w),
+            .sw_gs_i(a2bus_if.sw_gs),
 
             .pixel_stream(apple_ps),
 
@@ -1802,7 +1804,8 @@ module top #(
     wire [7:0] debug_b_w;
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
-        .ENABLE(1'b1)
+        .ENABLE(1'b1),
+        .NUM_HEX_BYTES(9)
     ) debug_overlay (
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
@@ -1817,7 +1820,9 @@ module top #(
         // (rolling; frozen while an SHR game draws = writes not reaching
         // the bus capture), [3]=CAPTURED M2B0 WRITES (IIgs bank-E1 style),
         // [4]=line not ready, [5]=max line lag, [6]=shadow write-queue
-        // drops, [7]=GLU write-queue drops.
+        // drops, [7]=GLU write-queue drops, [8]=GS autodetect status
+        // (hi nibble 5=auto GS, 4=DIP GS, 2=IIe lockout, 0=none;
+        // lo nibble = detection event count).
         .hex_values ({
             mcu_scratch_w[7:0],
             mcu_scratch_w[31:24],
@@ -1826,7 +1831,8 @@ module top #(
             fb_dbg_line_not_ready_w,
             fb_dbg_line_lag_max_w,
             wq_drops_w,
-            glu_drops_w
+            glu_drops_w,
+            gs_status_w
         }),
 `else
         .hex_values ({
@@ -1837,7 +1843,8 @@ module top #(
             mcu_scratch_w[39:32],   // scratch4: status flag bits
             8'h0,
             8'h0,
-            8'h0
+            8'h0,
+            gs_status_w             // GS autodetect status (5x=auto GS, 2x=IIe)
         }),
 `endif
 

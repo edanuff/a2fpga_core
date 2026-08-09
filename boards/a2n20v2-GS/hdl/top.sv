@@ -293,7 +293,6 @@ module top #(
     wire sw_scanlines_w = !dip_switches_n_w[0];
     wire sw_apple_speaker_w = !dip_switches_n_w[1];
     wire sw_slot_7_w = !dip_switches_n_w[2];
-    wire sw_gs_w = !dip_switches_n_w[3];
 
     IOBUF a2_bridge_d_iobuf[7:0] (
         .O  (a2_bridge_d_buf_w),
@@ -342,7 +341,8 @@ module top #(
 
         .dip_switches_n_o(dip_switches_n_w),
 
-        .sleep_o(sleep_w)
+        .sleep_o(sleep_w),
+        .gs_status_o()
     );
 
     // Memory
@@ -504,7 +504,7 @@ module top #(
 
         .a2mem_if(a2mem_if),
         .video_control_if(video_control_if),
-        .sw_gs_i(sw_gs_w),
+        .sw_gs_i(a2bus_if.sw_gs),
 
         .pixel_stream(apple_ps),
 

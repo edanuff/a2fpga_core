@@ -35,6 +35,7 @@
 module apple_bus #(
     parameter bit IRQ_OUT_ENABLE = 1,
     parameter bit INH_OUT_ENABLE = 1,
+    parameter bit GS_AUTODETECT = 1,
     parameter bit BUS_DATA_OUT_ENABLE = 1,
     parameter bit ENABLE_DENOISE = 1,
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -75,7 +76,13 @@ module apple_bus #(
 
     output reg [3:0] dip_switches_n_o,
 
-    output sleep_o
+    output sleep_o,
+
+    // GS auto-detection status for debug display:
+    //   [7]=0, [6]=sw_gs (effective, incl. DIP), [5]=iie fingerprinted,
+    //   [4]=gs auto-detected, [3:0]=detection event count (saturating).
+    // High nibble reads: 5=auto GS, 4=DIP-forced GS, 2=IIe lockout, 0=none.
+    output [7:0] gs_status_o
 
 );
 
@@ -144,11 +151,58 @@ module apple_bus #(
     assign a2bus_if.control_nmi_n = control_in_r[5];
     assign a2bus_if.control_reset_n = control_in_r[6];
 
-    wire sw_gs_w = !dip_switches_n_o[3];
+    // GS mode: DIP switch 4 forces it on; otherwise auto-detected from the
+    // IIgs firmware's reset-time TSB $C029 R-M-W signature (see gs_detector).
+    // The detector watches the raw latched bus lines because m2sel_n
+    // qualification is only meaningful once sw_gs is known.
+    wire gs_autodetect_w;
+    wire iie_detected_w;
+    wire gs_event_w;
+    reg [3:0] gs_event_cnt_r;
+
+    generate
+        if (GS_AUTODETECT) begin : gen_gs_detect
+            gs_detector gs_detector_inst (
+                .clk_i(clk_logic_i),
+                .reset_n_i(system_reset_n_i),
+                // Unconditional sampling — a TransWarp GS emits its
+                // detectable $C036 pairs while /RES is still asserted.
+                .phi1_posedge_i(a2bus_if.phi1_posedge),
+                .addr_i(addr_r),
+                .rw_n_i(rw_n_r),
+                .data_i(data_r),
+                .gs_detected_o(gs_autodetect_w),
+                .iie_detected_o(iie_detected_w),
+                .gs_event_o(gs_event_w)
+            );
+        end else begin : gen_no_gs_detect
+            assign gs_autodetect_w = 1'b0;
+            assign iie_detected_w = 1'b0;
+            assign gs_event_w = 1'b0;
+        end
+    endgenerate
+
+    always @(posedge clk_logic_i or negedge system_reset_n_i) begin
+        if (!system_reset_n_i) gs_event_cnt_r <= 4'd0;
+        else if (gs_event_w && gs_event_cnt_r != 4'hF) gs_event_cnt_r <= gs_event_cnt_r + 1'b1;
+    end
+
+    wire sw_gs_w = !dip_switches_n_o[3] || gs_autodetect_w;
     assign a2bus_if.sw_gs = sw_gs_w;
 
+    assign gs_status_o = {1'b0, sw_gs_w, iie_detected_w, gs_autodetect_w, gs_event_cnt_r};
+
     assign a2bus_if.addr = addr_r;
-    assign a2bus_if.m2sel_n = sw_gs_w ? m2sel_n_r : 0; 
+    // NOTE: do NOT mask m2sel_n while the Apple /RES line is asserted.
+    // It looks safe ("no CPU writes during reset") but accelerator cards
+    // are DMA bus masters that run through motherboard reset: a TransWarp
+    // GS draws its whole splash — and emits the $C036 pairs the GS
+    // auto-detector needs — while the FPGA still holds /RES at power-on.
+    // Masking that window discards the splash AND defers detection past
+    // release, leaving junk to scribble ungated afterward (seen on hw).
+    // Pre-detection junk is instead wiped once when detection latches
+    // (see the sw_gs-rise state wipe in apple_memory*).
+    assign a2bus_if.m2sel_n = sw_gs_w ? m2sel_n_r : 1'b0;
     assign a2bus_if.m2b0 = sw_gs_w ? m2b0_r : 0; 
     //assign a2bus_if.m2b0 = 0; 
     assign a2bus_if.data = data_r;

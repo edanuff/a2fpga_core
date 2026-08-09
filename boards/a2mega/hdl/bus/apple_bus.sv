@@ -26,6 +26,7 @@
 
 module apple_bus #(
     parameter int GS = 0,
+    parameter bit GS_AUTODETECT = 1,
     parameter int CLOCK_SPEED_HZ = 54_000_000,                      // 18.52 ns
     parameter int APPLE_HZ = 14_318_181,
     parameter bit ENABLE_DENOISE = 0,
@@ -124,8 +125,38 @@ module apple_bus #(
     assign a2bus_if.data = data_r;
     assign a2bus_if.rw_n = rw_n_r;
 
-    wire a2_gs = GS | sw_gs_i;
+    // GS mode: forced by parameter/switch, or auto-detected from the IIgs
+    // firmware's reset-time TSB $C029 R-M-W signature (see gs_detector).
+    // The detector watches the raw latched bus lines because m2sel_n
+    // qualification is only meaningful once GS mode is known.
+    wire gs_autodetect_w;
+
+    generate
+        if (GS_AUTODETECT) begin : gen_gs_detect
+            gs_detector gs_detector_inst (
+                .clk_i(clk_logic_i),
+                .reset_n_i(system_reset_n_i),
+                // Unconditional sampling — a TransWarp GS emits its
+                // detectable $C036 pairs while /RES is still asserted.
+                .phi1_posedge_i(a2bus_if.phi1_posedge),
+                .addr_i(addr_r),
+                .rw_n_i(rw_n_r),
+                .data_i(data_r),
+                .gs_detected_o(gs_autodetect_w),
+                .iie_detected_o(),
+                .gs_event_o()
+            );
+        end else begin : gen_no_gs_detect
+            assign gs_autodetect_w = 1'b0;
+        end
+    endgenerate
+
+    wire a2_gs = GS | sw_gs_i | gs_autodetect_w;
     assign a2bus_if.sw_gs = a2_gs;
+    // NOTE: no /RES masking here — accelerator cards (TransWarp GS) do
+    // legitimate DMA work, including their splash and the $C036 pairs the
+    // auto-detector needs, while /RES is still asserted. Pre-detection
+    // junk is wiped when detection latches (see apple_memory*).
     assign a2bus_if.m2sel_n = a2_gs ? m2sel_n_r : 1'b0;
 
     reg m2b0_r;
