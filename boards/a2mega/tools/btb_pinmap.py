@@ -12,10 +12,23 @@ Method (see docs/btb_pinout_1_0a3.md for the worked 1.0a3 result):
     clustered into a left and a right column (odd pins label left, even
     pins label right) and matched by row (same y within 0.9 mm).
 
-The sheets use Tang Mega 138K pin names. Ball names carry over 1:1 to the
-Tang Mega 60K (same PG484 package and SOM PCB); bank numbering and the
-SERDES Q0 lane 1/3 assignment differ between the dies (the CSV's lane
-columns record both).
+The a2-mega sheets use Tang Mega 138K pin names. Ball names carry over
+1:1 to the Tang Mega 60K (same PG484 package and SOM PCB), but bank
+numbering and IO names differ per die. Per-die names come from
+docs/tang_mega_die_names.json, extracted from the Sipeed SOM schematics
+(tang_mega_60k_30353_Schematics.pdf / tang_mega_138k_30354_Schematics.pdf
+via `pdftotext -layout`; NB the 138K PDF's embedded font maps text
+shifted by -0x1D — add 0x1D per character to decode). The Sipeed 138K
+names agree with the a2-mega annotations on every overlapping ball
+(0 mismatches, 135-row check); the 138K PDF labels fewer balls than the
+60K one, so io_138k falls back to the a2-mega annotation.
+
+SERDES caveat: the Sipeed *60K* sheet labels the BTB DP pins with
+138K-style lane names (e.g. Q0_LN1 on the pins that are die-true lane 3
+on the GW5AT-60) — exactly the "SOM PCB uses 138K net conventions"
+premise of the die-true lane note on the a2-mega BTB1 sheet. The lane
+columns below record the die-true mapping (timing-verified IP), not the
+Sipeed sheet labels.
 
 Validated against the working 1.0a2 boards/a2mega/hdl/a2mega.cst by
 joining this ball table with the 1.0a2a-branch PCB netlist: 12/12
@@ -195,6 +208,10 @@ def main():
     hw_repo = sys.argv[1] if len(sys.argv) > 1 else '/Users/edanuff/GitHub/a2-mega'
     rev = sys.argv[2] if len(sys.argv) > 2 else '1_0a3'
 
+    die_path = os.path.join(os.path.dirname(__file__), '..', 'docs',
+                            'tang_mega_die_names.json')
+    die = json.load(open(die_path)) if os.path.exists(die_path) else {'60k': {}, '138k': {}}
+
     balls = {
         'J1': extract_balls(os.path.join(hw_repo, 'fpga_som_btb0.kicad_sch'), 'J1'),
         'J2': extract_balls(os.path.join(hw_repo, 'fpga_som_btb1.kicad_sch'), 'J2'),
@@ -222,42 +239,48 @@ def main():
             if short.startswith('Net-('):
                 short = LED.get(key, short)
             ball, bank, ioname = parse_ball(balls[ref].get(pin))
+            ann138 = (bank + '_' + ioname) if ball else (balls[ref].get(pin) or '')
             rows.append({
                 'signal': short,
                 'esp32_s3': ESP32.get(short, ''),
                 'btb': key,
                 'ball': ball,
-                'io_name_138k': (bank + '_' + ioname) if ball else (balls[ref].get(pin) or ''),
+                'io_60k': die['60k'].get(ball, ''),
+                'io_138k': die['138k'].get(ball, ann138.rstrip('_')),
                 'lane_60k': '', 'lane_138k': '',
                 'notes': '',
             })
 
     for sig, btb, ball, io, l60, l138, note in SERDES_ROWS:
         rows.append({'signal': sig, 'esp32_s3': '', 'btb': btb, 'ball': ball,
-                     'io_name_138k': io, 'lane_60k': l60, 'lane_138k': l138,
-                     'notes': note})
+                     'io_60k': io, 'io_138k': io,
+                     'lane_60k': l60, 'lane_138k': l138, 'notes': note})
 
-    rows.append({'signal': 'clk (50 MHz osc)', 'esp32_s3': '', 'btb': 'SOM',
-                 'ball': 'V22', 'io_name_138k': '', 'lane_60k': '',
-                 'lane_138k': '', 'notes': 'SOM oscillator'})
-    rows.append({'signal': 'button', 'esp32_s3': '', 'btb': 'SOM',
-                 'ball': 'AB13', 'io_name_138k': '', 'lane_60k': '',
-                 'lane_138k': '',
-                 'notes': 'LVCMOS15; bank differs 60K vs 138K (Bank 5 on 138K)'})
+    for sig, ball, note in (
+            ('clk (50 MHz osc)', 'V22', 'SOM oscillator (EMCCLK)'),
+            ('button', 'AB13', 'LVCMOS15 (1.5 V bank on both dies)')):
+        rows.append({'signal': sig, 'esp32_s3': '', 'btb': 'SOM',
+                     'ball': ball,
+                     'io_60k': die['60k'].get(ball, ''),
+                     'io_138k': die['138k'].get(ball, ''),
+                     'lane_60k': '', 'lane_138k': '', 'notes': note})
 
     out = os.path.join(os.path.dirname(__file__), '..', 'docs',
                        f'a2mega_pinmap_{rev}.csv')
     with open(out, 'w', newline='') as f:
-        f.write('# a2mega %s master pin map - signal / ESP32-S3 / BTB position / FPGA ball\n' % rev)
+        f.write('# a2mega %s master pin map - signal / ESP32-S3 / BTB position / FPGA ball / per-die IO names\n' % rev)
         f.write('# Ball names are identical on Tang Mega 60K (GW5AT-60) and 138K (GW5AST-138): same PG484 package,\n')
-        f.write('#  same SOM PCB. Bank NUMBERING and IO names below are 138K conventions (the a2-mega schematics use\n')
-        f.write('#  Tang Mega 138K pin names); the SERDES Q0 lanes 1 and 3 swap between the dies - see lane columns.\n')
+        f.write('#  same SOM PCB. Bank numbering and IO names DIFFER per die - io_60k / io_138k columns from the\n')
+        f.write('#  Sipeed SOM schematics (tang_mega_60k_30353 / tang_mega_138k_30354), see tang_mega_die_names.json.\n')
+        f.write('#  The SERDES Q0 lanes 1 and 3 swap between the dies - lane columns give the die-true mapping\n')
+        f.write('#  (NB the Sipeed 60K sheet itself labels the BTB DP pins with 138K-style lane names).\n')
         f.write('# NOTE: pins move again on board rev 1.0a4 (HyperRAM added, GS nets relocated) - re-extract with\n')
         f.write('#  boards/a2mega/tools/btb_pinmap.py before targeting 1.0a4.\n')
-        f.write('# Sources: a2-mega repo (kicad_pcb pad nets + fpga_som_btb*.kicad_sch pin-name texts);\n')
-        f.write('#  validated against the working 1.0a2 a2mega.cst via the 1.0a2a netlist.\n')
+        f.write('# Sources: a2-mega repo (kicad_pcb pad nets + fpga_som_btb*.kicad_sch pin-name texts) + Sipeed SOM\n')
+        f.write('#  schematics; validated against the working 1.0a2 a2mega.cst via the 1.0a2a netlist (12/12) and\n')
+        f.write('#  0 mismatches between the a2-mega annotations and the Sipeed 138K PDF on overlapping balls.\n')
         w = csv.DictWriter(f, fieldnames=['signal', 'esp32_s3', 'btb', 'ball',
-                                          'io_name_138k', 'lane_60k',
+                                          'io_60k', 'io_138k', 'lane_60k',
                                           'lane_138k', 'notes'])
         w.writeheader()
         for r in rows:

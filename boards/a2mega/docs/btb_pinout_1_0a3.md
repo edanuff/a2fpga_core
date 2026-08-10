@@ -93,13 +93,23 @@ ESP32 (net ESP32_TX), `uart_tx` = data *to* it (net ESP32_RX).
 ## Master table
 
 The complete machine-generated table for **all three connectors** (J1
-Apple bus, J2 ESP32/DP, J3 GS), including ESP32-S3 GPIO numbers and the
-60K/138K SERDES lane naming, lives in
+Apple bus, J2 ESP32/DP, J3 GS), including ESP32-S3 GPIO numbers and
+**per-die IO names** (`io_60k` / `io_138k` — bank numbering and IO names
+differ between the GW5AT-60 and GW5AST-138 even though the balls are
+identical), lives in
 **[`a2mega_pinmap_1_0a3.csv`](a2mega_pinmap_1_0a3.csv)** — regenerate
-with `boards/a2mega/tools/btb_pinmap.py` (this is required for 1.0a4,
-which moves GS nets and adds HyperRAM). Extra cross-validation: the four
-J1 Apple-bus spot checks (a2_phi1 H19, a2_d[0] N18, a2_a[0] T20,
-a2_a[15] G17) match the working `a2mega.cst` exactly.
+with `boards/a2mega/tools/btb_pinmap.py` (required for 1.0a4, which
+moves GS nets and adds HyperRAM). Per-die names were extracted from the
+Sipeed SOM schematics (`tang_mega_60k_30353` / `tang_mega_138k_30354`
+PDFs → [`tang_mega_die_names.json`](tang_mega_die_names.json); the 138K
+PDF's font encodes text shifted by −0x1D). Cross-validation: the Sipeed
+138K names agree with the a2-mega schematic annotations on **every**
+overlapping ball; the four J1 Apple-bus spot checks (a2_phi1 H19,
+a2_d[0] N18, a2_a[0] T20, a2_a[15] G17) match the working `a2mega.cst`
+exactly. One more Sipeed caveat confirmed at the source: the Sipeed
+*60K* sheet labels the BTB DP lanes with 138K-style names (`Q0_LN1` on
+the die-true lane-3 pins) — the die-true columns in the CSV are the
+ones the timing-verified SERDES IP implements.
 
 J3 highlights for the Phase 3 port: GS address bus on BANK4 (A0=V17 …
 A15=AA19); data bus D0-D7 = N15 M15 M16 N17 P17 M17 U20 V20 (mixed
