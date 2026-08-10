@@ -138,7 +138,11 @@ defparam PLLA_inst.SSC_EN = "FALSE";
 endmodule //clk_pll
 
 
-module gowin_pixel_pll (output lock, output clkout, input clkin);
+// ODIV0 selects the pixel rate off the fixed 1188 MHz VCO (135 MHz refclk
+// x 44/5): 8 -> 148.5 MHz (1080p), 44 -> 27.0 MHz (480p). dp_transmitter
+// derives it from PIXEL_CLK_MULT/DIV.
+module gowin_pixel_pll #(parameter ODIV0 = 8)
+                        (output lock, output clkout, input clkin);
 
 
 
@@ -187,7 +191,7 @@ PLLA PLLA_inst (
 defparam PLLA_inst.FCLKIN = "135";
 defparam PLLA_inst.IDIV_SEL = 5;
 defparam PLLA_inst.FBDIV_SEL = 1;
-defparam PLLA_inst.ODIV0_SEL = 8;
+defparam PLLA_inst.ODIV0_SEL = ODIV0;
 defparam PLLA_inst.ODIV1_SEL = 10;
 defparam PLLA_inst.ODIV2_SEL = 25;
 defparam PLLA_inst.ODIV3_SEL = 8;

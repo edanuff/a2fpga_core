@@ -189,18 +189,21 @@ SERDES_ROWS = [
     ('DP_REFCLK_P', 'J2.73', 'F10', 'Q0_REFCLK1', 'Q0_REFCLK1', 'Q0_REFCLK1',
      'DSC1103 135 MHz LVDS XO, AC-coupled'),
     ('DP_REFCLK_N', 'J2.71', 'E10', 'Q0_REFCLK1', 'Q0_REFCLK1', 'Q0_REFCLK1', ''),
-    ('DP0_P', 'J2.77', 'D7', 'Q0 SERDES', 'Q0 lane 3 (TXN - P/N swapped)',
-     'Q0 lane 1', 'tx_pol_invert required'),
-    ('DP0_N', 'J2.79', 'C7', 'Q0 SERDES', 'Q0 lane 3 (TXP)', 'Q0 lane 1', ''),
-    ('DP1_P', 'J2.83', 'B6', 'Q0 SERDES', 'Q0 lane 2 (TXN - P/N swapped)',
-     'Q0 lane 2', 'bonding master (2-lane IP)'),
-    ('DP1_N', 'J2.85', 'A6', 'Q0 SERDES', 'Q0 lane 2 (TXP)', 'Q0 lane 2', ''),
-    ('DP2_P', 'J2.89', 'D5', 'Q0 SERDES', 'Q0 lane 1 (TXN - P/N swapped)',
-     'Q0 lane 3', 'future 4-lane'),
-    ('DP2_N', 'J2.91', 'C5', 'Q0 SERDES', 'Q0 lane 1 (TXP)', 'Q0 lane 3', ''),
-    ('DP3_P', 'J2.95', 'B4', 'Q0 SERDES', 'Q0 lane 0 (TXP - NOT swapped*)',
-     'Q0 lane 0', '*Sipeed sheet disagrees; verify on hw before 4-lane'),
-    ('DP3_N', 'J2.97', 'A4', 'Q0 SERDES', 'Q0 lane 0 (TXN)', 'Q0 lane 0', ''),
+    ('DP0_P', 'J2.77', 'C7', 'Q0 SERDES', 'Q0 lane 3 TXM', 'Q0 lane 1',
+     'P/N swapped - tx_pol_invert (set in the 2-lane IP)'),
+    ('DP0_N', 'J2.79', 'D7', 'Q0 SERDES', 'Q0 lane 3 TXP', 'Q0 lane 1', ''),
+    ('DP1_P', 'J2.83', 'A6', 'Q0 SERDES', 'Q0 lane 2 TXM', 'Q0 lane 2',
+     'P/N swapped - tx_pol_invert (set); bonding master (2-lane IP)'),
+    ('DP1_N', 'J2.85', 'B6', 'Q0 SERDES', 'Q0 lane 2 TXP', 'Q0 lane 2', ''),
+    ('DP2_P', 'J2.89', 'C5', 'Q0 SERDES', 'Q0 lane 1 TXM', 'Q0 lane 3',
+     'P/N swapped - future 4-lane: tx_pol_invert'),
+    ('DP2_N', 'J2.91', 'D5', 'Q0 SERDES', 'Q0 lane 1 TXP', 'Q0 lane 3', ''),
+    ('DP3_P', 'J2.95', 'A4', 'Q0 SERDES', 'Q0 lane 0 TXM', 'Q0 lane 0',
+     'P/N swapped - future 4-lane: tx_pol_invert. RESOLVED 2026-08-09: '
+     'Sipeed 60K U1L (die-true, matches UG1222) + BTB nets give pin95=A4=TXM; '
+     'ALL FOUR lanes are uniformly TXM-first. The a2-mega BTB1 note saying '
+     'DP3 NOT swapped (and its per-pair ball orderings) needs correcting.'),
+    ('DP3_N', 'J2.97', 'B4', 'Q0 SERDES', 'Q0 lane 0 TXP', 'Q0 lane 0', ''),
 ]
 
 

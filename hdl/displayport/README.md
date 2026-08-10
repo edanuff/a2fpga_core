@@ -51,10 +51,14 @@ The generated Customized PHY IP for the a2mega board lives in
 lanes**). The `dp_serdes.csr` sidecar must be registered in the board's
 `.gprj.user` (`RES.serdes.csr = ...`) or PnR fails with CM2031.
 
-Die-true lane mapping on the 1.0a3 board (BTB1 schematic note in the
-a2-mega repo): DP0←L3 (P/N swapped), DP1←L2 (swapped), DP2←L1 (swapped),
-DP3←L0 (not swapped — unverified on hardware). 4-lane needs the IP
-regenerated and a new `DP_SERDES_LANES_*` branch in
+Die-true lane mapping on the 1.0a3 board: DP0←L3, DP1←L2, DP2←L1,
+DP3←L0, and **all four pairs are P/N swapped** (the SOM presents TXM on
+the lower BTB pin of every pair — resolved 2026-08-09 from the Sipeed
+60K schematic's U1L die symbol, which matches Gowin UG1222 exactly,
+joined with the BTB-page nets; see boards/a2mega/docs/
+a2mega_pinmap_1_0a3.csv). The 2-lane IP's `tx_pol_invert` on lanes 2+3
+is correct as generated; a future 4-lane IP needs it on lanes 0 and 1
+as well, plus a new `DP_SERDES_LANES_*` branch in
 `transceiver_bank_gowin.v`.
 
 Status: simulation-verified + timing-closed on GW5AT-60B (1080p59.94,

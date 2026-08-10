@@ -47,8 +47,8 @@ ESP32 (net ESP32_TX), `uart_tx` = data *to* it (net ESP32_RX).
 | DPAUX_P | 64 | **G15** (BANK3, IOR105A) | old tmds clk pair — true diff pair; drive as two LVCMOS33 |
 | DPAUX_N | 62 | **G16** (BANK3, IOR105B) | pseudo-diff idiom in the top |
 | ESP32_GPIO0 = DP HPD | 17 | **A19** (BANK2, IOR38B) | level + 0.75 ms IRQ pulses from the ESP32 |
-| DP_REFCLK_P/N | 73/71 | Q0_REFCLK1 pads (E10/F10) | dedicated bumps — no cst entry |
-| DP0..DP3 P/N | 77/79 83/85 89/91 95/97 | Q0 SERDES pads | dedicated bumps — no cst entry; die-true map DP0←L3 DP1←L2 DP2←L1 DP3←L0 |
+| DP_REFCLK_P/N | 73/71 | F10/E10 (Q0_REFCLK1) | dedicated bumps — no cst entry |
+| DP0..DP3 P/N | 77/79 83/85 89/91 95/97 | C7/D7 A6/B6 C5/D5 A4/B4 | dedicated bumps — no cst entry; die-true map DP0←L3 DP1←L2 DP2←L1 DP3←L0, **all four pairs P/N swapped** (TXM on the lower pin — resolved from Sipeed U1L + UG1222; the a2-mega BTB1 note's "DP3 not swapped" and its per-pair ball orderings need correcting) |
 
 ## Full 1.0a3 J2 (BTB1) signal table
 

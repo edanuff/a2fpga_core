@@ -91,19 +91,17 @@ module top #(
     output a2_d_dir,
     inout [7:0] a2_d,
 
-    // hdmi ports
-    output tmds_clk_p,
-    output tmds_clk_n,
-    output [2:0] tmds_d_p,
-    output [2:0] tmds_d_n,
+    // DisplayPort (1.0a3 USB-C): AUX pseudo-diff pair to the TUSB1046A
+    // (bias/AC coupling on the carrier) and HPD reconstructed by the ESP32
+    // from PD VDMs (level + 0.75 ms IRQ low pulses on ESP32_GPIO0). The DP
+    // main-link lanes and 135 MHz refclk are dedicated SERDES bumps
+    // configured inside the generated PHY IP — no top-level ports.
+    inout  dp_aux_p,
+    inout  dp_aux_n,
+    input  dp_hpd,
 
-    input hdmi_hpd,
-    output hdmi_scl,
-    output hdmi_sda,
-    output hdmi_cec,
-
-    // leds
-    output [1:0] led,
+    // leds (active low on 1.0a3: anode +3V3 via R23-R26)
+    output [3:0] led,
 
     input button,  // 0 when pressed
 
@@ -137,17 +135,9 @@ module top #(
 
     // ESP32 Octal SPI interface
     input         esp_sclk,
-    inout  [7:0]  esp_data,
-
-    // USB-A host port (direct GPIO, BANK3)
-    inout usb_dp,
-    inout usb_dm
+    inout  [7:0]  esp_data
 
 );
-
-    assign hdmi_scl = 1'b1;
-    assign hdmi_sda = 1'b1;
-    assign hdmi_cec = 1'b0;
 
     // Clocks — all PLLs live in board_plls, a per-SOM-variant module:
     // clocks_60b.sv (GW5AT-60B: PLLA + mDRP pll_stop glue) or
@@ -157,10 +147,17 @@ module top #(
     wire clk_logic_pll_w;           // 54 MHz from board PLL (independent of DDR3)
     wire clk_logic_w = clk_logic_pll_w;  // logic runs on independent PLL
     wire clk_lock_w;
-    wire clk_pixel_w;
-    wire clk_hdmi_w;
+    // Board-PLL 27 MHz tap. On 1.0a3 the video pixel clock comes from the
+    // DP core instead (clk_pixel_w below, 27 MHz derived from the 135 MHz
+    // SERDES symbol clock); this output remains ONLY as pll_ddr3's source
+    // inside board_plls — do not remove it, and do not re-source pll_ddr3:
+    // DDR3 calibration is fragile and this keeps its clock chain identical
+    // to the hardware-proven 1.0a2 configuration.
+    wire clk_pixel_pll_w;
+    wire clk_pixel_w;               // video pixel clock (from dp_transmitter)
+    wire clk_hdmi_w;                // unused on 1.0a3 (was TMDS x5)
 
-    wire clk_usb_w;                 // 60 MHz USB host clock
+    wire clk_usb_w;                 // unused on 1.0a3 (no USB-A host)
     wire usb_pll_lock_w;
 
     wire memory_clk_w;              // 324 MHz to DDR3 controller
@@ -170,7 +167,7 @@ module top #(
     board_plls u_board_plls (
         .clk           (clk),
         .pll_stop      (pll_stop_w),
-        .clk_pixel     (clk_pixel_w),
+        .clk_pixel     (clk_pixel_pll_w),
         .clk_hdmi      (clk_hdmi_w),
         .clk_logic     (clk_logic_pll_w),
         .clk_lock      (clk_lock_w),
@@ -1439,277 +1436,101 @@ module top #(
     end
 
     // -----------------------------------------------------------------
-    // HDMI TX — 480p 59.94Hz
+    // DisplayPort TX — 720x480p 59.94 Hz over 2-lane HBR (Phase 3a)
     // -----------------------------------------------------------------
+    // The vendored dp_transmitter (hdl/displayport) replaces the HDMI
+    // encoder at the same seam: it owns clk_pixel_w (27.000 MHz = 135 MHz
+    // symbol clock x 1/5 from its pixel PLL) and pulls rgb for the
+    // previous cycle's (cx, cy) — the identical hdl-util-style contract
+    // the hdmi core used, so framebuffer_480p, the OSD overlay and the
+    // DebugOverlay connect unchanged. 480p CEA timing, negative syncs.
+    // 1080p with a scan-out scaler is Phase 3b.
 
-    wire [9:0] hdmi_cx_raw_w;
-    wire [9:0] hdmi_cy_raw_w;
-    reg [23:0] hdmi_rgb_r;
+    wire [9:0] dp_cx_raw_w;         // $clog2(858)
+    wire [9:0] dp_cy_raw_w;         // $clog2(525)
+    reg  [23:0] dp_rgb_r;
 
-    assign hdmi_cx_w = {1'b0, hdmi_cx_raw_w};
-    assign hdmi_cy_w = hdmi_cy_raw_w;
+    assign hdmi_cx_w = {1'b0, dp_cx_raw_w};
+    assign hdmi_cy_w = dp_cy_raw_w;
 
-    wire [2:0] tmds_w;
+    // AUX channel analog interface: pseudo-diff pair, tri-stated by the
+    // in-fabric AUX engine; carrier provides bias + AC coupling.
+    wire dp_auxch_in_w, dp_auxch_out_w, dp_auxch_tri_w;
+    assign dp_aux_p = dp_auxch_tri_w ? 1'bz : dp_auxch_out_w;
+    assign dp_aux_n = dp_auxch_tri_w ? 1'bz : ~dp_auxch_out_w;
+    assign dp_auxch_in_w = dp_aux_p;
 
-    hdmi #(
-        .VIDEO_ID_CODE(2),          // 720x480p 59.94Hz
-        .DVI_OUTPUT(0),
-        .VIDEO_REFRESH_RATE(59.94),
-        .IT_CONTENT(1),
-        .AUDIO_RATE(AUDIO_RATE),
-        .AUDIO_BIT_WIDTH(16),
-        .START_X(0),
-        .START_Y(0)
-    ) hdmi_inst (
-        .clk_pixel_x5    (clk_hdmi_w),
-        .clk_pixel        (clk_pixel_w),
-        .clk_audio        (clk_audio),
-        .rgb              (overlay_en_w ? overlay_rgb_w : hdmi_rgb_r),
-        .reset            (ddr_rst_w),
-        .audio_sample_word(audio_sample_word),
-        .tmds             (tmds_w),
-        .tmds_clock       (),
-        .cx               (hdmi_cx_raw_w),
-        .cy               (hdmi_cy_raw_w),
-        .frame_width      (),
-        .frame_height     ()
+    // 100 MHz management/AUX-bit-timing clock
+    wire clk100_w;
+    gowin_mgmt_pll i_mgmt_pll (.lock(), .clkout(clk100_w), .clkin(clk));
+
+    wire dp_link_established_w, dp_video_live_w;
+
+    dp_transmitter #(
+        .LANE_COUNT     (2),
+        .LINK_RATE_MBPS (2700),
+        .H_VISIBLE (720), .H_TOTAL (858), .H_SYNC_WIDTH (62), .H_START (122),
+        .V_VISIBLE (480), .V_TOTAL (525), .V_SYNC_WIDTH (6),  .V_START (36),
+        .H_SYNC_ACTIVE_HIGH (1'b0),
+        .V_SYNC_ACTIVE_HIGH (1'b0),
+        .PIXEL_CLK_MULT (1),
+        .PIXEL_CLK_DIV  (5),
+        .AUDIO_RATE     (AUDIO_RATE),
+        .AUDIO_BIT_WIDTH(16)
+    ) i_dp (
+        .clk100            (clk100_w),
+        .refclk0           (1'b0),      // IP mode: refclk = Q0_REFCLK1 pad
+        .refclk1           (1'b0),
+        .sim_clk_pixel     (1'b0),
+        .reset             (ddr_rst_w),
+        .clk_audio         (clk_audio),
+        .audio_sample_word (audio_sample_word),
+        .clk_pixel         (clk_pixel_w),
+        .rgb               (overlay_en_w ? overlay_rgb_w : dp_rgb_r),
+        .cx                (dp_cx_raw_w),
+        .cy                (dp_cy_raw_w),
+        .frame_width(), .screen_width(), .frame_height(), .screen_height(),
+        .dp_tx_lane_p      (),          // dedicated SERDES bumps, not fabric
+        .dp_tx_lane_n      (),
+        .hpd               (dp_hpd),
+        .auxch_in          (dp_auxch_in_w),
+        .auxch_out         (dp_auxch_out_w),
+        .auxch_tri         (dp_auxch_tri_w),
+        .link_established  (dp_link_established_w),
+        .video_live        (dp_video_live_w),
+        .debug             ()
     );
 
-    // Register framebuffer RGB output for HDMI
+    // Register framebuffer RGB output for the DP pull interface
     always @(posedge clk_pixel_w) begin
-        hdmi_rgb_r <= fb_rgb_w;
+        dp_rgb_r <= fb_rgb_w;
     end
 
-    // Gowin LVDS output buffer
-    ELVDS_OBUF tmds_bufds [3:0] (
-        .I({clk_pixel_w, tmds_w}),
-        .O({tmds_clk_p, tmds_d_p}),
-        .OB({tmds_clk_n, tmds_d_n})
-    );
-
-    // DDR3 calibration status on LED[1]
+    // DDR3 calibration status on LED[1]; DP bring-up ladder on LED[2:3]
     assign led[1] = !init_calib_complete_w;
+    assign led[2] = ~dp_link_established_w;
+    assign led[3] = ~dp_video_live_w;
 
     // =========================================================================
-    // USB HID host — runs in clk_usb (60 MHz) domain
+    // USB HID host — REMOVED on 1.0a3 (no USB-A port; gamepads/keyboards now
+    // come via the ESP32's USB-C or the telnet menu mirror). The ESP32
+    // readback registers keep their interface; tie them to "no device".
     // =========================================================================
-    // Full-speed host for mouse/keyboard/gamepad on the USB-A port. The board
-    // wires D+/D- straight to BANK3 GPIO with external 15k pulldowns (host
-    // topology); no PHY, no series resistors on this board spin, so keep
-    // cables short during bring-up.
+    wire [1:0]  hid_typ_sync1      = 2'd0;
+    wire        hid_connerr_sync1  = 1'b0;
+    wire [3:0]  hid_cnt_sync1      = 4'd0;
+    wire [7:0]  pad_btns0_sync1    = 8'd0;
+    wire [7:0]  pad_btns1_sync1    = 8'd0;
+    wire [7:0]  key_mod_sync1      = 8'd0;
+    wire [7:0]  key0_sync1         = 8'd0;
+    wire [7:0]  key1_sync1         = 8'd0;
+    wire [7:0]  dbg_usb_line_w     = 8'd0;
+    wire [7:0]  dbg_usb_pc_w       = 8'd0;
+    wire [47:0] usb_dbg_desc_sync1 = 48'd0;
+    wire [7:0]  usb_dbg_flags_sync1 = 8'd0;
+    wire [7:0]  usb_cnt_start_sync1 = 8'd0;
+    wire [7:0]  usb_cnt_rdy_sync1   = 8'd0;
 
-    wire usb_reset_w;
-
-    reset_sync usb_reset_sync (
-        .clk (clk_usb_w),
-        .arst(~(device_reset_n_w & usb_pll_lock_w)),
-        .srst(usb_reset_w)
-    );
-
-    wire usb_dp_i_w, usb_dm_i_w;
-    wire usb_dp_o_w, usb_dm_o_w;
-    wire usb_oe_w;
-
-    IOBUF usb_dp_iobuf (
-        .O  (usb_dp_i_w),
-        .IO (usb_dp),
-        .I  (usb_dp_o_w),
-        .OEN(!usb_oe_w)
-    );
-
-    IOBUF usb_dm_iobuf (
-        .O  (usb_dm_i_w),
-        .IO (usb_dm),
-        .I  (usb_dm_o_w),
-        .OEN(!usb_oe_w)
-    );
-
-    wire [63:0] usb_dbg_hid_regs_w;   // enum descriptor scratch (VID/PID/class/...)
-    wire [7:0]  usb_dbg_state_w;      // {connerr,x_input,full_speed,connected,ukpstart,ukprdy,ukpstb,busy}
-
-    // UKP microcode ROM is external to the core in the m1nl fork
-    wire [9:0] usb_rom_addr_w;
-    wire [3:0] usb_rom_dout_w;
-    wire       usb_rom_en_w;
-
-    usb_hid_host_rom usb_rom (
-        .clk (clk_usb_w),
-        .addr(usb_rom_addr_w),
-        .dout(usb_rom_dout_w),
-        .en  (usb_rom_en_w)
-    );
-
-    wire [1:0] usb_typ_w;          // 0: none, 1: keyboard, 2: mouse, 3: gamepad
-    wire       usb_report_w;
-    wire       usb_connerr_w;
-    wire [7:0] usb_key_modifiers_w;
-    wire [7:0] usb_key_w [6];
-    wire [2:0] usb_mouse_btn_w;
-    wire signed [7:0] usb_mouse_dx_w, usb_mouse_dy_w;
-    wire usb_game_l_w, usb_game_r_w, usb_game_u_w, usb_game_d_w;
-    wire usb_game_a_w, usb_game_b_w, usb_game_x_w, usb_game_y_w;
-    wire usb_game_sel_w, usb_game_sta_w;
-    wire [3:0] usb_game_extra_w;
-
-    usb_hid_host #(
-        .FULL_SPEED(1)
-    ) usb_hid_host (
-        .clk          (clk_usb_w),
-        .reset        (usb_reset_w),
-        .cs           (1'b1),
-
-        .usb_dm_i     (usb_dm_i_w),
-        .usb_dp_i     (usb_dp_i_w),
-        .usb_dm_o     (usb_dm_o_w),
-        .usb_dp_o     (usb_dp_o_w),
-        .usb_oe       (usb_oe_w),
-
-        .typ          (usb_typ_w),
-        .full_report  (usb_report_w),
-        .connerr      (usb_connerr_w),
-        .busy         (),
-
-        .key_modifiers(usb_key_modifiers_w),
-        .key_0        (usb_key_w[0]),
-        .key_1        (usb_key_w[1]),
-        .key_2        (usb_key_w[2]),
-        .key_3        (usb_key_w[3]),
-        .key_4        (usb_key_w[4]),
-        .key_5        (usb_key_w[5]),
-
-        .mouse_btn    (usb_mouse_btn_w),
-        .mouse_dx     (usb_mouse_dx_w),
-        .mouse_dy     (usb_mouse_dy_w),
-
-        .game_l       (usb_game_l_w),
-        .game_r       (usb_game_r_w),
-        .game_u       (usb_game_u_w),
-        .game_d       (usb_game_d_w),
-        .game_a       (usb_game_a_w),
-        .game_b       (usb_game_b_w),
-        .game_x       (usb_game_x_w),
-        .game_y       (usb_game_y_w),
-        .game_sel     (usb_game_sel_w),
-        .game_sta     (usb_game_sta_w),
-        .game_extra   (usb_game_extra_w),
-
-        .dbg_hid_report(),
-        .dbg_hid_regs (usb_dbg_hid_regs_w),
-        .dbg_state    (usb_dbg_state_w),
-
-        .rom_addr     (usb_rom_addr_w),
-        .rom_dout     (usb_rom_dout_w),
-        .rom_en       (usb_rom_en_w)
-    );
-
-    // -----------------------------------------------------------------
-    // HID report capture (clk_usb) + CDC into clk_logic for the ESP32
-    // readback registers (0x16-0x1B). Values are latched per full report
-    // and quasi-static between reports, so double-flop synchronizers are
-    // sufficient.
-    // -----------------------------------------------------------------
-    reg [1:0] hid_typ_usb_r;
-    reg [3:0] hid_report_cnt_usb_r;
-    reg [7:0] pad_btns0_usb_r;   // {Y,X,B,A,R,L,D,U}
-    reg [7:0] pad_btns1_usb_r;   // {extra[3:0],2'b0,START,SELECT}
-    reg [7:0] key_mod_usb_r;
-    reg [7:0] key0_usb_r, key1_usb_r;
-
-    always @(posedge clk_usb_w) begin
-        if (usb_reset_w) begin
-            hid_typ_usb_r <= 2'd0;
-            hid_report_cnt_usb_r <= 4'd0;
-            pad_btns0_usb_r <= 8'd0;
-            pad_btns1_usb_r <= 8'd0;
-            key_mod_usb_r <= 8'd0;
-            key0_usb_r <= 8'd0;
-            key1_usb_r <= 8'd0;
-        end else if (usb_report_w) begin
-            hid_typ_usb_r <= usb_typ_w;
-            hid_report_cnt_usb_r <= hid_report_cnt_usb_r + 4'd1;
-            if (usb_typ_w == 2'd3) begin
-                pad_btns0_usb_r <= {usb_game_y_w, usb_game_x_w, usb_game_b_w, usb_game_a_w,
-                                    usb_game_r_w, usb_game_l_w, usb_game_d_w, usb_game_u_w};
-                pad_btns1_usb_r <= {usb_game_extra_w, 2'b00, usb_game_sta_w, usb_game_sel_w};
-            end
-            if (usb_typ_w == 2'd1) begin
-                key_mod_usb_r <= usb_key_modifiers_w;
-                key0_usb_r <= usb_key_w[0];
-                key1_usb_r <= usb_key_w[1];
-            end
-        end
-    end
-
-    reg [1:0] hid_typ_sync0, hid_typ_sync1;
-    reg       hid_connerr_sync0, hid_connerr_sync1;
-    reg [3:0] hid_cnt_sync0, hid_cnt_sync1;
-    reg [7:0] pad_btns0_sync0, pad_btns0_sync1;
-    reg [7:0] pad_btns1_sync0, pad_btns1_sync1;
-    reg [7:0] key_mod_sync0, key_mod_sync1;
-    reg [7:0] key0_sync0, key0_sync1;
-    reg [7:0] key1_sync0, key1_sync1;
-
-    always @(posedge clk_logic_w) begin
-        hid_typ_sync0 <= hid_typ_usb_r;         hid_typ_sync1 <= hid_typ_sync0;
-        hid_connerr_sync0 <= usb_connerr_w;     hid_connerr_sync1 <= hid_connerr_sync0;
-        hid_cnt_sync0 <= hid_report_cnt_usb_r;  hid_cnt_sync1 <= hid_cnt_sync0;
-        pad_btns0_sync0 <= pad_btns0_usb_r;     pad_btns0_sync1 <= pad_btns0_sync0;
-        pad_btns1_sync0 <= pad_btns1_usb_r;     pad_btns1_sync1 <= pad_btns1_sync0;
-        key_mod_sync0 <= key_mod_usb_r;         key_mod_sync1 <= key_mod_sync0;
-        key0_sync0 <= key0_usb_r;               key0_sync1 <= key0_sync0;
-        key1_sync0 <= key1_usb_r;               key1_sync1 <= key1_sync0;
-    end
-
-    // USB bring-up debug (regs 0x79/0x7B). oe_sticky proves the UKP ever
-    // drove the bus (bus reset/SOF); pc bits are an async sample of the
-    // microcode PC — fuzzy per read, but repeated reads distinguish
-    // "stuck in reset" / "waiting for connect" / "enumerating".
-    reg usb_oe_sticky_usb_r;
-    always @(posedge clk_usb_w) begin
-        if (usb_reset_w) usb_oe_sticky_usb_r <= 1'b0;
-        else if (usb_oe_w) usb_oe_sticky_usb_r <= 1'b1;
-    end
-
-    reg [4:0]  usb_dbg_line_sync0, usb_dbg_line_sync1;
-    reg [9:0]  usb_dbg_pc_sync0, usb_dbg_pc_sync1;
-    always @(posedge clk_logic_w) begin
-        usb_dbg_line_sync0 <= {usb_pll_lock_w, usb_reset_w, usb_oe_sticky_usb_r,
-                               usb_dm_i_w, usb_dp_i_w};
-        usb_dbg_line_sync1 <= usb_dbg_line_sync0;
-        usb_dbg_pc_sync0   <= usb_rom_addr_w;
-        usb_dbg_pc_sync1   <= usb_dbg_pc_sync0;
-    end
-
-    wire [7:0] dbg_usb_line_w = {usb_dbg_line_sync1, usb_dbg_pc_sync1[9:7]};
-    wire [7:0] dbg_usb_pc_w   = usb_dbg_pc_sync1[7:0];
-
-    // Enumeration descriptor scratch: {subclass,class,pid,vid}. Quasi-static
-    // once enumeration parses descriptors — 2FF sync per byte is fine.
-    reg [47:0] usb_dbg_desc_sync0, usb_dbg_desc_sync1;
-    always @(posedge clk_logic_w) begin
-        usb_dbg_desc_sync0 <= usb_dbg_hid_regs_w[47:0];
-        usb_dbg_desc_sync1 <= usb_dbg_desc_sync0;
-    end
-
-    // Transaction / received-data-packet counters (clk_usb domain; sampled
-    // async — values are fuzzy per read but "is it ticking" is reliable).
-    reg [7:0] usb_cnt_start_r, usb_cnt_rdy_r;
-    reg usb_dbg_start_d, usb_dbg_rdy_d;
-    always @(posedge clk_usb_w) begin
-        usb_dbg_start_d <= usb_dbg_state_w[3];  // ukpstart
-        usb_dbg_rdy_d   <= usb_dbg_state_w[2];  // ukprdy
-        if (usb_dbg_state_w[3] & ~usb_dbg_start_d) usb_cnt_start_r <= usb_cnt_start_r + 8'd1;
-        if (usb_dbg_state_w[2] & ~usb_dbg_rdy_d)   usb_cnt_rdy_r   <= usb_cnt_rdy_r + 8'd1;
-    end
-
-    reg [7:0] usb_dbg_flags_sync0, usb_dbg_flags_sync1;
-    reg [7:0] usb_cnt_start_sync0, usb_cnt_start_sync1;
-    reg [7:0] usb_cnt_rdy_sync0, usb_cnt_rdy_sync1;
-    always @(posedge clk_logic_w) begin
-        usb_dbg_flags_sync0 <= usb_dbg_state_w;   usb_dbg_flags_sync1 <= usb_dbg_flags_sync0;
-        usb_cnt_start_sync0 <= usb_cnt_start_r;   usb_cnt_start_sync1 <= usb_cnt_start_sync0;
-        usb_cnt_rdy_sync0   <= usb_cnt_rdy_r;     usb_cnt_rdy_sync1   <= usb_cnt_rdy_sync0;
-    end
 
     // DDR3 sequencer telemetry (clk 50 MHz -> clk_logic; quasi-static)
     reg [7:0] ddr3_retry_sync0, ddr3_retry_sync1;

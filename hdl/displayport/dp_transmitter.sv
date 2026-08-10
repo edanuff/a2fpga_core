@@ -154,9 +154,16 @@ module dp_transmitter #(
     // ------------------------------------------------------------------
 `ifdef DP_VENDOR_GOWIN
  `ifdef GOWIN_PLL_IP
-    // IDE-generated PLLA wrapper: clk_pixel = tx_symbol_clk * MULT / DIV
-    // (81 MHz * 11/12 = 74.25 MHz for 720p60 @ RBR)
-    gowin_pixel_pll i_pixel_pll (
+    // IDE-generated PLLA wrapper: clk_pixel = tx_symbol_clk * MULT / DIV.
+    // The wrapper's VCO is fixed at 1188 MHz (135 MHz refclk x 44/5), so
+    // ODIV0 = 1188 / f_pixel = 44*DIV / (5*MULT). 11/10 -> 8 (148.5 MHz),
+    // 1/5 -> 44 (27.0 MHz).
+    localparam int PIXEL_ODIV0 = (44 * PIXEL_CLK_DIV) / (5 * PIXEL_CLK_MULT);
+    initial begin
+        if ((44 * PIXEL_CLK_DIV) % (5 * PIXEL_CLK_MULT) != 0)
+            $error("dp_transmitter: pixel clock not reachable from the 1188 MHz VCO (44*DIV must divide by 5*MULT)");
+    end
+    gowin_pixel_pll #(.ODIV0(PIXEL_ODIV0)) i_pixel_pll (
         .clkin  (tx_symbol_clk),
         .clkout (clk_pixel)
     );
