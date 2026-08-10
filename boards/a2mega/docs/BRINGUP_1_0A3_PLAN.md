@@ -98,6 +98,17 @@ holds the FUSB302B/TUSB1046A spec and the portable PD driver in C).
    ftpd); disk.c backend swap SD→VFS. (Can trail the display work.)
 
 ### Phase 2 — Colorbars over DP (first hardware milestone)
+
+> **Status 2026-08-09: bitstream BUILT & timing-clean** (step 1 done
+> pre-hardware): `boards/a2mega/a2mega_dp_test.gprj` →
+> `impl/pnr/a2mega_dp_test.fs`; 0 violations, TNS 0.000, all Fmax ≥
+> constraint (clk_sym 135.352 vs 135.007). Pins from
+> `docs/a2mega_pinmap_1_0a3.csv`. Gotchas encountered: Gowin needs
+> `impl/<proj>_process_config.json` with `Verilog_Standard: Sysv2017`,
+> `TopModule`, and a distinct `OUTPUT_BASE_NAME` (else it silently
+> overwrites the main project's outputs). The bring-up ladder (step 2)
+> awaits hardware.
+
 1. New minimal bring-up project `boards/a2mega/a2mega_dp_test.gprj`:
    `dp_transmitter` (2-lane HBR, 1080p59.94 148.5 MHz — the exact
    timing-closed config), a trivial `cx/cy → rgb` colorbar generator (none
