@@ -258,6 +258,10 @@ static void fall_back_to_usb_only(usbc_port_t *port, const char *reason)
     set_dp_outputs(port, false, false);
     port->state = USBC_STATE_USB_ONLY;
     port->expected_vdm_command = 0u;
+    /* Sink+DFP: schedule a DP discovery retry (see service_state_timer).
+     * The VDM exchange flakes on some attaches; parking here until a
+     * physical replug wastes an otherwise healthy contract. */
+    port->deadline_ms = now_ms(port) + 2000u;
     log_message(port, USBC_LOG_WARNING, reason);
 }
 
@@ -652,6 +656,16 @@ static int service_state_timer(usbc_port_t *port)
             log_message(port, USBC_LOG_ERROR,
                         "DR_Swap unanswered; staying UFP (no DP)");
             port->state = USBC_STATE_DEVICE;
+        }
+        break;
+    case USBC_STATE_USB_ONLY:
+        /* Auto-retry DP discovery after a VDM flake (sink+DFP only —
+         * the contract survived; only the Alt-Mode exchange failed). */
+        if (port->power_sink && port->data_dfp &&
+            time_reached(now, port->deadline_ms)) {
+            log_message(port, USBC_LOG_INFO, "Retrying DP discovery");
+            port->state = USBC_STATE_SINK_READY;
+            port->deadline_ms = now + DISCOVERY_START_DELAY_MS;
         }
         break;
     case USBC_STATE_SOURCE_WAIT_VBUS:

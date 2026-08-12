@@ -43,6 +43,18 @@ extern "C" {
 #define TUSB_GEN_CTLSEL_DP4  0x02   /* four-lane DP, pin assignment C/E */
 #define TUSB_GEN_FLIPSEL     0x04
 #define TUSB_GEN_HPDIN_OVR   0x08   /* ignore the (NC) HPDIN pin */
+#define TUSB_GEN_EQ_OVERRIDE 0x10   /* EQ from registers, not strap pins */
+#define TUSB1046_REG_DPEQ10  0x10   /* DP1EQ_SEL[7:4] | DP0EQ_SEL[3:0] */
+#define TUSB1046_REG_DPEQ32  0x11   /* DP3EQ_SEL[7:4] | DP2EQ_SEL[3:0] */
+
+/* DP receiver EQ. CRITICAL (board #1 root-cause candidate, 2026-08-12):
+ * in I2C mode the DPEQ strap pins double as address pins and float, so
+ * the chip latches EQ setting 10 = 12.3 dB at reset (datasheet Table 7,
+ * F/F row) — ~11 dB of over-equalization for a few-cm board trace,
+ * enough to wreck the redriven eye at 2.7 Gb/s. EQ_OVERRIDE + low
+ * register EQ is mandatory in I2C mode; SPEC.md always said EQ is
+ * "register-settable instead of strap resistors". Setting 0 = 1.0 dB. */
+static uint8_t s_dp_eq_setting = 0;
 
 static usbc_port_t s_port;
 static SemaphoreHandle_t s_wake;
@@ -54,21 +66,44 @@ static volatile bool s_vbus_on;
 static volatile bool s_dp_mux_on;
 static volatile bool s_fpga_dp_en;
 
-/* ---- I2C (shared bus: FUSB302B + TUSB1046A) ------------------------------ */
+/* ---- I2C (shared bus: FUSB302B + TUSB1046A) ------------------------------
+ * Bus mutex: the 1 kHz PD task, the CLI (loop task), and the telnet task
+ * (mux dumps / EQ cycling) all touch Wire — unlocked access produced
+ * intermittent read failures (the 'x' dump's 0xEE noise). */
+
+static SemaphoreHandle_t s_i2c_lock;
+
+static void i2c_lock(void)
+{
+    if (s_i2c_lock)
+        xSemaphoreTake(s_i2c_lock, portMAX_DELAY);
+}
+
+static void i2c_unlock(void)
+{
+    if (s_i2c_lock)
+        xSemaphoreGive(s_i2c_lock);
+}
 
 static int i2c_read(void *ctx, uint8_t address, uint8_t reg,
                     uint8_t *data, size_t length)
 {
     (void)ctx;
+    i2c_lock();
     Wire.beginTransmission(address);
     Wire.write(reg);
-    if (Wire.endTransmission(false) != 0)
+    if (Wire.endTransmission(false) != 0) {
+        i2c_unlock();
         return -1;
+    }
     size_t got = Wire.requestFrom(address, (uint8_t)length);
-    if (got != length)
+    if (got != length) {
+        i2c_unlock();
         return -1;
+    }
     for (size_t i = 0; i < length; i++)
         data[i] = (uint8_t)Wire.read();
+    i2c_unlock();
     return 0;
 }
 
@@ -76,11 +111,14 @@ static int i2c_write(void *ctx, uint8_t address, uint8_t reg,
                      const uint8_t *data, size_t length)
 {
     (void)ctx;
+    i2c_lock();
     Wire.beginTransmission(address);
     Wire.write(reg);
     for (size_t i = 0; i < length; i++)
         Wire.write(data[i]);
-    return Wire.endTransmission(true) == 0 ? 0 : -1;
+    int rc = Wire.endTransmission(true) == 0 ? 0 : -1;
+    i2c_unlock();
+    return rc;
 }
 
 static void io_delay_us(void *ctx, uint32_t us)
@@ -121,15 +159,28 @@ static void hal_set_usb_role(void *ctx, usbc_usb_role_t role)
                   role == USBC_USB_ROLE_DEVICE ? "device" : "off");
 }
 
+static int tusb_write_dp_eq(uint8_t setting)
+{
+    uint8_t v = (uint8_t)((setting << 4) | (setting & 0x0F));
+    int rc = i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_DPEQ10, &v, 1);
+    rc |= i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_DPEQ32, &v, 1);
+    return rc;
+}
+
 static void hal_set_tusb1046(void *ctx, bool dp_enable, bool flipped)
 {
     (void)ctx;
     uint8_t v;
-    if (dp_enable)
-        v = TUSB_GEN_CTLSEL_DP4 | TUSB_GEN_HPDIN_OVR |
+    if (dp_enable) {
+        /* Program sane EQ BEFORE enabling the lanes (see s_dp_eq_setting
+         * comment: floating straps latch a link-killing 12.3 dB). */
+        if (tusb_write_dp_eq(s_dp_eq_setting) != 0)
+            Serial.println("[usbc] TUSB1046A EQ reg write FAILED");
+        v = TUSB_GEN_CTLSEL_DP4 | TUSB_GEN_HPDIN_OVR | TUSB_GEN_EQ_OVERRIDE |
             (flipped ? TUSB_GEN_FLIPSEL : 0);
-    else
+    } else {
         v = TUSB_GEN_CTLSEL_USB3 | TUSB_GEN_HPDIN_OVR;
+    }
     if (tusb_write_general(v) != 0)
         Serial.println("[usbc] TUSB1046A general reg write FAILED");
     s_dp_mux_on = dp_enable;
@@ -248,6 +299,7 @@ extern "C" bool usbc_pd_init(void)
         return false;
     }
 
+    s_i2c_lock = xSemaphoreCreateMutex();
     s_wake = xSemaphoreCreateBinary();
     attachInterrupt(digitalPinToInterrupt(PIN_FUSB_INT), fusb_int_isr, FALLING);
     xTaskCreatePinnedToCore(usbc_task, "usbc_pd", 4096, NULL, 6, NULL, 1);
@@ -300,6 +352,23 @@ extern "C" void usbc_mux_dump_log(void)
     snprintf(line, sizeof(line), "MUX 10-13: %02X %02X %02X %02X",
              v[0], v[1], v[2], v[3]);
     osd_log("%s", line);
+}
+
+/* Cycle the DP receiver EQ through bring-up presets, live over telnet.
+ * Table 7 gains at 4.05 GHz: 0=1.0 dB, 3=6.5 dB, 6=9.5 dB, 10=12.3 dB
+ * (10 = the floating-strap default that motivated all of this). Writes
+ * take effect immediately on the running link — A/B without reflashing. */
+extern "C" void usbc_mux_eq_cycle(void)
+{
+    static const uint8_t presets[4] = { 0, 3, 6, 10 };
+    static const char *gains[4] = { "1.0", "6.5", "9.5", "12.3" };
+    static uint8_t idx = 0;
+    idx = (uint8_t)((idx + 1) & 3);
+    s_dp_eq_setting = presets[idx];
+    if (tusb_write_dp_eq(s_dp_eq_setting) == 0)
+        osd_log("MUX EQ: SETTING %u (%s DB)", presets[idx], gains[idx]);
+    else
+        osd_log("MUX EQ: WRITE FAILED");
 }
 
 /* Condensed PD status through osd_log: reaches the OSD *and* every telnet

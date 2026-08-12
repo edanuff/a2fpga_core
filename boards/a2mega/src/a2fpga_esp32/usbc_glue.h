@@ -20,6 +20,7 @@ bool usbc_pd_init(void);
 void usbc_pd_status(void);
 void usbc_pd_status_log(void);  /* condensed, via osd_log (OSD + telnet tee) */
 void usbc_mux_dump_log(void);   /* TUSB1046A regs via osd_log (AUX snooper) */
+void usbc_mux_eq_cycle(void);   /* cycle DP RX EQ presets live (telnet 'e') */
 
 #ifdef __cplusplus
 }
