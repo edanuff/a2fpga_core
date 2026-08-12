@@ -87,7 +87,10 @@ module dp_transmitter #(
     // Status
     output logic link_established,
     output logic video_live,
-    output logic [7:0] debug
+    output logic [7:0] debug,
+    // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
+    // e.g. an in-fabric line-rate check against a known crystal.
+    output logic clk_symbol_out
 );
 
     // ------------------------------------------------------------------
@@ -112,6 +115,7 @@ module dp_transmitter #(
     logic        swing_0p4,  swing_0p6,  swing_0p8;
     logic  [3:0] tx_running;
     logic        tx_symbol_clk;
+    assign clk_symbol_out = tx_symbol_clk;
     logic [79:0] tx_symbols;
     logic        tx_align_train, tx_clock_train, tx_link_established;
     logic  [2:0] stream_channel_count;

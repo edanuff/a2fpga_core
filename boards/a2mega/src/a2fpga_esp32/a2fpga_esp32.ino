@@ -967,16 +967,15 @@ static void start_subsystems() {
 // ============================================================================
 
 void setup() {
-    // Route the USB JTAG bridge to the FPGA pins FIRST, before anything
-    // slow (the 300 ms settle, PD init, WiFi join): the GW5A gives JTAG
-    // priority over MSPI auto-boot, so an openFPGALoader retry loop on the
-    // PC can grab the TAP during the boot window. This is the recovery
-    // path for a bad flash image that otherwise leaves the config
-    // controller looping on MSPI with JTAG unresponsive (board #1,
-    // 2026-08-11). Idle routing is harmless — no host clocking, no effect
-    // on normal auto-boot; loop() still manages connect/disconnect edges.
-    route_usb_jtag_to_gpio();
-
+    // NOTE: do NOT route the USB JTAG bridge here. It was tried (early
+    // rescue window for the MSPI-hang state, board #1 2026-08-11) and it
+    // broke the bridge for the rest of the boot: Serial.begin()'s
+    // hardware-CDC init reconfigures the same USB peripheral and leaves
+    // an early-routed bridge half-configured — every JTAG chain scan
+    // after the first returned "no device found" until power cycle
+    // (observed 30/30 flash-attempt failures). loop()'s edge-triggered
+    // routing after USB init is the correct path; the MSPI-hang rescue
+    // works through the SRAM-load retry race regardless.
     Serial.begin(115200);
     Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);
     delay(300);

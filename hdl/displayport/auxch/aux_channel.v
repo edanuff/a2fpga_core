@@ -181,6 +181,8 @@ module aux_channel #(
     reg       just_read_from_rx;
     reg  [3:0] powerup_mask;
 
+    reg [17:0] blind_dwell = 18'd0;   // per-state dwell timer (blind mode)
+
     // BLIND_SINK: assume training succeeded (no status reads possible)
     wire clock_locked_i  = clock_locked  | (BLIND_SINK != 0);
     wire equ_locked_i    = equ_locked    | (BLIND_SINK != 0);
@@ -520,11 +522,19 @@ always @(posedge clk) begin
 
     //-----------------------------------------------------------
     // BLIND_SINK: reply bytes will never arrive. Advance once the
-    // request has fully left the wire (channel idle) and the same
-    // 100 us dwell has elapsed — the sink still RECEIVED the
-    // message; we simply do not wait to hear back.
+    // request has fully left the wire (channel idle) and a dwell
+    // has elapsed — the sink still RECEIVED the message; we simply
+    // do not wait to hear back. The dwell is ~1.3 ms (not the
+    // 100 us wait-state timer): with no status readback, each
+    // training pattern must persist long enough for a slow sink to
+    // adapt; the whole walk stays ~60 ms, inside the watchdog.
     //-----------------------------------------------------------
-    if(BLIND_SINK != 0 && channel_busy == 1'b0 && count_100us[14] == 1'b1) begin
+    if(state == next_state) begin
+        blind_dwell <= blind_dwell + 18'd1;
+    end else begin
+        blind_dwell <= 18'd0;
+    end
+    if(BLIND_SINK != 0 && channel_busy == 1'b0 && blind_dwell[17] == 1'b1) begin
         next_state <= state_on_success;
     end
             

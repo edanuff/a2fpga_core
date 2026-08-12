@@ -78,4 +78,43 @@ unconfigured, see Stage 3).
 - Firmware also gained: early JTAG bridge routing at top of setup()
   (rescue window), telnet `p` key = PD status via the console tee.
 
-### Stage 4 — PD / Alt-Mode — (next: swap to monitor)
+### Stage 4 — PD / Alt-Mode — PASS after sink-path implementation (2026-08-11)
+
+- First monitor attach stalled in PD state `device`: the vendored driver
+  only implemented the source role (the SPEC deliberately scoped out
+  monitors that present Rp — i.e. every real charging-capable USB-C
+  monitor). Implemented the sink path per the SPEC's own sketch: sink
+  PD contract → DR_Swap → DFP → existing VDM ladder (752b2d33; also
+  fixed: FUSB302 BMC TX never enabled in sink role, hardcoded TX header
+  roles, GoodCRC DATAROLE after swap).
+- **PASS: `DP-ACTIVE SNK/DFP`, both cable orientations (CC1+CC2), mux
+  configured (reg 0x0A=0x0A verified in-chip), HPD delivered, led[1].**
+
+### Stage 5 — link training — IN PROGRESS (2026-08-11)
+
+- **AUX receive is electrically unreachable on 1.0a3** — board matches
+  the TI TUSB1046A reference (Fig 28) + datasheet-mandated AUX CM bias
+  exactly; the reference assumes a GPU-class AUX PHY (internal RX bias
+  behind own caps), which an FPGA LVCMOS pin is not. No field mod
+  possible. → DP core gained BLIND_SINK open-loop link policy
+  (5f83f4e3): writes transmit, replies assumed, HPD-gated, D0 wake
+  added (stock core never woke the sink).
+- **AUX transmit proven end-to-end by TI silicon**: mux DCI snooper
+  reg 0x12 read back LANE_COUNT_SET=2 — our DPCD write, decoded off
+  the wire by the TUSB1046A.
+- Current state: all LEDs (HPD + link_established + video_live)
+  assert on monitor attach; **no picture**. led2/3 are now blind-mode
+  self-report, not sink truth. Verified correct by inspection: fabric
+  lane crossover (lane0→LN3, lane1→LN2), .ipc lane/invert config
+  (TXBITPOLARITYINVERT=true on Q0 L2+L3, QPLL0, REFCLK1).
+- Monitor behavior: **"no signal" then sleeps** — sink never locks the
+  main link (not a stream/MSA rejection). Control test: **MacBook +
+  same cable + same monitor works** — monitor/cable/Alt-Mode path all
+  good; fault is board-side in the main-link signal.
+- Open suspects (ranked): actual line rate out of the QPLL (verify
+  clk_sym=135 MHz in-fabric vs the 50 MHz crystal — no external gear
+  needed), GTR12 serialization bit-order/polarity semantics (CSR blob
+  not inspectable — never verified on silicon), training dwell too
+  short for slow-adapting sinks, swing/EQ/SI. Next: D0 build test →
+  instrumented build (freq-check LED + longer dwells) → A/B bit-order
+  and polarity builds.

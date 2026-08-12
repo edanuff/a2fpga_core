@@ -1498,6 +1498,7 @@ module top #(
         .auxch_tri         (dp_auxch_tri_w),
         .link_established  (dp_link_established_w),
         .video_live        (dp_video_live_w),
+        .clk_symbol_out    (),
         .debug             ()
     );
 

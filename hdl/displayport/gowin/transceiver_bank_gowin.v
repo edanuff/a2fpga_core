@@ -146,12 +146,40 @@ module transceiver_bank_gowin (
     // drives ln2. Bonding master is lane 2: its PCS clkout and pll_lock
     // serve the bank. IP generated with lanes 2+3, REFCLK1, QPLL0.
     // ------------------------------------------------------------------
+    // A/B EXPERIMENT (board #1 Stage 5): serializer word convention. The
+    // GTR12's wire-order for the 20-bit word (two 10-bit 8b10b symbols)
+    // was never verified on silicon. A wrong convention lets TPS1
+    // (alternating, order-invariant) give sinks CR lock while
+    // TPS2/symbols garble — matching the observed trained-but-no-signal.
+    //   0 = straight (documented LSB-first assumption)   — TESTED: no lock
+    //   1 = full 20-bit reversal (= symbol swap + per-symbol reverse)
+    //                                                    — TESTED: no lock
+    //   2 = symbol swap only ({sym0, sym1})              — untested
+    //   3 = per-symbol bit reverse, order kept           — untested
+    // Flip and rebuild to A/B; fold the winner in and delete when settled.
+    localparam TX_WORD_MODE = 0;
+    function [9:0] rev10(input [9:0] x);
+        integer ri;
+        for (ri = 0; ri < 10; ri = ri + 1)
+            rev10[ri] = x[9 - ri];
+    endfunction
+    function [19:0] word_conv(input [19:0] x);
+        case (TX_WORD_MODE)
+            1: word_conv = {rev10(x[9:0]), rev10(x[19:10])};  // full reversal
+            2: word_conv = {x[9:0], x[19:10]};                // symbol swap
+            3: word_conv = {rev10(x[19:10]), rev10(x[9:0])};  // per-symbol rev
+            default: word_conv = x;
+        endcase
+    endfunction
+    wire [19:0] tx_wire0 = word_conv(tx_code0);
+    wire [19:0] tx_wire1 = word_conv(tx_code1);
+
     dp_serdes i_dp_serdes (
         .por_n_i                    (por_n),
         // lane 3 TX <= word lane 0 (ML0)
         .dp_phy_q0_ln3_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln3_tx_pcs_clkout_o (),
-        .dp_phy_q0_ln3_tx_data_i    ({60'b0, tx_code0}),
+        .dp_phy_q0_ln3_tx_data_i    ({60'b0, tx_wire0}),
         .dp_phy_q0_ln3_tx_fifo_wren_i (1'b1),
         .dp_phy_q0_ln3_tx_fifo_wrusewd_o (),
         .dp_phy_q0_ln3_tx_fifo_afull_o (),
@@ -175,7 +203,7 @@ module transceiver_bank_gowin (
         // lane 2 TX <= word lane 1 (ML1); bonding master
         .dp_phy_q0_ln2_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln2_tx_pcs_clkout_o (tx_symbol_clk_raw),
-        .dp_phy_q0_ln2_tx_data_i    ({60'b0, tx_code1}),
+        .dp_phy_q0_ln2_tx_data_i    ({60'b0, tx_wire1}),
         .dp_phy_q0_ln2_tx_fifo_wren_i (1'b1),
         .dp_phy_q0_ln2_tx_fifo_wrusewd_o (),
         .dp_phy_q0_ln2_tx_fifo_afull_o (),
@@ -214,7 +242,7 @@ module transceiver_bank_gowin (
         // lane 0 TX
         .dp_phy_q0_ln0_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln0_tx_pcs_clkout_o (tx_symbol_clk_raw),
-        .dp_phy_q0_ln0_tx_data_i    ({60'b0, tx_code0}),
+        .dp_phy_q0_ln0_tx_data_i    ({60'b0, tx_wire0}),
         .dp_phy_q0_ln0_tx_fifo_wren_i (1'b1),
         .dp_phy_q0_ln0_tx_fifo_wrusewd_o (),
         .dp_phy_q0_ln0_tx_fifo_afull_o (),
@@ -239,7 +267,7 @@ module transceiver_bank_gowin (
         // lane 1 TX
         .dp_phy_q0_ln1_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln1_tx_pcs_clkout_o (),
-        .dp_phy_q0_ln1_tx_data_i    ({60'b0, tx_code1}),
+        .dp_phy_q0_ln1_tx_data_i    ({60'b0, tx_wire1}),
         .dp_phy_q0_ln1_tx_fifo_wren_i (1'b1),
         .dp_phy_q0_ln1_tx_fifo_wrusewd_o (),
         .dp_phy_q0_ln1_tx_fifo_afull_o (),

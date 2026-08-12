@@ -143,8 +143,43 @@ module a2mega_dp_test_top (
         .auxch_tri         (auxch_tri),
         .link_established  (link_established),
         .video_live        (video_live),
-        .debug             (debug)
+        .debug             (debug),
+        .clk_symbol_out    (clk_sym_w)
     );
+
+    // ------------------------------------------------------------------
+    // Line-rate verification: count clk_sym (the GTR12 TX word clock,
+    // line-rate/20) over a 1 s window timed by the 50 MHz crystal. If
+    // the QPLL is really running 2.7 Gb/s, the delta is 135 M ± tol.
+    // This is the only zero-equipment way to confirm the actual serial
+    // rate — with blind training, "link_established" (the old led[2])
+    // is self-report and carries no information.
+    // ------------------------------------------------------------------
+    logic [25:0] win_cnt = '0;          // 0..49,999,999 @ 50 MHz
+    logic        win_tgl = 1'b0;
+    always_ff @(posedge clk50_in) begin
+        if (win_cnt == 26'd49_999_999) begin
+            win_cnt <= '0;
+            win_tgl <= ~win_tgl;
+        end else
+            win_cnt <= win_cnt + 26'd1;
+    end
+
+    logic [27:0] sym_cnt = '0, sym_last = '0, sym_delta = '0;
+    logic [2:0]  tgl_sync = '0;
+    logic        freq_ok = 1'b0;
+    logic        clk_sym_w;
+    always_ff @(posedge clk_sym_w) begin
+        sym_cnt  <= sym_cnt + 28'd1;
+        tgl_sync <= {tgl_sync[1:0], win_tgl};
+        if (tgl_sync[2] != tgl_sync[1]) begin
+            sym_delta <= sym_cnt - sym_last;
+            sym_last  <= sym_cnt;
+            // 135 M ± ~2%: 132.3M .. 137.7M
+            freq_ok <= (sym_cnt - sym_last > 28'd132_300_000) &&
+                       (sym_cnt - sym_last < 28'd137_700_000);
+        end
+    end
 
     // ------------------------------------------------------------------
     // Bring-up ladder on the LEDs (active low)
@@ -155,7 +190,7 @@ module a2mega_dp_test_top (
 
     assign led[0] = ~hb_cnt[24];        // heartbeat
     assign led[1] = ~dp_hpd;            // HPD from the ESP32
-    assign led[2] = ~link_established;  // link training done
+    assign led[2] = ~freq_ok;           // clk_sym == 135 MHz (line rate OK)
     assign led[3] = ~video_live;        // pixels flowing
 
 endmodule
