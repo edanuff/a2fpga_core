@@ -12,27 +12,27 @@
   <Part Number>: GW5AT-LV60PG484AC1/I0
   <Device>: GW5AT-60
   <Device Version>: B
-  <Created Time>:Mon Aug 10 10:30:20 2026
+  <Created Time>:Tue Aug 11 17:17:09 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 39s, Elapsed time = 0h 0m 56s
-    Placement Phase 1: CPU time = 0h 0m 7s, Elapsed time = 0h 0m 8s
-    Placement Phase 2: CPU time = 0h 4m 57s, Elapsed time = 0h 7m 0s
-    Placement Phase 3: CPU time = 0h 6m 1s, Elapsed time = 0h 8m 10s
-    Total Placement: CPU time = 0h 11m 45s, Elapsed time = 0h 16m 15s
+    Placement Phase 0: CPU time = 0h 0m 56s, Elapsed time = 0h 1m 14s
+    Placement Phase 1: CPU time = 0h 0m 8s, Elapsed time = 0h 0m 13s
+    Placement Phase 2: CPU time = 0h 1m 23s, Elapsed time = 0h 1m 33s
+    Placement Phase 3: CPU time = 0h 1m 9s, Elapsed time = 0h 1m 9s
+    Total Placement: CPU time = 0h 3m 36s, Elapsed time = 0h 4m 10s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.011s, Elapsed time = 0h 0m 0.011s
-    Routing Phase 1: CPU time = 0h 2m 40s, Elapsed time = 0h 2m 41s
-    Routing Phase 2: CPU time = 0h 0m 0.38s, Elapsed time = 0h 0m 0.384s
+    Routing Phase 0: CPU time = 0h 0m 0.009s, Elapsed time = 0h 0m 0.009s
+    Routing Phase 1: CPU time = 0h 3m 8s, Elapsed time = 0h 3m 8s
+    Routing Phase 2: CPU time = 0h 0m 0.324s, Elapsed time = 0h 0m 0.325s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 2m 40s, Elapsed time = 0h 2m 41s
+    Total Routing: CPU time = 0h 3m 9s, Elapsed time = 0h 3m 9s
  Generate output files:
-    CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
+    CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
 
- Total Time and Memory Usage: CPU time = 0h 14m 28s, Elapsed time = 0h 18m 59s, Peak memory usage = 2104MB
+ Total Time and Memory Usage: CPU time = 0h 6m 48s, Elapsed time = 0h 7m 22s, Peak memory usage = 2032MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 29107/59904                         |  49%
-    --LUT,ALU,ROM16           | 29107(25699 LUT, 3384 ALU, 24 ROM16)| -
+  Logic                       | 27933/59904                         |  47%
+    --LUT,ALU,ROM16           | 27933(24617 LUT, 3292 ALU, 24 ROM16)| -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 30132/60780                         |  50%
+  Register                    | 30546/60780                         |  51%
     --Logic Register as Latch | 0/59904                             |  0%
-    --Logic Register as FF    | 30090/59904                         |  51%
+    --Logic Register as FF    | 30504/59904                         |  51%
     --I/O Register as Latch   | 0/876                               |  0%
     --I/O Register as FF      | 42/876                              |  5%
-  CLS                         | 27414/29952                         |  92%
+  CLS                         | 26934/29952                         |  90%
   I/O Port                    | 120/297                             |  41%
   I/O Buf                     | 105                                 | -
     --Input Buf               | 29                                  | -
@@ -59,13 +59,13 @@
     --OSER8                   | 25
     --OSER8_MEM               | 20
     --IODELAY                 | 16
-  BSRAM                       | 99/118                              | 84%
+  BSRAM                       | 107/118                             | 91%
     --SP                      | 2
-    --SDPB                    | 48
-    --SDPX9B                  | 15
+    --SDPB                    | 61
+    --SDPX9B                  | 9
     --DPB                     | 29
     --DPX9B                   | 2
-    --pROM                    | 3
+    --pROM                    | 4
   DSP                         | 4/118                               | 4%
     --MULT12X12               | 8
   GTR12_QUADA                 | 1/1                                 | 100%
@@ -114,13 +114,13 @@
   -------------------------------------------
   Signal         | Global Clock   | Location
   -------------------------------------------
-  clk_d          | PRIMARY        |  PTR0 PTR2 PTR3 PBR1 PBR3
+  clk_d          | PRIMARY        |  PTR0 PTR3 PBR1 PBR2 PBR3
   a2bus_if.clk_pixel| PRIMARY        |  PTR0 PTR1 PTR2 PTR3 PBR0 PBR1 PBR2 PBR3
   clk_x1_w       | PRIMARY        |  PTR0 PTR1 PBR0 PBR1
-  clk100_w       | PRIMARY        |  PTR1 PTR2 PTR3
+  clk100_w       | PRIMARY        |  PTR2 PTR3 PBR2
   clk_pixel_w    | PRIMARY        |  PTR1 PTR2 PBR1 PBR2
   u_board_plls/clk_pixel_pll_w| PRIMARY        |  PBR1
-  i_dp/tx_symbol_clk| PRIMARY        |  PTR1 PTR2 PBR0
+  i_dp/tx_symbol_clk| PRIMARY        |  PTR1 PTR2 PBR0 PBR1 PBR2
   i_dp/i_transceiver_bank/i_dp_serdes/q0_fabric_cm_life_clk_o| PRIMARY        |  PTR1 PTR2
   a2bus_if.device_reset_n| LW             |  -
   n1290_7        | LW             |  -

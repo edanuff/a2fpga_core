@@ -27,8 +27,8 @@ create_clock -name clk100 -period 10.000 -waveform {0 5.000} [get_pins {i_mgmt_p
 // LANE2 -- the bonding master for the a2mega lane pair
 create_clock -name clk_sym -period 7.407 -waveform {0 3.703} [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/gtr12_quad_inst0/LANE2_PCS_TX_O_FABRIC_CLK}]
 
-// 27.000 MHz video pixel clock: gowin_pixel_pll = 135 MHz * 1/5 (480p)
-create_clock -name clk_pix -period 37.037 -waveform {0 18.518} [get_pins {i_dp/i_pixel_pll/PLLA_inst/CLKOUT0}]
+// 148.5 MHz video pixel clock: gowin_pixel_pll = 135 MHz * 11/10 (1080p)
+create_clock -name clk_pix -period 6.734 -waveform {0 3.367} [get_pins {i_dp/i_pixel_pll/PLLA_inst/CLKOUT0}]
 
 // GTR12 housekeeping clock (unused in fabric; constrain to silence TA1132)
 create_clock -name cm_life -period 10.000 [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/gtr12_quad_inst0/FABRIC_CM_LIFE_CLK_O}]

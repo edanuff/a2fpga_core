@@ -75,7 +75,9 @@ buildlog="$(mktemp "${TMPDIR:-/tmp}/a2fpga_build.XXXXXX")"
 BUILD_TIMEOUT="${BUILD_TIMEOUT:-1800}"
 
 # Run gw_sh under a wall-time cap (macOS has no coreutils `timeout`).
-( cd "$bdir" && printf 'open_project %s\n%s\nexit\n' "$gprj" "$run" | "$GW_SH" ) | tee "$buildlog" &
+CAFF=""
+[[ "$(uname)" == "Darwin" ]] && command -v caffeinate >/dev/null && CAFF="caffeinate -i"
+( cd "$bdir" && printf 'open_project %s\n%s\nexit\n' "$gprj" "$run" | $CAFF "$GW_SH" ) | tee "$buildlog" &
 build_pid=$!
 (
     slept=0

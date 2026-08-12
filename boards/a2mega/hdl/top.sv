@@ -1050,7 +1050,7 @@ module top #(
     // Decomposed architecture:
     //   1. DDR3 PLL + DDR3_Memory_Interface_Top (memory controller)
     //   2. ddr3_ports — multi-port arbiter (mem_port_if → DDR3 IP)
-    //   3. framebuffer_480p — shared framebuffer (2 × mem_port_if)
+    //   3. framebuffer_1080p — shared framebuffer (2 × mem_port_if)
     //   4. HDMI encoder + TMDS output (480p 59.94Hz)
     //
     // Board PLL provides clk_pixel (27 MHz) and clk_pixel_x5 (135 MHz) directly.
@@ -1115,8 +1115,8 @@ module top #(
     wire init_calib_complete_w;
     wire ddr_rst_w;
     wire clk_x1_w;              // 81 MHz from DDR3 controller (324/4)
-    wire [10:0] hdmi_cx_w;      // HDMI raster X (0–857)
-    wire [9:0]  hdmi_cy_w;      // HDMI raster Y (0–524)
+    wire [11:0] hdmi_cx_w;      // raster X (0–2199, 1080p)
+    wire [10:0] hdmi_cy_w;      // raster Y (0–1124, 1080p)
     wire [23:0] fb_rgb_w;       // Current framebuffer RGB output
     wire [23:0] overlay_rgb_w;  // DebugOverlay RGB output
     wire        overlay_en_w;   // DebugOverlay enable
@@ -1349,7 +1349,7 @@ module top #(
     wire [7:0] fb_dbg_line_not_ready_total_w;
     wire [7:0] fb_dbg_beat_extra_w;
     wire [7:0] fb_dbg_beat_timeout_w;
-    framebuffer_480p #(
+    framebuffer_1080p #(
         .COLOR_BITS(18),
         .FB_READ_BURST_WORDS(8),
         .TEST_PATTERN(0)
@@ -1410,19 +1410,18 @@ module top #(
     // -----------------------------------------------------------------
 
     localparam AUDIO_RATE = 48000;
-    localparam AUDIO_CLK_DELAY = 27000000 / AUDIO_RATE;  // 562 (27M/48k = 562.5)
-    logic [$clog2(AUDIO_CLK_DELAY)-1:0] audio_divider;
+    // 48 kHz strobe from the 148.5 MHz pixel clock via a sign-bit phase
+    // accumulator (exact for any ratio; 148.5M/48k = 3093.75 is not an
+    // integer, so the old divider+frac scheme no longer applies)
     logic clk_audio;
-    reg audio_frac;
-
+    logic signed [28:0] aud_acc = -29'sd148_500_000;
     always_ff @(posedge clk_pixel_w) begin
         clk_audio <= 1'b0;
-        if (audio_divider >= (audio_frac ? AUDIO_CLK_DELAY : AUDIO_CLK_DELAY - 1)) begin
+        if (!aud_acc[28]) begin
+            aud_acc   <= aud_acc + 29'sd48_000 - 29'sd148_500_000;
             clk_audio <= 1'b1;
-            audio_divider <= 0;
-            audio_frac <= ~audio_frac;
         end else begin
-            audio_divider <= audio_divider + 1;
+            aud_acc <= aud_acc + 29'sd48_000;
         end
     end
 
@@ -1436,21 +1435,21 @@ module top #(
     end
 
     // -----------------------------------------------------------------
-    // DisplayPort TX — 720x480p 59.94 Hz over 2-lane HBR (Phase 3a)
+    // DisplayPort TX — 1920x1080p 59.94 Hz over 2-lane HBR (Phase 3b)
     // -----------------------------------------------------------------
     // The vendored dp_transmitter (hdl/displayport) replaces the HDMI
     // encoder at the same seam: it owns clk_pixel_w (27.000 MHz = 135 MHz
     // symbol clock x 1/5 from its pixel PLL) and pulls rgb for the
     // previous cycle's (cx, cy) — the identical hdl-util-style contract
-    // the hdmi core used, so framebuffer_480p, the OSD overlay and the
-    // DebugOverlay connect unchanged. 480p CEA timing, negative syncs.
-    // 1080p with a scan-out scaler is Phase 3b.
+    // the hdmi core used, so the framebuffer, the OSD overlay and the
+    // DebugOverlay connect unchanged. 1080p CEA timing; the x3/x5
+    // scan-out scaler lives in framebuffer_1080p's read side.
 
-    wire [9:0] dp_cx_raw_w;         // $clog2(858)
-    wire [9:0] dp_cy_raw_w;         // $clog2(525)
+    wire [11:0] dp_cx_raw_w;        // $clog2(2200)
+    wire [10:0] dp_cy_raw_w;        // $clog2(1125)
     reg  [23:0] dp_rgb_r;
 
-    assign hdmi_cx_w = {1'b0, dp_cx_raw_w};
+    assign hdmi_cx_w = dp_cx_raw_w;
     assign hdmi_cy_w = dp_cy_raw_w;
 
     // AUX channel analog interface: pseudo-diff pair, tri-stated by the
@@ -1469,12 +1468,10 @@ module top #(
     dp_transmitter #(
         .LANE_COUNT     (2),
         .LINK_RATE_MBPS (2700),
-        .H_VISIBLE (720), .H_TOTAL (858), .H_SYNC_WIDTH (62), .H_START (122),
-        .V_VISIBLE (480), .V_TOTAL (525), .V_SYNC_WIDTH (6),  .V_START (36),
-        .H_SYNC_ACTIVE_HIGH (1'b0),
-        .V_SYNC_ACTIVE_HIGH (1'b0),
-        .PIXEL_CLK_MULT (1),
-        .PIXEL_CLK_DIV  (5),
+        .H_VISIBLE (1920), .H_TOTAL (2200), .H_SYNC_WIDTH (44), .H_START (192),
+        .V_VISIBLE (1080), .V_TOTAL (1125), .V_SYNC_WIDTH (5),  .V_START (41),
+        .PIXEL_CLK_MULT (11),
+        .PIXEL_CLK_DIV  (10),
         .AUDIO_RATE     (AUDIO_RATE),
         .AUDIO_BIT_WIDTH(16)
     ) i_dp (
@@ -1564,8 +1561,8 @@ module top #(
     end
 
     osd_text_overlay #(
-        .X_OFFSET(80),
-        .Y_OFFSET(48)
+        .X_OFFSET(680),   // center the 560x384 OSD window in 1920x1080
+        .Y_OFFSET(348)    // (native-scale text for now; 3x scaling = later polish)
     ) osd_overlay (
         .clk_i      (clk_pixel_w),
         .reset_n    (device_reset_n_w),

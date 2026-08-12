@@ -123,21 +123,63 @@ module sdp_engine #(
     // insertion is delayed one cycle (pkt_armed) so the registered
     // parity is always settled before the first wire byte is read.
     wire [31:0] pbhv_c;
-    wire [63:0] pbdv_c;
     assign pbhv_c = {pb_byte(hbv[31:24]), pb_byte(hbv[23:16]),
                      pb_byte(hbv[15:8]),  pb_byte(hbv[7:0])};
+    reg [31:0] pbhv;
+    always @(posedge clk) begin
+        pbhv <= pbhv_c;
+    end
+
+    // Data-parity pipeline: pb_group's 8 chained GF steps (~20 XOR levels)
+    // miss 148.5/135 MHz as a single cycle. Split at the 2-byte midpoint:
+    // stage 1 runs the LFSR over group bytes 0-1, stage 2 continues over
+    // bytes 2-3 (from a matching delayed db copy). pbdv is final two
+    // cycles after a packet loads; the pkt_armed delay chain below covers
+    // the settling (as the original single-cycle design already did).
+    function [7:0] pb_group_half(input [7:0] st_in, input [15:0] g2);
+        reg [7:0] st;
+        reg [15:0] tt;
+        integer hi;
+        begin
+            st = st_in;
+            tt = g2;
+            for (hi = 0; hi < 2; hi = hi + 1) begin
+                st = lstep(st, tt[3:0]);
+                st = lstep(st, tt[7:4]);
+                tt = tt >> 8;
+            end
+            pb_group_half = st;
+        end
+    endfunction
+
+    reg [255:0] db_d;
+    always @(posedge clk) db_d <= db;
+
+    wire [63:0] pbdv;
     genvar gi;
     generate
         for (gi = 0; gi < 8; gi = gi + 1) begin : g_pbd
-            assign pbdv_c[8*gi +: 8] = pb_group(db[32*gi +: 32]);
+            reg [7:0] mid_r;
+            reg [7:0] fin_r;
+            wire [7:0] fin_st = pb_group_half(mid_r, db_d[32*gi+16 +: 16]);
+            always @(posedge clk) begin
+                mid_r <= pb_group_half(8'h00, db[32*gi +: 16]);
+                fin_r <= {fin_st[3:0], fin_st[7:4]};
+            end
+            assign pbdv[8*gi +: 8] = fin_r;
+            // synthesis translate_off
+            reg chk_stable_d;
+            always @(posedge clk) begin
+                chk_stable_d <= (db_d === db);
+                if (chk_stable_d && (db_d === db) &&
+                    (fin_r !== pb_group(db[32*gi +: 32]))) begin
+                    $display("FATAL: sdp_engine parity pipeline diverged, group %0d", gi);
+                    $fatal(1);
+                end
+            end
+            // synthesis translate_on
         end
     endgenerate
-    reg [31:0] pbhv;
-    reg [63:0] pbdv;
-    always @(posedge clk) begin
-        pbhv <= pbhv_c;
-        pbdv <= pbdv_c;
-    end
 
     // ------------------------------------------------------------------
     // Pre-interleave lane sequences and wire-byte lookup
@@ -279,6 +321,7 @@ module sdp_engine #(
     reg        ts_sent_once, stream_sent_once;
     reg        pkt_pending;
     reg        pkt_armed;                      // parity registers settled
+    reg [2:0]  armed_sh;                       // arming delay chain
     reg [5:0]  ins_cyc;                        // 0 = idle
     reg        inserting;
 
@@ -325,6 +368,7 @@ module sdp_engine #(
             stream_sent_once <= 1'b0;
             pkt_pending      <= 1'b0;
             pkt_armed        <= 1'b0;
+            armed_sh         <= 3'b000;
             inserting        <= 1'b0;
             ins_cyc          <= 6'd0;
             iec_cnt          <= 8'd0;
@@ -333,7 +377,15 @@ module sdp_engine #(
             out_data         <= 73'b0;
         end else begin
             buffer_take <= 1'b0;
-            pkt_armed   <= pkt_pending;
+            // armed = pending for >=4 CONSECUTIVE cycles (covers the split
+            // parity pipeline + wb precompute). Must clear the instant
+            // pending drops: a plain shift register retains stale armed
+            // state across a packet boundary, and on back-to-back packets
+            // in one gap the next insertion would start on the PREVIOUS
+            // packet's precomputed bytes (caught by the wire-byte shadow
+            // assertion in sim - TimeStamp/Stream pair, frame 1).
+            armed_sh    <= pkt_pending ? {armed_sh[1:0], 1'b1} : 3'b000;
+            pkt_armed   <= pkt_pending ? armed_sh[2] : 1'b0;
 
             if (frame_pulse) begin
                 ts_due   <= 1'b1;

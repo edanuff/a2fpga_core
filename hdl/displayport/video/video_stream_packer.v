@@ -345,14 +345,18 @@ module video_stream_packer #(
 
     reg [1:0] pf_ftu, pf_fnl;
     reg       pf_prime;
+    reg [1:0] pf_vb0, pf_vb1;   // vsel() range compares, precomputed like pf_ftu
     initial begin
         pf_ftu = 2'b00; pf_fnl = 2'b00; pf_prime = 1'b0;
+        pf_vb0 = 2'd0; pf_vb1 = 2'd0;
     end
     always @(posedge clk) begin
         if (reset) begin
             pf_ftu   <= 2'b00;
             pf_fnl   <= 2'b00;
             pf_prime <= 1'b0;
+            pf_vb0   <= 2'd0;
+            pf_vb1   <= 2'd0;
         end else begin
             pf_ftu[0] <= nl2 && (s0n2 >= DATA_START) && (s0n2 < BS_POS);
             pf_ftu[1] <= nl2 && (s1n2 >= DATA_START) && (s1n2 < BS_POS);
@@ -360,6 +364,8 @@ module video_stream_packer #(
             pf_fnl[1] <= (s1n2 != BS_POS-1);
             pf_prime  <= (running || start_ok) && nl2 &&
                          (nc2 == (DATA_START/2)-1);
+            pf_vb0    <= vsel(s0n2);
+            pf_vb1    <= vsel(s1n2);
         end
     end
 
@@ -447,13 +453,14 @@ module video_stream_packer #(
 
         // gate by next-cycle running (start transition mirrors the
         // sequential block's `if (start_ok) running <= 1`)
+        // Only the side-effect decisions need the running gate: the sym
+        // path muxes on dec_* strictly under `if (running)` in stage B, so
+        // zeroing p_px/p_fs/p_fe here only added RESET arcs to the end of
+        // the walk cone (they were the worst clk_sym paths at 1080p).
         if (!(running || start_ok)) begin
             p_fetch = 1'b0;
             p_prime = 1'b0;
             p_load0 = 1'b0;
-            p_px    = 2'b00;
-            p_fs    = 2'b00;
-            p_fe    = 2'b00;
         end
     end
 
@@ -645,8 +652,8 @@ module video_stream_packer #(
             f_bs[1] <= (s1n == BS_POS);
             f_nl[0] <= (s0n != BS_POS-1);
             f_nl[1] <= (s1n != BS_POS-1);
-            f_vb[0] <= vsel(s0n);
-            f_vb[1] <= vsel(s1n);
+            f_vb[0] <= pf_vb0;   // = vsel(s0n): registered a cycle early
+            f_vb[1] <= pf_vb1;   //   from the exact two-step-ahead counters
             f_prime <= running && nl_active && (nc == (DATA_START/2)-1);
 
             if (!running) begin
