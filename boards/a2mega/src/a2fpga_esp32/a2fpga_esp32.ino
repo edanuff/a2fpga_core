@@ -158,7 +158,13 @@ static void cmd_process(String cmd) {
             Serial.printf("SPI mode: %s\n", a2spi_is_octal() ? "OCTAL" : "STANDARD");
         }
         Serial.printf("USB connected: %s\n", usb_was_connected ? "YES" : "NO");
-        if (a2spi_is_ready()) {
+        // Only report FPGA-side state over a verified link: with no SOM (or
+        // an OSPI-less bring-up bitstream) reg reads "succeed" at the SPI
+        // driver level but return floating-bus junk — live-observed as
+        // "DDR3: CALIBRATED (retries=254 seq=0xFE)" on an EMPTY board.
+        Serial.printf("FPGA link: %s\n",
+                      fpga_link_ok() ? "UP (A2FP)" : "DOWN (no OSPI device)");
+        if (fpga_link_ok()) {
             uint8_t fs = 0, retries = 0, seq = 0, st = 0;
             if (a2spi_reg_read_status(0x07, &fs, &st) == ESP_OK) {
                 a2spi_reg_read_status(0x23, &retries, &st);
