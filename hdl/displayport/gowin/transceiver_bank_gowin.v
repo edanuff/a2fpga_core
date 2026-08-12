@@ -59,7 +59,11 @@ module transceiver_bank_gowin (
     input      [79:0] tx_symbols,
     // Lanes
     output      [1:0] gtptx_p,
-    output      [1:0] gtptx_n
+    output      [1:0] gtptx_n,
+    // Raw SERDES bring-up status (mgmt_clk domain except where noted):
+    // {pll_lock, lane_ready[1:0], ~pcs_tx_rst, tx_running[1:0]} — the
+    // signals the reset sequencer gates on, never before observable.
+    output      [5:0] serdes_status
 );
 
     // ------------------------------------------------------------------
@@ -112,6 +116,8 @@ module transceiver_bank_gowin (
             tx_running <= {2{!pcs_tx_rst}} & powerup_channel;
         end
     end
+
+    assign serdes_status = {pll_lock, lane_ready, ~pcs_tx_rst, tx_running};
 
     // release the encoder reset synchronously to the word clock
     reg [1:0] enc_rst_sync = 2'b11;
@@ -179,7 +185,7 @@ module transceiver_bank_gowin (
         // lane 3 TX <= word lane 0 (ML0)
         .dp_phy_q0_ln3_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln3_tx_pcs_clkout_o (),
-        .dp_phy_q0_ln3_tx_data_i    ({60'b0, tx_wire0}),
+        .dp_phy_q0_ln3_tx_data_i    ({4{tx_wire0}}),
         .dp_phy_q0_ln3_tx_fifo_wren_i (1'b1),
         .dp_phy_q0_ln3_tx_fifo_wrusewd_o (),
         .dp_phy_q0_ln3_tx_fifo_afull_o (),
@@ -203,7 +209,7 @@ module transceiver_bank_gowin (
         // lane 2 TX <= word lane 1 (ML1); bonding master
         .dp_phy_q0_ln2_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln2_tx_pcs_clkout_o (tx_symbol_clk_raw),
-        .dp_phy_q0_ln2_tx_data_i    ({60'b0, tx_wire1}),
+        .dp_phy_q0_ln2_tx_data_i    ({4{tx_wire1}}),
         .dp_phy_q0_ln2_tx_fifo_wren_i (1'b1),
         .dp_phy_q0_ln2_tx_fifo_wrusewd_o (),
         .dp_phy_q0_ln2_tx_fifo_afull_o (),
@@ -242,7 +248,7 @@ module transceiver_bank_gowin (
         // lane 0 TX
         .dp_phy_q0_ln0_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln0_tx_pcs_clkout_o (tx_symbol_clk_raw),
-        .dp_phy_q0_ln0_tx_data_i    ({60'b0, tx_wire0}),
+        .dp_phy_q0_ln0_tx_data_i    ({4{tx_wire0}}),
         .dp_phy_q0_ln0_tx_fifo_wren_i (1'b1),
         .dp_phy_q0_ln0_tx_fifo_wrusewd_o (),
         .dp_phy_q0_ln0_tx_fifo_afull_o (),
@@ -267,7 +273,7 @@ module transceiver_bank_gowin (
         // lane 1 TX
         .dp_phy_q0_ln1_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln1_tx_pcs_clkout_o (),
-        .dp_phy_q0_ln1_tx_data_i    ({60'b0, tx_wire1}),
+        .dp_phy_q0_ln1_tx_data_i    ({4{tx_wire1}}),
         .dp_phy_q0_ln1_tx_fifo_wren_i (1'b1),
         .dp_phy_q0_ln1_tx_fifo_wrusewd_o (),
         .dp_phy_q0_ln1_tx_fifo_afull_o (),

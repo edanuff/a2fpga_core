@@ -1499,6 +1499,7 @@ module top #(
         .link_established  (dp_link_established_w),
         .video_live        (dp_video_live_w),
         .clk_symbol_out    (),
+        .serdes_status     (),
         .debug             ()
     );
 

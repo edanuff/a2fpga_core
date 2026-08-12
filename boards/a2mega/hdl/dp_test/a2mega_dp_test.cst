@@ -22,6 +22,10 @@ IO_PORT "dp_aux_p" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
 IO_LOC  "dp_aux_n" G16;
 IO_PORT "dp_aux_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
 
+// Debug UART to the ESP32 (Serial1 RX side)
+IO_LOC  "uart_tx" H13;
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
 // HPD from the ESP32 (ESP32_GPIO0, J2.17). Pull down so HPD idles
 // deasserted while the ESP32 is unprogrammed or booting.
 IO_LOC  "dp_hpd" A19;

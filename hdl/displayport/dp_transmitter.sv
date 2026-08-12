@@ -90,7 +90,10 @@ module dp_transmitter #(
     output logic [7:0] debug,
     // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
     // e.g. an in-fabric line-rate check against a known crystal.
-    output logic clk_symbol_out
+    output logic clk_symbol_out,
+    // SERDES bring-up status {pll_lock, lane_ready[1:0], tx_out_of_reset,
+    // tx_running[1:0]}; ties to all-ones on non-Gowin/sim builds.
+    output logic [5:0] serdes_status
 );
 
     // ------------------------------------------------------------------
@@ -444,6 +447,7 @@ module dp_transmitter #(
         .gtptx_n         (dp_tx_lane_n)
     );
     assign tx_running[3:2] = 2'b00;
+    assign serdes_status = 6'h3F;
 `elsif DP_VENDOR_GOWIN
     transceiver_bank_gowin i_transceiver_bank(
         .mgmt_clk        (clk100),
@@ -460,7 +464,8 @@ module dp_transmitter #(
         .tx_symbol_clk   (tx_symbol_clk),
         .tx_symbols      (tx_symbols),
         .gtptx_p         (dp_tx_lane_p),
-        .gtptx_n         (dp_tx_lane_n)
+        .gtptx_n         (dp_tx_lane_n),
+        .serdes_status   (serdes_status)
     );
     assign tx_running[3:2] = 2'b00;
 `else
@@ -471,6 +476,7 @@ module dp_transmitter #(
     assign tx_running    = tx_powerup_channel;
     assign dp_tx_lane_p  = '0;
     assign dp_tx_lane_n  = '1;
+    assign serdes_status = 6'h3F;
 `endif
 
 endmodule

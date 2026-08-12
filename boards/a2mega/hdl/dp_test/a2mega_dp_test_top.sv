@@ -35,7 +35,11 @@ module a2mega_dp_test_top (
     inout  wire  dp_aux_n,          // G16 (DPAUX_N, J2.62)
     input  logic dp_hpd,            // A19 (ESP32_GPIO0, J2.17)
 
-    output logic [3:0] led          // D15 D14 R14 P14, active low
+    output logic [3:0] led,         // D15 D14 R14 P14, active low
+
+    // Debug UART to the ESP32 (H13 -> ESP32 Serial1 -> telnet tee): the
+    // FPGA-side status channel that works while the monitor owns USB-C.
+    output logic uart_tx
 );
 
     // ------------------------------------------------------------------
@@ -107,6 +111,7 @@ module a2mega_dp_test_top (
     // ------------------------------------------------------------------
     logic link_established, video_live;
     logic [7:0] debug;
+    logic [5:0] serdes_status;
 
     dp_transmitter #(
         .LANE_COUNT     (2),
@@ -144,8 +149,91 @@ module a2mega_dp_test_top (
         .link_established  (link_established),
         .video_live        (video_live),
         .debug             (debug),
-        .clk_symbol_out    (clk_sym_w)
+        .clk_symbol_out    (clk_sym_w),
+        .serdes_status     (serdes_status)
     );
+
+    // ------------------------------------------------------------------
+    // Debug UART: one ASCII status line ~2x/s at 115200. Everything is
+    // sampled loosely into the 50 MHz domain — all quasi-static or
+    // diagnostic counters; exactness is not required.
+    //   "DP S:xx D:yy F:zz HLV:abc"
+    //   S = {pll_lock, lane_ready[1:0], tx_out_of_reset, tx_running[1:0]}
+    //   D = dp_transmitter debug byte
+    //   F = frame counter (cy wraps, mod 256) — proves pixel pump alive
+    //   H/L/V = hpd, link_established, video_live
+    // ------------------------------------------------------------------
+    logic [7:0] frame_cnt = '0;
+    logic       cy_msb_d = 1'b0;
+    always_ff @(posedge clk_pixel) begin
+        cy_msb_d <= cy[10];
+        if (cy_msb_d && !cy[10])         // cy wrapped: one frame
+            frame_cnt <= frame_cnt + 8'd1;
+    end
+
+    // loose 2FF samples into clk50
+    logic [5:0] st_s0, st_s;
+    logic [7:0] dbg_s0, dbg_s, frm_s0, frm_s;
+    logic [2:0] flg_s0, flg_s;
+    always_ff @(posedge clk50_in) begin
+        st_s0  <= serdes_status;  st_s  <= st_s0;
+        dbg_s0 <= debug;          dbg_s <= dbg_s0;
+        frm_s0 <= frame_cnt;      frm_s <= frm_s0;
+        flg_s0 <= {dp_hpd, link_established, video_live};
+        flg_s  <= flg_s0;
+    end
+
+    function automatic [7:0] hexch(input [3:0] n);
+        hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
+    endfunction
+
+    localparam int MSG_LEN = 27;
+    logic [7:0] msg [0:MSG_LEN-1];
+    always_comb begin
+        msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
+        msg[5]=hexch({2'b0, st_s[5:4]}); msg[6]=hexch(st_s[3:0]);
+        msg[7]=" "; msg[8]="D"; msg[9]=":";
+        msg[10]=hexch(dbg_s[7:4]); msg[11]=hexch(dbg_s[3:0]);
+        msg[12]=" "; msg[13]="F"; msg[14]=":";
+        msg[15]=hexch(frm_s[7:4]); msg[16]=hexch(frm_s[3:0]);
+        msg[17]=" "; msg[18]="H"; msg[19]="L"; msg[20]="V"; msg[21]=":";
+        msg[22]=8'h30 + 8'(flg_s[2]);
+        msg[23]=8'h30 + 8'(flg_s[1]);
+        msg[24]=8'h30 + 8'(flg_s[0]);
+        msg[25]=8'h0D; msg[26]=8'h0A;
+    end
+
+    // 115200 baud from 50 MHz (divisor 434); one message per ~0.5 s
+    logic [8:0]  baud_cnt = '0;
+    logic        baud_tick;
+    logic [24:0] msg_timer = '0;
+    logic [4:0]  msg_idx = MSG_LEN[4:0];   // idle when == MSG_LEN
+    logic [3:0]  bit_idx = '0;
+    logic [9:0]  shifter = 10'h3FF;
+    always_ff @(posedge clk50_in) begin
+        baud_tick <= 1'b0;
+        if (baud_cnt == 9'd433) begin baud_cnt <= '0; baud_tick <= 1'b1; end
+        else baud_cnt <= baud_cnt + 9'd1;
+
+        msg_timer <= msg_timer + 25'd1;
+        if (msg_timer == 25'd0 && msg_idx == MSG_LEN[4:0]) begin
+            msg_idx <= '0;                 // start a new message
+            bit_idx <= 4'd10;              // force reload on next tick
+        end
+
+        if (baud_tick && msg_idx != MSG_LEN[4:0]) begin
+            if (bit_idx >= 4'd10) begin    // load next char: start+8+stop
+                shifter <= {1'b1, msg[msg_idx], 1'b0};
+                bit_idx <= 4'd0;
+            end else begin
+                shifter <= {1'b1, shifter[9:1]};
+                bit_idx <= bit_idx + 4'd1;
+                if (bit_idx == 4'd9)
+                    msg_idx <= msg_idx + 5'd1;
+            end
+        end
+    end
+    assign uart_tx = (msg_idx == MSG_LEN[4:0]) ? 1'b1 : shifter[0];
 
     // ------------------------------------------------------------------
     // Line-rate verification: count clk_sym (the GTR12 TX word clock,

@@ -1056,7 +1056,21 @@ void loop() {
         }
 
         if (Serial1.available()) {
-            Serial.write(Serial1.read());
+            char c1 = (char)Serial1.read();
+            Serial.write(c1);
+            // Tee FPGA debug-UART lines into the telnet console: the only
+            // FPGA-status channel that works while the monitor owns USB-C.
+            static char fline[40];
+            static uint8_t flen = 0;
+            if (c1 == '\n' || flen >= sizeof(fline) - 1) {
+                if (flen > 0) {
+                    fline[flen] = '\0';
+                    telnetd_console_tee(fline);
+                    flen = 0;
+                }
+            } else if (c1 != '\r') {
+                fline[flen++] = c1;
+            }
         }
     }
 
