@@ -1468,6 +1468,9 @@ module top #(
     dp_transmitter #(
         .LANE_COUNT     (2),
         .LINK_RATE_MBPS (2700),
+        // 1.0a3: AUX receive electrically dead — open-loop link policy
+        // (see a2mega_dp_test_top.sv / aux_channel.v for the full story)
+        .BLIND_SINK     (1),
         .H_VISIBLE (1920), .H_TOTAL (2200), .H_SYNC_WIDTH (44), .H_START (192),
         .V_VISIBLE (1080), .V_TOTAL (1125), .V_SYNC_WIDTH (5),  .V_START (41),
         .PIXEL_CLK_MULT (11),

@@ -58,8 +58,19 @@
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
+// BLIND_SINK: open-loop link policy for boards whose AUX RECEIVE path is
+// electrically dead but whose transmit works (a2mega 1.0a3: AUX is
+// AC-coupled with bias only on the mux side; a DP AUX reply's <=1.38 Vpp
+// swing can never cross an LVCMOS33 input threshold, and the board cannot
+// be field-modified). Every DPCD WRITE still goes out on the wire — the
+// sink gets configured normally — but the FSM advances on a timer instead
+// of reply bytes, reply timeouts do not reset it, training status reads
+// are assumed good (fixed dwell per pattern), and the sink is assumed to
+// match the source's lane count and rate. Costs: no EDID, no per-lane
+// EQ/swing adaptation, no link-quality re-check. Default 0 = spec flow.
 module aux_channel #(
-    parameter LINK_RATE_MBPS = 2700
+    parameter LINK_RATE_MBPS = 2700,
+    parameter BLIND_SINK = 0
 )(
         input        clk,
         output [7:0] debug_pmod,
@@ -126,6 +137,9 @@ module aux_channel #(
     // Link up.
     localparam [7:0] switch_to_normal = 8'h2D, link_established = 8'h2E;
 
+    // DPCD power state D0 wake (inserted before link configuration)
+    localparam [7:0] set_power_d0 = 8'h31;
+
     // Checking the state of the link
     localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
                     
@@ -166,6 +180,12 @@ module aux_channel #(
     
     reg       just_read_from_rx;
     reg  [3:0] powerup_mask;
+
+    // BLIND_SINK: assume training succeeded (no status reads possible)
+    wire clock_locked_i  = clock_locked  | (BLIND_SINK != 0);
+    wire equ_locked_i    = equ_locked    | (BLIND_SINK != 0);
+    wire symbol_locked_i = symbol_locked | (BLIND_SINK != 0);
+    wire align_locked_i  = align_locked  | (BLIND_SINK != 0);
   
 
 initial begin
@@ -216,7 +236,11 @@ dp_aux_messages #(.LINK_RATE_MBPS(LINK_RATE_MBPS)) i_aux_messages(
          .aux_tx_data  (aux_tx_data)
      );
 
-aux_interface i_aux_interface( 
+aux_interface #(
+           // Blind mode: replies never come; don't hold `busy` 20 ms per
+           // transaction (sim-caught watchdog collision). 799 ticks = 400 us.
+           .REPLY_TIMEOUT_TICKS(BLIND_SINK != 0 ? 16'd799 : 16'd39999)
+       ) i_aux_interface(
            .clk         (clk),
            .debug_pmod  (debug_pmod), 
             //---------------------------
@@ -266,7 +290,8 @@ always @(posedge clk) begin
             edid_block6:        state_on_success <= edid_block7;
             edid_block7:        state_on_success <= read_sink_count;
             read_sink_count:    state_on_success <= read_registers;        
-            read_registers:     state_on_success <= set_channel_coding;
+            read_registers:     state_on_success <= set_power_d0;
+            set_power_d0:       state_on_success <= set_channel_coding;
             set_channel_coding: state_on_success <= set_speed_270;                        
             set_speed_270:      state_on_success <= set_downspread;                        
             set_downspread:     case(link_count)
@@ -286,7 +311,7 @@ always @(posedge clk) begin
             clock_wait:         state_on_success <= clock_test;                        
             clock_test:         state_on_success <= clock_adjust;
             clock_adjust:       state_on_success <= clock_wait_after;
-            clock_wait_after:   if(clock_locked == 1'b1) begin
+            clock_wait_after:   if(clock_locked_i == 1'b1) begin
                                     state_on_success <= align_training;
                                 end else if(swing_0p8 == 1'b1) begin
                                     state_on_success <= clock_voltage_0p8;
@@ -318,7 +343,7 @@ always @(posedge clk) begin
             align_wait3:        state_on_success <= align_test;                        
             align_test:         state_on_success <= align_adjust;                        
             align_adjust:       state_on_success <= align_wait_after;
-            align_wait_after:   if(symbol_locked == 1'b1) begin
+            align_wait_after:   if(symbol_locked_i == 1'b1) begin
                                            state_on_success <= switch_to_normal;
                                 end else if(swing_0p8 == 1'b1) begin
                                     if(preemp_6p0 == 1'b1) begin
@@ -348,7 +373,7 @@ always @(posedge clk) begin
             switch_to_normal:   state_on_success <= link_established;  
             link_established:   state_on_success <= link_established;
             check_link:         state_on_success <= check_wait;
-            check_wait:         if(clock_locked == 1'b1 && equ_locked == 1'b1 && symbol_locked == 1'b1 && align_locked == 1'b1) begin
+            check_wait:         if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
                                     state_on_success <= link_established;
                                 end else begin
                                     state_on_success <= error;
@@ -384,6 +409,7 @@ always @(posedge clk) begin
                     
             read_sink_count:      begin msg <= 8'h03; expected <= 8'h02; reset_addr_on_change <= 1'b1; end
             read_registers:       begin msg <= 8'h04; expected <= 8'h0D; dp_reg_de_active <= 1'b1; end
+            set_power_d0:         begin msg <= 8'h13; expected <= 8'h01; end
             set_channel_coding:   begin msg <= 8'h06; expected <= 8'h01;  end
             set_speed_270:        begin msg <= 8'h07; expected <= 8'h01;  end
             set_downspread:       begin msg <= 8'h08; expected <= 8'h01;  end
@@ -491,6 +517,16 @@ always @(posedge clk) begin
     if(expected == 8'h00 && count_100us[14] == 1'b1) begin
         next_state <= state_on_success;
     end
+
+    //-----------------------------------------------------------
+    // BLIND_SINK: reply bytes will never arrive. Advance once the
+    // request has fully left the wire (channel idle) and the same
+    // 100 us dwell has elapsed — the sink still RECEIVED the
+    // message; we simply do not wait to hear back.
+    //-----------------------------------------------------------
+    if(BLIND_SINK != 0 && channel_busy == 1'b0 && count_100us[14] == 1'b1) begin
+        next_state <= state_on_success;
+    end
             
     //------------------------------------------------------------
     // Processing the data that has been received from the sink
@@ -567,18 +603,37 @@ always @(posedge clk) begin
     // establish a link. 
     //-----------------------------------------------------------                            
     //    if channel_timeout = 1'b1 or (state /= reset and state /= link_established and retry_now = 1'b1) then
-    if(channel_timeout == 1'b1 || (state != reset      && state != link_established &&
+    // (BLIND_SINK: reply timeouts are the EXPECTED outcome of every
+    // transaction — they must not reset the FSM. The periodic retry_now
+    // watchdog is kept in both modes.)
+    if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
+                                  (state != reset      && state != link_established &&
                                    state != check_link && state != check_wait       && retry_now == 1'b1)) begin
         next_state <= reset;
         state      <= error;
-    end 
+    end
     
     //-----------------------------------------------
-    // If the link was established, then every 
-    // now and then check the state of the link  
+    // If the link was established, then every
+    // now and then check the state of the link
     //-----------------------------------------------
     if(state == link_established && link_check_now == 1'b1) begin
-        next_state <= check_link;  
+        next_state <= check_link;
+    end
+
+    //---------------------------------------------------------------
+    // BLIND_SINK: hold the ladder until a sink is actually present.
+    // The spec flow was implicitly gated by "the sink replies"; with
+    // replies assumed, the ladder would otherwise walk to
+    // link_established against an empty connector — and a monitor
+    // attached later would never see the training patterns it needs
+    // (live-hit on board #1: led2/3 asserted on a PC with no sink).
+    // Holding here also restarts training from scratch whenever HPD
+    // drops and returns.
+    //---------------------------------------------------------------
+    if(BLIND_SINK != 0 && hpd_present == 1'b0) begin
+        next_state <= reset;
+        state      <= error;
     end
 
     //-----------------------------------------------

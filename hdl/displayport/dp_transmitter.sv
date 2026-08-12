@@ -43,6 +43,10 @@ module dp_transmitter #(
     // Audio - HDMI-style contract
     parameter int AUDIO_RATE      = 48000, // 44100 | 48000
     parameter int AUDIO_BIT_WIDTH = 16,
+    // Open-loop link policy for boards whose AUX receive path is dead
+    // (a2mega 1.0a3). DPCD writes still transmit; replies are not awaited.
+    // See aux_channel.v for the full contract. 0 = spec-compliant flow.
+    parameter int BLIND_SINK      = 0,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -391,7 +395,8 @@ module dp_transmitter #(
     // ------------------------------------------------------------------
     // Link policy: AUX channel, EDID/DPCD, link training
     // ------------------------------------------------------------------
-    channel_management #(.LINK_RATE_MBPS(LINK_RATE_MBPS)) i_channel_management(
+    channel_management #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
+                         .BLIND_SINK(BLIND_SINK)) i_channel_management(
         .clk100               (clk100),
         .debug                (debug),
         .hpd                  (hpd),

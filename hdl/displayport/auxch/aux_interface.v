@@ -58,7 +58,15 @@
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
-module aux_interface(
+// REPLY_TIMEOUT_TICKS: how long tx_waiting holds `busy` awaiting a sink
+// reply, in half-bit (500 ns) ticks. The historical value 39999 is ~20 ms
+// (the "400us" comment below was stale). BLIND_SINK callers shorten this
+// to ~400 us so the open-loop FSM walk completes well inside the 0.5 s
+// retry watchdog (sim-caught: at 20 ms/transaction the ladder collides
+// with the watchdog and never finishes).
+module aux_interface #(
+    parameter [15:0] REPLY_TIMEOUT_TICKS = 16'd39999
+)(
        input        clk,
        output [7:0] debug_pmod,
        //----------------------------
@@ -364,7 +372,7 @@ always @(posedge clk) begin
     //----------------------------------------
     if(bit_counter == bit_counter_max) begin 
         if(tx_state == tx_waiting && tx_state == tx_waiting) begin 
-            if(timeout_count == 39999) begin
+            if(timeout_count == REPLY_TIMEOUT_TICKS) begin
                 tx_state      <= tx_idle;
                 timeout       <= 1'b1;
             end else  begin

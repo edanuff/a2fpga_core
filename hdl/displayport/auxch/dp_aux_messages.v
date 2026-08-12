@@ -196,6 +196,18 @@ always @(posedge clk) begin
        12'h114: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end  // Scrambler enabled
 
        // Set Premp level 0, votage 0.4V
+       // Write DPCD powerstate D0 (0x600 = 0x01): spec-mandated wake
+       // before link config. The stock flow never sent it (live-verified
+       // by the TUSB1046A AUX snooper: SET_POWER_STATE stayed 00); a sink
+       // that idles in low power after Alt-Mode entry ignores training
+       // until woken. Also doubles as the wire-verification loop: after
+       // this lands, mux reg 0x12[6:5] must read 01.
+       12'h130: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end
+       12'h131: begin aux_tx_data <= 8'h06; aux_tx_wr_en <= 1'b1; end
+       12'h132: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
+       12'h133: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
+       12'h134: begin aux_tx_data <= 8'h01; aux_tx_wr_en <= 1'b1; end
+
        12'h140: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end
        12'h141: begin aux_tx_data <= 8'h01; aux_tx_wr_en <= 1'b1; end
        12'h142: begin aux_tx_data <= 8'h03; aux_tx_wr_en <= 1'b1; end

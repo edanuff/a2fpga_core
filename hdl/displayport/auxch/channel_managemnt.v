@@ -59,7 +59,8 @@
 `timescale 1ns / 1ps
 
 module channel_management #(
-    parameter LINK_RATE_MBPS = 2700
+    parameter LINK_RATE_MBPS = 2700,
+    parameter BLIND_SINK = 0   // open-loop link policy (see aux_channel.v)
 )(
         input  clk100,
         output [7:0] debug,
@@ -160,8 +161,11 @@ module channel_management #(
     wire       hpd_present;
 
 
-    // Feed the number of links from the registers into the link management logic
-assign      sink_channel_count = dp_link_count[2:0];
+    // Feed the number of links from the registers into the link management
+    // logic. BLIND_SINK: the DPCD capability read never yields data (AUX RX
+    // dead) — assume the sink matches the source's lane count.
+assign      sink_channel_count = (BLIND_SINK != 0) ? source_channel_count
+                                                   : dp_link_count[2:0];
 assign     tx_preemp_0p0 = preemp_0p0_i;
 assign     tx_preemp_3p5 = preemp_3p5_i;
 assign     tx_preemp_6p0 = preemp_6p0_i;
@@ -177,7 +181,8 @@ hotplug_decode i_hotplug_decode(
         .present (hpd_present)
     );
 
-aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS)) i_aux_channel( 
+aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
+              .BLIND_SINK(BLIND_SINK)) i_aux_channel(
         .clk             (clk100),
         .debug_pmod      (debug),
          //------------------------------

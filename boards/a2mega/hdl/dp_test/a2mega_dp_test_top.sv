@@ -111,6 +111,11 @@ module a2mega_dp_test_top (
     dp_transmitter #(
         .LANE_COUNT     (2),
         .LINK_RATE_MBPS (2700),
+        // 1.0a3: AUX receive is electrically dead (AC caps, no FPGA-side
+        // bias, LVCMOS thresholds unreachable by a <=1.38 Vpp reply; board
+        // not field-modifiable). TX works — run the link policy open-loop.
+        // Remove when a board rev provides a real AUX front-end.
+        .BLIND_SINK     (1),
         .H_VISIBLE (1920), .H_TOTAL (2200), .H_SYNC_WIDTH (44), .H_START (192),
         .V_VISIBLE (1080), .V_TOTAL (1125), .V_SYNC_WIDTH (5),  .V_START (41),
         .PIXEL_CLK_MULT (11),
