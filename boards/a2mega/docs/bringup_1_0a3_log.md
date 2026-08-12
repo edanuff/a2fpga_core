@@ -111,6 +111,42 @@ unconfigured, see Stage 3).
   main link (not a stream/MSA rejection). Control test: **MacBook +
   same cable + same monitor works** — monitor/cable/Alt-Mode path all
   good; fault is board-side in the main-link signal.
+
+#### ROOT-CAUSE CANDIDATE (overnight I2C investigation, 2026-08-12)
+
+**TUSB1046A DP receiver EQ is latched at 12.3 dB from floating straps.**
+Evidence chain, each link verified:
+1. PCB netlist: U11 SSEQ0/A0 (pad 11) and DPEQ0/A1 (pad 14) are
+   explicitly unconnected — floated per SPEC for I2C address 0x12.
+2. Datasheet Table 1: floating = 4-level "F"; the 4-level pins latch at
+   reset and the strap resistors then disconnect.
+3. Datasheet Table 7: DPEQ1/DPEQ0 = F/F → **EQ setting 10 = 12.3 dB at
+   4.05 GHz, all DP lanes**.
+4. Live register dump ('x'): 0x10 = 0x11 = 0xAA (setting 10 ×4 lanes),
+   General EQ_OVERRIDE = 0 (strap-sampled EQ active).
+5. Channel needs ~1 dB (few cm of PCB): ~11 dB over-equalization; the
+   linear redriver re-drives a destroyed eye at 2.7 Gb/s → sink cannot
+   lock — while the MacBook path (no mux) drives the monitor fine.
+6. SPEC.md anticipated this: "Receiver EQ is register-settable
+   (DPxEQ_SEL) instead of strap resistors" — the firmware just never
+   programmed it (wrote CTLSEL/FLIPSEL/HPDIN_OVRRIDE only).
+
+Fix committed (f5abb424, NOT yet on the board): program DPxEQ_SEL=0
+(1.0 dB) + EQ_OVERRIDE before lane enable; telnet 'e' cycles EQ
+0/3/6/10 live for A/B; I2C mutex (kills the 0xEE read races); PD
+discovery auto-retry after VDM flakes (no more replug-to-retry).
+
+#### MORNING RUNBOOK (one PC visit)
+1. Board → PC. `make -C boards/a2mega/src/a2fpga_esp32 upload
+   PORT=/dev/cu.usbmodem5101` (serial; JTAG uninvolved).
+2. `FS=boards/a2mega/impl/pnr/a2mega_dp_test.fs tools/flash.sh a2mega`
+   — flash holds the mode-1 bit-reversal experiment; this restores the
+   canonical mode-0 build (already rebuilt, timing-clean).
+3. Board → monitor. Expected: heartbeat + led1 (HPD) + led2 (135 MHz
+   check) + led3, and — if the EQ chain is the root cause — colorbars.
+4. Verify over telnet regardless: 'x' must now show 0x10=0x11=0x00 and
+   General bit4 set (clean reads — mutex). If no picture: 'e' cycles EQ
+   presets live; also confirm D0 snoop (0x12[6:5], anomaly still open).
 - Open suspects (ranked): actual line rate out of the QPLL (verify
   clk_sym=135 MHz in-fabric vs the 50 MHz crystal — no external gear
   needed), GTR12 serialization bit-order/polarity semantics (CSR blob
