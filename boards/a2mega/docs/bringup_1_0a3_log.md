@@ -136,6 +136,29 @@ Fix committed (f5abb424, NOT yet on the board): program DPxEQ_SEL=0
 0/3/6/10 live for A/B; I2C mutex (kills the 0xEE read races); PD
 discovery auto-retry after VDM flakes (no more replug-to-retry).
 
+#### ROOT CAUSE FOUND (2026-08-12, debug-plan Phase A2)
+
+**The GTR12 transmitter was held in reset the entire bring-up.** First
+live status readback over the new FPGA-debug-UART→telnet channel:
+`DP S:20` = pll_lock=1, **lane_ready=00, pcs_tx_rst asserted,
+tx_running=00** — the lanes never carried a single bit. The reset
+sequencer in `transceiver_bank_gowin.v` waited for `pll_lock &&
+lane_ready` before releasing `pcs_tx_rst`, but the GTR12's `ready_o`
+does not assert while PCS is held in reset: a deadlock. The working
+Sipeed SFP+ example releases both resets statically and treats
+`ready_o` as status only.
+
+Consequences: every prior content-side "elimination" (word modes 0-3,
+polarity both ways, EQ effect on lock, D0, dwell) tested a dead line
+and is VOID — exactly as the debug plan's "critical logical
+consequence" warned. The EQ fix remains real and necessary (register
+evidence), just not sufficient alone.
+
+Fix: static reset release (~330 µs after powerup, ungated) + TX FIFO
+wren gated on ~afull (working-example idiom, was constant-1) + tx_data
+replicated 4× across the 80-bit bus (slice question still open until
+lanes run — replication covers all cases).
+
 #### MORNING RUNBOOK (one PC visit)
 1. Board → PC. `make -C boards/a2mega/src/a2fpga_esp32 upload
    PORT=/dev/cu.usbmodem5101` (serial; JTAG uninvolved).

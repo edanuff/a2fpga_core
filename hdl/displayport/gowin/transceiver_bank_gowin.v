@@ -38,7 +38,15 @@
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
-module transceiver_bank_gowin (
+// TX_PROBE: bring-up aid. Forces the quad powered (no link-policy
+// dependency) and replaces the 8b10b stream with a raw 16-words-low /
+// 16-words-high pattern = line-rate/640 ~= 4.2 MHz square wave on both
+// lanes — visible on a basic scope at a connector breakout. Answers
+// "are the lanes electrically alive, on which pins, with which
+// polarity" without any DP protocol in the loop.
+module transceiver_bank_gowin #(
+    parameter TX_PROBE = 0
+)(
     input             mgmt_clk,
     // Master control
     input       [1:0] powerup_channel,
@@ -98,22 +106,38 @@ module transceiver_bank_gowin (
     wire pll_lock;
     wire [1:0] lane_ready;
 
+    // ROOT-CAUSE FIX (board #1, 2026-08-12): the original sequencer waited
+    // for pll_lock && lane_ready before releasing pcs_tx_rst — but the
+    // GTR12's ready_o does not assert while PCS is held in reset, so the
+    // transmitter deadlocked in reset FOREVER (live status readback:
+    // pll_lock=1, lane_ready=00, pcs_tx_rst=1 — the lanes never carried a
+    // bit while every upstream indicator looked healthy). The working
+    // Sipeed SFP+ example releases both resets STATICALLY and treats
+    // ready_o as status only. Mirror that: release pma at powerup, release
+    // pcs_tx_rst a short settle later, gate on nothing.
+    wire [1:0] powerup_eff = TX_PROBE ? 2'b11 : powerup_channel;
+
+    // probe pattern generator (tx_symbol_clk domain)
+    reg [4:0] probe_cnt = 5'd0;
+    always @(posedge tx_symbol_clk)
+        probe_cnt <= probe_cnt + 5'd1;
+    wire [19:0] probe_word = probe_cnt[4] ? 20'hFFFFF : 20'h00000;
+
     reg [15:0] seq_count = 0;
     always @(posedge mgmt_clk) begin
-        if (powerup_channel == 2'b00) begin
+        if (powerup_eff == 2'b00) begin
             pma_rstn   <= 1'b0;
             pcs_tx_rst <= 1'b1;
             seq_count  <= 0;
             tx_running <= 2'b00;
         end else begin
             pma_rstn <= 1'b1;
-            if (pll_lock && &lane_ready) begin
-                if (seq_count[15])
-                    pcs_tx_rst <= 1'b0;
-                else
-                    seq_count <= seq_count + 1'b1;
-            end
-            tx_running <= {2{!pcs_tx_rst}} & powerup_channel;
+            if (seq_count[15])
+                pcs_tx_rst <= 1'b0;      // ~330 us after powerup; ungated
+            else
+                seq_count <= seq_count + 1'b1;
+            // status only — consumed by nothing critical
+            tx_running <= {2{!pcs_tx_rst}} & powerup_eff & lane_ready;
         end
     end
 
@@ -125,6 +149,8 @@ module transceiver_bank_gowin (
         enc_rst_sync <= {enc_rst_sync[0], pcs_tx_rst};
         enc_reset    <= enc_rst_sync[1];
     end
+
+    wire tx_afull_ln0, tx_afull_ln1, tx_afull_ln2, tx_afull_ln3;
 
 `ifdef GOWIN_SERDES_IP
     // ------------------------------------------------------------------
@@ -141,7 +167,7 @@ module transceiver_bank_gowin (
     // board's clock generator is programmed before the FPGA runs)
     reg por_n = 1'b0;
     always @(posedge mgmt_clk)
-        por_n <= (powerup_channel != 2'b00);
+        por_n <= (powerup_eff != 2'b00);
 
 `ifdef DP_SERDES_LANES_23
     // ------------------------------------------------------------------
@@ -177,8 +203,8 @@ module transceiver_bank_gowin (
             default: word_conv = x;
         endcase
     endfunction
-    wire [19:0] tx_wire0 = word_conv(tx_code0);
-    wire [19:0] tx_wire1 = word_conv(tx_code1);
+    wire [19:0] tx_wire0 = TX_PROBE ? probe_word : word_conv(tx_code0);
+    wire [19:0] tx_wire1 = TX_PROBE ? probe_word : word_conv(tx_code1);
 
     dp_serdes i_dp_serdes (
         .por_n_i                    (por_n),
@@ -186,9 +212,9 @@ module transceiver_bank_gowin (
         .dp_phy_q0_ln3_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln3_tx_pcs_clkout_o (),
         .dp_phy_q0_ln3_tx_data_i    ({4{tx_wire0}}),
-        .dp_phy_q0_ln3_tx_fifo_wren_i (1'b1),
+        .dp_phy_q0_ln3_tx_fifo_wren_i (~tx_afull_ln3),
         .dp_phy_q0_ln3_tx_fifo_wrusewd_o (),
-        .dp_phy_q0_ln3_tx_fifo_afull_o (),
+        .dp_phy_q0_ln3_tx_fifo_afull_o (tx_afull_ln3),
         .dp_phy_q0_ln3_tx_fifo_full_o (),
         .dp_phy_q0_ln3_pma_rstn_i   (pma_rstn),
         .dp_phy_q0_ln3_pcs_tx_rst_i (pcs_tx_rst),
@@ -210,9 +236,9 @@ module transceiver_bank_gowin (
         .dp_phy_q0_ln2_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln2_tx_pcs_clkout_o (tx_symbol_clk_raw),
         .dp_phy_q0_ln2_tx_data_i    ({4{tx_wire1}}),
-        .dp_phy_q0_ln2_tx_fifo_wren_i (1'b1),
+        .dp_phy_q0_ln2_tx_fifo_wren_i (~tx_afull_ln2),
         .dp_phy_q0_ln2_tx_fifo_wrusewd_o (),
-        .dp_phy_q0_ln2_tx_fifo_afull_o (),
+        .dp_phy_q0_ln2_tx_fifo_afull_o (tx_afull_ln2),
         .dp_phy_q0_ln2_tx_fifo_full_o (),
         .dp_phy_q0_ln2_pma_rstn_i   (pma_rstn),
         .dp_phy_q0_ln2_pcs_tx_rst_i (pcs_tx_rst),
@@ -249,9 +275,9 @@ module transceiver_bank_gowin (
         .dp_phy_q0_ln0_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln0_tx_pcs_clkout_o (tx_symbol_clk_raw),
         .dp_phy_q0_ln0_tx_data_i    ({4{tx_wire0}}),
-        .dp_phy_q0_ln0_tx_fifo_wren_i (1'b1),
+        .dp_phy_q0_ln0_tx_fifo_wren_i (~tx_afull_ln0),
         .dp_phy_q0_ln0_tx_fifo_wrusewd_o (),
-        .dp_phy_q0_ln0_tx_fifo_afull_o (),
+        .dp_phy_q0_ln0_tx_fifo_afull_o (tx_afull_ln0),
         .dp_phy_q0_ln0_tx_fifo_full_o (),
         .dp_phy_q0_ln0_pma_rstn_i   (pma_rstn),
         .dp_phy_q0_ln0_pcs_tx_rst_i (pcs_tx_rst),
@@ -274,9 +300,9 @@ module transceiver_bank_gowin (
         .dp_phy_q0_ln1_tx_clk_i     (tx_symbol_clk),
         .dp_phy_q0_ln1_tx_pcs_clkout_o (),
         .dp_phy_q0_ln1_tx_data_i    ({4{tx_wire1}}),
-        .dp_phy_q0_ln1_tx_fifo_wren_i (1'b1),
+        .dp_phy_q0_ln1_tx_fifo_wren_i (~tx_afull_ln1),
         .dp_phy_q0_ln1_tx_fifo_wrusewd_o (),
-        .dp_phy_q0_ln1_tx_fifo_afull_o (),
+        .dp_phy_q0_ln1_tx_fifo_afull_o (tx_afull_ln1),
         .dp_phy_q0_ln1_tx_fifo_full_o (),
         .dp_phy_q0_ln1_pma_rstn_i   (pma_rstn),
         .dp_phy_q0_ln1_pcs_tx_rst_i (pcs_tx_rst),

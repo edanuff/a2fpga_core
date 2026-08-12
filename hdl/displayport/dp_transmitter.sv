@@ -47,6 +47,9 @@ module dp_transmitter #(
     // (a2mega 1.0a3). DPCD writes still transmit; replies are not awaited.
     // See aux_channel.v for the full contract. 0 = spec-compliant flow.
     parameter int BLIND_SINK      = 0,
+    // Bring-up lane probe: force the SERDES powered and transmit a raw
+    // ~4.2 MHz square on both lanes (scope-visible). See transceiver bank.
+    parameter int TX_PROBE        = 0,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -449,7 +452,7 @@ module dp_transmitter #(
     assign tx_running[3:2] = 2'b00;
     assign serdes_status = 6'h3F;
 `elsif DP_VENDOR_GOWIN
-    transceiver_bank_gowin i_transceiver_bank(
+    transceiver_bank_gowin #(.TX_PROBE(TX_PROBE)) i_transceiver_bank(
         .mgmt_clk        (clk100),
         .powerup_channel (tx_powerup_channel[1:0]),
         .preemp_0p0      (preemp_0p0),
