@@ -18,6 +18,7 @@ bool usbc_pd_init(void);
 
 /* Print PD state to Serial (the CLI 'pd' command). */
 void usbc_pd_status(void);
+void usbc_pd_status_log(void);  /* condensed, via osd_log (OSD + telnet tee) */
 
 #ifdef __cplusplus
 }

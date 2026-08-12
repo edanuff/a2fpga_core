@@ -270,4 +270,20 @@ extern "C" void usbc_pd_status(void)
                   (int)s_fpga_dp_en);
 }
 
+/* Condensed PD status through osd_log: reaches the OSD *and* every telnet
+ * console session (the tee) — the only live status path once a monitor
+ * occupies the USB-C port. Lines fit the 40-col console. */
+extern "C" void usbc_pd_status_log(void)
+{
+    if (!s_running) {
+        osd_log("PD: STACK NOT RUNNING");
+        return;
+    }
+    osd_log("PD: %s", usbc_port_state_name(s_port.state));
+    osd_log("PD: CC%d HPD=%d SRC=%d MUX=%d EN=%d",
+            s_port.polarity == FUSB302_POLARITY_CC2 ? 2 : 1,
+            (int)s_hpd_level, (int)s_vbus_on, (int)s_dp_mux_on,
+            (int)s_fpga_dp_en);
+}
+
 #endif /* A2MEGA_HAS_USBC_PD */

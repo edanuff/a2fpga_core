@@ -38,6 +38,10 @@
 #include "fpga_screen.h"
 #include "osd_console.h"
 #include "menu.h"
+#include "board_pins.h"
+#if A2MEGA_HAS_USBC_PD
+#include "usbc_glue.h"
+#endif
 #include "a2fpga_regs.h"
 #include "telnetd.h"
 
@@ -161,7 +165,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2mega remote console\r\n"
-                "keys: c=console m=menu q=quit\r\n"
+                "keys: c=console m=menu p=pd-status q=quit\r\n"
                 "menu: up/down move, left/right change, enter/a=ok,\r\n"
                 "      esc/backspace/b=back, y=view, s/tab=select\r\n\r\n");
 
@@ -219,6 +223,16 @@ static void session(int fd)
                 xSemaphoreTake(s_tee_lock, portMAX_DELAY);
                 s_tee_rd = s_tee_wr;
                 xSemaphoreGive(s_tee_lock);
+                continue;
+            }
+            if (esc_st == 0 && ch == 'p' && !menu_mode) {
+                /* PD status into the console tee: works with the monitor
+                 * on the port, when telnet is the only console. */
+#if A2MEGA_HAS_USBC_PD
+                usbc_pd_status_log();
+#else
+                tn_puts(fd, "pd: not built for this board rev\r\n");
+#endif
                 continue;
             }
             if (esc_st == 0 && ch == 'm' && !menu_mode) {

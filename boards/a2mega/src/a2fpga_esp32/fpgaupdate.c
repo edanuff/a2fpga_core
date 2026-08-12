@@ -136,6 +136,61 @@ void fpgaupdate_set_keepsram(bool on)
     s_keepsram = on;
 }
 
+/* Erase the bitstream region of the config flash WITHOUT touching the
+ * running fabric. Recovery for a corrupt flash image: the GW5A's MSPI
+ * auto-boot retry loop owns the bus and wedges every external flash tool
+ * (openFPGALoader's flash entry resets the fabric, re-arming the loop —
+ * live-hit on board #1, 2026-08-11). Precondition: a good bitstream has
+ * been SRAM-loaded over JTAG, so the boot engine is satisfied and the
+ * IDCODE reads back. keepsram entry + erase + leave; the fabric (and its
+ * heartbeat) keeps running throughout. */
+bool fpgaupdate_erase_bitstream_region(void)
+{
+    fpga_jtag_init_pins();
+
+    uint32_t id = fpga_jtag_idcode();
+    if (id != FPGA_JTAG_IDCODE_GW5AT60) {
+        ESP_LOGE(TAG, "erase: IDCODE %08lx != GW5AT-60 — fabric not alive; "
+                      "SRAM-load a bitstream first", (unsigned long)id);
+        osd_log("FPGA ERASE: NO LIVE FABRIC");
+        fpga_jtag_release_pins();
+        return false;
+    }
+    if (!fpga_jtag_flash_enter_keepsram()) {
+        fpga_jtag_flash_leave();
+        fpga_jtag_release_pins();
+        osd_log("FPGA ERASE: SPI ENTRY FAILED");
+        return false;
+    }
+
+    /* Header blocks only (validated on 1.0a2a): with no sync word the GW5A
+     * boots like a factory-blank board — quietly unconfigured, MSPI bus
+     * free. The stale image body beyond 128 KB is inert. */
+    const uint32_t region = 2u * FPU_BLOCK;
+    bool ok = true;
+    for (uint32_t a = 0; ok && a < region; a += FPU_BLOCK) {
+        ok = flash_erase_block(a);
+        if ((a % (FPU_BLOCK * 16u)) == 0)
+            osd_log("FPGA ERASE: %luK/%luK", (unsigned long)(a >> 10),
+                    (unsigned long)(region >> 10));
+        vTaskDelay(1);                   /* feed the watchdog */
+    }
+
+    if (ok) {                            /* verify the header area is blank */
+        uint8_t back[32];
+        fpga_jtag_flash_read(0, back, sizeof(back));
+        for (size_t i = 0; i < sizeof(back); i++)
+            if (back[i] != 0xFF)
+                ok = false;
+    }
+
+    fpga_jtag_flash_leave();
+    fpga_jtag_release_pins();
+    osd_log(ok ? "FPGA ERASE: DONE, FLASH BLANK"
+               : "FPGA ERASE: FAILED");
+    return ok;
+}
+
 void fpgaupdate_cancel(void)
 {
     if (s_state == FPU_READY || s_state == FPU_ERROR) {

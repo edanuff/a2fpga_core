@@ -411,41 +411,21 @@ static void cmd_process(String cmd) {
                       (unsigned long)wifi_dbg_last_reason);
 
     } else if (cmd == "fpgaerase") {
-        // Erase the config-flash HEADER blocks only (128KB), via the
-        // SRAM-preserving SPI entry. With no sync word the GW5A boots like a
-        // factory-blank board: quietly unconfigured, JTAG and flash bus free
-        // — which lets the STANDARD openFPGALoader flash flow work again.
-        // The running fabric stays alive (it is in SRAM).
-        Serial.println("fpgaerase: entering SPI mode (fabric stays live)...");
-        if (!fpga_jtag_flash_enter_keepsram()) {
-            Serial.println("fpgaerase: SPI entry failed");
-            return;
-        }
-        bool ok = true;
-        for (uint32_t a = 0; a < 0x20000 && ok; a += 0x10000) {
-            fpga_jtag_spi_xfer(0x06, NULL, NULL, 0);          // WREN
-            uint8_t tx[3] = { (uint8_t)(a >> 16), (uint8_t)(a >> 8), (uint8_t)a };
-            fpga_jtag_spi_xfer(0xD8, tx, NULL, 3);            // block erase
-            ok = false;
-            for (int i = 0; i < 40000; i++) {                 // poll WIP
-                uint8_t st = 0xFF;
-                fpga_jtag_spi_xfer(0x05, NULL, &st, 1);
-                if (!(st & 0x01)) { ok = true; break; }
-            }
-            Serial.printf("fpgaerase: block 0x%05lX %s\n",
-                          (unsigned long)a, ok ? "erased" : "TIMEOUT");
-        }
-        if (ok) {
-            // Read back the header area to confirm FF
-            uint8_t chk[16];
-            fpga_jtag_flash_read(0, chk, sizeof(chk));
-            bool blank = true;
-            for (size_t i = 0; i < sizeof(chk); i++)
-                if (chk[i] != 0xFF) blank = false;
-            Serial.printf("fpgaerase: header readback %s\n",
-                          blank ? "BLANK (FF) — success" : "NOT blank!");
-        }
-        Serial.println("fpgaerase: done; replug, then flash normally");
+        // Erase the config-flash HEADER blocks (128KB) via the
+        // SRAM-preserving SPI entry — the GW5A then boots like a
+        // factory-blank board and the STANDARD openFPGALoader flash flow
+        // works again. Delegates to fpgaupdate_erase_bitstream_region(),
+        // which (unlike the original inline version) calls
+        // fpga_jtag_init_pins() first: after any USB JTAG bridge session,
+        // the disconnect handler leaves TCK/TMS/TDI as INPUTs, and
+        // bit-banging floating pins produced "block 0x00000 TIMEOUT"
+        // (live-hit on board #1, 2026-08-11).
+        Serial.println("fpgaerase: erasing config-flash header "
+                       "(keepsram; fabric stays live)...");
+        bool eok = fpgaupdate_erase_bitstream_region();
+        Serial.printf("fpgaerase: %s\n",
+                      eok ? "OK — flash boots as blank; flash normally now"
+                          : "FAILED (see log; is a fabric SRAM-loaded?)");
 
     } else if (cmd.startsWith("fpgaflash ")) {
         // Persistent FPGA flash via the on-board bit-bang updater (fpgaupdate/
@@ -987,6 +967,16 @@ static void start_subsystems() {
 // ============================================================================
 
 void setup() {
+    // Route the USB JTAG bridge to the FPGA pins FIRST, before anything
+    // slow (the 300 ms settle, PD init, WiFi join): the GW5A gives JTAG
+    // priority over MSPI auto-boot, so an openFPGALoader retry loop on the
+    // PC can grab the TAP during the boot window. This is the recovery
+    // path for a bad flash image that otherwise leaves the config
+    // controller looping on MSPI with JTAG unresponsive (board #1,
+    // 2026-08-11). Idle routing is harmless — no host clocking, no effect
+    // on normal auto-boot; loop() still manages connect/disconnect edges.
+    route_usb_jtag_to_gpio();
+
     Serial.begin(115200);
     Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);
     delay(300);
