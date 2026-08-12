@@ -7,6 +7,17 @@ enum {
     PS_RDY_DELAY_MS = 25,
     DISCOVERY_START_DELAY_MS = 10,
     VDM_BUSY_DELAY_MS = 50,
+    /* Sink path (we are powered by the monitor). tTypeCSinkWaitCap is
+     * 620 ms max per PD; sources rebroadcast caps, so wait generously. */
+    SINK_WAIT_CAPS_MS = 3000,
+    SINK_ACCEPT_TIMEOUT_MS = 250,      /* tSenderResponse 30 ms + margin */
+    SINK_PS_RDY_TIMEOUT_MS = 600,      /* tPSTransition 550 ms max */
+    SINK_DR_SWAP_TIMEOUT_MS = 200,
+    SINK_CONTRACT_RETRIES = 2,
+    /* Sink requests from the source's 5 V PDO, bounded by our real draw
+     * (~0.5 A board) and what the source offers. */
+    SINK_OPERATING_MA = 500,
+    SINK_MAXIMUM_MA = 1000,
 };
 
 static bool time_reached(uint32_t now, uint32_t deadline)
@@ -65,6 +76,9 @@ static void reset_protocol(usbc_port_t *port)
     port->dp_mode_position = 0u;
     port->vdm_retry_count = 0u;
     port->expected_vdm_command = 0u;
+    port->power_sink = false;
+    port->data_dfp = true;
+    port->sink_attempts = 0u;
     port->dp_hpd_level = false;
 }
 
@@ -145,7 +159,7 @@ static int queue_message(usbc_port_t *port, uint8_t type,
         return -1;
     memset(&message, 0, sizeof(message));
     message.header = usb_pd_header(type, count, port->tx_message_id,
-                                   true, true);
+                                   !port->power_sink, port->data_dfp);
     message.data_count = count;
     if (count != 0u && data != NULL)
         memcpy(message.data, data, (size_t)count * sizeof(data[0]));
@@ -370,8 +384,15 @@ static int handle_received_message(usbc_port_t *port,
         port->tx_busy = false;
         port->tx_kind = USBC_TX_NONE;
         port->dp_mode_position = 0u;
-        port->state = USBC_STATE_SOURCE_WAIT_REQUEST;
-        port->deadline_ms = now_ms(port);
+        if (port->power_sink) {
+            port->data_dfp = false;
+            fusb302_set_data_role(&port->fusb302, false);
+            port->state = USBC_STATE_SINK_WAIT_SRC_CAPS;
+            port->deadline_ms = now_ms(port) + SINK_WAIT_CAPS_MS;
+        } else {
+            port->state = USBC_STATE_SOURCE_WAIT_REQUEST;
+            port->deadline_ms = now_ms(port);
+        }
         return send_control(port, USB_PD_CTRL_ACCEPT, USBC_TX_ACCEPT);
     }
     if (port->have_last_rx_message_id && port->last_rx_message_id == message_id)
@@ -387,6 +408,76 @@ static int handle_received_message(usbc_port_t *port,
         }
         return send_control(port, USB_PD_CTRL_REJECT, USBC_TX_REJECT);
     }
+
+    /* ---- sink path: partner sources VBUS and offers capabilities ---- */
+    if (count >= 1u && type == USB_PD_DATA_SOURCE_CAP && port->power_sink) {
+        /* PDO 1 is vSafe5V fixed by spec; request it, bounded by the
+         * offer. Accept caps (re)broadcasts from the wait state or after
+         * a fallback to plain-device — some sources are slow starters. */
+        if (port->state != USBC_STATE_SINK_WAIT_SRC_CAPS &&
+            port->state != USBC_STATE_DEVICE)
+            return 0;
+        const uint32_t pdo = message->data[0];
+        uint16_t offered_ma = (uint16_t)((pdo & 0x3ffu) * 10u);
+        uint16_t op_ma = offered_ma < SINK_OPERATING_MA ? offered_ma
+                                                        : SINK_OPERATING_MA;
+        uint16_t max_ma = offered_ma < SINK_MAXIMUM_MA ? offered_ma
+                                                       : SINK_MAXIMUM_MA;
+        const uint32_t rdo = (UINT32_C(1) << 28) |     /* object position 1 */
+                             (UINT32_C(1) << 25) |     /* USB comm capable */
+                             ((uint32_t)(op_ma / 10u) << 10) |
+                             (uint32_t)(max_ma / 10u);
+        if (queue_message(port, USB_PD_DATA_REQUEST, &rdo, 1u,
+                          USBC_TX_REQUEST) != 0)
+            return -1;
+        port->state = USBC_STATE_SINK_REQUEST_SENT;
+        port->deadline_ms = now_ms(port) + SINK_ACCEPT_TIMEOUT_MS;
+        return 0;
+    }
+    if (count == 0u && type == USB_PD_CTRL_ACCEPT && port->power_sink) {
+        if (port->state == USBC_STATE_SINK_REQUEST_SENT) {
+            port->state = USBC_STATE_SINK_WAIT_PS_RDY;
+            port->deadline_ms = now_ms(port) + SINK_PS_RDY_TIMEOUT_MS;
+            return 0;
+        }
+        if (port->state == USBC_STATE_SINK_DR_SWAP_SENT) {
+            port->data_dfp = true;
+            fusb302_set_data_role(&port->fusb302, true);
+            log_message(port, USBC_LOG_INFO,
+                        "DR_Swap accepted; now DFP, starting DP discovery");
+            port->state = USBC_STATE_SINK_READY;
+            port->deadline_ms = now_ms(port) + DISCOVERY_START_DELAY_MS;
+            return 0;
+        }
+    }
+    if (count == 0u && type == USB_PD_CTRL_PS_RDY && port->power_sink &&
+        port->state == USBC_STATE_SINK_WAIT_PS_RDY) {
+        log_message(port, USBC_LOG_INFO, "Sink 5 V PD contract established");
+        port->sink_attempts = 0u;
+        port->state = USBC_STATE_SINK_READY;
+        port->deadline_ms = now_ms(port) + DISCOVERY_START_DELAY_MS;
+        return 0;
+    }
+    if (count == 0u && (type == USB_PD_CTRL_REJECT ||
+                        type == USB_PD_CTRL_WAIT) &&
+        port->state == USBC_STATE_SINK_DR_SWAP_SENT) {
+        log_message(port, USBC_LOG_ERROR,
+                    "DR_Swap rejected; partner keeps DFP (no DP source role)");
+        port->state = USBC_STATE_DEVICE;
+        return 0;
+    }
+    if (count == 0u && type == USB_PD_CTRL_DR_SWAP &&
+        port->power_sink && !port->data_dfp) {
+        /* Partner hands us DFP — exactly what the DP ladder needs. */
+        return send_control(port, USB_PD_CTRL_ACCEPT, USBC_TX_ACCEPT_DR_SWAP);
+    }
+    if (count == 0u && type == USB_PD_CTRL_GET_SINK_CAP && port->power_sink) {
+        const uint32_t sink_pdo = (UINT32_C(100) << 10) |  /* 5 V (50 mV) */
+                                  (uint32_t)(SINK_OPERATING_MA / 10u);
+        return queue_message(port, USB_PD_DATA_SINK_CAP, &sink_pdo, 1u,
+                             USBC_TX_SINK_CAPS);
+    }
+
     if (count == 0u && type == USB_PD_CTRL_GET_SOURCE_CAP)
         return send_source_caps(port);
     if (count == 0u && (type == USB_PD_CTRL_DR_SWAP ||
@@ -445,6 +536,15 @@ static void handle_tx_success(usbc_port_t *port)
         port->state = USBC_STATE_SOURCE_READY;
         port->deadline_ms = now_ms(port) + DISCOVERY_START_DELAY_MS;
         log_message(port, USBC_LOG_INFO, "Fixed 5 V PD contract established");
+    } else if (kind == USBC_TX_ACCEPT_DR_SWAP) {
+        /* Our Accept of the partner's DR_Swap is on the wire: the swap is
+         * effective. We are now DFP; run the shared DP ladder. */
+        port->data_dfp = true;
+        fusb302_set_data_role(&port->fusb302, true);
+        log_message(port, USBC_LOG_INFO,
+                    "Accepted partner DR_Swap; now DFP, starting DP discovery");
+        port->state = USBC_STATE_SINK_READY;
+        port->deadline_ms = now_ms(port) + DISCOVERY_START_DELAY_MS;
     }
 }
 
@@ -503,8 +603,55 @@ static int service_state_timer(usbc_port_t *port)
         if (fusb302_vbus_present(&port->fusb302, &vbus_present) == 0 &&
             vbus_present) {
             set_usb_role(port, USBC_USB_ROLE_DEVICE);
+            /* Powered by the partner. If it speaks PD (a monitor that
+             * presents Rp), take a 5 V contract and DR_Swap to DFP so the
+             * shared DP ladder can run; if no Source_Capabilities arrive,
+             * fall back to the plain USB 2.0 device behavior. */
+            if (fusb302_set_pd_receiver(&port->fusb302, true) != 0)
+                return -1;
+            port->state = USBC_STATE_SINK_WAIT_SRC_CAPS;
+            port->deadline_ms = now_ms(port) + SINK_WAIT_CAPS_MS;
+            log_message(port, USBC_LOG_INFO,
+                        "USB-C sink at 5 V; waiting for source capabilities");
+        }
+        break;
+    case USBC_STATE_SINK_WAIT_SRC_CAPS:
+        if (time_reached(now, port->deadline_ms)) {
+            log_message(port, USBC_LOG_INFO,
+                        "No PD source capabilities; USB-only device");
             port->state = USBC_STATE_DEVICE;
-            log_message(port, USBC_LOG_INFO, "USB-C device attached at 5 V");
+        }
+        break;
+    case USBC_STATE_SINK_REQUEST_SENT:
+    case USBC_STATE_SINK_WAIT_PS_RDY:
+        if (time_reached(now, port->deadline_ms)) {
+            if (++port->sink_attempts <= SINK_CONTRACT_RETRIES) {
+                /* Sources rebroadcast caps; rejoin the wait. */
+                port->state = USBC_STATE_SINK_WAIT_SRC_CAPS;
+                port->deadline_ms = now + SINK_WAIT_CAPS_MS;
+            } else {
+                log_message(port, USBC_LOG_ERROR,
+                            "Sink PD contract failed; USB-only device");
+                port->state = USBC_STATE_DEVICE;
+            }
+        }
+        break;
+    case USBC_STATE_SINK_READY:
+        if (!port->tx_busy && time_reached(now, port->deadline_ms)) {
+            if (port->data_dfp)
+                return send_discover_identity(port);
+            if (send_control(port, USB_PD_CTRL_DR_SWAP,
+                             USBC_TX_DR_SWAP) != 0)
+                return -1;
+            port->state = USBC_STATE_SINK_DR_SWAP_SENT;
+            port->deadline_ms = now + SINK_DR_SWAP_TIMEOUT_MS;
+        }
+        break;
+    case USBC_STATE_SINK_DR_SWAP_SENT:
+        if (time_reached(now, port->deadline_ms)) {
+            log_message(port, USBC_LOG_ERROR,
+                        "DR_Swap unanswered; staying UFP (no DP)");
+            port->state = USBC_STATE_DEVICE;
         }
         break;
     case USBC_STATE_SOURCE_WAIT_VBUS:
@@ -588,6 +735,8 @@ static int handle_toggle_result(usbc_port_t *port,
         port->polarity = result == FUSB302_TOGGLE_ATTACHED_SINK_CC2
                              ? FUSB302_POLARITY_CC2 : FUSB302_POLARITY_CC1;
         reset_protocol(port);
+        port->power_sink = true;
+        port->data_dfp = false;      /* Rd side attaches as UFP */
         if (fusb302_configure_sink(&port->fusb302, port->polarity) != 0)
             return -1;
         set_vbus(port, false);
@@ -636,6 +785,20 @@ int usbc_port_task(usbc_port_t *port)
     if ((events.bits & FUSB302_EVENT_HARD_RESET) != 0u &&
         port->fusb302.source_role)
         return begin_hard_reset_recovery(port);
+    if ((events.bits & FUSB302_EVENT_HARD_RESET) != 0u && port->power_sink) {
+        /* Source will drop and restore VBUS; restart the sink ladder. */
+        set_dp_outputs(port, false, false);
+        port->tx_message_id = 0u;
+        port->have_last_rx_message_id = false;
+        port->tx_busy = false;
+        port->tx_kind = USBC_TX_NONE;
+        port->dp_mode_position = 0u;
+        port->data_dfp = false;
+        fusb302_set_data_role(&port->fusb302, false);
+        port->state = USBC_STATE_DEVICE_WAIT_VBUS;
+        log_message(port, USBC_LOG_INFO, "Hard reset as sink; re-attaching");
+        return 0;
+    }
     if ((events.bits & FUSB302_EVENT_TX_SUCCESS) != 0u)
         handle_tx_success(port);
     if ((events.bits & FUSB302_EVENT_TX_FAILED) != 0u) {
@@ -667,7 +830,10 @@ const char *usbc_port_state_name(usbc_state_t state)
     static const char *const names[] = {
         "disabled", "unattached", "device-wait-vbus", "device",
         "source-wait-vbus", "source-wait-request", "source-accept-sent",
-        "source-send-ps-rdy", "source-ready", "vdm-wait-identity",
+        "source-send-ps-rdy", "source-ready",
+        "sink-wait-src-caps", "sink-request-sent", "sink-wait-ps-rdy",
+        "sink-ready", "sink-dr-swap-sent",
+        "vdm-wait-identity",
         "vdm-wait-svids", "vdm-wait-modes", "vdm-wait-enter",
         "vdm-wait-status", "vdm-wait-configure", "dp-active",
         "usb-only", "hard-reset-off",

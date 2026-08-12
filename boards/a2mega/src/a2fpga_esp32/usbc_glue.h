@@ -19,6 +19,7 @@ bool usbc_pd_init(void);
 /* Print PD state to Serial (the CLI 'pd' command). */
 void usbc_pd_status(void);
 void usbc_pd_status_log(void);  /* condensed, via osd_log (OSD + telnet tee) */
+void usbc_mux_dump_log(void);   /* TUSB1046A regs via osd_log (AUX snooper) */
 
 #ifdef __cplusplus
 }

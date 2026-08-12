@@ -65,6 +65,7 @@ typedef struct {
     uint8_t i2c_address;
     fusb302_polarity_t polarity;
     bool source_role;
+    bool data_role_dfp;      /* DATAROLE bit for GoodCRC/TX headers */
     bool rx_enabled;
     uint16_t rp_milliamps;   /* advertised Type-C source current tier */
 } fusb302_t;
@@ -84,6 +85,10 @@ int fusb302_configure_source(fusb302_t *device,
 int fusb302_configure_sink(fusb302_t *device,
                            fusb302_polarity_t polarity);
 int fusb302_set_pd_receiver(fusb302_t *device, bool enable);
+
+/* Flip the DATAROLE bit (auto-GoodCRC + TX headers) after a DR_Swap.
+ * Power role is fixed at attach; data role is not. */
+int fusb302_set_data_role(fusb302_t *device, bool dfp);
 int fusb302_poll_events(fusb302_t *device, fusb302_events_t *events);
 int fusb302_vbus_present(fusb302_t *device, bool *present);
 int fusb302_source_detached(fusb302_t *device, bool *detached);

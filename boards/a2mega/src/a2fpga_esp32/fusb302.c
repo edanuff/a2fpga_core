@@ -240,10 +240,17 @@ int fusb302_set_pd_receiver(fusb302_t *device, bool enable)
     uint8_t switches1 = SW1_PD_REV20;
     int rc;
 
+    /* Role bits feed auto-GoodCRC headers; power and data roles are
+     * independent (sink attach + DR_Swap => sink power, DFP data). The
+     * BMC TX driver (TXCC select) must be on in BOTH power roles once PD
+     * is active — a sink transmits Request/DR_Swap/VDMs too (the original
+     * source-only gating left a sink mute). */
     if (device->source_role)
-        switches1 |= SW1_POWER_SRC | SW1_DATA_DFP | active_tx(device->polarity);
+        switches1 |= SW1_POWER_SRC;
+    if (device->data_role_dfp)
+        switches1 |= SW1_DATA_DFP;
     if (enable)
-        switches1 |= SW1_AUTO_CRC;
+        switches1 |= SW1_AUTO_CRC | active_tx(device->polarity);
 
     if (enable) {
         if ((rc = update_reg(device, REG_CONTROL1, 0u,
@@ -264,6 +271,7 @@ int fusb302_configure_source(fusb302_t *device,
     int rc;
     device->polarity = polarity;
     device->source_role = true;
+    device->data_role_dfp = true;
 
     if ((rc = write_reg(device, REG_CONTROL2, CONTROL2_MODE_DRP)) != 0)
         return rc;
@@ -283,6 +291,7 @@ int fusb302_configure_sink(fusb302_t *device,
     int rc;
     device->polarity = polarity;
     device->source_role = false;
+    device->data_role_dfp = false;
     device->rx_enabled = false;
 
     if ((rc = write_reg(device, REG_CONTROL2, CONTROL2_MODE_DRP)) != 0)
@@ -291,6 +300,13 @@ int fusb302_configure_sink(fusb302_t *device,
                         SW0_CC1_PD | SW0_CC2_PD | active_measure(polarity))) != 0)
         return rc;
     return write_reg(device, REG_SWITCHES1, SW1_PD_REV20);
+}
+
+int fusb302_set_data_role(fusb302_t *device, bool dfp)
+{
+    device->data_role_dfp = dfp;
+    /* Rewrite SWITCHES1 with the new role bits, preserving RX state. */
+    return fusb302_set_pd_receiver(device, device->rx_enabled);
 }
 
 int fusb302_poll_events(fusb302_t *device, fusb302_events_t *events)

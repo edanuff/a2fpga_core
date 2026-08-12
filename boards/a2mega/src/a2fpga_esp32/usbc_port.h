@@ -23,6 +23,15 @@ typedef enum {
     USBC_STATE_SOURCE_ACCEPT_SENT,
     USBC_STATE_SOURCE_SEND_PS_RDY,
     USBC_STATE_SOURCE_READY,
+    /* Sink-attach path (self-powered monitor presents Rp and powers us):
+     * PD contract as sink, then DR_Swap to DFP, then the shared VDM
+     * ladder below. Keep the VDM_* block contiguous — code uses ordered
+     * comparisons over it. */
+    USBC_STATE_SINK_WAIT_SRC_CAPS,
+    USBC_STATE_SINK_REQUEST_SENT,
+    USBC_STATE_SINK_WAIT_PS_RDY,
+    USBC_STATE_SINK_READY,
+    USBC_STATE_SINK_DR_SWAP_SENT,
     USBC_STATE_VDM_WAIT_IDENTITY,
     USBC_STATE_VDM_WAIT_SVIDS,
     USBC_STATE_VDM_WAIT_MODES,
@@ -78,6 +87,10 @@ typedef enum {
     USBC_TX_PS_RDY,
     USBC_TX_REJECT,
     USBC_TX_VDM,
+    USBC_TX_REQUEST,         /* sink: RDO for the source's 5 V PDO */
+    USBC_TX_SINK_CAPS,       /* sink: Get_Sink_Cap response */
+    USBC_TX_DR_SWAP,         /* sink: our DR_Swap request (UFP -> DFP) */
+    USBC_TX_ACCEPT_DR_SWAP,  /* sink: Accept of the partner's DR_Swap */
 } usbc_tx_kind_t;
 
 typedef struct {
@@ -100,6 +113,11 @@ typedef struct {
     uint8_t vdm_retry_count;
     uint8_t expected_vdm_command;
     bool dp_hpd_level;
+
+    /* Role tracking (power role fixed at attach; data role can DR_Swap). */
+    bool power_sink;         /* true = partner sources VBUS (monitor) */
+    bool data_dfp;           /* current data role for TX headers */
+    uint8_t sink_attempts;   /* contract retries before USB-only fallback */
 } usbc_port_t;
 
 void usbc_port_default_config(usbc_port_config_t *config);

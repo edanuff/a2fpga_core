@@ -262,12 +262,44 @@ extern "C" void usbc_pd_status(void)
         Serial.println("pd: stack not running");
         return;
     }
-    Serial.printf("pd: state %s\n", usbc_port_state_name(s_port.state));
+    Serial.printf("pd: state %s (%s power role, %s data role)\n",
+                  usbc_port_state_name(s_port.state),
+                  s_port.power_sink ? "sink" : "source",
+                  s_port.data_dfp ? "DFP" : "UFP");
     Serial.printf("    orientation CC%d, HPD %d, VBUS-src %d, mux-DP %d, "
                   "fpga-dp-en %d\n",
                   s_port.polarity == FUSB302_POLARITY_CC2 ? 2 : 1,
                   (int)s_hpd_level, (int)s_vbus_on, (int)s_dp_mux_on,
                   (int)s_fpga_dp_en);
+}
+
+/* TUSB1046A register dump via osd_log (OSD + telnet tee). The DCI AUX
+ * snooper sits directly on the AUX pair and parses our DPCD writes
+ * (LANE_COUNT_SET, SET_POWER_STATE) to auto-trim lanes — its registers
+ * are on-the-wire evidence of whether the FPGA's AUX transmissions are
+ * well-formed, which nothing else on this board can observe. */
+extern "C" void usbc_mux_dump_log(void)
+{
+    uint8_t v[8];
+    char line[41];
+    int n = 0;
+    for (uint8_t r = 0x08; r <= 0x0B; r++)
+        if (i2c_read(NULL, TUSB1046_I2C_ADDR, r, &v[n], 1) != 0)
+            v[n] = 0xEE, n++;
+        else
+            n++;
+    snprintf(line, sizeof(line), "MUX 08-0B: %02X %02X %02X %02X",
+             v[0], v[1], v[2], v[3]);
+    osd_log("%s", line);
+    n = 0;
+    for (uint8_t r = 0x10; r <= 0x13; r++)
+        if (i2c_read(NULL, TUSB1046_I2C_ADDR, r, &v[n], 1) != 0)
+            v[n] = 0xEE, n++;
+        else
+            n++;
+    snprintf(line, sizeof(line), "MUX 10-13: %02X %02X %02X %02X",
+             v[0], v[1], v[2], v[3]);
+    osd_log("%s", line);
 }
 
 /* Condensed PD status through osd_log: reaches the OSD *and* every telnet
@@ -279,7 +311,9 @@ extern "C" void usbc_pd_status_log(void)
         osd_log("PD: STACK NOT RUNNING");
         return;
     }
-    osd_log("PD: %s", usbc_port_state_name(s_port.state));
+    osd_log("PD: %s %s/%s", usbc_port_state_name(s_port.state),
+            s_port.power_sink ? "SNK" : "SRC",
+            s_port.data_dfp ? "DFP" : "UFP");
     osd_log("PD: CC%d HPD=%d SRC=%d MUX=%d EN=%d",
             s_port.polarity == FUSB302_POLARITY_CC2 ? 2 : 1,
             (int)s_hpd_level, (int)s_vbus_on, (int)s_dp_mux_on,
