@@ -1,6 +1,10 @@
 # a2mega 1.0a3 Bring-Up Plan — USB-C DisplayPort
 
-Status: DRAFT (pre-hardware). Boards (5 units, PCBWay) arriving imminently.
+Status: **HARDWARE IN HAND (2026-08-11).** All pre-hardware software is done
+and committed: Phases 0–1 (vendoring + ESP32 firmware), Phase 2 step 1
+(colorbars bitstream `a2mega_dp_test.fs`, timing-clean), Phase 3a (full core
+480p-over-DP) and 3b (full core 1080p, `a2mega.fs` sha `2270857e…`,
+timing-clean). **Execute Section 5 (hardware runbook) next.**
 Hardware source of truth: `/Users/edanuff/GitHub/a2-mega` branch `1.0a3`
 (HEAD `273d673 "Final Board"`). DP core: `/Users/edanuff/GitHub/DisplayPort_Verilog`
 (`examples/a2_mega` is the board-locked, timing-closed SERDES recipe; `usb-c/`
@@ -180,3 +184,189 @@ holds the FUSB302B/TUSB1046A spec and the portable PD driver in C).
 7. **First-article checklist before any slot insertion**: visual inspect,
    bench-power via USB-C (current-limited), rail check (+5V/+3V3), then
    ESP32 flash — before the board ever sees an Apple II.
+
+## 5. Hardware bring-up runbook (boards in hand, 2026-08-11)
+
+### 5.0 Read this first: the one-port problem
+
+Everything on this board funnels through the single USB-C port (J4):
+
+- **PC connection** = ESP32 flashing (native USB-Serial/JTAG) **and** FPGA
+  programming (`openFPGALoader -c esp32s3` through the ESP32's USB-JTAG
+  bridge, `route_usb_jtag_to_gpio()`).
+- **Monitor connection** = DP Alt Mode — the thing we're bringing up.
+- **On the bench, J4 is also the board's only power** (monitor or PC
+  sources VBUS; dead-battery attach works).
+
+Consequences that shape the whole sequence:
+
+1. You can never program and watch the monitor at the same time.
+2. On the bench, an FPGA **SRAM load dies at every cable swap** (power
+   drops). Bench iteration therefore writes to **SPI flash** (survives the
+   swap) — slower per cycle but stateless.
+3. **In an Apple II slot, the board keeps slot 5 V across cable swaps** —
+   SRAM loads survive PC↔monitor replug. That is the fast iteration loop;
+   move to it as soon as the board is trusted enough to slot.
+4. Telnet (port 23: `status`, `wifi`, `pd`, `restart`, `help`, ANSI menu
+   mirror) is the only console while a monitor occupies J4 — bringing WiFi
+   up is a *gate*, not a nicety.
+
+### 5.1 Stage 0 — bench prep (before powering anything)
+
+- Label the 5 boards `#1`–`#5`. **#1 = first article** (takes all the
+  risk). Keep **#5 untouched** as a known-virgin reference for "is this
+  fault board-specific?" questions (see the second-machine-repro rule).
+- Equipment: USB-C cable to PC; inline USB-C power meter (or
+  current-limited supply feeding a C breakout); multimeter; **two or more
+  USB-C DP monitors/dongles** (monitor tolerance is a listed risk);
+  Tang Mega 60K SOM(s); an Apple IIgs for Stage 7.
+- Software staged on the PC, hashes logged (provenance rule — binary hash
+  is ground truth):
+  - ESP32 firmware: `make -C boards/a2mega/src/a2fpga_esp32 compile`
+    (BOARD_REV defaults to 103/N4R2).
+  - `boards/a2mega/impl/pnr/a2mega_dp_test.fs` (colorbars) and
+    `impl/pnr/a2mega.fs` (full core 1080p, sha256 `2270857e…`).
+  - `arduino-cli` + `openFPGALoader` installed and in PATH.
+
+### 5.2 Stage 1 — first-article electrical (board #1, **no SOM fitted**)
+
+1. Visual inspection under magnification: J4 solder, the two QFNs
+   (TUSB1046A U11, FUSB302B U12), SY8089 buck, BTB connectors clean.
+2. Unpowered: ohmmeter +5V→GND and +3V3→GND — no shorts.
+3. Power via USB-C from PC/power-meter. Check **+5V** (after PTC →
+   LM66100) and **+3V3** (SY8089). Idle current: expect low tens of mA
+   (ESP32 module only). Anything ≥250 mA without the SOM → stop, thermal
+   hunt.
+4. Verify **VBUS_SRC_EN behavior**: the board must NOT attempt to source
+   5 V back out the port (IO46 has R29 pull-down; firmware leaves it low).
+
+**Gate:** rails good, current sane → Stage 2.
+
+### 5.3 Stage 2 — ESP32 alive, WiFi/telnet up (still no SOM)
+
+1. Flash: `make -C boards/a2mega/src/a2fpga_esp32 upload PORT=/dev/cu.usbmodem*`.
+   A blank module should enumerate the ROM USB-Serial/JTAG automatically;
+   if not, hold BOOT + tap RESET (both buttons are on the board).
+   ⚠ **IO3 strap check (risk #3):** IO3 (JTAG-source-select strap) is
+   pulled up by the FUSB INT_N pull-up. Confirm normal boot + normal
+   reflashing. If flashing is flaky only on first power-up, this strap is
+   the suspect — document the workaround (BOOT-button entry always wins).
+2. Serial monitor (`make monitor`): boot banner, then confirm **no**
+   `[usbc] warning: TUSB1046A (0x12) not responding` and **no**
+   `[usbc] FUSB302B (0x22) init FAILED` — that pair of checks validates
+   the shared I2C bus (IO1/IO2) and both PD chips in one shot.
+3. `wifi <ssid> <psk>` (persists to NVS) → `status` shows an IP →
+   **telnet to port 23** from the PC; verify `status`, `pd`, and the ANSI
+   menu mirror render.
+4. Sanity: `pd` with nothing attached reports detached/idle.
+
+**Gate:** telnet console works → you can afford to lose the USB console.
+
+### 5.4 Stage 3 — SOM + JTAG path (FPGA enters the picture)
+
+1. Power off. Mount the Tang Mega 60K SOM on BTB0/1/2 (inspect keying —
+   a misaligned BTB can short rails). Power back up **watching the
+   current meter**; re-verify rails. GW5A + DDR3 idle draw will jump the
+   total substantially; a hot SOM or >1 A sustained at idle → stop.
+2. `openFPGALoader -c esp32s3 --detect` through the bridge → GW5AT-60
+   IDCODE. This proves TCK/TMS/TDI + the **relocated TDO (IO39)**.
+3. SRAM-load colorbars: `openFPGALoader -c esp32s3 a2mega_dp_test.fs`.
+   **led[0] blinks ~1.5 Hz** (heartbeat) = bitstream alive. (LEDs are
+   active-low; D15/D14/R14/P14.)
+4. Write the same bitstream to **SPI flash** (`openFPGALoader -c esp32s3
+   -f a2mega_dp_test.fs`) and power-cycle: heartbeat returns on its own.
+   Flash-boot is what makes bench cable-swaps tolerable.
+
+**Gate:** heartbeat from flash after power cycle → Stage 4.
+
+### 5.5 Stage 4 — PD negotiation / DP Alt Mode entry
+
+Colorbars bitstream LED ladder: `led[0]` heartbeat → `led[1]` HPD →
+`led[2]` link_established → `led[3]` video_live.
+
+1. With colorbars in flash: swap J4 from PC to the **USB-C monitor**
+   (board reboots on monitor power — fine, it flash-boots). Watch over
+   **telnet**: `pd` should walk attach → orientation → Discover
+   Identity/SVIDs/Modes → Enter DP → Status/Config VDMs → mux configured
+   (CTLSEL=10 + FLIPSEL + HPDIN_OVRRIDE) → **HPD asserted to the FPGA**.
+2. **led[1] on = HPD delivered.** This checkpoint is pure ESP32+PD — no
+   SERDES involved yet.
+3. Flip the cable (both orientations must work — FLIPSEL path).
+4. Repeat on the second monitor/dongle before declaring PD good.
+
+Failure play: `pd` trace stalls at Discover → CC/FUSB problem (check
+INT_N on IO3); enters DP mode but no HPD → VDM Attention/Status parsing
+or the HPD GPIO wire; mode entry refused → monitor wants different PDOs
+(risk #4 — try the other monitor first).
+
+### 5.6 Stage 5 — link training + colorbars (the moment of truth)
+
+This is the **first-ever hardware run of the DP core** (risk #6). Budget
+time here.
+
+1. After HPD: fabric AUX churn → **led[2] = link training done** →
+   **led[3] = video live** → colorbars at 1080p59.94 on screen.
+2. Soak ≥30 min (SI at HBR, no impedance-controlled routing — risk #2):
+   watch for dropouts/retrains. Power-cycle ×5: colorbars must return
+   unattended every time.
+3. led[2] never lights: AUX-layer problem — polarity/tri-state idiom,
+   DPCD handshake. The `misc/` golden-model checkers and `tb_*` benches
+   in DisplayPort_Verilog are the reference; compare a `pd`-observed AUX
+   timeline against sim. led[2] on but led[3] off / black screen: main
+   stream path (MSA/VB-ID/scrambler assumptions). Unstable image or
+   intermittent retrain: SI — try the shortest cable, the other monitor,
+   and only then consider dropping to RBR (needs SERDES IP regen; note it
+   in the log, don't improvise it at the bench).
+4. Log everything per unit in the provenance format (build sha + what was
+   observed).
+
+**Gate:** colorbars stable on 2 monitors, both orientations, across
+power cycles → the DP path is real. Commit any fixes; then Stage 6.
+
+### 5.7 Stage 6 — full core on the bench (no Apple II yet)
+
+Full-core LED ladder differs: `led[0]` heartbeat, **`led[1]` = DDR3
+calibration FAILED (lit = bad)**, `led[2]` link_established,
+`led[3]` video_live.
+
+1. Flash `a2mega.fs` (1080p full core). Swap to monitor.
+2. Expect: led[1] **off** (DDR3 calibrated), link up, and a mostly-black
+   1080p frame with borders + **DebugOverlay** hex/status and the OSD —
+   no Apple II bus activity is fine, scan-out doesn't need it.
+3. Verify the monitor actually reports 1920×1080@59.94; check overlay
+   text legibility (OSD renders native-scale at 1080p — small text is a
+   known cosmetic, not a bug).
+4. Telnet menu mirror should drive the OSD.
+
+**Gate:** full core scans out 1080p with DDR3 calibrated → slot time.
+
+### 5.8 Stage 7 — Apple II slot (IIgs first)
+
+Pre-insertion checklist: machine off; inspect card-edge for solder
+bridges; card seats fully; nothing conductive under the board.
+
+1. First power-on in slot with **no USB-C attached**: machine must boot
+   normally (bus transceivers behave, no /INH mischief). Then attach the
+   monitor.
+2. **Fast iteration loop unlocked:** in-slot the board holds slot 5 V, so
+   PC↔monitor cable swaps no longer reboot it — SRAM loads
+   (`openFPGALoader -c esp32s3 file.fs`, no `-f`) now survive the swap.
+   Bench = flash writes; slot = SRAM iterate.
+3. Regression sweep (the Phase 3.5 list): IIgs boots; Apple video correct
+   at 1080p (40/80-col text, hires, DHGR, SHR); OSD/menu via telnet
+   mirror; disk serve from LittleFS (FTP a .dsk up first — ~a dozen fit);
+   Ensoniq audio over DP audio (48 kHz SDP path — first hardware test of
+   sdp_engine too); W5100-over-WiFi; GS RDY split (`FPGA_GS_RDY_OUT` via
+   the new open-drain driver — watch for bus contention symptoms).
+4. Soak: leave a GS demo/game running ≥1 hr.
+
+### 5.9 Stage 8 — fleet + wrap-up
+
+- Repeat Stages 1–3 + colorbars on board **#2** to separate "design
+  works" from "unit #1 works" before deep-diving any anomaly.
+- Log per-unit results + build hashes; update this doc's risk list with
+  what reality said (esp. IO3 strap, monitor matrix, SI margin).
+- Then the deferred queue, in order of value: DP3/L0 polarity probe
+  (needs 4-lane IP regen — now safe to schedule); stream-to-JTAG FPGA
+  update (removes the PC from the loop); 3× OSD text scaling; HBR2
+  experiment only if the SI soak was spotless.
