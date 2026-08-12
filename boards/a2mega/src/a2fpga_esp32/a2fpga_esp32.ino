@@ -93,6 +93,7 @@ static const int SPI_HZ = 4 * 1000 * 1000;  // (reg path is clean at 8 MHz but
 bool usb_was_connected = false;
 static bool sd_mounted = false;
 static bool subsystems_up = false;
+static bool network_up = false;
 static TaskHandle_t disk_task_h = NULL;
 static TaskHandle_t menu_task_h = NULL;
 static bool wifitest_quiesced = false;
@@ -877,34 +878,26 @@ static void menu_task(void *arg) {
     }
 }
 
-static void start_subsystems() {
-    if (subsystems_up)
+// Network + storage bring-up, deliberately INDEPENDENT of the FPGA link.
+// On 1.0a3 the USB-C port is the monitor, so WiFi/telnet is the primary
+// console and must come up even when the FPGA is absent (no SOM fitted),
+// unconfigured, or running a bitstream without the OSPI service (the DP
+// colorbars bring-up build has none). osd_log() lines emitted here are
+// buffered in the console and replay to the OSD when the link appears.
+static void start_network() {
+    if (network_up)
         return;
-
-    esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
-    if (err != ESP_OK) {
-        Serial.printf("[SPI] init failed: %s\n", esp_err_to_name(err));
-        return;
-    }
-    if (!fpga_link_init()) {
-        Serial.println("[fpga] no A2FP device on the OSPI link; retrying later");
-        return;
-    }
+    network_up = true;
 
     settings_init();
     sd_mounted = mount_sd();
 
-    osd_console_show();
     osd_log("A2MEGA ESP32 %s %s", __DATE__, __TIME__);
 #if A2MEGA_HAS_SD
     osd_log(sd_mounted ? "SD CARD MOUNTED" : "NO SD CARD");
 #else
     osd_log(sd_mounted ? "FLASH FS MOUNTED" : "FLASH FS FAILED");
 #endif
-
-    disk_init();
-    menu_init();
-    w5100_init();
 
     if (sd_mounted)
         load_wifi_credentials();
@@ -927,6 +920,32 @@ static void start_subsystems() {
         osd_log("WIFI: NOT CONFIGURED (CLI: WIFI <SSID> <PSK>)");
 #endif
     }
+}
+
+static void start_subsystems() {
+    if (subsystems_up)
+        return;
+
+    esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+    if (err != ESP_OK) {
+        Serial.printf("[SPI] init failed: %s\n", esp_err_to_name(err));
+        return;
+    }
+    if (!fpga_link_init()) {
+        // Keep probing quietly: with the colorbars bring-up bitstream (no
+        // OSPI service in fabric) this state is permanent and expected.
+        static uint32_t misses = 0;
+        if (misses++ % 60 == 0)
+            Serial.println("[fpga] no A2FP device on the OSPI link; retrying "
+                           "in the background (normal for bring-up bitstreams)");
+        return;
+    }
+
+    osd_console_show();
+
+    disk_init();
+    menu_init();
+    w5100_init();
 
     // DDR3 calibration telemetry: status reg bit1 = init_calib_complete,
     // reg 0x23 = fabric watchdog retry count (nonzero = the reset sequencer
@@ -990,6 +1009,7 @@ void setup() {
     usbc_pd_init();
 #endif
 
+    start_network();      /* WiFi/telnet console first — never FPGA-gated */
     start_subsystems();
 }
 

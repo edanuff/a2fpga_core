@@ -45,6 +45,13 @@ static void ensure_lock(void)
 /* Repaint the whole buffer to the OSD text page. Caller holds s_lock. */
 static void repaint(void)
 {
+    /* Console text buffers fine without an FPGA (no SOM, or a bring-up
+     * bitstream without the OSPI service); the a2spi writes below would
+     * hit an uninitialized SPI device. osd_console_show() repaints the
+     * full buffer once the link comes up, so nothing is lost. */
+    if (!fpga_link_ok())
+        return;
+
     fpga_link_lock();                 /* keep the frame update atomic */
     fpga_screen_clear();
     fpga_screen_home();
