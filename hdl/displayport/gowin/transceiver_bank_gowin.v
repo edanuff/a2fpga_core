@@ -71,7 +71,16 @@ module transceiver_bank_gowin #(
     // Raw SERDES bring-up status (mgmt_clk domain except where noted):
     // {pll_lock, lane_ready[1:0], ~pcs_tx_rst, tx_running[1:0]} — the
     // signals the reset sequencer gates on, never before observable.
-    output      [7:0] serdes_status
+    output      [7:0] serdes_status,
+    // DRP register-dump readback (IPUG1024 3.11): a background FSM
+    // reads a curated list of CSR addresses over the DRP and latches
+    // the results. dbg_data/dbg_addr are quasi-static once dbg_done —
+    // safe to sample from any clock for a debug UART. Answers whether
+    // the bitstream's CSR replay actually landed in the silicon.
+    input       [4:0] dbg_idx,
+    output     [31:0] dbg_data,
+    output     [23:0] dbg_addr,
+    output            dbg_done
 );
 
     // ------------------------------------------------------------------
@@ -175,6 +184,14 @@ module transceiver_bank_gowin #(
     // ------------------------------------------------------------------
     wire tx_symbol_clk_raw;
 
+    // DRP readback plumbing (reader FSM below the instantiations)
+    wire        drp_clk_w;
+    reg  [23:0] drp_addr_r  = 24'd0;
+    reg         drp_rden_r  = 1'b0;
+    wire        drp_rdvld_w;
+    wire [31:0] drp_rddata_w;
+    wire        drp_ready_w;
+
     // por_n: release after power-up request (refclk must be stable; the
     // board's clock generator is programmed before the FPGA runs)
     reg por_n = 1'b0;
@@ -268,16 +285,16 @@ module transceiver_bank_gowin #(
         .dp_phy_q0_ln2_rx_valid_o   (),
         .dp_phy_q0_ln2_signal_detect_o (),
         .dp_phy_q0_ln2_rx_cdr_lock_o (),
-        // DRP idle (future swing/FFE reconfiguration hook)
-        .dp_phy_drp_clk_o           (),
-        .dp_phy_drp_addr_i          (24'b0),
+        // DRP: read-only register-dump bridge (writes never enabled)
+        .dp_phy_drp_clk_o           (drp_clk_w),
+        .dp_phy_drp_addr_i          (drp_addr_r),
         .dp_phy_drp_wren_i          (1'b0),
         .dp_phy_drp_wrdata_i        (32'b0),
-        .dp_phy_drp_strb_i          (4'b0),
-        .dp_phy_drp_rden_i          (1'b0),
-        .dp_phy_drp_ready_o         (),
-        .dp_phy_drp_rdvld_o         (),
-        .dp_phy_drp_rddata_o        (),
+        .dp_phy_drp_strb_i          (8'b0),
+        .dp_phy_drp_rden_i          (drp_rden_r),
+        .dp_phy_drp_ready_o         (drp_ready_w),
+        .dp_phy_drp_rdvld_o         (drp_rdvld_w),
+        .dp_phy_drp_rddata_o        (drp_rddata_w),
         .dp_phy_drp_resp_o          ()
     );
 `else
@@ -333,16 +350,16 @@ module transceiver_bank_gowin #(
         .dp_phy_q0_ln1_rx_valid_o   (),
         .dp_phy_q0_ln1_signal_detect_o (),
         .dp_phy_q0_ln1_rx_cdr_lock_o (),
-        // DRP idle (future swing/FFE reconfiguration hook)
-        .dp_phy_drp_clk_o           (),
-        .dp_phy_drp_addr_i          (24'b0),
+        // DRP: read-only register-dump bridge (writes never enabled)
+        .dp_phy_drp_clk_o           (drp_clk_w),
+        .dp_phy_drp_addr_i          (drp_addr_r),
         .dp_phy_drp_wren_i          (1'b0),
         .dp_phy_drp_wrdata_i        (32'b0),
-        .dp_phy_drp_strb_i          (4'b0),
-        .dp_phy_drp_rden_i          (1'b0),
-        .dp_phy_drp_ready_o         (),
-        .dp_phy_drp_rdvld_o         (),
-        .dp_phy_drp_rddata_o        (),
+        .dp_phy_drp_strb_i          (8'b0),
+        .dp_phy_drp_rden_i          (drp_rden_r),
+        .dp_phy_drp_ready_o         (drp_ready_w),
+        .dp_phy_drp_rdvld_o         (drp_rdvld_w),
+        .dp_phy_drp_rddata_o        (drp_rddata_w),
         .dp_phy_drp_resp_o          ()
     );
 `endif
@@ -350,12 +367,109 @@ module transceiver_bank_gowin #(
     // serial data leaves through dedicated pads; these RTL ports idle
     assign gtptx_p = 2'b00;
     assign gtptx_n = 2'b11;
+
+    // ------------------------------------------------------------------
+    // DRP register-dump reader (drp_clk_w domain). Read timing per
+    // IPUG1024 3.11: rden high with addr, hold until rdvld, capture
+    // rddata, drop rden the following cycle. Re-dumps continuously
+    // (~every 0.3 s) so the UART always shows fresh values; a read that
+    // never returns rdvld times out and is recorded as 0xDEAD_xxxx.
+    // ------------------------------------------------------------------
+    function [23:0] dump_addr_rom(input [4:0] i);
+        case (i)
+            // the 7 writes the generator emits BEFORE the 0xb00000 key
+            5'd0:  dump_addr_rom = 24'h8081a4;
+            5'd1:  dump_addr_rom = 24'h8081a8;
+            5'd2:  dump_addr_rom = 24'h808758;
+            5'd3:  dump_addr_rom = 24'h808284;
+            5'd4:  dump_addr_rom = 24'h808384;
+            5'd5:  dump_addr_rom = 24'h808484;
+            5'd6:  dump_addr_rom = 24'h808584;
+            // common-block deltas vs tang_mega
+            5'd7:  dump_addr_rom = 24'h808760;
+            5'd8:  dump_addr_rom = 24'h800b91;
+            // lane2 (active; bonding master) control/status block
+            5'd9:  dump_addr_rom = 24'h809468;
+            5'd10: dump_addr_rom = 24'h80946c;
+            5'd11: dump_addr_rom = 24'h809400;
+            5'd12: dump_addr_rom = 24'h80943c;
+            5'd13: dump_addr_rom = 24'h809410;
+            5'd14: dump_addr_rom = 24'h809420;
+            // lane3 (active)
+            5'd15: dump_addr_rom = 24'h809668;
+            5'd16: dump_addr_rom = 24'h809600;
+            5'd17: dump_addr_rom = 24'h80963c;
+            // per-lane analog/driver blocks (lanes 2/3)
+            5'd18: dump_addr_rom = 24'h8084c0;
+            5'd19: dump_addr_rom = 24'h8085c0;
+            5'd20: dump_addr_rom = 24'h8084b8;
+            5'd21: dump_addr_rom = 24'h8084bc;
+            // QPLL/refclk-adjacent lane blocks
+            5'd22: dump_addr_rom = 24'h800658;
+            5'd23: dump_addr_rom = 24'h800832;
+            default: dump_addr_rom = 24'h000000;
+        endcase
+    endfunction
+    // Only the register the UART currently displays is served: dbg_idx
+    // (quasi-static, changes every ~0.7 s) is synchronized into the DRP
+    // domain and that single address is re-read continuously. One result
+    // register instead of a full dump RAM — negligible fabric footprint.
+    reg [4:0]  idx_meta = 5'd0, idx_sync = 5'd0;
+    reg [31:0] res_data = 32'd0;
+    reg [23:0] res_addr = 24'd0;
+    reg        res_vld  = 1'b0;
+    reg [1:0]  rd_state = 2'd0;          // 0=gap, 1=read, 2=drop
+    reg [15:0] rd_tmo   = 16'd0;
+    reg [17:0] rd_gap   = 18'd0;         // settle between reads (~ms)
+
+    always @(posedge drp_clk_w) begin
+        idx_meta <= dbg_idx;
+        idx_sync <= idx_meta;
+        case (rd_state)
+            2'd0: begin
+                drp_rden_r <= 1'b0;
+                rd_gap <= rd_gap + 18'd1;
+                if (&rd_gap) begin
+                    rd_state <= 2'd1;
+                    drp_addr_r <= dump_addr_rom(idx_sync);
+                    rd_tmo <= 16'd0;
+                end
+            end
+            2'd1: begin                  // rden high until rdvld or timeout
+                drp_rden_r <= 1'b1;
+                rd_tmo <= rd_tmo + 16'd1;
+                if (drp_rdvld_w) begin
+                    res_data <= drp_rddata_w;
+                    res_addr <= drp_addr_r;
+                    res_vld  <= 1'b1;
+                    rd_state <= 2'd2;
+                end else if (&rd_tmo) begin
+                    res_data <= {16'hDEAD, 11'd0, idx_sync};
+                    res_addr <= drp_addr_r;
+                    res_vld  <= 1'b1;
+                    rd_state <= 2'd2;
+                end
+            end
+            default: begin
+                drp_rden_r <= 1'b0;
+                rd_gap <= 18'd0;
+                rd_state <= 2'd0;
+            end
+        endcase
+    end
+
+    assign dbg_data = res_data;
+    assign dbg_addr = res_addr;
+    assign dbg_done = res_vld;
 `else
     // ------------------------------------------------------------------
     // Behavioural stand-in for simulation and lint: refclk0 must be
     // driven at the word rate (81 MHz for RBR/20-bit) by the testbench;
     // lock/ready assert after short fake delays.
     // ------------------------------------------------------------------
+    assign dbg_data = 32'd0;
+    assign dbg_addr = 24'd0;
+    assign dbg_done = 1'b0;
     assign tx_symbol_clk = refclk0;
 
     reg [7:0] fake_lock_cnt = 0;

@@ -97,7 +97,13 @@ module dp_transmitter #(
     // SERDES bring-up status {pll_lock, lane_ready[1:0], tx_out_of_reset,
     // tx_running[1:0]}; ties to all-ones on non-Gowin/sim builds.
     output logic [7:0] serdes_status,
-    output logic hpd_present_out
+    output logic hpd_present_out,
+    // DRP register-dump readback (Gowin only; zeros elsewhere) — see
+    // transceiver_bank_gowin dbg_* ports.
+    input  logic [4:0]  drp_dbg_idx,
+    output logic [31:0] drp_dbg_data,
+    output logic [23:0] drp_dbg_addr,
+    output logic        drp_dbg_done
 );
 
     // ------------------------------------------------------------------
@@ -453,6 +459,9 @@ module dp_transmitter #(
     );
     assign tx_running[3:2] = 2'b00;
     assign serdes_status = 8'h3F;
+    assign drp_dbg_data = 32'd0;
+    assign drp_dbg_addr = 24'd0;
+    assign drp_dbg_done = 1'b0;
 `elsif DP_VENDOR_GOWIN
     transceiver_bank_gowin #(.TX_PROBE(TX_PROBE)) i_transceiver_bank(
         .mgmt_clk        (clk100),
@@ -470,7 +479,11 @@ module dp_transmitter #(
         .tx_symbols      (tx_symbols),
         .gtptx_p         (dp_tx_lane_p),
         .gtptx_n         (dp_tx_lane_n),
-        .serdes_status   (serdes_status)
+        .serdes_status   (serdes_status),
+        .dbg_idx         (drp_dbg_idx),
+        .dbg_data        (drp_dbg_data),
+        .dbg_addr        (drp_dbg_addr),
+        .dbg_done        (drp_dbg_done)
     );
     assign tx_running[3:2] = 2'b00;
 `else
@@ -482,6 +495,9 @@ module dp_transmitter #(
     assign dp_tx_lane_p  = '0;
     assign dp_tx_lane_n  = '1;
     assign serdes_status = 8'h3F;
+    assign drp_dbg_data = 32'd0;
+    assign drp_dbg_addr = 24'd0;
+    assign drp_dbg_done = 1'b0;
 `endif
 
 endmodule

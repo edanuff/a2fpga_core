@@ -113,6 +113,10 @@ module a2mega_dp_test_top (
     logic [7:0] debug;
     logic [7:0] serdes_status;
     logic       hpd_present_w;
+    logic [4:0]  drp_idx;
+    logic [31:0] drp_data;
+    logic [23:0] drp_addr;
+    logic        drp_done;
 
     dp_transmitter #(
         .LANE_COUNT     (2),
@@ -122,7 +126,7 @@ module a2mega_dp_test_top (
         // not field-modifiable). TX works — run the link policy open-loop.
         // Remove when a board rev provides a real AUX front-end.
         .BLIND_SINK     (1),
-        .TX_PROBE       (1),  // 1 = lane-probe build: raw 4.2 MHz square on
+        .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.
         .H_VISIBLE (1920), .H_TOTAL (2200), .H_SYNC_WIDTH (44), .H_START (192),
@@ -155,7 +159,11 @@ module a2mega_dp_test_top (
         .debug             (debug),
         .clk_symbol_out    (clk_sym_w),
         .serdes_status     (serdes_status),
-        .hpd_present_out   (hpd_present_w)
+        .hpd_present_out   (hpd_present_w),
+        .drp_dbg_idx       (drp_idx),
+        .drp_dbg_data      (drp_data),
+        .drp_dbg_addr      (drp_addr),
+        .drp_dbg_done      (drp_done)
     );
 
     // ------------------------------------------------------------------
@@ -210,7 +218,36 @@ module a2mega_dp_test_top (
 
     localparam int MSG_LEN = 37;
     logic [7:0] msg [0:MSG_LEN-1];
+    // DRP register-dump interleave: every message slot alternates between
+    // the status line and one "CR ii aaaaaa dddddddd" register line (idx
+    // advances per reg line; ~24 regs -> full dump every few seconds).
+    // Values are latched at message start so a line is never torn.
+    logic        line_is_reg = 1'b0;
+    logic [4:0]  drp_idx_q = 5'd0;
+    logic [31:0] reg_data_l = '0;
+    logic [23:0] reg_addr_l = '0;
+    logic        reg_done_l = 1'b0;
+    assign drp_idx = drp_idx_q;
     always_comb begin
+        if (line_is_reg) begin
+            msg[0]="C"; msg[1]="R"; msg[2]=" ";
+            msg[3]=hexch({3'b0, drp_idx_q[4]}); msg[4]=hexch(drp_idx_q[3:0]);
+            msg[5]=" ";
+            msg[6]=hexch(reg_addr_l[23:20]); msg[7]=hexch(reg_addr_l[19:16]);
+            msg[8]=hexch(reg_addr_l[15:12]); msg[9]=hexch(reg_addr_l[11:8]);
+            msg[10]=hexch(reg_addr_l[7:4]);  msg[11]=hexch(reg_addr_l[3:0]);
+            msg[12]=" ";
+            msg[13]=hexch(reg_data_l[31:28]); msg[14]=hexch(reg_data_l[27:24]);
+            msg[15]=hexch(reg_data_l[23:20]); msg[16]=hexch(reg_data_l[19:16]);
+            msg[17]=hexch(reg_data_l[15:12]); msg[18]=hexch(reg_data_l[11:8]);
+            msg[19]=hexch(reg_data_l[7:4]);   msg[20]=hexch(reg_data_l[3:0]);
+            msg[21]=" "; msg[22]="W";          // W: dump-pass-complete flag
+            msg[23]=8'h30 + 8'(reg_done_l);
+            msg[24]=" "; msg[25]=" "; msg[26]=" "; msg[27]=" ";
+            msg[28]=" "; msg[29]=" "; msg[30]=" "; msg[31]=" ";
+            msg[32]=" "; msg[33]=" "; msg[34]=" "; msg[35]=" ";
+            msg[36]=8'h0A;
+        end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
         msg[7]=" "; msg[8]="D"; msg[9]=":";
@@ -229,6 +266,7 @@ module a2mega_dp_test_top (
         msg[34]=hexch(hp_s[7:4]);             // raw HPD falling edges (mod 256)
         msg[35]=hexch(hp_s[3:0]);
         msg[36]=8'h0A;
+        end
     end
 
     // 115200 baud from 50 MHz (divisor 434); one message per ~0.5 s
@@ -244,9 +282,15 @@ module a2mega_dp_test_top (
         else baud_cnt <= baud_cnt + 9'd1;
 
         msg_timer <= msg_timer + 25'd1;
-        if (msg_timer == 25'd0 && msg_idx == MSG_LEN[5:0]) begin
+        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[5:0]) begin
             msg_idx <= '0;                 // start a new message
             bit_idx <= 4'd10;              // force reload on next tick
+            line_is_reg <= ~line_is_reg;   // alternate status / register
+            if (line_is_reg)               // last line was a reg: advance
+                drp_idx_q <= (drp_idx_q == 5'd23) ? 5'd0 : drp_idx_q + 5'd1;
+            reg_data_l <= drp_data;        // latch (quasi-static source)
+            reg_addr_l <= drp_addr;
+            reg_done_l <= drp_done;
         end
 
         if (baud_tick && msg_idx != MSG_LEN[5:0]) begin
@@ -289,12 +333,15 @@ module a2mega_dp_test_top (
         sym_cnt  <= sym_cnt + 28'd1;
         tgl_sync <= {tgl_sync[1:0], win_tgl};
         if (tgl_sync[2] != tgl_sync[1]) begin
-            sym_delta <= sym_cnt - sym_last;
+            sym_delta <= sym_cnt - sym_last;   // registered snapshot
             sym_last  <= sym_cnt;
-            // 135 M ± ~2%: 132.3M .. 137.7M
-            freq_ok <= (sym_cnt - sym_last > 28'd132_300_000) &&
-                       (sym_cnt - sym_last < 28'd137_700_000);
         end
+        // pipelined vs the snapshot: sym_delta is static for a full 1 s
+        // window, so comparing it a cycle later costs nothing and keeps
+        // the wide subtract-compare off the single-cycle 135 MHz path.
+        // 135 M ± ~2%: 132.3M .. 137.7M
+        freq_ok <= (sym_delta > 28'd132_300_000) &&
+                   (sym_delta < 28'd137_700_000);
     end
 
     // ------------------------------------------------------------------
