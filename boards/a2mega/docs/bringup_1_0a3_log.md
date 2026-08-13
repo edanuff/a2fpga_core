@@ -284,3 +284,27 @@ PHY, electrically DP) instance at 2.7G as a Gowin-blessed CSR reference;
 (D) DRP readback bridge in the dp_test top (verify replay, then live
 poke candidate driver bits). UART-dead-in-TX_PROBE-builds anomaly still
 open (perfect correlation, no mechanism).
+
+**Path A round 2 (magic-write ordering): NEGATIVE.** Gowin's own
+Customized PHY reference design (GW5AST-138 PRBS7 demo,
+/Volumes/Storage/Downloads/Gowin_Customized_PHY_RefDesign) puts the
+0xb00000=0x00FFAA55 write FIRST in its CSR; our generator emits 7 writes
+before it. Reordered ours unlock-first: built clean, flashed, B11/B10
+unchanged (1.84 V CM, no pattern). Keeping the Gowin-blessed order (no
+observed downside). Bonus from the ref design: its fabric idiom (static
+pma_rstn=1/pcs_tx_rst=0, wren=~afull, clkout->tx_clk loopback) matches
+our post-reset-fix code EXACTLY — the reset fix is validated against
+vendor practice. Note: ref design zero-pads unused upper 80-bit-bus
+words where we replicate; content-identical for probe, revisit for data.
+
+DONE-LED flashing during problem periods (user observation): ESP32 side
+is clean (GPIO48 INPUT_PULLUP, read-only) — adds ~45k parallel pull-up
+to the DONE net. flash.sh retries wiggle JTAG which legitimately
+resets/reconfigures (DONE drops/rises per attempt). UG718 config guide
+now in boards/a2mega/docs/ for the net's pull-up requirements. Watch.
+
+**Decision: stop bit-guessing. Next = observability.** (1) DRP readback
+bridge in dp_test top — IPUG1024 §3.11 timing, dump curated CSR window
+over the debug UART: answers "did the replay land" and enables live
+pokes. (2) GUI session: from-scratch regen + single-knob attribution +
+EDPPHY generation for a Gowin-blessed DP-rate CSR reference.
