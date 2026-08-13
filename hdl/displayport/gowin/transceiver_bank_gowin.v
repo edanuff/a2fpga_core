@@ -117,11 +117,14 @@ module transceiver_bank_gowin #(
     // pcs_tx_rst a short settle later, gate on nothing.
     wire [1:0] powerup_eff = TX_PROBE ? 2'b11 : powerup_channel;
 
-    // probe pattern generator (tx_symbol_clk domain)
-    reg [4:0] probe_cnt = 5'd0;
+    // probe pattern generator (tx_symbol_clk domain): 128-word frame,
+    // 96 words high / 32 low = ~1.05 MHz square at 75% duty. The low
+    // rate suits flywire scope probes; the ASYMMETRIC duty reads out
+    // polarity directly (P-leg: 75% high; an inverted lane: 25%).
+    reg [6:0] probe_cnt = 7'd0;
     always @(posedge tx_symbol_clk)
-        probe_cnt <= probe_cnt + 5'd1;
-    wire [19:0] probe_word = probe_cnt[4] ? 20'hFFFFF : 20'h00000;
+        probe_cnt <= probe_cnt + 7'd1;
+    wire [19:0] probe_word = (probe_cnt < 7'd96) ? 20'hFFFFF : 20'h00000;
 
     reg [15:0] seq_count = 0;
     always @(posedge mgmt_clk) begin
@@ -198,7 +201,7 @@ module transceiver_bank_gowin #(
     //   2 = symbol swap only ({sym0, sym1})              — untested
     //   3 = per-symbol bit reverse, order kept           — untested
     // Flip and rebuild to A/B; fold the winner in and delete when settled.
-    localparam TX_WORD_MODE = 0;
+    localparam TX_WORD_MODE = 0; // canonical for probe
     function [9:0] rev10(input [9:0] x);
         integer ri;
         for (ri = 0; ri < 10; ri = ri + 1)

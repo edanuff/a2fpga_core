@@ -41,17 +41,34 @@ DPCD_NAMES = {
 }
 
 def load_levels(path, thresh):
-    pts = []
+    """2-col CSV: single-ended (threshold = --thresh, or adaptive if 0).
+    3-col CSV: differential (ch1-ch2), threshold 0 crossing."""
+    raw = []
+    diff = False
     with open(path) as f:
         for row in csv.reader(f):
             if len(row) < 2:
                 continue
             try:
                 t = float(row[0]); v = float(row[1])
+                if len(row) >= 3:
+                    v -= float(row[2]); diff = True
             except ValueError:
                 continue  # header
-            pts.append((t, 1 if v >= thresh else 0))
-    return pts
+            raw.append((t, v))
+    if not raw:
+        return []
+    if diff:
+        th = 0.0
+    elif thresh > 0:
+        th = thresh
+    else:
+        vs = sorted(v for _, v in raw)
+        lo = vs[int(len(vs)*0.05)]; hi = vs[int(len(vs)*0.95)]
+        th = (lo + hi) / 2.0
+        print(f"# adaptive threshold {th:.3f}V (p5={lo:.3f} p95={hi:.3f})",
+              file=sys.stderr)
+    return [(t, 1 if v >= th else 0) for t, v in raw]
 
 def edges_from_levels(pts):
     out = []
@@ -137,7 +154,8 @@ def parse_burst(bts, is_reply_hint):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("csv")
-    ap.add_argument("--thresh", type=float, default=0.7)
+    ap.add_argument("--thresh", type=float, default=0.0,
+                help="0 = adaptive (single-ended CSV only)")
     ap.add_argument("--gap", type=float, default=8.0, help="idle gap, us")
     ap.add_argument("--rate", type=float, default=1e6)
     a = ap.parse_args()
