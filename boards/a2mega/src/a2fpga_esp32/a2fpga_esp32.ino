@@ -1005,6 +1005,22 @@ void setup() {
 #endif
 
     start_network();      /* WiFi/telnet console first — never FPGA-gated */
+
+    // Route the USB-JTAG bridge ONCE, after USB/CDC init, and never
+    // unroute it. The old edge-triggered routing keyed on
+    // usb_serial_jtag_is_connected() — an SOF-activity heuristic that
+    // macOS USB autosuspend defeats whenever no host process holds a
+    // port open: suspend -> "disconnected" -> unroute -> the next
+    // openFPGALoader open races the polled re-route and loses. That one
+    // heuristic caused two days of "JTAG wedge" rituals (works
+    // first-op-after-replug, dies on op two, retry-races eventually
+    // win). The bit-bang path (fpga_jtag) does its own pad handoff via
+    // fpga_usb_jtag_bridge_release()/restore(), so permanent routing is
+    // safe. (Routing EARLY in setup(), before Serial.begin, was tried
+    // and broke the bridge differently — this placement is the one that
+    // works.)
+    route_usb_jtag_to_gpio();
+
     start_subsystems();
 }
 
@@ -1023,13 +1039,9 @@ void loop() {
         wifi_bridge_poll();
     }
 
-    // Handle USB JTAG connection changes
-    bool usb_is_connected = usb_serial_jtag_is_connected();
-    if (usb_was_connected == false && usb_is_connected == true)
-        route_usb_jtag_to_gpio();
-    if (usb_was_connected == true && usb_is_connected == false)
-        unroute_usb_jtag_to_gpio();
-    usb_was_connected = usb_is_connected;
+    // USB JTAG bridge: routed permanently in setup() (see note there).
+    // Track connection state for the 'status' display only.
+    usb_was_connected = usb_serial_jtag_is_connected();
 
     check_escape_timeout();
 

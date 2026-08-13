@@ -166,6 +166,10 @@ module a2mega_dp_test_top (
     //   F = frame counter (cy wraps, mod 256) — proves pixel pump alive
     //   H/L/V = hpd, link_established, video_live
     // ------------------------------------------------------------------
+    logic [26:0] c100_cnt = '0;
+    always_ff @(posedge clk100)
+        c100_cnt <= c100_cnt + 27'd1;
+
     logic [7:0] frame_cnt = '0;
     logic       cy_msb_d = 1'b0;
     always_ff @(posedge clk_pixel) begin
@@ -178,11 +182,13 @@ module a2mega_dp_test_top (
     logic [7:0] st_s0, st_s;
     logic [7:0] dbg_s0, dbg_s, frm_s0, frm_s;
     logic [2:0] flg_s0, flg_s;
+    logic       c100_s0, c100_s;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
         frm_s0 <= frame_cnt;      frm_s <= frm_s0;
         flg_s0 <= {dp_hpd, link_established, video_live};
+        c100_s0 <= c100_cnt[26];  c100_s <= c100_s0;
         flg_s  <= flg_s0;
     end
 
@@ -190,7 +196,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 27;
+    localparam int MSG_LEN = 28;
     logic [7:0] msg [0:MSG_LEN-1];
     always_comb begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
@@ -199,11 +205,13 @@ module a2mega_dp_test_top (
         msg[10]=hexch(dbg_s[7:4]); msg[11]=hexch(dbg_s[3:0]);
         msg[12]=" "; msg[13]="F"; msg[14]=":";
         msg[15]=hexch(frm_s[7:4]); msg[16]=hexch(frm_s[3:0]);
-        msg[17]=" "; msg[18]="H"; msg[19]="L"; msg[20]="V"; msg[21]=":";
-        msg[22]=8'h30 + 8'(flg_s[2]);
-        msg[23]=8'h30 + 8'(flg_s[1]);
-        msg[24]=8'h30 + 8'(flg_s[0]);
-        msg[25]=8'h0D; msg[26]=8'h0A;
+        msg[17]=" "; msg[18]="H"; msg[19]="L"; msg[20]="V"; msg[21]="C";
+        msg[22]=":";
+        msg[23]=8'h30 + 8'(flg_s[2]);
+        msg[24]=8'h30 + 8'(flg_s[1]);
+        msg[25]=8'h30 + 8'(flg_s[0]);
+        msg[26]=8'h30 + 8'(c100_s);   // alternates line-to-line iff clk100 alive
+        msg[27]=8'h0A;
     end
 
     // 115200 baud from 50 MHz (divisor 434); one message per ~0.5 s

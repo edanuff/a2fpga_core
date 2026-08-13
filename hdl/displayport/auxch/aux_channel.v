@@ -73,7 +73,7 @@ module aux_channel #(
     parameter BLIND_SINK = 0
 )(
         input        clk,
-        output [7:0] debug_pmod,
+        output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
         //------------------------------
         output reg   edid_de,
         output reg   dp_reg_de,
@@ -183,6 +183,8 @@ module aux_channel #(
 
     reg [17:0] blind_dwell = 18'd0;   // per-state dwell timer (blind mode)
 
+    assign debug_pmod = state;
+
     // BLIND_SINK: assume training succeeded (no status reads possible)
     wire clock_locked_i  = clock_locked  | (BLIND_SINK != 0);
     wire equ_locked_i    = equ_locked    | (BLIND_SINK != 0);
@@ -244,7 +246,7 @@ aux_interface #(
            .REPLY_TIMEOUT_TICKS(BLIND_SINK != 0 ? 16'd799 : 16'd39999)
        ) i_aux_interface(
            .clk         (clk),
-           .debug_pmod  (debug_pmod), 
+           .debug_pmod  (),   // superseded: debug_pmod = FSM state 
             //---------------------------
             .aux_in     (aux_in),
             .aux_out    (aux_out),
