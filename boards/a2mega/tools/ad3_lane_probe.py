@@ -37,6 +37,7 @@ def analyze(name, vs, rate):
     n = len(vs)
     vmin, vmax = min(vs), max(vs)
     vpp = vmax - vmin
+    mean = sum(vs) / n
     mid = (vmax + vmin) / 2.0
     above = sum(1 for v in vs if v > mid)
     duty = above / n
@@ -66,7 +67,11 @@ def analyze(name, vs, rate):
                    % (duty*100))
         else:
             pol = f"period {period_us:.2f}us not the probe pattern"
-    print(f"{name}: Vpp={vpp*1000:.0f}mV  {verdict}"
+    # DC mean is diagnostic gold at the connector: an ENABLED TUSB1046A DP
+    # output drives ~1.75 V common mode even with a silent input, so
+    # mean~1.8V + tiny Vpp = mux alive, FPGA lane dead; mean~0V = that mux
+    # output pair not driving (disabled/unused lane). Use --range 5.
+    print(f"{name}: Vpp={vpp*1000:.0f}mV  DC={mean:.2f}V  {verdict}"
           + (f"  period={period_us:.2f}us  {pol}" if period_us else ""))
 
 def main():

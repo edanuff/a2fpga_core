@@ -46,6 +46,8 @@ extern "C" {
 #define TUSB_GEN_EQ_OVERRIDE 0x10   /* EQ from registers, not strap pins */
 #define TUSB1046_REG_DPEQ10  0x10   /* DP1EQ_SEL[7:4] | DP0EQ_SEL[3:0] */
 #define TUSB1046_REG_DPEQ32  0x11   /* DP3EQ_SEL[7:4] | DP2EQ_SEL[3:0] */
+#define TUSB1046_REG_DPCTL3  0x13   /* AUX_SNOOP_DISABLE | AUX_SBU_OVR | DPx_DISABLE */
+#define TUSB_DP_SNOOP_DIS    0x80   /* lanes governed by DPx_DISABLE (all default-enabled) */
 
 /* DP receiver EQ. CRITICAL (board #1 root-cause candidate, 2026-08-12):
  * in I2C mode the DPEQ strap pins double as address pins and float, so
@@ -180,6 +182,14 @@ static void hal_set_tusb1046(void *ctx, bool dp_enable, bool flipped)
          * comment: floating straps latch a link-killing 12.3 dB). */
         if (tusb_write_dp_eq(s_dp_eq_setting) != 0)
             Serial.println("[usbc] TUSB1046A EQ reg write FAILED");
+        /* Defeat the AUX snooper's lane power gating: with snoop enabled
+         * (reset default) the redriver mutes every DP lane until it decodes
+         * a LANE_COUNT_SET write on AUX (datasheet 8.3.2) — bitstreams that
+         * run no AUX ladder (TX_PROBE) transmit into a disabled mux. With
+         * snoop disabled, DPx_DISABLE governs and defaults to all-enabled. */
+        uint8_t dc = TUSB_DP_SNOOP_DIS;
+        if (i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_DPCTL3, &dc, 1) != 0)
+            Serial.println("[usbc] TUSB1046A snoop-disable write FAILED");
         /* s_flip_invert: live A/B of the CC-orientation -> FLIPSEL
          * convention (telnet 'f'). FLIPSEL steers BOTH the SBU/AUX
          * crossbar and the SS-lane crosspoint; an inverted convention

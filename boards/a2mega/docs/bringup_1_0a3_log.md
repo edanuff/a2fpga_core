@@ -177,3 +177,74 @@ lanes run — replication covers all cases).
   short for slow-adapting sinks, swing/EQ/SI. Next: D0 build test →
   instrumented build (freq-check LED + longer dwells) → A/B bit-order
   and polarity builds.
+
+### 2026-08-13 — AD3 physical-layer session, part 1: THE MUX WAS MUTING EVERY LANE / then the real split
+
+Toolkit sanity: AD3 on the Mac; `ad3_lane_probe.py` correctly reads DEAD
+on an open input (6 mV floor); Record-mode streamer pulled 2 s @ 4 MS/s
+with zero lost samples; W1→CH1 loopback self-test returns the generated
+1 MHz 75%-duty square at 513 mVpp/76% — the whole capture chain is proven.
+(Lesson: AD3 range-relay needs ~3 s settle before capture, now in the
+script; also closing the dwf handle stops the wavegen, so self-tests must
+run in one session.)
+
+Flash detour (morning): first flash attempt hit the wedged-JTAG state
+(garbage IDCODE 0x120034e5), and its early attempts corrupted the flash
+header → MSPI wedge, DONE low, TAP reading 0xFFFFFFFF. Recovery per the
+recipe: SRAM-load race won on iteration 129 → `fpgaerase` (now requires a
+live fabric; runs keepsram) → chain healthy at full speed → flash + verify
+100%. Also learned: serial console boots in FORWARDING mode — '+++' to
+reach the CLI; telnet console keys are single-key hotkeys (a pasted string
+gets eaten as commands — undo with e/e/f).
+
+**FINDING 1 (root-cause class, fixed): TUSB1046A AUX-snoop lane gating.**
+Datasheet 8.3.2: with AUX snoop enabled (reset default), the redriver
+DISABLES every DP lane until it snoops a LANE_COUNT_SET write on AUX;
+unused lanes stay off to save power. Reg 0x12 read 0x00 this attach (the
+TX_PROBE build runs no AUX ladder) → all four lanes muted INSIDE the mux
+regardless of what the FPGA drives. Fix (firmware, register-only):
+usbc_glue.cpp now writes reg 0x13=0x80 (AUX_SNOOP_DISABLE; DPx_DISABLE
+defaults = all lanes enabled) right after the EQ programming on DP-mode
+entry. Verified live: MUX 10-13 = 00 00 00 80, DP-ACTIVE, CC2, FLIPSEL=1.
+Note: this does NOT retro-explain yesterday's certified runs (snooper had
+LANE_COUNT_SET=2 then, lanes 0/1 enabled), but it retires a whole failure
+class — any bitstream that doesn't complete the AUX ladder transmits into
+a disabled mux; also interacts with the per-boot D:00 ladder race.
+
+**FINDING 2 (the decisive split): mux TX alive, FPGA lane silent.**
+With snoop defeated and all lanes force-enabled, full SS-pin sweep at the
+USB-C breakout (both legs, 3 s settle, twice): A2/A3, A11/A10, B2/B3,
+B11/B10 all ~10 mV Vpp — no probe pattern anywhere. Then the DC
+measurement that splits the world: B11/B10 (= DP0 out under FLIPSEL=1 per
+Table 4) sit at 1.83 V DC — the TUSB's ~1.75 V TX common-mode bias —
+with 6 mV of data. An enabled linear redriver driving CM with zero data
+means its INPUT is silent: DP0 ← die L3 ← GTR12 TX pads. (B2/B3 = DP2,
+never connected, correctly sit at 0 V.)
+
+Caveat being closed right now: the AD3 (~30 MHz BW) cannot see a
+2.7 Gb/s stream, so the verdict requires certainty that the flashed .fs
+really transmits the 1 MHz TX_PROBE pattern. The stashed
+dp_lane_probe_v2.fs matched by hash but its build parameters are not
+provable from the artifact (and the build's UART telemetry never
+appeared — unexplained). Rebuilding TX_PROBE=1 from visible source,
+reflash, re-probe B11/B10. If still silent under 1.83 V of live mux CM:
+U1 closed — the GTR12 has never driven its pads, and the IP-config/CSR
+path (task C, IDE regen) is the critical path.
+
+**VERDICT (2026-08-13 afternoon): U1 CLOSED — GTR12 TX pads have never
+driven.** Fresh a2mega_dp_test build (TX_PROBE=1 verified in source,
+timing-clean 0/0, flash verified 100%, heartbeat confirmed): B11/B10
+show DC=1.836 V (mux TX bias, alive) with only ~35 mV ripple @ ~14 MHz —
+the 1 MHz/75% probe pattern is absent. An enabled linear redriver driving
+CM with no data = silent input = DP0 ← L3 ← GTR12. All prior content-side
+A/Bs ran on a dead line. Critical path is now the SERDES IP config
+itself: task C (clean IDE regen from dp_serdes.ipc, + generate a 1.62G
+RBR variant while in the GUI), plus desk-diff of our CSR vs the Sipeed
+SFP+ working example for TX power/enable bits.
+
+Open anomaly, possibly related: UART telemetry (clk50-only, pin placed,
+H13 confirmed in pin report) is silent on BOTH TX_PROBE=1 builds but
+streamed on all TX_PROBE=0 mode builds across two firmware versions —
+a perfect correlation with no innocent mechanism identified yet. If the
+TX_PROBE forced-powerup path wedges more than the SERDES (e.g. via CSR
+interaction), both symptoms may share a root.
