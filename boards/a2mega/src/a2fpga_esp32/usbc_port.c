@@ -732,7 +732,22 @@ static int handle_toggle_result(usbc_port_t *port,
 {
     switch (result) {
     case FUSB302_TOGGLE_ATTACHED_SOURCE_CC1:
-    case FUSB302_TOGGLE_ATTACHED_SOURCE_CC2:
+    case FUSB302_TOGGLE_ATTACHED_SOURCE_CC2: {
+        /* Type-C: a source may only apply VBUS after confirming it is
+         * ABSENT (partner really is a sink). Against another DRP (a PC
+         * port) the toggle race can make both sides see "sink attached";
+         * sourcing then back-drives the partner's live VBUS, our own
+         * supply (that same VBUS on the bench) collapses, and the board
+         * brownout-loops at the toggle period — seen live 2026-08-13 as
+         * rhythmic power+ready LED flashing with no USB enumeration. */
+        bool vbus_live = false;
+        (void)fusb302_vbus_present(&port->fusb302, &vbus_live);
+        if (vbus_live) {
+            log_message(port, USBC_LOG_INFO,
+                        "source-attach with VBUS already live; partner is "
+                        "a source/DRP race - restarting toggle as sink");
+            return enter_unattached(port);
+        }
         port->polarity = result == FUSB302_TOGGLE_ATTACHED_SOURCE_CC2
                              ? FUSB302_POLARITY_CC2 : FUSB302_POLARITY_CC1;
         reset_protocol(port);
@@ -744,6 +759,7 @@ static int handle_toggle_result(usbc_port_t *port,
         port->deadline_ms = now_ms(port) + port->config.source_vbus_settle_ms;
         log_message(port, USBC_LOG_INFO, "USB-C host/source partner attached");
         return 0;
+    }
     case FUSB302_TOGGLE_ATTACHED_SINK_CC1:
     case FUSB302_TOGGLE_ATTACHED_SINK_CC2:
         port->polarity = result == FUSB302_TOGGLE_ATTACHED_SINK_CC2
