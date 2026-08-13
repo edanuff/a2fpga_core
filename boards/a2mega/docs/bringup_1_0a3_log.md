@@ -248,3 +248,39 @@ streamed on all TX_PROBE=0 mode builds across two firmware versions —
 a perfect correlation with no innocent mechanism identified yet. If the
 TX_PROBE forced-powerup path wedges more than the SERDES (e.g. via CSR
 interaction), both symptoms may share a root.
+
+### 2026-08-13 evening — CSR bit test negative; provenance settled; IPUG1024 acquired
+
+**Path A result: NEGATIVE.** 0x809468/0x809668 bit 6 (0x1BF->0x1FF,
+matching tang_mega's active lanes) rebuilt/flashed/probed: B11/B10
+unchanged (1.84 V CM, no pattern). Bit 6 is not a TX kill switch.
+CSR reverted to generator-authentic 0x1BF.
+
+**Provenance settled (user + DisplayPort_Verilog project memory):** the
+whole DP stack incl. both example SERDES configs was authored by a prior
+Claude instance driven by Ed; NOTHING has ever run on silicon (tang_mega
+dock has no DP connector — this board is the first hardware). a2_mega
+IP was genuinely GUI-generated 2026-07-19 (GUI can't reload .ipc;
+from-scratch redo drifted 3 defaults, caught by sidecar diff — ALWAYS
+diff after regen). Our .csr is byte-identical to that generator output.
+tang-vs-a2mega CSR deltas beyond mechanical lane transposition:
+0x809x68 bit6 (tested, not it), 0x808760 bit 0x400 + 0x800b91 F3->FD
+(both plausibly REFCLK1 config; QPLL locks so likely correct).
+
+**IPUG1024 read (now in boards/a2mega/docs/):** TOML loopBack="TX_ONLY"
+= Operation Mode "TX Only" (legit lane-direction mode, §3.4) — CLEARED
+as suspect. Loopback proper is separate (OFF/LB_NES/LB_FES/LB_ENC), ours
+effectively OFF. ready_o = "TX channel status indicator" — asserted in
+post-reset-fix mode builds (certified runs), so PCS layer reports alive;
+break is in the PMA serializer/driver layer, CSR-configured. por_n
+contract (§3.2): low after config until refclks stable, then high —
+ours releases after one mgmt_clk edge (compliant-ish; margin unknown).
+DRP read/write timing fully documented (§3.11, p.35) — a runtime CSR
+readback/poke bridge is buildable to verify the replay actually landed.
+
+**Next-step menu:** (B) GUI matrix session — from-scratch regen + single
+-knob variants for register attribution + generate an EDPPHY (eDP TX
+PHY, electrically DP) instance at 2.7G as a Gowin-blessed CSR reference;
+(D) DRP readback bridge in the dp_test top (verify replay, then live
+poke candidate driver bits). UART-dead-in-TX_PROBE-builds anomaly still
+open (perfect correlation, no mechanism).
