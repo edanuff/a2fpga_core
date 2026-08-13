@@ -112,6 +112,7 @@ module a2mega_dp_test_top (
     logic link_established, video_live;
     logic [7:0] debug;
     logic [7:0] serdes_status;
+    logic       hpd_present_w;
 
     dp_transmitter #(
         .LANE_COUNT     (2),
@@ -153,7 +154,8 @@ module a2mega_dp_test_top (
         .video_live        (video_live),
         .debug             (debug),
         .clk_symbol_out    (clk_sym_w),
-        .serdes_status     (serdes_status)
+        .serdes_status     (serdes_status),
+        .hpd_present_out   (hpd_present_w)
     );
 
     // ------------------------------------------------------------------
@@ -166,6 +168,14 @@ module a2mega_dp_test_top (
     //   F = frame counter (cy wraps, mod 256) — proves pixel pump alive
     //   H/L/V = hpd, link_established, video_live
     // ------------------------------------------------------------------
+    logic [7:0] hpd_fall_cnt = '0;
+    logic [2:0] hpd_sync = '0;
+    always_ff @(posedge clk50_in) begin
+        hpd_sync <= {hpd_sync[1:0], dp_hpd};
+        if (hpd_sync[2] && !hpd_sync[1])
+            hpd_fall_cnt <= hpd_fall_cnt + 8'd1;
+    end
+
     logic [26:0] c100_cnt = '0;
     always_ff @(posedge clk100)
         c100_cnt <= c100_cnt + 27'd1;
@@ -183,12 +193,14 @@ module a2mega_dp_test_top (
     logic [7:0] dbg_s0, dbg_s, frm_s0, frm_s;
     logic [2:0] flg_s0, flg_s;
     logic       c100_s0, c100_s;
+    logic [8:0] hp_s0, hp_s;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
         frm_s0 <= frame_cnt;      frm_s <= frm_s0;
         flg_s0 <= {dp_hpd, link_established, video_live};
         c100_s0 <= c100_cnt[26];  c100_s <= c100_s0;
+        hp_s0 <= {hpd_present_w, hpd_fall_cnt};  hp_s <= hp_s0;
         flg_s  <= flg_s0;
     end
 
@@ -196,7 +208,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 28;
+    localparam int MSG_LEN = 37;
     logic [7:0] msg [0:MSG_LEN-1];
     always_comb begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
@@ -211,14 +223,19 @@ module a2mega_dp_test_top (
         msg[24]=8'h30 + 8'(flg_s[1]);
         msg[25]=8'h30 + 8'(flg_s[0]);
         msg[26]=8'h30 + 8'(c100_s);   // alternates line-to-line iff clk100 alive
-        msg[27]=8'h0A;
+        msg[27]=" "; msg[28]="P"; msg[29]=":";
+        msg[30]=8'h30 + 8'(hp_s[8]);          // hpd_present (the gate)
+        msg[31]=" "; msg[32]="E"; msg[33]=":";
+        msg[34]=hexch(hp_s[7:4]);             // raw HPD falling edges (mod 256)
+        msg[35]=hexch(hp_s[3:0]);
+        msg[36]=8'h0A;
     end
 
     // 115200 baud from 50 MHz (divisor 434); one message per ~0.5 s
     logic [8:0]  baud_cnt = '0;
     logic        baud_tick;
     logic [24:0] msg_timer = '0;
-    logic [4:0]  msg_idx = MSG_LEN[4:0];   // idle when == MSG_LEN
+    logic [5:0]  msg_idx = MSG_LEN[5:0];   // idle when == MSG_LEN
     logic [3:0]  bit_idx = '0;
     logic [9:0]  shifter = 10'h3FF;
     always_ff @(posedge clk50_in) begin
@@ -227,12 +244,12 @@ module a2mega_dp_test_top (
         else baud_cnt <= baud_cnt + 9'd1;
 
         msg_timer <= msg_timer + 25'd1;
-        if (msg_timer == 25'd0 && msg_idx == MSG_LEN[4:0]) begin
+        if (msg_timer == 25'd0 && msg_idx == MSG_LEN[5:0]) begin
             msg_idx <= '0;                 // start a new message
             bit_idx <= 4'd10;              // force reload on next tick
         end
 
-        if (baud_tick && msg_idx != MSG_LEN[4:0]) begin
+        if (baud_tick && msg_idx != MSG_LEN[5:0]) begin
             if (bit_idx >= 4'd10) begin    // load next char: start+8+stop
                 shifter <= {1'b1, msg[msg_idx], 1'b0};
                 bit_idx <= 4'd0;
@@ -240,11 +257,11 @@ module a2mega_dp_test_top (
                 shifter <= {1'b1, shifter[9:1]};
                 bit_idx <= bit_idx + 4'd1;
                 if (bit_idx == 4'd9)
-                    msg_idx <= msg_idx + 5'd1;
+                    msg_idx <= msg_idx + 6'd1;
             end
         end
     end
-    assign uart_tx = (msg_idx == MSG_LEN[4:0]) ? 1'b1 : shifter[0];
+    assign uart_tx = (msg_idx == MSG_LEN[5:0]) ? 1'b1 : shifter[0];
 
     // ------------------------------------------------------------------
     // Line-rate verification: count clk_sym (the GTR12 TX word clock,

@@ -96,7 +96,8 @@ module dp_transmitter #(
     output logic clk_symbol_out,
     // SERDES bring-up status {pll_lock, lane_ready[1:0], tx_out_of_reset,
     // tx_running[1:0]}; ties to all-ones on non-Gowin/sim builds.
-    output logic [7:0] serdes_status
+    output logic [7:0] serdes_status,
+    output logic hpd_present_out
 );
 
     // ------------------------------------------------------------------
@@ -425,7 +426,8 @@ module dp_transmitter #(
         .tx_swing_0p6         (swing_0p6),
         .tx_swing_0p8         (swing_0p8),
         .tx_running           (tx_running),
-        .tx_link_established  (tx_link_established)
+        .tx_link_established  (tx_link_established),
+        .hpd_present_out      (hpd_present_out)
     );
 
     // ------------------------------------------------------------------

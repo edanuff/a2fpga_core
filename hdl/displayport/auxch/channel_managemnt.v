@@ -90,7 +90,8 @@ module channel_management #(
         output tx_swing_0p8,
           
         input  [3:0] tx_running,
-        output tx_link_established
+        output tx_link_established,
+        output hpd_present_out
     );
 
     wire       edid_de;
@@ -159,6 +160,7 @@ module channel_management #(
 
     wire       hpd_irq;
     wire       hpd_present;
+    assign     hpd_present_out = hpd_present;
 
 
     // Feed the number of links from the registers into the link management

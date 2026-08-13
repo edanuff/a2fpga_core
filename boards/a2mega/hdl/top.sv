@@ -1500,6 +1500,7 @@ module top #(
         .video_live        (dp_video_live_w),
         .clk_symbol_out    (),
         .serdes_status     (),
+        .hpd_present_out   (),
         .debug             ()
     );
 
