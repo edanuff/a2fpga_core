@@ -127,8 +127,12 @@ static void io_delay_us(void *ctx, uint32_t us)
     delayMicroseconds(us);
 }
 
+static uint8_t s_general_last = 0;   /* last value written to reg 0x0A */
+static bool    s_flip_invert = false; /* live A/B: invert FLIPSEL convention */
+
 static int tusb_write_general(uint8_t v)
 {
+    s_general_last = v;
     return i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_GENERAL, &v, 1);
 }
 
@@ -176,8 +180,14 @@ static void hal_set_tusb1046(void *ctx, bool dp_enable, bool flipped)
          * comment: floating straps latch a link-killing 12.3 dB). */
         if (tusb_write_dp_eq(s_dp_eq_setting) != 0)
             Serial.println("[usbc] TUSB1046A EQ reg write FAILED");
+        /* s_flip_invert: live A/B of the CC-orientation -> FLIPSEL
+         * convention (telnet 'f'). FLIPSEL steers BOTH the SBU/AUX
+         * crossbar and the SS-lane crosspoint; an inverted convention
+         * puts AUX polarity-swapped and lanes on unwatched pins while
+         * every register readback stays green. */
+        bool flip_eff = flipped ^ s_flip_invert;
         v = TUSB_GEN_CTLSEL_DP4 | TUSB_GEN_HPDIN_OVR | TUSB_GEN_EQ_OVERRIDE |
-            (flipped ? TUSB_GEN_FLIPSEL : 0);
+            (flip_eff ? TUSB_GEN_FLIPSEL : 0);
     } else {
         v = TUSB_GEN_CTLSEL_USB3 | TUSB_GEN_HPDIN_OVR;
     }
@@ -369,6 +379,23 @@ extern "C" void usbc_mux_eq_cycle(void)
         osd_log("MUX EQ: SETTING %u (%s DB)", presets[idx], gains[idx]);
     else
         osd_log("MUX EQ: WRITE FAILED");
+}
+
+/* Toggle the FLIPSEL convention live (telnet 'f') and rewrite the mux
+ * General register in place. If the CC->FLIPSEL mapping convention is
+ * inverted, this one bit un-crosses the AUX pair AND moves the DP lanes
+ * onto the connector pins the sink actually watches. */
+extern "C" void usbc_mux_flip_toggle(void)
+{
+    s_flip_invert = !s_flip_invert;
+    uint8_t v = (uint8_t)(s_general_last ^ TUSB_GEN_FLIPSEL);
+    if (i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_GENERAL, &v, 1) == 0) {
+        s_general_last = v;
+        osd_log("MUX FLIPSEL NOW %d (INVERT %d)",
+                (v & TUSB_GEN_FLIPSEL) ? 1 : 0, (int)s_flip_invert);
+    } else {
+        osd_log("MUX FLIP: WRITE FAILED");
+    }
 }
 
 /* Condensed PD status through osd_log: reaches the OSD *and* every telnet

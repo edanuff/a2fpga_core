@@ -111,7 +111,7 @@ module a2mega_dp_test_top (
     // ------------------------------------------------------------------
     logic link_established, video_live;
     logic [7:0] debug;
-    logic [5:0] serdes_status;
+    logic [7:0] serdes_status;
 
     dp_transmitter #(
         .LANE_COUNT     (2),
@@ -175,7 +175,7 @@ module a2mega_dp_test_top (
     end
 
     // loose 2FF samples into clk50
-    logic [5:0] st_s0, st_s;
+    logic [7:0] st_s0, st_s;
     logic [7:0] dbg_s0, dbg_s, frm_s0, frm_s;
     logic [2:0] flg_s0, flg_s;
     always_ff @(posedge clk50_in) begin
@@ -194,7 +194,7 @@ module a2mega_dp_test_top (
     logic [7:0] msg [0:MSG_LEN-1];
     always_comb begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
-        msg[5]=hexch({2'b0, st_s[5:4]}); msg[6]=hexch(st_s[3:0]);
+        msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
         msg[7]=" "; msg[8]="D"; msg[9]=":";
         msg[10]=hexch(dbg_s[7:4]); msg[11]=hexch(dbg_s[3:0]);
         msg[12]=" "; msg[13]="F"; msg[14]=":";
