@@ -593,3 +593,24 @@ receive AUX replies for real; ELVDS_IOBUF would ALSO fix TX over-swing
 wants). Would retire BLIND_SINK on this board rev entirely. Verify
 first: (1) G15/G16 pair as a TLVDS input pair on PG484/GW5AT-60B,
 (2) ELVDS/TLVDS input legality in a 3.3 V VCCIO bank on GW5A.
+
+### 2026-08-14 — ✅ STAGE 6 BENCH MILESTONE: FULL CORE DISPLAYS OVER DP
+
+Full core (with drp_dbg ports, OSD input reg, debug-overlay stage-B
+pipeline) built at 2 setup / 0 hold (down from 21 — the two remaining
+are -0.157/-0.109 routing-margin paths: cy self-increment + one packer
+hop; flashed for bench with that caveat, clean-roll queued). Bench:
+DDR3-backed Apple II framebuffer + OSD visible on the USB-C monitor
+over the certified DP link, PD DP-ACTIVE. KNOWN GAP (deferred polish):
+frame renders native-size in the 1080p raster — the integer scaler
+(Phase 3b intent) isn't in the scan-out path; image + OSD small.
+
+Build-time note: full-core PnR now takes ~35 min (register-richer
+netlist) — BUILD_TIMEOUT=1800 kills healthy runs; use 3600 for the
+full core. The earlier "pathological PnR / license contention" reads
+were wrong: the runs were just slow. (Monitor-phase streaming instead
+of tail-piped invocations makes this visible.)
+
+Remaining Stage 6/7: one more PnR roll for 0/0; integer scaling; IIgs
+slot regression — BLOCKED on the in-slot source-role PD fix (now the
+critical path); 30-min full-core soak.
