@@ -551,3 +551,13 @@ First light for a2mega 1.0a3 and first-ever silicon success for the
 DisplayPort_Verilog transmitter + blind-sink architecture. Remaining
 for Stage 5 sign-off: 30-min soak, second-monitor cross-check, then
 Stage 6 (full core).
+
+**SOAK PASSED (2026-08-14 morning): 30 min, 60/60 telemetry samples,
+ZERO anomalies** — D:2E pinned, HLVC:111x, frames counting, E:00 (not
+one HPD edge). Monitor certificate identical at T0 and T30:
+`00 41 00 77 00 01 03 22 22` (0x77 both lanes, aligned, in sync,
+level 2). User-observed: colorbars rock-solid, audio playing.
+**Stage 5 core: SIGNED OFF.** Remaining Stage 5 extras: second-monitor
+cross-check; then Stage 6 (full core: DDR3 + 1080p scan-out — NOTE:
+full-core top.sv needs the new dp_transmitter drp_dbg_* ports connected
+and picks up all aux_channel fixes automatically).
