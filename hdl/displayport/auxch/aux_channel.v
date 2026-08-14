@@ -147,7 +147,7 @@ module aux_channel #(
     reg  [7:0]  next_state       = error;
     reg  [7:0]  state_on_success = error;
     reg         retry_now;
-    reg  [26:0] retry_count;
+    reg  [28:0] retry_count;
     reg         link_check_now;
     reg [26:0]  link_check_count;
     reg [14:0]  count_100us;
@@ -181,7 +181,14 @@ module aux_channel #(
     reg       just_read_from_rx;
     reg  [3:0] powerup_mask;
 
-    reg [17:0] blind_dwell = 18'd0;   // per-state dwell timer (blind mode)
+    // Per-state dwell timer (blind mode). 2026-08-14: widened from bit 17
+    // (~1.3 ms @100 MHz) to bit 23 (~84 ms) after the AD3 AUX decode showed
+    // the sink ACKing every write yet LANE0_1_STATUS stuck at CR_DONE=0 —
+    // the 1.3 ms sprint through the training states gave the sink no time
+    // to lock TPS1 before we advanced to scrambled video. ~84 ms per state
+    // is deep inside every sink's training budget; the full ladder still
+    // completes in ~2 s after HPD.
+    reg [23:0] blind_dwell = 24'd0;
 
     assign debug_pmod = state;
 
@@ -197,7 +204,7 @@ initial begin
     next_state       = error;
     state_on_success = error;
     retry_now        = 1'b0;
-    retry_count      = 27'h0200;
+    retry_count      = 29'h0200;
     link_check_now   = 1'b0;
     link_check_count = 27'h0200;
     count_100us      = 15'd1000; 
@@ -532,11 +539,11 @@ always @(posedge clk) begin
     // adapt; the whole walk stays ~60 ms, inside the watchdog.
     //-----------------------------------------------------------
     if(state == next_state) begin
-        blind_dwell <= blind_dwell + 18'd1;
+        blind_dwell <= blind_dwell + 24'd1;
     end else begin
-        blind_dwell <= 18'd0;
+        blind_dwell <= 24'd0;
     end
-    if(BLIND_SINK != 0 && channel_busy == 1'b0 && blind_dwell[17] == 1'b1) begin
+    if(BLIND_SINK != 0 && channel_busy == 1'b0 && blind_dwell[23] == 1'b1) begin
         next_state <= state_on_success;
     end
             
@@ -667,7 +674,11 @@ always @(posedge clk) begin
     //---------------------------------------
     if(retry_count == 0) begin
         retry_now   <= 1'b1;
-        retry_count <= 27'd49999999;
+        // Blind mode walks the ladder at ~84 ms/state (~2.1 s total) —
+        // the 0.5 s watchdog reset every walk forever (live-hit
+        // 2026-08-14: D cycling 02..06). 4 s keeps the watchdog while
+        // clearing the full walk with 2x margin.
+        retry_count <= (BLIND_SINK != 0) ? 29'd399999999 : 29'd49999999;
     end else begin
         retry_now   <= 1'b0;
         retry_count <= retry_count - 1;

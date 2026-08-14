@@ -497,3 +497,39 @@ ladder restart = no more cable dances for retrain captures).
 
 Captures: aux_training{,2}.csv in scratchpad; golden set preserved in
 boards/a2mega/captures/.
+
+### 2026-08-14 — ROOT CAUSE #5, IN THE MONITOR'S OWN WORDS: TX SWING TOO LOW
+
+Dwell fix (1.3 ms -> 84 ms/state) exposed a second bug: the 0.5 s
+retry_now watchdog reset the slowed ladder forever (D cycling 02..06)
+-> watchdog now 4 s in blind mode. With both fixed the ladder walks
+clean (D:2E, ~2.1 s) — screen still dark, CR_DONE still 0.
+
+THE self-triggered retrain capture (new telnet 'r' key + AD3) decoded
+the ENTIRE ladder conversation:
+- EDID reads: monitor serves full EDID (ASCII name visible in replies)
+- D0 power write (0x600): **ACKed** — the "never-snooped D0" was a TUSB
+  snooper quirk, not a transmit bug (U6 closed)
+- During TPS1: LANE_ALIGN_STATUS=0x80 (LINK_STATUS_UPDATED) and
+  **ADJUST_REQUEST_LANE0_1 = 0x22 — the monitor requests VOLTAGE SWING
+  LEVEL 2 (800 mV) on both lanes, repeatedly, all training long**
+- Our ladder then writes TRAINING_PATTERN_SET=0 (training over) at the
+  same 420 mV -> monitor never locks -> dark, CR_DONE=0.
+
+Compounding gaps: blind mode's forced clock_locked_i skips the ladder's
+own swing-escalation states, and the swing_0p4/0p6/0p8 outputs are not
+wired to silicon anyway (GTR12 swing static in CSR: txlev=5 = 420 mV).
+
+FIX ROUTES (both ours, no hardware): (1) STATIC — IDE regen with TX
+Swing = 800 mV (DP level 2); (2) DYNAMIC — IPUG 3.11.2: the IP GUI's
+"Reconfiguration" button EXPORTS a .csr of DRP writes for TX-AFE swing;
+replay over our already-wired DRP port = real closed-... loop swing
+control for the ladder. GUI session agenda: regen @800 mV + export
+swing-level reconfig .csr set + RBR variant.
+
+Session tally: FIVE root causes found+fixed/identified (mux snoop
+gating; VBUS DRP-race brownout; wrong-gprj flash trap; open AUX-SBU
+crossbar; TX swing below sink's requested level) + physical layer fully
+signed off + AUX proven bidirectional with complete protocol
+visibility (decoder v2 + retrain key = closed-loop debugging without a
+protocol analyzer).

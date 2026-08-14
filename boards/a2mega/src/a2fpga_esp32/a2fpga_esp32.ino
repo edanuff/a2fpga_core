@@ -1025,6 +1025,31 @@ void setup() {
 }
 
 void loop() {
+    // One-shot debug-UART line diagnostic (2026-08-13: FPGA heartbeat up,
+    // uart_tx placed on H13, yet zero bytes reach the telnet tee): raw-
+    // sample the Serial1 RX pad for 400 ms ~8 s after boot. The GPIO in-
+    // register still reflects the pad while the UART owns it. A healthy
+    // line idles HIGH and shows a burst of edges every ~340 ms; stuck
+    // LOW = pin conflict/no drive; HIGH with 0 edges = FPGA not sending.
+    static bool uart_diag_done = false;
+    if (!uart_diag_done && millis() > 8000) {
+        uart_diag_done = true;
+        int last = gpio_get_level(GPIO_NUM_44), edges = 0;
+        uint32_t lows = 0, n = 0;
+        uint32_t t0 = millis();
+        while (millis() - t0 < 400) {
+            int v = gpio_get_level(GPIO_NUM_44);
+            n++;
+            if (v != last) { edges++; last = v; }
+            if (!v) lows++;
+        }
+        char msg[64];
+        snprintf(msg, sizeof msg, "UARTDIAG: RX44 EDGES=%d LOW=%lu/%lu",
+                 edges, (unsigned long)lows, (unsigned long)n);
+        osd_log(msg);
+        Serial.printf("[diag] %s\n", msg);
+    }
+
     // Late bring-up: keep probing until the FPGA answers on the OSPI link
     // (it may still be configuring at ESP32 boot).
     if (!subsystems_up) {

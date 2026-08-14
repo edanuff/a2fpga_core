@@ -244,6 +244,36 @@ static void hal_set_fpga_hpd(void *ctx, bool level)
     s_hpd_level = level;
 }
 
+/* Telnet 'r': drop HPD to the FPGA for ~250 ms and restore — restarts
+ * the gateware's blind AUX/training ladder on demand (BLIND_SINK resets
+ * on hpd_present falling). No cables touched, nothing power-cycles. */
+extern "C" void usbc_hpd_retrain(void)
+{
+    if (!s_hpd_level) {
+        osd_log("RETRAIN: HPD is low (no sink) - nothing to pulse");
+        return;
+    }
+    osd_log("RETRAIN: pulsing HPD low 250 ms (ladder restart)");
+    digitalWrite(PIN_DP_HPD_OUT, LOW);
+    vTaskDelay(pdMS_TO_TICKS(250));
+    digitalWrite(PIN_DP_HPD_OUT, HIGH);
+}
+
+/* Telnet 'u': raw FUSB302B status snapshot for in-slot attach debugging. */
+extern "C" void usbc_fusb_dump_log(void)
+{
+    static const uint8_t regs[] = {0x40, 0x41, 0x42, 0x43, 0x44, 0x3C, 0x3E};
+    char line[64];
+    char *w = line;
+    w += snprintf(w, sizeof line, "FUSB");
+    for (size_t i = 0; i < sizeof regs; i++) {
+        uint8_t v = 0xEE;
+        (void)i2c_read(NULL, 0x22, regs[i], &v, 1);
+        w += snprintf(w, sizeof line - (w - line), " %02X:%02X", regs[i], v);
+    }
+    osd_log(line);
+}
+
 static void hal_pulse_fpga_hpd_irq(void *ctx)
 {
     (void)ctx;
