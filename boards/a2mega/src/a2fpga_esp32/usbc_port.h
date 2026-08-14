@@ -108,6 +108,7 @@ typedef struct {
     usbc_tx_kind_t tx_kind;
     usb_pd_message_t tx_message;
     uint8_t tx_attempts;
+    uint8_t source_caps_attempts;  /* Source_Caps resends this attach */
 
     uint8_t dp_mode_position;
     uint8_t vdm_retry_count;

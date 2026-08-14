@@ -31,6 +31,8 @@ enum {
     SW0_CC2_PD     = 1u << 1,
     SW0_MEASURE_CC1 = 1u << 2,
     SW0_MEASURE_CC2 = 1u << 3,
+    SW0_VCONN_CC1  = 1u << 4,
+    SW0_VCONN_CC2  = 1u << 5,
     SW0_CC1_PU     = 1u << 6,
     SW0_CC2_PU     = 1u << 7,
 
@@ -275,8 +277,16 @@ int fusb302_configure_source(fusb302_t *device,
 
     if ((rc = write_reg(device, REG_CONTROL2, CONTROL2_MODE_DRP)) != 0)
         return rc;
+    /* Source VCONN on the NON-CC pin (the Ra/cable side). Cable
+     * adapters (USB-C->DP etc.) power their marker/redriver from
+     * VCONN — without it they never come up as sinks at all (found
+     * 2026-08-14: DP-cable adapter undetectable in the slot; the
+     * driver never touched the VCONN switches). Type-C requires a
+     * DFP to supply VCONN when sourcing. */
     if ((rc = write_reg(device, REG_SWITCHES0,
                         SW0_CC1_PU | SW0_CC2_PU |
+                        (polarity == FUSB302_POLARITY_CC2 ? SW0_VCONN_CC1
+                                                          : SW0_VCONN_CC2) |
                         active_measure(polarity))) != 0)
         return rc;
     /* 0x26 is the 1.6 V attach/detach threshold for Rp = 1.5 A. */

@@ -125,7 +125,13 @@ int usbc_port_init(usbc_port_t *port,
     port->hal = *hal;
     port->config = *config;
     port->state = USBC_STATE_DISABLED;
-    port->fusb302.rp_milliamps = config->source_milliamps;
+    /* Rp ADVERTISEMENT (Type-C CC signaling) decoupled from the PD PDO:
+     * 1.5 A Rp = 180 uA pull-up, more than doubling the CC noise margin
+     * vs default-USB's 80 uA (with 80 uA, <=20 kOhm of leakage on an
+     * exposed connector reads as an attached sink — the in-slot phantom
+     * attach, 2026-08-14). The TPS2553 still hardware-limits at 1 A and
+     * the PDO still offers 5 V/1 A. */
+    port->fusb302.rp_milliamps = 1500u;
     return fusb302_init(&port->fusb302, fusb_io, fusb_i2c_address);
 }
 
@@ -682,8 +688,21 @@ static int service_state_timer(usbc_port_t *port)
         port->state = USBC_STATE_SOURCE_WAIT_REQUEST;
         return send_source_caps(port);
     case USBC_STATE_SOURCE_WAIT_REQUEST:
-        if (!port->tx_busy && time_reached(now, port->deadline_ms))
+        if (!port->tx_busy && time_reached(now, port->deadline_ms)) {
+            /* Give-up bound (2026-08-14): a partner that never sends a
+             * Request after repeated Source_Caps is a non-PD sink or a
+             * phantom (leakage) — this port exists solely for DP Alt
+             * Mode, which needs PD, so release VBUS and resume toggling
+             * rather than parking forever (the old behavior parked here
+             * for good and ignored later real attaches). */
+            if (++port->source_caps_attempts >= 12u) {
+                log_message(port, USBC_LOG_INFO,
+                            "no PD Request after 12 Source_Caps; "
+                            "releasing (non-PD sink or phantom)");
+                return enter_unattached(port);
+            }
             return send_source_caps(port);
+        }
         break;
     case USBC_STATE_SOURCE_SEND_PS_RDY:
         if (!port->tx_busy && time_reached(now, port->deadline_ms))
@@ -719,6 +738,7 @@ static int service_state_timer(usbc_port_t *port)
             set_vbus(port, true);
             port->state = USBC_STATE_SOURCE_WAIT_VBUS;
             port->deadline_ms = now + port->config.source_vbus_settle_ms;
+            port->source_caps_attempts = 0u;
         }
         break;
     default:
@@ -757,6 +777,7 @@ static int handle_toggle_result(usbc_port_t *port,
         set_vbus(port, true);
         port->state = USBC_STATE_SOURCE_WAIT_VBUS;
         port->deadline_ms = now_ms(port) + port->config.source_vbus_settle_ms;
+        port->source_caps_attempts = 0u;
         log_message(port, USBC_LOG_INFO, "USB-C host/source partner attached");
         return 0;
     }
