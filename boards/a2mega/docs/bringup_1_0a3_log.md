@@ -401,3 +401,31 @@ regardless: 12 polls, ZERO monitor replies, E:00 — the sink is not
 answering, and finding out why is the morning's first job. Candidates:
 AUX timing (pending precise capture), TX amplitude/CM at the monitor
 side of the mux, or request framing.
+
+### 2026-08-13 midnight — ROOT CAUSE #4 FOUND & FIXED: AUX-SBU crossbar was OPEN
+
+50 MS/s capture: our AUX TX timing is CLEAN (1.0 us cells, ~50/50
+Manchester, normal AC wander) — the 75/25 reading was 4 MS/s
+quantization. TX exonerated.
+
+THE find: SBU idle DC read 0.43/0.61 V — the AUXN 100k-to-3V3 bias never
+crossed the chip. The TUSB1046A's AUX<->SBU crossbar was effectively
+OPEN despite CTLSEL1=1/FLIPSEL auto-mapping; our AUX reached the monitor
+only through ~5 pF of off-capacitance. The monitor never received a
+single DPCD write across the entire bring-up — dark screen with perfect
+lanes, zero replies, zero HPD-IRQ, all explained.
+
+FIX (firmware): AUX_SBU_OVR forced per orientation (reg 0x13 = 0xA0 for
+FLIPSEL=1: AUXp->SBU2/AUXn->SBU1) alongside snoop-disable. VERIFIED: SBU
+idle DC snapped to 1.67 V (= source 100k-up ∥ sink 100k-down, the
+textbook two-network midpoint — the MONITOR'S OWN BIAS is now visible)
+and 2.59 V. The sink's AUX front-end is electrically attached for the
+first time.
+
+REMAINING: sink still does not ACK the 1 Hz check_link poll (msg 0x0D,
+a mandatory-reply DPCD status read). Next-tier suspects: TX differential
+over-swing (~±2 V measured vs DP AUX 1.38 Vpp max), differential SYNC
+polarity convention, request framing. Decisive next test: B2 — MacBook
+golden-reference AUX capture through the same breakout, electrical +
+byte-level diff vs ours. Also: whether ladder re-ran post-fix at a fresh
+attach is unconfirmed (capture window showed steady-state polls only).

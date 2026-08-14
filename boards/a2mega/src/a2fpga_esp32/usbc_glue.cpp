@@ -178,6 +178,9 @@ static void hal_set_tusb1046(void *ctx, bool dp_enable, bool flipped)
     (void)ctx;
     uint8_t v;
     if (dp_enable) {
+        /* s_flip_invert: live A/B of the CC-orientation -> FLIPSEL
+         * convention (telnet 'f'); needed up here for AUX_SBU_OVR too. */
+        bool flip_eff = flipped ^ s_flip_invert;
         /* Program sane EQ BEFORE enabling the lanes (see s_dp_eq_setting
          * comment: floating straps latch a link-killing 12.3 dB). */
         if (tusb_write_dp_eq(s_dp_eq_setting) != 0)
@@ -186,16 +189,20 @@ static void hal_set_tusb1046(void *ctx, bool dp_enable, bool flipped)
          * (reset default) the redriver mutes every DP lane until it decodes
          * a LANE_COUNT_SET write on AUX (datasheet 8.3.2) — bitstreams that
          * run no AUX ladder (TX_PROBE) transmit into a disabled mux. With
-         * snoop disabled, DPx_DISABLE governs and defaults to all-enabled. */
-        uint8_t dc = TUSB_DP_SNOOP_DIS;
+         * snoop disabled, DPx_DISABLE governs and defaults to all-enabled.
+         *
+         * ALSO force the AUX<->SBU crossbar closed (AUX_SBU_OVR, Table 6:
+         * override "regardless of CTLSEL1 and FLIPSEL"). Found 2026-08-13:
+         * with the automatic mapping the SBU pins idled at ~0.5 V on BOTH
+         * lines (AUXN's 100k-to-3V3 bias never crossed the chip) — the
+         * switch was effectively open, our AUX bursts reached the monitor
+         * only capacitively, and the sink never replied to ANY request.
+         * 01 = AUXp->SBU1/AUXn->SBU2 (normal), 10 = crossed (flipped). */
+        uint8_t dc = TUSB_DP_SNOOP_DIS | (flip_eff ? 0x20 : 0x10);
         if (i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_DPCTL3, &dc, 1) != 0)
-            Serial.println("[usbc] TUSB1046A snoop-disable write FAILED");
-        /* s_flip_invert: live A/B of the CC-orientation -> FLIPSEL
-         * convention (telnet 'f'). FLIPSEL steers BOTH the SBU/AUX
-         * crossbar and the SS-lane crosspoint; an inverted convention
-         * puts AUX polarity-swapped and lanes on unwatched pins while
-         * every register readback stays green. */
-        bool flip_eff = flipped ^ s_flip_invert;
+            Serial.println("[usbc] TUSB1046A snoop-disable/aux-ovr write FAILED");
+        /* FLIPSEL steers BOTH the SBU/AUX crossbar and the SS-lane
+         * crosspoint (flip_eff computed at the top of this branch). */
         v = TUSB_GEN_CTLSEL_DP4 | TUSB_GEN_HPDIN_OVR | TUSB_GEN_EQ_OVERRIDE |
             (flip_eff ? TUSB_GEN_FLIPSEL : 0);
     } else {
