@@ -439,3 +439,30 @@ diagnostic bitstreams). Its only benefit — auto power savings — is
 irrelevant on a slot-powered card. Future lane trimming, if wanted,
 belongs in the ESP32 driving DPx_DISABLE from explicitly-communicated
 link state.
+
+### 2026-08-13/14 overnight — B2 GOLDEN CAPTURE IN HAND; analysis deferred
+
+MacBook -> breakout -> monitor: PICTURE WORKS through the breakout (the
+breakout passes a full DP link incl. SS lanes at rate — important
+control). Golden AUX capture landed: 60 M samples, ~492k edges, ~2,675
+bursts at the replug — the complete attach negotiation with constant
+sink replies. Fragmentary live decode shows plausible ACK/NACK framing;
+full byte-level + electrical diff vs our bursts DEFERRED to careful
+offline analysis (late-night quick-look stats were internally
+inconsistent — probe-placement doubt on the differential pair + a
+windowing bug in the ad-hoc slicer; single-ended data looks rich).
+
+Solid numeric from OUR side (aux_attach2, earlier, differential probes
+verified): our AUX TX = 1.99 Vpp differential — ABOVE the DP AUX spec
+ceiling (0.29-1.38 Vpp). Over-swing is now the leading suspect for the
+sink ignoring us (spec-fearing receivers may squelch it), ahead of SYNC
+polarity and framing. The FPGA drives AUX at LVCMOS33 full swing
+pseudo-diff; attenuation options are firmware-free but fabric-side
+(drive strength / IO standard on G15/G16 in the cst - e.g. lower
+DRIVE, or series impedance already on board?) — design in the morning
+against the golden capture's measured amplitude.
+
+Captures preserved: boards/a2mega/captures/{aux_golden2,aux_attach2,
+aux_attach}.csv.gz (gitignored, ~170 MB each). Decoder needs an
+edge-timing-based Manchester pass for 4 MS/s data (quarter-cell
+sampling is marginal); write offline against the golden file.
