@@ -466,3 +466,34 @@ Captures preserved: boards/a2mega/captures/{aux_golden2,aux_attach2,
 aux_attach}.csv.gz (gitignored, ~170 MB each). Decoder needs an
 edge-timing-based Manchester pass for 4 MS/s data (quarter-cell
 sampling is marginal); write offline against the golden file.
+
+### 2026-08-14 — AUX FULLY BIDIRECTIONAL; failure isolated to CR training; in-slot source attach = separate broken workstream
+
+**Decoder v2** (edge-timing, per-burst clock fit, tools/aux_decode2.py):
+our 1 Hz poll decodes EXACTLY as designed — REQ `90 02 00 07` (native
+read, DPCD 0x200, 8 bytes) — and THE MONITOR REPLIES 260 us later:
+`00 41 00 00 00 00 00 00 00` = ACK, SINK_COUNT=0x41 (present),
+**LANE0_1_STATUS=0x00 — CR_DONE=0**. Conclusions:
+- AUX works BOTH directions through mux+breakout; v1 decoder's "sink
+  never replies" was tooling blindness (its replies use a ~31-cell
+  precharge, longer than ours). Amplitude fear retired (sink ACKs our
+  2 Vpp fine). Polarity consistent (pol=0 decodes both parties).
+- THE remaining fault: main-link training never achieves clock
+  recovery. Prime suspect: blind ladder's ~1.3 ms dwells rush the sink
+  (writes all land, but TPS1 hold time may be far too short before we
+  advance to scrambled video). Fix candidate: lengthen blind dwells
+  massively (parameter). Full closed-loop visibility now exists via
+  AD3 capture incl. ADJUST_REQUEST once in training.
+
+**In-slot experiments:** source-role attach NEVER works (user corrected:
+the DP monitor's earlier "no signal" OSD was its own power cycle, not
+our HPD). Observed: phantom Rd attach on empty breakout -> parked
+forever in SOURCE-WAIT-REQUEST (no timeout); after unstick, no attach
+against USB-C monitor (dual-source deadlock) nor DP-cable adapter (Rd
+not detected — check VBUS-backfeed vs the new source guard). Firmware
+backlog: Rd debounce/vRd check, SOURCE-WAIT-REQUEST timeout->retoggle,
+raw FUSB302B status telnet key, **telnet HPD-pulse key** (on-demand
+ladder restart = no more cable dances for retrain captures).
+
+Captures: aux_training{,2}.csv in scratchpad; golden set preserved in
+boards/a2mega/captures/.
