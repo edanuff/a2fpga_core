@@ -58,3 +58,4 @@ set_clock_groups -asynchronous -group [get_clocks {clk_pix}] -group [get_clocks 
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk4x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk1x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk_pixel}]
+

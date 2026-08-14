@@ -581,3 +581,15 @@ each produce a trained link + video on the known-good sink (current
 telemetry: CC1, D:2E, HLVC:111x). Crosspoint, AUX-crossbar override,
 polarity compensation, and training all orientation-clean.
 **Stage 5: FULLY SIGNED OFF.** Next: Stage 6 full core.
+
+**FOLLOW-UP (user insight, 2026-08-14): differential AUX RX may be
+possible on UNMODIFIED 1.0a3.** PULL_MODE alone can't fix RX (0.7 Vpp
+per leg can never span LVCMOS33's 0.8->2.0 V threshold window at any
+bias) — but G15/G16 are the old TMDS pins = a true die diff pair. A
+TLVDS/ELVDS INPUT buffer (mV-class differential sensitivity) + weak
+internal pulls (P up / N down: classic AC-coupled LVDS biasing) could
+receive AUX replies for real; ELVDS_IOBUF would ALSO fix TX over-swing
+(~350 mV diff, in-spec — likely what the picky DP->HDMI converter
+wants). Would retire BLIND_SINK on this board rev entirely. Verify
+first: (1) G15/G16 pair as a TLVDS input pair on PG484/GW5AT-60B,
+(2) ELVDS/TLVDS input legality in a 3.3 V VCCIO bank on GW5A.

@@ -251,11 +251,49 @@ module DebugOverlay #(
     wire [2:0] bits_bp = 3'(comb_rel_bits_pos / 11'(CHAR_WIDTH));
     wire bits_bv = (sA_bit_field == 1'b0) ? bits0_r[7-bits_bp] : bits1_r[7-bits_bp];
 
-    wire hex_nibble_sel = comb_rel_hex_pos >= 11'(CHAR_WIDTH);
     wire [7:0] hex_hval = sA_is_hex ? hex_vals_r[sA_hex_byte[2:0]] : 8'h00;
-    wire [3:0] hex_nibble = hex_nibble_sel ? hex_hval[3:0] : hex_hval[7:4];
 
     wire [7:0] ver_ch = VERSION[(NUM_CHARS-1-sA_char_pos)*8 +: 8];
+
+    //=========================================================================
+    // PIPELINE STAGE B (2026-08-14, 1080p full-core congestion): the A->1
+    // chain (region-relative subtract -> 8:1 hex-value mux -> nibble mux ->
+    // ROM-address composition) misses 148.5 MHz under congested placement
+    // (worst observed -1.4 ns). Register the subtract/mux results so the
+    // stage-1 composition starts from flops. One more pixel of overlay
+    // latency, absorbed by blanking.
+    //=========================================================================
+    reg               sB_is_hex, sB_is_bits, sB_in_space, sB_debug_region;
+    reg [11:0]        sB_rel_x;
+    reg [10:0]        sB_rel_hex_pos, sB_rel_bits_pos;
+    reg [7:0]         sB_hex_hval;
+    reg               sB_bits_bv;
+    reg [7:0]         sB_ver_ch;
+    reg               sB_x_version_in_range, sB_y_in_range;
+    reg [2:0]         sB_y_bit;
+    reg [7:0]         sB_r, sB_g, sB_b;
+
+    always @(posedge clk_i) begin
+        sB_is_hex       <= sA_is_hex;
+        sB_is_bits      <= sA_is_bits;
+        sB_in_space     <= sA_in_space;
+        sB_debug_region <= sA_debug_region;
+        sB_rel_x        <= sA_rel_x;
+        sB_rel_hex_pos  <= comb_rel_hex_pos;
+        sB_rel_bits_pos <= comb_rel_bits_pos;
+        sB_hex_hval     <= hex_hval;
+        sB_bits_bv      <= bits_bv;
+        sB_ver_ch       <= ver_ch;
+        sB_x_version_in_range <= sA_x_version_in_range;
+        sB_y_in_range   <= sA_y_in_range;
+        sB_y_bit        <= sA_y_bit;
+        sB_r <= sA_r;
+        sB_g <= sA_g;
+        sB_b <= sA_b;
+    end
+
+    wire hex_nibble_sel = sB_rel_hex_pos >= 11'(CHAR_WIDTH);
+    wire [3:0] hex_nibble = hex_nibble_sel ? sB_hex_hval[3:0] : sB_hex_hval[7:4];
 
     // Compute ROM address and x_bit in stage 1
     reg [6:0] comb_rom_addr;
@@ -271,30 +309,30 @@ module DebugOverlay #(
         comb_is_space = 1'b0;
         comb_is_solid = 1'b0;
 
-        if (ENABLE && enable_i && sA_y_in_range) begin
-            if (sA_debug_region) begin
-                if (sA_in_space) begin
+        if (ENABLE && enable_i && sB_y_in_range) begin
+            if (sB_debug_region) begin
+                if (sB_in_space) begin
                     comb_in_bounds = 1'b1;
                     comb_is_space = 1'b1;
-                end else if (sA_is_bits && sA_rel_x < DEBUG_END) begin
+                end else if (sB_is_bits && sB_rel_x < DEBUG_END) begin
                     comb_in_bounds = 1'b1;
-                    comb_x_bit = comb_rel_bits_pos[2:0];
-                    comb_rom_addr = {4'(bits_bv ? 4'd1 : 4'd0), sA_y_bit};
-                end else if (sA_is_hex && sA_rel_x < DEBUG_END) begin
+                    comb_x_bit = sB_rel_bits_pos[2:0];
+                    comb_rom_addr = {4'(sB_bits_bv ? 4'd1 : 4'd0), sB_y_bit};
+                end else if (sB_is_hex && sB_rel_x < DEBUG_END) begin
                     comb_in_bounds = 1'b1;
-                    comb_x_bit = comb_rel_hex_pos[2:0];
-                    comb_rom_addr = {hex_nibble, sA_y_bit};
+                    comb_x_bit = sB_rel_hex_pos[2:0];
+                    comb_rom_addr = {hex_nibble, sB_y_bit};
                 end
             end else begin
-                if (sA_x_version_in_range) begin
+                if (sB_x_version_in_range) begin
                     comb_in_bounds = 1'b1;
-                    comb_x_bit = sA_rel_x[2:0];
-                    if (ver_ch >= 8'h30 && ver_ch <= 8'h39)
-                        comb_rom_addr = {ver_ch[3:0], sA_y_bit};
-                    else if (ver_ch >= 8'h41 && ver_ch <= 8'h46)
-                        comb_rom_addr = {4'd10 + (ver_ch[3:0] - 4'd1), sA_y_bit};
-                    else if (ver_ch >= 8'h61 && ver_ch <= 8'h66)
-                        comb_rom_addr = {4'd10 + (ver_ch[3:0] - 4'd1), sA_y_bit};
+                    comb_x_bit = sB_rel_x[2:0];
+                    if (sB_ver_ch >= 8'h30 && sB_ver_ch <= 8'h39)
+                        comb_rom_addr = {sB_ver_ch[3:0], sB_y_bit};
+                    else if (sB_ver_ch >= 8'h41 && sB_ver_ch <= 8'h46)
+                        comb_rom_addr = {4'd10 + (sB_ver_ch[3:0] - 4'd1), sB_y_bit};
+                    else if (sB_ver_ch >= 8'h61 && sB_ver_ch <= 8'h66)
+                        comb_rom_addr = {4'd10 + (sB_ver_ch[3:0] - 4'd1), sB_y_bit};
                     else
                         comb_is_solid = 1'b1;
                 end
@@ -317,9 +355,9 @@ module DebugOverlay #(
         s1_is_space  <= comb_is_space;
         s1_is_solid  <= comb_is_solid;
         // Delay RGB passthrough by 1 cycle to align with pipeline
-        s1_r <= sA_r;
-        s1_g <= sA_g;
-        s1_b <= sA_b;
+        s1_r <= sB_r;
+        s1_g <= sB_g;
+        s1_b <= sB_b;
     end
 
     //=========================================================================

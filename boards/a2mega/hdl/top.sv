@@ -1501,7 +1501,13 @@ module top #(
         .clk_symbol_out    (),
         .serdes_status     (),
         .hpd_present_out   (),
-        .debug             ()
+        .debug             (),
+        // DRP register-readback debug bridge (used interactively by the
+        // dp_test bitstream; idle here — index parked, outputs unread)
+        .drp_dbg_idx       (5'd0),
+        .drp_dbg_data      (),
+        .drp_dbg_addr      (),
+        .drp_dbg_done      ()
     );
 
     // Register framebuffer RGB output for the DP pull interface
@@ -1566,6 +1572,9 @@ module top #(
         osd_en_sync1 <= osd_en_sync0;
     end
 
+    reg [23:0] fb_rgb_osd_r;
+    always @(posedge clk_pixel_w) fb_rgb_osd_r <= fb_rgb_w;
+
     osd_text_overlay #(
         .X_OFFSET(680),   // center the 560x384 OSD window in 1920x1080
         .Y_OFFSET(348)    // (native-scale text for now; 3x scaling = later polish)
@@ -1580,9 +1589,13 @@ module top #(
         .vram_addr_o(osd_vram_addr_w),
         .vram_data_i(osd_vram_data_w),
 
-        .r_i        (fb_rgb_w[23:16]),
-        .g_i        (fb_rgb_w[15:8]),
-        .b_i        (fb_rgb_w[7:0]),
+        // Registered fb feed: the line_buf BSRAM -> mix -> output-reg hop
+        // misses setup at 148.5 MHz (module predates the 1080p port; worst
+        // -0.28 ns). One register here relaxes it; the base video shifts
+        // 1 px under the OSD text — imperceptible.
+        .r_i        (fb_rgb_osd_r[23:16]),
+        .g_i        (fb_rgb_osd_r[15:8]),
+        .b_i        (fb_rgb_osd_r[7:0]),
 
         .r_o        (osd_rgb_w[23:16]),
         .g_o        (osd_rgb_w[15:8]),
