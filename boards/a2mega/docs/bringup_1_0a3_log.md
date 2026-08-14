@@ -574,3 +574,10 @@ levels 2.35/1.53 Vpp). DP->HDMI bridges are the strictest sink class
 (some require true closed-loop training). Needs its own session:
 decoder work (triggered 50 MS/s captures, per-orientation thresholds)
 before diagnosis. Not a Stage 5 blocker — real-monitor path signed off.
+
+**ORIENTATION COVERAGE COMPLETE (user-tested both plug orientations on
+the USB-C monitor): COLORBARS IN BOTH.** CC1/FLIPSEL=0 and CC2/FLIPSEL=1
+each produce a trained link + video on the known-good sink (current
+telemetry: CC1, D:2E, HLVC:111x). Crosspoint, AUX-crossbar override,
+polarity compensation, and training all orientation-clean.
+**Stage 5: FULLY SIGNED OFF.** Next: Stage 6 full core.
