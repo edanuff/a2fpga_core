@@ -1,5 +1,5 @@
 -type SERDES
--path /Users/edanuff/GitHub/DisplayPort_Verilog/examples/tang_mega/src/serdes/
+-path /Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/a2mega-1-0a3-prep-79601a/boards/a2mega/hdl/gowin/60B/dp_serdes/
 -file_type vlg
 -file_name dp_serdes
 -mod_name dp_serdes
