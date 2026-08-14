@@ -429,8 +429,15 @@ always @(posedge clk) begin
             set_link_count_4:     begin msg <= 8'h0B; expected <= 8'h01;  end
                     
             clock_training:       begin msg <= 8'h0C; expected <= 8'h01;  end
-            clock_voltage_0p4:    begin msg <= 8'h14; expected <= 8'h01; end
-            clock_voltage_0p6:    begin msg <= 8'h16; expected <= 8'h01; end
+            // BLIND_SINK: TRAINING_LANEx_SET must DECLARE what the TX
+            // actually drives — the sink calibrates against it and stalls
+            // while its ADJUST_REQUEST goes unanswered (live-hit 2026-08-14:
+            // monitor requested 0x22 all training while we declared level 0;
+            // CR never completed). The GTR12 is fixed at 804 mV = DP swing
+            // level 2, so blind mode always sends the 0p8/max message
+            // (0x06/lane = level 2 + MAX_SWING_REACHED).
+            clock_voltage_0p4:    begin msg <= (BLIND_SINK != 0) ? 8'h18 : 8'h14; expected <= 8'h01; end
+            clock_voltage_0p6:    begin msg <= (BLIND_SINK != 0) ? 8'h18 : 8'h16; expected <= 8'h01; end
             clock_voltage_0p8:    begin msg <= 8'h18; expected <= 8'h01; end
             clock_wait:           begin msg <= 8'h00; expected <= 8'h00;  reset_addr_on_change <= 1'b1; end
             clock_test:           begin msg <= 8'h0D; expected <= 8'h09;  status_de_active <= 1'b1; reset_addr_on_change <= 1'b1; end
@@ -438,8 +445,8 @@ always @(posedge clk) begin
             clock_wait_after:     begin msg <= 8'h00; expected <= 8'h00;  end
                     
             align_training:       begin msg <= 8'h0F; expected <= 8'h01; end
-            align_p0_V0p4:        begin msg <= 8'h14; expected <= 8'h01; end
-            align_p0_V0p6:        begin msg <= 8'h16; expected <= 8'h01; end
+            align_p0_V0p4:        begin msg <= (BLIND_SINK != 0) ? 8'h18 : 8'h14; expected <= 8'h01; end
+            align_p0_V0p6:        begin msg <= (BLIND_SINK != 0) ? 8'h18 : 8'h16; expected <= 8'h01; end
             align_p0_V0p8:        begin msg <= 8'h18; expected <= 8'h01; end
             align_p1_V0p4:        begin msg <= 8'h24; expected <= 8'h01; end
             align_p1_V0p6:        begin msg <= 8'h26; expected <= 8'h01; end
