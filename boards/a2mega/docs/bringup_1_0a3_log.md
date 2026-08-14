@@ -533,3 +533,21 @@ crossbar; TX swing below sink's requested level) + physical layer fully
 signed off + AUX proven bidirectional with complete protocol
 visibility (decoder v2 + retrain key = closed-loop debugging without a
 protocol analyzer).
+
+### 2026-08-14 — ✅✅ COLORBARS + AUDIO. STAGE 5 CORE GOAL ACHIEVED.
+
+The swing fix landed in three parts: (1) IP regen at 804 mV (txlev 13);
+(2) blind ladder DECLARES the driven level — TRAINING_LANEx_SET=0x06
+(swing 2 + MAX_SWING_REACHED) in all blind voltage writes; (3) dwell
+84 ms + 4 s blind watchdog. First attach: COLORBARS ON SCREEN, test
+tone playing (DP audio path working end-to-end).
+
+The monitor's own certificate (AUX poll reply, decoded):
+`00 41 00 77 00 01 03 22 22` — LANE0_1_STATUS=0x77 (CR_DONE +
+CHANNEL_EQ_DONE + SYMBOL_LOCKED, both lanes), LANE_ALIGN=0x01 (aligned),
+SINK_STATUS=0x03 (both ports in sync), adjust satisfied at level 2.
+
+First light for a2mega 1.0a3 and first-ever silicon success for the
+DisplayPort_Verilog transmitter + blind-sink architecture. Remaining
+for Stage 5 sign-off: 30-min soak, second-monitor cross-check, then
+Stage 6 (full core).
