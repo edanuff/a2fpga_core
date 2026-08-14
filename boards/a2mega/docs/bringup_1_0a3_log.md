@@ -429,3 +429,13 @@ polarity convention, request framing. Decisive next test: B2 — MacBook
 golden-reference AUX capture through the same breakout, electrical +
 byte-level diff vs ours. Also: whether ladder re-ran post-fix at a fresh
 attach is unconfirmed (capture window showed steady-state polls only).
+
+**POLICY (2026-08-13, user-ratified): TUSB1046A AUX snooping stays
+permanently disabled** (reg 0x13 bit7, written with AUX_SBU_OVR on every
+DP-mode entry). Rationale: we own the link state machine; the snooper is
+a second silent FSM inferring lane state from AUX traffic it may or may
+not catch (per-attach 0x12 reset, the never-snooped D0 write, AUX-less
+diagnostic bitstreams). Its only benefit — auto power savings — is
+irrelevant on a slot-powered card. Future lane trimming, if wanted,
+belongs in the ESP32 driving DPx_DISABLE from explicitly-communicated
+link state.

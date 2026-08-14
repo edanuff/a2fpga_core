@@ -185,11 +185,17 @@ static void hal_set_tusb1046(void *ctx, bool dp_enable, bool flipped)
          * comment: floating straps latch a link-killing 12.3 dB). */
         if (tusb_write_dp_eq(s_dp_eq_setting) != 0)
             Serial.println("[usbc] TUSB1046A EQ reg write FAILED");
-        /* Defeat the AUX snooper's lane power gating: with snoop enabled
-         * (reset default) the redriver mutes every DP lane until it decodes
-         * a LANE_COUNT_SET write on AUX (datasheet 8.3.2) — bitstreams that
-         * run no AUX ladder (TX_PROBE) transmit into a disabled mux. With
-         * snoop disabled, DPx_DISABLE governs and defaults to all-enabled.
+        /* POLICY (2026-08-13, permanent): AUX snooping stays DISABLED.
+         * We own the link state machine; the snooper is a second, silent
+         * state machine inferring lane state from AUX traffic, and it
+         * bit us three ways: reg 0x12 resets per attach so a missed
+         * LANE_COUNT_SET write leaves lanes muted; the D0 write was
+         * never snooped at all; and AUX-less diagnostic bitstreams
+         * (TX_PROBE) transmit into a muted mux forever. Its only benefit
+         * is power savings — irrelevant on a slot-powered card. If lane
+         * trimming is ever wanted, drive DPx_DISABLE explicitly from
+         * known link state instead. With snoop disabled, DPx_DISABLE
+         * governs and defaults to all-enabled.
          *
          * ALSO force the AUX<->SBU crossbar closed (AUX_SBU_OVR, Table 6:
          * override "regardless of CTLSEL1 and FLIPSEL"). Found 2026-08-13:
