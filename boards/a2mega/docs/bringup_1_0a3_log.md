@@ -359,3 +359,34 @@ sequence. Word-mode 2 (symbol swap) was never hardware-tested.
 Next: canonical mode-0 colorbars with snoop-disabled mux; if no image,
 AUX capture on SBU (A8/B8) for the monitor's LANE0_1_STATUS CR_DONE
 verdict, then word-mode 2.
+
+### 2026-08-13 night — colorbars still dark BUT the AUX capture found a smoking gun
+
+Colorbars attempt (correctly-flashed, certified D:2E, HLVC:111x, P:1,
+lanes proven alive, snoop-disabled mux): monitor stays asleep. Fault is
+at the content/protocol layer as predicted.
+
+**B1 AUX capture (SBU1/SBU2 differential, 12 s spanning a monitor
+replug): TWO findings.**
+1. Our AUX TX Manchester is MALFORMED: bit cells exactly 1.0 us (rate
+   correct) but the mid-cell transition sits at ~75% (0.75/0.25 us
+   intervals) instead of 50%. TI's snooper tolerates it (that's how our
+   writes were ever snooped); a strict sink receiver may not.
+2. THE MONITOR NEVER REPLIES: 12 identical 1 Hz poll bursts (ours),
+   zero reply bursts, zero HPD-IRQ pulses (E:00). Prior belief "the
+   monitor has been replying all along" was an inference from the
+   snooper seeing OUR writes — never actually evidence of replies.
+   If the sink rejects malformed Manchester it never received ANY DPCD
+   write: no LINK_BW_SET, no TRAINING_PATTERN_SET — dark screen with
+   perfect lanes exactly as observed.
+
+NEXT (morning): read hdl/displayport/auxch/aux_interface.v TX
+bit-shaping, fix the 50/50 duty; recapture (expect monitor ACKs to
+appear); then colorbars again. Decoder TODO: edge-timing-based
+Manchester decode (quarter/three-quarter sampling fails on asymmetric
+cells); UNDECODABLE guard added tonight.
+
+Flash-ritual note: tonight's corruption loop was cleared by race →
+openFPGALoader --freq 500000 --bulk-erase (clean JEDEC read, full-chip
+erase) → replug → flash; serial-CLI fpgaerase was unavailable (ESP32
+CDC wedge after enumeration storms — telnet stays up).

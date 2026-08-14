@@ -174,10 +174,14 @@ def main():
             bts = bits_to_bytes(manchester_bits(b, bit_s, inv))
             if bts and (best is None or len(bts) > len(best[1])):
                 best = (inv, bts)
+        t_ms = b[0][0] * 1e3
+        if best is None:
+            print(f"[{n:03d}] t={t_ms:10.3f}ms UNDECODABLE ({len(b)} edges)")
+            prev_end = b[-1][0]
+            continue
         inv, bts = best
         # heuristics: a burst that follows another within ~300 us is a reply
         is_reply = prev_end is not None and (b[0][0] - prev_end) < 300e-6 and len(bts) <= 17
-        t_ms = b[0][0] * 1e3
         print(f"[{n:03d}] t={t_ms:10.3f}ms inv={inv} {parse_burst(bts, is_reply)}")
         prev_end = b[-1][0]
 
