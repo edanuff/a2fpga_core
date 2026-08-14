@@ -126,7 +126,7 @@ module a2mega_dp_test_top (
         // not field-modifiable). TX works — run the link policy open-loop.
         // Remove when a board rev provides a real AUX front-end.
         .BLIND_SINK     (1),
-        .TX_PROBE       (1),  // 1 = lane-probe build: raw 4.2 MHz square on
+        .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.
         .H_VISIBLE (1920), .H_TOTAL (2200), .H_SYNC_WIDTH (44), .H_START (192),

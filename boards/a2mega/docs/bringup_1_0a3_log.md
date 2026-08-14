@@ -339,3 +339,23 @@ Reset test matrix (all on correctly-flashed dp_test builds): (1) TX_PROBE
 lane probe at the breakout — pads-alive question REOPENED, now with
 snoop-disabled mux; (2) DRP register dump; (3) mode build S: status with
 monitor attached.
+
+### 2026-08-13 late — ✅ PHYSICAL LAYER SIGNED OFF (first correctly-flashed probe run)
+
+DRP dump: **24/24 registers MATCH the CSR** — replay lands perfectly
+(incl. pre-magic writes; later-write-wins ordering observed working).
+Lane probe at the breakout, TX_PROBE build, snoop-disabled mux, FLIPSEL=1:
+- DP0 → B11/B10: 226/215 mVpp, 75%/25% duty, 0.948 µs — EXACT pattern
+- DP1 → A2/A3:   228/211 mVpp, 75%/25% duty, 0.948 µs — EXACT pattern
+GTR12 TX transmits; crosspoint mapping exactly per datasheet Table 4;
+polarity nets TRUE end-to-end (IP tx_pol_invert correctly compensates
+the board P/N swap); amplitude healthy through the redriver.
+
+The transmitter has likely worked since the GTR12 reset fix. Yesterday's
+certified no-lock runs (valid dp_test runs via FS=) therefore failed at
+the CONTENT layer: word packing / 8b10b framing / scrambling / training
+sequence. Word-mode 2 (symbol swap) was never hardware-tested.
+
+Next: canonical mode-0 colorbars with snoop-disabled mux; if no image,
+AUX capture on SBU (A8/B8) for the monitor's LANE0_1_STATUS CR_DONE
+verdict, then word-mode 2.
