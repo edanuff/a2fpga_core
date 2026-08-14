@@ -561,3 +561,16 @@ level 2). User-observed: colorbars rock-solid, audio playing.
 cross-check; then Stage 6 (full core: DDR3 + 1080p scan-out — NOTE:
 full-core top.sv needs the new dp_transmitter drp_dbg_* ports connected
 and picks up all aux_channel fixes automatically).
+
+**Bonus compatibility test — powered USB-C hub + DP->HDMI adapter:
+BLACK SCREEN, logged as backlog.** Positives: first live validation of
+the CC1/FLIPSEL=0 path end-to-end (crosspoint + straight AUX_SBU_OVR=01
+mapping both correct; our ladder trains to D:2E), AUX electrically
+healthy with heavy bidirectional traffic (DEFER-rich EDID relay pattern
+typical of converters, incl. 2352-edge reply bursts). Unknowns: the
+converter's LANE0_1_STATUS is unreadable — its burst format defeats
+aux_decode2 in this orientation (170-edge frames, asymmetric leg
+levels 2.35/1.53 Vpp). DP->HDMI bridges are the strictest sink class
+(some require true closed-loop training). Needs its own session:
+decoder work (triggered 50 MS/s captures, per-orientation thresholds)
+before diagnosis. Not a Stage 5 blocker — real-monitor path signed off.
