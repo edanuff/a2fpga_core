@@ -390,3 +390,14 @@ Flash-ritual note: tonight's corruption loop was cleared by race →
 openFPGALoader --freq 500000 --bulk-erase (clean JEDEC read, full-chip
 erase) → replug → flash; serial-CLI fpgaerase was unavailable (ESP32
 CDC wedge after enumeration storms — telnet stays up).
+
+CAVEAT (same night, added after reading aux_interface.v): the 75/25
+"malformed Manchester" measurement is at 4 MS/s (0.25 us grid) — a true
+0.5/0.5 stream can alias to 0.75/0.25 under that quantization, and the
+TX shaping RTL (50-cycle half-bit counter on clk100) looks correct by
+inspection. The asymmetry claim is UNCONFIRMED until a 50 MS/s buffer
+capture of one burst (5-min task, probes already on A8/B8). What stands
+regardless: 12 polls, ZERO monitor replies, E:00 — the sink is not
+answering, and finding out why is the morning's first job. Candidates:
+AUX timing (pending precise capture), TX amplitude/CM at the monitor
+side of the mux, or request framing.
