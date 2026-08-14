@@ -308,3 +308,34 @@ bridge in dp_test top — IPUG1024 §3.11 timing, dump curated CSR window
 over the debug UART: answers "did the replay land" and enables live
 pokes. (2) GUI session: from-scratch regen + single-knob attribution +
 EDPPHY generation for a Gowin-blessed DP-rate CSR reference.
+
+### 2026-08-13 late — ⚠️ MAJOR CORRECTION: wrong bitstream flashed ALL DAY
+
+`tools/flash.sh a2mega` without FS= auto-picks the alphabetically-first
+project — **a2mega.gprj (the full core)** — and flashed impl/pnr/a2mega.fs
+on every plain invocation today. Yesterday's runbook used the FS=
+override; today it was dropped. Discovered when ESP32 `status` on a
+supposedly-dp_test board reported "FPGA link: UP (A2FP), DDR3 CALIBRATED,
+disk slots" — none of which exist in dp_test. The only correctly-flashed
+image today was mode3_inst (via FS=) — exactly the one whose UART
+"mysteriously" worked. The whole UART anomaly = full core has no debug
+UART on H13.
+
+**RETRACTED:** "U1 CLOSED — GTR12 pads never driven" (the probe pattern
+never reached silicon; the full core's 2.7 Gb/s traffic reads as ~35 mV
+ripple in the AD3's ~30 MHz bandwidth — THE LANES MAY BE ALIVE); both CSR
+experiments (bit6 0x1FF, unlock-first ordering) — never on hardware,
+results VOID; the "TX_PROBE kills UART" correlation.
+
+**STILL VALID:** TUSB1046A snoop-gating fix (verified via I2C readback),
+VBUS-sourcing brownout-loop fix, AD3 toolkit + self-tests (the 1.83 V mux
+CM measurement stands as a MUX-level fact), flash-corruption recovery
+recipe, DRP readback bridge code, mode-build S:20-at-idle telemetry.
+
+**Guardrail:** flash.sh now takes GPRJ= (like build.sh) and REFUSES to
+guess when a board has multiple .gprj and neither GPRJ= nor FS= is given.
+
+Reset test matrix (all on correctly-flashed dp_test builds): (1) TX_PROBE
+lane probe at the breakout — pads-alive question REOPENED, now with
+snoop-disabled mux; (2) DRP register dump; (3) mode build S: status with
+monitor attached.
