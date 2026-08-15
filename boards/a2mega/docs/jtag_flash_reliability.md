@@ -637,3 +637,10 @@ USB-C path at fault; fails identically -> SOM flash chip. **Do first
 (zero cost): slot power-on test** — last confirmed flash-boot was IN THE
 SLOT; if heartbeat appears there but not on the bench, flash is fine and
 it's bench-environment interference on the shared config pins.
+
+**Slot-boot test result (2026-08-14, late): NO heartbeat in the powered
+GS either.** Bench-interference theory eliminated — the flash CONTENT is
+corrupt (not merely unreadable-on-bench). Tomorrow's direct-JTAG
+programmer session is now a clean two-way discriminator: writes+boots →
+chip fine, bridge corrupted content (fix/work around the bridge);
+fails → chip damaged → plan C (ESP32 SRAM-load at power-up) or SOM swap.
