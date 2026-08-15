@@ -109,6 +109,7 @@ typedef struct {
     usb_pd_message_t tx_message;
     uint8_t tx_attempts;
     uint8_t source_caps_attempts;  /* Source_Caps resends this attach */
+    uint32_t vbus_seen_ms;         /* VBUS-while-unattached debounce */
 
     uint8_t dp_mode_position;
     uint8_t vdm_retry_count;

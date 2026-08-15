@@ -262,8 +262,8 @@ extern "C" void usbc_hpd_retrain(void)
 /* Telnet 'u': raw FUSB302B status snapshot for in-slot attach debugging. */
 extern "C" void usbc_fusb_dump_log(void)
 {
-    static const uint8_t regs[] = {0x40, 0x41, 0x42, 0x43, 0x44, 0x3C, 0x3E};
-    char line[64];
+    static const uint8_t regs[] = {0x08, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42};
+    char line[80];
     char *w = line;
     w += snprintf(w, sizeof line, "FUSB");
     for (size_t i = 0; i < sizeof regs; i++) {

@@ -2,6 +2,7 @@
 #include "usbc_port.h"
 
 #include <string.h>
+#include <stdio.h>
 
 enum {
     PS_RDY_DELAY_MS = 25,
@@ -674,6 +675,51 @@ static int service_state_timer(usbc_port_t *port)
             port->deadline_ms = now + DISCOVERY_START_DELAY_MS;
         }
         break;
+    case USBC_STATE_UNATTACHED: {
+        /* Fallback attach (in-slot, 2026-08-14): a source-role partner
+         * (USB-C monitor) drives VBUS but the FUSB302B DRP toggle never
+         * reports the attach. VBUS while unattached is proof of a
+         * source: debounce 300 ms, find the Rp side by measurement, and
+         * enter the bench-proven sink flow directly. */
+        bool vbus_now = false;
+        if (fusb302_vbus_present(&port->fusb302, &vbus_now) == 0 && vbus_now) {
+            if (port->vbus_seen_ms == 0u)
+                port->vbus_seen_ms = now;
+            else if ((int32_t)(now - port->vbus_seen_ms) >= 300) {
+                fusb302_polarity_t pol;
+                bool found = false;
+                port->vbus_seen_ms = 0u;
+                if (fusb302_detect_source_orientation(&port->fusb302,
+                                                      &pol, &found) != 0 ||
+                    !found) {
+                    /* No Rp found: in-slot VBUS backfeed makes VBUS-present
+                     * permanent, so don't churn — restart the toggle once
+                     * and back off 2 s before re-probing. */
+                    (void)fusb302_start_drp_toggle(&port->fusb302);
+                    port->vbus_seen_ms = now + 2000u;
+                    break;
+                }
+                {
+                    log_message(port, USBC_LOG_INFO,
+                                "VBUS with silent toggle: source partner "
+                                "assumed; entering sink flow");
+                    port->polarity = pol;
+                    reset_protocol(port);
+                    port->power_sink = true;
+                    port->data_dfp = false;
+                    if (fusb302_configure_sink(&port->fusb302,
+                                               port->polarity) != 0)
+                        return -1;
+                    set_vbus(port, false);
+                    port->state = USBC_STATE_DEVICE_WAIT_VBUS;
+                    return 0;
+                }
+            }
+        } else {
+            port->vbus_seen_ms = 0u;
+        }
+        break;
+    }
     case USBC_STATE_SOURCE_WAIT_VBUS:
         if (!time_reached(now, port->deadline_ms))
             break;
@@ -794,8 +840,13 @@ static int handle_toggle_result(usbc_port_t *port,
         port->state = USBC_STATE_DEVICE_WAIT_VBUS;
         log_message(port, USBC_LOG_INFO, "USB-C device/sink partner attached");
         return 0;
-    default:
+    default: {
+        char msg[48];
+        snprintf(msg, sizeof msg, "toggle result code %d unhandled",
+                 (int)result);
+        log_message(port, USBC_LOG_INFO, msg);
         return enter_unattached(port);
+    }
     }
 }
 

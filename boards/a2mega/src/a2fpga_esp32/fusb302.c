@@ -266,6 +266,40 @@ int fusb302_set_pd_receiver(fusb302_t *device, bool enable)
     return 0;
 }
 
+/* Measure which CC pin carries a partner Rp (source present). Used when
+ * VBUS appears while the DRP toggle stays silent (in-slot 2026-08-14: a
+ * source-role monitor drove VBUS but TOGDONE never fired): sample BC_LVL
+ * with our pull-downs on each CC in turn; the Rp side reads non-zero. */
+int fusb302_detect_source_orientation(fusb302_t *device,
+                                      fusb302_polarity_t *polarity,
+                                      bool *found)
+{
+    int rc;
+    uint8_t status0;
+    uint8_t lvl_cc1, lvl_cc2;
+
+    if ((rc = write_reg(device, REG_SWITCHES0,
+                        SW0_CC1_PD | SW0_CC2_PD | SW0_MEASURE_CC1)) != 0)
+        return rc;
+    device->io.delay_us(device->io.context, 300u);
+    if ((rc = read_reg(device, REG_STATUS0, &status0)) != 0)
+        return rc;
+    lvl_cc1 = status0 & 0x03u;
+
+    if ((rc = write_reg(device, REG_SWITCHES0,
+                        SW0_CC1_PD | SW0_CC2_PD | SW0_MEASURE_CC2)) != 0)
+        return rc;
+    device->io.delay_us(device->io.context, 300u);
+    if ((rc = read_reg(device, REG_STATUS0, &status0)) != 0)
+        return rc;
+    lvl_cc2 = status0 & 0x03u;
+
+    *found = (lvl_cc1 != 0u) != (lvl_cc2 != 0u);  /* exactly one Rp side */
+    *polarity = lvl_cc2 > lvl_cc1 ? FUSB302_POLARITY_CC2
+                                  : FUSB302_POLARITY_CC1;
+    return 0;
+}
+
 int fusb302_configure_source(fusb302_t *device,
                              fusb302_polarity_t polarity,
                              bool enable_pd_receiver)

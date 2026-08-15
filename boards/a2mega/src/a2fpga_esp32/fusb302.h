@@ -82,6 +82,9 @@ int fusb302_start_drp_toggle(fusb302_t *device);
 int fusb302_configure_source(fusb302_t *device,
                              fusb302_polarity_t polarity,
                              bool enable_pd_receiver);
+int fusb302_detect_source_orientation(fusb302_t *device,
+                                      fusb302_polarity_t *polarity,
+                                      bool *found);
 int fusb302_configure_sink(fusb302_t *device,
                            fusb302_polarity_t polarity);
 int fusb302_set_pd_receiver(fusb302_t *device, bool enable);
