@@ -614,3 +614,21 @@ of tail-piped invocations makes this visible.)
 Remaining Stage 6/7: one more PnR roll for 0/0; integer scaling; IIgs
 slot regression — BLOCKED on the in-slot source-role PD fix (now the
 critical path); 30-min full-core soak.
+
+### 2026-08-14 — ✅ STAGE 7 CORE MOMENT: IIgs DISPLAYS FROM THE SLOT
+
+In-slot attach fixed via four changes: 1.5 A Rp advertisement (phantom
+killed — empty-connector attach gone), Source_Caps give-up (12 tries),
+VCONN sourcing on source attach, VBUS-fallback sink attach (CC-measured
+orientation), and REMOVAL of the VBUS source veto (slot backfeed made
+it block everything; TOGSS=2 proved the toggle worked all along).
+Result: board in IIgs slot, USB-C monitor through breakout —
+DP-ACTIVE SNK/DFP on CC1, HPD=1, VIDEO UP. The monitor chose to source
+power; our port took sink+DFP (bench-identical roles). Slot findings
+recorded: VBUS node permanently backfed by slot power (VBUSOK always
+1); dead-battery Rd was historically the only working attach persona —
+now the toggle+fallback paths work too.
+
+Remaining: DP-cable adapter test (true source role e2e with VCONN);
+IIgs functional regression (boot, input, disk); integer scaling; one
+timing-clean PnR roll; full-core soak.
