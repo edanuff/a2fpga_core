@@ -47,7 +47,7 @@
 
 #define TELNET_PORT     23
 #define TEE_LINES       32
-#define TEE_COLS        40
+#define TEE_COLS        80
 
 /* ---- console tee ring (written by osd_log from any thread) -------------- */
 static char     s_tee[TEE_LINES][TEE_COLS + 1];
