@@ -69,7 +69,13 @@ module a2mega_dp_test_top (
 
     logic auxch_in, auxch_out, auxch_tri;
     generate if (AUX_TLVDS != 0) begin : g_aux_tlvds
-        TLVDS_IOBUF i_aux_diff (
+        // ELVDS_IOBUF, not TLVDS: true LVDS is a CURRENT-mode driver that
+        // needs a 100R differential termination — into this unterminated
+        // AC-coupled 100k-biased line it produced rounded mush the sink
+        // couldn't parse (live-hit: requests degraded, zero ACKs).
+        // LVCMOS33D/ELVDS = voltage-mode complementary drive (the exact
+        // electricals the sink has ACKed all along) + differential RX.
+        ELVDS_IOBUF i_aux_diff (
             .O   (auxch_in),
             .IO  (dp_aux_p),
             .IOB (dp_aux_n),
