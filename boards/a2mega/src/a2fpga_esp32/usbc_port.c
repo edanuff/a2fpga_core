@@ -806,14 +806,13 @@ static int handle_toggle_result(usbc_port_t *port,
          * supply (that same VBUS on the bench) collapses, and the board
          * brownout-loops at the toggle period — seen live 2026-08-13 as
          * rhythmic power+ready LED flashing with no USB enumeration. */
-        bool vbus_live = false;
-        (void)fusb302_vbus_present(&port->fusb302, &vbus_live);
-        if (vbus_live) {
-            log_message(port, USBC_LOG_INFO,
-                        "source-attach with VBUS already live; partner is "
-                        "a source/DRP race - restarting toggle as sink");
-            return enter_unattached(port);
-        }
+        /* GUARD REMOVED (2026-08-14): the VBUS-present veto that lived
+         * here (bench brownout protection) proved WRONG in the slot —
+         * slot power permanently backfeeds the VBUS node, so the veto
+         * blocked every legitimate source attach while the toggle was
+         * correctly reporting the monitor's Rd (TOGSS=2). Phantom/race
+         * protection now: 1.5 A Rp (honest Rd threshold) + the
+         * 12-Source_Caps give-up (bad attaches self-clear in ~2 s). */
         port->polarity = result == FUSB302_TOGGLE_ATTACHED_SOURCE_CC2
                              ? FUSB302_POLARITY_CC2 : FUSB302_POLARITY_CC1;
         reset_protocol(port);
