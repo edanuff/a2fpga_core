@@ -65,6 +65,7 @@ module channel_management #(
         input  clk100,
         output [7:0] debug,
         output [15:0] debug_rx,  // AUX RX: {last byte, sync hits, accepted bytes} (registered)
+        output [3:0]  debug_locks, // {clock,equ,symbol,align}_locked (registered)
 
         input   hpd,
         input   auxch_in,
@@ -158,8 +159,13 @@ module channel_management #(
     // when exported combinationally)
     wire [15:0] debug_rx_w;
     reg  [15:0] debug_rx_r = 16'd0;
-    always @(posedge clk100) debug_rx_r <= debug_rx_w;
+    reg  [3:0]  debug_locks_r = 4'd0;
+    always @(posedge clk100) begin
+        debug_rx_r    <= debug_rx_w;
+        debug_locks_r <= {clock_locked, equ_locked, symbol_locked, align_locked};
+    end
     assign debug_rx = debug_rx_r;
+    assign debug_locks = debug_locks_r;
     wire [7:0] interface_debug;
     wire [7:0] mgmt_debug;
    

@@ -432,7 +432,19 @@ always @(posedge clk) begin
                             //---------------------------------------------------
                             if(rx_buffer == 16'b0101010111110000) begin
                                 rx_bits <= 16'h0000;
-                                if(rx_holdoff[9] == 1'b0) begin
+                                // SQUELCH (2026-08-15): accept a sync only
+                                // while a transaction awaits its reply
+                                // (`busy`). The un-driven pulled-down pair
+                                // idles at zero differential and the
+                                // comparator CHATTERS; chatter passes the
+                                // Manchester gauntlet often enough to stuff
+                                // noise bytes into the RX FIFO, corrupting
+                                // the next reply parse (established-state
+                                // status polls read garbage lock bits ->
+                                // spurious retrain ~1 Hz). Real AUX PHYs
+                                // have analog squelch; this is the digital
+                                // equivalent.
+                                if(rx_holdoff[9] == 1'b0 && busy == 1'b1) begin
                                      //------------------------------------
                                      // Yes, switch to receiving bits, but,
                                      // but only if(the TX modules hasn't

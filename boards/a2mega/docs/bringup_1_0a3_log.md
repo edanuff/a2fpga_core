@@ -774,3 +774,18 @@ Milestone unaffected: closed-loop training + live monitoring PROVEN
 (trains in ms, notices loss, retrains autonomously — all visible in
 telemetry). The instability is a link-quality tuning problem, not an
 AUX/protocol one.
+
+**Round 14 + revert findings (late night):** round-12 revert cycles
+IDENTICALLY -> round 13 exonerated. Squelch added to aux_interface (sync
+acceptance gated on `busy`; NB rx_reset already flushes the FIFO per
+transaction — noise-ingestion math can't explain every-poll failures).
+Lock-bits L: field added but reads 0 ALWAYS incl. during established —
+the lock signals are pulses, sampled wrong; needs latch-at-check_wait +
+timeout-vs-gate-fail event counters (next instrument build).
+NEW PRIME SUSPECT: THERMAL — nothing else differs from the stable
+morning sessions except ~12 h of continuous powered operation; SERDES
+margin drift fits trains-then-drops + morning-stable/evening-cycling.
+ZERO-BUILD DISCRIMINATOR QUEUED: stone-cold board, exact boot recipe,
+first thing next session. Monitor-direct non-working is EXPECTED on
+closed-loop builds (offset-invisible replies) — production wants
+closed-loop with blind-ladder fallback on presence timeout.
