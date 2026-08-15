@@ -49,12 +49,38 @@ module a2mega_dp_test_top (
     gowin_mgmt_pll i_mgmt_pll (.lock(), .clkout(clk100), .clkin(clk50_in));
 
     // ------------------------------------------------------------------
-    // AUX analog interface: drive/tri-state the pseudo-diff pair
+    // AUX analog interface. Two selectable front-ends:
+    //
+    // AUX_TLVDS=0 (pseudo-diff, proven): two LVCMOS33 pins, ~2 Vpp on
+    //   the wire, RX electrically unreachable -> requires BLIND_SINK=1.
+    //
+    // AUX_TLVDS=1 (closed-loop experiment, 2026-08-14): G15/G16 are the
+    //   die's IOR24A/B true differential pair (old TMDS pins), and GW5A
+    //   allows true-LVDS (LVDS25) output in a 3.3 V bank (DS Table 2-5).
+    //   One TLVDS_IOBUF gives spec-compliant ~350 mV differential TX
+    //   (vs our 2 Vpp over-drive — likely what strict sinks want) AND a
+    //   real mV-class differential RX, making the sink's replies
+    //   readable for the first time -> pair with BLIND_SINK=0 for true
+    //   closed-loop training. PULL_MODE UP/DOWN on the pads (cst) sets
+    //   the AC-coupled DC point + defined idle polarity.
     // ------------------------------------------------------------------
+    localparam AUX_TLVDS = 1;   // experiment ON; set 0 to restore proven path
+    localparam AUX_BLIND = (AUX_TLVDS != 0) ? 0 : 1;
+
     logic auxch_in, auxch_out, auxch_tri;
-    assign dp_aux_p = auxch_tri ? 1'bz : auxch_out;
-    assign dp_aux_n = auxch_tri ? 1'bz : ~auxch_out;
-    assign auxch_in = dp_aux_p;
+    generate if (AUX_TLVDS != 0) begin : g_aux_tlvds
+        TLVDS_IOBUF i_aux_diff (
+            .O   (auxch_in),
+            .IO  (dp_aux_p),
+            .IOB (dp_aux_n),
+            .I   (auxch_out),
+            .OEN (auxch_tri)     // 1 = release (listen), matching bufif0
+        );
+    end else begin : g_aux_pseudo
+        assign dp_aux_p = auxch_tri ? 1'bz : auxch_out;
+        assign dp_aux_n = auxch_tri ? 1'bz : ~auxch_out;
+        assign auxch_in = dp_aux_p;
+    end endgenerate
 
     // ------------------------------------------------------------------
     // Colorbars: eight 240-px vertical bars (white, yellow, cyan, green,
@@ -125,7 +151,7 @@ module a2mega_dp_test_top (
         // bias, LVCMOS thresholds unreachable by a <=1.38 Vpp reply; board
         // not field-modifiable). TX works — run the link policy open-loop.
         // Remove when a board rev provides a real AUX front-end.
-        .BLIND_SINK     (1),
+        .BLIND_SINK     (AUX_BLIND),
         .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.
