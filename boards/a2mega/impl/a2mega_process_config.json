@@ -69,7 +69,7 @@
  "Route_Option": "1",
  "Run_Timing_Driven": true,
  "SECURE_MODE": false,
- "SECURITY_BIT": true,
+ "SECURITY_BIT": false,
  "SEU_HANDLER": false,
  "SEU_HANDLER_CHECKSUM": false,
  "SEU_HANDLER_MODE": "auto",
