@@ -672,3 +672,42 @@ issue #578 — esp_usb_jtag fragility).
 
 Validation pending: fresh cold boot + patched flash at 2 MHz → expect
 real multi-minute write with progress lines → power cycle → heartbeat.
+
+## FINAL POST-MORTEM (2026-08-15): board #1 SOM flash retired
+
+Direct-JTAG discriminator (user, Sipeed RV Debugger, SOM UNSEATED from
+carrier): identical "Read ID failed" + wedge-until-power-cycle, JEDEC ID
+reads 0x000000 (zeros, not FF — MISO flat, chip answers nothing). SRAM
+config works perfectly through both transports. Revival sequence
+(0xAB release-DPD + 0x66/0x99 software reset, patched into our
+openFPGALoader build) changed nothing. FPGA's own boot master also gets
+nothing (auto_boot_1st_fail at POR). Chip or its SOM-local connection is
+dead; FPGA healthy.
+
+REVISED root-cause ranking (user insight): flash trouble was CHRONIC —
+replug rituals, ~50%/attempt failures, flash-phase-specific wedges
+persisting after the toggleClk fix — consistent with a MARGINAL,
+PROGRESSIVELY DEGRADING flash element all along, now fully failed. The
+software bugs found tonight (10 MHz hardcode, fake-success on empty
+chain, no chain-scan retry) are real and fixed in our local build, but
+they were layered ON TOP of the failing hardware, not the cause of it.
+Named mechanisms eliminated: SR-write brick (can't disable ID reads),
+stuck DPD/QPI/continuous-read (reset didn't revive), transport layers
+(two independent cables). Unresolved: defective part vs chronic
+electrical stress. NOTE our master pin table is USE-FILTERED — "MSPI
+unreachable from carrier" is NOT yet verified against the full BTB;
+GW5A datasheet ball table vs BTB sheets check is on the board #2
+pre-slot checklist.
+
+Board #1: retired from flash-boot service (bench mule for ESP32/PD work;
+SRAM-load still works when Mac-attached). Board #2 protections:
+1. Patched openFPGALoader only (freq honored, honest empty-chain errors,
+   flash revival preamble); judge every op by elapsed time + progress.
+2. Machine-off flashing rule stays absolute (D05 transceiver-enable
+   window).
+3. Routine 5-second flash health check (--detect -f) after slot
+   sessions; log results — degradation must show as a trend, not a
+   surprise.
+4. Pre-slot: verify MSPI balls vs BTB (datasheet cross-check).
+5. 1.0a4 rev list: hard gate on bus-transceiver enable during config
+   windows + AUX bias resistors.
