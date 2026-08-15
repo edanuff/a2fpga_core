@@ -602,3 +602,38 @@ post-flash `--reset` (M2) and a corrected operator note (M3).
 Top experiments: **E0** (fresh power window, then switch the Apple II on, then flash),
 **E2** (`--detect` at 10 MHz vs 500 kHz right after a failure), **E4** (does `--reset` alone
 un-wedge the chain?).
+
+---
+
+## 2026-08-14 night session: fake-success bug + flash-boot failure forensics
+
+**openFPGALoader FAKE-SUCCESS BUG (critical operational finding):** when the
+JTAG chain scans `empty` (first line of output), flash operations DO NOT
+ABORT — the tool parses the file, prints `Done`/`DONE`, runs the exit
+sequence (status-register dump, "Erase SRAM DONE", reload attempt) and
+looks success-shaped while having written NOTHING. A 7-18 MB write at
+500 kHz takes minutes and emits thousands of `Writing:` progress lines;
+a fake completes in ~1.4 s with zero. **Judge every op by elapsed time +
+progress lines, never by `Done`.** (The "2-second bulk-erase" tonight was
+a fake; so was every "verified write" whose log began with `empty`.)
+
+**Boot-failure timeline (reconstructed):** flash held a known-good image
+(booted from the slot minutes earlier). The first wedged flash session
+wrote nothing (all attempts died at chain scan). Yet flash-boot never
+succeeded again on the bench afterward — the failure PREDATES any real
+write. The one live-chain probe that reached real flash logic read an
+unrecognized JEDEC ID + block-protection bits set — either the chip is in
+a corrupted persistent state, or the bridge garbles SPI-over-JTAG and the
+readings are noise.
+
+**Confirmed healthy:** FPGA + bitstream (SRAM load at 500 kHz ran to
+100%, heartbeat up). Compressed bitstream now 7.2 MB (was 18.3 MB):
+`set_option -bit_compress 1` — keep this on all a2mega builds regardless
+(3x faster flash, dodges any >16 MB addressing questions).
+
+**Discriminator queued (user):** direct JTAG programmer on the SOM's JTAG
+header, bypassing ESP32 bridge + USB-C entirely. Programs fine -> bridge/
+USB-C path at fault; fails identically -> SOM flash chip. **Do first
+(zero cost): slot power-on test** — last confirmed flash-boot was IN THE
+SLOT; if heartbeat appears there but not on the bench, flash is fine and
+it's bench-environment interference on the shared config pins.

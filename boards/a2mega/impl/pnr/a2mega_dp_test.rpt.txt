@@ -12,27 +12,27 @@
   <Part Number>: GW5AT-LV60PG484AC1/I0
   <Device>: GW5AT-60
   <Device Version>: B
-  <Created Time>:Fri Aug 14 07:45:24 2026
+  <Created Time>:Fri Aug 14 20:10:42 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.222s, Elapsed time = 0h 0m 0.223s
-    Placement Phase 1: CPU time = 0h 0m 0.278s, Elapsed time = 0h 0m 0.279s
-    Placement Phase 2: CPU time = 0h 0m 0.917s, Elapsed time = 0h 0m 0.92s
-    Placement Phase 3: CPU time = 0h 0m 0.811s, Elapsed time = 0h 0m 0.813s
+    Placement Phase 0: CPU time = 0h 0m 0.247s, Elapsed time = 0h 0m 0.27s
+    Placement Phase 1: CPU time = 0h 0m 0.282s, Elapsed time = 0h 0m 0.288s
+    Placement Phase 2: CPU time = 0h 0m 0.891s, Elapsed time = 0h 0m 0.896s
+    Placement Phase 3: CPU time = 0h 0m 0.751s, Elapsed time = 0h 0m 0.756s
     Total Placement: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.001s, Elapsed time = 0h 0m 0.001s
-    Routing Phase 1: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
-    Routing Phase 2: CPU time = 0h 0m 0.041s, Elapsed time = 0h 0m 0.042s
+    Routing Phase 0: CPU time = 0h 0m 0.001s, Elapsed time = 0h 0m 0.002s
+    Routing Phase 1: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 10s
+    Routing Phase 2: CPU time = 0h 0m 0.041s, Elapsed time = 0h 0m 0.043s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
+    Total Routing: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 10s
  Generate output files:
-    CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+    CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
 
- Total Time and Memory Usage: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 11s, Peak memory usage = 2112MB
+ Total Time and Memory Usage: CPU time = 0h 0m 15s, Elapsed time = 0h 0m 15s, Peak memory usage = 2114MB
 
 
 3. Resource Usage Summary
@@ -40,19 +40,19 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 3685/59904                          |  7%
-    --LUT,ALU,ROM16           | 3685(3239 LUT, 446 ALU, 0 ROM16)    | -
+  Logic                       | 3754/59904                          |  7%
+    --LUT,ALU,ROM16           | 3754(3319 LUT, 435 ALU, 0 ROM16)    | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 2899/60780                          |  5%
+  Register                    | 2925/60780                          |  5%
     --Logic Register as Latch | 0/59904                             |  0%
-    --Logic Register as FF    | 2897/59904                          |  5%
+    --Logic Register as FF    | 2923/59904                          |  5%
     --I/O Register as Latch   | 0/876                               |  0%
     --I/O Register as FF      | 2/876                               |  <1%
-  CLS                         | 2892/29952                          |  10%
+  CLS                         | 2897/29952                          |  10%
   I/O Port                    | 10/297                              |  4%
-  I/O Buf                     | 10                                  | -
+  I/O Buf                     | 9                                   | -
     --Input Buf               | 3                                   | -
-    --Output Buf              | 6                                   | -
+    --Output Buf              | 5                                   | -
     --Inout Buf               | 1                                   | -
   BSRAM                       | 13/118                              | 12%
     --SDPB                    | 13
@@ -122,8 +122,8 @@ led[1]     | -         | D14/1         | Y          | out   | IOT82[A] | PCIE_HO
 led[2]     | -         | R14/6         | Y          | out   | IOB146[B] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | NONE         
 led[3]     | -         | P14/6         | Y          | out   | IOB146[A] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | NONE         
 uart_tx    | -         | H13/4         | Y          | out   | IOR20[A] | -               | LVCMOS33   | 8     | UP        | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | NONE         
-dp_aux_p   | -         | G15/4         | Y          | io    | IOR24[A] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | OFF          
-dp_aux_n   | -         | G16/4         | Y          | io    | IOR24[B] | -               | LVCMOS33   | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3        | MEDIUM        | NONE          | NONE         
+dp_aux_p   | dp_aux_n  | G15/4         | Y          | io    | IOR24[A] | -               | LVDS25     | 3.5   | DOWN      | OFF       | NONE       | OFF        | NONE      | OFF        | OFF             | ON            | 3.3        | MEDIUM        | OFF           | OFF          
+dp_aux_n   | dp_aux_p  | G16/4         | Y          | io    | IOR24[B] | -               | LVDS25     | 3.5   | DOWN      | OFF       | NONE       | OFF        | NONE      | OFF        | OFF             | ON            | 3.3        | MEDIUM        | OFF           | OFF          
 ==================================================================================================================================================================================================================
 
 
@@ -388,8 +388,8 @@ H13/4    | uart_tx   | out   | IOR20[A] | -               | LVCMOS33 | 8     | U
 G13/4    | -         | in    | IOR20[B] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 J15/4    | -         | in    | IOR22[A] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 H15/4    | -         | in    | IOR22[B] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
-G15/4    | dp_aux_p  | io    | IOR24[A] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
-G16/4    | dp_aux_n  | out   | IOR24[B] | -               | LVCMOS33 | 8     | NONE      | OFF       | OFF        | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | NONE         
+G15/4    | dp_aux_p  | io    | IOR24[A] | -               | LVDS25   | 3.5   | DOWN      | OFF       | NONE       | OFF        | NONE      | OFF        | OFF             | ON            | 3.3   | MEDIUM        | OFF           | OFF          
+G16/4    | dp_aux_n  | io    | IOR24[B] | -               | LVDS25   | 3.5   | DOWN      | OFF       | NONE       | OFF        | NONE      | OFF        | OFF             | ON            | 3.3   | MEDIUM        | OFF           | OFF          
 J14/4    | -         | in    | IOR26[A] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 H14/4    | -         | in    | IOR26[B] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          
 G17/4    | -         | in    | IOR30[A] | -               | LVCMOS33 | OFF   | UP        | OFF       | ON         | OFF        | SLOW      | OFF        | OFF             | OFF           | 3.3   | MEDIUM        | NONE          | OFF          

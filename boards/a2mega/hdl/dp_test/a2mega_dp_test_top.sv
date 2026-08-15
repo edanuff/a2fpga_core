@@ -80,7 +80,14 @@ module a2mega_dp_test_top (
         // RX sense inversion retained: the vendored decoder's SYNC-END
         // constant expects the opposite line sense from the wire.
         assign auxch_in = ~auxch_in_raw;
-        ELVDS_IOBUF i_aux_diff (
+        // Round 7 (user-sparked): TRUE LVDS TX/RX + both-leg pull-DOWNs.
+        // Stored offset after a burst is only ~0.35 V (driver swing), and
+        // same-rail pulls decay the differential toward ZERO while the CM
+        // (1.25 V -> ground) stays inside the receiver's range through
+        // the whole reply window. Round 1 paired this receiver with
+        // pull-UPS (CM at rail = blind) so this combination was never
+        // actually tested.
+        TLVDS_IOBUF i_aux_diff (
             .O   (auxch_in_raw),
             .IO  (dp_aux_p),
             .IOB (dp_aux_n),
@@ -231,17 +238,35 @@ module a2mega_dp_test_top (
     // our driver is tri-stated AND >10 us have passed since release, so
     // our own TX and its ring-down can never be counted. Any count here
     // is the sink's reply arriving at the differential receiver output.
-    logic [7:0] auxin_edge_cnt = '0;
+    // ...refined again: BURST-RUN discriminator. E: now reports the
+    // LONGEST run of consecutive listen-window edges spaced <2 us apart
+    // (saturating). Manchester replies are dense runs of ~1 us-spaced
+    // edges (a full reply ~100+); pull-decay comparator chatter gives
+    // isolated crossings (runs of 1-3). Sticky max, never cleared —
+    // one attach tells the story.
+    logic [7:0] auxin_edge_cnt = '0;   // now: max fast-edge run length
     logic [2:0] auxin_sync = '0;
     logic [10:0] listen_us = '0;
+    logic [7:0] gap_us8 = 8'hFF;       // 100 MHz ticks/2.56us since last edge
+    logic [7:0] run_len = '0;
     always_ff @(posedge clk100) begin
         if (!auxch_tri)
             listen_us <= '0;
         else if (listen_us != 11'h7FF)
             listen_us <= listen_us + 11'd1;
         auxin_sync <= {auxin_sync[1:0], auxch_in};
-        if ((listen_us > 11'd1000) && (auxin_sync[2] != auxin_sync[1]))
-            auxin_edge_cnt <= auxin_edge_cnt + 8'd1;
+        if (gap_us8 != 8'hFF)
+            gap_us8 <= gap_us8 + 8'd1;
+        if (!auxch_tri)
+            run_len <= '0;
+        else if ((listen_us > 11'd1000) && (auxin_sync[2] != auxin_sync[1])) begin
+            gap_us8 <= 8'd0;
+            // <2 us since previous edge (200 ticks) -> same burst
+            run_len <= (gap_us8 < 8'd200 && run_len != 8'hFF) ? run_len + 8'd1 : 8'd1;
+        end else if (gap_us8 >= 8'd200)
+            run_len <= '0;
+        if (run_len > auxin_edge_cnt)
+            auxin_edge_cnt <= run_len;
     end
 
     logic [26:0] c100_cnt = '0;
