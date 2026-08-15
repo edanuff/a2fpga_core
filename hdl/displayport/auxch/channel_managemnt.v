@@ -64,6 +64,7 @@ module channel_management #(
 )(
         input  clk100,
         output [7:0] debug,
+        output [7:0] debug_rx,   // AUX RX: {sync hits, accepted bytes} (registered)
 
         input   hpd,
         input   auxch_in,
@@ -152,6 +153,13 @@ module channel_management #(
     wire       symbol_locked;
     wire       align_locked;
     //----------------------------------------------
+    // registered export: keeps debug plumbing off the RX engine's
+    // timing-critical paths (PnR placed rx_r->aux_addr CE at -0.6 ns
+    // when exported combinationally)
+    wire [7:0] debug_rx_w;
+    reg  [7:0] debug_rx_r = 8'd0;
+    always @(posedge clk100) debug_rx_r <= debug_rx_w;
+    assign debug_rx = debug_rx_r;
     wire [7:0] interface_debug;
     wire [7:0] mgmt_debug;
    
@@ -187,6 +195,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .BLIND_SINK(BLIND_SINK)) i_aux_channel(
         .clk             (clk100),
         .debug_pmod      (debug),
+        .debug_rx        (debug_rx_w),
          //------------------------------
         .edid_de         (edid_de),
         .dp_reg_de       (dp_reg_de),

@@ -74,6 +74,7 @@ module aux_channel #(
 )(
         input        clk,
         output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
+        output [7:0] debug_rx,    // = {sync hits, rx bytes} from aux_interface
         //------------------------------
         output reg   edid_de,
         output reg   dp_reg_de,
@@ -253,7 +254,7 @@ aux_interface #(
            .REPLY_TIMEOUT_TICKS(BLIND_SINK != 0 ? 16'd799 : 16'd39999)
        ) i_aux_interface(
            .clk         (clk),
-           .debug_pmod  (),   // superseded: debug_pmod = FSM state 
+           .debug_pmod  (debug_rx),   // {sync hits, rx bytes}
             //---------------------------
             .aux_in     (aux_in),
             .aux_out    (aux_out),

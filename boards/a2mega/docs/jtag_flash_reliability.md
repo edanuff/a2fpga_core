@@ -720,3 +720,46 @@ death. Failure contained to the SOM (chip defect / solder / SOM-local
 stress). Only carrier-mediated path remaining is power quality into the
 SOM (speculative; hot-plug churn + VBUS backfeed topology noted). Board
 #2 slot use carries no flash-specific risk beyond standing rules.
+
+---
+
+## 2026-08-15: TRUE ROOT CAUSE — SecurityBit + auto-boot race (supersedes all prior verdicts)
+
+The full mechanism, proven end-to-end on SOM #2:
+
+1. **Gowin bitstreams default `SecurityBit: ON`** (never chosen by us; visible
+   in the .fs header). A security-on image auto-booted from flash latches
+   "Security Final" in the config controller.
+2. Every openFPGALoader GW5A flash op erases SRAM first, which RE-ARMS the
+   MSPI auto-boot mid-session; the boot master + re-latching security state
+   then CONTEND with the tool's JTAG->SPI passthrough. Win the race = flash
+   works; lose = "Read ID failed" + TAP WEDGED until cold boot. This race —
+   not hardware — was the weeks-long flash ritual.
+3. Post-wedge runs fake-success on the empty chain (tool bug), presenting
+   interrupted sequences as complete — the source of corrupt-flash states.
+4. Independent second gate: the hardcoded 10 MHz SPI phase deterministically
+   misreads the JEDEC tail through the ESP32 bridge (EF4017 -> "EF4010",
+   rejected). Confirmed by identical wrong values across boots.
+
+**Proof:** flash_rescue core (MSPI-as-user-IO via "MSPI": true, SRAM-loaded,
+autonomous UART/telnet reporting) read the W25Q64 directly: pristine
+factory state (J:EF4017 1:00 2:02 3:60). Its erase variant blanked the
+chip (no auto-boot possible), after which a security-OFF image flashed
+100% clean, first try, 1:50 (erase+write+verify), zero contention.
+
+**RETRACTIONS:** (a) "chronic hardware degradation" — wrong; the chip was
+never marginal. (b) SOM #1 "flash chip dead" — NOW DOUBTFUL: its signature
+(Security Final latch, auto-boot on corrupt content, blocked passthrough,
+zeros on ID reads, both transports) matches the latch mechanism, and its
+corrupt content likely came from the fake-success cascade. SOM #1 revival
+via flash_rescue erase is QUEUED and would confirm.
+
+**Standing rules going forward:**
+- `set_option -bit_security 0` on ALL a2mega bitstreams (dp_test done;
+  full core + 138B pending — do before their next flash).
+- flash_rescue (probe + ERASE_OP variants) is the recovery/diagnosis path;
+  it bypasses the passthrough entirely.
+- Patched openFPGALoader (tools/bin/) remains preferred; judge ops by
+  elapsed time + progress lines regardless.
+- Blinking power/done LEDs = supply brownout (cable/port), a separate
+  failure layer — fix power before touching JTAG theories.

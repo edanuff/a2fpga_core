@@ -91,6 +91,7 @@ module dp_transmitter #(
     output logic link_established,
     output logic video_live,
     output logic [7:0] debug,
+    output logic [7:0] debug_rx,   // AUX RX: {sync hits, accepted bytes}
     // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
     // e.g. an in-fabric line-rate check against a known crystal.
     output logic clk_symbol_out,
@@ -416,6 +417,7 @@ module dp_transmitter #(
                          .BLIND_SINK(BLIND_SINK)) i_channel_management(
         .clk100               (clk100),
         .debug                (debug),
+        .debug_rx             (debug_rx),
         .hpd                  (hpd),
         .auxch_in             (auxch_in),
         .auxch_out            (auxch_out),

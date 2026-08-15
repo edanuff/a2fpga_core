@@ -77,9 +77,13 @@ module a2mega_dp_test_top (
         // listen-window edge counter (below) tells us whether the sink's
         // replies produce ANY transitions at the receiver output.
         logic auxch_in_raw;
-        // RX sense inversion retained: the vendored decoder's SYNC-END
-        // constant expects the opposite line sense from the wire.
-        assign auxch_in = ~auxch_in_raw;
+        // Round 10: inverter REMOVED. Round-9 counters showed coherent
+        // 64-edge reply bursts with ZERO sync-pattern hits — the exact
+        // signature of inverted RX sense (Manchester edges are polarity-
+        // blind; the SYNC-END pattern is not). The inversion was derived
+        // for the ELVDS receiver; TLVDS evidently has the opposite
+        // convention.
+        assign auxch_in = auxch_in_raw;
         // Round 7 (user-sparked): TRUE LVDS TX/RX + both-leg pull-DOWNs.
         // Stored offset after a burst is only ~0.35 V (driver swing), and
         // same-rail pulls decay the differential toward ZERO while the CM
@@ -87,12 +91,35 @@ module a2mega_dp_test_top (
         // the whole reply window. Round 1 paired this receiver with
         // pull-UPS (CM at rail = blind) so this combination was never
         // actually tested.
+        // Round 8: COUNTER-PARK. The reply's early section (precharge +
+        // SYNC-END) clips against the residual stored offset while the
+        // later body comes through clean (round-7b E:40 = body-only runs
+        // -> decoder never sees sync). While DRIVING, the line re-biases
+        // with tau ~= 5 us through the far-side termination — so after
+        // the STOP we hold the OPPOSITE polarity ~2.5 us (~0.5 tau),
+        // charging the caps partway back so the stored differential
+        // lands near zero at release. Complementary-driver-compatible
+        // park: no independent legs needed.
+        logic       tri_d = 1'b1;
+        logic       out_last = 1'b0;
+        logic [8:0] park_cnt = 9'd0;
+        always_ff @(posedge clk100) begin
+            tri_d <= auxch_tri;
+            if (!auxch_tri)
+                out_last <= auxch_out;
+            if (auxch_tri && !tri_d)
+                park_cnt <= 9'd250;          // 2.5 us @ 100 MHz
+            else if (park_cnt != 9'd0)
+                park_cnt <= park_cnt - 9'd1;
+        end
+        wire parking = (park_cnt != 9'd0);
+
         TLVDS_IOBUF i_aux_diff (
             .O   (auxch_in_raw),
             .IO  (dp_aux_p),
             .IOB (dp_aux_n),
-            .I   (auxch_out),
-            .OEN (auxch_tri)
+            .I   (parking ? ~out_last : auxch_out),
+            .OEN (auxch_tri && !parking)
         );
     end else begin : g_aux_pseudo
         assign dp_aux_p = auxch_tri ? 1'bz : auxch_out;
@@ -156,6 +183,7 @@ module a2mega_dp_test_top (
     logic link_established, video_live;
     logic [7:0] debug;
     logic [7:0] serdes_status;
+    logic [7:0] aux_dbg_rx;
     logic       hpd_present_w;
     logic [4:0]  drp_idx;
     logic [31:0] drp_data;
@@ -201,6 +229,7 @@ module a2mega_dp_test_top (
         .link_established  (link_established),
         .video_live        (video_live),
         .debug             (debug),
+        .debug_rx       (aux_dbg_rx),
         .clk_symbol_out    (clk_sym_w),
         .serdes_status     (serdes_status),
         .hpd_present_out   (hpd_present_w),
@@ -293,7 +322,7 @@ module a2mega_dp_test_top (
         frm_s0 <= frame_cnt;      frm_s <= frm_s0;
         flg_s0 <= {dp_hpd, link_established, video_live};
         c100_s0 <= c100_cnt[26];  c100_s <= c100_s0;
-        hp_s0 <= {hpd_present_w, auxin_edge_cnt};  hp_s <= hp_s0;  // E: = aux RX edges (experiment)
+        hp_s0 <= {hpd_present_w, aux_dbg_rx};  hp_s <= hp_s0;  // E: = {sync hits, rx bytes}
         flg_s  <= flg_s0;
     end
 
