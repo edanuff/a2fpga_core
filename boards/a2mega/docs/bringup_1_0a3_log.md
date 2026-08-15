@@ -682,3 +682,25 @@ Consequences:
    sweep (lane count / link rate / mode) with HPD-IRQ pulses from the
    sink as the only feedback channel. Converter still receives all our
    DPCD writes (TX works); we just can't read its capabilities.
+
+## 2026-08-15 late: PD attach regression (OPEN) — parks the AUX counter experiment
+
+After the day's heavy attach cycling, DP alt-mode entry stopped completing.
+Signature: attach detection + (sometimes) contract/DR_Swap still work
+(one attach reached USB-ONLY SNK/DFP), but VDM-phase messaging ALWAYS
+fails — "DP ALT MODE RESPONSE TIMEOUT" xN then "PD TRANSMISSION FAILED
+DURING DP" (no GoodCRC on our own TX). Eliminated: breakout (direct cable
+same), cable orientation (flip same), monitor state (power-cycled; also
+HUB shows identical timeouts -> BOARD SIDE), board+monitor state machines
+(full both-end power cycle same), FPGA image (VDMs don't involve FPGA).
+FUSB dump with hub attached: 08:02 3C:0C 3D:01 3E:00 3F:00 40:9.
+Suspects for next session: FUSB302B TX path degradation, board USB-C
+connector CC contacts (exceptional insertion count today), subtle
+firmware regression (3 uploads today — diff is textually benign: 'j'
+key, fline[96], TEE_COLS 80). Next: register-level VDM/GoodCRC logging
+in usbc_port.c; try known-good firmware build from git if in doubt.
+
+Blocked by this: the attach-counter experiment (E: should walk +1 per
+fresh attach if the virgin-caps theory holds). Round-11 evidence stands:
+ONE fully-decoded reply with valid ACK header (E:11 R:00) — decoder +
+polarity PROVEN; only reply visibility vs stored line offset remains.

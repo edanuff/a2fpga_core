@@ -68,7 +68,7 @@ module aux_interface #(
     parameter [15:0] REPLY_TIMEOUT_TICKS = 16'd39999
 )(
        input        clk,
-       output [7:0] debug_pmod,
+       output [15:0] debug_pmod,
        //----------------------------
        input        aux_in,
        output reg   aux_out,
@@ -191,15 +191,18 @@ end
     // vs 'decode fully working' at the telemetry level.
     reg [3:0] dbg_sync_cnt = 4'd0;
     reg [3:0] dbg_byte_cnt = 4'd0;
+    reg [7:0] dbg_last_byte = 8'd0;
     reg [2:0] rx_state_d   = 3'b000;
     always @(posedge clk) begin
         rx_state_d <= rx_state;
         if (rx_state == rx_receiving_data && rx_state_d != rx_receiving_data)
             dbg_sync_cnt <= dbg_sync_cnt + 4'd1;
-        if (rx_wr_en)
-            dbg_byte_cnt <= dbg_byte_cnt + 4'd1;
+        if (rx_wr_en) begin
+            dbg_byte_cnt  <= dbg_byte_cnt + 4'd1;
+            dbg_last_byte <= rx_wr_data;
+        end
     end
-    assign debug_pmod = {dbg_sync_cnt, dbg_byte_cnt};
+    assign debug_pmod = {dbg_last_byte, dbg_sync_cnt, dbg_byte_cnt};
     
     //--------------------------------------------
     // Async logic for the FIFO state and pointers

@@ -64,7 +64,7 @@ module channel_management #(
 )(
         input  clk100,
         output [7:0] debug,
-        output [7:0] debug_rx,   // AUX RX: {sync hits, accepted bytes} (registered)
+        output [15:0] debug_rx,  // AUX RX: {last byte, sync hits, accepted bytes} (registered)
 
         input   hpd,
         input   auxch_in,
@@ -156,8 +156,8 @@ module channel_management #(
     // registered export: keeps debug plumbing off the RX engine's
     // timing-critical paths (PnR placed rx_r->aux_addr CE at -0.6 ns
     // when exported combinationally)
-    wire [7:0] debug_rx_w;
-    reg  [7:0] debug_rx_r = 8'd0;
+    wire [15:0] debug_rx_w;
+    reg  [15:0] debug_rx_r = 16'd0;
     always @(posedge clk100) debug_rx_r <= debug_rx_w;
     assign debug_rx = debug_rx_r;
     wire [7:0] interface_debug;

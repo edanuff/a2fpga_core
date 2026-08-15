@@ -183,7 +183,7 @@ module a2mega_dp_test_top (
     logic link_established, video_live;
     logic [7:0] debug;
     logic [7:0] serdes_status;
-    logic [7:0] aux_dbg_rx;
+    logic [15:0] aux_dbg_rx;
     logic       hpd_present_w;
     logic [4:0]  drp_idx;
     logic [31:0] drp_data;
@@ -315,14 +315,14 @@ module a2mega_dp_test_top (
     logic [7:0] dbg_s0, dbg_s, frm_s0, frm_s;
     logic [2:0] flg_s0, flg_s;
     logic       c100_s0, c100_s;
-    logic [8:0] hp_s0, hp_s;
+    logic [16:0] hp_s0, hp_s;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
         frm_s0 <= frame_cnt;      frm_s <= frm_s0;
         flg_s0 <= {dp_hpd, link_established, video_live};
         c100_s0 <= c100_cnt[26];  c100_s <= c100_s0;
-        hp_s0 <= {hpd_present_w, aux_dbg_rx};  hp_s <= hp_s0;  // E: = {sync hits, rx bytes}
+        hp_s0 <= {hpd_present_w, aux_dbg_rx};  hp_s <= hp_s0;  // E: = {sync,bytes}, R: = last byte
         flg_s  <= flg_s0;
     end
 
@@ -330,7 +330,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 37;
+    localparam int MSG_LEN = 42;
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -360,7 +360,8 @@ module a2mega_dp_test_top (
             msg[24]=" "; msg[25]=" "; msg[26]=" "; msg[27]=" ";
             msg[28]=" "; msg[29]=" "; msg[30]=" "; msg[31]=" ";
             msg[32]=" "; msg[33]=" "; msg[34]=" "; msg[35]=" ";
-            msg[36]=8'h0A;
+            msg[36]=" "; msg[37]=" "; msg[38]=" "; msg[39]=" ";
+            msg[40]=" "; msg[41]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -375,11 +376,14 @@ module a2mega_dp_test_top (
         msg[25]=8'h30 + 8'(flg_s[0]);
         msg[26]=8'h30 + 8'(c100_s);   // alternates line-to-line iff clk100 alive
         msg[27]=" "; msg[28]="P"; msg[29]=":";
-        msg[30]=8'h30 + 8'(hp_s[8]);          // hpd_present (the gate)
+        msg[30]=8'h30 + 8'(hp_s[16]);         // hpd_present (the gate)
         msg[31]=" "; msg[32]="E"; msg[33]=":";
-        msg[34]=hexch(hp_s[7:4]);             // raw HPD falling edges (mod 256)
-        msg[35]=hexch(hp_s[3:0]);
-        msg[36]=8'h0A;
+        msg[34]=hexch(hp_s[7:4]);             // sync-pattern hits (mod 16)
+        msg[35]=hexch(hp_s[3:0]);             // accepted rx bytes (mod 16)
+        msg[36]=" "; msg[37]="R"; msg[38]=":";
+        msg[39]=hexch(hp_s[15:12]);           // last accepted byte (reply
+        msg[40]=hexch(hp_s[11:8]);            //  header: ACK/NACK/DEFER)
+        msg[41]=8'h0A;
         end
     end
 

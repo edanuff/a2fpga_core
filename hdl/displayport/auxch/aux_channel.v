@@ -74,7 +74,7 @@ module aux_channel #(
 )(
         input        clk,
         output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
-        output [7:0] debug_rx,    // = {sync hits, rx bytes} from aux_interface
+        output [15:0] debug_rx,   // = {last byte, sync hits, rx bytes} from aux_interface
         //------------------------------
         output reg   edid_de,
         output reg   dp_reg_de,
