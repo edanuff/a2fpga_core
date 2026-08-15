@@ -237,6 +237,14 @@ always @(posedge clk) begin
        12'h186: begin aux_tx_data <= 8'h06; aux_tx_wr_en <= 1'b1; end
        12'h187: begin aux_tx_data <= 8'h06; aux_tx_wr_en <= 1'b1; end
 
+       // Clear DEVICE_SERVICE_IRQ_VECTOR (native write DPCD 0x201 <= 0x7F,
+       // write-1-clear of all defined vector bits)
+       12'h190: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end
+       12'h191: begin aux_tx_data <= 8'h02; aux_tx_wr_en <= 1'b1; end
+       12'h192: begin aux_tx_data <= 8'h01; aux_tx_wr_en <= 1'b1; end
+       12'h193: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
+       12'h194: begin aux_tx_data <= 8'h7F; aux_tx_wr_en <= 1'b1; end
+
 	   	   // Set Premp level 1, votage 0.4V
        12'h240: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end
        12'h241: begin aux_tx_data <= 8'h01; aux_tx_wr_en <= 1'b1; end

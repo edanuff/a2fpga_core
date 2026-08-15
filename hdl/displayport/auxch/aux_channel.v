@@ -143,6 +143,11 @@ module aux_channel #(
 
     // Checking the state of the link
     localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
+    // 2026-08-15: write-1-clear DPCD 0x201 (DEVICE_SERVICE_IRQ_VECTOR)
+    // after each IRQ-triggered status read. Sinks (esp. DP->HDMI
+    // converters after an HDMI hotplug) re-assert HPD-IRQ until the
+    // vector is cleared -> eternal retrain loop without this.
+    localparam [7:0] clear_irq = 8'h32;
                     
     reg  [7:0]  state            = error;
     reg  [7:0]  next_state       = error;
@@ -384,7 +389,8 @@ always @(posedge clk) begin
                                 end                        
             switch_to_normal:   state_on_success <= link_established;  
             link_established:   state_on_success <= link_established;
-            check_link:         state_on_success <= check_wait;
+            check_link:         state_on_success <= clear_irq;
+            clear_irq:          state_on_success <= check_wait;
             check_wait:         if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
                                     state_on_success <= link_established;
                                 end else begin
@@ -469,6 +475,7 @@ always @(posedge clk) begin
             switch_to_normal:     begin msg <= 8'h11; expected <= 8'h01; end
             link_established:     begin msg <= 8'h00; expected <= 8'h00; reset_addr_on_change <= 1'b1; end
             check_link:           begin msg <= 8'h0D; expected <= 8'h09; status_de_active <= 1'b1;  end
+            clear_irq:            begin msg <= 8'h19; expected <= 8'h01; end
             check_wait:           begin msg <= 8'h00; expected <= 8'h00; end
             error:                begin msg <= 8'h00; end
             default:              begin msg <= 8'h00; end
@@ -512,6 +519,7 @@ always @(posedge clk) begin
             switch_to_normal:     begin tx_powerup <= 1'b1; end
             link_established:     begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             check_link:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            clear_irq:            begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             check_wait:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
         endcase
     end
@@ -639,7 +647,7 @@ always @(posedge clk) begin
     // watchdog is kept in both modes.)
     if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
                                   (state != reset      && state != link_established &&
-                                   state != check_link && state != check_wait       && retry_now == 1'b1)) begin
+                                   state != check_link && state != check_wait && state != clear_irq && retry_now == 1'b1)) begin
         next_state <= reset;
         state      <= error;
     end

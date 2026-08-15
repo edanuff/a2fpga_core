@@ -747,3 +747,30 @@ ladder correctly retrains each wake (closed-loop doing its job). PD
 hot-attach worked twice this session (hub attach + live flip) — the
 hot-attach regression is intermittent/partner-dependent, not absolute;
 VDM diagnostics remain in firmware to catch the failing case.
+
+## 2026-08-15 end of session: hub link-stability regression (OPEN)
+
+After the HDMI-replug experiments, the hub/converter path never returned
+to the stable state of the first round-12 session (which held D:2E for
+minutes with video+audio). Current behavior on BOTH orientations, through
+round 13 (IRQ-vector clear — didn't cure it), hub power cycle, display
+wake: ladder trains closed-loop to D:2E, holds 1-2 s, sink status shows
+loss, correct retrain, repeat ~1 Hz. Screen dark — converter's HDMI TX
+plausibly never starts because the link never stays up long enough.
+One EQ preset step tried live ('e') — no change.
+
+Hypotheses for next session, in order:
+1. Main-link SI/EQ through the hub path (sweep all mux EQ presets
+   systematically while watching stability; the working first session may
+   have been on a luckier EQ/orientation combination).
+2. Converter HDCP attempts with this display churning its DP side.
+3. Converter state damaged by the hotplug churn (try a different
+   DP->HDMI adapter or the hub's other ports).
+Required instrumentation: lock-bits telemetry (clock/equ/symbol/align
+from the DECODED sink status) to see WHICH condition the sink reports
+losing at each drop — closed-loop gives us this for free now.
+
+Milestone unaffected: closed-loop training + live monitoring PROVEN
+(trains in ms, notices loss, retrains autonomously — all visible in
+telemetry). The instability is a link-quality tuning problem, not an
+AUX/protocol one.
