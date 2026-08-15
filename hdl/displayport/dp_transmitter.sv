@@ -93,6 +93,7 @@ module dp_transmitter #(
     output logic [7:0] debug,
     output logic [15:0] debug_rx,  // AUX RX: {last byte, sync hits, accepted bytes}
     output logic [3:0]  debug_locks, // {clock,equ,symbol,align}_locked
+    output logic [7:0]  debug_gate,  // latched-at-gate locks + fail/timeout ctrs
     // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
     // e.g. an in-fabric line-rate check against a known crystal.
     output logic clk_symbol_out,
@@ -420,6 +421,7 @@ module dp_transmitter #(
         .debug                (debug),
         .debug_rx             (debug_rx),
         .debug_locks          (debug_locks),
+        .debug_gate           (debug_gate),
         .hpd                  (hpd),
         .auxch_in             (auxch_in),
         .auxch_out            (auxch_out),

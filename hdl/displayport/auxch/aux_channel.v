@@ -74,6 +74,7 @@ module aux_channel #(
 )(
         input        clk,
         output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
+        output [7:0] debug_gate,  // {locks@check_wait[3:0], gate_fails[1:0], timeouts[1:0]}
         output [15:0] debug_rx,   // = {last byte, sync hits, rx bytes} from aux_interface
         //------------------------------
         output reg   edid_de,
@@ -195,6 +196,14 @@ module aux_channel #(
 
     // BLIND_SINK: assume training succeeded (no status reads possible)
     wire clock_locked_i  = clock_locked  | (BLIND_SINK != 0);
+
+    // Instrument (2026-08-15): the lock signals are decode-time pulses —
+    // sample them exactly when the check_wait gate evaluates, and count
+    // the two possible established-loop reset causes separately.
+    reg [3:0] dbg_gate_locks = 4'd0;
+    reg [1:0] dbg_gate_fail  = 2'd0;
+    reg [1:0] dbg_timeouts   = 2'd0;
+    assign debug_gate = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
     wire equ_locked_i    = equ_locked    | (BLIND_SINK != 0);
     wire symbol_locked_i = symbol_locked | (BLIND_SINK != 0);
     wire align_locked_i  = align_locked  | (BLIND_SINK != 0);
@@ -385,10 +394,14 @@ always @(posedge clk) begin
             switch_to_normal:   state_on_success <= link_established;  
             link_established:   state_on_success <= link_established;
             check_link:         state_on_success <= check_wait;
-            check_wait:         if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
+            check_wait:         begin
+                                dbg_gate_locks <= {clock_locked_i, equ_locked_i, symbol_locked_i, align_locked_i};
+                                if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
                                     state_on_success <= link_established;
                                 end else begin
+                                    dbg_gate_fail    <= dbg_gate_fail + 2'd1;
                                     state_on_success <= error;
+                                end
                                 end 
             error:              state_on_success <= error;
         endcase
@@ -637,6 +650,8 @@ always @(posedge clk) begin
     // (BLIND_SINK: reply timeouts are the EXPECTED outcome of every
     // transaction — they must not reset the FSM. The periodic retry_now
     // watchdog is kept in both modes.)
+    if (BLIND_SINK == 0 && channel_timeout == 1'b1)
+        dbg_timeouts <= dbg_timeouts + 2'd1;
     if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
                                   (state != reset      && state != link_established &&
                                    state != check_link && state != check_wait       && retry_now == 1'b1)) begin
