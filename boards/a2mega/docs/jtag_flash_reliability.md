@@ -711,3 +711,12 @@ SRAM-load still works when Mac-attached). Board #2 protections:
 4. Pre-slot: verify MSPI balls vs BTB (datasheet cross-check).
 5. 1.0a4 rev list: hard gate on bus-transceiver enable during config
    windows + AUX bias resistors.
+
+**MSPI-vs-BTB check CLOSED (2026-08-15, user, Tang Mega 60K SOM
+schematics):** no connections between the MSPI (config flash) signals and
+the BTB connectors. The flash SPI bus is entirely SOM-local — the carrier,
+Apple bus, and all system-level activity are exonerated for the flash
+death. Failure contained to the SOM (chip defect / solder / SOM-local
+stress). Only carrier-mediated path remaining is power quality into the
+SOM (speculative; hot-plug churn + VBUS backfeed topology noted). Board
+#2 slot use carries no flash-specific risk beyond standing rules.
