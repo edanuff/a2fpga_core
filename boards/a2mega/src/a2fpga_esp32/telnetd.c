@@ -92,6 +92,9 @@ static void tn_puts(int fd, const char *s)
     tn_send(fd, s, (int)strlen(s));
 }
 
+/* non-static wrapper for C++ side (jtag bridge toggle feedback) */
+void tn_puts_ext(int fd, const char *s) { tn_puts(fd, s); }
+
 /* Render one 40-char row of Apple II screen codes as ANSI. Inverse video
  * is codes $00-$3F ($00-$1F = '@'+c, $20-$3F = c); normal is ASCII+0x80. */
 static void render_row(int fd, const uint8_t *row)
@@ -165,7 +168,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2mega remote console\r\n"
-                "keys: c=console m=menu p=pd x=regs e=eq f=flip r=retrain u=fusb q=quit\r\n"
+                "keys: c=console m=menu p=pd x=regs e=eq f=flip r=retrain u=fusb j=jtagbridge q=quit\r\n"
                 "menu: up/down move, left/right change, enter/a=ok,\r\n"
                 "      esc/backspace/b=back, y=view, s/tab=select\r\n\r\n");
 
@@ -262,6 +265,15 @@ static void session(int fd)
 #else
                 tn_puts(fd, "fusb: not built for this board rev\r\n");
 #endif
+                continue;
+            }
+            if (esc_st == 0 && ch == 'j' && !menu_mode) {
+                /* Toggle the USB-JTAG bridge routing. Release puts all
+                 * ESP32 JTAG pads at high-Z so an EXTERNAL programmer can
+                 * own the FPGA JTAG bus without contention (board #1 flash
+                 * forensics, 2026-08-15). */
+                extern void telnetd_jtag_bridge_toggle(int fd);
+                telnetd_jtag_bridge_toggle(fd);
                 continue;
             }
             if (esc_st == 0 && ch == 'e' && !menu_mode) {
