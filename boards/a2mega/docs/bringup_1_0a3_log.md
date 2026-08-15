@@ -644,3 +644,41 @@ DP core -> GTR12 -> TUSB1046A -> USB-C Alt Mode -> monitor.
 Remaining regression items: disk boot via ESP32 serving, keyboard/
 input, slot soak, DP-cable adapter (true source role), OSD scaling
 polish, timing-clean PnR roll, board #2 (Stage 8).
+
+## AUX closed-loop RX: FINAL VERDICT — electrically unreachable on 1.0a3 (2026-08-14)
+
+Six rounds. TX is fully proven (monitor ACKs every DPCD write; EDID I2C
+request flow decoded on the wire; replies arrive ~300 us after each
+request). RX is proven impossible with this board + FPGA IO:
+
+- Root cause (circuit analysis): every Manchester burst ends with the pads
+  driven to opposite rails; the 100 nF AC caps STORE that differential.
+  The FPGA-side pair idles with a large locked-in offset (no DC path on
+  the FPGA side to discharge it — PULL_MODE pulls are far too weak within
+  the 300 us reply window). The sink's ±0.35 V differential reply never
+  crosses the comparator threshold.
+- Fix would be "park both legs at the same level before release" —
+  requires independent per-leg drivers plus a differential receiver:
+  - MIPI_IBUF has exactly this, but its HS receiver requires bank VCCIO
+    1.2/1.5/1.8 V (CT1136); bank 4 is hard-wired 3.3 V. Dead.
+  - Hand-composition (TLVDS_IBUF + 2x TBUF on shared pads) rejected by
+    PnR (CV0013: IBUF must connect directly to a port). Dead.
+  - ELVDS_IOBUF (only remaining diff-RX personality) forces P=~N. Dead.
+- Empirical confirmation (round 6 instrumentation): listen-window edge
+  counter (counts auxch_in transitions only >10 us after tri-state, so
+  own TX can never register) stayed at 00 across hundreds of
+  request/reply exchanges. Counter path itself validated in round 3
+  (free-running variant churned on TX edges). Receiver output is DEAD
+  QUIET while the sink talks: comparator pinned. No RTL fix exists.
+
+Consequences:
+1. Blind-sink ladder (84 ms dwell + declared 804 mV swing + watchdog)
+   REMAINS the production AUX strategy for 1.0a3. Stage 5 sign-off stands.
+2. 1.0a4 board rev item: add an FPGA-side AUX bias/termination network
+   (e.g. 100 k divider bias per leg to ~1.5 V) so the receiver idles in
+   range with zero stored differential — two resistors buy closed-loop
+   training, EDID read, and link-status feedback.
+3. USB-C hub / DP->HDMI converter path must be attacked blind: config
+   sweep (lane count / link rate / mode) with HPD-IRQ pulses from the
+   sink as the only feedback channel. Converter still receives all our
+   DPCD writes (TX works); we just can't read its capabilities.

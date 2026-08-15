@@ -69,26 +69,23 @@ module a2mega_dp_test_top (
 
     logic auxch_in, auxch_out, auxch_tri;
     generate if (AUX_TLVDS != 0) begin : g_aux_tlvds
-        // ELVDS_IOBUF, not TLVDS: true LVDS is a CURRENT-mode driver that
-        // needs a 100R differential termination — into this unterminated
-        // AC-coupled 100k-biased line it produced rounded mush the sink
-        // couldn't parse (live-hit: requests degraded, zero ACKs).
-        // LVCMOS33D/ELVDS = voltage-mode complementary drive (the exact
-        // electricals the sink has ACKed all along) + differential RX.
-        // RX sense inversion: the vendored Manchester decoder's SYNC-END
-        // constant (0101010111110000) expects the OPPOSITE line sense
-        // from what the wire carries (monitor sync-end observed as
-        // low-run-then-high-run; decoder wants high-then-low — the
-        // original board's analog front end evidently inverted). One
-        // inverter on RX only; TX polarity stays (sink ACKs it).
+        // Round 6: pad back to the PROVEN round-3 config (ELVDS_IOBUF:
+        // voltage-mode complementary TX — monitor demonstrably replies on
+        // the wire — plus the LVCMOS33D differential RX). Independent-leg
+        // park is unreachable (MIPI needs a 1.8 V bank; hand-composition
+        // rejected by PnR), so this round is INSTRUMENTATION: a
+        // listen-window edge counter (below) tells us whether the sink's
+        // replies produce ANY transitions at the receiver output.
         logic auxch_in_raw;
+        // RX sense inversion retained: the vendored decoder's SYNC-END
+        // constant expects the opposite line sense from the wire.
         assign auxch_in = ~auxch_in_raw;
         ELVDS_IOBUF i_aux_diff (
             .O   (auxch_in_raw),
             .IO  (dp_aux_p),
             .IOB (dp_aux_n),
             .I   (auxch_out),
-            .OEN (auxch_tri)     // 1 = release (listen), matching bufif0
+            .OEN (auxch_tri)
         );
     end else begin : g_aux_pseudo
         assign dp_aux_p = auxch_tri ? 1'bz : auxch_out;
@@ -230,11 +227,20 @@ module a2mega_dp_test_top (
     // path is alive at the pin (then any decode failure is downstream);
     // frozen = the primitive's input path itself is dead. Temporarily
     // displayed in the UART E: field (HPD edge count parked).
+    // ...refined: LISTEN-WINDOW edge counter. Count only edges seen while
+    // our driver is tri-stated AND >10 us have passed since release, so
+    // our own TX and its ring-down can never be counted. Any count here
+    // is the sink's reply arriving at the differential receiver output.
     logic [7:0] auxin_edge_cnt = '0;
     logic [2:0] auxin_sync = '0;
-    always_ff @(posedge clk50_in) begin
+    logic [10:0] listen_us = '0;
+    always_ff @(posedge clk100) begin
+        if (!auxch_tri)
+            listen_us <= '0;
+        else if (listen_us != 11'h7FF)
+            listen_us <= listen_us + 11'd1;
         auxin_sync <= {auxin_sync[1:0], auxch_in};
-        if (auxin_sync[2] != auxin_sync[1])
+        if ((listen_us > 11'd1000) && (auxin_sync[2] != auxin_sync[1]))
             auxin_edge_cnt <= auxin_edge_cnt + 8'd1;
     end
 
