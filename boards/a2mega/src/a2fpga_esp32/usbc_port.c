@@ -517,6 +517,27 @@ static int handle_received_message(usbc_port_t *port,
     return 0;
 }
 
+/* --- VDM-phase diagnostics (2026-08-15 attach regression) ------------
+ * Discriminates TX-side vs RX-side death during alt-mode entry:
+ *   "VDM TXOK st=N"  = FUSB got GoodCRC for our VDM (partner RECEIVED it)
+ *   "VDM TXFL st=N"  = retries exhausted, no GoodCRC (link-level TX fail)
+ *   "VDM RX h=XXXX"  = any message received while in a VDM wait state
+ *   "VDM TO st=N try=K" = response timer expired, retrying
+ * TXOK + no RX = partner hears us and elects not to answer (role/content
+ * issue); TXFL = CC messaging path broken.                             */
+static bool in_vdm_state(const usbc_port_t *port)
+{
+    return port->state >= USBC_STATE_VDM_WAIT_IDENTITY &&
+           port->state <= USBC_STATE_VDM_WAIT_CONFIGURE;
+}
+
+static void log_vdm(usbc_port_t *port, const char *fmt, unsigned a, unsigned b)
+{
+    char buf[38];
+    (void)snprintf(buf, sizeof buf, fmt, a, b);
+    log_message(port, USBC_LOG_INFO, buf);
+}
+
 static int drain_receive_fifo(usbc_port_t *port)
 {
     usb_pd_message_t message;
@@ -527,6 +548,9 @@ static int drain_receive_fifo(usbc_port_t *port)
             return 0;
         if (rc != 0)
             return rc;
+        if (in_vdm_state(port))
+            log_vdm(port, "VDM RX h=%04X n=%u", message.header,
+                    (unsigned)message.data_count);
         rc = handle_received_message(port, &message);
         if (rc != 0)
             return rc;
@@ -539,6 +563,9 @@ static void handle_tx_success(usbc_port_t *port)
     port->tx_busy = false;
     port->tx_kind = USBC_TX_NONE;
     port->tx_message_id = (uint8_t)((port->tx_message_id + 1u) & 0x7u);
+    if (in_vdm_state(port))
+        log_vdm(port, "VDM TXOK st=%u k=%u", (unsigned)port->state,
+                (unsigned)kind);
 
     if (kind == USBC_TX_ACCEPT && port->state == USBC_STATE_SOURCE_ACCEPT_SENT) {
         port->state = USBC_STATE_SOURCE_SEND_PS_RDY;
@@ -567,9 +594,11 @@ static int handle_tx_failure(usbc_port_t *port)
         return fusb302_transmit(&port->fusb302, &port->tx_message);
     port->tx_busy = false;
     port->tx_kind = USBC_TX_NONE;
-    if (port->state >= USBC_STATE_VDM_WAIT_IDENTITY &&
-        port->state <= USBC_STATE_VDM_WAIT_CONFIGURE)
+    if (in_vdm_state(port)) {
+        log_vdm(port, "VDM TXFL st=%u try=%u", (unsigned)port->state,
+                (unsigned)port->tx_attempts);
         fall_back_to_usb_only(port, "PD transmission failed during DP discovery");
+    }
     else
         port->deadline_ms = now_ms(port) + port->config.source_caps_period_ms;
     return 0;
@@ -767,7 +796,10 @@ static int service_state_timer(usbc_port_t *port)
         if (!port->tx_busy && time_reached(now, port->deadline_ms)) {
             if (port->vdm_retry_count < port->config.vdm_retries) {
                 const uint8_t next_retry = (uint8_t)(port->vdm_retry_count + 1u);
-                const int rc = retry_vdm_for_state(port);
+                int rc;
+                log_vdm(port, "VDM TO st=%u try=%u", (unsigned)port->state,
+                        (unsigned)next_retry);
+                rc = retry_vdm_for_state(port);
                 port->vdm_retry_count = next_retry;
                 return rc;
             }

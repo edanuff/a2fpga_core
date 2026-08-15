@@ -262,10 +262,15 @@ extern "C" void usbc_hpd_retrain(void)
 /* Telnet 'u': raw FUSB302B status snapshot for in-slot attach debugging. */
 extern "C" void usbc_fusb_dump_log(void)
 {
-    static const uint8_t regs[] = {0x08, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42};
+    /* STATUS registers only: 0x3E/0x3F/0x42 (interrupts) CLEAR ON READ —
+     * dumping them both lied (service loop drains them first: always 00)
+     * and stole pending events from the live PD stack. 0x41 Status1 has
+     * the TX/RX FIFO + collision flags the attach-regression hunt needs.
+     * Line kept <=38 chars for the 40-col OSD console (CON_COLS 39). */
+    static const uint8_t regs[] = {0x08, 0x3C, 0x3D, 0x40, 0x41};
     char line[80];
     char *w = line;
-    w += snprintf(w, sizeof line, "FUSB");
+    w += snprintf(w, sizeof line, "FB");
     for (size_t i = 0; i < sizeof regs; i++) {
         uint8_t v = 0xEE;
         (void)i2c_read(NULL, 0x22, regs[i], &v, 1);
