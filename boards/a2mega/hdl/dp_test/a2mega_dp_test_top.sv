@@ -75,8 +75,16 @@ module a2mega_dp_test_top (
         // couldn't parse (live-hit: requests degraded, zero ACKs).
         // LVCMOS33D/ELVDS = voltage-mode complementary drive (the exact
         // electricals the sink has ACKed all along) + differential RX.
+        // RX sense inversion: the vendored Manchester decoder's SYNC-END
+        // constant (0101010111110000) expects the OPPOSITE line sense
+        // from what the wire carries (monitor sync-end observed as
+        // low-run-then-high-run; decoder wants high-then-low — the
+        // original board's analog front end evidently inverted). One
+        // inverter on RX only; TX polarity stays (sink ACKs it).
+        logic auxch_in_raw;
+        assign auxch_in = ~auxch_in_raw;
         ELVDS_IOBUF i_aux_diff (
-            .O   (auxch_in),
+            .O   (auxch_in_raw),
             .IO  (dp_aux_p),
             .IOB (dp_aux_n),
             .I   (auxch_out),
