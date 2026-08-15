@@ -736,3 +736,14 @@ partner-present works — that's the workaround; VDM diagnostics now in
 firmware for the hot-attach case). AUX RX FIFO noise ingestion at
 zero-offset idle documented (squelch = gate sync acceptance on
 awaiting-reply; future hardening).
+
+**Round-12 stability addendum:** CC2 orientation = rock solid (continuous
+D:2E, live ACKed polling, colorbars+audio). CC1 orientation = trains
+closed-loop successfully but link drops/retrains ~1 Hz (converter
+HPD-IRQ/lock-loss) — orientation-dependent main-link margin; add to lane
+EQ tuning list (mux EQ was tuned on the monitor path). Display-asleep
+behavior identified: converter cycles HPD when its HDMI sink sleeps —
+ladder correctly retrains each wake (closed-loop doing its job). PD
+hot-attach worked twice this session (hub attach + live flip) — the
+hot-attach regression is intermittent/partner-dependent, not absolute;
+VDM diagnostics remain in firmware to catch the failing case.
