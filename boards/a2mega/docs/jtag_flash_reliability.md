@@ -644,3 +644,31 @@ corrupt (not merely unreadable-on-bench). Tomorrow's direct-JTAG
 programmer session is now a clean two-way discriminator: writes+boots →
 chip fine, bridge corrupted content (fix/work around the bridge);
 fails → chip damaged → plan C (ESP32 SRAM-load at power-up) or SOM swap.
+
+## ROOT CAUSE FOUND (2026-08-15 early AM): gowin.cpp hardcoded 10 MHz
+
+`Gowin::prepare_flash_access()` (openFPGALoader src/gowin.cpp) ends with
+`_jtag->setClkFreq(10000000);` — the GW5A SPI-over-JTAG external-flash
+phase ALWAYS runs at 10 MHz, ignoring --freq. Through the esp_usb_jtag
+bridge this is marginal: it held all week, tipped over tonight. A flash op
+that dies mid-10 MHz-sequence WEDGES THE TAP for every tool (OpenOCD
+included, "all ones") until USB cold boot. Wedged-state runs then
+fake-success in ~1.4 s (chain scans empty, tool proceeds anyway).
+Full causal chain: 10 MHz SPI phase crash → TAP wedge → fake-success
+cascade → corrupt flash content → autoboot fail.
+
+Why the layers confused us: SRAM loads never enter the flash-access phase
+(stay at --freq) → always worked. Status-register reads happen BEFORE the
+10 MHz switch → looked healthy. "flash chip unknown"/BP-bits/JEDEC garbage
+were all 10 MHz misreads, not chip state.
+
+**Fix (local build, scratchpad ofl/):** two patches —
+1. jtag.cpp: detectChain retry x5 in constructor; empty chain after
+   retries now surfaces "no device found" instead of fake-succeeding.
+2. gowin.cpp: removed the setClkFreq(10000000) hardcode; SPI-over-JTAG
+   flash access now honors the user's --freq.
+Upstream issue/PR worth filing (also relates to trabucayre/openFPGALoader
+issue #578 — esp_usb_jtag fragility).
+
+Validation pending: fresh cold boot + patched flash at 2 MHz → expect
+real multi-minute write with progress lines → power cycle → heartbeat.
