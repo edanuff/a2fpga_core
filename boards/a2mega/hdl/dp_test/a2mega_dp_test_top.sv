@@ -216,6 +216,20 @@ module a2mega_dp_test_top (
             hpd_fall_cnt <= hpd_fall_cnt + 8'd1;
     end
 
+    // TLVDS-RX experiment probe: count edges on the differential AUX
+    // receive line (auxch_in). Replies from the sink are ~100 edges per
+    // transaction; a counter that moves during attach = the ELVDS input
+    // path is alive at the pin (then any decode failure is downstream);
+    // frozen = the primitive's input path itself is dead. Temporarily
+    // displayed in the UART E: field (HPD edge count parked).
+    logic [7:0] auxin_edge_cnt = '0;
+    logic [2:0] auxin_sync = '0;
+    always_ff @(posedge clk50_in) begin
+        auxin_sync <= {auxin_sync[1:0], auxch_in};
+        if (auxin_sync[2] != auxin_sync[1])
+            auxin_edge_cnt <= auxin_edge_cnt + 8'd1;
+    end
+
     logic [26:0] c100_cnt = '0;
     always_ff @(posedge clk100)
         c100_cnt <= c100_cnt + 27'd1;
@@ -240,7 +254,7 @@ module a2mega_dp_test_top (
         frm_s0 <= frame_cnt;      frm_s <= frm_s0;
         flg_s0 <= {dp_hpd, link_established, video_live};
         c100_s0 <= c100_cnt[26];  c100_s <= c100_s0;
-        hp_s0 <= {hpd_present_w, hpd_fall_cnt};  hp_s <= hp_s0;
+        hp_s0 <= {hpd_present_w, auxin_edge_cnt};  hp_s <= hp_s0;  // E: = aux RX edges (experiment)
         flg_s  <= flg_s0;
     end
 
