@@ -704,3 +704,35 @@ Blocked by this: the attach-counter experiment (E: should walk +1 per
 fresh attach if the virgin-caps theory holds). Round-11 evidence stands:
 ONE fully-decoded reply with valid ACK header (E:11 R:00) — decoder +
 polarity PROVEN; only reply visibility vs stored line offset remains.
+
+## 2026-08-15: CLOSED-LOOP DP TRAINING WORKS — hub DP->HDMI converter shows colorbars + audio
+
+Round 12 (native-DPCD presence + EDID skip) trained the link CLOSED-LOOP
+end-to-end on the USB-C hub's DP->HDMI converter: D:2E (established),
+HLVC:1111 (HPD/link/video/clk), E: counting continuously with R:00 —
+live DPCD status polling, every reply decoded, every reply an ACK.
+Colorbars + audio on the HDMI display behind the hub. THE HUB PATH
+(previous total black-screen blocker, critical path to disk booting) IS
+OPEN.
+
+The path here, compressed:
+- Rounds 1-6: receiver electrically blind (stored cap differential).
+- Round 7 (user's BLVDS question): LVDS25 + pull-downs -> first edges.
+- Round 9-10: decoder counters proved sync-polarity inverted; inverter
+  removed -> first decoded byte.
+- Round 11: R: field showed reply headers. Monitor: one ACK at attach
+  then offset-blind. (Monitor path remains offset-marginal — blind
+  ladder still available for it via BLIND_SINK.)
+- Hub converter discovery: its properly-terminated AUX front end gives
+  clean full-swing replies -> RX works CONTINUOUSLY. R:40 = I2C NACK
+  (no HDMI display), then R:20 = DEFER on all DDC-class traffic.
+- Round 12 root insight: check_presence was an I2C address-phase to 0x50
+  (DDC-class!) — converters DEFER DDC indefinitely; ladder never passed
+  step 1 ALL SESSION. Fix: presence = native DPCD read (msg 0x03 sink
+  count), skip EDID states entirely (we output fixed 1080p).
+
+Also this session: PD hot-attach regression remains OPEN (boot-with-
+partner-present works — that's the workaround; VDM diagnostics now in
+firmware for the hot-attach case). AUX RX FIFO noise ingestion at
+zero-offset idle documented (squelch = gate sync acceptance on
+awaiting-reply; future hardening).

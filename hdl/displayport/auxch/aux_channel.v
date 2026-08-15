@@ -292,7 +292,7 @@ always @(posedge clk) begin
         //-------------------------------------------------
         case(next_state)
             reset:              state_on_success <= check_presence;
-            check_presence:     state_on_success <= edid_block0;                        
+            check_presence:     state_on_success <= read_sink_count;  // EDID skipped (DDC-class, converters DEFER it)                        
             edid_block0:        state_on_success <= edid_block1;
             edid_block1:        state_on_success <= edid_block2;
             edid_block2:        state_on_success <= edid_block3;
@@ -408,7 +408,11 @@ always @(posedge clk) begin
         reset_addr_on_change <= 1'b0;                
         case(next_state)
             reset:                begin msg <= 8'h00; expected <= 8'h00; end
-            check_presence:       begin msg <= 8'h01; expected <= 8'h01; reset_addr_on_change <= 1'b1; end
+            // 2026-08-15: presence via NATIVE DPCD read (msg 0x03 = sink
+            // count @ 0x200), not the I2C address-phase to 0x50 — DP->HDMI
+            // converters DEFER all DDC-class traffic indefinitely while
+            // their HDMI side settles, pinning the ladder at step one.
+            check_presence:       begin msg <= 8'h03; expected <= 8'h02; reset_addr_on_change <= 1'b1; end
 
             edid_block0:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
             edid_block1:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
