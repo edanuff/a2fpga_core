@@ -632,3 +632,15 @@ now the toggle+fallback paths work too.
 Remaining: DP-cable adapter test (true source role e2e with VCONN);
 IIgs functional regression (boot, input, disk); integer scaling; one
 timing-clean PnR roll; full-core soak.
+
+**STAGE 7 DISPLAY REGRESSION: PASSED.** IIgs running (ctrl-reset beep),
+OSD toggled off via telnet menu (SELECT='s') — APPLE II DISPLAY UP AND
+CORRECTLY SCALED on the DP monitor from the slot. Scaling mystery
+resolved: the Apple II fb rides the Phase 3b 1080p scan-out scaler
+(working as designed); only the OSD draws native-size (known polish
+item). Full chain live: IIgs bus -> capture -> DDR3 fb -> scaler ->
+DP core -> GTR12 -> TUSB1046A -> USB-C Alt Mode -> monitor.
+
+Remaining regression items: disk boot via ESP32 serving, keyboard/
+input, slot soak, DP-cable adapter (true source role), OSD scaling
+polish, timing-clean PnR roll, board #2 (Stage 8).
