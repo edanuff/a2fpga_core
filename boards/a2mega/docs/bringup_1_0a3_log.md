@@ -930,3 +930,25 @@ re-enable AUDIO_ENABLE=1 after the bonding fix validates).
 - Primitive-level find: GTR12 quad exposes FABRIC_LNx_TX_DISPARITY_I —
   per-lane TX disparity control exists below the EDP PHY abstraction if the
   TPS2 initial-phase delta ever matters.
+
+## 2026-08-16 — flash saga: content-present race pattern NAILED
+
+Today's sequence (patched loader, single-attempt discipline, --verify always):
+fail@1:22 (old image present) -> success@1:45 (chip erased by failed attempt)
+-> fail@1:22 (image present) -> success@1:46 -> verify-FAIL@0:58 mid-write
+(hole at byte 173919; bridge dropped a write op) -> wedge (Read ID fail 1.3s)
+-> replug -> partial JEDEC ef 40 00 -> full wedge (chain empty, honest
+report) -> replug -> flash_rescue SRAM erase (J:EF4017, E:B->E:D) -> replug
+-> success@1:44.9 on blank chip.
+
+- PATTERN: every failure-first had CONTENT in flash; every attempt on an
+  erased chip succeeded (4/4 today incl. post-rescue). The auto-boot re-arm
+  retry loop races the JTAG-SPI passthrough only when a (partial or whole)
+  image gives it something to chew on. SecurityBit=OFF made this survivable,
+  not gone. The 1:22 "timeout" failures are this race, not chip/bridge decay.
+- Success profile is deterministic: 1:44.9-1:45.9. Fail profiles: 1:22.0x
+  (race), <5s (wedge/chain), ~0:58 verify-fail (mid-write drop).
+- flash_rescue erase path: deterministic, ~3 min end to end incl. replugs.
+- Loader fix list (upstream + local): (1) erase-whole-image first or kill
+  auto-boot before write session; (2) stretch erase-phase wait; (3) chunked
+  write with readback-retry; (4) keep honest empty-chain reporting.
