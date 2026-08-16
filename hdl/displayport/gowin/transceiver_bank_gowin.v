@@ -135,25 +135,15 @@ module transceiver_bank_gowin #(
         probe_cnt <= probe_cnt + 7'd1;
     wire [19:0] probe_word = (probe_cnt < 7'd96) ? 20'hFFFFF : 20'h00000;
 
-    // pma_rstn is a ONE-WAY release (2026-08-15): re-asserting the PMA
-    // reset on every ladder retrain WIPES the CSR-programmed analog
-    // settings (the bitstream's UPAR replay — incl. the 804 mV TX swing —
-    // runs only at configuration). That made every post-first-pass link
-    // run at silicon-default analog settings: still lockable, but sinks
-    // (esp. re-encoding converters) refused the stream (SINK_STATUS=0
-    // until reboot — the "video restart" bug). Retrains now pulse only
-    // the PCS reset; the PMA (and its CSR state) stays up for the life
-    // of the configuration.
-    reg        pma_released = 1'b0;
     reg [15:0] seq_count = 0;
     always @(posedge mgmt_clk) begin
         if (powerup_eff == 2'b00) begin
+            pma_rstn   <= 1'b0;
             pcs_tx_rst <= 1'b1;
             seq_count  <= 0;
             tx_running <= 2'b00;
         end else begin
-            pma_rstn     <= 1'b1;
-            pma_released <= 1'b1;
+            pma_rstn <= 1'b1;
             if (seq_count[15])
                 pcs_tx_rst <= 1'b0;      // ~330 us after powerup; ungated
             else
