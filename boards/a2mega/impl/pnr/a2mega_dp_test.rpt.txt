@@ -12,21 +12,21 @@
   <Part Number>: GW5AT-LV60PG484AC1/I0
   <Device>: GW5AT-60
   <Device Version>: B
-  <Created Time>:Sat Aug 15 21:28:35 2026
+  <Created Time>:Sat Aug 15 22:00:59 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.22s, Elapsed time = 0h 0m 0.22s
-    Placement Phase 1: CPU time = 0h 0m 0.249s, Elapsed time = 0h 0m 0.249s
-    Placement Phase 2: CPU time = 0h 0m 0.748s, Elapsed time = 0h 0m 0.748s
-    Placement Phase 3: CPU time = 0h 0m 0.867s, Elapsed time = 0h 0m 0.868s
+    Placement Phase 0: CPU time = 0h 0m 0.22s, Elapsed time = 0h 0m 0.221s
+    Placement Phase 1: CPU time = 0h 0m 0.266s, Elapsed time = 0h 0m 0.266s
+    Placement Phase 2: CPU time = 0h 0m 0.817s, Elapsed time = 0h 0m 0.819s
+    Placement Phase 3: CPU time = 0h 0m 0.868s, Elapsed time = 0h 0m 0.87s
     Total Placement: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
  Running routing:
     Routing Phase 0: CPU time = 0h 0m 0.001s, Elapsed time = 0h 0m 0.001s
     Routing Phase 1: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
-    Routing Phase 2: CPU time = 0h 0m 0.037s, Elapsed time = 0h 0m 0.037s
+    Routing Phase 2: CPU time = 0h 0m 0.039s, Elapsed time = 0h 0m 0.039s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
     Total Routing: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
  Generate output files:
