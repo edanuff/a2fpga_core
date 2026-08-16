@@ -10,5 +10,6 @@
 `define GOWIN_SERDES_IP
 `define GOWIN_PLL_IP
 
-// a2-mega carrier: die lanes 3+2 drive ML0/ML1 (board remap)
-`define DP_SERDES_LANES_23
+// DP_SERDES_LANES_23 retired with the EDP PHY adoption: the die-lane
+// 3+2 -> ML0/ML1 board remap is now hardcoded in transceiver_bank_gowin
+// (logical ln1/ln0 of the 2-lane EDP PHY on Q0 lanes 2+3).

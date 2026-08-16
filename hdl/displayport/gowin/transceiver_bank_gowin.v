@@ -6,44 +6,58 @@
 //
 // Drop-in replacement for src/artix7/transceiver_bank.v (same port
 // contract) targeting the Gowin GTR12 transceiver quad via the
-// IDE-generated "Customized PHY" IP (IPUG1024):
+// IDE-generated EDP PHY IP (IPUG1043):
 //
-//   - line rate 1.62 Gbps (DP RBR), internal width 20, raw mode
-//     (hard 8B10B disabled - the GTR12 PCS has no per-character
-//     disparity-force input, which DP's TPS2 requires, so 8b/10b is
-//     done in fabric by lane_encoder_8b10b)
-//   - TX fabric clock: q0_ln0_tx_pcs_clkout_o = line/20 = 81 MHz,
-//     shared by both lanes (IPUG1043 3.3.1); this is tx_symbol_clk
-//   - parallel data serialises LSB first, matching lane_encoder output
-//   - refclk: 135 MHz recommended for the DP rate family (50-800 MHz
-//     accepted); must be stable before pma reset release
-//   - swing / pre-emphasis: static in the IP config (Vdiffpp, 3-tap
-//     FFE); runtime adjustment is possible over the DRP port by
-//     replaying IDE-exported .csr write sequences - the AUX-requested
-//     levels are exposed on swing_sel/preemp_sel for a future DRP FSM,
-//     and DP sinks accept "max swing reached" replies meanwhile
+//   - EDP PHY replaces the earlier Customized PHY (IPUG1024) usage. The
+//     Customized PHY generator emitted HALF a TX bond for this config
+//     (slave-lane tx_if FIFO chained to the master, but per-lane
+//     independent PCS clocks, pcs_tx_clk_src=1) - chained FIFOs on
+//     unrelated read clocks made interlane phase a per-powerup lottery.
+//     The EDP PHY's architecture is a shared PCS TX clock
+//     (pcs_tx_clk_src=2, IPUG1043 3.3.1: "the fabric_tx_clk_i of each
+//     lane shares the pcs_tx_clk_o of one of the lanes"), which fixes
+//     interlane phase by construction.
+//   - line rate 2.7 Gbps (DP HBR), 1:20 user clock ratio -> 135 MHz
+//     fabric TX clock = tx_symbol_clk, sourced from logical lane 0's
+//     pcs_tx_clk_o and fed back to both lanes' fabric_tx_clk_i
+//   - 8b10b is the HARDENED PCS encoder (encode_mode=8b10b): we feed
+//     raw bytes + K flags (txdata[15:0]/txk[1:0], low byte transmitted
+//     first, LSB first). The fabric lane_encoder_8b10b path is gone
+//     with one semantic delta: the hardened encoder has no per-character
+//     disparity-force input, so TPS2's first K28.5 is no longer forced
+//     to RD-. The 10-symbol TPS2 period is disparity-self-sustaining,
+//     so only the initial +/- phase of the K28.5 alternation can differ
+//     - a legal 8b10b stream either way (Gowin's own EDP Encoder drives
+//     TPS2 through this same interface with no disparity control).
+//   - a2mega lane map: board routes die lane 3 to TUSB1046A DP0 and die
+//     lane 2 to DP1, both pairs P/N-inverted (TX PN Invert in the IP).
+//     EDP PHY generated on Q0 lanes 2+3 -> logical ln0 = die lane 2,
+//     logical ln1 = die lane 3. Word lane 0 (ML0) therefore drives ln1
+//     and word lane 1 (ML1) drives ln0.
+//   - swing / FFE are static in the IP config (804 mV, FFE auto);
+//     AUX-requested levels are exposed on swing_sel/preemp_sel for a
+//     future DRP FSM, and DP sinks accept "max swing reached" replies
 //
-// The actual IP instantiation is guarded by GOWIN_SERDES_IP because the
-// generated SerDes_Top wrapper and its .toml/.csr sidecars must come
-// from the Gowin IP Core Generator (Customized PHY, TX only, QPLL,
-// 1.62G, width 20, encoding off, 2 bonded lanes). Without the define, a
-// behavioural stub stands in so the full design simulates and lints:
-// refclk0 is used directly as the 81 MHz word clock and the reset
-// sequencer runs against fake lock/ready timers.
+// The IP instantiation is guarded by GOWIN_SERDES_IP because the
+// generated dp_serdes wrapper and its .toml/.csr sidecars must come from
+// the Gowin IP Core Generator (SERDES IP -> EDP PHY protocol module; the
+// wrapper instantiates the edp_phy interposer internally and exposes the
+// user face directly). Without the define, a behavioural stub stands in
+// so the full design simulates and lints: refclk0 is used directly as
+// the word clock and lock indicators assert after fake delays.
 //
-// References: IPUG1024E, IPUG1043E, github.com/key2/gowin-serdes,
-// github.com/sipeed/TangMega-138KPro-example (sfp+/customized_phy).
+// References: IPUG1043E (EDP PHY), IPUG1024E, IPUG1179E,
+// github.com/key2/gowin-serdes, Sipeed TangMega examples.
 //
 // MIT License - part of work derived from Copyright (c) 2019 Mike Field
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
-// TX_PROBE: bring-up aid. Forces the quad powered (no link-policy
-// dependency) and replaces the 8b10b stream with a raw 16-words-low /
-// 16-words-high pattern = line-rate/640 ~= 4.2 MHz square wave on both
-// lanes — visible on a basic scope at a connector breakout. Answers
-// "are the lanes electrically alive, on which pins, with which
-// polarity" without any DP protocol in the loop.
+// TX_PROBE: bring-up relic from the raw-mode Customized PHY (it bypassed
+// 8b10b with a ~1 MHz square). Through the hardened encoder a raw square
+// is impossible (DC balance); the probe now just forces the quad powered
+// and streams D10.2 clock pattern on both lanes - still answers "are the
+// lanes electrically alive" on a fast scope.
 module transceiver_bank_gowin #(
     parameter TX_PROBE = 0
 )(
@@ -69,14 +83,13 @@ module transceiver_bank_gowin #(
     output      [1:0] gtptx_p,
     output      [1:0] gtptx_n,
     // Raw SERDES bring-up status (mgmt_clk domain except where noted):
-    // {pll_lock, lane_ready[1:0], ~pcs_tx_rst, tx_running[1:0]} — the
-    // signals the reset sequencer gates on, never before observable.
+    // {txfifo_afull, txfifo_full, pll_lock, lane_ok[1:0], ~tx_rst,
+    //  tx_running[1:0]} - status only, nothing gates on it.
     output      [7:0] serdes_status,
-    // DRP register-dump readback (IPUG1024 3.11): a background FSM
-    // reads a curated list of CSR addresses over the DRP and latches
-    // the results. dbg_data/dbg_addr are quasi-static once dbg_done —
-    // safe to sample from any clock for a debug UART. Answers whether
-    // the bitstream's CSR replay actually landed in the silicon.
+    // DRP register-dump readback (see reader FSM below): dbg_data/
+    // dbg_addr are quasi-static once dbg_done - safe to sample from any
+    // clock for a debug UART. Answers whether the bitstream's CSR
+    // replay actually landed in the silicon.
     input       [4:0] dbg_idx,
     output     [31:0] dbg_data,
     output     [23:0] dbg_addr,
@@ -85,106 +98,87 @@ module transceiver_bank_gowin #(
 
     // ------------------------------------------------------------------
     // Requested drive levels, encoded for a future DRP reconfiguration
-    // FSM (IPUG1024 3.10/3.11: TX AFE swing + FFE written over DRP)
+    // FSM (TX AFE swing + FFE are DRP-writable)
     // ------------------------------------------------------------------
     wire [1:0] swing_sel  = swing_0p8  ? 2'd2 : swing_0p6  ? 2'd1 : 2'd0;
     wire [1:0] preemp_sel = preemp_6p0 ? 2'd2 : preemp_3p5 ? 2'd1 : 2'd0;
 
     // ------------------------------------------------------------------
-    // Fabric 8b/10b (raw-mode SERDES): two encoded lanes
+    // Reset / power-up sequencing. Lesson from board #1 Stage 5 (and the
+    // Sipeed SFP+ example): release resets STATICALLY on a timer and
+    // treat every lock/ready indicator as status only - gating a release
+    // on an indicator that itself waits for the release deadlocks.
+    // Cadence per the Gowin EDP reference design (rst_gen.v: fabric_rstn
+    // released first, tx_rst released tens of ms later; tx_vld tied 1):
+    //   powerup -> release fabric_rstn (low-active) immediately ->
+    //   release tx_rst (high-active) ~21 ms later (mgmt_clk = 100 MHz).
     // ------------------------------------------------------------------
-    wire [19:0] tx_code0, tx_code1;
-    reg         enc_reset = 1'b1;
-
-    lane_encoder_8b10b enc0 (
-        .clk(tx_symbol_clk), .reset(enc_reset),
-        .tx_symbol(tx_symbols[19:0]),  .tx_code(tx_code0)
-    );
-    lane_encoder_8b10b enc1 (
-        .clk(tx_symbol_clk), .reset(enc_reset),
-        .tx_symbol(tx_symbols[39:20]), .tx_code(tx_code1)
-    );
-
-    // ------------------------------------------------------------------
-    // Reset / power-up sequencing (IPUG1024 4-1 port semantics):
-    // refclk stable -> release pma_rstn (low-active) -> wait pll_lock
-    // and lane ready -> release pcs_tx_rst (high-active) -> running
-    // ------------------------------------------------------------------
-    reg  pma_rstn   = 1'b0;
-    reg  pcs_tx_rst = 1'b1;
+    reg  fabric_rstn = 1'b0;
+    reg  tx_rst      = 1'b1;
     wire pll_lock;
-    wire [1:0] lane_ready;
+    wire [1:0] lane_ok;
 
-    // ROOT-CAUSE FIX (board #1, 2026-08-12): the original sequencer waited
-    // for pll_lock && lane_ready before releasing pcs_tx_rst — but the
-    // GTR12's ready_o does not assert while PCS is held in reset, so the
-    // transmitter deadlocked in reset FOREVER (live status readback:
-    // pll_lock=1, lane_ready=00, pcs_tx_rst=1 — the lanes never carried a
-    // bit while every upstream indicator looked healthy). The working
-    // Sipeed SFP+ example releases both resets STATICALLY and treats
-    // ready_o as status only. Mirror that: release pma at powerup, release
-    // pcs_tx_rst a short settle later, gate on nothing.
     wire [1:0] powerup_eff = TX_PROBE ? 2'b11 : powerup_channel;
 
-    // probe pattern generator (tx_symbol_clk domain): 128-word frame,
-    // 96 words high / 32 low = ~1.05 MHz square at 75% duty. The low
-    // rate suits flywire scope probes; the ASYMMETRIC duty reads out
-    // polarity directly (P-leg: 75% high; an inverted lane: 25%).
-    reg [6:0] probe_cnt = 7'd0;
-    always @(posedge tx_symbol_clk)
-        probe_cnt <= probe_cnt + 7'd1;
-    wire [19:0] probe_word = (probe_cnt < 7'd96) ? 20'hFFFFF : 20'h00000;
-
-    reg [15:0] seq_count = 0;
+    reg [21:0] seq_count = 0;
     always @(posedge mgmt_clk) begin
         if (powerup_eff == 2'b00) begin
-            pma_rstn   <= 1'b0;
-            pcs_tx_rst <= 1'b1;
-            seq_count  <= 0;
-            tx_running <= 2'b00;
+            fabric_rstn <= 1'b0;
+            tx_rst      <= 1'b1;
+            seq_count   <= 0;
+            tx_running  <= 2'b00;
         end else begin
-            pma_rstn <= 1'b1;
-            if (seq_count[15])
-                pcs_tx_rst <= 1'b0;      // ~330 us after powerup; ungated
+            fabric_rstn <= 1'b1;
+            if (seq_count[21])
+                tx_rst <= 1'b0;          // ~21 ms after powerup; ungated
             else
                 seq_count <= seq_count + 1'b1;
-            // status only — consumed by nothing critical
-            tx_running <= {2{!pcs_tx_rst}} & powerup_eff & lane_ready;
+            // status only - consumed by nothing critical
+            tx_running <= {2{!tx_rst}} & powerup_eff & lane_ok;
         end
     end
 
+    wire fifo_afull_used, fifo_full_used;
     assign serdes_status = {fifo_afull_used, fifo_full_used,
-                            pll_lock, lane_ready, ~pcs_tx_rst, tx_running};
+                            pll_lock, lane_ok, ~tx_rst, tx_running};
 
-    // release the encoder reset synchronously to the word clock
-    reg [1:0] enc_rst_sync = 2'b11;
-    always @(posedge tx_symbol_clk) begin
-        enc_rst_sync <= {enc_rst_sync[0], pcs_tx_rst};
-        enc_reset    <= enc_rst_sync[1];
-    end
+    // tx_vld (TX buffer read enable, IPUG1043 3.7.1): the reference
+    // design ties it permanently high and sequences with the resets
+    // alone - mirror that exactly
+    wire tx_vld = 1'b1;
 
-    wire tx_afull_ln0, tx_afull_ln1, tx_afull_ln2, tx_afull_ln3;
-    wire tx_full_ln0,  tx_full_ln1,  tx_full_ln2,  tx_full_ln3;
-`ifdef DP_SERDES_LANES_23
-    wire fifo_afull_used = tx_afull_ln2 | tx_afull_ln3;
-    wire fifo_full_used  = tx_full_ln2  | tx_full_ln3;
-`else
-    wire fifo_afull_used = tx_afull_ln0 | tx_afull_ln1;
-    wire fifo_full_used  = tx_full_ln0  | tx_full_ln1;
-`endif
+    // ------------------------------------------------------------------
+    // Per-lane byte/K extraction from the 80-bit symbol bus. Each lane
+    // word is {force1, sym1[8:0], force0, sym0[8:0]} with sym = {K,
+    // data[7:0]} and sym0 transmitted first. EDP PHY convention: low
+    // byte of txdata transmits first, txk bit N flags byte N. The force
+    // (disparity) bits [9]/[19] are intentionally dropped - see header.
+    // ------------------------------------------------------------------
+    localparam [8:0] SYM_D10_2 = 9'b001001010;  // TX_PROBE filler
+    wire [8:0] w0s0 = TX_PROBE ? SYM_D10_2 : tx_symbols[8:0];
+    wire [8:0] w0s1 = TX_PROBE ? SYM_D10_2 : tx_symbols[18:10];
+    wire [8:0] w1s0 = TX_PROBE ? SYM_D10_2 : tx_symbols[28:20];
+    wire [8:0] w1s1 = TX_PROBE ? SYM_D10_2 : tx_symbols[38:30];
+
+    // word lane 0 -> logical ln1 (die lane 3 = DP0), word lane 1 ->
+    // logical ln0 (die lane 2 = DP1) - see header lane map
+    wire [15:0] ln1_txdata = {w0s1[7:0], w0s0[7:0]};
+    wire [1:0]  ln1_txk    = {w0s1[8],   w0s0[8]};
+    wire [15:0] ln0_txdata = {w1s1[7:0], w1s0[7:0]};
+    wire [1:0]  ln0_txk    = {w1s1[8],   w1s0[8]};
 
 `ifdef GOWIN_SERDES_IP
     // ------------------------------------------------------------------
-    // IDE-generated Customized PHY ("dp_serdes" integration top from the
-    // IP Core Generator: dp_phy + upar_arbiter + GTR12 quad). The serial
-    // pads are dedicated transceiver bumps - they do not appear as RTL
-    // ports. Config: TX only, 2 lanes, QPLL0, 2.7 Gbps, refclk 135 MHz,
-    // width 20 raw (8B10B off), TX bonding, 420 mV, FFE flat, DRP on.
-    // Sidecars dp_serdes.csr/.ipc/serdes.mod must stay with the project.
+    // IDE-generated SERDES wrapper ("dp_serdes") carrying the EDP PHY
+    // protocol module on Q0 lanes 2+3, REFCLK1 @ 135 MHz, 2.7 Gbps,
+    // 1:20, hardened 8b10b, TX PN invert both lanes, 804 mV, FFE auto,
+    // DRP on. The serial pads are dedicated transceiver bumps - they do
+    // not appear as RTL ports. Sidecars dp_serdes.csr/.ipc/serdes.mod
+    // must stay with the project.
     // ------------------------------------------------------------------
     wire tx_symbol_clk_raw;
 
-    // DRP readback plumbing (reader FSM below the instantiations)
+    // DRP readback plumbing (reader FSM below the instantiation)
     wire        drp_clk_w;
     reg  [23:0] drp_addr_r  = 24'd0;
     reg         drp_rden_r  = 1'b0;
@@ -198,186 +192,102 @@ module transceiver_bank_gowin #(
     always @(posedge mgmt_clk)
         por_n <= (powerup_eff != 2'b00);
 
-`ifdef DP_SERDES_LANES_23
-    // ------------------------------------------------------------------
-    // a2-mega carrier (GW5AT-60 SOM): board routing delivers die lane 3
-    // to TUSB1046A DP0 and die lane 2 to DP1, both pairs P/N-inverted
-    // (compensated by tx_pol_invert inside the generated IP). Fabric
-    // word lane 0 (ML0) therefore drives ln3 and word lane 1 (ML1)
-    // drives ln2. Bonding master is lane 2: its PCS clkout and pll_lock
-    // serve the bank. IP generated with lanes 2+3, REFCLK1, QPLL0.
-    // ------------------------------------------------------------------
-    // A/B EXPERIMENT (board #1 Stage 5): serializer word convention. The
-    // GTR12's wire-order for the 20-bit word (two 10-bit 8b10b symbols)
-    // was never verified on silicon. A wrong convention lets TPS1
-    // (alternating, order-invariant) give sinks CR lock while
-    // TPS2/symbols garble — matching the observed trained-but-no-signal.
-    //   0 = straight (documented LSB-first assumption)   — TESTED: no lock
-    //   1 = full 20-bit reversal (= symbol swap + per-symbol reverse)
-    //                                                    — TESTED: no lock
-    //   2 = symbol swap only ({sym0, sym1})              — untested
-    //   3 = per-symbol bit reverse, order kept           — untested
-    // Flip and rebuild to A/B; fold the winner in and delete when settled.
-    localparam TX_WORD_MODE = 0; // canonical for probe
-    function [9:0] rev10(input [9:0] x);
-        integer ri;
-        for (ri = 0; ri < 10; ri = ri + 1)
-            rev10[ri] = x[9 - ri];
-    endfunction
-    function [19:0] word_conv(input [19:0] x);
-        case (TX_WORD_MODE)
-            1: word_conv = {rev10(x[9:0]), rev10(x[19:10])};  // full reversal
-            2: word_conv = {x[9:0], x[19:10]};                // symbol swap
-            3: word_conv = {rev10(x[19:10]), rev10(x[9:0])};  // per-symbol rev
-            default: word_conv = x;
-        endcase
-    endfunction
-    wire [19:0] tx_wire0 = TX_PROBE ? probe_word : word_conv(tx_code0);
-    wire [19:0] tx_wire1 = TX_PROBE ? probe_word : word_conv(tx_code1);
+    wire qpll0_ok, qpll1_ok, ln0_cpll_ok, ln1_cpll_ok;
+    wire tx_afull_ln0, tx_afull_ln1, tx_full_ln0, tx_full_ln1;
+    // whichever PLL the IP config uses asserts its indicator; the rest
+    // stay low. OR them so the status word is config-agnostic.
+    assign pll_lock = qpll0_ok | qpll1_ok | (ln0_cpll_ok & ln1_cpll_ok);
+    assign lane_ok  = {2{pll_lock}};
 
     dp_serdes i_dp_serdes (
-        .por_n_i                    (por_n),
-        // lane 3 TX <= word lane 0 (ML0)
-        .dp_phy_q0_ln3_tx_clk_i     (tx_symbol_clk),
-        .dp_phy_q0_ln3_tx_pcs_clkout_o (),
-        .dp_phy_q0_ln3_tx_data_i    ({4{tx_wire0}}),
-        .dp_phy_q0_ln3_tx_fifo_wren_i (~tx_afull_ln3),
-        .dp_phy_q0_ln3_tx_fifo_wrusewd_o (),
-        .dp_phy_q0_ln3_tx_fifo_afull_o (tx_afull_ln3),
-        .dp_phy_q0_ln3_tx_fifo_full_o (tx_full_ln3),
-        .dp_phy_q0_ln3_pma_rstn_i   (pma_rstn),
-        .dp_phy_q0_ln3_pcs_tx_rst_i (pcs_tx_rst),
-        .dp_phy_q0_ln3_pll_lock_o   (),
-        .dp_phy_q0_ln3_ready_o      (lane_ready[0]),
-        .dp_phy_q0_ln3_refclk_o     (),
-        .dp_phy_q0_ln3_rx_clk_i     (1'b0),
-        .dp_phy_q0_ln3_rx_fifo_rden_i (1'b0),
-        .dp_phy_q0_ln3_pcs_rx_rst_i (1'b1),
-        .dp_phy_q0_ln3_rx_pcs_clkout_o (),
-        .dp_phy_q0_ln3_rx_data_o    (),
-        .dp_phy_q0_ln3_rx_fifo_rdusewd_o (),
-        .dp_phy_q0_ln3_rx_fifo_aempty_o (),
-        .dp_phy_q0_ln3_rx_fifo_empty_o (),
-        .dp_phy_q0_ln3_rx_valid_o   (),
-        .dp_phy_q0_ln3_signal_detect_o (),
-        .dp_phy_q0_ln3_rx_cdr_lock_o (),
-        // lane 2 TX <= word lane 1 (ML1); bonding master
-        .dp_phy_q0_ln2_tx_clk_i     (tx_symbol_clk),
-        .dp_phy_q0_ln2_tx_pcs_clkout_o (tx_symbol_clk_raw),
-        .dp_phy_q0_ln2_tx_data_i    ({4{tx_wire1}}),
-        .dp_phy_q0_ln2_tx_fifo_wren_i (~tx_afull_ln2),
-        .dp_phy_q0_ln2_tx_fifo_wrusewd_o (),
-        .dp_phy_q0_ln2_tx_fifo_afull_o (tx_afull_ln2),
-        .dp_phy_q0_ln2_tx_fifo_full_o (tx_full_ln2),
-        .dp_phy_q0_ln2_pma_rstn_i   (pma_rstn),
-        .dp_phy_q0_ln2_pcs_tx_rst_i (pcs_tx_rst),
-        .dp_phy_q0_ln2_pll_lock_o   (pll_lock),
-        .dp_phy_q0_ln2_ready_o      (lane_ready[1]),
-        .dp_phy_q0_ln2_refclk_o     (),
-        .dp_phy_q0_ln2_rx_clk_i     (1'b0),
-        .dp_phy_q0_ln2_rx_fifo_rden_i (1'b0),
-        .dp_phy_q0_ln2_pcs_rx_rst_i (1'b1),
-        .dp_phy_q0_ln2_rx_pcs_clkout_o (),
-        .dp_phy_q0_ln2_rx_data_o    (),
-        .dp_phy_q0_ln2_rx_fifo_rdusewd_o (),
-        .dp_phy_q0_ln2_rx_fifo_aempty_o (),
-        .dp_phy_q0_ln2_rx_fifo_empty_o (),
-        .dp_phy_q0_ln2_rx_valid_o   (),
-        .dp_phy_q0_ln2_signal_detect_o (),
-        .dp_phy_q0_ln2_rx_cdr_lock_o (),
-        // DRP: read-only register-dump bridge (writes never enabled)
-        .dp_phy_drp_clk_o           (drp_clk_w),
-        .dp_phy_drp_addr_i          (drp_addr_r),
-        .dp_phy_drp_wren_i          (1'b0),
-        .dp_phy_drp_wrdata_i        (32'b0),
-        .dp_phy_drp_strb_i          (8'b0),
-        .dp_phy_drp_rden_i          (drp_rden_r),
-        .dp_phy_drp_ready_o         (drp_ready_w),
-        .dp_phy_drp_rdvld_o         (drp_rdvld_w),
-        .dp_phy_drp_rddata_o        (drp_rddata_w),
-        .dp_phy_drp_resp_o          ()
-    );
-`else
-    dp_serdes i_dp_serdes (
-        .por_n_i                    (por_n),
-        // lane 0 TX
-        .dp_phy_q0_ln0_tx_clk_i     (tx_symbol_clk),
-        .dp_phy_q0_ln0_tx_pcs_clkout_o (tx_symbol_clk_raw),
-        .dp_phy_q0_ln0_tx_data_i    ({4{tx_wire0}}),
-        .dp_phy_q0_ln0_tx_fifo_wren_i (~tx_afull_ln0),
-        .dp_phy_q0_ln0_tx_fifo_wrusewd_o (),
-        .dp_phy_q0_ln0_tx_fifo_afull_o (tx_afull_ln0),
-        .dp_phy_q0_ln0_tx_fifo_full_o (tx_full_ln0),
-        .dp_phy_q0_ln0_pma_rstn_i   (pma_rstn),
-        .dp_phy_q0_ln0_pcs_tx_rst_i (pcs_tx_rst),
-        .dp_phy_q0_ln0_pll_lock_o   (pll_lock),
-        .dp_phy_q0_ln0_ready_o      (lane_ready[0]),
-        .dp_phy_q0_ln0_refclk_o     (),
-        // lane 0 RX unused (TX-only configuration)
-        .dp_phy_q0_ln0_rx_clk_i     (1'b0),
-        .dp_phy_q0_ln0_rx_fifo_rden_i (1'b0),
-        .dp_phy_q0_ln0_pcs_rx_rst_i (1'b1),
-        .dp_phy_q0_ln0_rx_pcs_clkout_o (),
-        .dp_phy_q0_ln0_rx_data_o    (),
-        .dp_phy_q0_ln0_rx_fifo_rdusewd_o (),
-        .dp_phy_q0_ln0_rx_fifo_aempty_o (),
-        .dp_phy_q0_ln0_rx_fifo_empty_o (),
-        .dp_phy_q0_ln0_rx_valid_o   (),
-        .dp_phy_q0_ln0_signal_detect_o (),
-        .dp_phy_q0_ln0_rx_cdr_lock_o (),
-        // lane 1 TX
-        .dp_phy_q0_ln1_tx_clk_i     (tx_symbol_clk),
-        .dp_phy_q0_ln1_tx_pcs_clkout_o (),
-        .dp_phy_q0_ln1_tx_data_i    ({4{tx_wire1}}),
-        .dp_phy_q0_ln1_tx_fifo_wren_i (~tx_afull_ln1),
-        .dp_phy_q0_ln1_tx_fifo_wrusewd_o (),
-        .dp_phy_q0_ln1_tx_fifo_afull_o (tx_afull_ln1),
-        .dp_phy_q0_ln1_tx_fifo_full_o (tx_full_ln1),
-        .dp_phy_q0_ln1_pma_rstn_i   (pma_rstn),
-        .dp_phy_q0_ln1_pcs_tx_rst_i (pcs_tx_rst),
-        .dp_phy_q0_ln1_pll_lock_o   (),
-        .dp_phy_q0_ln1_ready_o      (lane_ready[1]),
-        .dp_phy_q0_ln1_refclk_o     (),
+        .por_n_i                     (por_n),
+        // logical lane 0 (die lane 2 = DP1) <= word lane 1 (ML1)
+        .edp_phy_ln0_fabric_rstn_i   (fabric_rstn),
+        .edp_phy_ln0_tx_rst_i        (tx_rst),
+        .edp_phy_ln0_fabric_tx_clk_i (tx_symbol_clk),
+        .edp_phy_ln0_pcs_tx_clk_o    (tx_symbol_clk_raw),
+        .edp_phy_ln0_tx_vld_i        (tx_vld),
+        .edp_phy_ln0_txdata_i        (ln0_txdata),
+        .edp_phy_ln0_txk_i           (ln0_txk),
+        .edp_phy_ln0_txfifo_wrusewd_o(),
+        .edp_phy_ln0_txfifo_afull_o  (tx_afull_ln0),
+        .edp_phy_ln0_txfifo_full_o   (tx_full_ln0),
+        .edp_phy_ln0_cpll_ok_o       (ln0_cpll_ok),
+        // lane 0 RX unused (TX-only application)
+        .edp_phy_ln0_rx_rst_i        (1'b1),
+        .edp_phy_ln0_fabric_rx_clk_i (1'b0),
+        .edp_phy_ln0_rxfifo_rden_i   (1'b0),
+        .edp_phy_ln0_chbond_start_i  (1'b0),
+        .edp_phy_ln0_pma_rx_lock_o   (),
+        .edp_phy_ln0_align_link_o    (),
+        .edp_phy_ln0_k_lock_o        (),
+        .edp_phy_ln0_pcs_rx_clk_o    (),
+        .edp_phy_ln0_rxfifo_rdusewd_o(),
+        .edp_phy_ln0_rxfifo_aempty_o (),
+        .edp_phy_ln0_rxfifo_empty_o  (),
+        .edp_phy_ln0_rxdata_o        (),
+        .edp_phy_ln0_rxk_o           (),
+        // logical lane 1 (die lane 3 = DP0) <= word lane 0 (ML0)
+        .edp_phy_ln1_fabric_rstn_i   (fabric_rstn),
+        .edp_phy_ln1_tx_rst_i        (tx_rst),
+        .edp_phy_ln1_fabric_tx_clk_i (tx_symbol_clk),
+        .edp_phy_ln1_pcs_tx_clk_o    (),
+        .edp_phy_ln1_tx_vld_i        (tx_vld),
+        .edp_phy_ln1_txdata_i        (ln1_txdata),
+        .edp_phy_ln1_txk_i           (ln1_txk),
+        .edp_phy_ln1_txfifo_wrusewd_o(),
+        .edp_phy_ln1_txfifo_afull_o  (tx_afull_ln1),
+        .edp_phy_ln1_txfifo_full_o   (tx_full_ln1),
+        .edp_phy_ln1_cpll_ok_o       (ln1_cpll_ok),
         // lane 1 RX unused
-        .dp_phy_q0_ln1_rx_clk_i     (1'b0),
-        .dp_phy_q0_ln1_rx_fifo_rden_i (1'b0),
-        .dp_phy_q0_ln1_pcs_rx_rst_i (1'b1),
-        .dp_phy_q0_ln1_rx_pcs_clkout_o (),
-        .dp_phy_q0_ln1_rx_data_o    (),
-        .dp_phy_q0_ln1_rx_fifo_rdusewd_o (),
-        .dp_phy_q0_ln1_rx_fifo_aempty_o (),
-        .dp_phy_q0_ln1_rx_fifo_empty_o (),
-        .dp_phy_q0_ln1_rx_valid_o   (),
-        .dp_phy_q0_ln1_signal_detect_o (),
-        .dp_phy_q0_ln1_rx_cdr_lock_o (),
+        .edp_phy_ln1_rx_rst_i        (1'b1),
+        .edp_phy_ln1_fabric_rx_clk_i (1'b0),
+        .edp_phy_ln1_rxfifo_rden_i   (1'b0),
+        .edp_phy_ln1_chbond_start_i  (1'b0),
+        .edp_phy_ln1_pma_rx_lock_o   (),
+        .edp_phy_ln1_align_link_o    (),
+        .edp_phy_ln1_k_lock_o        (),
+        .edp_phy_ln1_pcs_rx_clk_o    (),
+        .edp_phy_ln1_rxfifo_rdusewd_o(),
+        .edp_phy_ln1_rxfifo_aempty_o (),
+        .edp_phy_ln1_rxfifo_empty_o  (),
+        .edp_phy_ln1_rxdata_o        (),
+        .edp_phy_ln1_rxk_o           (),
+        // PLL indicators
+        .edp_phy_qpll0_ok_o          (qpll0_ok),
+        .edp_phy_qpll1_ok_o          (qpll1_ok),
         // DRP: read-only register-dump bridge (writes never enabled)
-        .dp_phy_drp_clk_o           (drp_clk_w),
-        .dp_phy_drp_addr_i          (drp_addr_r),
-        .dp_phy_drp_wren_i          (1'b0),
-        .dp_phy_drp_wrdata_i        (32'b0),
-        .dp_phy_drp_strb_i          (8'b0),
-        .dp_phy_drp_rden_i          (drp_rden_r),
-        .dp_phy_drp_ready_o         (drp_ready_w),
-        .dp_phy_drp_rdvld_o         (drp_rdvld_w),
-        .dp_phy_drp_rddata_o        (drp_rddata_w),
-        .dp_phy_drp_resp_o          ()
+        .edp_phy_drp_clk_o           (drp_clk_w),
+        .edp_phy_drp_addr_i          (drp_addr_r),
+        .edp_phy_drp_wren_i          (1'b0),
+        .edp_phy_drp_wrdata_i        (32'b0),
+        .edp_phy_drp_strb_i          (8'b0),
+        .edp_phy_drp_rden_i          (drp_rden_r),
+        .edp_phy_drp_ready_o         (drp_ready_w),
+        .edp_phy_drp_rdvld_o         (drp_rdvld_w),
+        .edp_phy_drp_rddata_o        (drp_rddata_w),
+        .edp_phy_drp_resp_o          ()
     );
-`endif
+
+    assign fifo_afull_used = tx_afull_ln0 | tx_afull_ln1;
+    assign fifo_full_used  = tx_full_ln0  | tx_full_ln1;
+
     assign tx_symbol_clk = tx_symbol_clk_raw;
     // serial data leaves through dedicated pads; these RTL ports idle
     assign gtptx_p = 2'b00;
     assign gtptx_n = 2'b11;
 
     // ------------------------------------------------------------------
-    // DRP register-dump reader (drp_clk_w domain). Read timing per
-    // IPUG1024 3.11: rden high with addr, hold until rdvld, capture
-    // rddata, drop rden the following cycle. Re-dumps continuously
-    // (~every 0.3 s) so the UART always shows fresh values; a read that
-    // never returns rdvld times out and is recorded as 0xDEAD_xxxx.
+    // DRP register-dump reader (drp_clk_w domain). rden high with addr,
+    // hold until rdvld, capture rddata, drop rden the following cycle.
+    // Re-reads continuously so the UART always shows fresh values; a
+    // read that never returns rdvld is recorded as 0xDEAD_xxxx.
+    // Addresses are physical-lane CSR offsets - lanes 2/3 are the same
+    // physical lanes as under the Customized PHY, so the map holds.
     // ------------------------------------------------------------------
     function [23:0] dump_addr_rom(input [4:0] i);
         case (i)
-            // the 7 writes the generator emits BEFORE the 0xb00000 key
+            // common/config block probes
             5'd0:  dump_addr_rom = 24'h8081a4;
             5'd1:  dump_addr_rom = 24'h8081a8;
             5'd2:  dump_addr_rom = 24'h808758;
@@ -385,17 +295,16 @@ module transceiver_bank_gowin #(
             5'd4:  dump_addr_rom = 24'h808384;
             5'd5:  dump_addr_rom = 24'h808484;
             5'd6:  dump_addr_rom = 24'h808584;
-            // common-block deltas vs tang_mega
             5'd7:  dump_addr_rom = 24'h808760;
             5'd8:  dump_addr_rom = 24'h800b91;
-            // lane2 (active; bonding master) control/status block
+            // lane2 (logical ln0) control/status block
             5'd9:  dump_addr_rom = 24'h809468;
             5'd10: dump_addr_rom = 24'h80946c;
             5'd11: dump_addr_rom = 24'h809400;
             5'd12: dump_addr_rom = 24'h80943c;
             5'd13: dump_addr_rom = 24'h809410;
             5'd14: dump_addr_rom = 24'h809420;
-            // lane3 (active)
+            // lane3 (logical ln1)
             5'd15: dump_addr_rom = 24'h809668;
             5'd16: dump_addr_rom = 24'h809600;
             5'd17: dump_addr_rom = 24'h80963c;
@@ -412,8 +321,7 @@ module transceiver_bank_gowin #(
     endfunction
     // Only the register the UART currently displays is served: dbg_idx
     // (quasi-static, changes every ~0.7 s) is synchronized into the DRP
-    // domain and that single address is re-read continuously. One result
-    // register instead of a full dump RAM — negligible fabric footprint.
+    // domain and that single address is re-read continuously.
     reg [4:0]  idx_meta = 5'd0, idx_sync = 5'd0;
     reg [31:0] res_data = 32'd0;
     reg [23:0] res_addr = 24'd0;
@@ -464,8 +372,10 @@ module transceiver_bank_gowin #(
 `else
     // ------------------------------------------------------------------
     // Behavioural stand-in for simulation and lint: refclk0 must be
-    // driven at the word rate (81 MHz for RBR/20-bit) by the testbench;
-    // lock/ready assert after short fake delays.
+    // driven at the word rate (135 MHz for HBR/1:20) by the testbench;
+    // lock indicators assert after short fake delays. The fabric 8b10b
+    // encoders survive here only so the encoded stream is observable
+    // and the sim timing resembles the hardened path.
     // ------------------------------------------------------------------
     assign dbg_data = 32'd0;
     assign dbg_addr = 24'd0;
@@ -474,10 +384,29 @@ module transceiver_bank_gowin #(
 
     reg [7:0] fake_lock_cnt = 0;
     always @(posedge mgmt_clk)
-        if (!pma_rstn) fake_lock_cnt <= 0;
+        if (!fabric_rstn) fake_lock_cnt <= 0;
         else if (!fake_lock_cnt[7]) fake_lock_cnt <= fake_lock_cnt + 1'b1;
-    assign pll_lock   = fake_lock_cnt[7];
-    assign lane_ready = {2{fake_lock_cnt[7]}};
+    assign pll_lock = fake_lock_cnt[7];
+    assign lane_ok  = {2{fake_lock_cnt[7]}};
+
+    wire [19:0] tx_code0, tx_code1;
+    reg         enc_reset = 1'b1;
+    reg [1:0]   enc_rst_sync = 2'b11;
+    always @(posedge tx_symbol_clk) begin
+        enc_rst_sync <= {enc_rst_sync[0], tx_rst};
+        enc_reset    <= enc_rst_sync[1];
+    end
+    lane_encoder_8b10b enc0 (
+        .clk(tx_symbol_clk), .reset(enc_reset),
+        .tx_symbol(tx_symbols[19:0]),  .tx_code(tx_code0)
+    );
+    lane_encoder_8b10b enc1 (
+        .clk(tx_symbol_clk), .reset(enc_reset),
+        .tx_symbol(tx_symbols[39:20]), .tx_code(tx_code1)
+    );
+
+    assign fifo_afull_used = 1'b0;
+    assign fifo_full_used  = 1'b0;
 
     // no analogue serialiser in sim: reduce the encoded codes onto the
     // dummy lane pins so the 8b/10b path is not swept by synthesis and
