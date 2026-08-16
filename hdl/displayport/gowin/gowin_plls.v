@@ -141,7 +141,16 @@ endmodule //clk_pll
 // ODIV0 selects the pixel rate off the fixed 1188 MHz VCO (135 MHz refclk
 // x 44/5): 8 -> 148.5 MHz (1080p), 44 -> 27.0 MHz (480p). dp_transmitter
 // derives it from PIXEL_CLK_MULT/DIV.
-module gowin_pixel_pll #(parameter ODIV0 = 8)
+// clkout = clkin * MDIV / IDIV / ODIV0   (VCO = clkin * MDIV / IDIV)
+// Defaults are the 135 MHz-in / 148.5 MHz-out (2-lane HBR) case:
+// VCO = 135 * 44/5 = 1188 MHz, /8 = 148.5 MHz.
+// 4-lane RBR uses an 81 MHz symbol clock: IDIV=1, MDIV=11 (VCO 891 MHz),
+// ODIV0=6 -> 148.5 MHz. Keep the VCO inside the PLLA's documented range
+// when picking new ratios.
+module gowin_pixel_pll #(parameter ODIV0 = 8,
+                         parameter IDIV  = 5,
+                         parameter MDIV  = 44,
+                         parameter FCLKIN = "135")
                         (output lock, output clkout, input clkin);
 
 
@@ -188,8 +197,8 @@ PLLA PLLA_inst (
     .MDWDI({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd})
 );
 
-defparam PLLA_inst.FCLKIN = "135";
-defparam PLLA_inst.IDIV_SEL = 5;
+defparam PLLA_inst.FCLKIN = FCLKIN;
+defparam PLLA_inst.IDIV_SEL = IDIV;
 defparam PLLA_inst.FBDIV_SEL = 1;
 defparam PLLA_inst.ODIV0_SEL = ODIV0;
 defparam PLLA_inst.ODIV1_SEL = 10;
@@ -198,7 +207,7 @@ defparam PLLA_inst.ODIV3_SEL = 8;
 defparam PLLA_inst.ODIV4_SEL = 8;
 defparam PLLA_inst.ODIV5_SEL = 8;
 defparam PLLA_inst.ODIV6_SEL = 8;
-defparam PLLA_inst.MDIV_SEL = 44;
+defparam PLLA_inst.MDIV_SEL = MDIV;
 defparam PLLA_inst.MDIV_FRAC_SEL = 0;
 defparam PLLA_inst.ODIV0_FRAC_SEL = 0;
 defparam PLLA_inst.CLKOUT0_EN = "TRUE";

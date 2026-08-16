@@ -9,7 +9,7 @@ create_clock -name clk100 -period 10.000 -waveform {0 5.000} [get_pins {i_mgmt_p
 
 // 135 MHz TX word clock from the GTR12 quad (2.7 Gbps / 20), anchored on
 // LANE2 — the bonding master for the a2mega lane pair
-create_clock -name clk_sym -period 7.407 -waveform {0 3.703} [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/gtr12_quad_inst0/LANE2_PCS_TX_O_FABRIC_CLK}]
+create_clock -name clk_sym -period 12.346 -waveform {0 6.173} [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/gtr12_quad_inst0/LANE2_PCS_TX_O_FABRIC_CLK}]
 
 // 148.5 MHz pixel clock: gowin_pixel_pll = 135 * 44/5 VCO / 8
 create_clock -name clk_pix -period 6.734 -waveform {0 3.367} [get_pins {i_dp/i_pixel_pll/PLLA_inst/CLKOUT0}]

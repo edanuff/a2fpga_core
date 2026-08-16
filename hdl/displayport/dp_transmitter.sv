@@ -44,6 +44,13 @@ module dp_transmitter #(
     // F_pixel = F_symbol_clk * PIXEL_CLK_MULT / PIXEL_CLK_DIV (81 MHz * 11/12 = 74.25 MHz)
     parameter int PIXEL_CLK_MULT = 11,
     parameter int PIXEL_CLK_DIV  = 12,
+    // Pixel PLL divider triple (Gowin builds): clk_pixel =
+    // f_symbol * MDIV / IDIV / ODIV0, and it must equal
+    // f_symbol * PIXEL_CLK_MULT / PIXEL_CLK_DIV (checked at elaboration).
+    parameter int PIXEL_PLL_IDIV  = 5,
+    parameter int PIXEL_PLL_MDIV  = 44,
+    parameter int PIXEL_PLL_ODIV0 = 8,
+    parameter     PIXEL_PLL_FCLKIN = "135",
     // Audio - HDMI-style contract
     parameter int AUDIO_RATE      = 48000, // 44100 | 48000
     parameter int AUDIO_BIT_WIDTH = 16,
@@ -185,16 +192,24 @@ module dp_transmitter #(
     // ------------------------------------------------------------------
 `ifdef DP_VENDOR_GOWIN
  `ifdef GOWIN_PLL_IP
-    // IDE-generated PLLA wrapper: clk_pixel = tx_symbol_clk * MULT / DIV.
-    // The wrapper's VCO is fixed at 1188 MHz (135 MHz refclk x 44/5), so
-    // ODIV0 = 1188 / f_pixel = 44*DIV / (5*MULT). 11/10 -> 8 (148.5 MHz),
-    // 1/5 -> 44 (27.0 MHz).
-    localparam int PIXEL_ODIV0 = (44 * PIXEL_CLK_DIV) / (5 * PIXEL_CLK_MULT);
+    // IDE-generated PLLA wrapper: clk_pixel = tx_symbol_clk * MULT / DIV,
+    // realized as VCO = f_symbol * PIXEL_PLL_MDIV / PIXEL_PLL_IDIV and
+    // clk_pixel = VCO / PIXEL_PLL_ODIV0. DP synchronous-clock mode needs
+    // the pixel clock locked to the symbol clock, so this PLL always
+    // takes tx_symbol_clk - only the ratio changes with the link rate:
+    //   2-lane HBR: 135 MHz in, 5/44/8   -> VCO 1188, 148.5 MHz out
+    //   4-lane RBR:  81 MHz in, 1/11/6   -> VCO  891, 148.5 MHz out
+    // The elaboration check below is the guard: it recomputes the output
+    // from the divider triple and fails if it misses MULT/DIV.
     initial begin
-        if ((44 * PIXEL_CLK_DIV) % (5 * PIXEL_CLK_MULT) != 0)
-            $error("dp_transmitter: pixel clock not reachable from the 1188 MHz VCO (44*DIV must divide by 5*MULT)");
+        if (F_SYMBOL_HZ * PIXEL_PLL_MDIV / PIXEL_PLL_IDIV / PIXEL_PLL_ODIV0
+            != F_PIXEL_HZ)
+            $error("dp_transmitter: PIXEL_PLL_IDIV/MDIV/ODIV0 do not yield F_PIXEL_HZ from F_SYMBOL_HZ");
     end
-    gowin_pixel_pll #(.ODIV0(PIXEL_ODIV0)) i_pixel_pll (
+    gowin_pixel_pll #(.ODIV0(PIXEL_PLL_ODIV0),
+                      .IDIV (PIXEL_PLL_IDIV),
+                      .MDIV (PIXEL_PLL_MDIV),
+                      .FCLKIN(PIXEL_PLL_FCLKIN)) i_pixel_pll (
         .clkin  (tx_symbol_clk),
         .clkout (clk_pixel)
     );
@@ -350,7 +365,34 @@ module dp_transmitter #(
     // MSA (main stream attributes) secondary packet insertion
     // ------------------------------------------------------------------
     generate
-    if (LANE_COUNT == 1) begin : g_msa1
+    if (LANE_COUNT == 4) begin : g_msa4
+        msa_inserter_4ch i_msa(
+            .clk                 (tx_symbol_clk),
+            .active              (1'b1),
+            .M_value             (24'(M_VALUE)),
+            .N_value             (24'(N_VALUE)),
+            .H_visible           (12'(H_VISIBLE)),
+            .V_visible           (12'(V_VISIBLE)),
+            .H_total             (12'(H_TOTAL)),
+            .V_total             (12'(V_TOTAL)),
+            .H_sync_width        (12'(H_SYNC_WIDTH)),
+            .V_sync_width        (12'(V_SYNC_WIDTH)),
+            .H_start             (12'(H_START)),
+            .V_start             (12'(V_START)),
+            .H_vsync_active_high (H_SYNC_ACTIVE_HIGH),
+            .V_vsync_active_high (V_SYNC_ACTIVE_HIGH),
+            .flag_sync_clock     (1'b1),
+            .flag_YCCnRGB        (1'b0),
+            .flag_422n444        (1'b0),
+            .flag_range_reduced  (1'b0),
+            .flag_interlaced_even(1'b0),
+            .flag_YCC_colour_709 (1'b0),
+            .flags_3d_Indicators (2'b00),
+            .bits_per_colour     (5'b01000),
+            .in_data             (sdp_merged_data),
+            .out_data            (msa_merged_data)
+        );
+    end else if (LANE_COUNT == 1) begin : g_msa1
         msa_inserter_1ch i_msa(
             .clk                 (tx_symbol_clk),
             .active              (1'b1),

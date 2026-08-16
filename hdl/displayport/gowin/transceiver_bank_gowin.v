@@ -107,19 +107,31 @@ module transceiver_bank_gowin #(
     wire [1:0] preemp_sel = preemp_6p0 ? 2'd2 : preemp_3p5 ? 2'd1 : 2'd0;
 
     // ------------------------------------------------------------------
-    // Fabric 8b/10b (raw-mode SERDES): two encoded lanes
+    // Fabric 8b/10b (raw-mode SERDES): one encoder per active lane.
+    // tx_symbols carries 20 bits per word lane: [19:0]=ML0, [39:20]=ML1,
+    // [59:40]=ML2, [79:60]=ML3.
     // ------------------------------------------------------------------
-    wire [19:0] tx_code0, tx_code1;
-    reg         enc_reset = 1'b1;
-
-    lane_encoder_8b10b enc0 (
-        .clk(tx_symbol_clk), .reset(enc_reset),
-        .tx_symbol(tx_symbols[19:0]),  .tx_code(tx_code0)
-    );
-    lane_encoder_8b10b enc1 (
-        .clk(tx_symbol_clk), .reset(enc_reset),
-        .tx_symbol(tx_symbols[39:20]), .tx_code(tx_code1)
-    );
+    reg enc_reset = 1'b1;
+`ifdef DP_SERDES_LANES_4
+    localparam ENC_LANES = 4;
+`else
+    localparam ENC_LANES = 2;
+`endif
+    wire [19:0] tx_code [0:3];
+    genvar gi;
+    generate
+        for (gi = 0; gi < ENC_LANES; gi = gi + 1) begin : g_enc
+            lane_encoder_8b10b enc (
+                .clk(tx_symbol_clk), .reset(enc_reset),
+                .tx_symbol(tx_symbols[gi*20 +: 20]), .tx_code(tx_code[gi])
+            );
+        end
+        for (gi = ENC_LANES; gi < 4; gi = gi + 1) begin : g_enc_unused
+            assign tx_code[gi] = 20'd0;
+        end
+    endgenerate
+    wire [19:0] tx_code0 = tx_code[0];
+    wire [19:0] tx_code1 = tx_code[1];
 
     // ------------------------------------------------------------------
     // Reset / power-up sequencing (IPUG1024 4-1 port semantics):
@@ -181,7 +193,12 @@ module transceiver_bank_gowin #(
 
     wire tx_afull_ln0, tx_afull_ln1, tx_afull_ln2, tx_afull_ln3;
     wire tx_full_ln0,  tx_full_ln1,  tx_full_ln2,  tx_full_ln3;
-`ifdef DP_SERDES_LANES_23
+`ifdef DP_SERDES_LANES_4
+    wire fifo_afull_used = tx_afull_ln0 | tx_afull_ln1 |
+                           tx_afull_ln2 | tx_afull_ln3;
+    wire fifo_full_used  = tx_full_ln0  | tx_full_ln1  |
+                           tx_full_ln2  | tx_full_ln3;
+`elsif DP_SERDES_LANES_23
     wire fifo_afull_used = tx_afull_ln2 | tx_afull_ln3;
     wire fifo_full_used  = tx_full_ln2  | tx_full_ln3;
 `else
@@ -216,7 +233,140 @@ module transceiver_bank_gowin #(
     always @(posedge mgmt_clk)
         por_n <= (powerup_eff != 2'b00);
 
-`ifdef DP_SERDES_LANES_23
+`ifdef DP_SERDES_LANES_4
+    // ------------------------------------------------------------------
+    // a2-mega 4-lane RBR (1.62 Gbps/lane, 81 MHz word clock). Board
+    // routing (docs/a2mega_pinmap_1_0a3.csv, die-true columns):
+    //   connector DP0 <- die ln3,  DP1 <- die ln2,
+    //   connector DP2 <- die ln1,  DP3 <- die ln0
+    // All four pairs are P/N-swapped at the BTB, compensated by
+    // tx_pol_invert on every lane inside the generated IP. DP main-link
+    // lane N must carry word lane N, so:
+    //   ML0->ln3, ML1->ln2, ML2->ln1, ML3->ln0.
+    // Clock master stays die lane 2 so the .sdc anchor pin
+    // (LANE2_PCS_TX_O_FABRIC_CLK) is unchanged - only its period moves
+    // from 7.407 ns to 12.346 ns. Un-bonded: every lane's fabric write
+    // clock is this one PCS clkout, which is what keeps the four write
+    // sides in lockstep without the bonding machinery.
+    // ------------------------------------------------------------------
+    wire [19:0] tx_wire_ml0 = TX_PROBE ? probe_word : tx_code[0];
+    wire [19:0] tx_wire_ml1 = TX_PROBE ? probe_word : tx_code[1];
+    wire [19:0] tx_wire_ml2 = TX_PROBE ? probe_word : tx_code[2];
+    wire [19:0] tx_wire_ml3 = TX_PROBE ? probe_word : tx_code[3];
+    wire rdy_ln0, rdy_ln1, rdy_ln2, rdy_ln3;
+    assign lane_ready = {rdy_ln2 & rdy_ln0, rdy_ln3 & rdy_ln1};
+
+    dp_serdes i_dp_serdes (
+        .por_n_i                    (por_n),
+        // die lane 3 <= ML0 (connector DP0)
+        .dp_phy_q0_ln3_tx_clk_i     (tx_symbol_clk),
+        .dp_phy_q0_ln3_tx_pcs_clkout_o (),
+        .dp_phy_q0_ln3_tx_data_i    ({4{tx_wire_ml0}}),
+        .dp_phy_q0_ln3_tx_fifo_wren_i (~tx_afull_ln3),
+        .dp_phy_q0_ln3_tx_fifo_wrusewd_o (dbg_wrusewd[9:5]),
+        .dp_phy_q0_ln3_tx_fifo_afull_o (tx_afull_ln3),
+        .dp_phy_q0_ln3_tx_fifo_full_o (tx_full_ln3),
+        .dp_phy_q0_ln3_pma_rstn_i   (pma_rstn),
+        .dp_phy_q0_ln3_pcs_tx_rst_i (pcs_tx_rst),
+        .dp_phy_q0_ln3_pll_lock_o   (),
+        .dp_phy_q0_ln3_ready_o      (rdy_ln3),
+        .dp_phy_q0_ln3_refclk_o     (),
+        .dp_phy_q0_ln3_rx_clk_i     (1'b0),
+        .dp_phy_q0_ln3_rx_fifo_rden_i (1'b0),
+        .dp_phy_q0_ln3_pcs_rx_rst_i (1'b1),
+        .dp_phy_q0_ln3_rx_pcs_clkout_o (),
+        .dp_phy_q0_ln3_rx_data_o    (),
+        .dp_phy_q0_ln3_rx_fifo_rdusewd_o (),
+        .dp_phy_q0_ln3_rx_fifo_aempty_o (),
+        .dp_phy_q0_ln3_rx_fifo_empty_o (),
+        .dp_phy_q0_ln3_rx_valid_o   (),
+        .dp_phy_q0_ln3_signal_detect_o (),
+        .dp_phy_q0_ln3_rx_cdr_lock_o (),
+        // die lane 2 <= ML1 (connector DP1); clock master
+        .dp_phy_q0_ln2_tx_clk_i     (tx_symbol_clk),
+        .dp_phy_q0_ln2_tx_pcs_clkout_o (tx_symbol_clk_raw),
+        .dp_phy_q0_ln2_tx_data_i    ({4{tx_wire_ml1}}),
+        .dp_phy_q0_ln2_tx_fifo_wren_i (~tx_afull_ln2),
+        .dp_phy_q0_ln2_tx_fifo_wrusewd_o (dbg_wrusewd[4:0]),
+        .dp_phy_q0_ln2_tx_fifo_afull_o (tx_afull_ln2),
+        .dp_phy_q0_ln2_tx_fifo_full_o (tx_full_ln2),
+        .dp_phy_q0_ln2_pma_rstn_i   (pma_rstn),
+        .dp_phy_q0_ln2_pcs_tx_rst_i (pcs_tx_rst),
+        .dp_phy_q0_ln2_pll_lock_o   (pll_lock),
+        .dp_phy_q0_ln2_ready_o      (rdy_ln2),
+        .dp_phy_q0_ln2_refclk_o     (),
+        .dp_phy_q0_ln2_rx_clk_i     (1'b0),
+        .dp_phy_q0_ln2_rx_fifo_rden_i (1'b0),
+        .dp_phy_q0_ln2_pcs_rx_rst_i (1'b1),
+        .dp_phy_q0_ln2_rx_pcs_clkout_o (),
+        .dp_phy_q0_ln2_rx_data_o    (),
+        .dp_phy_q0_ln2_rx_fifo_rdusewd_o (),
+        .dp_phy_q0_ln2_rx_fifo_aempty_o (),
+        .dp_phy_q0_ln2_rx_fifo_empty_o (),
+        .dp_phy_q0_ln2_rx_valid_o   (),
+        .dp_phy_q0_ln2_signal_detect_o (),
+        .dp_phy_q0_ln2_rx_cdr_lock_o (),
+        // die lane 1 <= ML2 (connector DP2)
+        .dp_phy_q0_ln1_tx_clk_i     (tx_symbol_clk),
+        .dp_phy_q0_ln1_tx_pcs_clkout_o (),
+        .dp_phy_q0_ln1_tx_data_i    ({4{tx_wire_ml2}}),
+        .dp_phy_q0_ln1_tx_fifo_wren_i (~tx_afull_ln1),
+        .dp_phy_q0_ln1_tx_fifo_wrusewd_o (),
+        .dp_phy_q0_ln1_tx_fifo_afull_o (tx_afull_ln1),
+        .dp_phy_q0_ln1_tx_fifo_full_o (tx_full_ln1),
+        .dp_phy_q0_ln1_pma_rstn_i   (pma_rstn),
+        .dp_phy_q0_ln1_pcs_tx_rst_i (pcs_tx_rst),
+        .dp_phy_q0_ln1_pll_lock_o   (),
+        .dp_phy_q0_ln1_ready_o      (rdy_ln1),
+        .dp_phy_q0_ln1_refclk_o     (),
+        .dp_phy_q0_ln1_rx_clk_i     (1'b0),
+        .dp_phy_q0_ln1_rx_fifo_rden_i (1'b0),
+        .dp_phy_q0_ln1_pcs_rx_rst_i (1'b1),
+        .dp_phy_q0_ln1_rx_pcs_clkout_o (),
+        .dp_phy_q0_ln1_rx_data_o    (),
+        .dp_phy_q0_ln1_rx_fifo_rdusewd_o (),
+        .dp_phy_q0_ln1_rx_fifo_aempty_o (),
+        .dp_phy_q0_ln1_rx_fifo_empty_o (),
+        .dp_phy_q0_ln1_rx_valid_o   (),
+        .dp_phy_q0_ln1_signal_detect_o (),
+        .dp_phy_q0_ln1_rx_cdr_lock_o (),
+        // die lane 0 <= ML3 (connector DP3)
+        .dp_phy_q0_ln0_tx_clk_i     (tx_symbol_clk),
+        .dp_phy_q0_ln0_tx_pcs_clkout_o (),
+        .dp_phy_q0_ln0_tx_data_i    ({4{tx_wire_ml3}}),
+        .dp_phy_q0_ln0_tx_fifo_wren_i (~tx_afull_ln0),
+        .dp_phy_q0_ln0_tx_fifo_wrusewd_o (),
+        .dp_phy_q0_ln0_tx_fifo_afull_o (tx_afull_ln0),
+        .dp_phy_q0_ln0_tx_fifo_full_o (tx_full_ln0),
+        .dp_phy_q0_ln0_pma_rstn_i   (pma_rstn),
+        .dp_phy_q0_ln0_pcs_tx_rst_i (pcs_tx_rst),
+        .dp_phy_q0_ln0_pll_lock_o   (),
+        .dp_phy_q0_ln0_ready_o      (rdy_ln0),
+        .dp_phy_q0_ln0_refclk_o     (),
+        .dp_phy_q0_ln0_rx_clk_i     (1'b0),
+        .dp_phy_q0_ln0_rx_fifo_rden_i (1'b0),
+        .dp_phy_q0_ln0_pcs_rx_rst_i (1'b1),
+        .dp_phy_q0_ln0_rx_pcs_clkout_o (),
+        .dp_phy_q0_ln0_rx_data_o    (),
+        .dp_phy_q0_ln0_rx_fifo_rdusewd_o (),
+        .dp_phy_q0_ln0_rx_fifo_aempty_o (),
+        .dp_phy_q0_ln0_rx_fifo_empty_o (),
+        .dp_phy_q0_ln0_rx_valid_o   (),
+        .dp_phy_q0_ln0_signal_detect_o (),
+        .dp_phy_q0_ln0_rx_cdr_lock_o (),
+        // DRP: register dump + CSR replay bridge
+        .dp_phy_drp_clk_o           (drp_clk_w),
+        .dp_phy_drp_addr_i          (drp_addr_r),
+        .dp_phy_drp_wren_i          (drp_wren_r),
+        .dp_phy_drp_wrdata_i        (drp_wrdata_r),
+        .dp_phy_drp_strb_i          (drp_wren_r ? 8'hFF : 8'b0),
+        .dp_phy_drp_rden_i          (drp_rden_r),
+        .dp_phy_drp_ready_o         (drp_ready_w),
+        .dp_phy_drp_rdvld_o         (drp_rdvld_w),
+        .dp_phy_drp_rddata_o        (drp_rddata_w),
+        .dp_phy_drp_resp_o          ()
+    );
+`elsif DP_SERDES_LANES_23
     // ------------------------------------------------------------------
     // a2-mega carrier (GW5AT-60 SOM): board routing delivers die lane 3
     // to TUSB1046A DP0 and die lane 2 to DP1, both pairs P/N-inverted

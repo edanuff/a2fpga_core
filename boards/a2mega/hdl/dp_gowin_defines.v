@@ -10,5 +10,10 @@
 `define GOWIN_SERDES_IP
 `define GOWIN_PLL_IP
 
-// a2-mega carrier: die lanes 3+2 drive ML0/ML1 (board remap)
-`define DP_SERDES_LANES_23
+// a2-mega carrier lane selection (board remap; see transceiver_bank_gowin):
+//   DP_SERDES_LANES_4  = 4-lane RBR, die ln3/2/1/0 <- ML0/1/2/3
+//   DP_SERDES_LANES_23 = 2-lane HBR, die ln3/2     <- ML0/ML1
+// Only one may be defined. 4-lane RBR is the wider-UI configuration under
+// evaluation against the ~20% boot marginality; tag
+// a2mega-2lane-planc-4of5 is the 2-lane revert point.
+`define DP_SERDES_LANES_4

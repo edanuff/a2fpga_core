@@ -20,7 +20,7 @@ reload workaround. Revert anchor: tag `a2mega-2lane-planc-4of5`.
 - Mux already **CTLSEL_DP4** (four-lane) when DP active. (usbc_glue.cpp:214)
 - HPD, flip, EQ override all unchanged.
 
-## DP core RTL: parameter-only, NO new datapath ✅
+## DP core RTL: parameter-only + one wiring gap found ✅
 The vendored core is genuinely 1/2/4-lane and rate-parameterized:
 - `video_stream_packer` LANE_COUNT ∈ {1,2,4} (pixel-interleaved), VBID
   repeats = 4/LANE_COUNT — generic. (video_stream_packer.v:35)
@@ -28,9 +28,14 @@ The vendored core is genuinely 1/2/4-lane and rate-parameterized:
 - Ladder already has `set_link_count_4`; DPCD LINK_BW_SET byte is emitted
   as `LINK_RATE_MBPS/270` → 1620/270 = 0x06 (RBR) automatically.
   (dp_aux_messages.v:129)
-- So: `dp_transmitter #(.LANE_COUNT(4), .LINK_RATE_MBPS(1620))`. The
-  capacity assert, channel-count DPCD, MSA selection all follow the
-  params.
+- So: `dp_transmitter #(.LANE_COUNT(4), .LINK_RATE_MBPS(1620))`.
+- **GAP FOUND & FIXED**: the MSA generate was `if (LANE_COUNT==1) 1ch
+  else 2ch` — no 4-lane branch, so LANE_COUNT=4 would have silently used
+  the 2-channel inserter. `msa_inserter_4ch` existed but was never wired.
+  Added as the first branch.
+- The 80-bit tx_symbols bus is 8 x 10-bit symbol slots and was always
+  4-lane-wide; 2-lane only ever filled the low half. Lane N = bits
+  [20N +: 20]. Encoders are now a generate loop over ENC_LANES.
 
 ## transceiver_bank_gowin.v: the real RTL work (mechanical)
 Currently hardwired 2-lane (ln2/ln3) under `DP_SERDES_LANES_23`. Extend to
@@ -57,15 +62,24 @@ want less pre-emphasis). **Bonding decision (the crux):**
 - Plan: try Option 1 first (does lower rate alone fix it?); if still
   marginal, Option 2 (does proper framing fix it?).
 
-## ⚠️ Clocking gotcha
+## Clocking (CORRECTED — earlier draft of this doc was wrong)
 - Symbol clock 135 → **81 MHz** (1.62 G / 20). SDC `clk_sym` period
-  7.407 → **12.346 ns**; re-anchor on the new master lane's
-  `LANEx_PCS_TX_O_FABRIC_CLK`.
-- **Pixel PLL is currently derived from the 135 MHz symbol clock**
-  (`gowin_pixel_pll = 135 * 44/5 / 8 = 148.5`). At RBR the symbol clock
-  is 81 MHz — the 148.5 MHz pixel clock MUST be re-sourced from a stable
-  reference (clk50/clk100 path), NOT the symbol clock. This is the one
-  non-mechanical change and must be right or video timing breaks.
+  7.407 → **12.346 ns**. Clock master stays die lane 2, so the SDC anchor
+  pin `LANE2_PCS_TX_O_FABRIC_CLK` is UNCHANGED — only the period moves.
+- Pixel PLL: an earlier draft said to re-source it off a stable reference
+  instead of the symbol clock. **That was wrong** — this is DP
+  *synchronous-clock mode*: clk_pixel must stay locked to the symbol
+  clock (the MSA M/N ratio encodes exactly that relationship). The real
+  change is the PLL RATIO:
+    2-lane HBR: 135 MHz in, IDIV 5 / MDIV 44 / ODIV0 8 → VCO 1188 → 148.5
+    4-lane RBR:  81 MHz in, IDIV 1 / MDIV 11 / ODIV0 6 → VCO  891 → 148.5
+  `gowin_pixel_pll` now takes IDIV/MDIV/FCLKIN as parameters (defaults =
+  the old hardcoded values, so 2-lane builds are unchanged), and
+  dp_transmitter asserts at elaboration that the divider triple actually
+  reproduces F_PIXEL_HZ from F_SYMBOL_HZ.
+- Derived params all check out at LANE_COUNT=4 / MULT 11 / DIV 6:
+  SYMS_PER_LINE 2400, TU fill 44/64 (= 445.5/648 MB/s), M_VALUE 480597
+  (=148.5/162, 0.7 ppm rounding), capacity assert passes.
 
 ## Test protocol (unchanged rig)
 Flash (rescue-first), 5+ cold boots logo-up, count K:03/colorbars vs K:00.
