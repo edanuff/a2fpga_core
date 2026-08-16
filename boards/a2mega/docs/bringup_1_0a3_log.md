@@ -858,3 +858,29 @@ quirk (document, hub boot-discipline, unblock port); dark = shared-layer
 bug with a narrowed search space. Practical risk note: with EQ 6.5 dB,
 boots converge first-pass ~always (G:F1); settled links soak clean —
 full-core port viable under boot discipline in parallel.
+
+## 2026-08-15 end: ROOT CAUSE CANDIDATE FOUND — TX Channel Bonding disabled
+
+Honest boot-convergence measurement (reverted build, 5 full fresh
+cycles): 2/5 lit; PERFECT correlation lit<->G:F1 (first-pass) and
+dark<->retried(doom loop). No boot discipline suffices.
+
+Unifying mechanism, backed by config evidence: **chbond_enable = false**
+in dp_serdes (serdes_tmp.toml) — TX channel bonding DISABLED. The two TX
+lanes' buffers free-run at arbitrary relative read phase per PCS
+release: ~40% of releases land within the sink's deskew window (golden
+boots — genuinely clean links, 15-min soaks pass), the rest land outside
+(marginal locks, flapping polls, SINK_STATUS=0 doom loop). In-session
+re-releases land correlated with the first roll -> retrains never
+escape. Explains: boot lottery, doom loop, cycling, immunity to every
+protocol/analog/stream fix (all exonerated: stream bit-exact sim, CSR
+24/24 silicon readback, PHY sequencing both ways, audio off, D3/EN
+bounces, dead-window). chbond_trigger_by_fabric=true exists — a fabric
+trigger input never driven.
+
+FIX (next session): guided GUI IP regen (same procedure as the 804 mV
+swing session) enabling Channel Bonding (master channel + Read Start
+Depth per IPUG1024 p.21), then drive the bonding trigger after lane
+release. Acceptance: 5/5 fresh-boot cycles lit + flip-kill recovery.
+Current flash: reverted round-19-equivalent (stable retrains, AUDIO OFF —
+re-enable AUDIO_ENABLE=1 after the bonding fix validates).
