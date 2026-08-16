@@ -37,6 +37,10 @@ module dp_transmitter #(
     parameter bit H_SYNC_ACTIVE_HIGH = 1'b1,
     parameter bit V_SYNC_ACTIVE_HIGH = 1'b1,
     parameter int TU_SIZE = 64,
+    parameter bit AUDIO_ENABLE = 1,  // 0: bypass SDP engine entirely (no
+                                     // secondary packets on the wire) —
+                                     // video-restart-bug discriminator
+
     // F_pixel = F_symbol_clk * PIXEL_CLK_MULT / PIXEL_CLK_DIV (81 MHz * 11/12 = 74.25 MHz)
     parameter int PIXEL_CLK_MULT = 11,
     parameter int PIXEL_CLK_DIV  = 12,
@@ -254,7 +258,8 @@ module dp_transmitter #(
         .rlevel (fifo_rlevel)
     );
 
-    logic [72:0] packed_data, sdp_merged_data;
+    logic [72:0] packed_data, sdp_merged_data, sdp_engine_out;
+    assign sdp_merged_data = AUDIO_ENABLE ? sdp_engine_out : packed_data;
     logic        sdp_gap, frame_pulse, fifo_underrun;
     logic        audio_strobe_sym, audio_buffer_ready, audio_buffer_take;
     logic        audio_mute;
@@ -331,7 +336,7 @@ module dp_transmitter #(
         .in_data      (packed_data),
         .sdp_gap      (sdp_gap),
         .frame_pulse  (frame_pulse),
-        .out_data     (sdp_merged_data),
+        .out_data     (sdp_engine_out),
         .buffer       (audio_buffer_flat),
         .buffer_ready (audio_buffer_ready),
         .buffer_take  (audio_buffer_take),

@@ -195,6 +195,8 @@ module a2mega_dp_test_top (
 
     dp_transmitter #(
         .LANE_COUNT     (2),
+        .AUDIO_ENABLE   (0),   // round 19: SDP/audio OFF — video-restart discriminator
+
         .LINK_RATE_MBPS (2700),
         // 1.0a3: AUX receive is electrically dead (AC caps, no FPGA-side
         // bias, LVCMOS thresholds unreachable by a <=1.38 Vpp reply; board

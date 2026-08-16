@@ -819,3 +819,27 @@ idle->video transition, VB-ID, MSA emission) — no hardware needed.
 **Golden signature (healthy streaming link): L:F G:F1 K:03.**
 Telemetry fields now: D: ladder state, HLVC, E:{sync,bytes} R:last-byte
 L:live-locks G:{gate-locks,fails,timeouts} K:SINK_STATUS(0x205).
+
+## Video-restart bug: elimination complete on source side (2026-08-15 night)
+
+Round 19 (AUDIO_ENABLE=0, zero SDP packets) reproduced K:00 after
+flip-kill on a pure-video stream -> SDP/audio path exonerated. Full
+elimination table for the source: stream content (bit-exact sim),
+idle-switch (real cadences), PHY (re-resets every pass via powerup drop),
+SDP (hardware-discriminated), D3 bounce (no effect + reverted), mux-EN
+bounce (no effect — and RETROSPECTIVELY INVALID: the converter sits
+behind the hub's internal wiring and never saw a detach).
+
+Remaining theory: the CONVERTER's stream pipeline wedges and only its
+own power cycle clears it ("first-pass magic" = hub was freshly powered
+at our boots). The clean test (K:00 -> hub-only power cycle -> video?)
+was CONFOUNDED: after the hub reboot the re-attach came up on CC1 with
+AUX DEAD (E: frozen, transactions timing out; flip-convention probe no
+help) — a NEW sub-failure: either converter AUX silent post-reboot or a
+CC1-specific crossbar/orientation gap on our side. Needs its own
+session: 'x' mux reg dump on CC1 attach, PD/VDM logs, compare CC1 vs CC2
+attach flows.
+
+Round 19 also showed: audio-off boot converged FIRST-PASS (G:F1) with
+colorbars — consistent with prior good boots; no evidence audio affects
+convergence.
