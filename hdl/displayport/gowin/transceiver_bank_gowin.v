@@ -142,8 +142,12 @@ module transceiver_bank_gowin #(
         end
     end
 
-    wire fifo_afull_used, fifo_full_used;
-    assign serdes_status = {fifo_afull_used, fifo_full_used,
+    // serdes_status bit6 carried fifo_full (constant 0 in practice); it
+    // temporarily reports the polarity experiment phase instead - see
+    // the POLARITY-STAGE EXPERIMENT block. Running S: 0xBF = invert on,
+    // 0xFF = invert off.
+    wire fifo_afull_used, exp_phase_status;
+    assign serdes_status = {fifo_afull_used, exp_phase_status,
                             pll_lock, lane_ok, ~tx_rst, tx_running};
 
     // tx_vld (TX buffer data-valid, IPUG1043 3.7.1). Constant-1 (as in
@@ -197,6 +201,8 @@ module transceiver_bank_gowin #(
     wire        drp_rdvld_w;
     wire [31:0] drp_rddata_w;
     wire        drp_ready_w;
+    reg         drp_wren_r   = 1'b0;
+    reg  [31:0] drp_wrdata_r = 32'd0;
 
     // por_n: release after power-up request (refclk must be stable; the
     // board's clock generator is programmed before the FPGA runs)
@@ -271,9 +277,9 @@ module transceiver_bank_gowin #(
         // DRP: read-only register-dump bridge (writes never enabled)
         .edp_phy_drp_clk_o           (drp_clk_w),
         .edp_phy_drp_addr_i          (drp_addr_r),
-        .edp_phy_drp_wren_i          (1'b0),
-        .edp_phy_drp_wrdata_i        (32'b0),
-        .edp_phy_drp_strb_i          (8'b0),
+        .edp_phy_drp_wren_i          (drp_wren_r),
+        .edp_phy_drp_wrdata_i        (drp_wrdata_r),
+        .edp_phy_drp_strb_i          (drp_wren_r ? 8'hFF : 8'b0),
         .edp_phy_drp_rden_i          (drp_rden_r),
         .edp_phy_drp_ready_o         (drp_ready_w),
         .edp_phy_drp_rdvld_o         (drp_rdvld_w),
@@ -282,7 +288,8 @@ module transceiver_bank_gowin #(
     );
 
     assign fifo_afull_used = tx_afull_ln2 | tx_afull_ln3;
-    assign fifo_full_used  = tx_full_ln2  | tx_full_ln3;
+    // quasi-static (~15-40 s period): safe to sample loosely cross-domain
+    assign exp_phase_status = exp_phase;
 
     assign tx_symbol_clk = tx_symbol_clk_raw;
     // serial data leaves through dedicated pads; these RTL ports idle
@@ -338,42 +345,86 @@ module transceiver_bank_gowin #(
     reg [31:0] res_data = 32'd0;
     reg [23:0] res_addr = 24'd0;
     reg        res_vld  = 1'b0;
-    reg [1:0]  rd_state = 2'd0;          // 0=gap, 1=read, 2=drop
+    reg [2:0]  rd_state = 3'd0;   // 0=gap, 1=read, 2=drop, 3=write, 4=wdrop
     reg [15:0] rd_tmo   = 16'd0;
-    reg [17:0] rd_gap   = 18'd0;         // settle between reads (~ms)
+    reg [17:0] rd_gap   = 18'd0;         // settle between ops (~ms)
+
+    // ------------------------------------------------------------------
+    // POLARITY-STAGE EXPERIMENT (temporary, 2026-08-16). Symptom: sink
+    // CR-locks on TPS1 but NEVER symbol-locks on TPS2 - the signature of
+    // comma-free garbage on the wire. Suspect: the tx_pol_invert CSR bit
+    // (0x400 @ per-lane +0x3c) acts on the PARALLEL data ahead of the
+    // hardened 8b10b encoder (wire-equivalent in the old raw mode, but
+    // pre-encoder corruption in 8b10b mode - inverted D10.2 = D21.5 is
+    // still a clock pattern, so TPS1/CR survives the corruption).
+    // Discriminator: alternate both lanes' +0x3c regs between the two
+    // generator-emitted values 0x408 (invert on, current) and 0x008
+    // (invert off) every 2^31 drp_clk cycles (~15-40 s), letting the
+    // AUX ladder retry under each phase. exp_phase is exported on
+    // serdes_status bit 6 -> telemetry S: bit6 (0xBF vs 0xFF running).
+    // Round-20 established that CSR values survive retrain resets, so a
+    // written value holds for its whole phase.
+    // ------------------------------------------------------------------
+    reg        exp_phase = 1'b0;  // 0 = 0x408 (invert on), 1 = 0x008 (off)
+    reg [31:0] exp_timer = 32'd0;
+    reg [1:0]  exp_pend  = 2'b00; // {lane3, lane2} writes outstanding
 
     always @(posedge drp_clk_w) begin
         idx_meta <= dbg_idx;
         idx_sync <= idx_meta;
+        exp_timer <= exp_timer + 32'd1;
+        if (exp_timer[31] != exp_phase) begin
+            exp_phase <= exp_timer[31];
+            exp_pend  <= 2'b11;
+        end
         case (rd_state)
-            2'd0: begin
+            3'd0: begin
                 drp_rden_r <= 1'b0;
+                drp_wren_r <= 1'b0;
                 rd_gap <= rd_gap + 18'd1;
                 if (&rd_gap) begin
-                    rd_state <= 2'd1;
-                    drp_addr_r <= dump_addr_rom(idx_sync);
                     rd_tmo <= 16'd0;
+                    if (exp_pend != 2'b00) begin
+                        rd_state <= 3'd3;
+                        drp_addr_r   <= exp_pend[0] ? 24'h80943c
+                                                    : 24'h80963c;
+                        drp_wrdata_r <= exp_phase ? 32'h00000008
+                                                  : 32'h00000408;
+                    end else begin
+                        rd_state <= 3'd1;
+                        drp_addr_r <= dump_addr_rom(idx_sync);
+                    end
                 end
             end
-            2'd1: begin                  // rden high until rdvld or timeout
+            3'd1: begin                  // rden high until rdvld or timeout
                 drp_rden_r <= 1'b1;
                 rd_tmo <= rd_tmo + 16'd1;
                 if (drp_rdvld_w) begin
                     res_data <= drp_rddata_w;
                     res_addr <= drp_addr_r;
                     res_vld  <= 1'b1;
-                    rd_state <= 2'd2;
+                    rd_state <= 3'd2;
                 end else if (&rd_tmo) begin
                     res_data <= {16'hDEAD, 11'd0, idx_sync};
                     res_addr <= drp_addr_r;
                     res_vld  <= 1'b1;
-                    rd_state <= 2'd2;
+                    rd_state <= 3'd2;
                 end
             end
-            default: begin
+            3'd3: begin                  // wren high until ready or timeout
+                drp_wren_r <= 1'b1;
+                rd_tmo <= rd_tmo + 16'd1;
+                if (drp_ready_w || (&rd_tmo)) begin
+                    // clear this lane's pend even on timeout (no livelock)
+                    exp_pend <= exp_pend[0] ? {exp_pend[1], 1'b0} : 2'b00;
+                    rd_state <= 3'd4;
+                end
+            end
+            default: begin               // 2=drop, 4=wdrop: release strobes
                 drp_rden_r <= 1'b0;
+                drp_wren_r <= 1'b0;
                 rd_gap <= 18'd0;
-                rd_state <= 2'd0;
+                rd_state <= 3'd0;
             end
         endcase
     end
@@ -417,8 +468,8 @@ module transceiver_bank_gowin #(
         .tx_symbol(tx_symbols[39:20]), .tx_code(tx_code1)
     );
 
-    assign fifo_afull_used = 1'b0;
-    assign fifo_full_used  = 1'b0;
+    assign fifo_afull_used   = 1'b0;
+    assign exp_phase_status  = 1'b0;
 
     // no analogue serialiser in sim: reduce the encoded codes onto the
     // dummy lane pins so the 8b/10b path is not swept by synthesis and
