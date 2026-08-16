@@ -1040,3 +1040,21 @@ D. 4-lane: ALL FOUR lanes routed on 1.0a3 (DP2=die ln1, DP3=die ln0,
    4-lane mainly serves monitor-direct (blind-ladder path) — pairs with
    the closed-loop-with-blind-fallback ladder work.
 E. 1.0a4: RECONFIG_N -> ESP32 + AUX bias resistors (both queued).
+
+## 2026-08-16 — Scenario A closes NEGATIVE: no word-level draw signature
+
+Instrument build (U:xxyy = both lanes' tx_if FIFO wrusewd): 5 boots
+sampled — 3 good (K:03, colorbars) + 2 bad (K:00) — U:0A0A on EVERY one,
+rock-stable across all telemetry rows. Both lanes park at 10 words by
+rd_start_depth design; fill levels carry zero draw information. The
+config-time draw is SUB-WORD (serializer/divider phase below FIFO/word
+granularity) — no fabric-reachable measurement or cancellation target.
+(Also burned one flash cycle on a self-inflicted UART bug: MSG_LEN 67
+overflowed 6-bit msg_idx arithmetic — widened to 7 bits.)
+
+Remaining scenarios, re-weighted: B (ESP32-JTAG reload firmware) is now
+the main line for resilience; C (outreach: ask Gowin for a divider-sync/
+recalibration strobe — exactly the thing only they would know); D
+(4-lane: different sink deskew posture may TOLERATE all draws); E
+(1.0a4: RECONFIG_N + AUX bias). U: field stays in the build (harmless,
+one line of decode).
