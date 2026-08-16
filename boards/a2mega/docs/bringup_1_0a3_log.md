@@ -843,3 +843,18 @@ attach flows.
 Round 19 also showed: audio-off boot converged FIRST-PASS (G:F1) with
 colorbars — consistent with prior good boots; no evidence audio affects
 convergence.
+
+**Round 20 falsified + reverted:** DRP readback in the live K:00 state
+showed ALL 24 CSR registers INTACT (24/24 match incl. the 804 mV swing)
+— PMA resets do NOT wipe the UPAR/CSR analog settings; the one-way
+pma_rstn release fixed nothing and made retrains jitterier. Long-dead-
+window test (45 s lanes dead, then restore) also K:00 — signal-loss-
+timeout reset theory dead. Video-restart elimination is now TOTAL on the
+source side including analog state (verified by silicon readback, not
+inference). Sole remaining axis: sink class. Discriminator queued:
+BLIND_SINK=1 build + direct monitor (Stage-5 recipe) -> flip-kill ->
+does MONITOR video return post-retrain? Recovers = converter-specific
+quirk (document, hub boot-discipline, unblock port); dark = shared-layer
+bug with a narrowed search space. Practical risk note: with EQ 6.5 dB,
+boots converge first-pass ~always (G:F1); settled links soak clean —
+full-core port viable under boot discipline in parallel.
