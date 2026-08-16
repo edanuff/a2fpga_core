@@ -249,6 +249,21 @@ static void hal_set_fpga_hpd(void *ctx, bool level)
 /* Telnet 'r': drop HPD to the FPGA for ~250 ms and restore — restarts
  * the gateware's blind AUX/training ladder on demand (BLIND_SINK resets
  * on hpd_present falling). No cables touched, nothing power-cycles. */
+/* Bounce the mux EN: from the sink's perspective the DP source vanishes
+ * and reappears — a full DP-side hotplug. Theory (2026-08-15): converter
+ * firmwares run their stream-pipeline init only on this event, which is
+ * why boots (mux EN 0->1) get video and in-session retrains (EN never
+ * toggles) end K:00. Telnet 'b'. */
+extern "C" void usbc_mux_bounce(void)
+{
+    bool flipped_now = ((s_general_last & TUSB_GEN_FLIPSEL) != 0) ^ s_flip_invert;
+    hal_set_tusb1046(NULL, false, false);
+    osd_log("MUX BOUNCE: EN OFF");
+    vTaskDelay(pdMS_TO_TICKS(150));
+    hal_set_tusb1046(NULL, true, flipped_now);
+    osd_log("MUX BOUNCE: EN ON (flip preserved)");
+}
+
 extern "C" void usbc_hpd_retrain(void)
 {
     if (!s_hpd_level) {
