@@ -1010,3 +1010,33 @@ from flash (~2-3s), proven behavior from the flash saga. Architecture:
 FPGA watchdog exhausts (W:7 K:00, harmless placebo pulses) -> ESP32 parses
 its own UART tee -> JTAG reload -> fresh draw -> recheck; ~1.25 reloads
 expected at measured 4/5 pass rate.
+
+## 2026-08-16 — CSR replay: placebo #2. Draw is config-DOMAIN state.
+
+Watchdog v3 on a bad-draw boot: W 1->7, each attempt = 2ms reset + full
+357-write CSR replay over DRP (verified engine; same one that landed the
+polarity-experiment writes) + 2ms reset + bring-up. K:00 through all
+seven. VERDICT: the common-block draw is not in the registers and not
+reset-reachable — it is created by the configuration wakeup process
+itself. Software re-roll levers exhausted at the fabric level; only full
+reconfiguration (power / RECONFIG_N / JTAG reload) re-rolls.
+
+Scenario menu going forward:
+A. Instrument the draw: both lanes' tx_if FIFO wrusewd + CMU_OK etc. in
+   telemetry; correlate good/bad boots. If the bad draw shows a WORD-level
+   signature, a targeted per-lane rd_start_depth DRP adjust + PCS reset
+   could CANCEL it (real fabric fix, no re-roll needed). If sub-word,
+   fabric is out of levers.
+B. ESP32-JTAG reload firmware (pragmatic hammer): dp_test/bench contexts
+   unrestricted; full core = at-boot only, bounded to ONE reload inside
+   the reset-hold (~3s extra, Enhanced-precedent scale) -> 20% dark boots
+   become ~4%; residual = "power cycle" guidance. NMOS reset-hold concern
+   bounded by the single-reload cap.
+C. Gowin support ticket (parallel): half-bond emission, hardened-8b10b
+   no-symbol-lock, config-domain draw — ask for the sanctioned runtime
+   re-init (a PLL recalibrate strobe may exist outside our CSR list).
+D. 4-lane: ALL FOUR lanes routed on 1.0a3 (DP2=die ln1, DP3=die ln0,
+   uniform P/N swap). Hub will negotiate 2-lane+USB3 (pin asgn D/F), so
+   4-lane mainly serves monitor-direct (blind-ladder path) — pairs with
+   the closed-loop-with-blind-fallback ladder work.
+E. 1.0a4: RECONFIG_N -> ESP32 + AUX bias resistors (both queued).
