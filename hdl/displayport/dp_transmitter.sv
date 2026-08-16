@@ -468,40 +468,77 @@ module dp_transmitter #(
     // Grace accumulates whenever the PHY is powered but the sink is not
     // streaming, and is NOT reset by link drops - a bad draw can express
     // as stable-dark (established, K=0) OR as endless flap (teardown
-    // every few seconds); only genuine streaming clears the timer. On a
-    // healthy boot the sink streams within a few seconds of power, well
-    // inside the grace; a slow-EQ boot that eats a spurious restart just
-    // re-rolls and still converges (budget re-arms on streaming).
+    // every few seconds); only genuine streaming clears the timer.
+    //
+    // v3 recovery action (v1/v2's bare por_n pulses were proven placebo
+    // on hw - the common-block draw is config-time state): each attempt
+    // is reset-pulse -> full CSR-sequence replay over the DRP (the same
+    // writes device configuration performs; see csr_replay_rom) ->
+    // reset-pulse -> normal bring-up. ~10 ms per attempt.
     localparam int WDOG_GRACE = 800_000_000;  // 8 s   @ clk100
-    localparam int WDOG_DWELL = 200_000;      // 2 ms  @ clk100
+    localparam int WDOG_PULSE = 200_000;      // 2 ms  @ clk100
+    localparam int WDOG_RTIME = 5_000_000;    // 50 ms replay timeout
     localparam int WDOG_CAP   = 7;
     logic        wdog_force = 1'b0;
+    logic        wdog_replay_req = 1'b0;
+    logic        wdog_replay_ack;
+    logic        wdog_ack_m = 1'b0, wdog_ack_s = 1'b0;
     logic [2:0]  wdog_count = 3'd0;
     logic [30:0] wdog_timer = 31'd0;
+    logic [1:0]  wdog_st = 2'd0;  // 0 idle, 1 pulse1, 2 replay, 3 pulse2
     wire wdog_streaming = tx_link_established && (debug_sink[1:0] != 2'b00);
     always_ff @(posedge clk100) begin
-        if (wdog_force) begin
-            wdog_timer <= wdog_timer + 31'd1;
-            if (wdog_timer >= 31'(WDOG_DWELL)) begin
-                wdog_force <= 1'b0;
-                wdog_timer <= 31'd0;
+        wdog_ack_m <= wdog_replay_ack;
+        wdog_ack_s <= wdog_ack_m;
+        case (wdog_st)
+            2'd0: begin
+                wdog_force      <= 1'b0;
+                wdog_replay_req <= 1'b0;
+                if (wdog_streaming) begin
+                    wdog_timer <= 31'd0;
+                    wdog_count <= 3'd0;      // streaming - re-arm budget
+                end else if (tx_powerup_channel != 4'b0000) begin
+                    wdog_timer <= wdog_timer + 31'd1;
+                    if (wdog_timer >= 31'(WDOG_GRACE)
+                        && wdog_count != 3'(WDOG_CAP)) begin
+                        wdog_st    <= 2'd1;
+                        wdog_timer <= 31'd0;
+                        wdog_count <= wdog_count + 3'd1;
+                    end
+                end
+                // PHY unpowered (no partner): timer holds; nothing fires
             end
-        end else if (wdog_streaming) begin
-            wdog_timer <= 31'd0;
-            wdog_count <= 3'd0;              // streaming - re-arm the budget
-        end else if (tx_powerup_channel != 4'b0000) begin
-            wdog_timer <= wdog_timer + 31'd1;
-            if (wdog_timer >= 31'(WDOG_GRACE) && wdog_count != 3'(WDOG_CAP)) begin
+            2'd1: begin                      // reset pulse 1
                 wdog_force <= 1'b1;
-                wdog_timer <= 31'd0;
-                wdog_count <= wdog_count + 3'd1;
+                wdog_timer <= wdog_timer + 31'd1;
+                if (wdog_timer >= 31'(WDOG_PULSE)) begin
+                    wdog_st    <= 2'd2;
+                    wdog_timer <= 31'd0;
+                end
             end
-        end
-        // PHY unpowered (no HPD/partner): timer simply holds; nothing fires
+            2'd2: begin                      // PHY back up; CSR replay
+                wdog_force      <= 1'b0;
+                wdog_replay_req <= 1'b1;
+                wdog_timer <= wdog_timer + 31'd1;
+                if (wdog_ack_s || wdog_timer >= 31'(WDOG_RTIME)) begin
+                    wdog_st    <= 2'd3;
+                    wdog_timer <= 31'd0;
+                end
+            end
+            default: begin                   // reset pulse 2, then re-arm
+                wdog_replay_req <= 1'b0;
+                wdog_force      <= 1'b1;
+                wdog_timer <= wdog_timer + 31'd1;
+                if (wdog_timer >= 31'(WDOG_PULSE)) begin
+                    wdog_st    <= 2'd0;
+                    wdog_timer <= 31'd0;
+                end
+            end
+        endcase
     end
     logic [1:0] bank_powerup;
     assign bank_powerup = wdog_force ? 2'b00 : tx_powerup_channel[1:0];
-    assign debug_wdog   = {wdog_force, wdog_count};
+    assign debug_wdog   = {(wdog_st != 2'd0), wdog_count};
 
     // ------------------------------------------------------------------
     // Vendor PHY
@@ -529,6 +566,7 @@ module dp_transmitter #(
     assign drp_dbg_data = 32'd0;
     assign drp_dbg_addr = 24'd0;
     assign drp_dbg_done = 1'b0;
+    assign wdog_replay_ack = wdog_replay_req;  // no DRP on this PHY
 `elsif DP_VENDOR_GOWIN
     transceiver_bank_gowin #(.TX_PROBE(TX_PROBE)) i_transceiver_bank(
         .mgmt_clk        (clk100),
@@ -550,7 +588,9 @@ module dp_transmitter #(
         .dbg_idx         (drp_dbg_idx),
         .dbg_data        (drp_dbg_data),
         .dbg_addr        (drp_dbg_addr),
-        .dbg_done        (drp_dbg_done)
+        .dbg_done        (drp_dbg_done),
+        .replay_req      (wdog_replay_req),
+        .replay_ack      (wdog_replay_ack)
     );
     assign tx_running[3:2] = 2'b00;
 `else
@@ -562,6 +602,7 @@ module dp_transmitter #(
     assign dp_tx_lane_p  = '0;
     assign dp_tx_lane_n  = '1;
     assign serdes_status = 8'h3F;
+    assign wdog_replay_ack = wdog_replay_req;  // no DRP in the sim stub
     assign drp_dbg_data = 32'd0;
     assign drp_dbg_addr = 24'd0;
     assign drp_dbg_done = 1'b0;

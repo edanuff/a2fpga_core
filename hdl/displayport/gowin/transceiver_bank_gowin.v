@@ -80,7 +80,16 @@ module transceiver_bank_gowin #(
     input       [4:0] dbg_idx,
     output     [31:0] dbg_data,
     output     [23:0] dbg_addr,
-    output            dbg_done
+    output            dbg_done,
+    // CSR replay (common-block draw re-roll experiment, 2026-08-16):
+    // 4-phase handshake. While replay_req is high the DRP engine replays
+    // the ENTIRE generator-emitted CSR write sequence (csr_replay_rom,
+    // auto-generated from dp_serdes.csr) - the same writes the bitstream
+    // performs at device configuration. replay_ack rises when the pass
+    // completes and clears after replay_req falls. Loosely-synchronized
+    // levels; caller runs a slow supervisor.
+    input             replay_req,
+    output            replay_ack
 );
 
     // ------------------------------------------------------------------
@@ -191,6 +200,8 @@ module transceiver_bank_gowin #(
     wire        drp_rdvld_w;
     wire [31:0] drp_rddata_w;
     wire        drp_ready_w;
+    reg         drp_wren_r   = 1'b0;
+    reg  [31:0] drp_wrdata_r = 32'd0;
 
     // por_n: release after power-up request (refclk must be stable; the
     // board's clock generator is programmed before the FPGA runs)
@@ -288,9 +299,9 @@ module transceiver_bank_gowin #(
         // DRP: read-only register-dump bridge (writes never enabled)
         .dp_phy_drp_clk_o           (drp_clk_w),
         .dp_phy_drp_addr_i          (drp_addr_r),
-        .dp_phy_drp_wren_i          (1'b0),
-        .dp_phy_drp_wrdata_i        (32'b0),
-        .dp_phy_drp_strb_i          (8'b0),
+        .dp_phy_drp_wren_i          (drp_wren_r),
+        .dp_phy_drp_wrdata_i        (drp_wrdata_r),
+        .dp_phy_drp_strb_i          (drp_wren_r ? 8'hFF : 8'b0),
         .dp_phy_drp_rden_i          (drp_rden_r),
         .dp_phy_drp_ready_o         (drp_ready_w),
         .dp_phy_drp_rdvld_o         (drp_rdvld_w),
@@ -353,9 +364,9 @@ module transceiver_bank_gowin #(
         // DRP: read-only register-dump bridge (writes never enabled)
         .dp_phy_drp_clk_o           (drp_clk_w),
         .dp_phy_drp_addr_i          (drp_addr_r),
-        .dp_phy_drp_wren_i          (1'b0),
-        .dp_phy_drp_wrdata_i        (32'b0),
-        .dp_phy_drp_strb_i          (8'b0),
+        .dp_phy_drp_wren_i          (drp_wren_r),
+        .dp_phy_drp_wrdata_i        (drp_wrdata_r),
+        .dp_phy_drp_strb_i          (drp_wren_r ? 8'hFF : 8'b0),
         .dp_phy_drp_rden_i          (drp_rden_r),
         .dp_phy_drp_ready_o         (drp_ready_w),
         .dp_phy_drp_rdvld_o         (drp_rdvld_w),
@@ -414,46 +425,82 @@ module transceiver_bank_gowin #(
     // (quasi-static, changes every ~0.7 s) is synchronized into the DRP
     // domain and that single address is re-read continuously. One result
     // register instead of a full dump RAM — negligible fabric footprint.
+    // CSR replay ROM: the generator-emitted config write sequence
+    `include "csr_replay_rom.svh"
+
     reg [4:0]  idx_meta = 5'd0, idx_sync = 5'd0;
     reg [31:0] res_data = 32'd0;
     reg [23:0] res_addr = 24'd0;
     reg        res_vld  = 1'b0;
-    reg [1:0]  rd_state = 2'd0;          // 0=gap, 1=read, 2=drop
+    reg [2:0]  rd_state = 3'd0;   // 0=gap, 1=read, 2=drop, 3=write, 4=wdrop
     reg [15:0] rd_tmo   = 16'd0;
     reg [17:0] rd_gap   = 18'd0;         // settle between reads (~ms)
+
+    // replay handshake (drp_clk domain)
+    reg        req_m = 1'b0, req_s = 1'b0;
+    reg        replay_done_r = 1'b0;
+    reg [8:0]  replay_idx = 9'd0;
+    wire       replay_pend = req_s && !replay_done_r;
+    assign replay_ack = replay_done_r;
 
     always @(posedge drp_clk_w) begin
         idx_meta <= dbg_idx;
         idx_sync <= idx_meta;
+        req_m <= replay_req;
+        req_s <= req_m;
+        if (!req_s) begin
+            replay_done_r <= 1'b0;
+            replay_idx    <= 9'd0;
+        end
         case (rd_state)
-            2'd0: begin
+            3'd0: begin
                 drp_rden_r <= 1'b0;
+                drp_wren_r <= 1'b0;
                 rd_gap <= rd_gap + 18'd1;
-                if (&rd_gap) begin
-                    rd_state <= 2'd1;
-                    drp_addr_r <= dump_addr_rom(idx_sync);
+                // replay writes use a short inter-op gap (whole pass
+                // ~200 us); background reads keep the leisurely one
+                if (replay_pend ? rd_gap[4] : (&rd_gap)) begin
                     rd_tmo <= 16'd0;
+                    if (replay_pend) begin
+                        rd_state <= 3'd3;
+                        {drp_addr_r, drp_wrdata_r} <= csr_replay_rom(replay_idx);
+                    end else begin
+                        rd_state <= 3'd1;
+                        drp_addr_r <= dump_addr_rom(idx_sync);
+                    end
                 end
             end
-            2'd1: begin                  // rden high until rdvld or timeout
+            3'd1: begin                  // rden high until rdvld or timeout
                 drp_rden_r <= 1'b1;
                 rd_tmo <= rd_tmo + 16'd1;
                 if (drp_rdvld_w) begin
                     res_data <= drp_rddata_w;
                     res_addr <= drp_addr_r;
                     res_vld  <= 1'b1;
-                    rd_state <= 2'd2;
+                    rd_state <= 3'd2;
                 end else if (&rd_tmo) begin
                     res_data <= {16'hDEAD, 11'd0, idx_sync};
                     res_addr <= drp_addr_r;
                     res_vld  <= 1'b1;
-                    rd_state <= 2'd2;
+                    rd_state <= 3'd2;
                 end
             end
-            default: begin
+            3'd3: begin                  // wren high until ready or timeout
+                drp_wren_r <= 1'b1;
+                rd_tmo <= rd_tmo + 16'd1;
+                if (drp_ready_w || (&rd_tmo)) begin
+                    if (replay_idx == CSR_REPLAY_LEN - 1)
+                        replay_done_r <= 1'b1;
+                    else
+                        replay_idx <= replay_idx + 9'd1;
+                    rd_state <= 3'd4;
+                end
+            end
+            default: begin               // 2=drop, 4=wdrop
                 drp_rden_r <= 1'b0;
+                drp_wren_r <= 1'b0;
                 rd_gap <= 18'd0;
-                rd_state <= 2'd0;
+                rd_state <= 3'd0;
             end
         endcase
     end
@@ -470,6 +517,7 @@ module transceiver_bank_gowin #(
     assign dbg_data = 32'd0;
     assign dbg_addr = 24'd0;
     assign dbg_done = 1'b0;
+    assign replay_ack = replay_req;   // no DRP in the stub: ack instantly
     assign tx_symbol_clk = refclk0;
 
     reg [7:0] fake_lock_cnt = 0;
