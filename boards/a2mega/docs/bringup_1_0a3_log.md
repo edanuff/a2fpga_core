@@ -908,3 +908,25 @@ re-enable AUDIO_ENABLE=1 after the bonding fix validates).
   ships without disparity control)
 - Next: flash (IIgs OFF, board on Mac), then acceptance: 5x fresh power
   cycles, flip-kill recovery, 15-min soak; then AUDIO_ENABLE=1
+
+## 2026-08-16 — EDP PHY build #1 slot test: FAIL (deterministic) -> build #2
+
+- Build #1 on hardware: no colorbars; telemetry S:BF while running = TX FIFO
+  almost-full asserted on EVERY running sample, across boots AND flip-kill
+  retrains; sink reaches CR lock (L:8) but never symbol lock; ladder cycles.
+  Deterministic — NOT the old per-boot lottery.
+- Mechanism: tx_vld tied 1 (mirroring the Gowin reference) lets the fabric
+  write side stuff the TX FIFO for the full 21 ms tx_rst hold (PCS read side
+  stopped) -> FIFO parks at full -> continuous word drops -> undecodable
+  symbol stream at the correct bit rate. Matches CR-without-symbol-lock.
+- Build #2 fix: tx_vld = 3-stage sync of ~tx_rst in the fabric clock domain
+  (write gate off during reset; session starts with empty FIFO in lockstep).
+- Build #2: 0/0 timing violations; netlist confirms vld_sync[2] ->
+  FABRIC_LN2/LN3_TX_VLD_IN. fs sha256 d263d0b0fb3538709efd74556eca5fecd0ff
+  99aa36f1affbf26cc2befd709117 (SecurityBit OFF).
+- Fallback if afull persists (would mean tx_vld gates the PCS read side
+  instead): reference-exact reset choreography (tx_rst deasserted at
+  power-up, brief pulse after fabric_rstn release, falling edge last).
+- Primitive-level find: GTR12 quad exposes FABRIC_LNx_TX_DISPARITY_I —
+  per-lane TX disparity control exists below the EDP PHY abstraction if the
+  TPS2 initial-phase delta ever matters.

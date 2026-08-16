@@ -146,10 +146,18 @@ module transceiver_bank_gowin #(
     assign serdes_status = {fifo_afull_used, fifo_full_used,
                             pll_lock, lane_ok, ~tx_rst, tx_running};
 
-    // tx_vld (TX buffer read enable, IPUG1043 3.7.1): the reference
-    // design ties it permanently high and sequences with the resets
-    // alone - mirror that exactly
-    wire tx_vld = 1'b1;
+    // tx_vld (TX buffer data-valid, IPUG1043 3.7.1). Constant-1 (as in
+    // the Gowin reference design) FAILED on hardware: with tx_rst
+    // holding the PCS read side for 21 ms while the fabric write side
+    // free-runs, the TX FIFO parks at almost-full (telemetry S bit7=1)
+    // and drops words forever - sink gets CR lock but never symbol
+    // lock. Gate the write side off during reset instead: release
+    // tx_vld a few fabric clocks after tx_rst deasserts, so each
+    // session starts with an empty FIFO in write/read lockstep.
+    reg [2:0] vld_sync = 3'b000;
+    wire      tx_vld   = vld_sync[2];
+    always @(posedge tx_symbol_clk)
+        vld_sync <= {vld_sync[1:0], ~tx_rst};
 
     // ------------------------------------------------------------------
     // Per-lane byte/K extraction from the 80-bit symbol bus. Each lane
