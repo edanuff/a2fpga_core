@@ -985,3 +985,28 @@ trigger reconfig (~2-3 s) -> re-check; at 80%/draw converges in ~1.25
 draws. (b) closed-loop-with-blind-fallback ladder for full core (serves
 monitors' invisible replies too). (c) Gowin ticket: half-bond emission,
 hardened-8b10b no-symbol-lock forensics, common-block draw.
+
+## 2026-08-16 — VERDICT: common-block draw is CONFIG-TIME-ONLY
+
+Watchdog v2 on hardware (bad-draw boot, flap expression): W climbed 3..7 —
+seven genuine 2ms held por_n resets (CMU0/1 + all CPLLs + quad POR, wiring
+verified in dp_serdes.v:496-533) each followed by full retrain — K:00
+through ALL seven. The quad common-block init draw does NOT re-roll under
+any fabric-reachable reset; it is fixed at device configuration/wakeup.
+Corroborates Gowin's own reference design tying every common-block reset
+port to gw_gnd and never touching them at runtime (plaintext refdesign
+audit, serdes.v:526-563; GTR12_QUADA prim_sim model is an empty stub —
+silicon was the only oracle, and it has now spoken).
+
+Watchdog v1->v2 lesson: bad draws express two ways (stable-dark K:00 with
+checks passing, OR flap with ~5s teardowns); grace must accumulate across
+link drops (cleared only by streaming), else the flap starves it.
+
+RE-ROLL LEVER (the only one left in software reach): full bitstream reload.
+RECONFIG_N = ball N12, NOT routed on 1.0a3 (1.0a4 candidate: route to
+ESP32 alongside AUX bias resistors). Available NOW: ESP32 bit-bangs JTAG
+(it is the programming bridge) — SRAM-erase re-arms auto-boot = reload
+from flash (~2-3s), proven behavior from the flash saga. Architecture:
+FPGA watchdog exhausts (W:7 K:00, harmless placebo pulses) -> ESP32 parses
+its own UART tee -> JTAG reload -> fresh draw -> recheck; ~1.25 reloads
+expected at measured 4/5 pass rate.
