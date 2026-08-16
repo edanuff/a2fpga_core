@@ -100,6 +100,7 @@ module dp_transmitter #(
     output logic [7:0]  debug_gate,  // latched-at-gate locks + fail/timeout ctrs
     output logic [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
     output logic [3:0]  debug_wdog,  // {cold-restart forcing, attempts[2:0]}
+    output logic [9:0]  debug_wrusewd, // TX FIFO fill {word-lane0's, word-lane1's}
     // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
     // e.g. an in-fabric line-rate check against a known crystal.
     output logic clk_symbol_out,
@@ -567,6 +568,7 @@ module dp_transmitter #(
     assign drp_dbg_addr = 24'd0;
     assign drp_dbg_done = 1'b0;
     assign wdog_replay_ack = wdog_replay_req;  // no DRP on this PHY
+    assign debug_wrusewd = 10'd0;
 `elsif DP_VENDOR_GOWIN
     transceiver_bank_gowin #(.TX_PROBE(TX_PROBE)) i_transceiver_bank(
         .mgmt_clk        (clk100),
@@ -590,7 +592,8 @@ module dp_transmitter #(
         .dbg_addr        (drp_dbg_addr),
         .dbg_done        (drp_dbg_done),
         .replay_req      (wdog_replay_req),
-        .replay_ack      (wdog_replay_ack)
+        .replay_ack      (wdog_replay_ack),
+        .dbg_wrusewd     (debug_wrusewd)
     );
     assign tx_running[3:2] = 2'b00;
 `else
@@ -603,6 +606,7 @@ module dp_transmitter #(
     assign dp_tx_lane_n  = '1;
     assign serdes_status = 8'h3F;
     assign wdog_replay_ack = wdog_replay_req;  // no DRP in the sim stub
+    assign debug_wrusewd = 10'd0;
     assign drp_dbg_data = 32'd0;
     assign drp_dbg_addr = 24'd0;
     assign drp_dbg_done = 1'b0;

@@ -89,7 +89,14 @@ module transceiver_bank_gowin #(
     // completes and clears after replay_req falls. Loosely-synchronized
     // levels; caller runs a slow supervisor.
     input             replay_req,
-    output            replay_ack
+    output            replay_ack,
+    // TX interface FIFO fill levels, both lanes ({word-lane-0's phy
+    // lane, word-lane-1's phy lane}). The parked level is set once per
+    // bring-up; a good-vs-bad-draw DIFFERENCE here would localize the
+    // config-time draw to word-level FIFO/serializer offset - which a
+    // per-lane rd_start_depth DRP adjust could then cancel. Quasi-static
+    // once parked; sampled loosely by the debug UART.
+    output      [9:0] dbg_wrusewd
 );
 
     // ------------------------------------------------------------------
@@ -253,7 +260,7 @@ module transceiver_bank_gowin #(
         .dp_phy_q0_ln3_tx_pcs_clkout_o (),
         .dp_phy_q0_ln3_tx_data_i    ({4{tx_wire0}}),
         .dp_phy_q0_ln3_tx_fifo_wren_i (~tx_afull_ln3),
-        .dp_phy_q0_ln3_tx_fifo_wrusewd_o (),
+        .dp_phy_q0_ln3_tx_fifo_wrusewd_o (dbg_wrusewd[9:5]),
         .dp_phy_q0_ln3_tx_fifo_afull_o (tx_afull_ln3),
         .dp_phy_q0_ln3_tx_fifo_full_o (tx_full_ln3),
         .dp_phy_q0_ln3_pma_rstn_i   (pma_rstn),
@@ -277,7 +284,7 @@ module transceiver_bank_gowin #(
         .dp_phy_q0_ln2_tx_pcs_clkout_o (tx_symbol_clk_raw),
         .dp_phy_q0_ln2_tx_data_i    ({4{tx_wire1}}),
         .dp_phy_q0_ln2_tx_fifo_wren_i (~tx_afull_ln2),
-        .dp_phy_q0_ln2_tx_fifo_wrusewd_o (),
+        .dp_phy_q0_ln2_tx_fifo_wrusewd_o (dbg_wrusewd[4:0]),
         .dp_phy_q0_ln2_tx_fifo_afull_o (tx_afull_ln2),
         .dp_phy_q0_ln2_tx_fifo_full_o (tx_full_ln2),
         .dp_phy_q0_ln2_pma_rstn_i   (pma_rstn),
@@ -316,7 +323,7 @@ module transceiver_bank_gowin #(
         .dp_phy_q0_ln0_tx_pcs_clkout_o (tx_symbol_clk_raw),
         .dp_phy_q0_ln0_tx_data_i    ({4{tx_wire0}}),
         .dp_phy_q0_ln0_tx_fifo_wren_i (~tx_afull_ln0),
-        .dp_phy_q0_ln0_tx_fifo_wrusewd_o (),
+        .dp_phy_q0_ln0_tx_fifo_wrusewd_o (dbg_wrusewd[4:0]),
         .dp_phy_q0_ln0_tx_fifo_afull_o (tx_afull_ln0),
         .dp_phy_q0_ln0_tx_fifo_full_o (tx_full_ln0),
         .dp_phy_q0_ln0_pma_rstn_i   (pma_rstn),
@@ -341,7 +348,7 @@ module transceiver_bank_gowin #(
         .dp_phy_q0_ln1_tx_pcs_clkout_o (),
         .dp_phy_q0_ln1_tx_data_i    ({4{tx_wire1}}),
         .dp_phy_q0_ln1_tx_fifo_wren_i (~tx_afull_ln1),
-        .dp_phy_q0_ln1_tx_fifo_wrusewd_o (),
+        .dp_phy_q0_ln1_tx_fifo_wrusewd_o (dbg_wrusewd[9:5]),
         .dp_phy_q0_ln1_tx_fifo_afull_o (tx_afull_ln1),
         .dp_phy_q0_ln1_tx_fifo_full_o (tx_full_ln1),
         .dp_phy_q0_ln1_pma_rstn_i   (pma_rstn),
@@ -518,6 +525,7 @@ module transceiver_bank_gowin #(
     assign dbg_addr = 24'd0;
     assign dbg_done = 1'b0;
     assign replay_ack = replay_req;   // no DRP in the stub: ack instantly
+    assign dbg_wrusewd = 10'd0;
     assign tx_symbol_clk = refclk0;
 
     reg [7:0] fake_lock_cnt = 0;
