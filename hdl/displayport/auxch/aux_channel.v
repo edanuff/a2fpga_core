@@ -404,17 +404,13 @@ always @(posedge clk) begin
             check_link:         state_on_success <= check_wait;
             check_wait:         begin
                                 dbg_gate_locks <= {clock_locked_i, equ_locked_i, symbol_locked_i, align_locked_i};
-                                // EXPERIMENT (2026-08-16, plan C flap): check
-                                // failures are LOG-ONLY - stay established
-                                // instead of tearing down. Discriminates
-                                // "link genuinely flapping" (still dark)
-                                // from "healthy link killed every ~5 s by a
-                                // misparsed status read" (picture appears
-                                // and holds). Counters still increment.
-                                if(!(clock_locked_i && equ_locked_i && symbol_locked_i && align_locked_i))
+                                if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
+                                    state_on_success <= link_established;
+                                end else begin
                                     dbg_gate_fail    <= dbg_gate_fail + 2'd1;
-                                state_on_success <= link_established;
+                                    state_on_success <= error;
                                 end
+                                end 
             error:              state_on_success <= error;
         endcase
 
