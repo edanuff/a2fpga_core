@@ -238,6 +238,7 @@ module a2mega_dp_test_top (
         .debug_locks    (aux_dbg_locks),
         .debug_gate     (aux_dbg_gate),
         .debug_sink     (aux_dbg_sink),
+        .debug_wdog     (aux_dbg_wdog),
         .clk_symbol_out    (clk_sym_w),
         .serdes_status     (serdes_status),
         .hpd_present_out   (hpd_present_w),
@@ -324,6 +325,8 @@ module a2mega_dp_test_top (
     logic [2:0] flg_s0, flg_s;
     logic       c100_s0, c100_s;
     logic [36:0] hp_s0, hp_s;
+    logic [3:0]  aux_dbg_wdog;
+    logic [3:0]  wdog_s0, wdog_s;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
@@ -331,6 +334,7 @@ module a2mega_dp_test_top (
         flg_s0 <= {dp_hpd, link_established, video_live};
         c100_s0 <= c100_cnt[26];  c100_s <= c100_s0;
         hp_s0 <= {aux_dbg_sink, aux_dbg_gate, aux_dbg_locks, hpd_present_w, aux_dbg_rx};  hp_s <= hp_s0;  // S205 G: L: E: R:
+        wdog_s0 <= aux_dbg_wdog;  wdog_s <= wdog_s0;
         flg_s  <= flg_s0;
     end
 
@@ -338,7 +342,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 56;
+    localparam int MSG_LEN = 61;
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -372,7 +376,9 @@ module a2mega_dp_test_top (
             msg[40]=" "; msg[41]=" "; msg[42]=" "; msg[43]=" ";
             msg[44]=" "; msg[45]=" "; msg[46]=" "; msg[47]=" ";
             msg[48]=" "; msg[49]=" "; msg[50]=" "; msg[51]=" ";
-            msg[52]=" "; msg[53]=" "; msg[54]=" "; msg[55]=8'h0A;
+            msg[52]=" "; msg[53]=" "; msg[54]=" "; msg[55]=" ";
+            msg[56]=" "; msg[57]=" "; msg[58]=" "; msg[59]=" ";
+            msg[60]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -402,7 +408,10 @@ module a2mega_dp_test_top (
         msg[50]=" "; msg[51]="K"; msg[52]=":";
         msg[53]=hexch(hp_s[36:33]);           // DPCD 0x205 SINK_STATUS:
         msg[54]=hexch(hp_s[32:29]);           //  bit0 = receiving stream
-        msg[55]=8'h0A;
+        msg[55]=" "; msg[56]="W"; msg[57]=":";
+        msg[58]=hexch(wdog_s);                // {cold-rst forcing, tries[2:0]}
+        msg[59]=" ";
+        msg[60]=8'h0A;
         end
     end
 

@@ -99,6 +99,7 @@ module dp_transmitter #(
     output logic [3:0]  debug_locks, // {clock,equ,symbol,align}_locked
     output logic [7:0]  debug_gate,  // latched-at-gate locks + fail/timeout ctrs
     output logic [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
+    output logic [3:0]  debug_wdog,  // {cold-restart forcing, attempts[2:0]}
     // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
     // e.g. an in-fabric line-rate check against a known crystal.
     output logic clk_symbol_out,
@@ -450,12 +451,57 @@ module dp_transmitter #(
     );
 
     // ------------------------------------------------------------------
+    // AUTO-RECOVERY WATCHDOG (2026-08-16). The GTR12 quad common block
+    // (CMU/QPLL) takes a per-powered-session init draw; a bad roll leaves
+    // the link trained-and-stable but the sink reporting SINK_STATUS=0
+    // (DPCD 0x205 bits[1:0]) - no valid stream, dark screen. Ladder
+    // retrains, PMA/PCS resets, mux/hub bounces never re-roll it (proven
+    // on hw); the CMU resets are tied to por_n inside the generated
+    // wrapper, and por_n follows powerup_channel - but the ladder's own
+    // retrain path only blips powerup for a few states. This watchdog
+    // performs a GENUINE cold restart: if the link is established and
+    // the sink still reports no stream after WDOG_GRACE, force the PHY
+    // powerup low for WDOG_DWELL (por_n low -> CMU0/1 reset held), then
+    // release and let the ladder retrain. Budget WDOG_CAP attempts,
+    // re-armed on success. debug_wdog = {forcing, attempts[2:0]}.
+    // ------------------------------------------------------------------
+    localparam int WDOG_GRACE = 400_000_000;  // 4 s   @ clk100
+    localparam int WDOG_DWELL = 200_000;      // 2 ms  @ clk100
+    localparam int WDOG_CAP   = 7;
+    logic        wdog_force = 1'b0;
+    logic [2:0]  wdog_count = 3'd0;
+    logic [28:0] wdog_timer = 29'd0;
+    always_ff @(posedge clk100) begin
+        if (wdog_force) begin
+            wdog_timer <= wdog_timer + 29'd1;
+            if (wdog_timer >= 29'(WDOG_DWELL)) begin
+                wdog_force <= 1'b0;
+                wdog_timer <= 29'd0;
+            end
+        end else if (tx_link_established && debug_sink[1:0] == 2'b00) begin
+            wdog_timer <= wdog_timer + 29'd1;
+            if (wdog_timer >= 29'(WDOG_GRACE) && wdog_count != 3'(WDOG_CAP)) begin
+                wdog_force <= 1'b1;
+                wdog_timer <= 29'd0;
+                wdog_count <= wdog_count + 3'd1;
+            end
+        end else begin
+            wdog_timer <= 29'd0;
+            if (tx_link_established && debug_sink[1:0] != 2'b00)
+                wdog_count <= 3'd0;      // streaming - re-arm the budget
+        end
+    end
+    logic [1:0] bank_powerup;
+    assign bank_powerup = wdog_force ? 2'b00 : tx_powerup_channel[1:0];
+    assign debug_wdog   = {wdog_force, wdog_count};
+
+    // ------------------------------------------------------------------
     // Vendor PHY
     // ------------------------------------------------------------------
 `ifdef DP_VENDOR_XILINX_GTP
     transceiver_bank i_transceiver_bank(
         .mgmt_clk        (clk100),
-        .powerup_channel (tx_powerup_channel[1:0]),
+        .powerup_channel (bank_powerup),
         .preemp_0p0      (preemp_0p0),
         .preemp_3p5      (preemp_3p5),
         .preemp_6p0      (preemp_6p0),
@@ -478,7 +524,7 @@ module dp_transmitter #(
 `elsif DP_VENDOR_GOWIN
     transceiver_bank_gowin #(.TX_PROBE(TX_PROBE)) i_transceiver_bank(
         .mgmt_clk        (clk100),
-        .powerup_channel (tx_powerup_channel[1:0]),
+        .powerup_channel (bank_powerup),
         .preemp_0p0      (preemp_0p0),
         .preemp_3p5      (preemp_3p5),
         .preemp_6p0      (preemp_6p0),
