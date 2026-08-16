@@ -429,7 +429,7 @@ module a2mega_dp_test_top (
     logic [8:0]  baud_cnt = '0;
     logic        baud_tick;
     logic [24:0] msg_timer = '0;
-    logic [5:0]  msg_idx = MSG_LEN[5:0];   // idle when == MSG_LEN
+    logic [6:0]  msg_idx = MSG_LEN[6:0];   // idle when == MSG_LEN
     logic [3:0]  bit_idx = '0;
     logic [9:0]  shifter = 10'h3FF;
     always_ff @(posedge clk50_in) begin
@@ -438,7 +438,7 @@ module a2mega_dp_test_top (
         else baud_cnt <= baud_cnt + 9'd1;
 
         msg_timer <= msg_timer + 25'd1;
-        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[5:0]) begin
+        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[6:0]) begin
             msg_idx <= '0;                 // start a new message
             bit_idx <= 4'd10;              // force reload on next tick
             line_is_reg <= ~line_is_reg;   // alternate status / register
@@ -449,7 +449,7 @@ module a2mega_dp_test_top (
             reg_done_l <= drp_done;
         end
 
-        if (baud_tick && msg_idx != MSG_LEN[5:0]) begin
+        if (baud_tick && msg_idx != MSG_LEN[6:0]) begin
             if (bit_idx >= 4'd10) begin    // load next char: start+8+stop
                 shifter <= {1'b1, msg[msg_idx], 1'b0};
                 bit_idx <= 4'd0;
@@ -457,11 +457,11 @@ module a2mega_dp_test_top (
                 shifter <= {1'b1, shifter[9:1]};
                 bit_idx <= bit_idx + 4'd1;
                 if (bit_idx == 4'd9)
-                    msg_idx <= msg_idx + 6'd1;
+                    msg_idx <= msg_idx + 7'd1;
             end
         end
     end
-    assign uart_tx = (msg_idx == MSG_LEN[5:0]) ? 1'b1 : shifter[0];
+    assign uart_tx = (msg_idx == MSG_LEN[6:0]) ? 1'b1 : shifter[0];
 
     // ------------------------------------------------------------------
     // Line-rate verification: count clk_sym (the GTR12 TX word clock,
