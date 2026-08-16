@@ -142,13 +142,6 @@ module aux_channel #(
 
     // DPCD power state D0 wake (inserted before link configuration)
     localparam [7:0] set_power_d0 = 8'h31;
-    // 2026-08-15: D3->D0 power-state BOUNCE each training pass. Sim v2
-    // exonerated the source stream path for the video-restart-after-
-    // retrain bug (K:00 until reboot); leading theory = the sink only
-    // re-arms stream detection on real events. D0-while-D0 is a no-op;
-    // a D3->D0 transition resets sink stream state per spec (and is
-    // harmless at boot). ROM already carried the never-used D3 message.
-    localparam [7:0] set_power_d3 = 8'h32;
 
     // Checking the state of the link
     localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
@@ -326,8 +319,7 @@ always @(posedge clk) begin
             edid_block6:        state_on_success <= edid_block7;
             edid_block7:        state_on_success <= read_sink_count;
             read_sink_count:    state_on_success <= read_registers;        
-            read_registers:     state_on_success <= set_power_d3;
-            set_power_d3:       state_on_success <= set_power_d0;
+            read_registers:     state_on_success <= set_power_d0;
             set_power_d0:       state_on_success <= set_channel_coding;
             set_channel_coding: state_on_success <= set_speed_270;                        
             set_speed_270:      state_on_success <= set_downspread;                        
@@ -454,7 +446,6 @@ always @(posedge clk) begin
                     
             read_sink_count:      begin msg <= 8'h03; expected <= 8'h02; reset_addr_on_change <= 1'b1; end
             read_registers:       begin msg <= 8'h04; expected <= 8'h0D; dp_reg_de_active <= 1'b1; end
-            set_power_d3:         begin msg <= 8'h05; expected <= 8'h01; end
             set_power_d0:         begin msg <= 8'h13; expected <= 8'h01; end
             set_channel_coding:   begin msg <= 8'h06; expected <= 8'h01;  end
             set_speed_270:        begin msg <= 8'h07; expected <= 8'h01;  end
