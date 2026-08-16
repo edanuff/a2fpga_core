@@ -9,16 +9,20 @@
 // IDE-generated EDP PHY IP (IPUG1043):
 //
 //   - EDP PHY replaces the earlier Customized PHY (IPUG1024) usage. The
-//     Customized PHY generator emitted HALF a TX bond for this config
-//     (slave-lane tx_if FIFO chained to the master, but per-lane
-//     independent PCS clocks, pcs_tx_clk_src=1) - chained FIFOs on
-//     unrelated read clocks made interlane phase a per-powerup lottery.
-//     The EDP PHY's architecture is a shared PCS TX clock
-//     (pcs_tx_clk_src=2, IPUG1043 3.3.1: "the fabric_tx_clk_i of each
-//     lane shares the pcs_tx_clk_o of one of the lanes"), which fixes
-//     interlane phase by construction.
+//     Customized PHY generator emitted HALF a TX bond for this config:
+//     the slave lane's tx_if FIFO was chained to the master
+//     (tx_if_cfg_mst_sel=q0.ln2 on ln3) WITHOUT the rest of the bonding
+//     machinery - interlane phase became a per-powerup lottery. The EDP
+//     PHY emission un-chains the FIFOs (each lane self-mastered) and
+//     follows IPUG1043 3.3.1: every lane's fabric_tx_clk_i is fed from
+//     ONE lane's pcs_tx_clk_o, so both TX FIFOs are written by a single
+//     clock and drained by frequency-locked PCS clocks with a
+//     deterministic, reset-sequenced read start. (Note: the emission
+//     key pcs_tx_clk_src is position-dependent plumbing - lanes 0/1
+//     emit 2, lanes 2/3 emit 1 under BOTH IPs - not the shared-clock
+//     mode flag it was first read as.)
 //   - line rate 2.7 Gbps (DP HBR), 1:20 user clock ratio -> 135 MHz
-//     fabric TX clock = tx_symbol_clk, sourced from logical lane 0's
+//     fabric TX clock = tx_symbol_clk, sourced from lane 2's
 //     pcs_tx_clk_o and fed back to both lanes' fabric_tx_clk_i
 //   - 8b10b is the HARDENED PCS encoder (encode_mode=8b10b): we feed
 //     raw bytes + K flags (txdata[15:0]/txk[1:0], low byte transmitted
@@ -31,9 +35,9 @@
 //     TPS2 through this same interface with no disparity control).
 //   - a2mega lane map: board routes die lane 3 to TUSB1046A DP0 and die
 //     lane 2 to DP1, both pairs P/N-inverted (TX PN Invert in the IP).
-//     EDP PHY generated on Q0 lanes 2+3 -> logical ln0 = die lane 2,
-//     logical ln1 = die lane 3. Word lane 0 (ML0) therefore drives ln1
-//     and word lane 1 (ML1) drives ln0.
+//     EDP PHY generated on Q0 lanes 2+3; the wrapper names its ports by
+//     physical lane (edp_phy_ln2_/ln3_). Word lane 0 (ML0) drives ln3
+//     and word lane 1 (ML1) drives ln2.
 //   - swing / FFE are static in the IP config (804 mV, FFE auto);
 //     AUX-requested levels are exposed on swing_sel/preemp_sel for a
 //     future DRP FSM, and DP sinks accept "max swing reached" replies
@@ -160,12 +164,12 @@ module transceiver_bank_gowin #(
     wire [8:0] w1s0 = TX_PROBE ? SYM_D10_2 : tx_symbols[28:20];
     wire [8:0] w1s1 = TX_PROBE ? SYM_D10_2 : tx_symbols[38:30];
 
-    // word lane 0 -> logical ln1 (die lane 3 = DP0), word lane 1 ->
-    // logical ln0 (die lane 2 = DP1) - see header lane map
-    wire [15:0] ln1_txdata = {w0s1[7:0], w0s0[7:0]};
-    wire [1:0]  ln1_txk    = {w0s1[8],   w0s0[8]};
-    wire [15:0] ln0_txdata = {w1s1[7:0], w1s0[7:0]};
-    wire [1:0]  ln0_txk    = {w1s1[8],   w1s0[8]};
+    // word lane 0 -> die lane 3 (DP0), word lane 1 -> die lane 2 (DP1)
+    // - see header lane map
+    wire [15:0] ln3_txdata = {w0s1[7:0], w0s0[7:0]};
+    wire [1:0]  ln3_txk    = {w0s1[8],   w0s0[8]};
+    wire [15:0] ln2_txdata = {w1s1[7:0], w1s0[7:0]};
+    wire [1:0]  ln2_txk    = {w1s1[8],   w1s0[8]};
 
 `ifdef GOWIN_SERDES_IP
     // ------------------------------------------------------------------
@@ -192,67 +196,67 @@ module transceiver_bank_gowin #(
     always @(posedge mgmt_clk)
         por_n <= (powerup_eff != 2'b00);
 
-    wire qpll0_ok, qpll1_ok, ln0_cpll_ok, ln1_cpll_ok;
-    wire tx_afull_ln0, tx_afull_ln1, tx_full_ln0, tx_full_ln1;
+    wire qpll0_ok, qpll1_ok, ln2_cpll_ok, ln3_cpll_ok;
+    wire tx_afull_ln2, tx_afull_ln3, tx_full_ln2, tx_full_ln3;
     // whichever PLL the IP config uses asserts its indicator; the rest
     // stay low. OR them so the status word is config-agnostic.
-    assign pll_lock = qpll0_ok | qpll1_ok | (ln0_cpll_ok & ln1_cpll_ok);
+    assign pll_lock = qpll0_ok | qpll1_ok | (ln2_cpll_ok & ln3_cpll_ok);
     assign lane_ok  = {2{pll_lock}};
 
     dp_serdes i_dp_serdes (
         .por_n_i                     (por_n),
-        // logical lane 0 (die lane 2 = DP1) <= word lane 1 (ML1)
-        .edp_phy_ln0_fabric_rstn_i   (fabric_rstn),
-        .edp_phy_ln0_tx_rst_i        (tx_rst),
-        .edp_phy_ln0_fabric_tx_clk_i (tx_symbol_clk),
-        .edp_phy_ln0_pcs_tx_clk_o    (tx_symbol_clk_raw),
-        .edp_phy_ln0_tx_vld_i        (tx_vld),
-        .edp_phy_ln0_txdata_i        (ln0_txdata),
-        .edp_phy_ln0_txk_i           (ln0_txk),
-        .edp_phy_ln0_txfifo_wrusewd_o(),
-        .edp_phy_ln0_txfifo_afull_o  (tx_afull_ln0),
-        .edp_phy_ln0_txfifo_full_o   (tx_full_ln0),
-        .edp_phy_ln0_cpll_ok_o       (ln0_cpll_ok),
+        // die lane 2 (DP1) <= word lane 1 (ML1); clock master
+        .edp_phy_ln2_fabric_rstn_i   (fabric_rstn),
+        .edp_phy_ln2_tx_rst_i        (tx_rst),
+        .edp_phy_ln2_fabric_tx_clk_i (tx_symbol_clk),
+        .edp_phy_ln2_pcs_tx_clk_o    (tx_symbol_clk_raw),
+        .edp_phy_ln2_tx_vld_i        (tx_vld),
+        .edp_phy_ln2_txdata_i        (ln2_txdata),
+        .edp_phy_ln2_txk_i           (ln2_txk),
+        .edp_phy_ln2_txfifo_wrusewd_o(),
+        .edp_phy_ln2_txfifo_afull_o  (tx_afull_ln2),
+        .edp_phy_ln2_txfifo_full_o   (tx_full_ln2),
+        .edp_phy_ln2_cpll_ok_o       (ln2_cpll_ok),
         // lane 0 RX unused (TX-only application)
-        .edp_phy_ln0_rx_rst_i        (1'b1),
-        .edp_phy_ln0_fabric_rx_clk_i (1'b0),
-        .edp_phy_ln0_rxfifo_rden_i   (1'b0),
-        .edp_phy_ln0_chbond_start_i  (1'b0),
-        .edp_phy_ln0_pma_rx_lock_o   (),
-        .edp_phy_ln0_align_link_o    (),
-        .edp_phy_ln0_k_lock_o        (),
-        .edp_phy_ln0_pcs_rx_clk_o    (),
-        .edp_phy_ln0_rxfifo_rdusewd_o(),
-        .edp_phy_ln0_rxfifo_aempty_o (),
-        .edp_phy_ln0_rxfifo_empty_o  (),
-        .edp_phy_ln0_rxdata_o        (),
-        .edp_phy_ln0_rxk_o           (),
-        // logical lane 1 (die lane 3 = DP0) <= word lane 0 (ML0)
-        .edp_phy_ln1_fabric_rstn_i   (fabric_rstn),
-        .edp_phy_ln1_tx_rst_i        (tx_rst),
-        .edp_phy_ln1_fabric_tx_clk_i (tx_symbol_clk),
-        .edp_phy_ln1_pcs_tx_clk_o    (),
-        .edp_phy_ln1_tx_vld_i        (tx_vld),
-        .edp_phy_ln1_txdata_i        (ln1_txdata),
-        .edp_phy_ln1_txk_i           (ln1_txk),
-        .edp_phy_ln1_txfifo_wrusewd_o(),
-        .edp_phy_ln1_txfifo_afull_o  (tx_afull_ln1),
-        .edp_phy_ln1_txfifo_full_o   (tx_full_ln1),
-        .edp_phy_ln1_cpll_ok_o       (ln1_cpll_ok),
+        .edp_phy_ln2_rx_rst_i        (1'b1),
+        .edp_phy_ln2_fabric_rx_clk_i (1'b0),
+        .edp_phy_ln2_rxfifo_rden_i   (1'b0),
+        .edp_phy_ln2_chbond_start_i  (1'b0),
+        .edp_phy_ln2_pma_rx_lock_o   (),
+        .edp_phy_ln2_align_link_o    (),
+        .edp_phy_ln2_k_lock_o        (),
+        .edp_phy_ln2_pcs_rx_clk_o    (),
+        .edp_phy_ln2_rxfifo_rdusewd_o(),
+        .edp_phy_ln2_rxfifo_aempty_o (),
+        .edp_phy_ln2_rxfifo_empty_o  (),
+        .edp_phy_ln2_rxdata_o        (),
+        .edp_phy_ln2_rxk_o           (),
+        // die lane 3 (DP0) <= word lane 0 (ML0)
+        .edp_phy_ln3_fabric_rstn_i   (fabric_rstn),
+        .edp_phy_ln3_tx_rst_i        (tx_rst),
+        .edp_phy_ln3_fabric_tx_clk_i (tx_symbol_clk),
+        .edp_phy_ln3_pcs_tx_clk_o    (),
+        .edp_phy_ln3_tx_vld_i        (tx_vld),
+        .edp_phy_ln3_txdata_i        (ln3_txdata),
+        .edp_phy_ln3_txk_i           (ln3_txk),
+        .edp_phy_ln3_txfifo_wrusewd_o(),
+        .edp_phy_ln3_txfifo_afull_o  (tx_afull_ln3),
+        .edp_phy_ln3_txfifo_full_o   (tx_full_ln3),
+        .edp_phy_ln3_cpll_ok_o       (ln3_cpll_ok),
         // lane 1 RX unused
-        .edp_phy_ln1_rx_rst_i        (1'b1),
-        .edp_phy_ln1_fabric_rx_clk_i (1'b0),
-        .edp_phy_ln1_rxfifo_rden_i   (1'b0),
-        .edp_phy_ln1_chbond_start_i  (1'b0),
-        .edp_phy_ln1_pma_rx_lock_o   (),
-        .edp_phy_ln1_align_link_o    (),
-        .edp_phy_ln1_k_lock_o        (),
-        .edp_phy_ln1_pcs_rx_clk_o    (),
-        .edp_phy_ln1_rxfifo_rdusewd_o(),
-        .edp_phy_ln1_rxfifo_aempty_o (),
-        .edp_phy_ln1_rxfifo_empty_o  (),
-        .edp_phy_ln1_rxdata_o        (),
-        .edp_phy_ln1_rxk_o           (),
+        .edp_phy_ln3_rx_rst_i        (1'b1),
+        .edp_phy_ln3_fabric_rx_clk_i (1'b0),
+        .edp_phy_ln3_rxfifo_rden_i   (1'b0),
+        .edp_phy_ln3_chbond_start_i  (1'b0),
+        .edp_phy_ln3_pma_rx_lock_o   (),
+        .edp_phy_ln3_align_link_o    (),
+        .edp_phy_ln3_k_lock_o        (),
+        .edp_phy_ln3_pcs_rx_clk_o    (),
+        .edp_phy_ln3_rxfifo_rdusewd_o(),
+        .edp_phy_ln3_rxfifo_aempty_o (),
+        .edp_phy_ln3_rxfifo_empty_o  (),
+        .edp_phy_ln3_rxdata_o        (),
+        .edp_phy_ln3_rxk_o           (),
         // PLL indicators
         .edp_phy_qpll0_ok_o          (qpll0_ok),
         .edp_phy_qpll1_ok_o          (qpll1_ok),
@@ -269,8 +273,8 @@ module transceiver_bank_gowin #(
         .edp_phy_drp_resp_o          ()
     );
 
-    assign fifo_afull_used = tx_afull_ln0 | tx_afull_ln1;
-    assign fifo_full_used  = tx_full_ln0  | tx_full_ln1;
+    assign fifo_afull_used = tx_afull_ln2 | tx_afull_ln3;
+    assign fifo_full_used  = tx_full_ln2  | tx_full_ln3;
 
     assign tx_symbol_clk = tx_symbol_clk_raw;
     // serial data leaves through dedicated pads; these RTL ports idle
@@ -297,14 +301,14 @@ module transceiver_bank_gowin #(
             5'd6:  dump_addr_rom = 24'h808584;
             5'd7:  dump_addr_rom = 24'h808760;
             5'd8:  dump_addr_rom = 24'h800b91;
-            // lane2 (logical ln0) control/status block
+            // lane2 control/status block
             5'd9:  dump_addr_rom = 24'h809468;
             5'd10: dump_addr_rom = 24'h80946c;
             5'd11: dump_addr_rom = 24'h809400;
             5'd12: dump_addr_rom = 24'h80943c;
             5'd13: dump_addr_rom = 24'h809410;
             5'd14: dump_addr_rom = 24'h809420;
-            // lane3 (logical ln1)
+            // lane3
             5'd15: dump_addr_rom = 24'h809668;
             5'd16: dump_addr_rom = 24'h809600;
             5'd17: dump_addr_rom = 24'h80963c;

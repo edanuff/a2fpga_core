@@ -2,56 +2,56 @@
 //All rights reserved.
 //File Title: Post-PnR Verilog Simulation Model file
 //Tool Version: V1.9.12.01
-//Created Time: Sat Aug 15 22:50:22 2026
+//Created Time: Sun Aug 16 08:33:31 2026
 
 `timescale 100 ps/100 ps
 module edp_phy(
-	serdes_ln0_cpll_ok_i,
-	serdes_ln0_pma_rx_lock_i,
-	serdes_ln0_align_link_i,
-	serdes_ln0_k_lock_i,
-	serdes_ln0_pcs_rx_clk_i,
-	serdes_ln0_rxdata_i,
-	serdes_ln0_rxfifo_rdusewd_i,
-	serdes_ln0_rxfifo_aempty_i,
-	serdes_ln0_rxfifo_empty_i,
-	serdes_ln0_pcs_tx_clk_i,
-	serdes_ln0_txfifo_wrusewd_i,
-	serdes_ln0_txfifo_afull_i,
-	serdes_ln0_txfifo_full_i,
-	ln0_fabric_rstn_i,
-	ln0_rx_rst_i,
-	ln0_chbond_start_i,
-	ln0_fabric_rx_clk_i,
-	ln0_rxfifo_rden_i,
-	ln0_tx_rst_i,
-	ln0_fabric_tx_clk_i,
-	ln0_tx_vld_i,
-	ln0_txdata_i,
-	ln0_txk_i,
-	serdes_ln1_cpll_ok_i,
-	serdes_ln1_pma_rx_lock_i,
-	serdes_ln1_align_link_i,
-	serdes_ln1_k_lock_i,
-	serdes_ln1_pcs_rx_clk_i,
-	serdes_ln1_rxdata_i,
-	serdes_ln1_rxfifo_rdusewd_i,
-	serdes_ln1_rxfifo_aempty_i,
-	serdes_ln1_rxfifo_empty_i,
-	serdes_ln1_pcs_tx_clk_i,
-	serdes_ln1_txfifo_wrusewd_i,
-	serdes_ln1_txfifo_afull_i,
-	serdes_ln1_txfifo_full_i,
-	ln1_fabric_rstn_i,
-	ln1_rx_rst_i,
-	ln1_chbond_start_i,
-	ln1_fabric_rx_clk_i,
-	ln1_rxfifo_rden_i,
-	ln1_tx_rst_i,
-	ln1_fabric_tx_clk_i,
-	ln1_tx_vld_i,
-	ln1_txdata_i,
-	ln1_txk_i,
+	serdes_ln2_cpll_ok_i,
+	serdes_ln2_pma_rx_lock_i,
+	serdes_ln2_align_link_i,
+	serdes_ln2_k_lock_i,
+	serdes_ln2_pcs_rx_clk_i,
+	serdes_ln2_rxdata_i,
+	serdes_ln2_rxfifo_rdusewd_i,
+	serdes_ln2_rxfifo_aempty_i,
+	serdes_ln2_rxfifo_empty_i,
+	serdes_ln2_pcs_tx_clk_i,
+	serdes_ln2_txfifo_wrusewd_i,
+	serdes_ln2_txfifo_afull_i,
+	serdes_ln2_txfifo_full_i,
+	ln2_fabric_rstn_i,
+	ln2_rx_rst_i,
+	ln2_chbond_start_i,
+	ln2_fabric_rx_clk_i,
+	ln2_rxfifo_rden_i,
+	ln2_tx_rst_i,
+	ln2_fabric_tx_clk_i,
+	ln2_tx_vld_i,
+	ln2_txdata_i,
+	ln2_txk_i,
+	serdes_ln3_cpll_ok_i,
+	serdes_ln3_pma_rx_lock_i,
+	serdes_ln3_align_link_i,
+	serdes_ln3_k_lock_i,
+	serdes_ln3_pcs_rx_clk_i,
+	serdes_ln3_rxdata_i,
+	serdes_ln3_rxfifo_rdusewd_i,
+	serdes_ln3_rxfifo_aempty_i,
+	serdes_ln3_rxfifo_empty_i,
+	serdes_ln3_pcs_tx_clk_i,
+	serdes_ln3_txfifo_wrusewd_i,
+	serdes_ln3_txfifo_afull_i,
+	serdes_ln3_txfifo_full_i,
+	ln3_fabric_rstn_i,
+	ln3_rx_rst_i,
+	ln3_chbond_start_i,
+	ln3_fabric_rx_clk_i,
+	ln3_rxfifo_rden_i,
+	ln3_tx_rst_i,
+	ln3_fabric_tx_clk_i,
+	ln3_tx_vld_i,
+	ln3_txdata_i,
+	ln3_txk_i,
 	drp_addr_i,
 	drp_wren_i,
 	drp_wrdata_i,
@@ -64,52 +64,52 @@ module edp_phy(
 	drp_resp_i,
 	serdes_qpll0_ok_i,
 	serdes_qpll1_ok_i,
-	serdes_ln0_fabric_rstn_o,
-	serdes_ln0_rx_rst_o,
-	serdes_ln0_chbond_start_o,
-	serdes_ln0_fabric_rx_clk_o,
-	serdes_ln0_rxfifo_rden_o,
-	serdes_ln0_tx_rst_o,
-	serdes_ln0_fabric_tx_clk_o,
-	serdes_ln0_txdata_o,
-	serdes_ln0_tx_vld_o,
-	ln0_cpll_ok_o,
-	ln0_pma_rx_lock_o,
-	ln0_align_link_o,
-	ln0_k_lock_o,
-	ln0_pcs_rx_clk_o,
-	ln0_rxfifo_rdusewd_o,
-	ln0_rxfifo_aempty_o,
-	ln0_rxfifo_empty_o,
-	ln0_pcs_tx_clk_o,
-	ln0_txfifo_wrusewd_o,
-	ln0_txfifo_afull_o,
-	ln0_txfifo_full_o,
-	ln0_rxdata_o,
-	ln0_rxk_o,
-	serdes_ln1_fabric_rstn_o,
-	serdes_ln1_rx_rst_o,
-	serdes_ln1_chbond_start_o,
-	serdes_ln1_fabric_rx_clk_o,
-	serdes_ln1_rxfifo_rden_o,
-	serdes_ln1_tx_rst_o,
-	serdes_ln1_fabric_tx_clk_o,
-	serdes_ln1_txdata_o,
-	serdes_ln1_tx_vld_o,
-	ln1_cpll_ok_o,
-	ln1_pma_rx_lock_o,
-	ln1_align_link_o,
-	ln1_k_lock_o,
-	ln1_pcs_rx_clk_o,
-	ln1_rxfifo_rdusewd_o,
-	ln1_rxfifo_aempty_o,
-	ln1_rxfifo_empty_o,
-	ln1_pcs_tx_clk_o,
-	ln1_txfifo_wrusewd_o,
-	ln1_txfifo_afull_o,
-	ln1_txfifo_full_o,
-	ln1_rxdata_o,
-	ln1_rxk_o,
+	serdes_ln2_fabric_rstn_o,
+	serdes_ln2_rx_rst_o,
+	serdes_ln2_chbond_start_o,
+	serdes_ln2_fabric_rx_clk_o,
+	serdes_ln2_rxfifo_rden_o,
+	serdes_ln2_tx_rst_o,
+	serdes_ln2_fabric_tx_clk_o,
+	serdes_ln2_txdata_o,
+	serdes_ln2_tx_vld_o,
+	ln2_cpll_ok_o,
+	ln2_pma_rx_lock_o,
+	ln2_align_link_o,
+	ln2_k_lock_o,
+	ln2_pcs_rx_clk_o,
+	ln2_rxfifo_rdusewd_o,
+	ln2_rxfifo_aempty_o,
+	ln2_rxfifo_empty_o,
+	ln2_pcs_tx_clk_o,
+	ln2_txfifo_wrusewd_o,
+	ln2_txfifo_afull_o,
+	ln2_txfifo_full_o,
+	ln2_rxdata_o,
+	ln2_rxk_o,
+	serdes_ln3_fabric_rstn_o,
+	serdes_ln3_rx_rst_o,
+	serdes_ln3_chbond_start_o,
+	serdes_ln3_fabric_rx_clk_o,
+	serdes_ln3_rxfifo_rden_o,
+	serdes_ln3_tx_rst_o,
+	serdes_ln3_fabric_tx_clk_o,
+	serdes_ln3_txdata_o,
+	serdes_ln3_tx_vld_o,
+	ln3_cpll_ok_o,
+	ln3_pma_rx_lock_o,
+	ln3_align_link_o,
+	ln3_k_lock_o,
+	ln3_pcs_rx_clk_o,
+	ln3_rxfifo_rdusewd_o,
+	ln3_rxfifo_aempty_o,
+	ln3_rxfifo_empty_o,
+	ln3_pcs_tx_clk_o,
+	ln3_txfifo_wrusewd_o,
+	ln3_txfifo_afull_o,
+	ln3_txfifo_full_o,
+	ln3_rxdata_o,
+	ln3_rxk_o,
 	drp_clk_o,
 	drp_ready_o,
 	drp_rdvld_o,
@@ -123,52 +123,52 @@ module edp_phy(
 	qpll0_ok_o,
 	qpll1_ok_o
 );
-input serdes_ln0_cpll_ok_i;
-input serdes_ln0_pma_rx_lock_i;
-input serdes_ln0_align_link_i;
-input serdes_ln0_k_lock_i;
-input serdes_ln0_pcs_rx_clk_i;
-input [87:0] serdes_ln0_rxdata_i;
-input [4:0] serdes_ln0_rxfifo_rdusewd_i;
-input serdes_ln0_rxfifo_aempty_i;
-input serdes_ln0_rxfifo_empty_i;
-input serdes_ln0_pcs_tx_clk_i;
-input [4:0] serdes_ln0_txfifo_wrusewd_i;
-input serdes_ln0_txfifo_afull_i;
-input serdes_ln0_txfifo_full_i;
-input ln0_fabric_rstn_i;
-input ln0_rx_rst_i;
-input ln0_chbond_start_i;
-input ln0_fabric_rx_clk_i;
-input ln0_rxfifo_rden_i;
-input ln0_tx_rst_i;
-input ln0_fabric_tx_clk_i;
-input ln0_tx_vld_i;
-input [15:0] ln0_txdata_i;
-input [1:0] ln0_txk_i;
-input serdes_ln1_cpll_ok_i;
-input serdes_ln1_pma_rx_lock_i;
-input serdes_ln1_align_link_i;
-input serdes_ln1_k_lock_i;
-input serdes_ln1_pcs_rx_clk_i;
-input [87:0] serdes_ln1_rxdata_i;
-input [4:0] serdes_ln1_rxfifo_rdusewd_i;
-input serdes_ln1_rxfifo_aempty_i;
-input serdes_ln1_rxfifo_empty_i;
-input serdes_ln1_pcs_tx_clk_i;
-input [4:0] serdes_ln1_txfifo_wrusewd_i;
-input serdes_ln1_txfifo_afull_i;
-input serdes_ln1_txfifo_full_i;
-input ln1_fabric_rstn_i;
-input ln1_rx_rst_i;
-input ln1_chbond_start_i;
-input ln1_fabric_rx_clk_i;
-input ln1_rxfifo_rden_i;
-input ln1_tx_rst_i;
-input ln1_fabric_tx_clk_i;
-input ln1_tx_vld_i;
-input [15:0] ln1_txdata_i;
-input [1:0] ln1_txk_i;
+input serdes_ln2_cpll_ok_i;
+input serdes_ln2_pma_rx_lock_i;
+input serdes_ln2_align_link_i;
+input serdes_ln2_k_lock_i;
+input serdes_ln2_pcs_rx_clk_i;
+input [87:0] serdes_ln2_rxdata_i;
+input [4:0] serdes_ln2_rxfifo_rdusewd_i;
+input serdes_ln2_rxfifo_aempty_i;
+input serdes_ln2_rxfifo_empty_i;
+input serdes_ln2_pcs_tx_clk_i;
+input [4:0] serdes_ln2_txfifo_wrusewd_i;
+input serdes_ln2_txfifo_afull_i;
+input serdes_ln2_txfifo_full_i;
+input ln2_fabric_rstn_i;
+input ln2_rx_rst_i;
+input ln2_chbond_start_i;
+input ln2_fabric_rx_clk_i;
+input ln2_rxfifo_rden_i;
+input ln2_tx_rst_i;
+input ln2_fabric_tx_clk_i;
+input ln2_tx_vld_i;
+input [15:0] ln2_txdata_i;
+input [1:0] ln2_txk_i;
+input serdes_ln3_cpll_ok_i;
+input serdes_ln3_pma_rx_lock_i;
+input serdes_ln3_align_link_i;
+input serdes_ln3_k_lock_i;
+input serdes_ln3_pcs_rx_clk_i;
+input [87:0] serdes_ln3_rxdata_i;
+input [4:0] serdes_ln3_rxfifo_rdusewd_i;
+input serdes_ln3_rxfifo_aempty_i;
+input serdes_ln3_rxfifo_empty_i;
+input serdes_ln3_pcs_tx_clk_i;
+input [4:0] serdes_ln3_txfifo_wrusewd_i;
+input serdes_ln3_txfifo_afull_i;
+input serdes_ln3_txfifo_full_i;
+input ln3_fabric_rstn_i;
+input ln3_rx_rst_i;
+input ln3_chbond_start_i;
+input ln3_fabric_rx_clk_i;
+input ln3_rxfifo_rden_i;
+input ln3_tx_rst_i;
+input ln3_fabric_tx_clk_i;
+input ln3_tx_vld_i;
+input [15:0] ln3_txdata_i;
+input [1:0] ln3_txk_i;
 input [23:0] drp_addr_i;
 input drp_wren_i;
 input [31:0] drp_wrdata_i;
@@ -181,52 +181,52 @@ input [31:0] drp_rddata_i;
 input drp_resp_i;
 input serdes_qpll0_ok_i;
 input serdes_qpll1_ok_i;
-output serdes_ln0_fabric_rstn_o;
-output serdes_ln0_rx_rst_o;
-output serdes_ln0_chbond_start_o;
-output serdes_ln0_fabric_rx_clk_o;
-output serdes_ln0_rxfifo_rden_o;
-output serdes_ln0_tx_rst_o;
-output serdes_ln0_fabric_tx_clk_o;
-output [79:0] serdes_ln0_txdata_o;
-output serdes_ln0_tx_vld_o;
-output ln0_cpll_ok_o;
-output ln0_pma_rx_lock_o;
-output ln0_align_link_o;
-output ln0_k_lock_o;
-output ln0_pcs_rx_clk_o;
-output [4:0] ln0_rxfifo_rdusewd_o;
-output ln0_rxfifo_aempty_o;
-output ln0_rxfifo_empty_o;
-output ln0_pcs_tx_clk_o;
-output [4:0] ln0_txfifo_wrusewd_o;
-output ln0_txfifo_afull_o;
-output ln0_txfifo_full_o;
-output [15:0] ln0_rxdata_o;
-output [1:0] ln0_rxk_o;
-output serdes_ln1_fabric_rstn_o;
-output serdes_ln1_rx_rst_o;
-output serdes_ln1_chbond_start_o;
-output serdes_ln1_fabric_rx_clk_o;
-output serdes_ln1_rxfifo_rden_o;
-output serdes_ln1_tx_rst_o;
-output serdes_ln1_fabric_tx_clk_o;
-output [79:0] serdes_ln1_txdata_o;
-output serdes_ln1_tx_vld_o;
-output ln1_cpll_ok_o;
-output ln1_pma_rx_lock_o;
-output ln1_align_link_o;
-output ln1_k_lock_o;
-output ln1_pcs_rx_clk_o;
-output [4:0] ln1_rxfifo_rdusewd_o;
-output ln1_rxfifo_aempty_o;
-output ln1_rxfifo_empty_o;
-output ln1_pcs_tx_clk_o;
-output [4:0] ln1_txfifo_wrusewd_o;
-output ln1_txfifo_afull_o;
-output ln1_txfifo_full_o;
-output [15:0] ln1_rxdata_o;
-output [1:0] ln1_rxk_o;
+output serdes_ln2_fabric_rstn_o;
+output serdes_ln2_rx_rst_o;
+output serdes_ln2_chbond_start_o;
+output serdes_ln2_fabric_rx_clk_o;
+output serdes_ln2_rxfifo_rden_o;
+output serdes_ln2_tx_rst_o;
+output serdes_ln2_fabric_tx_clk_o;
+output [79:0] serdes_ln2_txdata_o;
+output serdes_ln2_tx_vld_o;
+output ln2_cpll_ok_o;
+output ln2_pma_rx_lock_o;
+output ln2_align_link_o;
+output ln2_k_lock_o;
+output ln2_pcs_rx_clk_o;
+output [4:0] ln2_rxfifo_rdusewd_o;
+output ln2_rxfifo_aempty_o;
+output ln2_rxfifo_empty_o;
+output ln2_pcs_tx_clk_o;
+output [4:0] ln2_txfifo_wrusewd_o;
+output ln2_txfifo_afull_o;
+output ln2_txfifo_full_o;
+output [15:0] ln2_rxdata_o;
+output [1:0] ln2_rxk_o;
+output serdes_ln3_fabric_rstn_o;
+output serdes_ln3_rx_rst_o;
+output serdes_ln3_chbond_start_o;
+output serdes_ln3_fabric_rx_clk_o;
+output serdes_ln3_rxfifo_rden_o;
+output serdes_ln3_tx_rst_o;
+output serdes_ln3_fabric_tx_clk_o;
+output [79:0] serdes_ln3_txdata_o;
+output serdes_ln3_tx_vld_o;
+output ln3_cpll_ok_o;
+output ln3_pma_rx_lock_o;
+output ln3_align_link_o;
+output ln3_k_lock_o;
+output ln3_pcs_rx_clk_o;
+output [4:0] ln3_rxfifo_rdusewd_o;
+output ln3_rxfifo_aempty_o;
+output ln3_rxfifo_empty_o;
+output ln3_pcs_tx_clk_o;
+output [4:0] ln3_txfifo_wrusewd_o;
+output ln3_txfifo_afull_o;
+output ln3_txfifo_full_o;
+output [15:0] ln3_rxdata_o;
+output [1:0] ln3_rxk_o;
 output drp_clk_o;
 output drp_ready_o;
 output drp_rdvld_o;
@@ -261,100 +261,100 @@ wire [31:0] drp_wrdata_i;
 wire [31:0] drp_wrdata_o;
 wire drp_wren_i;
 wire drp_wren_o;
-wire ln0_align_link_o;
-wire ln0_chbond_start_i;
-wire ln0_cpll_ok_o;
-wire ln0_fabric_rstn_i;
-wire ln0_fabric_rx_clk_i;
-wire ln0_fabric_tx_clk_i;
-wire ln0_k_lock_o;
-wire ln0_pcs_rx_clk_o;
-wire ln0_pcs_tx_clk_o;
-wire ln0_pma_rx_lock_o;
-wire ln0_rx_rst_i;
-wire [15:0] ln0_rxdata_o;
-wire ln0_rxfifo_aempty_o;
-wire ln0_rxfifo_empty_o;
-wire ln0_rxfifo_rden_i;
-wire [4:0] ln0_rxfifo_rdusewd_o;
-wire [1:0] ln0_rxk_o;
-wire ln0_tx_rst_i;
-wire ln0_tx_vld_i;
-wire [15:0] ln0_txdata_i;
-wire ln0_txfifo_afull_o;
-wire ln0_txfifo_full_o;
-wire [4:0] ln0_txfifo_wrusewd_o;
-wire [1:0] ln0_txk_i;
-wire ln1_align_link_o;
-wire ln1_chbond_start_i;
-wire ln1_cpll_ok_o;
-wire ln1_fabric_rstn_i;
-wire ln1_fabric_rx_clk_i;
-wire ln1_fabric_tx_clk_i;
-wire ln1_k_lock_o;
-wire ln1_pcs_rx_clk_o;
-wire ln1_pcs_tx_clk_o;
-wire ln1_pma_rx_lock_o;
-wire ln1_rx_rst_i;
-wire [15:0] ln1_rxdata_o;
-wire ln1_rxfifo_aempty_o;
-wire ln1_rxfifo_empty_o;
-wire ln1_rxfifo_rden_i;
-wire [4:0] ln1_rxfifo_rdusewd_o;
-wire [1:0] ln1_rxk_o;
-wire ln1_tx_rst_i;
-wire ln1_tx_vld_i;
-wire [15:0] ln1_txdata_i;
-wire ln1_txfifo_afull_o;
-wire ln1_txfifo_full_o;
-wire [4:0] ln1_txfifo_wrusewd_o;
-wire [1:0] ln1_txk_i;
+wire ln2_align_link_o;
+wire ln2_chbond_start_i;
+wire ln2_cpll_ok_o;
+wire ln2_fabric_rstn_i;
+wire ln2_fabric_rx_clk_i;
+wire ln2_fabric_tx_clk_i;
+wire ln2_k_lock_o;
+wire ln2_pcs_rx_clk_o;
+wire ln2_pcs_tx_clk_o;
+wire ln2_pma_rx_lock_o;
+wire ln2_rx_rst_i;
+wire [15:0] ln2_rxdata_o;
+wire ln2_rxfifo_aempty_o;
+wire ln2_rxfifo_empty_o;
+wire ln2_rxfifo_rden_i;
+wire [4:0] ln2_rxfifo_rdusewd_o;
+wire [1:0] ln2_rxk_o;
+wire ln2_tx_rst_i;
+wire ln2_tx_vld_i;
+wire [15:0] ln2_txdata_i;
+wire ln2_txfifo_afull_o;
+wire ln2_txfifo_full_o;
+wire [4:0] ln2_txfifo_wrusewd_o;
+wire [1:0] ln2_txk_i;
+wire ln3_align_link_o;
+wire ln3_chbond_start_i;
+wire ln3_cpll_ok_o;
+wire ln3_fabric_rstn_i;
+wire ln3_fabric_rx_clk_i;
+wire ln3_fabric_tx_clk_i;
+wire ln3_k_lock_o;
+wire ln3_pcs_rx_clk_o;
+wire ln3_pcs_tx_clk_o;
+wire ln3_pma_rx_lock_o;
+wire ln3_rx_rst_i;
+wire [15:0] ln3_rxdata_o;
+wire ln3_rxfifo_aempty_o;
+wire ln3_rxfifo_empty_o;
+wire ln3_rxfifo_rden_i;
+wire [4:0] ln3_rxfifo_rdusewd_o;
+wire [1:0] ln3_rxk_o;
+wire ln3_tx_rst_i;
+wire ln3_tx_vld_i;
+wire [15:0] ln3_txdata_i;
+wire ln3_txfifo_afull_o;
+wire ln3_txfifo_full_o;
+wire [4:0] ln3_txfifo_wrusewd_o;
+wire [1:0] ln3_txk_i;
 wire qpll0_ok_o;
 wire qpll1_ok_o;
-wire serdes_ln0_align_link_i;
-wire serdes_ln0_chbond_start_o;
-wire serdes_ln0_cpll_ok_i;
-wire serdes_ln0_fabric_rstn_o;
-wire serdes_ln0_fabric_rx_clk_o;
-wire serdes_ln0_fabric_tx_clk_o;
-wire serdes_ln0_k_lock_i;
-wire serdes_ln0_pcs_rx_clk_i;
-wire serdes_ln0_pcs_tx_clk_i;
-wire serdes_ln0_pma_rx_lock_i;
-wire serdes_ln0_rx_rst_o;
-wire [87:0] serdes_ln0_rxdata_i;
-wire serdes_ln0_rxfifo_aempty_i;
-wire serdes_ln0_rxfifo_empty_i;
-wire serdes_ln0_rxfifo_rden_o;
-wire [4:0] serdes_ln0_rxfifo_rdusewd_i;
-wire serdes_ln0_tx_rst_o;
-wire serdes_ln0_tx_vld_o;
-wire [79:0] serdes_ln0_txdata_o;
-wire serdes_ln0_txfifo_afull_i;
-wire serdes_ln0_txfifo_full_i;
-wire [4:0] serdes_ln0_txfifo_wrusewd_i;
-wire serdes_ln1_align_link_i;
-wire serdes_ln1_chbond_start_o;
-wire serdes_ln1_cpll_ok_i;
-wire serdes_ln1_fabric_rstn_o;
-wire serdes_ln1_fabric_rx_clk_o;
-wire serdes_ln1_fabric_tx_clk_o;
-wire serdes_ln1_k_lock_i;
-wire serdes_ln1_pcs_rx_clk_i;
-wire serdes_ln1_pcs_tx_clk_i;
-wire serdes_ln1_pma_rx_lock_i;
-wire serdes_ln1_rx_rst_o;
-wire [87:0] serdes_ln1_rxdata_i;
-wire serdes_ln1_rxfifo_aempty_i;
-wire serdes_ln1_rxfifo_empty_i;
-wire serdes_ln1_rxfifo_rden_o;
-wire [4:0] serdes_ln1_rxfifo_rdusewd_i;
-wire serdes_ln1_tx_rst_o;
-wire serdes_ln1_tx_vld_o;
-wire [79:0] serdes_ln1_txdata_o;
-wire serdes_ln1_txfifo_afull_i;
-wire serdes_ln1_txfifo_full_i;
-wire [4:0] serdes_ln1_txfifo_wrusewd_i;
+wire serdes_ln2_align_link_i;
+wire serdes_ln2_chbond_start_o;
+wire serdes_ln2_cpll_ok_i;
+wire serdes_ln2_fabric_rstn_o;
+wire serdes_ln2_fabric_rx_clk_o;
+wire serdes_ln2_fabric_tx_clk_o;
+wire serdes_ln2_k_lock_i;
+wire serdes_ln2_pcs_rx_clk_i;
+wire serdes_ln2_pcs_tx_clk_i;
+wire serdes_ln2_pma_rx_lock_i;
+wire serdes_ln2_rx_rst_o;
+wire [87:0] serdes_ln2_rxdata_i;
+wire serdes_ln2_rxfifo_aempty_i;
+wire serdes_ln2_rxfifo_empty_i;
+wire serdes_ln2_rxfifo_rden_o;
+wire [4:0] serdes_ln2_rxfifo_rdusewd_i;
+wire serdes_ln2_tx_rst_o;
+wire serdes_ln2_tx_vld_o;
+wire [79:0] serdes_ln2_txdata_o;
+wire serdes_ln2_txfifo_afull_i;
+wire serdes_ln2_txfifo_full_i;
+wire [4:0] serdes_ln2_txfifo_wrusewd_i;
+wire serdes_ln3_align_link_i;
+wire serdes_ln3_chbond_start_o;
+wire serdes_ln3_cpll_ok_i;
+wire serdes_ln3_fabric_rstn_o;
+wire serdes_ln3_fabric_rx_clk_o;
+wire serdes_ln3_fabric_tx_clk_o;
+wire serdes_ln3_k_lock_i;
+wire serdes_ln3_pcs_rx_clk_i;
+wire serdes_ln3_pcs_tx_clk_i;
+wire serdes_ln3_pma_rx_lock_i;
+wire serdes_ln3_rx_rst_o;
+wire [87:0] serdes_ln3_rxdata_i;
+wire serdes_ln3_rxfifo_aempty_i;
+wire serdes_ln3_rxfifo_empty_i;
+wire serdes_ln3_rxfifo_rden_o;
+wire [4:0] serdes_ln3_rxfifo_rdusewd_i;
+wire serdes_ln3_tx_rst_o;
+wire serdes_ln3_tx_vld_o;
+wire [79:0] serdes_ln3_txdata_o;
+wire serdes_ln3_txfifo_afull_i;
+wire serdes_ln3_txfifo_full_i;
+wire [4:0] serdes_ln3_txfifo_wrusewd_i;
 wire serdes_qpll0_ok_i;
 wire serdes_qpll1_ok_i;
 VCC VCC_cZ (
@@ -367,1012 +367,1012 @@ GSR GSR (
 	.GSRI(VCC)
 );
 IBUF gowin_buf_0 (
-	.I(ln0_fabric_rstn_i),
-	.O(serdes_ln0_fabric_rstn_o)
+	.I(ln2_fabric_rstn_i),
+	.O(serdes_ln2_fabric_rstn_o)
 );
 IBUF gowin_buf_1 (
-	.I(ln0_rx_rst_i),
-	.O(serdes_ln0_rx_rst_o)
+	.I(ln2_rx_rst_i),
+	.O(serdes_ln2_rx_rst_o)
 );
 IBUF gowin_buf_2 (
-	.I(ln0_chbond_start_i),
-	.O(serdes_ln0_chbond_start_o)
+	.I(ln2_chbond_start_i),
+	.O(serdes_ln2_chbond_start_o)
 );
 IBUF gowin_buf_3 (
-	.I(ln0_fabric_rx_clk_i),
-	.O(serdes_ln0_fabric_rx_clk_o)
+	.I(ln2_fabric_rx_clk_i),
+	.O(serdes_ln2_fabric_rx_clk_o)
 );
 IBUF gowin_buf_4 (
-	.I(ln0_rxfifo_rden_i),
-	.O(serdes_ln0_rxfifo_rden_o)
+	.I(ln2_rxfifo_rden_i),
+	.O(serdes_ln2_rxfifo_rden_o)
 );
 IBUF gowin_buf_5 (
-	.I(ln0_tx_rst_i),
-	.O(serdes_ln0_tx_rst_o)
+	.I(ln2_tx_rst_i),
+	.O(serdes_ln2_tx_rst_o)
 );
 IBUF gowin_buf_6 (
-	.I(ln0_fabric_tx_clk_i),
-	.O(serdes_ln0_fabric_tx_clk_o)
+	.I(ln2_fabric_tx_clk_i),
+	.O(serdes_ln2_fabric_tx_clk_o)
 );
 IBUF gowin_buf_7 (
-	.I(ln0_txdata_i[0]),
-	.O(serdes_ln0_txdata_o[0])
+	.I(ln2_txdata_i[0]),
+	.O(serdes_ln2_txdata_o[0])
 );
 IBUF gowin_buf_8 (
-	.I(ln0_txdata_i[1]),
-	.O(serdes_ln0_txdata_o[1])
+	.I(ln2_txdata_i[1]),
+	.O(serdes_ln2_txdata_o[1])
 );
 IBUF gowin_buf_9 (
-	.I(ln0_txdata_i[2]),
-	.O(serdes_ln0_txdata_o[2])
+	.I(ln2_txdata_i[2]),
+	.O(serdes_ln2_txdata_o[2])
 );
 IBUF gowin_buf_10 (
-	.I(ln0_txdata_i[3]),
-	.O(serdes_ln0_txdata_o[3])
+	.I(ln2_txdata_i[3]),
+	.O(serdes_ln2_txdata_o[3])
 );
 IBUF gowin_buf_11 (
-	.I(ln0_txdata_i[4]),
-	.O(serdes_ln0_txdata_o[4])
+	.I(ln2_txdata_i[4]),
+	.O(serdes_ln2_txdata_o[4])
 );
 IBUF gowin_buf_12 (
-	.I(ln0_txdata_i[5]),
-	.O(serdes_ln0_txdata_o[5])
+	.I(ln2_txdata_i[5]),
+	.O(serdes_ln2_txdata_o[5])
 );
 IBUF gowin_buf_13 (
-	.I(ln0_txdata_i[6]),
-	.O(serdes_ln0_txdata_o[6])
+	.I(ln2_txdata_i[6]),
+	.O(serdes_ln2_txdata_o[6])
 );
 IBUF gowin_buf_14 (
-	.I(ln0_txdata_i[7]),
-	.O(serdes_ln0_txdata_o[7])
+	.I(ln2_txdata_i[7]),
+	.O(serdes_ln2_txdata_o[7])
 );
 IBUF gowin_buf_15 (
-	.I(ln0_txk_i[0]),
-	.O(serdes_ln0_txdata_o[8])
+	.I(ln2_txk_i[0]),
+	.O(serdes_ln2_txdata_o[8])
 );
 OBUF gowin_buf_16 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[9])
+	.O(serdes_ln2_txdata_o[9])
 );
 IBUF gowin_buf_17 (
-	.I(ln0_txdata_i[8]),
-	.O(serdes_ln0_txdata_o[10])
+	.I(ln2_txdata_i[8]),
+	.O(serdes_ln2_txdata_o[10])
 );
 IBUF gowin_buf_18 (
-	.I(ln0_txdata_i[9]),
-	.O(serdes_ln0_txdata_o[11])
+	.I(ln2_txdata_i[9]),
+	.O(serdes_ln2_txdata_o[11])
 );
 IBUF gowin_buf_19 (
-	.I(ln0_txdata_i[10]),
-	.O(serdes_ln0_txdata_o[12])
+	.I(ln2_txdata_i[10]),
+	.O(serdes_ln2_txdata_o[12])
 );
 IBUF gowin_buf_20 (
-	.I(ln0_txdata_i[11]),
-	.O(serdes_ln0_txdata_o[13])
+	.I(ln2_txdata_i[11]),
+	.O(serdes_ln2_txdata_o[13])
 );
 IBUF gowin_buf_21 (
-	.I(ln0_txdata_i[12]),
-	.O(serdes_ln0_txdata_o[14])
+	.I(ln2_txdata_i[12]),
+	.O(serdes_ln2_txdata_o[14])
 );
 IBUF gowin_buf_22 (
-	.I(ln0_txdata_i[13]),
-	.O(serdes_ln0_txdata_o[15])
+	.I(ln2_txdata_i[13]),
+	.O(serdes_ln2_txdata_o[15])
 );
 IBUF gowin_buf_23 (
-	.I(ln0_txdata_i[14]),
-	.O(serdes_ln0_txdata_o[16])
+	.I(ln2_txdata_i[14]),
+	.O(serdes_ln2_txdata_o[16])
 );
 IBUF gowin_buf_24 (
-	.I(ln0_txdata_i[15]),
-	.O(serdes_ln0_txdata_o[17])
+	.I(ln2_txdata_i[15]),
+	.O(serdes_ln2_txdata_o[17])
 );
 IBUF gowin_buf_25 (
-	.I(ln0_txk_i[1]),
-	.O(serdes_ln0_txdata_o[18])
+	.I(ln2_txk_i[1]),
+	.O(serdes_ln2_txdata_o[18])
 );
 OBUF gowin_buf_26 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[19])
+	.O(serdes_ln2_txdata_o[19])
 );
 OBUF gowin_buf_27 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[20])
+	.O(serdes_ln2_txdata_o[20])
 );
 OBUF gowin_buf_28 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[21])
+	.O(serdes_ln2_txdata_o[21])
 );
 OBUF gowin_buf_29 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[22])
+	.O(serdes_ln2_txdata_o[22])
 );
 OBUF gowin_buf_30 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[23])
+	.O(serdes_ln2_txdata_o[23])
 );
 OBUF gowin_buf_31 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[24])
+	.O(serdes_ln2_txdata_o[24])
 );
 OBUF gowin_buf_32 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[25])
+	.O(serdes_ln2_txdata_o[25])
 );
 OBUF gowin_buf_33 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[26])
+	.O(serdes_ln2_txdata_o[26])
 );
 OBUF gowin_buf_34 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[27])
+	.O(serdes_ln2_txdata_o[27])
 );
 OBUF gowin_buf_35 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[28])
+	.O(serdes_ln2_txdata_o[28])
 );
 OBUF gowin_buf_36 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[29])
+	.O(serdes_ln2_txdata_o[29])
 );
 OBUF gowin_buf_37 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[30])
+	.O(serdes_ln2_txdata_o[30])
 );
 OBUF gowin_buf_38 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[31])
+	.O(serdes_ln2_txdata_o[31])
 );
 OBUF gowin_buf_39 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[32])
+	.O(serdes_ln2_txdata_o[32])
 );
 OBUF gowin_buf_40 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[33])
+	.O(serdes_ln2_txdata_o[33])
 );
 OBUF gowin_buf_41 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[34])
+	.O(serdes_ln2_txdata_o[34])
 );
 OBUF gowin_buf_42 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[35])
+	.O(serdes_ln2_txdata_o[35])
 );
 OBUF gowin_buf_43 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[36])
+	.O(serdes_ln2_txdata_o[36])
 );
 OBUF gowin_buf_44 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[37])
+	.O(serdes_ln2_txdata_o[37])
 );
 OBUF gowin_buf_45 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[38])
+	.O(serdes_ln2_txdata_o[38])
 );
 OBUF gowin_buf_46 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[39])
+	.O(serdes_ln2_txdata_o[39])
 );
 OBUF gowin_buf_47 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[40])
+	.O(serdes_ln2_txdata_o[40])
 );
 OBUF gowin_buf_48 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[41])
+	.O(serdes_ln2_txdata_o[41])
 );
 OBUF gowin_buf_49 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[42])
+	.O(serdes_ln2_txdata_o[42])
 );
 OBUF gowin_buf_50 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[43])
+	.O(serdes_ln2_txdata_o[43])
 );
 OBUF gowin_buf_51 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[44])
+	.O(serdes_ln2_txdata_o[44])
 );
 OBUF gowin_buf_52 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[45])
+	.O(serdes_ln2_txdata_o[45])
 );
 OBUF gowin_buf_53 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[46])
+	.O(serdes_ln2_txdata_o[46])
 );
 OBUF gowin_buf_54 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[47])
+	.O(serdes_ln2_txdata_o[47])
 );
 OBUF gowin_buf_55 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[48])
+	.O(serdes_ln2_txdata_o[48])
 );
 OBUF gowin_buf_56 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[49])
+	.O(serdes_ln2_txdata_o[49])
 );
 OBUF gowin_buf_57 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[50])
+	.O(serdes_ln2_txdata_o[50])
 );
 OBUF gowin_buf_58 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[51])
+	.O(serdes_ln2_txdata_o[51])
 );
 OBUF gowin_buf_59 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[52])
+	.O(serdes_ln2_txdata_o[52])
 );
 OBUF gowin_buf_60 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[53])
+	.O(serdes_ln2_txdata_o[53])
 );
 OBUF gowin_buf_61 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[54])
+	.O(serdes_ln2_txdata_o[54])
 );
 OBUF gowin_buf_62 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[55])
+	.O(serdes_ln2_txdata_o[55])
 );
 OBUF gowin_buf_63 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[56])
+	.O(serdes_ln2_txdata_o[56])
 );
 OBUF gowin_buf_64 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[57])
+	.O(serdes_ln2_txdata_o[57])
 );
 OBUF gowin_buf_65 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[58])
+	.O(serdes_ln2_txdata_o[58])
 );
 OBUF gowin_buf_66 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[59])
+	.O(serdes_ln2_txdata_o[59])
 );
 OBUF gowin_buf_67 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[60])
+	.O(serdes_ln2_txdata_o[60])
 );
 OBUF gowin_buf_68 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[61])
+	.O(serdes_ln2_txdata_o[61])
 );
 OBUF gowin_buf_69 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[62])
+	.O(serdes_ln2_txdata_o[62])
 );
 OBUF gowin_buf_70 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[63])
+	.O(serdes_ln2_txdata_o[63])
 );
 OBUF gowin_buf_71 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[64])
+	.O(serdes_ln2_txdata_o[64])
 );
 OBUF gowin_buf_72 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[65])
+	.O(serdes_ln2_txdata_o[65])
 );
 OBUF gowin_buf_73 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[66])
+	.O(serdes_ln2_txdata_o[66])
 );
 OBUF gowin_buf_74 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[67])
+	.O(serdes_ln2_txdata_o[67])
 );
 OBUF gowin_buf_75 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[68])
+	.O(serdes_ln2_txdata_o[68])
 );
 OBUF gowin_buf_76 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[69])
+	.O(serdes_ln2_txdata_o[69])
 );
 OBUF gowin_buf_77 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[70])
+	.O(serdes_ln2_txdata_o[70])
 );
 OBUF gowin_buf_78 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[71])
+	.O(serdes_ln2_txdata_o[71])
 );
 OBUF gowin_buf_79 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[72])
+	.O(serdes_ln2_txdata_o[72])
 );
 OBUF gowin_buf_80 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[73])
+	.O(serdes_ln2_txdata_o[73])
 );
 OBUF gowin_buf_81 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[74])
+	.O(serdes_ln2_txdata_o[74])
 );
 OBUF gowin_buf_82 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[75])
+	.O(serdes_ln2_txdata_o[75])
 );
 OBUF gowin_buf_83 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[76])
+	.O(serdes_ln2_txdata_o[76])
 );
 OBUF gowin_buf_84 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[77])
+	.O(serdes_ln2_txdata_o[77])
 );
 OBUF gowin_buf_85 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[78])
+	.O(serdes_ln2_txdata_o[78])
 );
 OBUF gowin_buf_86 (
 	.I(GND),
-	.O(serdes_ln0_txdata_o[79])
+	.O(serdes_ln2_txdata_o[79])
 );
 IBUF gowin_buf_87 (
-	.I(ln0_tx_vld_i),
-	.O(serdes_ln0_tx_vld_o)
+	.I(ln2_tx_vld_i),
+	.O(serdes_ln2_tx_vld_o)
 );
 IBUF gowin_buf_88 (
-	.I(serdes_ln0_cpll_ok_i),
-	.O(ln0_cpll_ok_o)
+	.I(serdes_ln2_cpll_ok_i),
+	.O(ln2_cpll_ok_o)
 );
 IBUF gowin_buf_89 (
-	.I(serdes_ln0_pma_rx_lock_i),
-	.O(ln0_pma_rx_lock_o)
+	.I(serdes_ln2_pma_rx_lock_i),
+	.O(ln2_pma_rx_lock_o)
 );
 IBUF gowin_buf_90 (
-	.I(serdes_ln0_align_link_i),
-	.O(ln0_align_link_o)
+	.I(serdes_ln2_align_link_i),
+	.O(ln2_align_link_o)
 );
 IBUF gowin_buf_91 (
-	.I(serdes_ln0_k_lock_i),
-	.O(ln0_k_lock_o)
+	.I(serdes_ln2_k_lock_i),
+	.O(ln2_k_lock_o)
 );
 IBUF gowin_buf_92 (
-	.I(serdes_ln0_pcs_rx_clk_i),
-	.O(ln0_pcs_rx_clk_o)
+	.I(serdes_ln2_pcs_rx_clk_i),
+	.O(ln2_pcs_rx_clk_o)
 );
 IBUF gowin_buf_93 (
-	.I(serdes_ln0_rxfifo_rdusewd_i[0]),
-	.O(ln0_rxfifo_rdusewd_o[0])
+	.I(serdes_ln2_rxfifo_rdusewd_i[0]),
+	.O(ln2_rxfifo_rdusewd_o[0])
 );
 IBUF gowin_buf_94 (
-	.I(serdes_ln0_rxfifo_rdusewd_i[1]),
-	.O(ln0_rxfifo_rdusewd_o[1])
+	.I(serdes_ln2_rxfifo_rdusewd_i[1]),
+	.O(ln2_rxfifo_rdusewd_o[1])
 );
 IBUF gowin_buf_95 (
-	.I(serdes_ln0_rxfifo_rdusewd_i[2]),
-	.O(ln0_rxfifo_rdusewd_o[2])
+	.I(serdes_ln2_rxfifo_rdusewd_i[2]),
+	.O(ln2_rxfifo_rdusewd_o[2])
 );
 IBUF gowin_buf_96 (
-	.I(serdes_ln0_rxfifo_rdusewd_i[3]),
-	.O(ln0_rxfifo_rdusewd_o[3])
+	.I(serdes_ln2_rxfifo_rdusewd_i[3]),
+	.O(ln2_rxfifo_rdusewd_o[3])
 );
 IBUF gowin_buf_97 (
-	.I(serdes_ln0_rxfifo_rdusewd_i[4]),
-	.O(ln0_rxfifo_rdusewd_o[4])
+	.I(serdes_ln2_rxfifo_rdusewd_i[4]),
+	.O(ln2_rxfifo_rdusewd_o[4])
 );
 IBUF gowin_buf_98 (
-	.I(serdes_ln0_rxfifo_aempty_i),
-	.O(ln0_rxfifo_aempty_o)
+	.I(serdes_ln2_rxfifo_aempty_i),
+	.O(ln2_rxfifo_aempty_o)
 );
 IBUF gowin_buf_99 (
-	.I(serdes_ln0_rxfifo_empty_i),
-	.O(ln0_rxfifo_empty_o)
+	.I(serdes_ln2_rxfifo_empty_i),
+	.O(ln2_rxfifo_empty_o)
 );
 IBUF gowin_buf_100 (
-	.I(serdes_ln0_pcs_tx_clk_i),
-	.O(ln0_pcs_tx_clk_o)
+	.I(serdes_ln2_pcs_tx_clk_i),
+	.O(ln2_pcs_tx_clk_o)
 );
 IBUF gowin_buf_101 (
-	.I(serdes_ln0_txfifo_wrusewd_i[0]),
-	.O(ln0_txfifo_wrusewd_o[0])
+	.I(serdes_ln2_txfifo_wrusewd_i[0]),
+	.O(ln2_txfifo_wrusewd_o[0])
 );
 IBUF gowin_buf_102 (
-	.I(serdes_ln0_txfifo_wrusewd_i[1]),
-	.O(ln0_txfifo_wrusewd_o[1])
+	.I(serdes_ln2_txfifo_wrusewd_i[1]),
+	.O(ln2_txfifo_wrusewd_o[1])
 );
 IBUF gowin_buf_103 (
-	.I(serdes_ln0_txfifo_wrusewd_i[2]),
-	.O(ln0_txfifo_wrusewd_o[2])
+	.I(serdes_ln2_txfifo_wrusewd_i[2]),
+	.O(ln2_txfifo_wrusewd_o[2])
 );
 IBUF gowin_buf_104 (
-	.I(serdes_ln0_txfifo_wrusewd_i[3]),
-	.O(ln0_txfifo_wrusewd_o[3])
+	.I(serdes_ln2_txfifo_wrusewd_i[3]),
+	.O(ln2_txfifo_wrusewd_o[3])
 );
 IBUF gowin_buf_105 (
-	.I(serdes_ln0_txfifo_wrusewd_i[4]),
-	.O(ln0_txfifo_wrusewd_o[4])
+	.I(serdes_ln2_txfifo_wrusewd_i[4]),
+	.O(ln2_txfifo_wrusewd_o[4])
 );
 IBUF gowin_buf_106 (
-	.I(serdes_ln0_txfifo_afull_i),
-	.O(ln0_txfifo_afull_o)
+	.I(serdes_ln2_txfifo_afull_i),
+	.O(ln2_txfifo_afull_o)
 );
 IBUF gowin_buf_107 (
-	.I(serdes_ln0_txfifo_full_i),
-	.O(ln0_txfifo_full_o)
+	.I(serdes_ln2_txfifo_full_i),
+	.O(ln2_txfifo_full_o)
 );
 IBUF gowin_buf_108 (
-	.I(serdes_ln0_rxdata_i[0]),
-	.O(ln0_rxdata_o[0])
+	.I(serdes_ln2_rxdata_i[0]),
+	.O(ln2_rxdata_o[0])
 );
 IBUF gowin_buf_109 (
-	.I(serdes_ln0_rxdata_i[1]),
-	.O(ln0_rxdata_o[1])
+	.I(serdes_ln2_rxdata_i[1]),
+	.O(ln2_rxdata_o[1])
 );
 IBUF gowin_buf_110 (
-	.I(serdes_ln0_rxdata_i[2]),
-	.O(ln0_rxdata_o[2])
+	.I(serdes_ln2_rxdata_i[2]),
+	.O(ln2_rxdata_o[2])
 );
 IBUF gowin_buf_111 (
-	.I(serdes_ln0_rxdata_i[3]),
-	.O(ln0_rxdata_o[3])
+	.I(serdes_ln2_rxdata_i[3]),
+	.O(ln2_rxdata_o[3])
 );
 IBUF gowin_buf_112 (
-	.I(serdes_ln0_rxdata_i[4]),
-	.O(ln0_rxdata_o[4])
+	.I(serdes_ln2_rxdata_i[4]),
+	.O(ln2_rxdata_o[4])
 );
 IBUF gowin_buf_113 (
-	.I(serdes_ln0_rxdata_i[5]),
-	.O(ln0_rxdata_o[5])
+	.I(serdes_ln2_rxdata_i[5]),
+	.O(ln2_rxdata_o[5])
 );
 IBUF gowin_buf_114 (
-	.I(serdes_ln0_rxdata_i[6]),
-	.O(ln0_rxdata_o[6])
+	.I(serdes_ln2_rxdata_i[6]),
+	.O(ln2_rxdata_o[6])
 );
 IBUF gowin_buf_115 (
-	.I(serdes_ln0_rxdata_i[7]),
-	.O(ln0_rxdata_o[7])
+	.I(serdes_ln2_rxdata_i[7]),
+	.O(ln2_rxdata_o[7])
 );
 IBUF gowin_buf_116 (
-	.I(serdes_ln0_rxdata_i[10]),
-	.O(ln0_rxdata_o[8])
+	.I(serdes_ln2_rxdata_i[10]),
+	.O(ln2_rxdata_o[8])
 );
 IBUF gowin_buf_117 (
-	.I(serdes_ln0_rxdata_i[11]),
-	.O(ln0_rxdata_o[9])
+	.I(serdes_ln2_rxdata_i[11]),
+	.O(ln2_rxdata_o[9])
 );
 IBUF gowin_buf_118 (
-	.I(serdes_ln0_rxdata_i[12]),
-	.O(ln0_rxdata_o[10])
+	.I(serdes_ln2_rxdata_i[12]),
+	.O(ln2_rxdata_o[10])
 );
 IBUF gowin_buf_119 (
-	.I(serdes_ln0_rxdata_i[13]),
-	.O(ln0_rxdata_o[11])
+	.I(serdes_ln2_rxdata_i[13]),
+	.O(ln2_rxdata_o[11])
 );
 IBUF gowin_buf_120 (
-	.I(serdes_ln0_rxdata_i[14]),
-	.O(ln0_rxdata_o[12])
+	.I(serdes_ln2_rxdata_i[14]),
+	.O(ln2_rxdata_o[12])
 );
 IBUF gowin_buf_121 (
-	.I(serdes_ln0_rxdata_i[15]),
-	.O(ln0_rxdata_o[13])
+	.I(serdes_ln2_rxdata_i[15]),
+	.O(ln2_rxdata_o[13])
 );
 IBUF gowin_buf_122 (
-	.I(serdes_ln0_rxdata_i[16]),
-	.O(ln0_rxdata_o[14])
+	.I(serdes_ln2_rxdata_i[16]),
+	.O(ln2_rxdata_o[14])
 );
 IBUF gowin_buf_123 (
-	.I(serdes_ln0_rxdata_i[17]),
-	.O(ln0_rxdata_o[15])
+	.I(serdes_ln2_rxdata_i[17]),
+	.O(ln2_rxdata_o[15])
 );
 IBUF gowin_buf_124 (
-	.I(serdes_ln0_rxdata_i[8]),
-	.O(ln0_rxk_o[0])
+	.I(serdes_ln2_rxdata_i[8]),
+	.O(ln2_rxk_o[0])
 );
 IBUF gowin_buf_125 (
-	.I(serdes_ln0_rxdata_i[18]),
-	.O(ln0_rxk_o[1])
+	.I(serdes_ln2_rxdata_i[18]),
+	.O(ln2_rxk_o[1])
 );
 IBUF gowin_buf_126 (
-	.I(ln1_fabric_rstn_i),
-	.O(serdes_ln1_fabric_rstn_o)
+	.I(ln3_fabric_rstn_i),
+	.O(serdes_ln3_fabric_rstn_o)
 );
 IBUF gowin_buf_127 (
-	.I(ln1_rx_rst_i),
-	.O(serdes_ln1_rx_rst_o)
+	.I(ln3_rx_rst_i),
+	.O(serdes_ln3_rx_rst_o)
 );
 IBUF gowin_buf_128 (
-	.I(ln1_chbond_start_i),
-	.O(serdes_ln1_chbond_start_o)
+	.I(ln3_chbond_start_i),
+	.O(serdes_ln3_chbond_start_o)
 );
 IBUF gowin_buf_129 (
-	.I(ln1_fabric_rx_clk_i),
-	.O(serdes_ln1_fabric_rx_clk_o)
+	.I(ln3_fabric_rx_clk_i),
+	.O(serdes_ln3_fabric_rx_clk_o)
 );
 IBUF gowin_buf_130 (
-	.I(ln1_rxfifo_rden_i),
-	.O(serdes_ln1_rxfifo_rden_o)
+	.I(ln3_rxfifo_rden_i),
+	.O(serdes_ln3_rxfifo_rden_o)
 );
 IBUF gowin_buf_131 (
-	.I(ln1_tx_rst_i),
-	.O(serdes_ln1_tx_rst_o)
+	.I(ln3_tx_rst_i),
+	.O(serdes_ln3_tx_rst_o)
 );
 IBUF gowin_buf_132 (
-	.I(ln1_fabric_tx_clk_i),
-	.O(serdes_ln1_fabric_tx_clk_o)
+	.I(ln3_fabric_tx_clk_i),
+	.O(serdes_ln3_fabric_tx_clk_o)
 );
 IBUF gowin_buf_133 (
-	.I(ln1_txdata_i[0]),
-	.O(serdes_ln1_txdata_o[0])
+	.I(ln3_txdata_i[0]),
+	.O(serdes_ln3_txdata_o[0])
 );
 IBUF gowin_buf_134 (
-	.I(ln1_txdata_i[1]),
-	.O(serdes_ln1_txdata_o[1])
+	.I(ln3_txdata_i[1]),
+	.O(serdes_ln3_txdata_o[1])
 );
 IBUF gowin_buf_135 (
-	.I(ln1_txdata_i[2]),
-	.O(serdes_ln1_txdata_o[2])
+	.I(ln3_txdata_i[2]),
+	.O(serdes_ln3_txdata_o[2])
 );
 IBUF gowin_buf_136 (
-	.I(ln1_txdata_i[3]),
-	.O(serdes_ln1_txdata_o[3])
+	.I(ln3_txdata_i[3]),
+	.O(serdes_ln3_txdata_o[3])
 );
 IBUF gowin_buf_137 (
-	.I(ln1_txdata_i[4]),
-	.O(serdes_ln1_txdata_o[4])
+	.I(ln3_txdata_i[4]),
+	.O(serdes_ln3_txdata_o[4])
 );
 IBUF gowin_buf_138 (
-	.I(ln1_txdata_i[5]),
-	.O(serdes_ln1_txdata_o[5])
+	.I(ln3_txdata_i[5]),
+	.O(serdes_ln3_txdata_o[5])
 );
 IBUF gowin_buf_139 (
-	.I(ln1_txdata_i[6]),
-	.O(serdes_ln1_txdata_o[6])
+	.I(ln3_txdata_i[6]),
+	.O(serdes_ln3_txdata_o[6])
 );
 IBUF gowin_buf_140 (
-	.I(ln1_txdata_i[7]),
-	.O(serdes_ln1_txdata_o[7])
+	.I(ln3_txdata_i[7]),
+	.O(serdes_ln3_txdata_o[7])
 );
 IBUF gowin_buf_141 (
-	.I(ln1_txk_i[0]),
-	.O(serdes_ln1_txdata_o[8])
+	.I(ln3_txk_i[0]),
+	.O(serdes_ln3_txdata_o[8])
 );
 OBUF gowin_buf_142 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[9])
+	.O(serdes_ln3_txdata_o[9])
 );
 IBUF gowin_buf_143 (
-	.I(ln1_txdata_i[8]),
-	.O(serdes_ln1_txdata_o[10])
+	.I(ln3_txdata_i[8]),
+	.O(serdes_ln3_txdata_o[10])
 );
 IBUF gowin_buf_144 (
-	.I(ln1_txdata_i[9]),
-	.O(serdes_ln1_txdata_o[11])
+	.I(ln3_txdata_i[9]),
+	.O(serdes_ln3_txdata_o[11])
 );
 IBUF gowin_buf_145 (
-	.I(ln1_txdata_i[10]),
-	.O(serdes_ln1_txdata_o[12])
+	.I(ln3_txdata_i[10]),
+	.O(serdes_ln3_txdata_o[12])
 );
 IBUF gowin_buf_146 (
-	.I(ln1_txdata_i[11]),
-	.O(serdes_ln1_txdata_o[13])
+	.I(ln3_txdata_i[11]),
+	.O(serdes_ln3_txdata_o[13])
 );
 IBUF gowin_buf_147 (
-	.I(ln1_txdata_i[12]),
-	.O(serdes_ln1_txdata_o[14])
+	.I(ln3_txdata_i[12]),
+	.O(serdes_ln3_txdata_o[14])
 );
 IBUF gowin_buf_148 (
-	.I(ln1_txdata_i[13]),
-	.O(serdes_ln1_txdata_o[15])
+	.I(ln3_txdata_i[13]),
+	.O(serdes_ln3_txdata_o[15])
 );
 IBUF gowin_buf_149 (
-	.I(ln1_txdata_i[14]),
-	.O(serdes_ln1_txdata_o[16])
+	.I(ln3_txdata_i[14]),
+	.O(serdes_ln3_txdata_o[16])
 );
 IBUF gowin_buf_150 (
-	.I(ln1_txdata_i[15]),
-	.O(serdes_ln1_txdata_o[17])
+	.I(ln3_txdata_i[15]),
+	.O(serdes_ln3_txdata_o[17])
 );
 IBUF gowin_buf_151 (
-	.I(ln1_txk_i[1]),
-	.O(serdes_ln1_txdata_o[18])
+	.I(ln3_txk_i[1]),
+	.O(serdes_ln3_txdata_o[18])
 );
 OBUF gowin_buf_152 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[19])
+	.O(serdes_ln3_txdata_o[19])
 );
 OBUF gowin_buf_153 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[20])
+	.O(serdes_ln3_txdata_o[20])
 );
 OBUF gowin_buf_154 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[21])
+	.O(serdes_ln3_txdata_o[21])
 );
 OBUF gowin_buf_155 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[22])
+	.O(serdes_ln3_txdata_o[22])
 );
 OBUF gowin_buf_156 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[23])
+	.O(serdes_ln3_txdata_o[23])
 );
 OBUF gowin_buf_157 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[24])
+	.O(serdes_ln3_txdata_o[24])
 );
 OBUF gowin_buf_158 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[25])
+	.O(serdes_ln3_txdata_o[25])
 );
 OBUF gowin_buf_159 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[26])
+	.O(serdes_ln3_txdata_o[26])
 );
 OBUF gowin_buf_160 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[27])
+	.O(serdes_ln3_txdata_o[27])
 );
 OBUF gowin_buf_161 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[28])
+	.O(serdes_ln3_txdata_o[28])
 );
 OBUF gowin_buf_162 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[29])
+	.O(serdes_ln3_txdata_o[29])
 );
 OBUF gowin_buf_163 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[30])
+	.O(serdes_ln3_txdata_o[30])
 );
 OBUF gowin_buf_164 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[31])
+	.O(serdes_ln3_txdata_o[31])
 );
 OBUF gowin_buf_165 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[32])
+	.O(serdes_ln3_txdata_o[32])
 );
 OBUF gowin_buf_166 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[33])
+	.O(serdes_ln3_txdata_o[33])
 );
 OBUF gowin_buf_167 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[34])
+	.O(serdes_ln3_txdata_o[34])
 );
 OBUF gowin_buf_168 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[35])
+	.O(serdes_ln3_txdata_o[35])
 );
 OBUF gowin_buf_169 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[36])
+	.O(serdes_ln3_txdata_o[36])
 );
 OBUF gowin_buf_170 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[37])
+	.O(serdes_ln3_txdata_o[37])
 );
 OBUF gowin_buf_171 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[38])
+	.O(serdes_ln3_txdata_o[38])
 );
 OBUF gowin_buf_172 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[39])
+	.O(serdes_ln3_txdata_o[39])
 );
 OBUF gowin_buf_173 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[40])
+	.O(serdes_ln3_txdata_o[40])
 );
 OBUF gowin_buf_174 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[41])
+	.O(serdes_ln3_txdata_o[41])
 );
 OBUF gowin_buf_175 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[42])
+	.O(serdes_ln3_txdata_o[42])
 );
 OBUF gowin_buf_176 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[43])
+	.O(serdes_ln3_txdata_o[43])
 );
 OBUF gowin_buf_177 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[44])
+	.O(serdes_ln3_txdata_o[44])
 );
 OBUF gowin_buf_178 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[45])
+	.O(serdes_ln3_txdata_o[45])
 );
 OBUF gowin_buf_179 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[46])
+	.O(serdes_ln3_txdata_o[46])
 );
 OBUF gowin_buf_180 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[47])
+	.O(serdes_ln3_txdata_o[47])
 );
 OBUF gowin_buf_181 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[48])
+	.O(serdes_ln3_txdata_o[48])
 );
 OBUF gowin_buf_182 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[49])
+	.O(serdes_ln3_txdata_o[49])
 );
 OBUF gowin_buf_183 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[50])
+	.O(serdes_ln3_txdata_o[50])
 );
 OBUF gowin_buf_184 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[51])
+	.O(serdes_ln3_txdata_o[51])
 );
 OBUF gowin_buf_185 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[52])
+	.O(serdes_ln3_txdata_o[52])
 );
 OBUF gowin_buf_186 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[53])
+	.O(serdes_ln3_txdata_o[53])
 );
 OBUF gowin_buf_187 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[54])
+	.O(serdes_ln3_txdata_o[54])
 );
 OBUF gowin_buf_188 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[55])
+	.O(serdes_ln3_txdata_o[55])
 );
 OBUF gowin_buf_189 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[56])
+	.O(serdes_ln3_txdata_o[56])
 );
 OBUF gowin_buf_190 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[57])
+	.O(serdes_ln3_txdata_o[57])
 );
 OBUF gowin_buf_191 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[58])
+	.O(serdes_ln3_txdata_o[58])
 );
 OBUF gowin_buf_192 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[59])
+	.O(serdes_ln3_txdata_o[59])
 );
 OBUF gowin_buf_193 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[60])
+	.O(serdes_ln3_txdata_o[60])
 );
 OBUF gowin_buf_194 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[61])
+	.O(serdes_ln3_txdata_o[61])
 );
 OBUF gowin_buf_195 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[62])
+	.O(serdes_ln3_txdata_o[62])
 );
 OBUF gowin_buf_196 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[63])
+	.O(serdes_ln3_txdata_o[63])
 );
 OBUF gowin_buf_197 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[64])
+	.O(serdes_ln3_txdata_o[64])
 );
 OBUF gowin_buf_198 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[65])
+	.O(serdes_ln3_txdata_o[65])
 );
 OBUF gowin_buf_199 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[66])
+	.O(serdes_ln3_txdata_o[66])
 );
 OBUF gowin_buf_200 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[67])
+	.O(serdes_ln3_txdata_o[67])
 );
 OBUF gowin_buf_201 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[68])
+	.O(serdes_ln3_txdata_o[68])
 );
 OBUF gowin_buf_202 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[69])
+	.O(serdes_ln3_txdata_o[69])
 );
 OBUF gowin_buf_203 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[70])
+	.O(serdes_ln3_txdata_o[70])
 );
 OBUF gowin_buf_204 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[71])
+	.O(serdes_ln3_txdata_o[71])
 );
 OBUF gowin_buf_205 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[72])
+	.O(serdes_ln3_txdata_o[72])
 );
 OBUF gowin_buf_206 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[73])
+	.O(serdes_ln3_txdata_o[73])
 );
 OBUF gowin_buf_207 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[74])
+	.O(serdes_ln3_txdata_o[74])
 );
 OBUF gowin_buf_208 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[75])
+	.O(serdes_ln3_txdata_o[75])
 );
 OBUF gowin_buf_209 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[76])
+	.O(serdes_ln3_txdata_o[76])
 );
 OBUF gowin_buf_210 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[77])
+	.O(serdes_ln3_txdata_o[77])
 );
 OBUF gowin_buf_211 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[78])
+	.O(serdes_ln3_txdata_o[78])
 );
 OBUF gowin_buf_212 (
 	.I(GND),
-	.O(serdes_ln1_txdata_o[79])
+	.O(serdes_ln3_txdata_o[79])
 );
 IBUF gowin_buf_213 (
-	.I(ln1_tx_vld_i),
-	.O(serdes_ln1_tx_vld_o)
+	.I(ln3_tx_vld_i),
+	.O(serdes_ln3_tx_vld_o)
 );
 IBUF gowin_buf_214 (
-	.I(serdes_ln1_cpll_ok_i),
-	.O(ln1_cpll_ok_o)
+	.I(serdes_ln3_cpll_ok_i),
+	.O(ln3_cpll_ok_o)
 );
 IBUF gowin_buf_215 (
-	.I(serdes_ln1_pma_rx_lock_i),
-	.O(ln1_pma_rx_lock_o)
+	.I(serdes_ln3_pma_rx_lock_i),
+	.O(ln3_pma_rx_lock_o)
 );
 IBUF gowin_buf_216 (
-	.I(serdes_ln1_align_link_i),
-	.O(ln1_align_link_o)
+	.I(serdes_ln3_align_link_i),
+	.O(ln3_align_link_o)
 );
 IBUF gowin_buf_217 (
-	.I(serdes_ln1_k_lock_i),
-	.O(ln1_k_lock_o)
+	.I(serdes_ln3_k_lock_i),
+	.O(ln3_k_lock_o)
 );
 IBUF gowin_buf_218 (
-	.I(serdes_ln1_pcs_rx_clk_i),
-	.O(ln1_pcs_rx_clk_o)
+	.I(serdes_ln3_pcs_rx_clk_i),
+	.O(ln3_pcs_rx_clk_o)
 );
 IBUF gowin_buf_219 (
-	.I(serdes_ln1_rxfifo_rdusewd_i[0]),
-	.O(ln1_rxfifo_rdusewd_o[0])
+	.I(serdes_ln3_rxfifo_rdusewd_i[0]),
+	.O(ln3_rxfifo_rdusewd_o[0])
 );
 IBUF gowin_buf_220 (
-	.I(serdes_ln1_rxfifo_rdusewd_i[1]),
-	.O(ln1_rxfifo_rdusewd_o[1])
+	.I(serdes_ln3_rxfifo_rdusewd_i[1]),
+	.O(ln3_rxfifo_rdusewd_o[1])
 );
 IBUF gowin_buf_221 (
-	.I(serdes_ln1_rxfifo_rdusewd_i[2]),
-	.O(ln1_rxfifo_rdusewd_o[2])
+	.I(serdes_ln3_rxfifo_rdusewd_i[2]),
+	.O(ln3_rxfifo_rdusewd_o[2])
 );
 IBUF gowin_buf_222 (
-	.I(serdes_ln1_rxfifo_rdusewd_i[3]),
-	.O(ln1_rxfifo_rdusewd_o[3])
+	.I(serdes_ln3_rxfifo_rdusewd_i[3]),
+	.O(ln3_rxfifo_rdusewd_o[3])
 );
 IBUF gowin_buf_223 (
-	.I(serdes_ln1_rxfifo_rdusewd_i[4]),
-	.O(ln1_rxfifo_rdusewd_o[4])
+	.I(serdes_ln3_rxfifo_rdusewd_i[4]),
+	.O(ln3_rxfifo_rdusewd_o[4])
 );
 IBUF gowin_buf_224 (
-	.I(serdes_ln1_rxfifo_aempty_i),
-	.O(ln1_rxfifo_aempty_o)
+	.I(serdes_ln3_rxfifo_aempty_i),
+	.O(ln3_rxfifo_aempty_o)
 );
 IBUF gowin_buf_225 (
-	.I(serdes_ln1_rxfifo_empty_i),
-	.O(ln1_rxfifo_empty_o)
+	.I(serdes_ln3_rxfifo_empty_i),
+	.O(ln3_rxfifo_empty_o)
 );
 IBUF gowin_buf_226 (
-	.I(serdes_ln1_pcs_tx_clk_i),
-	.O(ln1_pcs_tx_clk_o)
+	.I(serdes_ln3_pcs_tx_clk_i),
+	.O(ln3_pcs_tx_clk_o)
 );
 IBUF gowin_buf_227 (
-	.I(serdes_ln1_txfifo_wrusewd_i[0]),
-	.O(ln1_txfifo_wrusewd_o[0])
+	.I(serdes_ln3_txfifo_wrusewd_i[0]),
+	.O(ln3_txfifo_wrusewd_o[0])
 );
 IBUF gowin_buf_228 (
-	.I(serdes_ln1_txfifo_wrusewd_i[1]),
-	.O(ln1_txfifo_wrusewd_o[1])
+	.I(serdes_ln3_txfifo_wrusewd_i[1]),
+	.O(ln3_txfifo_wrusewd_o[1])
 );
 IBUF gowin_buf_229 (
-	.I(serdes_ln1_txfifo_wrusewd_i[2]),
-	.O(ln1_txfifo_wrusewd_o[2])
+	.I(serdes_ln3_txfifo_wrusewd_i[2]),
+	.O(ln3_txfifo_wrusewd_o[2])
 );
 IBUF gowin_buf_230 (
-	.I(serdes_ln1_txfifo_wrusewd_i[3]),
-	.O(ln1_txfifo_wrusewd_o[3])
+	.I(serdes_ln3_txfifo_wrusewd_i[3]),
+	.O(ln3_txfifo_wrusewd_o[3])
 );
 IBUF gowin_buf_231 (
-	.I(serdes_ln1_txfifo_wrusewd_i[4]),
-	.O(ln1_txfifo_wrusewd_o[4])
+	.I(serdes_ln3_txfifo_wrusewd_i[4]),
+	.O(ln3_txfifo_wrusewd_o[4])
 );
 IBUF gowin_buf_232 (
-	.I(serdes_ln1_txfifo_afull_i),
-	.O(ln1_txfifo_afull_o)
+	.I(serdes_ln3_txfifo_afull_i),
+	.O(ln3_txfifo_afull_o)
 );
 IBUF gowin_buf_233 (
-	.I(serdes_ln1_txfifo_full_i),
-	.O(ln1_txfifo_full_o)
+	.I(serdes_ln3_txfifo_full_i),
+	.O(ln3_txfifo_full_o)
 );
 IBUF gowin_buf_234 (
-	.I(serdes_ln1_rxdata_i[0]),
-	.O(ln1_rxdata_o[0])
+	.I(serdes_ln3_rxdata_i[0]),
+	.O(ln3_rxdata_o[0])
 );
 IBUF gowin_buf_235 (
-	.I(serdes_ln1_rxdata_i[1]),
-	.O(ln1_rxdata_o[1])
+	.I(serdes_ln3_rxdata_i[1]),
+	.O(ln3_rxdata_o[1])
 );
 IBUF gowin_buf_236 (
-	.I(serdes_ln1_rxdata_i[2]),
-	.O(ln1_rxdata_o[2])
+	.I(serdes_ln3_rxdata_i[2]),
+	.O(ln3_rxdata_o[2])
 );
 IBUF gowin_buf_237 (
-	.I(serdes_ln1_rxdata_i[3]),
-	.O(ln1_rxdata_o[3])
+	.I(serdes_ln3_rxdata_i[3]),
+	.O(ln3_rxdata_o[3])
 );
 IBUF gowin_buf_238 (
-	.I(serdes_ln1_rxdata_i[4]),
-	.O(ln1_rxdata_o[4])
+	.I(serdes_ln3_rxdata_i[4]),
+	.O(ln3_rxdata_o[4])
 );
 IBUF gowin_buf_239 (
-	.I(serdes_ln1_rxdata_i[5]),
-	.O(ln1_rxdata_o[5])
+	.I(serdes_ln3_rxdata_i[5]),
+	.O(ln3_rxdata_o[5])
 );
 IBUF gowin_buf_240 (
-	.I(serdes_ln1_rxdata_i[6]),
-	.O(ln1_rxdata_o[6])
+	.I(serdes_ln3_rxdata_i[6]),
+	.O(ln3_rxdata_o[6])
 );
 IBUF gowin_buf_241 (
-	.I(serdes_ln1_rxdata_i[7]),
-	.O(ln1_rxdata_o[7])
+	.I(serdes_ln3_rxdata_i[7]),
+	.O(ln3_rxdata_o[7])
 );
 IBUF gowin_buf_242 (
-	.I(serdes_ln1_rxdata_i[10]),
-	.O(ln1_rxdata_o[8])
+	.I(serdes_ln3_rxdata_i[10]),
+	.O(ln3_rxdata_o[8])
 );
 IBUF gowin_buf_243 (
-	.I(serdes_ln1_rxdata_i[11]),
-	.O(ln1_rxdata_o[9])
+	.I(serdes_ln3_rxdata_i[11]),
+	.O(ln3_rxdata_o[9])
 );
 IBUF gowin_buf_244 (
-	.I(serdes_ln1_rxdata_i[12]),
-	.O(ln1_rxdata_o[10])
+	.I(serdes_ln3_rxdata_i[12]),
+	.O(ln3_rxdata_o[10])
 );
 IBUF gowin_buf_245 (
-	.I(serdes_ln1_rxdata_i[13]),
-	.O(ln1_rxdata_o[11])
+	.I(serdes_ln3_rxdata_i[13]),
+	.O(ln3_rxdata_o[11])
 );
 IBUF gowin_buf_246 (
-	.I(serdes_ln1_rxdata_i[14]),
-	.O(ln1_rxdata_o[12])
+	.I(serdes_ln3_rxdata_i[14]),
+	.O(ln3_rxdata_o[12])
 );
 IBUF gowin_buf_247 (
-	.I(serdes_ln1_rxdata_i[15]),
-	.O(ln1_rxdata_o[13])
+	.I(serdes_ln3_rxdata_i[15]),
+	.O(ln3_rxdata_o[13])
 );
 IBUF gowin_buf_248 (
-	.I(serdes_ln1_rxdata_i[16]),
-	.O(ln1_rxdata_o[14])
+	.I(serdes_ln3_rxdata_i[16]),
+	.O(ln3_rxdata_o[14])
 );
 IBUF gowin_buf_249 (
-	.I(serdes_ln1_rxdata_i[17]),
-	.O(ln1_rxdata_o[15])
+	.I(serdes_ln3_rxdata_i[17]),
+	.O(ln3_rxdata_o[15])
 );
 IBUF gowin_buf_250 (
-	.I(serdes_ln1_rxdata_i[8]),
-	.O(ln1_rxk_o[0])
+	.I(serdes_ln3_rxdata_i[8]),
+	.O(ln3_rxk_o[0])
 );
 IBUF gowin_buf_251 (
-	.I(serdes_ln1_rxdata_i[18]),
-	.O(ln1_rxk_o[1])
+	.I(serdes_ln3_rxdata_i[18]),
+	.O(ln3_rxk_o[1])
 );
 IBUF gowin_buf_252 (
 	.I(drp_clk_i),

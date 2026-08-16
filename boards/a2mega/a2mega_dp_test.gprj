@@ -6,10 +6,10 @@
     <Device name="GW5AT-60B" pn="GW5AT-LV60PG484AC1/I0">gw5at60b-002</Device>
     <FileList>
         <File path="hdl/dp_gowin_defines.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/60B/dp_serdes/edp_phy/edp_phy.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/60B/dp_serdes/dp_serdes.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/60B/dp_serdes/upar_arbiter/upar_arbiter.v" type="file.verilog" enable="1"/>
         <File path="hdl/dp_test/a2mega_dp_test_top.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/dp_serdes/dp_serdes.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/dp_serdes/edp_phy/edp_phy.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/dp_serdes/upar_arbiter/upar_arbiter.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/audio/audio_sample_buffer.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/audio/maud_measure.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/audio/sdp_engine.v" type="file.verilog" enable="1"/>
@@ -30,9 +30,9 @@
         <File path="../../hdl/displayport/dp_transmitter.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/benz_encode.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/enc_8b10b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/gowin_plls.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/lane_encoder_8b10b.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/transceiver_bank_gowin.v" type="file.verilog" enable="1"/>
-        <File path="../../hdl/displayport/gowin/gowin_plls.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/video/dp_video_timing.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/video/msa_inserter_1ch.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/video/msa_inserter_2ch.v" type="file.verilog" enable="1"/>

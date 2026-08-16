@@ -11,23 +11,12 @@
 
 
 -global_reset enable
--protocol_module_name0 dp_phy
--dp_phyprotocol_module_type customized
--dp_phyQ0Lane2 true
--dp_phyQ0Lane3 true
--dp_phyClock_Correction None
--dp_phyWord_Alignment false
--dp_phyRX_Channel_Bonding None
--dp_phyEnableDRP true
--dp_phyDRPPorts true
--dp_phyTX_Encoding_Mode OFF
--dp_phyRX_Decoding_Mode OFF
--protocol_module_name1 edp_phy
+-protocol_module_name0 edp_phy
 -edp_phyprotocol_module_type edpphy
--edp_phyReferenceClockSource Q0REFCLK0
--edp_phyPLLSource QPLL1
--edp_phyQ0Lane0 true
--edp_phyQ0Lane1 true
+-edp_phyReferenceClockSource Q0REFCLK1
+-edp_phyPLLSource QPLL0
+-edp_phyQ0Lane2 true
+-edp_phyQ0Lane3 true
 -edp_phyTXUserClockRatio 1:20
 -edp_phyRXUserClockRatio 1:20
 -edp_phyEnableDRP true
