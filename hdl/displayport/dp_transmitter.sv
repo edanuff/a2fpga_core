@@ -465,31 +465,39 @@ module dp_transmitter #(
     // release and let the ladder retrain. Budget WDOG_CAP attempts,
     // re-armed on success. debug_wdog = {forcing, attempts[2:0]}.
     // ------------------------------------------------------------------
-    localparam int WDOG_GRACE = 400_000_000;  // 4 s   @ clk100
+    // Grace accumulates whenever the PHY is powered but the sink is not
+    // streaming, and is NOT reset by link drops - a bad draw can express
+    // as stable-dark (established, K=0) OR as endless flap (teardown
+    // every few seconds); only genuine streaming clears the timer. On a
+    // healthy boot the sink streams within a few seconds of power, well
+    // inside the grace; a slow-EQ boot that eats a spurious restart just
+    // re-rolls and still converges (budget re-arms on streaming).
+    localparam int WDOG_GRACE = 800_000_000;  // 8 s   @ clk100
     localparam int WDOG_DWELL = 200_000;      // 2 ms  @ clk100
     localparam int WDOG_CAP   = 7;
     logic        wdog_force = 1'b0;
     logic [2:0]  wdog_count = 3'd0;
-    logic [28:0] wdog_timer = 29'd0;
+    logic [30:0] wdog_timer = 31'd0;
+    wire wdog_streaming = tx_link_established && (debug_sink[1:0] != 2'b00);
     always_ff @(posedge clk100) begin
         if (wdog_force) begin
-            wdog_timer <= wdog_timer + 29'd1;
-            if (wdog_timer >= 29'(WDOG_DWELL)) begin
+            wdog_timer <= wdog_timer + 31'd1;
+            if (wdog_timer >= 31'(WDOG_DWELL)) begin
                 wdog_force <= 1'b0;
-                wdog_timer <= 29'd0;
+                wdog_timer <= 31'd0;
             end
-        end else if (tx_link_established && debug_sink[1:0] == 2'b00) begin
-            wdog_timer <= wdog_timer + 29'd1;
-            if (wdog_timer >= 29'(WDOG_GRACE) && wdog_count != 3'(WDOG_CAP)) begin
+        end else if (wdog_streaming) begin
+            wdog_timer <= 31'd0;
+            wdog_count <= 3'd0;              // streaming - re-arm the budget
+        end else if (tx_powerup_channel != 4'b0000) begin
+            wdog_timer <= wdog_timer + 31'd1;
+            if (wdog_timer >= 31'(WDOG_GRACE) && wdog_count != 3'(WDOG_CAP)) begin
                 wdog_force <= 1'b1;
-                wdog_timer <= 29'd0;
+                wdog_timer <= 31'd0;
                 wdog_count <= wdog_count + 3'd1;
             end
-        end else begin
-            wdog_timer <= 29'd0;
-            if (tx_link_established && debug_sink[1:0] != 2'b00)
-                wdog_count <= 3'd0;      // streaming - re-arm the budget
         end
+        // PHY unpowered (no HPD/partner): timer simply holds; nothing fires
     end
     logic [1:0] bank_powerup;
     assign bank_powerup = wdog_force ? 2'b00 : tx_powerup_channel[1:0];
