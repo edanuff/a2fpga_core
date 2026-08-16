@@ -884,3 +884,27 @@ Depth per IPUG1024 p.21), then drive the bonding trigger after lane
 release. Acceptance: 5/5 fresh-boot cycles lit + flip-kill recovery.
 Current flash: reverted round-19-equivalent (stable retrains, AUDIO OFF —
 re-enable AUDIO_ENABLE=1 after the bonding fix validates).
+
+## 2026-08-16 — EDP PHY adoption build #1
+
+- Base commit: 8b39a9ee (+ this log entry); toolchain gw_sh V1.9.12.01
+- `impl/pnr/a2mega_dp_test.fs` sha256 `878e5498704b412f0e2dae2e9cc36da5e8e7e24fd1ae27a669623f3e3b5de248`
+  (18,275,231 bytes, Compress OFF, SecurityBit OFF, CRC ON)
+- Timing: 0 setup / 0 hold violated endpoints (9010 analyzed);
+  clk_sym 143.4 MHz actual vs 135.0 constraint; clk50/clk100/clk_pix/cm_life all pass
+- Netlist audit: `edp_phy_inst` "swept" warning = benign flattening of the
+  pure-wiring interposer; GTR12_QUADA FABRIC_LN2/LN3_TXDATA_I confirmed driven
+  by tx_symbols word lanes 1/0 with K flags at bits 8/18, 62 constant bits each
+  (60 unused + 2 invalid-bit slots) — exact expected packing
+- Config swap deltas vs Customized PHY (same physical lanes 2/3): ln3 tx_if FIFO
+  un-chained (self-mastered; half-bond defect gone), hardened 8b10b + RX word
+  align, loopback TX_ONLY->OFF, rd_start_depth 16->8. pcs_tx_clk_src proved to
+  be position-dependent plumbing (pair 0/1 emits 2, pair 2/3 emits 1 under both
+  IPs) — NOT the shared-clock flag of the earlier root-cause note; the fix is
+  the un-chained FIFOs + single-fabric-clock architecture + reference reset
+  cadence (fabric_rstn -> tx_rst ~21 ms, tx_vld tied 1)
+- Semantic delta on the wire: TPS2 initial K28.5 disparity phase no longer
+  forced to RD- (period is disparity-self-sustaining; Gowin's own encoder
+  ships without disparity control)
+- Next: flash (IIgs OFF, board on Mac), then acceptance: 5x fresh power
+  cycles, flip-kill recovery, 15-min soak; then AUDIO_ENABLE=1
