@@ -952,3 +952,36 @@ report) -> replug -> flash_rescue SRAM erase (J:EF4017, E:B->E:D) -> replug
 - Loader fix list (upstream + local): (1) erase-whole-image first or kill
   auto-boot before write session; (2) stretch erase-phase wait; (3) chunked
   write with readback-retry; (4) keep honest empty-chain reporting.
+
+## 2026-08-16 — plan C acceptance: 4/5 boots, frozen-draw model refined
+
+Un-chained Customized PHY (build d8c22f27), hub powered throughout, cable
+orientation fixed logo-up, boot-with-partner-attached:
+- 15-min soak on converged link: 10/10 golden (D:2E L:F G:F1 K:03). Every
+  soak ever run has been clean — steady-state SI is NOT the problem.
+- 5-cycle boot test: PASS/FAIL/PASS/PASS/PASS = 4/5 (baseline chained
+  config measured 2/5 yesterday; n too small to call the odds improved,
+  but the FAILURE MODE transformed: bad boot now trains fully and holds a
+  STABLE link with clean K:00 (sink: no valid stream) instead of
+  doom-loop churn — cleanly detectable).
+- Bad-draw remedies tested IN-SESSION, all negative: 5x flip-kill retrain,
+  mux EN bounce, hub-only power cycle (hub re-attach changed expression
+  stable-dark->flap but no recovery). The frozen variable survives PMA/PCS
+  resets, por_n, mux re-init, partner re-attach; re-rolls ONLY on board
+  power cycle -> cornered to the GTR12 QUAD COMMON BLOCK (QPLL/divider
+  init state), drawn once per powered session.
+- Un-chaining did NOT remove the draw; it decoupled the doom-loop
+  (retrains no longer correlated-WORSE) and made bad draws observable.
+  The old chained "winning streak" on the USB-C monitor is attributed to
+  that sink's generous deskew tolerance + blind mode never tearing down.
+- Capture-tooling note: telnet reconnects can replay a stale buffer —
+  ALWAYS verify F: (frame counter) progresses across two reads before
+  trusting a "same state" conclusion.
+
+NEXT (decision pending): (a) auto-recovery build — fabric self-reconfig
+hook (Gowin CONFIG/reload primitive) commanded via ESP32 scratch reg +
+both-lane txfifo wrusewd telemetry; firmware loop: K:00 after training ->
+trigger reconfig (~2-3 s) -> re-check; at 80%/draw converges in ~1.25
+draws. (b) closed-loop-with-blind-fallback ladder for full core (serves
+monitors' invisible replies too). (c) Gowin ticket: half-bond emission,
+hardened-8b10b no-symbol-lock forensics, common-block draw.
