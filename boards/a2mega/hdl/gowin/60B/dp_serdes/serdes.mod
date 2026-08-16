@@ -22,3 +22,13 @@
 -dp_phyDRPPorts true
 -dp_phyTX_Encoding_Mode OFF
 -dp_phyRX_Decoding_Mode OFF
+-protocol_module_name1 edp_phy
+-edp_phyprotocol_module_type edpphy
+-edp_phyReferenceClockSource Q0REFCLK0
+-edp_phyPLLSource QPLL1
+-edp_phyQ0Lane0 true
+-edp_phyQ0Lane1 true
+-edp_phyTXUserClockRatio 1:20
+-edp_phyRXUserClockRatio 1:20
+-edp_phyEnableDRP true
+-edp_phyDRPPorts true
