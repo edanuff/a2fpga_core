@@ -56,7 +56,9 @@ extern "C" {
  * enough to wreck the redriven eye at 2.7 Gb/s. EQ_OVERRIDE + low
  * register EQ is mandatory in I2C mode; SPEC.md always said EQ is
  * "register-settable instead of strap resistors". Setting 0 = 1.0 dB. */
-static uint8_t s_dp_eq_setting = 0;
+static uint8_t s_dp_eq_setting = 3;  /* 6.5 dB — hard-reacquisition sweep
+    2026-08-15 (flip-kill x4/preset): 6.5dB=4/4, 1.0dB=3/4, 12.3dB=2/4,
+    9.5dB=1/4. Raises the training-convergence odds on converter sinks. */
 
 static usbc_port_t s_port;
 static SemaphoreHandle_t s_wake;

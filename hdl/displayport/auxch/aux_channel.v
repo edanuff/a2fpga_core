@@ -75,6 +75,7 @@ module aux_channel #(
         input        clk,
         output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
         output [7:0] debug_gate,  // {locks@check_wait[3:0], gate_fails[1:0], timeouts[1:0]}
+        output [7:0] debug_sink,  // DPCD 0x205 SINK_STATUS (latched each status read)
         output [15:0] debug_rx,   // = {last byte, sync hits, rx bytes} from aux_interface
         //------------------------------
         output reg   edid_de,
@@ -204,6 +205,13 @@ module aux_channel #(
     reg [1:0] dbg_gate_fail  = 2'd0;
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
+    assign debug_sink = dbg_sink_status;
+    // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
+    // read): bit0/1 = RECEIVE_PORT_0/1 "sink is receiving a valid main
+    // stream". Splits dark-screen-with-solid-link: 0 = our MSA/stream
+    // rejected (source side); 1 = sink sees the stream, its output stage
+    // is the problem (converter/HDCP side).
+    reg [7:0] dbg_sink_status = 8'd0;
     wire equ_locked_i    = equ_locked    | (BLIND_SINK != 0);
     wire symbol_locked_i = symbol_locked | (BLIND_SINK != 0);
     wire align_locked_i  = align_locked  | (BLIND_SINK != 0);
@@ -630,7 +638,9 @@ always @(posedge clk) begin
 
                 aux_data   <= aux_rx_data;
                 aux_addr   <= aux_addr_i;
-                aux_addr_i <= aux_addr_i+1;                        
+                aux_addr_i <= aux_addr_i+1;
+                if(status_de_active == 1'b1 && aux_addr_i == 8'd5)
+                    dbg_sink_status <= aux_rx_data;                        
                         
                 if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
                     next_state <= state_on_success;

@@ -789,3 +789,33 @@ ZERO-BUILD DISCRIMINATOR QUEUED: stone-cold board, exact boot recipe,
 first thing next session. Monitor-direct non-working is EXPECTED on
 closed-loop builds (offset-invisible replies) — production wants
 closed-loop with blind-ladder fallback on presence timeout.
+
+## 2026-08-15 evening: stability SOLVED as a model; two concrete findings
+
+**The lottery model (confirmed):** link training is an EQ-convergence
+lottery; a converged link is stable INDEFINITELY (15-min hands-off soak:
+zero drops). "Cycling" = losing streaks of the retrain lottery;
+perturbations (HDMI hotplug etc.) just force new draws. Nothing was
+thermal, nothing was sticky state, no component was bad.
+
+**Finding 1 — EQ preset odds (hard re-acquisition via mux flip-kill,
+4 trials/preset):** 6.5dB=4/4, 1.0dB=3/4, 12.3dB=2/4, 9.5dB=1/4.
+Firmware default now 6.5 dB (was 1.0). Soft retrains ('r' on a settled
+link) converge 20/20 at ANY preset and don't even flicker the screen —
+the lottery only exists at true re-acquisition.
+
+**Finding 2 — video-restart-after-retrain BUG (blocks in-session
+recovery):** any in-session retrain leaves the link perfect (D:2E, L:F,
+G: clean) but the sink permanently reports SINK_STATUS=0 (K:00, "no
+valid stream") until a full board reboot; boots deliver K:03 + picture.
+Explains ALL "attach luck": boots whose first training attempt converged
+show video; boots that retrained even once come up dark. Suspects: VB-ID
+/MSA sequencing or scrambler-reset behavior on re-establishment in the
+stream engine (idle_pattern_inserter already does a 64k-symbol idle dwell
+and resets on channel drop — not the naive cause). NEXT: reproduce in
+SIMULATION (core has testbenches; replay a mid-stream retrain, inspect
+idle->video transition, VB-ID, MSA emission) — no hardware needed.
+
+**Golden signature (healthy streaming link): L:F G:F1 K:03.**
+Telemetry fields now: D: ladder state, HLVC, E:{sync,bytes} R:last-byte
+L:live-locks G:{gate-locks,fails,timeouts} K:SINK_STATUS(0x205).

@@ -67,6 +67,7 @@ module channel_management #(
         output [15:0] debug_rx,  // AUX RX: {last byte, sync hits, accepted bytes} (registered)
         output [3:0]  debug_locks, // {clock,equ,symbol,align}_locked (registered)
         output [7:0]  debug_gate,  // latched-at-gate locks + fail/timeout counters
+        output [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
 
         input   hpd,
         input   auxch_in,
@@ -203,6 +204,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
         .clk             (clk100),
         .debug_pmod      (debug),
         .debug_gate      (debug_gate),
+        .debug_sink      (debug_sink),
         .debug_rx        (debug_rx_w),
          //------------------------------
         .edid_de         (edid_de),
