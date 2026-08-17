@@ -1,0 +1,73 @@
+# a2mega DP test log
+
+Structured record of every hardware test. **Protocol: no test result is
+reported or acted on unless it has a row here.** The bringup log
+(`bringup_1_0a3_log.md`) stays the narrative journal; this file is the
+scannable ground truth.
+
+## Column key
+
+- **#**: test id (monotonic)
+- **GW**: FPGA bitstream — sha256 prefix of the flashed `.fs` (git-committed)
+- **FW**: ESP32 firmware — commit hash it was built from
+- **Sink**: `mon` (USB-C monitor direct) / `hubA` (Anker A8365 → HDMI) /
+  other (add to roster below)
+- **Cable**: id from the cable roster below
+- **Orient**: plug orientation as *detected* (`CC1`/`CC2` from PD telemetry),
+  or `?` if not captured. "logo-up" style notes go in Notes.
+- **Brk**: USB-C breakout inline? `Y`/`N` — **load-bearing variable** (AUX
+  attenuation), never omit
+- **Pwr**: board power source — `mon` (monitor VBUS, replugs = power cycle)
+  / `slot` (IIgs) / `mac` (USB bench)
+- **EQ**: mux DP RX EQ in dB at test time (fw default unless cycled;
+  RESETS to fw default on every board power-up)
+- **Kind**: `cold` (power-on with partner attached) / `hot` (partner
+  attached after boot) / `retrain` (in-session) / `soak`
+- **Result**: `LIT` / `DARK` / partial; add golden-signature state for
+  closed-loop builds (`K:03` etc.)
+
+## Cable roster
+
+| id | len | markings | Treedix CC | notes |
+|----|-----|----------|-----------|-------|
+| C1 | 6ft | USB3.2/USB4 Gen2 20G, 50V5A | CC1=1K, CC2=open | the "good" cable |
+| C2 | 3ft | USB3.2/USB4 Gen2 20G, 20V5A | CC1=open, CC2=1K | low loss (short) |
+| C3 | 6ft | USB4 Gen3 40G EPR, 20V5A | CC1=open, CC2=1K | premium/low loss |
+
+Treedix = continuity/pin-map only; it CANNOT see channel loss or SI.
+All three cables: all pins green incl. SBU; duplicate D+/D- red (normal).
+
+## Build roster (flashed images referenced below)
+
+| GW sha | built | config |
+|--------|-------|--------|
+| 5d8e15f0 | Fri 08-14 07:46 (a77e2422) | dp_test 2-lane HBR, CHAINED IP, pseudo-diff AUX, blind, 804mV. SecurityBit ON (pre-discovery) |
+| d8c22f27 | Sat 08-16 | dp_test 2-lane HBR "plan C" un-chained, TLVDS AUX, closed-loop |
+| 55571daf | Sun 08-16 | plan-C 2-lane + TLVDS + blind forced (lottery-check v2) |
+| 74759364 | Sun 08-16 | CHAINED IP + pseudo-diff + blind (lottery-check v3 = streak replica) |
+
+## Firmware roster
+
+| FW | date | key properties |
+|----|------|----------------|
+| 98461af3 | Fri 08-14 17:15 | end-of-Friday. EQ default 1.0dB. Fri-PM source-role PD (VCONN/Rp/VBUS). Telemetry: short DP line (S/D/F/HLVC/P/E). NO: R/L/G/K/W/U fields, 'j','b' keys. In-slot hotplug: reported NOT working (user) |
+| HEAD (10a4bf80+) | Sun 08-16 | EQ default 6.5dB. Full telemetry (R/L/G/K/W/U), VDM diag, jtag-toggle, muxbounce. Monitor-direct guilt UNPROVEN (confounded tests only) |
+
+## Test table
+
+Weekend backfill: only rows with certain provenance; `?` = not recorded
+(the confounds that cost us two days). Rigor starts at #10.
+
+| # | date | GW | FW | Sink | Cable | Orient | Brk | Pwr | EQ | Kind | Result | Notes |
+|---|------|----|----|------|-------|--------|-----|-----|----|------|--------|-------|
+| 1 | 08-14 AM | 5d8e15f0 | (Fri AM) | mon | ? | both | **Y** | mon? | 1.0 | cold+hot | LIT both orientations | "streak" era; 30-min soak passed; breakout inline ALL Friday |
+| 2 | 08-15→16 | various | Sat/Sun | hubA | ? | ? | N | slot | 1.0→6.5 | many | mixed (2/5, 4/5, soaks clean) | closed-loop era; boot-draw model built here; cable/orientation unlogged |
+| 3 | 08-16 night | 55571daf | HEAD | mon | ? | ? | N | mon | 6.5 | cold ×2 | DARK 0/2 | TLVDS pad confound |
+| 4 | 08-16 night | 74759364 | HEAD | ? | ? | ? | N | mon | 6.5→1.0 live | cold ×3 + EQ | DARK 0/3 | streak-replica GW but TODAY's fw |
+| 5 | 08-16 night | 5d8e15f0 | HEAD | mon | ? | ? | N | mon | 6.5 | cold | DARK | "Friday binary" test — fw not reverted (invalid as Friday repro) |
+| 6 | 08-16 night | 5d8e15f0 | 98461af3 | mon | C1? | one | N | mon | 1.0 | cold ×1 + replug ×5 | LIT 5/5 | BREAKTHROUGH row; one orientation only |
+| 7 | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C1 | ? | N | mon | 1.0 | cold ×5 | LIT 4/5 | cold morning |
+| 8 | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C2,C3 | both | N | mon | 1.0/6.5/9.5/12.3 | cold+EQ steps | DARK all | full EQ range dark on C3 both orientations |
+| 9 | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C3 | **both** | **Y** | mon | 1.0 | cold | **LIT both orientations** | ROOT CAUSE row: AUX overdrive needs attenuation |
+
+<!-- new rows below; never reuse ids -->
