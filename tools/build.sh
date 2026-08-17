@@ -13,6 +13,10 @@
 #   GPRJ      project file name to use when a board dir has more than one
 #             .gprj (e.g. GPRJ=a2n20v2_enhanced_dualrate.gprj); default is
 #             the first one alphabetically
+#   BUILD_TIMEOUT  wall-time cap in seconds (default 1800). A healthy full
+#             build is ~15 min; a placer that runs past 30 min is thrashing
+#             (region constraints have produced 9-HOUR runs) and gets
+#             killed with a loud failure instead of eating the day.
 #   DRY_RUN=1 print what would run without invoking gw_sh
 #
 # Notes:
@@ -68,7 +72,39 @@ fi
 
 start_epoch="$(date +%s)"
 buildlog="$(mktemp "${TMPDIR:-/tmp}/a2fpga_build.XXXXXX")"
-( cd "$bdir" && printf 'open_project %s\n%s\nexit\n' "$gprj" "$run" | "$GW_SH" ) | tee "$buildlog"
+BUILD_TIMEOUT="${BUILD_TIMEOUT:-1800}"
+
+# Run gw_sh under a wall-time cap (macOS has no coreutils `timeout`).
+CAFF=""
+[[ "$(uname)" == "Darwin" ]] && command -v caffeinate >/dev/null && CAFF="caffeinate -i"
+( cd "$bdir" && printf 'open_project %s\n%s\nexit\n' "$gprj" "$run" | $CAFF "$GW_SH" ) | tee "$buildlog" &
+build_pid=$!
+(
+    slept=0
+    while kill -0 "$build_pid" 2>/dev/null && [[ $slept -lt $BUILD_TIMEOUT ]]; do
+        sleep 10; slept=$((slept+10))
+    done
+    if kill -0 "$build_pid" 2>/dev/null; then
+        echo "!! BUILD_TIMEOUT: exceeded ${BUILD_TIMEOUT}s wall time — killing gw_sh (placer thrash?)" | tee -a "$buildlog"
+        pkill -P "$build_pid" 2>/dev/null
+        kill "$build_pid" 2>/dev/null
+        # gw_sh detaches from the subshell pipeline; make sure it dies too
+        pkill -x gw_sh 2>/dev/null
+    fi
+) &
+watchdog_pid=$!
+wait "$build_pid" 2>/dev/null
+kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null
+
+if grep -q 'BUILD_TIMEOUT' "$buildlog"; then
+    echo
+    echo "!! Build KILLED after exceeding BUILD_TIMEOUT=${BUILD_TIMEOUT}s."
+    echo "   A healthy full build is ~15 min. Do not just raise the timeout:"
+    echo "   look for what made PnR pathological (e.g. GROUP/GRP_LOC region"
+    echo "   constraints — see the note in boards/a2mega/hdl/a2mega.cst)."
+    rm -f "$buildlog"
+    exit 5
+fi
 
 # gw_sh exits 0 even when synthesis/PnR fail — detect ERROR lines ourselves.
 if grep -qE '^ERROR' "$buildlog"; then

@@ -11,17 +11,27 @@
  *   - USB JTAG bridge for PC-driven FPGA programming (openFPGALoader)
  *   - Serial forwarding to FPGA; CLI mode for diagnostics ("+++")
  *
- * Board: a2mega (ESP32-S3-MINI-1-N8, 8 MB flash, no PSRAM)
+ * Board: a2mega. The ESP32 module varies by board revision (board_pins.h):
+ *   1.0a3   ESP32-S3-MINI-1-N4R2 — 4 MB flash + 2 MB quad PSRAM (same
+ *           module as the a2p25; PSRAM available for large buffers)
+ *   1.0a2x  ESP32-S3-MINI-1-N8   — 8 MB flash, no PSRAM
  *
- * Arduino IDE Settings:
+ * Arduino IDE Settings (the Makefile encodes these per revision):
  *   - Board: ESP32S3 Dev Module
  *   - USB Mode: Hardware CDC and JTAG
  *   - USB CDC On Boot: Enabled
  *   - CPU Frequency: 240MHz
+ *   - Flash/PSRAM/Partitions: per module above (1.0a3: 4M, PSRAM enabled,
+ *     no_ota; 1.0a2x: 8M, PSRAM disabled, default_8MB)
  */
 
 #include <Arduino.h>
+#include "board_pins.h"
+#if A2MEGA_HAS_SD
 #include <SD_MMC.h>
+#else
+#include <LittleFS.h>
+#endif
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h"
 #include "a2fpga_jtag.h"
@@ -38,6 +48,8 @@
 #include "fpga_jtag.h"
 #include "fpgaupdate.h"
 #include "ftpd.h"
+#include "telnetd.h"
+#include "usbc_glue.h"
 #include "esp_err.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -45,44 +57,24 @@
 #include <stdlib.h>
 
 // ============================================================================
-// Pin Assignments (a2-mega schematic p.3, "ESP32 & I/O")
+// Pin Assignments — see board_pins.h (revision-selected: 1.0a2a vs 1.0a3)
 // ============================================================================
 
-// Serial interface to the FPGA
-#define PIN_RXD  44
-#define PIN_TXD  43
+#include "board_pins.h"
+
 #define BAUD 115200
-
-// Configuration done signal from the FPGA
-#define PIN_FPGA_DONE  48
-
-// JTAG interface to the FPGA (shared: USB bridge and fpga_jtag.c self-update)
-const int PIN_TCK  = 40;
-const int PIN_TMS  = 41;
-const int PIN_TDI  = 42;
-const int PIN_TDO  = 45;
-const int PIN_SRST = 3;  // unused and unconnected, but required by the JTAG bridge
-
-// Micro-SD slot (4-bit SDMMC)
-#define PIN_SD_CLK  37
-#define PIN_SD_CMD  36
-#define PIN_SD_D0   38
-#define PIN_SD_D1   39
-#define PIN_SD_D2   35   // verify at bring-up (schematic pin 31 net inferred)
-#define PIN_SD_D3   34
-#define PIN_SD_DET  46   // low when a card is inserted
 
 // Octal SPI interface to the FPGA
 static const ospi_pins_t OSPI_PINS = {
-    .sclk = 47,     // ESP32_OPI_CLK
-    .d0   = 1,      // ESP32_OPI_D0
-    .d1   = 2,
-    .d2   = 4,
-    .d3   = 5,
-    .d4   = 6,
-    .d5   = 7,
-    .d6   = 8,
-    .d7   = 9,
+    .sclk = PIN_OPI_CLK,
+    .d0   = PIN_OPI_D0,
+    .d1   = PIN_OPI_D1,
+    .d2   = PIN_OPI_D2,
+    .d3   = PIN_OPI_D3,
+    .d4   = PIN_OPI_D4,
+    .d5   = PIN_OPI_D5,
+    .d6   = PIN_OPI_D6,
+    .d7   = PIN_OPI_D7,
     .cs   = -1,     // no CS — the protocol uses sync-pattern framing
 };
 
@@ -101,6 +93,7 @@ static const int SPI_HZ = 4 * 1000 * 1000;  // (reg path is clean at 8 MHz but
 bool usb_was_connected = false;
 static bool sd_mounted = false;
 static bool subsystems_up = false;
+static bool network_up = false;
 static TaskHandle_t disk_task_h = NULL;
 static TaskHandle_t menu_task_h = NULL;
 static bool wifitest_quiesced = false;
@@ -165,7 +158,13 @@ static void cmd_process(String cmd) {
             Serial.printf("SPI mode: %s\n", a2spi_is_octal() ? "OCTAL" : "STANDARD");
         }
         Serial.printf("USB connected: %s\n", usb_was_connected ? "YES" : "NO");
-        if (a2spi_is_ready()) {
+        // Only report FPGA-side state over a verified link: with no SOM (or
+        // an OSPI-less bring-up bitstream) reg reads "succeed" at the SPI
+        // driver level but return floating-bus junk — live-observed as
+        // "DDR3: CALIBRATED (retries=254 seq=0xFE)" on an EMPTY board.
+        Serial.printf("FPGA link: %s\n",
+                      fpga_link_ok() ? "UP (A2FP)" : "DOWN (no OSPI device)");
+        if (fpga_link_ok()) {
             uint8_t fs = 0, retries = 0, seq = 0, st = 0;
             if (a2spi_reg_read_status(0x07, &fs, &st) == ESP_OK) {
                 a2spi_reg_read_status(0x23, &retries, &st);
@@ -343,6 +342,42 @@ static void cmd_process(String cmd) {
             Serial.printf("wifiproto: current=0x%02X (b=1 g=2 n=4)\n", pr);
         }
 
+    } else if (cmd == "wifi" || cmd.startsWith("wifi ")) {
+        // Set/show WiFi credentials in NVS. Primary config path on 1.0a3
+        // (no SD card, so no wifi.txt); also handy on older boards.
+        String toks[3];
+        int nt = split_ws(cmd, toks, 3);
+        if (nt < 2) {
+            a2_settings_t *s = settings();
+            Serial.printf("wifi: ssid '%s' (%s)\n",
+                          s->wifi_ssid[0] ? s->wifi_ssid : "(unset)",
+                          net_connected() ? "connected" :
+                          net_ssid()[0]   ? "joining"   : "not started");
+            Serial.println("Usage: wifi <ssid> [psk]   (no spaces in ssid;"
+                           " omit psk for open networks)");
+        } else {
+            a2_settings_t *s = settings();
+            strlcpy(s->wifi_ssid, toks[1].c_str(), sizeof(s->wifi_ssid));
+            strlcpy(s->wifi_psk, nt >= 3 ? toks[2].c_str() : "",
+                    sizeof(s->wifi_psk));
+            bool saved = settings_save();
+            Serial.printf("wifi: ssid '%s' %s\n", s->wifi_ssid,
+                          saved ? "saved" : "SAVE FAILED");
+            if (!net_ssid()[0]) {
+                // Bridge never started (booted unconfigured): start it now.
+                if (wifi_bridge_init(s->wifi_ssid, s->wifi_psk)) {
+                    osd_log("WIFI: JOINING %s (%s)", s->wifi_ssid,
+                            s->dhcp_enable ? "DHCP" : "STATIC IP");
+                    ftpd_init();
+                    telnetd_init();
+                } else {
+                    Serial.println("wifi: bridge init failed");
+                }
+            } else {
+                Serial.println("wifi: saved; 'restart' to apply the new network");
+            }
+        }
+
     } else if (cmd == "net") {
         wifi_ap_record_t ap;
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
@@ -376,41 +411,21 @@ static void cmd_process(String cmd) {
                       (unsigned long)wifi_dbg_last_reason);
 
     } else if (cmd == "fpgaerase") {
-        // Erase the config-flash HEADER blocks only (128KB), via the
-        // SRAM-preserving SPI entry. With no sync word the GW5A boots like a
-        // factory-blank board: quietly unconfigured, JTAG and flash bus free
-        // — which lets the STANDARD openFPGALoader flash flow work again.
-        // The running fabric stays alive (it is in SRAM).
-        Serial.println("fpgaerase: entering SPI mode (fabric stays live)...");
-        if (!fpga_jtag_flash_enter_keepsram()) {
-            Serial.println("fpgaerase: SPI entry failed");
-            return;
-        }
-        bool ok = true;
-        for (uint32_t a = 0; a < 0x20000 && ok; a += 0x10000) {
-            fpga_jtag_spi_xfer(0x06, NULL, NULL, 0);          // WREN
-            uint8_t tx[3] = { (uint8_t)(a >> 16), (uint8_t)(a >> 8), (uint8_t)a };
-            fpga_jtag_spi_xfer(0xD8, tx, NULL, 3);            // block erase
-            ok = false;
-            for (int i = 0; i < 40000; i++) {                 // poll WIP
-                uint8_t st = 0xFF;
-                fpga_jtag_spi_xfer(0x05, NULL, &st, 1);
-                if (!(st & 0x01)) { ok = true; break; }
-            }
-            Serial.printf("fpgaerase: block 0x%05lX %s\n",
-                          (unsigned long)a, ok ? "erased" : "TIMEOUT");
-        }
-        if (ok) {
-            // Read back the header area to confirm FF
-            uint8_t chk[16];
-            fpga_jtag_flash_read(0, chk, sizeof(chk));
-            bool blank = true;
-            for (size_t i = 0; i < sizeof(chk); i++)
-                if (chk[i] != 0xFF) blank = false;
-            Serial.printf("fpgaerase: header readback %s\n",
-                          blank ? "BLANK (FF) — success" : "NOT blank!");
-        }
-        Serial.println("fpgaerase: done; replug, then flash normally");
+        // Erase the config-flash HEADER blocks (128KB) via the
+        // SRAM-preserving SPI entry — the GW5A then boots like a
+        // factory-blank board and the STANDARD openFPGALoader flash flow
+        // works again. Delegates to fpgaupdate_erase_bitstream_region(),
+        // which (unlike the original inline version) calls
+        // fpga_jtag_init_pins() first: after any USB JTAG bridge session,
+        // the disconnect handler leaves TCK/TMS/TDI as INPUTs, and
+        // bit-banging floating pins produced "block 0x00000 TIMEOUT"
+        // (live-hit on board #1, 2026-08-11).
+        Serial.println("fpgaerase: erasing config-flash header "
+                       "(keepsram; fabric stays live)...");
+        bool eok = fpgaupdate_erase_bitstream_region();
+        Serial.printf("fpgaerase: %s\n",
+                      eok ? "OK — flash boots as blank; flash normally now"
+                          : "FAILED (see log; is a fabric SRAM-loaded?)");
 
     } else if (cmd.startsWith("fpgaflash ")) {
         // Persistent FPGA flash via the on-board bit-bang updater (fpgaupdate/
@@ -620,8 +635,28 @@ static void cmd_process(String cmd) {
         Serial.printf("  TXD:  %d\n", PIN_TXD);
         Serial.println("Other:");
         Serial.printf("  FPGA_DONE: %d\n", PIN_FPGA_DONE);
+        Serial.printf("  Board rev: %d\n", A2MEGA_BOARD_REV);
+#if A2MEGA_HAS_SD
         Serial.printf("  SD:   CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d DET=%d\n",
                       PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3, PIN_SD_DET);
+#endif
+#if A2MEGA_HAS_USBC_PD
+        Serial.printf("  I2C:  SCL=%d SDA=%d FUSB_INT=%d\n",
+                      PIN_I2C_SCL, PIN_I2C_SDA, PIN_FUSB_INT);
+        Serial.printf("  USB-C: VBUS_SRC_EN=%d HPD_OUT=%d\n",
+                      PIN_VBUS_SRC_EN, PIN_DP_HPD_OUT);
+#endif
+
+#if A2MEGA_HAS_USBC_PD
+    } else if (cmd == "pd") {
+        usbc_pd_status();
+#endif
+
+    } else if (cmd == "restart") {
+        Serial.println("Restarting...");
+        Serial.flush();
+        delay(100);
+        ESP.restart();
 
     } else if (cmd == "exit") {
         cli_mode = false;
@@ -639,6 +674,12 @@ static void cmd_process(String cmd) {
         Serial.println("  spiw <space> <addr> <inc> <b0> [b1 ...]  - Write to FPGA");
         Serial.println("  meminfo   - Show memory usage");
         Serial.println("  pins      - Show pin assignments");
+        Serial.println("  wifi [<ssid> [psk]] - Show/set WiFi credentials (NVS)");
+        Serial.println("  net       - Show WiFi/IP status");
+#if A2MEGA_HAS_USBC_PD
+        Serial.println("  pd        - Show USB-C PD / DP Alt Mode status");
+#endif
+        Serial.println("  restart   - Reboot the ESP32");
         Serial.println("  exit      - Return to serial forwarding mode");
         Serial.println("  help      - Show this help");
 
@@ -702,6 +743,7 @@ extern "C" void menu_hook_net_apply(void) {
     Serial.printf("[net] applied %s config\n", s->dhcp_enable ? "DHCP" : "static IP");
 }
 
+#if A2MEGA_HAS_SD
 static bool mount_sd() {
     pinMode(PIN_SD_DET, INPUT_PULLUP);
     SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3);
@@ -717,6 +759,25 @@ static bool mount_sd() {
     Serial.println("[sd] mounted (4-bit mode)");
     return true;
 }
+#else
+// 1.0a3 has no SD slot. Storage is a LittleFS on the 1.875 MB "spiffs"
+// flash partition (no_ota scheme on the N4R2's 4 MB part), mounted at the
+// same /sdcard VFS prefix so disk.c / ftpd.c / fpgaupdate.c (all plain
+// POSIX on that prefix) work unchanged. Disk images arrive over FTP once
+// WiFi is up. An uncompressed FPGA bitstream (~2.6 MB) does not fit —
+// see the Makefile note.
+static bool mount_sd() {
+    if (!LittleFS.begin(true /* format on first use */, "/sdcard", 10,
+                        "spiffs")) {
+        Serial.println("[fs] LittleFS mount FAILED");
+        return false;
+    }
+    Serial.printf("[fs] LittleFS at /sdcard: %u KB used of %u KB\n",
+                  (unsigned)(LittleFS.usedBytes() / 1024),
+                  (unsigned)(LittleFS.totalBytes() / 1024));
+    return true;
+}
+#endif
 
 // WiFi configuration file: wifi.txt on the SD card (root, with
 // /sdcard/A2FPGA/wifi.txt as a fallback location).
@@ -803,30 +864,26 @@ static void menu_task(void *arg) {
     }
 }
 
-static void start_subsystems() {
-    if (subsystems_up)
+// Network + storage bring-up, deliberately INDEPENDENT of the FPGA link.
+// On 1.0a3 the USB-C port is the monitor, so WiFi/telnet is the primary
+// console and must come up even when the FPGA is absent (no SOM fitted),
+// unconfigured, or running a bitstream without the OSPI service (the DP
+// colorbars bring-up build has none). osd_log() lines emitted here are
+// buffered in the console and replay to the OSD when the link appears.
+static void start_network() {
+    if (network_up)
         return;
-
-    esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
-    if (err != ESP_OK) {
-        Serial.printf("[SPI] init failed: %s\n", esp_err_to_name(err));
-        return;
-    }
-    if (!fpga_link_init()) {
-        Serial.println("[fpga] no A2FP device on the OSPI link; retrying later");
-        return;
-    }
+    network_up = true;
 
     settings_init();
     sd_mounted = mount_sd();
 
-    osd_console_show();
     osd_log("A2MEGA ESP32 %s %s", __DATE__, __TIME__);
+#if A2MEGA_HAS_SD
     osd_log(sd_mounted ? "SD CARD MOUNTED" : "NO SD CARD");
-
-    disk_init();
-    menu_init();
-    w5100_init();
+#else
+    osd_log(sd_mounted ? "FLASH FS MOUNTED" : "FLASH FS FAILED");
+#endif
 
     if (sd_mounted)
         load_wifi_credentials();
@@ -837,13 +894,44 @@ static void start_subsystems() {
         if (wifi_bridge_init(s->wifi_ssid, s->wifi_psk)) {
             osd_log("WIFI: JOINING %s (%s)", s->wifi_ssid,
                     s->dhcp_enable ? "DHCP" : "STATIC IP");
-            ftpd_init();   /* FTP file drop for /sdcard once WiFi is up */
+            ftpd_init();     /* FTP file drop for /sdcard once WiFi is up */
+            telnetd_init();  /* remote console/menu mirror on port 23 */
         } else {
             osd_log("WIFI: INIT FAILED");
         }
     } else {
+#if A2MEGA_HAS_SD
         osd_log("WIFI: NOT CONFIGURED (WIFI.TXT)");
+#else
+        osd_log("WIFI: NOT CONFIGURED (CLI: WIFI <SSID> <PSK>)");
+#endif
     }
+}
+
+static void start_subsystems() {
+    if (subsystems_up)
+        return;
+
+    esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+    if (err != ESP_OK) {
+        Serial.printf("[SPI] init failed: %s\n", esp_err_to_name(err));
+        return;
+    }
+    if (!fpga_link_init()) {
+        // Keep probing quietly: with the colorbars bring-up bitstream (no
+        // OSPI service in fabric) this state is permanent and expected.
+        static uint32_t misses = 0;
+        if (misses++ % 60 == 0)
+            Serial.println("[fpga] no A2FP device on the OSPI link; retrying "
+                           "in the background (normal for bring-up bitstreams)");
+        return;
+    }
+
+    osd_console_show();
+
+    disk_init();
+    menu_init();
+    w5100_init();
 
     // DDR3 calibration telemetry: status reg bit1 = init_calib_complete,
     // reg 0x23 = fabric watchdog retry count (nonzero = the reset sequencer
@@ -879,6 +967,15 @@ static void start_subsystems() {
 // ============================================================================
 
 void setup() {
+    // NOTE: do NOT route the USB JTAG bridge here. It was tried (early
+    // rescue window for the MSPI-hang state, board #1 2026-08-11) and it
+    // broke the bridge for the rest of the boot: Serial.begin()'s
+    // hardware-CDC init reconfigures the same USB peripheral and leaves
+    // an early-routed bridge half-configured — every JTAG chain scan
+    // after the first returned "no device found" until power cycle
+    // (observed 30/30 flash-attempt failures). loop()'s edge-triggered
+    // routing after USB init is the correct path; the MSPI-hang rescue
+    // works through the SRAM-load retry race regardless.
     Serial.begin(115200);
     Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);
     delay(300);
@@ -891,10 +988,68 @@ void setup() {
 
     pinMode(PIN_FPGA_DONE, INPUT_PULLUP);
 
+#if A2MEGA_HAS_USBC_PD
+    // Pin down the USB-C power-path controls before anything else runs.
+    // VBUS_SRC_EN (strapping pin, external pull-down) must stay low unless
+    // we deliberately source 5 V out the port; HPD to the FPGA idles low
+    // until the PD stack reports a DisplayPort sink.
+    pinMode(PIN_VBUS_SRC_EN, OUTPUT);
+    digitalWrite(PIN_VBUS_SRC_EN, LOW);
+    pinMode(PIN_DP_HPD_OUT, OUTPUT);
+    digitalWrite(PIN_DP_HPD_OUT, LOW);
+    pinMode(PIN_FUSB_INT, INPUT);   // open-drain, external pull-up R19
+
+    // PD policy (FUSB302B + TUSB1046A) is independent of the FPGA link and
+    // time-bound once a partner attaches — start it before the subsystems.
+    usbc_pd_init();
+#endif
+
+    start_network();      /* WiFi/telnet console first — never FPGA-gated */
+
+    // Route the USB-JTAG bridge ONCE, after USB/CDC init, and never
+    // unroute it. The old edge-triggered routing keyed on
+    // usb_serial_jtag_is_connected() — an SOF-activity heuristic that
+    // macOS USB autosuspend defeats whenever no host process holds a
+    // port open: suspend -> "disconnected" -> unroute -> the next
+    // openFPGALoader open races the polled re-route and loses. That one
+    // heuristic caused two days of "JTAG wedge" rituals (works
+    // first-op-after-replug, dies on op two, retry-races eventually
+    // win). The bit-bang path (fpga_jtag) does its own pad handoff via
+    // fpga_usb_jtag_bridge_release()/restore(), so permanent routing is
+    // safe. (Routing EARLY in setup(), before Serial.begin, was tried
+    // and broke the bridge differently — this placement is the one that
+    // works.)
+    route_usb_jtag_to_gpio();
+
     start_subsystems();
 }
 
 void loop() {
+    // One-shot debug-UART line diagnostic (2026-08-13: FPGA heartbeat up,
+    // uart_tx placed on H13, yet zero bytes reach the telnet tee): raw-
+    // sample the Serial1 RX pad for 400 ms ~8 s after boot. The GPIO in-
+    // register still reflects the pad while the UART owns it. A healthy
+    // line idles HIGH and shows a burst of edges every ~340 ms; stuck
+    // LOW = pin conflict/no drive; HIGH with 0 edges = FPGA not sending.
+    static bool uart_diag_done = false;
+    if (!uart_diag_done && millis() > 8000) {
+        uart_diag_done = true;
+        int last = gpio_get_level(GPIO_NUM_44), edges = 0;
+        uint32_t lows = 0, n = 0;
+        uint32_t t0 = millis();
+        while (millis() - t0 < 400) {
+            int v = gpio_get_level(GPIO_NUM_44);
+            n++;
+            if (v != last) { edges++; last = v; }
+            if (!v) lows++;
+        }
+        char msg[64];
+        snprintf(msg, sizeof msg, "UARTDIAG: RX44 EDGES=%d LOW=%lu/%lu",
+                 edges, (unsigned long)lows, (unsigned long)n);
+        osd_log(msg);
+        Serial.printf("[diag] %s\n", msg);
+    }
+
     // Late bring-up: keep probing until the FPGA answers on the OSPI link
     // (it may still be configuring at ESP32 boot).
     if (!subsystems_up) {
@@ -909,13 +1064,9 @@ void loop() {
         wifi_bridge_poll();
     }
 
-    // Handle USB JTAG connection changes
-    bool usb_is_connected = usb_serial_jtag_is_connected();
-    if (usb_was_connected == false && usb_is_connected == true)
-        route_usb_jtag_to_gpio();
-    if (usb_was_connected == true && usb_is_connected == false)
-        unroute_usb_jtag_to_gpio();
-    usb_was_connected = usb_is_connected;
+    // USB JTAG bridge: routed permanently in setup() (see note there).
+    // Track connection state for the 'status' display only.
+    usb_was_connected = usb_serial_jtag_is_connected();
 
     check_escape_timeout();
 
@@ -942,7 +1093,21 @@ void loop() {
         }
 
         if (Serial1.available()) {
-            Serial.write(Serial1.read());
+            char c1 = (char)Serial1.read();
+            Serial.write(c1);
+            // Tee FPGA debug-UART lines into the telnet console: the only
+            // FPGA-status channel that works while the monitor owns USB-C.
+            static char fline[40];
+            static uint8_t flen = 0;
+            if (c1 == '\n' || flen >= sizeof(fline) - 1) {
+                if (flen > 0) {
+                    fline[flen] = '\0';
+                    telnetd_console_tee(fline);
+                    flen = 0;
+                }
+            } else if (c1 != '\r') {
+                fline[flen++] = c1;
+            }
         }
     }
 

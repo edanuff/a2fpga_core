@@ -65,3 +65,4 @@ src/cardrom/cardrom
 # GW5A parts (exceeds GitHub's file limit). The .fs bitstream and reports
 # are the tracked build products.
 boards/*/impl/pnr/*.pr
+boards/a2mega/captures/

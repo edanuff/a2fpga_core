@@ -38,6 +38,13 @@ void fpga_screen_goto(int x, int y);
  * $00-$3F). Lowercase is uppercased; only uppercase/digits/symbols render. */
 void fpga_screen_set_inverse(bool inverse);
 
+/* Telnet menu mirror: read one 40-byte row of the local shadow (Apple II
+ * screen codes), and a generation counter bumped on every shadow write so
+ * the mirror knows when to repaint. Lock-free; a torn read self-heals on
+ * the next generation change. */
+const uint8_t *fpga_screen_shadow_row(int y);
+uint32_t fpga_screen_shadow_gen(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,0 +1,48 @@
+// a2mega 1.0a3 DP bring-up (colorbars) — physical constraints
+// Ball map: docs/btb_pinout_1_0a3.md (validated against the working
+// 1.0a2 a2mega.cst via the 1.0a2a PCB netlist).
+//
+// The DP main-link lanes (Q0 L2/L3) and the 135 MHz refclk (Q0_REFCLK1,
+// E10/F10) are dedicated SERDES bumps configured inside the generated PHY
+// IP — they take no constraints here.
+
+// 50 MHz SOM oscillator
+IO_LOC  "clk50_in" V22;
+IO_PORT "clk50_in" IO_TYPE=LVCMOS33 PULL_MODE=NONE BANK_VCCIO=3.3;
+
+// SOM pushbutton (active low) — reset
+IO_LOC  "button" AB13;
+IO_PORT "button" IO_TYPE=LVCMOS15 PULL_MODE=UP BANK_VCCIO=1.5;
+
+// DP AUX pseudo-differential pair -> TUSB1046A AUX inputs (bias/AC
+// coupling on the carrier). G15/G16 = the old HDMI clock pair (true
+// differential pair), driven here as two single-ended LVCMOS33.
+// AUX pair: PSEUDO-DIFF (blind-era proven config, restored 2026-08-16
+// night for the lottery-check gauntlet — the monitor has never lit on
+// any TLVDS-pad build; all monitor successes were this 2 Vpp drive).
+// TLVDS closed-loop config (restore with AUX_TLVDS=1):
+//   IO_LOC  "dp_aux_p" G15,G16;
+//   IO_PORT "dp_aux_p" IO_TYPE=LVDS25 PULL_MODE=DOWN;
+IO_LOC  "dp_aux_p" G15;
+IO_PORT "dp_aux_p" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "dp_aux_n" G16;
+IO_PORT "dp_aux_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+// Debug UART to the ESP32 (Serial1 RX side)
+IO_LOC  "uart_tx" H13;
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// HPD from the ESP32 (ESP32_GPIO0, J2.17). Pull down so HPD idles
+// deasserted while the ESP32 is unprogrammed or booting.
+IO_LOC  "dp_hpd" A19;
+IO_PORT "dp_hpd" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+
+// Carrier LEDs D1-D4, active low (anode +3V3 via R23-R26)
+IO_LOC  "led[0]" D15;
+IO_PORT "led[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "led[1]" D14;
+IO_PORT "led[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "led[2]" R14;
+IO_PORT "led[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "led[3]" P14;
+IO_PORT "led[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;

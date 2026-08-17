@@ -42,8 +42,8 @@ module osd_text_overlay #(
 
     input  wire        enable_i,
 
-    input  wire [10:0] screen_x_i,
-    input  wire [9:0]  screen_y_i,
+    input  wire [11:0] screen_x_i,
+    input  wire [10:0] screen_y_i,
 
     // OSD text page read port (registered read in this clock domain)
     output reg  [10:0] vram_addr_o,
@@ -60,16 +60,21 @@ module osd_text_overlay #(
 );
 
     localparam CELL_W = 14;               // 7 glyph pixels x 2
-    localparam [10:0] X_START = 11'(X_OFFSET - CELL_W);
+    localparam [11:0] X_START = 12'(X_OFFSET - CELL_W);
 
     // ------------------------------------------------------------------------
     // Font ROM — shared Apple II video ROM, same addressing as apple_video_gen
     // ------------------------------------------------------------------------
-    reg [7:0] viderom_r [4095:0];
+    // block_rom: at 148.5 MHz (1080p) a LUT-inferred 4Kx8 ROM is a deep
+    // mux chain and misses timing by ~3 ns. The read must be a PURE sync
+    // read for BSRAM inference — the glyph inversion moved to the
+    // consumer (8 NOT gates, free), since ~rom[addr] in the read path
+    // blocks the block-ROM mapping.
+    (* syn_romstyle = "block_rom" *) reg [7:0] viderom_r [4095:0];
     initial $readmemh("video.hex", viderom_r, 0);
     reg [11:0] viderom_a_r;
     reg [7:0]  viderom_d_r;
-    always @(posedge clk_i) viderom_d_r <= ~viderom_r[viderom_a_r];
+    always @(posedge clk_i) viderom_d_r <= viderom_r[viderom_a_r];
 
     // Flash cadence (~2 Hz at 27 MHz)
     reg [23:0] flash_cnt_r;
@@ -147,7 +152,7 @@ module osd_text_overlay #(
                     viderom_a_r <= charRomAddr(vram_data_i, glyph_line);
             end
             if (running_r && subcnt_r == 4'd13)
-                row_byte_r <= (cell_r < 6'd40) ? viderom_d_r : 8'd0;
+                row_byte_r <= (cell_r < 6'd40) ? ~viderom_d_r : 8'd0;
         end
     end
 

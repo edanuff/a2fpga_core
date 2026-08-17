@@ -9,6 +9,9 @@
 #
 # Environment:
 #   FS=<path> override the bitstream path (default: boards/<board>/impl/pnr/<proj>.fs)
+#   GPRJ=<file.gprj> select the project when a board has several (same as build.sh);
+#             REQUIRED for multi-gprj boards unless FS= is given — flashing the
+#             alphabetically-first project by accident cost a full debug day (2026-08-13)
 #   DRY_RUN=1 print the openFPGALoader command without running it
 #
 # Per-board programming config (the error-prone knowledge this encapsulates):
@@ -33,7 +36,13 @@ fi
 bdir="$REPO/boards/$board"
 [[ -d "$bdir" ]] || { echo "No such board: '$board' (see boards/)"; exit 2; }
 
-gprj="$(cd "$bdir" && ls *.gprj 2>/dev/null | head -1)"
+gprj="${GPRJ:-$(cd "$bdir" && ls *.gprj 2>/dev/null | head -1)}"
+nprj="$(cd "$bdir" && ls *.gprj 2>/dev/null | wc -l | tr -d ' ')"
+if [[ -z "${GPRJ:-}" && -z "${FS:-}" && "$nprj" -gt 1 ]]; then
+    echo "!! Board '$board' has $nprj projects: $(cd "$bdir" && ls *.gprj | tr '\n' ' ')"
+    echo "!! Refusing to guess. Set GPRJ=<file.gprj> or FS=<path>."
+    exit 2
+fi
 [[ -n "$gprj" ]] || { echo "No .gprj found in $bdir"; exit 2; }
 proj="${gprj%.gprj}"
 fs="${FS:-$bdir/impl/pnr/${proj}.fs}"

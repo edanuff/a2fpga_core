@@ -136,6 +136,69 @@ void fpgaupdate_set_keepsram(bool on)
     s_keepsram = on;
 }
 
+/* Erase the bitstream region of the config flash WITHOUT touching the
+ * running fabric. Recovery for a corrupt flash image: the GW5A's MSPI
+ * auto-boot retry loop owns the bus and wedges every external flash tool
+ * (openFPGALoader's flash entry resets the fabric, re-arming the loop —
+ * live-hit on board #1, 2026-08-11). Precondition: a good bitstream has
+ * been SRAM-loaded over JTAG, so the boot engine is satisfied and the
+ * IDCODE reads back. keepsram entry + erase + leave; the fabric (and its
+ * heartbeat) keeps running throughout. */
+bool fpgaupdate_erase_bitstream_region(void)
+{
+    fpga_jtag_init_pins();
+
+    uint32_t id = fpga_jtag_idcode();
+    if (id != FPGA_JTAG_IDCODE_GW5AT60) {
+        ESP_LOGE(TAG, "erase: IDCODE %08lx != GW5AT-60 — fabric not alive; "
+                      "SRAM-load a bitstream first", (unsigned long)id);
+        osd_log("FPGA ERASE: NO LIVE FABRIC");
+        fpga_jtag_release_pins();
+        return false;
+    }
+    if (!fpga_jtag_flash_enter_keepsram()) {
+        fpga_jtag_flash_leave();
+        fpga_jtag_release_pins();
+        osd_log("FPGA ERASE: SPI ENTRY FAILED");
+        return false;
+    }
+
+    /* Erase the FULL image region (4 MB), not just the header: after an
+     * INTERRUPTED external write the image tail is garbage, and the GW5A
+     * boot engine hunting for a sync word in it poisons JTAG access even
+     * with a configured fabric (board #1, 2026-08-11 late session).
+     *
+     * Empirical (same session): only the FIRST block erase after each
+     * SPI-mode entry completes; the second's status polls read garbage.
+     * So: re-enter SPI mode per block — one WREN+erase+poll per entry —
+     * skip blocks that fail, report the count, and let the caller re-run
+     * until zero failures. Slow (~2-3 min) but it converges. */
+    const uint32_t region = 64u * FPU_BLOCK;
+    uint32_t failed = 0;
+    fpga_jtag_flash_leave();             /* redo entry per block below */
+    for (uint32_t a = 0; a < region; a += FPU_BLOCK) {
+        fpga_jtag_reset();
+        if (!fpga_jtag_flash_enter_keepsram()) { failed++; continue; }
+        if (!flash_erase_block(a))
+            failed++;
+        fpga_jtag_flash_leave();
+        if ((a % (FPU_BLOCK * 16u)) == 0)
+            osd_log("FPGA ERASE: %luK/%luK (%lu bad)",
+                    (unsigned long)(a >> 10), (unsigned long)(region >> 10),
+                    (unsigned long)failed);
+        vTaskDelay(1);                   /* feed the watchdog */
+    }
+
+    bool ok = (failed == 0u);
+    fpga_jtag_release_pins();
+    if (ok)
+        osd_log("FPGA ERASE: DONE, ALL 64 BLOCKS BLANK");
+    else
+        osd_log("FPGA ERASE: %lu/64 BLOCKS FAILED - RERUN",
+                (unsigned long)failed);
+    return ok;
+}
+
 void fpgaupdate_cancel(void)
 {
     if (s_state == FPU_READY || s_state == FPU_ERROR) {
