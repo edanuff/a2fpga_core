@@ -1113,3 +1113,28 @@ its .fs is 5d8e15f0 (ALREADY on the chip), so ONLY need to rebuild+upload
 after). Monitor lights -> regression is Saturday firmware (bisect the PD
 rework); stays dark -> then and only then suspect hardware (SOM#1 A/B).
 Until this runs, make NO hardware-variation claims.
+
+## 2026-08-16 NIGHT — BREAKTHROUGH: hardware exonerated, regression is Saturday firmware
+
+FAITHFUL FRIDAY SNAPSHOT (FPGA .fs 5d8e15f0 already on chip + end-of-Friday
+firmware 98461af3 rebuilt & uploaded, EQ back to 1.0dB default) →
+**COLORBARS on the USB-C monitor, SOM#2.** Hardware fully exonerated:
+SOM#2 good, monitor good, pad good, silicon-variation hypothesis DEAD.
+The monitor-direct regression is entirely in the SATURDAY ESP32 FIRMWARE.
+
+BIG CLUE: works in only ONE plug orientation. Points at CC-orientation /
+FLIPSEL / mux-flip handling. Friday = works one orientation; Saturday
+rework = dark both. Bisection targets (all Saturday, the good snapshot
+98461af3 already includes the Friday-PM PD source-role rework):
+- 881fff61 jtag-bridge toggle (JTAG pad hi-Z routing — could touch mux/flip pins?)
+- d5accd46 / 7c26f650 tee width (unlikely)
+- 94f28b6e VDM-phase diagnostics + FUSB dump status-only (touches FUSB reads)
+- ad471835 EQ default -> 6.5dB (live-revert to 1.0 earlier didn't fix, but
+  that was on today's full firmware; re-evaluate in clean bisect)
+- bb11e4f3 mux-EN bounce telnet key
+Plus the full-firmware commits after 98461af3 up to HEAD.
+
+METHOD next session: git-bisect the ESP32 firmware between 98461af3 (GOOD)
+and HEAD (BAD), rebuild+upload each candidate, monitor-direct one-orientation
+test. FPGA untouched (5d8e15f0 stays). Board currently RUNS Friday firmware;
+working tree firmware restored to HEAD (source), board fw independent.

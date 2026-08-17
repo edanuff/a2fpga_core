@@ -1024,23 +1024,6 @@ void setup() {
     start_subsystems();
 }
 
-// External-programmer support: telnet 'j' toggles the USB-JTAG bridge
-// routing. Released = all ESP32 JTAG pads high-Z so a Fiddy Plus/FT2232
-// on the SOM JTAG header owns the bus without contention.
-static bool jtag_bridge_released = false;
-extern "C" void telnetd_jtag_bridge_toggle(int fd) {
-    extern void tn_puts_ext(int fd, const char *s);
-    if (jtag_bridge_released) {
-        route_usb_jtag_to_gpio();
-        jtag_bridge_released = false;
-        tn_puts_ext(fd, "jtag bridge: ROUTED (ESP32 owns FPGA JTAG)\r\n");
-    } else {
-        unroute_usb_jtag_to_gpio();
-        jtag_bridge_released = true;
-        tn_puts_ext(fd, "jtag bridge: RELEASED (pads high-Z, external programmer safe)\r\n");
-    }
-}
-
 void loop() {
     // One-shot debug-UART line diagnostic (2026-08-13: FPGA heartbeat up,
     // uart_tx placed on H13, yet zero bytes reach the telnet tee): raw-
@@ -1114,7 +1097,7 @@ void loop() {
             Serial.write(c1);
             // Tee FPGA debug-UART lines into the telnet console: the only
             // FPGA-status channel that works while the monitor owns USB-C.
-            static char fline[96];   // was 40: truncated the DP line at 42 chars (R: field)
+            static char fline[40];
             static uint8_t flen = 0;
             if (c1 == '\n' || flen >= sizeof(fline) - 1) {
                 if (flen > 0) {

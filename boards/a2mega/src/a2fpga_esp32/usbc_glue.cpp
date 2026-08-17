@@ -56,9 +56,7 @@ extern "C" {
  * enough to wreck the redriven eye at 2.7 Gb/s. EQ_OVERRIDE + low
  * register EQ is mandatory in I2C mode; SPEC.md always said EQ is
  * "register-settable instead of strap resistors". Setting 0 = 1.0 dB. */
-static uint8_t s_dp_eq_setting = 3;  /* 6.5 dB — hard-reacquisition sweep
-    2026-08-15 (flip-kill x4/preset): 6.5dB=4/4, 1.0dB=3/4, 12.3dB=2/4,
-    9.5dB=1/4. Raises the training-convergence odds on converter sinks. */
+static uint8_t s_dp_eq_setting = 0;
 
 static usbc_port_t s_port;
 static SemaphoreHandle_t s_wake;
@@ -249,21 +247,6 @@ static void hal_set_fpga_hpd(void *ctx, bool level)
 /* Telnet 'r': drop HPD to the FPGA for ~250 ms and restore — restarts
  * the gateware's blind AUX/training ladder on demand (BLIND_SINK resets
  * on hpd_present falling). No cables touched, nothing power-cycles. */
-/* Bounce the mux EN: from the sink's perspective the DP source vanishes
- * and reappears — a full DP-side hotplug. Theory (2026-08-15): converter
- * firmwares run their stream-pipeline init only on this event, which is
- * why boots (mux EN 0->1) get video and in-session retrains (EN never
- * toggles) end K:00. Telnet 'b'. */
-extern "C" void usbc_mux_bounce(void)
-{
-    bool flipped_now = ((s_general_last & TUSB_GEN_FLIPSEL) != 0) ^ s_flip_invert;
-    hal_set_tusb1046(NULL, false, false);
-    osd_log("MUX BOUNCE: EN OFF");
-    vTaskDelay(pdMS_TO_TICKS(150));
-    hal_set_tusb1046(NULL, true, flipped_now);
-    osd_log("MUX BOUNCE: EN ON (flip preserved)");
-}
-
 extern "C" void usbc_hpd_retrain(void)
 {
     if (!s_hpd_level) {
@@ -279,15 +262,10 @@ extern "C" void usbc_hpd_retrain(void)
 /* Telnet 'u': raw FUSB302B status snapshot for in-slot attach debugging. */
 extern "C" void usbc_fusb_dump_log(void)
 {
-    /* STATUS registers only: 0x3E/0x3F/0x42 (interrupts) CLEAR ON READ —
-     * dumping them both lied (service loop drains them first: always 00)
-     * and stole pending events from the live PD stack. 0x41 Status1 has
-     * the TX/RX FIFO + collision flags the attach-regression hunt needs.
-     * Line kept <=38 chars for the 40-col OSD console (CON_COLS 39). */
-    static const uint8_t regs[] = {0x08, 0x3C, 0x3D, 0x40, 0x41};
+    static const uint8_t regs[] = {0x08, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42};
     char line[80];
     char *w = line;
-    w += snprintf(w, sizeof line, "FB");
+    w += snprintf(w, sizeof line, "FUSB");
     for (size_t i = 0; i < sizeof regs; i++) {
         uint8_t v = 0xEE;
         (void)i2c_read(NULL, 0x22, regs[i], &v, 1);
