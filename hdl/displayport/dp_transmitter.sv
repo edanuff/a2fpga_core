@@ -529,7 +529,13 @@ module dp_transmitter #(
     logic [2:0]  wdog_count = 3'd0;
     logic [30:0] wdog_timer = 31'd0;
     logic [1:0]  wdog_st = 2'd0;  // 0 idle, 1 pulse1, 2 replay, 3 pulse2
-    wire wdog_streaming = tx_link_established && (debug_sink[1:0] != 2'b00);
+    // Blind sinks (monitor path) never yield a readable SINK_STATUS, so
+    // "streaming" can never be observed - without this gate the watchdog
+    // would tear down a healthy blind link every WDOG_GRACE forever
+    // (observed on hw 2026-08-16: W cycling on the blind-monitor build).
+    wire wdog_streaming = (BLIND_SINK != 0)
+                        ? tx_link_established
+                        : tx_link_established && (debug_sink[1:0] != 2'b00);
     always_ff @(posedge clk100) begin
         wdog_ack_m <= wdog_replay_ack;
         wdog_ack_s <= wdog_ack_m;
