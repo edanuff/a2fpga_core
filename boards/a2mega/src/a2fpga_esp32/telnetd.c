@@ -36,6 +36,7 @@
 #include "lwip/netif.h"
 
 #include "fpga_screen.h"
+#include "fpga_jtag.h"
 #include "osd_console.h"
 #include "menu.h"
 #include "board_pins.h"
@@ -165,7 +166,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2mega remote console\r\n"
-                "keys: c=console m=menu p=pd x=regs e=eq f=flip r=retrain u=fusb q=quit\r\n"
+                "keys: c=console m=menu p=pd x=regs e=eq f=flip r=retrain g=fpgareload u=fusb q=quit\r\n"
                 "menu: up/down move, left/right change, enter/a=ok,\r\n"
                 "      esc/backspace/b=back, y=view, s/tab=select\r\n\r\n");
 
@@ -271,6 +272,16 @@ static void session(int fd)
 #else
                 tn_puts(fd, "eq: not built for this board rev\r\n");
 #endif
+                continue;
+            }
+            if (esc_st == 0 && ch == 'g' && !menu_mode) {
+                /* Reconfigure the FPGA from flash (bench boot-draw
+                 * re-roll / recovery; ~2-3 s dark). NEVER a consumer
+                 * feature — bench tooling only (decision of record). */
+                tn_puts(fd, "fpga: reloading from flash\r\n");
+                fpga_jtag_init_pins();
+                fpga_jtag_reload();
+                fpga_jtag_release_pins();
                 continue;
             }
             if (esc_st == 0 && ch == 'x' && !menu_mode) {

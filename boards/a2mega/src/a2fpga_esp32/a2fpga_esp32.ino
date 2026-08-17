@@ -47,6 +47,7 @@
 #include "wifi_bridge.h"
 #include "fpga_jtag.h"
 #include "fpgaupdate.h"
+#include "fpgastream.h"
 #include "ftpd.h"
 #include "telnetd.h"
 #include "usbc_glue.h"
@@ -956,6 +957,7 @@ static void start_subsystems() {
     }
 
     xTaskCreatePinnedToCore(disk_task, "disk", 8192, NULL, 5, &disk_task_h, 1);
+    fpgastream_start();   /* network bitstream flashing, port 2323 (bench) */
     xTaskCreatePinnedToCore(menu_task, "menu", 8192, NULL, 4, &menu_task_h, 1);
 
     subsystems_up = true;
