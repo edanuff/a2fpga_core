@@ -1164,3 +1164,24 @@ NEXT-SESSION disambiguation (besides the orientation-regression bisect):
 - If hub also improves on Friday fw → the "lottery" was partly a Saturday
   firmware artifact, and production 2-lane HBR is in far better shape than
   the afternoon's 4/5 suggested.
+
+## 2026-08-16 NIGHT #3 — bisection is TWO personas, not one revert (user note)
+
+User: end-of-Friday fw (98461af3) does NOT support in-slot hotplug; recalls
+that working as a later iteration. Key reframe — there are TWO distinct PD
+personas, separate lineages, BOTH must work:
+- MONITOR-DIRECT / bench = SINK-attach (monitor powers board). Lineage:
+  752b2d33(Tue, sink-attach path) -> f6f3a6d4(Thu, force AUX_SBU_OVR PER
+  ORIENTATION = monitor AUX first attached; ROOT CAUSE #4). Tonight's
+  orientation-dependence (one flip works) almost certainly rides on this
+  per-orientation AUX_SBU_OVR — a Saturday change likely disturbed it.
+- IN-SLOT HOTPLUG / product = SOURCE-attach (board powers sink in slot).
+  Lineage: 29f65c19/ac183774/98461af3 (Fri PM source-role PD). 98461af3
+  may predate a later (early-Sat?) refinement that made slot hotplug solid.
+
+⇒ TRADE-OFF hypothesis: a Saturday commit FIXED in-slot source-attach while
+BREAKING monitor-direct per-orientation AUX. Goal is NOT "revert to Friday"
+— it's a fw state (or small fix) satisfying BOTH. Bisect watching both
+signals per candidate. Files: usbc_glue.cpp (AUX_SBU_OVR/FLIPSEL/mux),
+usbc_port.c (attach state machines). Board currently on 98461af3 (monitor
+5/5, slot hotplug NO).
