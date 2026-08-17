@@ -1138,3 +1138,29 @@ METHOD next session: git-bisect the ESP32 firmware between 98461af3 (GOOD)
 and HEAD (BAD), rebuild+upload each candidate, monitor-direct one-orientation
 test. FPGA untouched (5d8e15f0 stays). Board currently RUNS Friday firmware;
 working tree firmware restored to HEAD (source), board fw independent.
+
+## 2026-08-16 NIGHT #2 — blind monitor-direct is 5/5 (streak was REAL, not luck)
+
+Friday snapshot (fs 5d8e15f0 + fw 98461af3), monitor-direct, board
+MONITOR-POWERED (out of slot): 5 unplug/replug cycles → colorbars EVERY
+time. Board is monitor-powered, so each cable pull = full board power-down
+= FPGA RECONFIGURATION = fresh config draw. Therefore **5/5 cold config
+draws all lit.** The blind-era "winning streak" was REAL (user's hypothesis
+confirmed); blind 2-lane HBR monitor-direct is reliable, NOT a lottery.
+
+REFRAMES THE BOOT-LOTTERY: the 4/5 (un-chained) / 2/5 (chained) "lottery"
+was measured on the HUB path with SATURDAY firmware. This 5/5 is the
+MONITOR path with FRIDAY firmware. Three variables changed at once (sink:
+monitor-tolerant vs converter-strict; power: monitor-VBUS vs slot;
+firmware: Fri vs Sat) — can't yet attribute. But it means the boot draw
+may be HUB/sink/firmware-specific, NOT a fixed silicon tax. The all-day
+"config-domain draw" silicon experiments (reset/CSR-replay immune) remain
+valid AS MECHANISM, but the RATE-that-matters is sink-dependent and the
+monitor tolerates it (generous deskew window, as hypothesized).
+
+NEXT-SESSION disambiguation (besides the orientation-regression bisect):
+- Re-test the HUB with FRIDAY firmware (does the hub lottery improve?)
+- Boot-count the monitor path more (confirm 5/5 holds over 10+)
+- If hub also improves on Friday fw → the "lottery" was partly a Saturday
+  firmware artifact, and production 2-lane HBR is in far better shape than
+  the afternoon's 4/5 suggested.
