@@ -48,9 +48,22 @@ proj="${gprj%.gprj}"
 fs="${FS:-$bdir/impl/pnr/${proj}.fs}"
 [[ -f "$fs" ]] || { echo "No bitstream at: $fs"; echo "Build it first:  tools/build.sh $board"; exit 2; }
 
-# Resolve the loader binary (Homebrew installs openFPGALoader; some setups use lowercase).
-LOADER="$(command -v openFPGALoader || command -v openfpgaloader || true)"
+# Resolve the loader binary. For GW5A boards prefer the repo's patched
+# build (tools/bin/openFPGALoader-a2mega2): honest empty-chain errors,
+# freq-honored flash phase, and the auto-boot-race mitigations
+# (OFL_GW5A_SETTLE_MS wait — measured 5/6 first-attempt on populated
+# flash vs ~50% stock — and opt-in SRAM-preload OFL_GW5A_SRAM_FIRST).
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+LOADER="${LOADER:-}"
+if [[ -z "$LOADER" && -x "$repo_root/tools/bin/openFPGALoader-a2mega2" ]]; then
+    LOADER="$repo_root/tools/bin/openFPGALoader-a2mega2"
+fi
+[[ -n "$LOADER" ]] || LOADER="$(command -v openFPGALoader || command -v openfpgaloader || true)"
 [[ -n "$LOADER" ]] || { echo "openFPGALoader not found. Install it (macOS: brew install openfpgaloader)."; exit 3; }
+# GW5A boot-scanner settle (wait-only default; preload is opt-in recovery)
+export OFL_GW5A_NO_SRAM_FIRST="${OFL_GW5A_SRAM_FIRST:+0}"
+export OFL_GW5A_NO_SRAM_FIRST="${OFL_GW5A_NO_SRAM_FIRST:-1}"
+export OFL_GW5A_SETTLE_MS="${OFL_GW5A_SETTLE_MS:-3500}"
 
 esp32s3=0
 case "$board" in
@@ -86,25 +99,35 @@ echo ">> ${cmd[*]}"
 [[ "${DRY_RUN:-}" == "1" ]] && { echo "-- DRY RUN -- not executed."; exit 0; }
 
 if [[ "$esp32s3" == "1" && "$mode" == "flash" ]]; then
-    # The esp_usb_jtag bridge drops status reads intermittently during long
-    # flash sessions (~50% per-attempt failure observed); retry a few times.
-    for attempt in 1 2 3 4 5; do
+    # Protocol (validated 2026-08-17, test log #10/#11): single attempt;
+    # on failure, verify the chain is still healthy (failures are benign
+    # since the settle fix — no wedge) and retry EXACTLY ONCE. Never
+    # hammer: repeated blind retries were implicated in flash corruption.
+    for attempt in 1 2; do
         echo ">> flash attempt $attempt"
         if "${cmd[@]}"; then
             exit 0
         fi
-        echo "!! attempt $attempt failed; retrying..."
-        sleep 3
+        if [[ "$attempt" == "1" ]]; then
+            echo "!! attempt 1 failed; probing chain before the single retry..."
+            if ! "$LOADER" -c esp32s3 --detect >/dev/null 2>&1; then
+                echo "!! chain unhealthy — NOT retrying (wedge suspected)."
+                break
+            fi
+            sleep 2
+        fi
     done
-    echo "!! all flash attempts failed."
+    echo "!! flash failed."
     # Diagnostic snapshot: does the failure sit at the USB/ESP32 bridge layer
     # (open fails) or the FPGA TAP layer (bridge opens, no/garbage IDCODE)?
     # Discriminates the intermittent wedge classes — record with the failure.
     echo "!! diagnostic: low-speed detect probe:"
     openFPGALoader -c esp32s3 --freq 500000 --detect 2>&1 | tail -4 | sed 's/^/!!   /'
-    echo "!! Flash with the Apple II POWERED OFF (validated procedure), replug"
-    echo "!! USB (cold boot), and rerun."
-    echo "!! See boards/a2mega/docs/jtag_flash_reliability.md"
+    echo "!! Recovery options (see boards/a2mega/docs/jtag_flash_reliability.md):"
+    echo "!!   1. OFL_GW5A_SRAM_FIRST=1 tools/flash.sh ...   (preload variant)"
+    echo "!!   2. Corrupt/wedged flash: replug, load flash_rescue.fs to SRAM,"
+    echo "!!      wait for E:D on telnet, replug, flash onto the blank chip."
+    echo "!! Always: Apple II POWERED OFF while flashing."
     exit 1
 else
     "${cmd[@]}"
