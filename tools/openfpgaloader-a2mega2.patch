@@ -1,0 +1,144 @@
+diff --git a/src/gowin.cpp b/src/gowin.cpp
+index 4c25190..3f0741b 100644
+--- a/src/gowin.cpp
++++ b/src/gowin.cpp
+@@ -339,8 +339,43 @@ void Gowin::programFlash()
+ 		displayReadReg("after program flash", readStatusReg());
+ }
+ 
++/* GW5A external-flash boot-race mitigation (a2mega forensics 2026-08):
++ * after eraseSRAM the boot controller periodically re-scans MSPI for a
++ * bootable image; with content present it can reload the FPGA MID-SESSION,
++ * corrupting the JTAG-SPI passthrough (timeouts, dropped writes, wedged
++ * TAP). Blank flash = scanner gives up = deterministic writes.
++ * Primary fix: JTAG-configure the device FIRST (preload the very image
++ * being flashed into SRAM) -> DONE held -> scanner quiesced for the whole
++ * session. Opt out with OFL_GW5A_NO_SRAM_FIRST=1 (required for designs
++ * that use MSPI pins as user I/O). Fallback knob: OFL_GW5A_SETTLE_MS
++ * (default 500) replaces the fixed 100 ms post-erase settle. */
++static bool gw5a_sram_first_enabled()
++{
++	const char *e = getenv("OFL_GW5A_NO_SRAM_FIRST");
++	return !(e && e[0] == '1');
++}
++
++static unsigned gw5a_settle_us()
++{
++	const char *e = getenv("OFL_GW5A_SETTLE_MS");
++	return (e ? (unsigned)atoi(e) : 500) * 1000;
++}
++
+ void Gowin::programExtFlash(unsigned int offset, bool unprotect_flash)
+ {
++	if (is_gw5a && _fs && gw5a_sram_first_enabled()) {
++		printInfo("GW5A: preloading image to SRAM (quiesce auto-boot scanner)");
++		/* Work around FPGA stuck in Bad Command status */
++		reset();
++		_jtag->set_state(Jtag::RUN_TEST_IDLE);
++		_jtag->toggleClk(1000000);
++		if (eraseSRAM() && writeSRAM(_fs->getData(), _fs->getLength())) {
++			_gw5a_cfg_loaded = true;
++		} else {
++			printWarn("GW5A: SRAM preload failed; falling back to settle-delay path");
++		}
++	}
++
+ 	displayReadReg("after program flash", readStatusReg());
+ 
+ 	if (!prepare_flash_access()) {
+@@ -1219,6 +1254,18 @@ void Gowin::gw2a_force_state()
+ 
+ bool Gowin::prepare_flash_access()
+ {
++	if (is_gw5a && _gw5a_cfg_loaded) {
++		/* device is configured (SRAM preload): DO NOT reset or erase SRAM
++		 * - that would re-arm the auto-boot scanner. Straight to SPI. */
++		usleep(gw5a_settle_us());
++		if (!gw5a_enable_spi()) {
++			printError("Error: fail to switch GW5A to SPI mode");
++			return false;
++		}
++		usleep(100000);
++		return true;
++	}
++
+ 	/* Work around FPGA stuck in Bad Command status */
+ 	if (is_gw5a) {
+ 		reset();
+@@ -1232,12 +1279,23 @@ bool Gowin::prepare_flash_access()
+ 	}
+ 
+ 	if (is_gw5a) {
+-		usleep(100000);
++		usleep(gw5a_settle_us());
+ 		if (!gw5a_enable_spi()) {
+ 			printError("Error: fail to switch GW5A to SPI mode");
+ 			return false;
+ 		}
+ 		usleep(100000);
++		/* a2fpga patch: revive a flash stuck in deep-power-down /
++		 * continuous-read / QPI mode — states in which single-SPI
++		 * commands (incl. JEDEC 0x9F) are ignored and reads return
++		 * zeros. Sequence: Release-from-DPD (0xAB), then software
++		 * reset enable+reset (0x66/0x99), then settle. Harmless on a
++		 * healthy chip. */
++		spi_put_gw5a(0xAB, NULL, NULL, 0);
++		usleep(1000);
++		spi_put_gw5a(0x66, NULL, NULL, 0);
++		spi_put_gw5a(0x99, NULL, NULL, 0);
++		usleep(1000);
+ 	} else if (!is_gw2a) {
+ 		if (!enableCfg()) {
+ 			return false;
+@@ -1245,7 +1303,10 @@ bool Gowin::prepare_flash_access()
+ 		send_command(0x3D);
+ 	}
+ 
+-	_jtag->setClkFreq(10000000);
++	/* a2fpga patch: 10 MHz hardcode ignored the user's --freq and is
++	 * marginal through the esp_usb_jtag bridge (flash ID reads return
++	 * garbage: "Read ID failed" / "flash chip unknown" / phantom BP bits).
++	 * Keep the user's JTAG frequency for SPI-over-JTAG flash access. */
+ 
+ 	return true;
+ }
+diff --git a/src/gowin.hpp b/src/gowin.hpp
+index c3108f8..403bfe9 100644
+--- a/src/gowin.hpp
++++ b/src/gowin.hpp
+@@ -146,6 +146,10 @@ class Gowin: public Device, FlashInterface {
+ 		bool is_gw1n9;
+ 		bool is_gw2a;
+ 		bool is_gw5a;
++		/* GW5A: device was JTAG-configured (SRAM preload) before flash access
++		 * -> auto-boot scanner quiesced (DONE held); prepare_flash_access must
++		 * NOT reset/erase SRAM or the scanner re-arms mid-session. */
++		bool _gw5a_cfg_loaded = false;
+ 		bool skip_checksum;   /**< bypass checksum verification (GW2A) */
+ 		bool _external_flash; /**< select between int or ext flash */
+ 		uint8_t _spi_sck;     /**< clk signal offset in bscan SPI */
+diff --git a/src/jtag.cpp b/src/jtag.cpp
+index 2b528c7..f3975fd 100644
+--- a/src/jtag.cpp
++++ b/src/jtag.cpp
+@@ -230,7 +230,19 @@ Jtag::Jtag(const cable_t &cable, const jtag_pins_conf_t *pin_conf,
+ 		throw std::runtime_error("Error: memory allocation failed");
+ 	memset(_tms_buffer, 0, _tms_buffer_size);
+ 
+-	detectChain(32);
++	/* a2fpga patch: on esp_usb_jtag (and possibly other bridges) the first
++	 * chain scan intermittently reads all-ones when the FPGA sits in an
++	 * autoboot-failed state, while a later in-process scan succeeds (visible
++	 * in --detect output: "empty" followed by a found idcode). Retry a few
++	 * times before accepting an empty chain — prevents downstream flows from
++	 * fake-succeeding against no device. */
++	for (int _attempt = 0; _attempt < 5; ++_attempt) {
++		detectChain(32);
++		if (!_devices_list.empty())
++			break;
++		printInfo("Chain empty, retrying scan...");
++		usleep(200000);
++	}
+ }
+ 
+ Jtag::~Jtag()
