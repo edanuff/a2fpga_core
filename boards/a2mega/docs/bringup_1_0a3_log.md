@@ -1185,3 +1185,31 @@ BREAKING monitor-direct per-orientation AUX. Goal is NOT "revert to Friday"
 signals per candidate. Files: usbc_glue.cpp (AUX_SBU_OVR/FLIPSEL/mux),
 usbc_port.c (attach state machines). Board currently on 98461af3 (monitor
 5/5, slot hotplug NO).
+
+## 2026-08-16 NIGHT #4 — CORRECTION: TWO regressions, first is FRIDAY-PM (user)
+
+My "monitor-direct regression is Saturday firmware" was WRONG/incomplete.
+Coherent Friday timeline (all commits) shows a TRADE-OFF then a regression:
+- 07:52 6e1d40c6: COLORBARS+AUDIO first light (our .fs 5d8e15f0 era)
+- 11:52 5513d728: colorbars BOTH orientations (FLIPSEL 0 AND 1) — monitor
+  fully working both flips, but IN-SLOT not yet.
+- 16:47-17:15 29f65c19/ac183774/98461af3: in-slot SOURCE-ROLE PD rework
+  (VCONN sourcing, Rp 1.5A, VBUS-fallback, veto removal) — the user's
+  "VConn/VBUS hotplug commits."
+- 17:17 15086180: "IIgs DISPLAYS FROM THE SLOT — in-slot attach fixed."
+  => the Friday-PM rework FIXED in-slot but TRADED AWAY one monitor
+     orientation (both->one). We run 98461af3 = one-orientation + in-slot.
+- Saturday HEAD: broke the REMAINING orientation (one->zero) = all dark.
+
+So TWO regressions: (R1) Fri-PM source-role rework, monitor 2-orient->1
+(coupled to the in-slot fix, likely via AUX_SBU_OVR per-orientation vs
+source-attach CC/VCONN handling); (R2) Saturday, monitor 1-orient->0.
+Goal: BOTH monitor orientations AND in-slot hotplug simultaneously.
+Note: .fs 5d8e15f0 is EARLY-Friday dp_test gw (pre-TLVDS, pseudo-diff) —
+correct for the pseudo-diff fw path; Apple II FULL-CORE gw is a separate
+bitstream (a2mega.gprj) with its own Friday fixes, not this dp_test .fs.
+
+TOMORROW candidates: (a) build+upload ~11:52 fw (pre-16:47, e.g. tree at
+5513d728) → confirm BOTH orientations reproduce (isolates R1 to the Fri-PM
+rework); (b) then find minimal R1 change that keeps in-slot; (c) bisect R2
+across Saturday. FPGA stays 5d8e15f0 throughout.
