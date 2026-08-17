@@ -93,6 +93,30 @@ static void tn_puts(int fd, const char *s)
     tn_send(fd, s, (int)strlen(s));
 }
 
+/* Live-tee sends must never block: a client that is connected but not
+ * reading (paused terminal, script between reads) fills the send buffer,
+ * and a blocking send here wedges the whole task — key processing and the
+ * menu path included — until the client drains. Console telemetry is a
+ * lossy stream, so on EWOULDBLOCK the line (or its tail) is dropped for
+ * this client and the session stays up. Hard errors still mark the peer
+ * dead. Returns 0 if sent in full, 1 if (partially) dropped, -1 if dead. */
+static int tn_send_tee(int fd, const void *buf, int len)
+{
+    const char *p = buf;
+    while (len > 0 && !s_peer_dead) {
+        int n = lwip_send(fd, p, len, MSG_DONTWAIT);
+        if (n < 0 && (errno == EWOULDBLOCK || errno == EAGAIN))
+            return 1;
+        if (n <= 0) {
+            s_peer_dead = true;
+            return -1;
+        }
+        p += n;
+        len -= n;
+    }
+    return s_peer_dead ? -1 : 0;
+}
+
 /* Render one 40-char row of Apple II screen codes as ANSI. Inverse video
  * is codes $00-$3F ($00-$1F = '@'+c, $20-$3F = c); normal is ASCII+0x80. */
 static void render_row(int fd, const uint8_t *row)
@@ -333,7 +357,7 @@ static void session(int fd)
         } else {
             /* drain the console tee */
             for (;;) {
-                char line[TEE_COLS + 1];
+                char line[TEE_COLS + 3];
                 xSemaphoreTake(s_tee_lock, portMAX_DELAY);
                 bool have = s_tee_rd < s_tee_wr;
                 if (have) {
@@ -345,8 +369,9 @@ static void session(int fd)
                 xSemaphoreGive(s_tee_lock);
                 if (!have)
                     break;
-                tn_puts(fd, line);
-                tn_puts(fd, "\r\n");
+                strcat(line, "\r\n");
+                if (tn_send_tee(fd, line, (int)strlen(line)) != 0)
+                    break;                 /* buffer full: line dropped */
             }
         }
     }
