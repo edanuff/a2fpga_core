@@ -957,7 +957,6 @@ static void start_subsystems() {
     }
 
     xTaskCreatePinnedToCore(disk_task, "disk", 8192, NULL, 5, &disk_task_h, 1);
-    fpgastream_start();   /* network bitstream flashing, port 2323 (bench) */
     xTaskCreatePinnedToCore(menu_task, "menu", 8192, NULL, 4, &menu_task_h, 1);
 
     subsystems_up = true;
@@ -1007,6 +1006,10 @@ void setup() {
 #endif
 
     start_network();      /* WiFi/telnet console first — never FPGA-gated */
+    fpgastream_start();   /* network bitstream flashing, port 2323 (bench).
+                           * Unconditional: must work when the FPGA runs a
+                           * bring-up bitstream with no OSPI link (its task
+                           * retries the bind until lwIP is up). */
 
     // Route the USB-JTAG bridge ONCE, after USB/CDC init, and never
     // unroute it. The old edge-triggered routing keyed on
