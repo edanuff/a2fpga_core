@@ -12,27 +12,27 @@
   <Part Number>: GW5AT-LV60PG484AC1/I0
   <Device>: GW5AT-60
   <Device Version>: B
-  <Created Time>:Sun Aug 16 15:38:33 2026
+  <Created Time>:Sun Aug 16 17:18:44 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.273s, Elapsed time = 0h 0m 0.28s
-    Placement Phase 1: CPU time = 0h 0m 0.277s, Elapsed time = 0h 0m 0.282s
-    Placement Phase 2: CPU time = 0h 0m 0.93s, Elapsed time = 0h 0m 0.933s
-    Placement Phase 3: CPU time = 0h 0m 0.751s, Elapsed time = 0h 0m 0.761s
-    Total Placement: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
+    Placement Phase 0: CPU time = 0h 0m 0.312s, Elapsed time = 0h 0m 0.321s
+    Placement Phase 1: CPU time = 0h 0m 0.28s, Elapsed time = 0h 0m 0.285s
+    Placement Phase 2: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    Placement Phase 3: CPU time = 0h 0m 0.885s, Elapsed time = 0h 0m 0.891s
+    Total Placement: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
  Running routing:
     Routing Phase 0: CPU time = 0h 0m 0.001s, Elapsed time = 0h 0m 0.002s
-    Routing Phase 1: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
-    Routing Phase 2: CPU time = 0h 0m 0.041s, Elapsed time = 0h 0m 0.044s
+    Routing Phase 1: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
+    Routing Phase 2: CPU time = 0h 0m 0.043s, Elapsed time = 0h 0m 0.045s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
+    Total Routing: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
  Generate output files:
     CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
 
- Total Time and Memory Usage: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 10s, Peak memory usage = 2142MB
+ Total Time and Memory Usage: CPU time = 0h 0m 12s, Elapsed time = 0h 0m 12s, Peak memory usage = 2122MB
 
 
 3. Resource Usage Summary
@@ -40,22 +40,22 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 3596/59904                          |  6%
-    --LUT,ALU,ROM16           | 3596(3227 LUT, 369 ALU, 0 ROM16)    | -
+  Logic                       | 3980/59904                          |  7%
+    --LUT,ALU,ROM16           | 3980(3614 LUT, 366 ALU, 0 ROM16)    | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 2749/60780                          |  5%
+  Register                    | 3320/60780                          |  6%
     --Logic Register as Latch | 0/59904                             |  0%
-    --Logic Register as FF    | 2747/59904                          |  5%
+    --Logic Register as FF    | 3318/59904                          |  6%
     --I/O Register as Latch   | 0/876                               |  0%
     --I/O Register as FF      | 2/876                               |  <1%
-  CLS                         | 2841/29952                          |  10%
+  CLS                         | 3256/29952                          |  11%
   I/O Port                    | 10/297                              |  4%
   I/O Buf                     | 9                                   | -
     --Input Buf               | 3                                   | -
     --Output Buf              | 5                                   | -
     --Inout Buf               | 1                                   | -
-  BSRAM                       | 15/118                              | 13%
-    --SDPB                    | 13
+  BSRAM                       | 13/118                              | 12%
+    --SDPX9B                  | 11
     --pROM                    | 2
   GTR12_QUADA                 | 1/1                                 | 100%
   GTR12_UPARA                 | 1/1                                 | 100%
@@ -89,7 +89,7 @@
   Clock Resource| Usage         | Utilization 
   ------------------------------------------
   PRIMARY       | 5/8           | 63%
-  LW            | 2/8           | 25%
+  LW            | 4/8           | 50%
   GCLK_PIN      | 0/40          | 0%
   PLLA          | 2/8           | 25%
   ==========================================
@@ -106,6 +106,8 @@
   clk_sym_w      | PRIMARY        |  PTR0 PTR1 PBR1
   i_dp/i_transceiver_bank/drp_clk_w| PRIMARY        |  PTR0 PTR1
   button_d       | LW             |  -
+  i_dp/i_video_stream_packer/n4672_5| LW             |  -
+  i_dp/i_transceiver_bank/enc_reset| LW             |  -
   i_dp/i_transceiver_bank/i_dp_serdes/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/rstn| LW             |  -
   ===========================================
 
