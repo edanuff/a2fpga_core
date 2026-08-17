@@ -65,7 +65,14 @@ module a2mega_dp_test_top (
     //   the AC-coupled DC point + defined idle polarity.
     // ------------------------------------------------------------------
     localparam AUX_TLVDS = 1;   // experiment ON; set 0 to restore proven path
-    localparam AUX_BLIND = (AUX_TLVDS != 0) ? 0 : 1;
+    // 4-lane RBR probe (2026-08-16): BLIND forced ON — the closed-loop
+    // mask refused 4-lane against a sink whose DPCD parse yielded <4
+    // lanes (hub said 2, or the parse glitched; IT6563 silicon itself is
+    // 4-lane). Blind assumes sink lanes = ours -> all four power up and
+    // transmit regardless. Hub AUX replies stay readable, so K:/E:
+    // telemetry remains live even in blind mode. Restore the derived
+    // expression for closed-loop builds.
+    localparam AUX_BLIND = 1;
 
     logic auxch_in, auxch_out, auxch_tri;
     generate if (AUX_TLVDS != 0) begin : g_aux_tlvds
