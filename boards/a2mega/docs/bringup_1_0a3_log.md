@@ -1253,3 +1253,33 @@ FIX DIRECTION (until 1.0a4 bias network, which this PROMOTES to critical):
   still a risk until AUX is spec-compliant.
 - Bench rule: cable ID + orientation + breakout-presence + EQ logged on
   EVERY test (user instituting).
+
+## 2026-08-17 PM — WS1b COMPLETE: network flashing + telnet FPGA reload
+
+The replug tax is gone. Full loop verified twice on B2, zero USB after a
+one-time ESP32 firmware upload:
+
+- **fpgastream** (ESP32 TCP service, port 2323): streams a Gowin .bin
+  over WiFi straight into config flash via the native SPI-over-JTAG
+  driver. Validates A5C3 sync + GW5AT-60 IDCODE before erasing; page
+  program + readback verify + 1 retry; on OK, reloads the FPGA and
+  restarts the ESP32. Client: `tools/fpga_stream.py <ip> <bin>`.
+  Measured: 2,281,894 bytes in **186 s** (both runs identical), full
+  page verify included.
+- **telnet 'g' key**: reconfigures the FPGA from flash in ~2-3 s;
+  telemetry restarts from CR 00 (fresh config-domain state — a true
+  boot-draw re-roll); telnet session survives. This is the primitive for
+  task #3's high-n hub boot statistics. NEVER a consumer feature
+  (decision of record).
+- Bug caught during bring-up: fpgastream was initially started inside
+  start_subsystems(), which early-returns when the FPGA has no OSPI link
+  — i.e. dead exactly when running bring-up bitstreams. Moved to setup()
+  next to start_network(), unconditional (commit 928df697).
+- End-to-end validation payloads: TLVDS build (re-flash of running
+  image), then the **pseudo-diff bench baseline rebuild** (lottery-check
+  v3 config restored: LVCMOS33 2Vpp AUX + chained IP + blind ladder;
+  timing 0/0, SecurityBit OFF, bin sha256 6b97bafa, commit eea49ef0).
+  B2 now runs the useful bench config.
+
+ESP32 firmware updates still need USB (no OTA partition). Gateware
+iteration is now: edit -> build -> `fpga_stream.py` -> auto-reload.
