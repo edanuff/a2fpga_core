@@ -64,7 +64,11 @@ module a2mega_dp_test_top (
     //   closed-loop training. PULL_MODE UP/DOWN on the pads (cst) sets
     //   the AC-coupled DC point + defined idle polarity.
     // ------------------------------------------------------------------
-    localparam AUX_TLVDS = 0;   // lottery-check: blind-era pseudo-diff pad
+    localparam AUX_TLVDS = 1;   // TLVDS CLEAN TEST (task #2, 2026-08-17):
+                                // spec ~350mV differential drive + BLIND
+                                // ladder, NO breakout — does the monitor
+                                // hear spec-level AUX without attenuation?
+                                // Decides the 1.0a4 AUX network topology.
                                 // (2 Vpp) — the only AUX drive the monitor
                                 // has ever demonstrably heard. cst pad
                                 // block switched to match.
