@@ -76,4 +76,6 @@ Weekend backfill: only rows with certain provenance; `?` = not recorded
 
 | 13 | 08-17 | 74759364 | HEAD | mon | C3 | ? | **Y** | mon | 6.5 | cold | **LIT** | B2/SOM#1 first light. CLOSES: silicon-variation (dead — SOM#1 lights identical image), fresh-carrier bring-up (pass), Saturday-fw monitor guilt (exonerated — HEAD fw lights with AUX attenuation present) |
 
+| 14 | 08-17 | c85d3afc | HEAD | mon | C3 | both | Y and N | mon | 6.5 | cold ×4 | DARK all 4 | TLVDS clean test NEGATIVE: spec ~350mV doesn't light monitor direct OR breakout (attenuating weak signal only hurts). Hub ACKed TLVDS all Saturday => sink-dependent AUX RX thresholds. Neither 1.0a3 drive is in the 0.4-1.38Vpp spec window at the connector. CLOSES 1.0a4 open item A: resistive level/bias network on the LVCMOS path (≈1V diff at connector + defined CM + RX bias), NOT the TLVDS pad |
+
 <!-- new rows below; never reuse ids -->
