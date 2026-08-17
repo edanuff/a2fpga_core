@@ -1086,3 +1086,30 @@ one line of decode).
   a2mega-2lane-planc-4of5 (no IDE session needed); replay ROM 357; kept
   blind-gated watchdog + parameterized PLL (identical defaults) + dormant
   4-lane branch.
+
+## 2026-08-16 late — CONTAMINATED CONCLUSION RETRACTED (firmware confound)
+
+The monitor-direct dark-screen gauntlet tonight (blind 2-lane, faithful
+pseudo-diff pad, chained IP, 1.0dB EQ, even Friday's EXACT .fs 5d8e15f0)
+all stayed dark and drove toward "SOM#2 silicon variation / monitor never
+lit on SOM#2." **That conclusion is not supportable** — the ESP32 firmware
+was NEVER reverted. FPGA .fs was byte-identical Fri AM -> Fri PM
+(5d8e15f0); only FIRMWARE changed across the good period and all weekend.
+SOM#2 came into use ~same time as the Saturday firmware, so silicon and
+firmware are fully confounded. Tonight's "Friday binary" test flashed only
+the FPGA half; the ESP32 ran TODAY's firmware.
+
+Firmware diff since Fri 07:46 (a77e2422) = 235 insertions across 7 files,
+incl. the PD SOURCE-ROLE REWRITE (prime suspects for monitor alt-mode):
+- 29f65c19 Fri PM: Rp advert 1.5A/180uA, VCONN sourcing, Source_Caps giveup
+- ac183774 Fri PM: VBUS-fallback sink attach
+- 98461af3 Fri PM: remove VBUS source veto
+- ad471835 Sat: EQ default -> 6.5dB (tried reverting live to 1.0, no change)
+- Saturday: JTAG-bridge toggle, tee width, VDM diagnostics, mux-EN bounce
+
+FAITHFUL TEST (next session): full end-of-Friday snapshot 98461af3 —
+its .fs is 5d8e15f0 (ALREADY on the chip), so ONLY need to rebuild+upload
+98461af3's firmware (loses current telemetry width temporarily; restore
+after). Monitor lights -> regression is Saturday firmware (bisect the PD
+rework); stays dark -> then and only then suspect hardware (SOM#1 A/B).
+Until this runs, make NO hardware-variation claims.
