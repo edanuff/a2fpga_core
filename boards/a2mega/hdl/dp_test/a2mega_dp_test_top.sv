@@ -65,7 +65,12 @@ module a2mega_dp_test_top (
     //   the AC-coupled DC point + defined idle polarity.
     // ------------------------------------------------------------------
     localparam AUX_TLVDS = 1;   // experiment ON; set 0 to restore proven path
-    localparam AUX_BLIND = (AUX_TLVDS != 0) ? 0 : 1;
+    // BLIND-ERA LOTTERY CHECK (2026-08-16 night): blind forced ON over
+    // the proven 2-lane HBR config, monitor-direct. Question: was the
+    // original blind-era winning streak luck (draw lottery unobserved)
+    // or is blind 2-lane on the monitor genuinely ~5/5 across power
+    // cycles and replugs? Restore the derived expression afterwards.
+    localparam AUX_BLIND = 1;
 
     logic auxch_in, auxch_out, auxch_tri;
     generate if (AUX_TLVDS != 0) begin : g_aux_tlvds
