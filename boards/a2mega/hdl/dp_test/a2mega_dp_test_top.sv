@@ -488,6 +488,7 @@ module a2mega_dp_test_top (
 
     logic [27:0] sym_cnt = '0, sym_last = '0, sym_delta = '0;
     logic [2:0]  tgl_sync = '0;
+    logic        cmp_lo = 1'b0, cmp_hi = 1'b0;
     logic        freq_ok = 1'b0;
     logic        clk_sym_w;
     always_ff @(posedge clk_sym_w) begin
@@ -498,11 +499,13 @@ module a2mega_dp_test_top (
             sym_last  <= sym_cnt;
         end
         // pipelined vs the snapshot: sym_delta is static for a full 1 s
-        // window, so comparing it a cycle later costs nothing and keeps
-        // the wide subtract-compare off the single-cycle 135 MHz path.
+        // window, so extra compare latency costs nothing. Each 28-bit
+        // magnitude compare gets its own register stage (the two ANDed
+        // in one cycle missed 135 MHz by ~70 ps in some PnR seeds).
         // 135 M ± ~2%: 132.3M .. 137.7M
-        freq_ok <= (sym_delta > 28'd132_300_000) &&
-                   (sym_delta < 28'd137_700_000);
+        cmp_lo  <= (sym_delta > 28'd132_300_000);
+        cmp_hi  <= (sym_delta < 28'd137_700_000);
+        freq_ok <= cmp_lo && cmp_hi;
     end
 
     // ------------------------------------------------------------------
