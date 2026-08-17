@@ -13,6 +13,8 @@
 -global_reset enable
 -protocol_module_name0 dp_phy
 -dp_phyprotocol_module_type customized
+-dp_phyQ0Lane0 true
+-dp_phyQ0Lane1 true
 -dp_phyQ0Lane2 true
 -dp_phyQ0Lane3 true
 -dp_phyClock_Correction None

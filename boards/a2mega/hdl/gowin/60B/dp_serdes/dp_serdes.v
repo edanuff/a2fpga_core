@@ -6,10 +6,40 @@
 //Part Number: GW5AT-LV60PG484AC1/I0
 //Device: GW5AT-60
 //Device Version: B
-//Created Time: Sun Aug 16 09:48:13 2026
+//Created Time: Sun Aug 16 17:15:54 2026
 
-module dp_serdes (dp_phy_q0_ln2_rx_pcs_clkout_o, dp_phy_q0_ln2_rx_data_o, dp_phy_q0_ln2_rx_fifo_rdusewd_o, dp_phy_q0_ln2_rx_fifo_aempty_o, dp_phy_q0_ln2_rx_fifo_empty_o, dp_phy_q0_ln2_rx_valid_o, dp_phy_q0_ln2_tx_pcs_clkout_o, dp_phy_q0_ln2_tx_fifo_wrusewd_o, dp_phy_q0_ln2_tx_fifo_afull_o, dp_phy_q0_ln2_tx_fifo_full_o, dp_phy_q0_ln2_refclk_o, dp_phy_q0_ln2_signal_detect_o, dp_phy_q0_ln2_rx_cdr_lock_o, dp_phy_q0_ln2_pll_lock_o, dp_phy_q0_ln2_ready_o, dp_phy_q0_ln3_rx_pcs_clkout_o, dp_phy_q0_ln3_rx_data_o, dp_phy_q0_ln3_rx_fifo_rdusewd_o, dp_phy_q0_ln3_rx_fifo_aempty_o, dp_phy_q0_ln3_rx_fifo_empty_o, dp_phy_q0_ln3_rx_valid_o, dp_phy_q0_ln3_tx_pcs_clkout_o, dp_phy_q0_ln3_tx_fifo_wrusewd_o, dp_phy_q0_ln3_tx_fifo_afull_o, dp_phy_q0_ln3_tx_fifo_full_o, dp_phy_q0_ln3_refclk_o, dp_phy_q0_ln3_signal_detect_o, dp_phy_q0_ln3_rx_cdr_lock_o, dp_phy_q0_ln3_pll_lock_o, dp_phy_q0_ln3_ready_o, dp_phy_drp_clk_o, dp_phy_drp_ready_o, dp_phy_drp_rdvld_o, dp_phy_drp_rddata_o, dp_phy_drp_resp_o, por_n_i, dp_phy_q0_ln2_rx_clk_i, dp_phy_q0_ln2_rx_fifo_rden_i, dp_phy_q0_ln2_tx_clk_i, dp_phy_q0_ln2_tx_data_i, dp_phy_q0_ln2_tx_fifo_wren_i, dp_phy_q0_ln2_pma_rstn_i, dp_phy_q0_ln2_pcs_rx_rst_i, dp_phy_q0_ln2_pcs_tx_rst_i, dp_phy_q0_ln3_rx_clk_i, dp_phy_q0_ln3_rx_fifo_rden_i, dp_phy_q0_ln3_tx_clk_i, dp_phy_q0_ln3_tx_data_i, dp_phy_q0_ln3_tx_fifo_wren_i, dp_phy_q0_ln3_pma_rstn_i, dp_phy_q0_ln3_pcs_rx_rst_i, dp_phy_q0_ln3_pcs_tx_rst_i, dp_phy_drp_addr_i, dp_phy_drp_wren_i, dp_phy_drp_wrdata_i, dp_phy_drp_strb_i, dp_phy_drp_rden_i);
+module dp_serdes (dp_phy_q0_ln0_rx_pcs_clkout_o, dp_phy_q0_ln0_rx_data_o, dp_phy_q0_ln0_rx_fifo_rdusewd_o, dp_phy_q0_ln0_rx_fifo_aempty_o, dp_phy_q0_ln0_rx_fifo_empty_o, dp_phy_q0_ln0_rx_valid_o, dp_phy_q0_ln0_tx_pcs_clkout_o, dp_phy_q0_ln0_tx_fifo_wrusewd_o, dp_phy_q0_ln0_tx_fifo_afull_o, dp_phy_q0_ln0_tx_fifo_full_o, dp_phy_q0_ln0_refclk_o, dp_phy_q0_ln0_signal_detect_o, dp_phy_q0_ln0_rx_cdr_lock_o, dp_phy_q0_ln0_pll_lock_o, dp_phy_q0_ln0_ready_o, dp_phy_q0_ln1_rx_pcs_clkout_o, dp_phy_q0_ln1_rx_data_o, dp_phy_q0_ln1_rx_fifo_rdusewd_o, dp_phy_q0_ln1_rx_fifo_aempty_o, dp_phy_q0_ln1_rx_fifo_empty_o, dp_phy_q0_ln1_rx_valid_o, dp_phy_q0_ln1_tx_pcs_clkout_o, dp_phy_q0_ln1_tx_fifo_wrusewd_o, dp_phy_q0_ln1_tx_fifo_afull_o, dp_phy_q0_ln1_tx_fifo_full_o, dp_phy_q0_ln1_refclk_o, dp_phy_q0_ln1_signal_detect_o, dp_phy_q0_ln1_rx_cdr_lock_o, dp_phy_q0_ln1_pll_lock_o, dp_phy_q0_ln1_ready_o, dp_phy_q0_ln2_rx_pcs_clkout_o, dp_phy_q0_ln2_rx_data_o, dp_phy_q0_ln2_rx_fifo_rdusewd_o, dp_phy_q0_ln2_rx_fifo_aempty_o, dp_phy_q0_ln2_rx_fifo_empty_o, dp_phy_q0_ln2_rx_valid_o, dp_phy_q0_ln2_tx_pcs_clkout_o, dp_phy_q0_ln2_tx_fifo_wrusewd_o, dp_phy_q0_ln2_tx_fifo_afull_o, dp_phy_q0_ln2_tx_fifo_full_o, dp_phy_q0_ln2_refclk_o, dp_phy_q0_ln2_signal_detect_o, dp_phy_q0_ln2_rx_cdr_lock_o, dp_phy_q0_ln2_pll_lock_o, dp_phy_q0_ln2_ready_o, dp_phy_q0_ln3_rx_pcs_clkout_o, dp_phy_q0_ln3_rx_data_o, dp_phy_q0_ln3_rx_fifo_rdusewd_o, dp_phy_q0_ln3_rx_fifo_aempty_o, dp_phy_q0_ln3_rx_fifo_empty_o, dp_phy_q0_ln3_rx_valid_o, dp_phy_q0_ln3_tx_pcs_clkout_o, dp_phy_q0_ln3_tx_fifo_wrusewd_o, dp_phy_q0_ln3_tx_fifo_afull_o, dp_phy_q0_ln3_tx_fifo_full_o, dp_phy_q0_ln3_refclk_o, dp_phy_q0_ln3_signal_detect_o, dp_phy_q0_ln3_rx_cdr_lock_o, dp_phy_q0_ln3_pll_lock_o, dp_phy_q0_ln3_ready_o, dp_phy_drp_clk_o, dp_phy_drp_ready_o, dp_phy_drp_rdvld_o, dp_phy_drp_rddata_o, dp_phy_drp_resp_o, por_n_i, dp_phy_q0_ln0_rx_clk_i, dp_phy_q0_ln0_rx_fifo_rden_i, dp_phy_q0_ln0_tx_clk_i, dp_phy_q0_ln0_tx_data_i, dp_phy_q0_ln0_tx_fifo_wren_i, dp_phy_q0_ln0_pma_rstn_i, dp_phy_q0_ln0_pcs_rx_rst_i, dp_phy_q0_ln0_pcs_tx_rst_i, dp_phy_q0_ln1_rx_clk_i, dp_phy_q0_ln1_rx_fifo_rden_i, dp_phy_q0_ln1_tx_clk_i, dp_phy_q0_ln1_tx_data_i, dp_phy_q0_ln1_tx_fifo_wren_i, dp_phy_q0_ln1_pma_rstn_i, dp_phy_q0_ln1_pcs_rx_rst_i, dp_phy_q0_ln1_pcs_tx_rst_i, dp_phy_q0_ln2_rx_clk_i, dp_phy_q0_ln2_rx_fifo_rden_i, dp_phy_q0_ln2_tx_clk_i, dp_phy_q0_ln2_tx_data_i, dp_phy_q0_ln2_tx_fifo_wren_i, dp_phy_q0_ln2_pma_rstn_i, dp_phy_q0_ln2_pcs_rx_rst_i, dp_phy_q0_ln2_pcs_tx_rst_i, dp_phy_q0_ln3_rx_clk_i, dp_phy_q0_ln3_rx_fifo_rden_i, dp_phy_q0_ln3_tx_clk_i, dp_phy_q0_ln3_tx_data_i, dp_phy_q0_ln3_tx_fifo_wren_i, dp_phy_q0_ln3_pma_rstn_i, dp_phy_q0_ln3_pcs_rx_rst_i, dp_phy_q0_ln3_pcs_tx_rst_i, dp_phy_drp_addr_i, dp_phy_drp_wren_i, dp_phy_drp_wrdata_i, dp_phy_drp_strb_i, dp_phy_drp_rden_i);
 
+output dp_phy_q0_ln0_rx_pcs_clkout_o;
+output [87:0] dp_phy_q0_ln0_rx_data_o;
+output [4:0] dp_phy_q0_ln0_rx_fifo_rdusewd_o;
+output dp_phy_q0_ln0_rx_fifo_aempty_o;
+output dp_phy_q0_ln0_rx_fifo_empty_o;
+output dp_phy_q0_ln0_rx_valid_o;
+output dp_phy_q0_ln0_tx_pcs_clkout_o;
+output [4:0] dp_phy_q0_ln0_tx_fifo_wrusewd_o;
+output dp_phy_q0_ln0_tx_fifo_afull_o;
+output dp_phy_q0_ln0_tx_fifo_full_o;
+output dp_phy_q0_ln0_refclk_o;
+output dp_phy_q0_ln0_signal_detect_o;
+output dp_phy_q0_ln0_rx_cdr_lock_o;
+output dp_phy_q0_ln0_pll_lock_o;
+output dp_phy_q0_ln0_ready_o;
+output dp_phy_q0_ln1_rx_pcs_clkout_o;
+output [87:0] dp_phy_q0_ln1_rx_data_o;
+output [4:0] dp_phy_q0_ln1_rx_fifo_rdusewd_o;
+output dp_phy_q0_ln1_rx_fifo_aempty_o;
+output dp_phy_q0_ln1_rx_fifo_empty_o;
+output dp_phy_q0_ln1_rx_valid_o;
+output dp_phy_q0_ln1_tx_pcs_clkout_o;
+output [4:0] dp_phy_q0_ln1_tx_fifo_wrusewd_o;
+output dp_phy_q0_ln1_tx_fifo_afull_o;
+output dp_phy_q0_ln1_tx_fifo_full_o;
+output dp_phy_q0_ln1_refclk_o;
+output dp_phy_q0_ln1_signal_detect_o;
+output dp_phy_q0_ln1_rx_cdr_lock_o;
+output dp_phy_q0_ln1_pll_lock_o;
+output dp_phy_q0_ln1_ready_o;
 output dp_phy_q0_ln2_rx_pcs_clkout_o;
 output [87:0] dp_phy_q0_ln2_rx_data_o;
 output [4:0] dp_phy_q0_ln2_rx_fifo_rdusewd_o;
@@ -46,6 +76,22 @@ output dp_phy_drp_rdvld_o;
 output [31:0] dp_phy_drp_rddata_o;
 output dp_phy_drp_resp_o;
 input por_n_i;
+input dp_phy_q0_ln0_rx_clk_i;
+input dp_phy_q0_ln0_rx_fifo_rden_i;
+input dp_phy_q0_ln0_tx_clk_i;
+input [79:0] dp_phy_q0_ln0_tx_data_i;
+input dp_phy_q0_ln0_tx_fifo_wren_i;
+input dp_phy_q0_ln0_pma_rstn_i;
+input dp_phy_q0_ln0_pcs_rx_rst_i;
+input dp_phy_q0_ln0_pcs_tx_rst_i;
+input dp_phy_q0_ln1_rx_clk_i;
+input dp_phy_q0_ln1_rx_fifo_rden_i;
+input dp_phy_q0_ln1_tx_clk_i;
+input [79:0] dp_phy_q0_ln1_tx_data_i;
+input dp_phy_q0_ln1_tx_fifo_wren_i;
+input dp_phy_q0_ln1_pma_rstn_i;
+input dp_phy_q0_ln1_pcs_rx_rst_i;
+input dp_phy_q0_ln1_pcs_tx_rst_i;
 input dp_phy_q0_ln2_rx_clk_i;
 input dp_phy_q0_ln2_rx_fifo_rden_i;
 input dp_phy_q0_ln2_tx_clk_i;
@@ -68,24 +114,44 @@ input [31:0] dp_phy_drp_wrdata_i;
 input [7:0] dp_phy_drp_strb_i;
 input dp_phy_drp_rden_i;
 
+wire q0_fabric_ln0_rstn_i;
+wire q0_fabric_ln1_rstn_i;
 wire q0_fabric_ln2_rstn_i;
 wire q0_fabric_ln3_rstn_i;
+wire [79:0] q0_fabric_ln0_txdata_i;
+wire [79:0] q0_fabric_ln1_txdata_i;
 wire [79:0] q0_fabric_ln2_txdata_i;
 wire [79:0] q0_fabric_ln3_txdata_i;
+wire q0_lane0_pcs_rx_rst;
+wire q0_lane1_pcs_rx_rst;
 wire q0_lane2_pcs_rx_rst;
 wire q0_lane3_pcs_rx_rst;
+wire q0_lane0_chbond_start;
+wire q0_lane1_chbond_start;
 wire q0_lane2_chbond_start;
 wire q0_lane3_chbond_start;
+wire q0_lane0_pcs_tx_rst;
+wire q0_lane1_pcs_tx_rst;
 wire q0_lane2_pcs_tx_rst;
 wire q0_lane3_pcs_tx_rst;
+wire q0_lane0_fabric_rx_clk;
+wire q0_lane1_fabric_rx_clk;
 wire q0_lane2_fabric_rx_clk;
 wire q0_lane3_fabric_rx_clk;
+wire q0_lane0_fabric_c2i_clk;
+wire q0_lane1_fabric_c2i_clk;
 wire q0_lane2_fabric_c2i_clk;
 wire q0_lane3_fabric_c2i_clk;
+wire q0_lane0_fabric_tx_clk;
+wire q0_lane1_fabric_tx_clk;
 wire q0_lane2_fabric_tx_clk;
 wire q0_lane3_fabric_tx_clk;
+wire q0_lane0_rx_if_fifo_rden;
+wire q0_lane1_rx_if_fifo_rden;
 wire q0_lane2_rx_if_fifo_rden;
 wire q0_lane3_rx_if_fifo_rden;
+wire q0_fabric_ln0_tx_vld_in;
+wire q0_fabric_ln1_tx_vld_in;
 wire q0_fabric_ln2_tx_vld_in;
 wire q0_fabric_ln3_tx_vld_in;
 wire q0_fabric_cm_life_clk_o;
@@ -452,45 +518,45 @@ GTR12_QUADA gtr12_quad_inst0 (
     .FABRIC_LN1_RATE_I({gw_gnd,gw_gnd}),
     .FABRIC_LN2_RATE_I({gw_gnd,gw_gnd}),
     .FABRIC_LN3_RATE_I({gw_gnd,gw_gnd}),
-    .FABRIC_LN0_RSTN_I(gw_gnd),
-    .FABRIC_LN1_RSTN_I(gw_gnd),
+    .FABRIC_LN0_RSTN_I(q0_fabric_ln0_rstn_i),
+    .FABRIC_LN1_RSTN_I(q0_fabric_ln1_rstn_i),
     .FABRIC_LN2_RSTN_I(q0_fabric_ln2_rstn_i),
     .FABRIC_LN3_RSTN_I(q0_fabric_ln3_rstn_i),
-    .FABRIC_LN0_TXDATA_I({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
-    .FABRIC_LN1_TXDATA_I({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
+    .FABRIC_LN0_TXDATA_I(q0_fabric_ln0_txdata_i),
+    .FABRIC_LN1_TXDATA_I(q0_fabric_ln1_txdata_i),
     .FABRIC_LN2_TXDATA_I(q0_fabric_ln2_txdata_i),
     .FABRIC_LN3_TXDATA_I(q0_fabric_ln3_txdata_i),
     .FABRIC_REFCLK_GATE_I(gw_gnd),
-    .LANE0_PCS_RX_RST(gw_gnd),
-    .LANE1_PCS_RX_RST(gw_gnd),
+    .LANE0_PCS_RX_RST(q0_lane0_pcs_rx_rst),
+    .LANE1_PCS_RX_RST(q0_lane1_pcs_rx_rst),
     .LANE2_PCS_RX_RST(q0_lane2_pcs_rx_rst),
     .LANE3_PCS_RX_RST(q0_lane3_pcs_rx_rst),
     .LANE0_ALIGN_TRIGGER(gw_gnd),
     .LANE1_ALIGN_TRIGGER(gw_gnd),
     .LANE2_ALIGN_TRIGGER(gw_gnd),
     .LANE3_ALIGN_TRIGGER(gw_gnd),
-    .LANE0_CHBOND_START(gw_gnd),
-    .LANE1_CHBOND_START(gw_gnd),
+    .LANE0_CHBOND_START(q0_lane0_chbond_start),
+    .LANE1_CHBOND_START(q0_lane1_chbond_start),
     .LANE2_CHBOND_START(q0_lane2_chbond_start),
     .LANE3_CHBOND_START(q0_lane3_chbond_start),
-    .LANE0_PCS_TX_RST(gw_gnd),
-    .LANE1_PCS_TX_RST(gw_gnd),
+    .LANE0_PCS_TX_RST(q0_lane0_pcs_tx_rst),
+    .LANE1_PCS_TX_RST(q0_lane1_pcs_tx_rst),
     .LANE2_PCS_TX_RST(q0_lane2_pcs_tx_rst),
     .LANE3_PCS_TX_RST(q0_lane3_pcs_tx_rst),
-    .LANE0_FABRIC_RX_CLK(gw_gnd),
-    .LANE1_FABRIC_RX_CLK(gw_gnd),
+    .LANE0_FABRIC_RX_CLK(q0_lane0_fabric_rx_clk),
+    .LANE1_FABRIC_RX_CLK(q0_lane1_fabric_rx_clk),
     .LANE2_FABRIC_RX_CLK(q0_lane2_fabric_rx_clk),
     .LANE3_FABRIC_RX_CLK(q0_lane3_fabric_rx_clk),
-    .LANE0_FABRIC_C2I_CLK(gw_gnd),
-    .LANE1_FABRIC_C2I_CLK(gw_gnd),
+    .LANE0_FABRIC_C2I_CLK(q0_lane0_fabric_c2i_clk),
+    .LANE1_FABRIC_C2I_CLK(q0_lane1_fabric_c2i_clk),
     .LANE2_FABRIC_C2I_CLK(q0_lane2_fabric_c2i_clk),
     .LANE3_FABRIC_C2I_CLK(q0_lane3_fabric_c2i_clk),
-    .LANE0_FABRIC_TX_CLK(gw_gnd),
-    .LANE1_FABRIC_TX_CLK(gw_gnd),
+    .LANE0_FABRIC_TX_CLK(q0_lane0_fabric_tx_clk),
+    .LANE1_FABRIC_TX_CLK(q0_lane1_fabric_tx_clk),
     .LANE2_FABRIC_TX_CLK(q0_lane2_fabric_tx_clk),
     .LANE3_FABRIC_TX_CLK(q0_lane3_fabric_tx_clk),
-    .LANE0_RX_IF_FIFO_RDEN(gw_gnd),
-    .LANE1_RX_IF_FIFO_RDEN(gw_gnd),
+    .LANE0_RX_IF_FIFO_RDEN(q0_lane0_rx_if_fifo_rden),
+    .LANE1_RX_IF_FIFO_RDEN(q0_lane1_rx_if_fifo_rden),
     .LANE2_RX_IF_FIFO_RDEN(q0_lane2_rx_if_fifo_rden),
     .LANE3_RX_IF_FIFO_RDEN(q0_lane3_rx_if_fifo_rden),
     .FABRIC_CMU0_RESETN_I(por_n_i),
@@ -517,11 +583,11 @@ GTR12_QUADA gtr12_quad_inst0 (
     .FABRIC_LN0_CTRL_I_H({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
     .FABRIC_LN0_PD_I_H({gw_gnd,gw_gnd,gw_gnd}),
     .FABRIC_LN0_RATE_I_H({gw_gnd,gw_gnd}),
-    .FABRIC_LN0_TX_VLD_IN(gw_gnd),
+    .FABRIC_LN0_TX_VLD_IN(q0_fabric_ln0_tx_vld_in),
     .FABRIC_LN1_CTRL_I_H({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
     .FABRIC_LN1_PD_I_H({gw_gnd,gw_gnd,gw_gnd}),
     .FABRIC_LN1_RATE_I_H({gw_gnd,gw_gnd}),
-    .FABRIC_LN1_TX_VLD_IN(gw_gnd),
+    .FABRIC_LN1_TX_VLD_IN(q0_fabric_ln1_tx_vld_in),
     .FABRIC_LN2_CTRL_I_H({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
     .FABRIC_LN2_PD_I_H({gw_gnd,gw_gnd,gw_gnd}),
     .FABRIC_LN2_RATE_I_H({gw_gnd,gw_gnd}),
@@ -620,6 +686,56 @@ GTR12_UPARA gtr12_upar_inst (
 );
 
 dp_phy dp_phy_inst (
+    .q0_ln0_rx_pcs_clkout_o(dp_phy_q0_ln0_rx_pcs_clkout_o),
+    .q0_ln0_rx_data_o(dp_phy_q0_ln0_rx_data_o[87:0]),
+    .q0_ln0_rx_fifo_rdusewd_o(dp_phy_q0_ln0_rx_fifo_rdusewd_o[4:0]),
+    .q0_ln0_rx_fifo_aempty_o(dp_phy_q0_ln0_rx_fifo_aempty_o),
+    .q0_ln0_rx_fifo_empty_o(dp_phy_q0_ln0_rx_fifo_empty_o),
+    .q0_ln0_rx_valid_o(dp_phy_q0_ln0_rx_valid_o),
+    .q0_ln0_tx_pcs_clkout_o(dp_phy_q0_ln0_tx_pcs_clkout_o),
+    .q0_ln0_tx_fifo_wrusewd_o(dp_phy_q0_ln0_tx_fifo_wrusewd_o[4:0]),
+    .q0_ln0_tx_fifo_afull_o(dp_phy_q0_ln0_tx_fifo_afull_o),
+    .q0_ln0_tx_fifo_full_o(dp_phy_q0_ln0_tx_fifo_full_o),
+    .q0_ln0_refclk_o(dp_phy_q0_ln0_refclk_o),
+    .q0_ln0_signal_detect_o(dp_phy_q0_ln0_signal_detect_o),
+    .q0_ln0_rx_cdr_lock_o(dp_phy_q0_ln0_rx_cdr_lock_o),
+    .q0_ln0_pll_lock_o(dp_phy_q0_ln0_pll_lock_o),
+    .q0_ln0_ready_o(dp_phy_q0_ln0_ready_o),
+    .Q0_LANE0_FABRIC_RX_CLK(q0_lane0_fabric_rx_clk),
+    .Q0_LANE0_RX_IF_FIFO_RDEN(q0_lane0_rx_if_fifo_rden),
+    .Q0_LANE0_FABRIC_TX_CLK(q0_lane0_fabric_tx_clk),
+    .Q0_FABRIC_LN0_TXDATA_I(q0_fabric_ln0_txdata_i[79:0]),
+    .Q0_FABRIC_LN0_TX_VLD_IN(q0_fabric_ln0_tx_vld_in),
+    .Q0_LANE0_FABRIC_C2I_CLK(q0_lane0_fabric_c2i_clk),
+    .Q0_LANE0_CHBOND_START(q0_lane0_chbond_start),
+    .Q0_FABRIC_LN0_RSTN_I(q0_fabric_ln0_rstn_i),
+    .Q0_LANE0_PCS_RX_RST(q0_lane0_pcs_rx_rst),
+    .Q0_LANE0_PCS_TX_RST(q0_lane0_pcs_tx_rst),
+    .q0_ln1_rx_pcs_clkout_o(dp_phy_q0_ln1_rx_pcs_clkout_o),
+    .q0_ln1_rx_data_o(dp_phy_q0_ln1_rx_data_o[87:0]),
+    .q0_ln1_rx_fifo_rdusewd_o(dp_phy_q0_ln1_rx_fifo_rdusewd_o[4:0]),
+    .q0_ln1_rx_fifo_aempty_o(dp_phy_q0_ln1_rx_fifo_aempty_o),
+    .q0_ln1_rx_fifo_empty_o(dp_phy_q0_ln1_rx_fifo_empty_o),
+    .q0_ln1_rx_valid_o(dp_phy_q0_ln1_rx_valid_o),
+    .q0_ln1_tx_pcs_clkout_o(dp_phy_q0_ln1_tx_pcs_clkout_o),
+    .q0_ln1_tx_fifo_wrusewd_o(dp_phy_q0_ln1_tx_fifo_wrusewd_o[4:0]),
+    .q0_ln1_tx_fifo_afull_o(dp_phy_q0_ln1_tx_fifo_afull_o),
+    .q0_ln1_tx_fifo_full_o(dp_phy_q0_ln1_tx_fifo_full_o),
+    .q0_ln1_refclk_o(dp_phy_q0_ln1_refclk_o),
+    .q0_ln1_signal_detect_o(dp_phy_q0_ln1_signal_detect_o),
+    .q0_ln1_rx_cdr_lock_o(dp_phy_q0_ln1_rx_cdr_lock_o),
+    .q0_ln1_pll_lock_o(dp_phy_q0_ln1_pll_lock_o),
+    .q0_ln1_ready_o(dp_phy_q0_ln1_ready_o),
+    .Q0_LANE1_FABRIC_RX_CLK(q0_lane1_fabric_rx_clk),
+    .Q0_LANE1_RX_IF_FIFO_RDEN(q0_lane1_rx_if_fifo_rden),
+    .Q0_LANE1_FABRIC_TX_CLK(q0_lane1_fabric_tx_clk),
+    .Q0_FABRIC_LN1_TXDATA_I(q0_fabric_ln1_txdata_i[79:0]),
+    .Q0_FABRIC_LN1_TX_VLD_IN(q0_fabric_ln1_tx_vld_in),
+    .Q0_LANE1_FABRIC_C2I_CLK(q0_lane1_fabric_c2i_clk),
+    .Q0_LANE1_CHBOND_START(q0_lane1_chbond_start),
+    .Q0_FABRIC_LN1_RSTN_I(q0_fabric_ln1_rstn_i),
+    .Q0_LANE1_PCS_RX_RST(q0_lane1_pcs_rx_rst),
+    .Q0_LANE1_PCS_TX_RST(q0_lane1_pcs_tx_rst),
     .q0_ln2_rx_pcs_clkout_o(dp_phy_q0_ln2_rx_pcs_clkout_o),
     .q0_ln2_rx_data_o(dp_phy_q0_ln2_rx_data_o[87:0]),
     .q0_ln2_rx_fifo_rdusewd_o(dp_phy_q0_ln2_rx_fifo_rdusewd_o[4:0]),
@@ -670,16 +786,76 @@ dp_phy dp_phy_inst (
     .Q0_FABRIC_LN3_RSTN_I(q0_fabric_ln3_rstn_i),
     .Q0_LANE3_PCS_RX_RST(q0_lane3_pcs_rx_rst),
     .Q0_LANE3_PCS_TX_RST(q0_lane3_pcs_tx_rst),
-    .drp_addr_o(upar_arbiter_wrap_dp_serdes_inst_drp_addr_i[71:48]),
-    .drp_wren_o(upar_arbiter_wrap_dp_serdes_inst_drp_wren_i[2]),
-    .drp_wrdata_o(upar_arbiter_wrap_dp_serdes_inst_drp_wrdata_i[95:64]),
-    .drp_strb_o(upar_arbiter_wrap_dp_serdes_inst_drp_strb_i[23:16]),
-    .drp_rden_o(upar_arbiter_wrap_dp_serdes_inst_drp_rden_i[2]),
+    .drp_addr_o(upar_arbiter_wrap_dp_serdes_inst_drp_addr_i[23:0]),
+    .drp_wren_o(upar_arbiter_wrap_dp_serdes_inst_drp_wren_i[0]),
+    .drp_wrdata_o(upar_arbiter_wrap_dp_serdes_inst_drp_wrdata_i[31:0]),
+    .drp_strb_o(upar_arbiter_wrap_dp_serdes_inst_drp_strb_i[7:0]),
+    .drp_rden_o(upar_arbiter_wrap_dp_serdes_inst_drp_rden_i[0]),
     .drp_clk_o(dp_phy_drp_clk_o),
     .drp_ready_o(dp_phy_drp_ready_o),
     .drp_rdvld_o(dp_phy_drp_rdvld_o),
     .drp_rddata_o(dp_phy_drp_rddata_o[31:0]),
     .drp_resp_o(dp_phy_drp_resp_o),
+    .q0_ln0_rx_clk_i(dp_phy_q0_ln0_rx_clk_i),
+    .q0_ln0_rx_fifo_rden_i(dp_phy_q0_ln0_rx_fifo_rden_i),
+    .q0_ln0_tx_clk_i(dp_phy_q0_ln0_tx_clk_i),
+    .q0_ln0_tx_data_i(dp_phy_q0_ln0_tx_data_i[79:0]),
+    .q0_ln0_tx_fifo_wren_i(dp_phy_q0_ln0_tx_fifo_wren_i),
+    .q0_ln0_pma_rstn_i(dp_phy_q0_ln0_pma_rstn_i),
+    .q0_ln0_pcs_rx_rst_i(dp_phy_q0_ln0_pcs_rx_rst_i),
+    .q0_ln0_pcs_tx_rst_i(dp_phy_q0_ln0_pcs_tx_rst_i),
+    .Q0_LANE0_PCS_RX_O_FABRIC_CLK(q0_lane0_pcs_rx_o_fabric_clk),
+    .Q0_FABRIC_LN0_RXDATA_O(q0_fabric_ln0_rxdata_o[87:0]),
+    .Q0_LANE0_RX_IF_FIFO_RDUSEWD(q0_lane0_rx_if_fifo_rdusewd[4:0]),
+    .Q0_LANE0_RX_IF_FIFO_AEMPTY(q0_lane0_rx_if_fifo_aempty),
+    .Q0_LANE0_RX_IF_FIFO_EMPTY(q0_lane0_rx_if_fifo_empty),
+    .Q0_FABRIC_LN0_RX_VLD_OUT(q0_fabric_ln0_rx_vld_out),
+    .Q0_LANE0_PCS_TX_O_FABRIC_CLK(q0_lane0_pcs_tx_o_fabric_clk),
+    .Q0_LANE0_TX_IF_FIFO_WRUSEWD(q0_lane0_tx_if_fifo_wrusewd[4:0]),
+    .Q0_LANE0_TX_IF_FIFO_AFULL(q0_lane0_tx_if_fifo_afull),
+    .Q0_LANE0_TX_IF_FIFO_FULL(q0_lane0_tx_if_fifo_full),
+    .Q0_FABRIC_LANE0_CMU_CK_REF_O(q0_fabric_lane0_cmu_ck_ref_o),
+    .Q0_FABRIC_LN0_ASTAT_O(q0_fabric_ln0_astat_o[5:0]),
+    .Q0_FABRIC_LN0_PMA_RX_LOCK_O(q0_fabric_ln0_pma_rx_lock_o),
+    .Q0_LANE0_ALIGN_LINK(q0_lane0_align_link),
+    .Q0_LANE0_K_LOCK(q0_lane0_k_lock),
+    .Q0_FABRIC_LANE0_CMU_OK_O(q0_fabric_lane0_cmu_ok_o),
+    .Q0_FABRIC_LN0_STAT_O(q0_fabric_ln0_stat_o[12:0]),
+    .Q0_FABRIC_LANE0_64B66B_TX_INVLD_BLK(q0_fabric_lane0_64b66b_tx_invld_blk),
+    .Q0_FABRIC_LANE0_64B66B_TX_FETCH(q0_fabric_lane0_64b66b_tx_fetch),
+    .Q0_FABRIC_LANE0_64B66B_RX_VALID(q0_fabric_lane0_64b66b_rx_valid),
+    .Q0_FABRIC_CMU_CK_REF_O(q0_fabric_cmu_ck_ref_o),
+    .Q0_FABRIC_CMU1_CK_REF_O(q0_fabric_cmu1_ck_ref_o),
+    .Q0_FABRIC_CMU1_OK_O(q0_fabric_cmu1_ok_o),
+    .Q0_FABRIC_CMU_OK_O(q0_fabric_cmu_ok_o),
+    .q0_ln1_rx_clk_i(dp_phy_q0_ln1_rx_clk_i),
+    .q0_ln1_rx_fifo_rden_i(dp_phy_q0_ln1_rx_fifo_rden_i),
+    .q0_ln1_tx_clk_i(dp_phy_q0_ln1_tx_clk_i),
+    .q0_ln1_tx_data_i(dp_phy_q0_ln1_tx_data_i[79:0]),
+    .q0_ln1_tx_fifo_wren_i(dp_phy_q0_ln1_tx_fifo_wren_i),
+    .q0_ln1_pma_rstn_i(dp_phy_q0_ln1_pma_rstn_i),
+    .q0_ln1_pcs_rx_rst_i(dp_phy_q0_ln1_pcs_rx_rst_i),
+    .q0_ln1_pcs_tx_rst_i(dp_phy_q0_ln1_pcs_tx_rst_i),
+    .Q0_LANE1_PCS_RX_O_FABRIC_CLK(q0_lane1_pcs_rx_o_fabric_clk),
+    .Q0_FABRIC_LN1_RXDATA_O(q0_fabric_ln1_rxdata_o[87:0]),
+    .Q0_LANE1_RX_IF_FIFO_RDUSEWD(q0_lane1_rx_if_fifo_rdusewd[4:0]),
+    .Q0_LANE1_RX_IF_FIFO_AEMPTY(q0_lane1_rx_if_fifo_aempty),
+    .Q0_LANE1_RX_IF_FIFO_EMPTY(q0_lane1_rx_if_fifo_empty),
+    .Q0_FABRIC_LN1_RX_VLD_OUT(q0_fabric_ln1_rx_vld_out),
+    .Q0_LANE1_PCS_TX_O_FABRIC_CLK(q0_lane1_pcs_tx_o_fabric_clk),
+    .Q0_LANE1_TX_IF_FIFO_WRUSEWD(q0_lane1_tx_if_fifo_wrusewd[4:0]),
+    .Q0_LANE1_TX_IF_FIFO_AFULL(q0_lane1_tx_if_fifo_afull),
+    .Q0_LANE1_TX_IF_FIFO_FULL(q0_lane1_tx_if_fifo_full),
+    .Q0_FABRIC_LANE1_CMU_CK_REF_O(q0_fabric_lane1_cmu_ck_ref_o),
+    .Q0_FABRIC_LN1_ASTAT_O(q0_fabric_ln1_astat_o[5:0]),
+    .Q0_FABRIC_LN1_PMA_RX_LOCK_O(q0_fabric_ln1_pma_rx_lock_o),
+    .Q0_LANE1_ALIGN_LINK(q0_lane1_align_link),
+    .Q0_LANE1_K_LOCK(q0_lane1_k_lock),
+    .Q0_FABRIC_LANE1_CMU_OK_O(q0_fabric_lane1_cmu_ok_o),
+    .Q0_FABRIC_LN1_STAT_O(q0_fabric_ln1_stat_o[12:0]),
+    .Q0_FABRIC_LANE1_64B66B_TX_INVLD_BLK(q0_fabric_lane1_64b66b_tx_invld_blk),
+    .Q0_FABRIC_LANE1_64B66B_TX_FETCH(q0_fabric_lane1_64b66b_tx_fetch),
+    .Q0_FABRIC_LANE1_64B66B_RX_VALID(q0_fabric_lane1_64b66b_rx_valid),
     .q0_ln2_rx_clk_i(dp_phy_q0_ln2_rx_clk_i),
     .q0_ln2_rx_fifo_rden_i(dp_phy_q0_ln2_rx_fifo_rden_i),
     .q0_ln2_tx_clk_i(dp_phy_q0_ln2_tx_clk_i),
@@ -708,10 +884,6 @@ dp_phy dp_phy_inst (
     .Q0_FABRIC_LANE2_64B66B_TX_INVLD_BLK(q0_fabric_lane2_64b66b_tx_invld_blk),
     .Q0_FABRIC_LANE2_64B66B_TX_FETCH(q0_fabric_lane2_64b66b_tx_fetch),
     .Q0_FABRIC_LANE2_64B66B_RX_VALID(q0_fabric_lane2_64b66b_rx_valid),
-    .Q0_FABRIC_CMU_CK_REF_O(q0_fabric_cmu_ck_ref_o),
-    .Q0_FABRIC_CMU1_CK_REF_O(q0_fabric_cmu1_ck_ref_o),
-    .Q0_FABRIC_CMU1_OK_O(q0_fabric_cmu1_ok_o),
-    .Q0_FABRIC_CMU_OK_O(q0_fabric_cmu_ok_o),
     .q0_ln3_rx_clk_i(dp_phy_q0_ln3_rx_clk_i),
     .q0_ln3_rx_fifo_rden_i(dp_phy_q0_ln3_rx_fifo_rden_i),
     .q0_ln3_tx_clk_i(dp_phy_q0_ln3_tx_clk_i),
@@ -740,11 +912,11 @@ dp_phy dp_phy_inst (
     .Q0_FABRIC_LANE3_64B66B_TX_INVLD_BLK(q0_fabric_lane3_64b66b_tx_invld_blk),
     .Q0_FABRIC_LANE3_64B66B_TX_FETCH(q0_fabric_lane3_64b66b_tx_fetch),
     .Q0_FABRIC_LANE3_64B66B_RX_VALID(q0_fabric_lane3_64b66b_rx_valid),
-    .drp_clk_i(upar_arbiter_wrap_dp_serdes_inst_drp_clk_o[2]),
-    .drp_ready_i(upar_arbiter_wrap_dp_serdes_inst_drp_ready_o[2]),
-    .drp_rdvld_i(upar_arbiter_wrap_dp_serdes_inst_drp_rdvld_o[2]),
-    .drp_rddata_i(upar_arbiter_wrap_dp_serdes_inst_drp_rddata_o[95:64]),
-    .drp_resp_i(upar_arbiter_wrap_dp_serdes_inst_drp_resp_o[2]),
+    .drp_clk_i(upar_arbiter_wrap_dp_serdes_inst_drp_clk_o[0]),
+    .drp_ready_i(upar_arbiter_wrap_dp_serdes_inst_drp_ready_o[0]),
+    .drp_rdvld_i(upar_arbiter_wrap_dp_serdes_inst_drp_rdvld_o[0]),
+    .drp_rddata_i(upar_arbiter_wrap_dp_serdes_inst_drp_rddata_o[31:0]),
+    .drp_resp_i(upar_arbiter_wrap_dp_serdes_inst_drp_resp_o[0]),
     .drp_addr_i(dp_phy_drp_addr_i[23:0]),
     .drp_wren_i(dp_phy_drp_wren_i),
     .drp_wrdata_i(dp_phy_drp_wrdata_i[31:0]),
