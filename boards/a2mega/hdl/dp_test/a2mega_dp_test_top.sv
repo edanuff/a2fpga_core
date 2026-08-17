@@ -64,7 +64,10 @@ module a2mega_dp_test_top (
     //   closed-loop training. PULL_MODE UP/DOWN on the pads (cst) sets
     //   the AC-coupled DC point + defined idle polarity.
     // ------------------------------------------------------------------
-    localparam AUX_TLVDS = 1;   // experiment ON; set 0 to restore proven path
+    localparam AUX_TLVDS = 0;   // lottery-check: blind-era pseudo-diff pad
+                                // (2 Vpp) — the only AUX drive the monitor
+                                // has ever demonstrably heard. cst pad
+                                // block switched to match.
     // BLIND-ERA LOTTERY CHECK (2026-08-16 night): blind forced ON over
     // the proven 2-lane HBR config, monitor-direct. Question: was the
     // original blind-era winning streak luck (draw lottery unobserved)
