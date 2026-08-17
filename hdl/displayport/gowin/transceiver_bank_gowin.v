@@ -596,7 +596,7 @@ module transceiver_bank_gowin #(
     // replay handshake (drp_clk domain)
     reg        req_m = 1'b0, req_s = 1'b0;
     reg        replay_done_r = 1'b0;
-    reg [8:0]  replay_idx = 9'd0;
+    reg [9:0]  replay_idx = 10'd0;
     wire       replay_pend = req_s && !replay_done_r;
     assign replay_ack = replay_done_r;
 
@@ -607,7 +607,7 @@ module transceiver_bank_gowin #(
         req_s <= req_m;
         if (!req_s) begin
             replay_done_r <= 1'b0;
-            replay_idx    <= 9'd0;
+            replay_idx    <= 10'd0;
         end
         case (rd_state)
             3'd0: begin
@@ -649,7 +649,7 @@ module transceiver_bank_gowin #(
                     if (replay_idx == CSR_REPLAY_LEN - 1)
                         replay_done_r <= 1'b1;
                     else
-                        replay_idx <= replay_idx + 9'd1;
+                        replay_idx <= replay_idx + 10'd1;
                     rd_state <= 3'd4;
                 end
             end
