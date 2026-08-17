@@ -1058,3 +1058,31 @@ recalibration strobe — exactly the thing only they would know); D
 (4-lane: different sink deskew posture may TOLERATE all draws); E
 (1.0a4: RECONFIG_N + AUX bias). U: field stays in the build (harmless,
 one line of decode).
+
+## 2026-08-16 evening — 4-lane RBR detour: systematic failure; REVERT to 2-lane
+
+- Closed-loop 4-lane vs the Anker A8365: core's power-mask correctly
+  refused (sink DPCD=2 lanes). Teardown confirms hub architecture: IT6563
+  (4-lane-capable silicon) fed only 2 lanes; USB3 (VL817) runs alongside;
+  4K30 max. Target hub class is architecturally 2-lane -> 2-LANE HBR IS
+  THE PRODUCTION CONFIG (2-lane RBR can't carry 1080p).
+- Blind-4 v1 invalidated by our own watchdog (blind sinks never show
+  K!=0 -> 8s teardown loop; W cycling). Fixed: watchdog gated on
+  BLIND_SINK (link_established alone = healthy when blind).
+- Blind-4 v2 monitor-direct: TX side perfect every boot (D:2E, 4 lanes
+  streaming, W:0) — screen dark 0/4 (p~0.2% if lottery) AND dark on a
+  native-DP USB2 adapter. SYSTEMATIC: our 4-lane datapath implicated
+  (maiden flight of interleave/MSA4/skew; no sim coverage). Margin thesis
+  remains UNTESTED. If revisited: sim-audit 4-lane stream first.
+- DECISIONS OF RECORD: (1) FPGA reconfiguration is NEVER a user-level
+  fix — not JTAG, not RECONFIG_N; bench acceleration only. Shipping bar =
+  5/5 by construction. (2) Target hardware = commonplace USB3+2-lane-HDMI
+  hubs. (3) Escalation: FFE/swing sweep at 2-lane HBR (bench-reload
+  tooling first) -> full Gowin stack (Encoder+EDP PHY) on UPGRADED IDE
+  (newer encoder IP; old-IDE artifacts documented) if tuning can't reach
+  5/5. (4) Firmware must gain pin-assignment-D support (D-only hubs fail
+  find_dp_mode today).
+- Reverted: IP/defines/SDC/top byte-for-byte from tag
+  a2mega-2lane-planc-4of5 (no IDE session needed); replay ROM 357; kept
+  blind-gated watchdog + parameterized PLL (identical defaults) + dormant
+  4-lane branch.
