@@ -65,14 +65,7 @@ module a2mega_dp_test_top (
     //   the AC-coupled DC point + defined idle polarity.
     // ------------------------------------------------------------------
     localparam AUX_TLVDS = 1;   // experiment ON; set 0 to restore proven path
-    // 4-lane RBR probe (2026-08-16): BLIND forced ON — the closed-loop
-    // mask refused 4-lane against a sink whose DPCD parse yielded <4
-    // lanes (hub said 2, or the parse glitched; IT6563 silicon itself is
-    // 4-lane). Blind assumes sink lanes = ours -> all four power up and
-    // transmit regardless. Hub AUX replies stay readable, so K:/E:
-    // telemetry remains live even in blind mode. Restore the derived
-    // expression for closed-loop builds.
-    localparam AUX_BLIND = 1;
+    localparam AUX_BLIND = (AUX_TLVDS != 0) ? 0 : 1;
 
     logic auxch_in, auxch_out, auxch_tri;
     generate if (AUX_TLVDS != 0) begin : g_aux_tlvds
@@ -201,15 +194,10 @@ module a2mega_dp_test_top (
     logic        drp_done;
 
     dp_transmitter #(
-        // 4-lane RBR: 4 x 1.62 Gbps = 6.48 Gbps raw (5.18 Gbps payload)
-        // vs 1080p60's 4.46 Gbps. The 617 ps UI is 1.67x wider than
-        // HBR's 370 ps — the margin the boot marginality is being tested
-        // against. Symbol clock drops to 81 MHz; the pixel PLL ratio
-        // below tracks it (DP synchronous-clock mode).
-        .LANE_COUNT     (4),
+        .LANE_COUNT     (2),
         .AUDIO_ENABLE   (0),   // round 19: SDP/audio OFF — video-restart discriminator
 
-        .LINK_RATE_MBPS (1620),
+        .LINK_RATE_MBPS (2700),
         // 1.0a3: AUX receive is electrically dead (AC caps, no FPGA-side
         // bias, LVCMOS thresholds unreachable by a <=1.38 Vpp reply; board
         // not field-modifiable). TX works — run the link policy open-loop.
@@ -220,14 +208,8 @@ module a2mega_dp_test_top (
                               // Set back to 0 for the real colorbars.
         .H_VISIBLE (1920), .H_TOTAL (2200), .H_SYNC_WIDTH (44), .H_START (192),
         .V_VISIBLE (1080), .V_TOTAL (1125), .V_SYNC_WIDTH (5),  .V_START (41),
-        // 81 MHz symbol * 11/6 = 148.5 MHz pixel; PLL realizes it as
-        // VCO = 81 * 11/1 = 891 MHz, /6 = 148.5 MHz
         .PIXEL_CLK_MULT (11),
-        .PIXEL_CLK_DIV  (6),
-        .PIXEL_PLL_IDIV (1),
-        .PIXEL_PLL_MDIV (11),
-        .PIXEL_PLL_ODIV0(6),
-        .PIXEL_PLL_FCLKIN("81"),
+        .PIXEL_CLK_DIV  (10),
         .AUDIO_RATE     (48000),
         .AUDIO_BIT_WIDTH(16)
     ) i_dp (
