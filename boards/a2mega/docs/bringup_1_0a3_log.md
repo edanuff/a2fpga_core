@@ -1213,3 +1213,43 @@ TOMORROW candidates: (a) build+upload ~11:52 fw (pre-16:47, e.g. tree at
 5513d728) → confirm BOTH orientations reproduce (isolates R1 to the Fri-PM
 rework); (b) then find minimal R1 change that keeps in-slot; (c) bisect R2
 across Saturday. FPGA stays 5d8e15f0 throughout.
+
+## 2026-08-17 morning — ROOT CAUSE: AUX overdrive needs attenuation (breakout was load-bearing)
+
+Direct experiments (user): "dead" cable 3 + BREAKOUT inline -> COLORBARS,
+BOTH plug orientations. Confirms: the 2 Vpp pseudo-diff AUX overdrive
+(spec <=1.38 Vpp) is only decodable by the monitor through sufficient
+channel attenuation. The USB-C breakout board was inline for ALL Friday
+tests = silent inline attenuator; it was removed Saturday.
+
+ONE cause explains the entire monitor-direct saga:
+- 3 ft cable dead: shortest/least loss = worst for overdrive.
+- Premium 40G 6 ft cable dead both flips: best build = least loss.
+- "Good" 6 ft cable 4/5 cold: barely inside the window.
+- Friday both-orientations + streak reliability: breakout padding.
+- One-orientation-only without breakout: the two orientations route AUX
+  through different mux crossbar paths with different loss — marginal
+  signal passes one path, fails the other. NOT a firmware bug.
+- Treedix all-green: continuity testers cannot see this.
+
+RECORD CORRECTIONS:
+- "Saturday firmware broke monitor orientation" (R2): UNPROVEN and likely
+  FALSE — every Saturday+ monitor test changed pad (TLVDS) AND breakout
+  AND firmware together. Clean test pending: HEAD fw + pseudo-diff pad +
+  breakout (or cable 1) -> if lit, firmware fully exonerated, NO BISECT.
+- R1 (Fri-PM "traded away one orientation"): also likely analog — Friday
+  PM tests may have varied the breakout/cable, not the firmware.
+- EQ was never the morning's variable (full 1.0-12.3 sweep dark on the
+  low-loss cable; mux EQ is main-link RX, not AUX).
+- In-slot hotplug gap on 98461af3 (user observation) REMAINS a real
+  firmware question — separate from AUX, still to investigate.
+
+FIX DIRECTION (until 1.0a4 bias network, which this PROMOTES to critical):
+- Candidate: TLVDS pad (spec ~350 mV differential) — never cleanly tested
+  (all TLVDS monitor tests were confounded by fw/breakout). Test TLVDS +
+  known fw + no breakout + cable 3.
+- Hub path tolerates the overdrive (all Saturday hub work was
+  breakout-free) — product hub path less exposed, field cable variance
+  still a risk until AUX is spec-compliant.
+- Bench rule: cable ID + orientation + breakout-presence + EQ logged on
+  EVERY test (user instituting).
