@@ -30,13 +30,26 @@ no rev until the OPEN items that could change the netlist are closed.
    P/N swap is fine — tx_pol_invert handles it). 4-lane remains a future
    option; no change needed, just don't lose it.
 
+4. **VBUS source-path isolation + discharge** (evidence 08-17 eve,
+   instrumented): FUSB302 reads VBUSOK=1 with the port EMPTY — the 5V
+   plane backfeeds the connector VBUS rail, so the vSafe0V source-attach
+   precondition can never be met honestly (root of the in-slot attach
+   flakiness; 98461af3 had to remove the safety veto to attach at all).
+   Fix: real load switch/ideal diode between plane and VBUS pin +
+   discharge path, so VBUS is genuinely 0 V until sourced.
+5. **Local bulk capacitance on the VBUS source rail** for bus-powered
+   sink inrush: hub cold-boot inrush through the source switch sagged
+   the shared rail hard enough to kill ESP32 WiFi for ~1 min in-slot
+   (bench supply masked it). Size for a bus-powered hub + downstream
+   devices; consider soft-start on the switch.
+
 ## STRONG candidates (cheap, would have saved days)
 
-4. **AUX/SBU test points** (2 pads near the caps) — the entire AUX saga
+6. **AUX/SBU test points** (2 pads near the caps) — the entire AUX saga
    was fought blind; two pads make it an oscilloscope problem.
-5. **DP main-link ground-referenced test structure** if layout allows
+7. **DP main-link ground-referenced test structure** if layout allows
    (even one lane's P/N stubs) — boot-draw/eye debugging.
-6. **Confirm SecurityBit=OFF is process default** in all shipping build
+8. **Confirm SecurityBit=OFF is process default** in all shipping build
    configs (process config item, not board — listed so it ships in the
    same review).
 
@@ -44,9 +57,12 @@ no rev until the OPEN items that could change the netlist are closed.
 
 - **A. AUX network topology/values** ← TLVDS clean test (+AD2 capture).
   This is the only item where the schematic genuinely waits on data.
-- **B. Anything from the hub-path clean re-baseline** (task #3) that
-  implicates board-level SI (e.g., if FFE/swing tuning shows the channel
-  into the mux needs help). Expected: no board change; verify.
+- **B. Hub-path re-baseline: CLOSED 08-17 eve** — verdict 0/10 power-on
+  draws (D:2A channel-EQ stall, all sw variables eliminated; Sat '4/5'
+  not replicable). No SI data implicating the board channel yet — the
+  stall is at training, upstream of any margin question. Items 4/5 above
+  (VBUS isolation + bulk cap) are the board-level fallout. Hub-viability
+  hope now rides on WS4 (item C).
 - **C. Gowin IP assessment fallout** (new-IDE EDP PHY / encoder): if the
   supported stack imposes pin/clock constraints we don't meet. Expected:
   none (same quad, same refclk); verify during assessment.
