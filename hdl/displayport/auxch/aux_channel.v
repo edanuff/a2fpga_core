@@ -404,13 +404,17 @@ always @(posedge clk) begin
             check_link:         state_on_success <= check_wait;
             check_wait:         begin
                                 dbg_gate_locks <= {clock_locked_i, equ_locked_i, symbol_locked_i, align_locked_i};
-                                if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
-                                    state_on_success <= link_established;
-                                end else begin
+                                // DIAGNOSTIC (2026-08-18, Ugreen flap-loop, revival of
+                                // 5f29c7ed): check failures LOG-ONLY — stay established
+                                // instead of tearing down. Discriminates "link genuinely
+                                // flapping" (screen still unstable) from "healthy link
+                                // killed every check interval by a misparsed/DEFERred
+                                // status read" (picture appears and HOLDS while
+                                // dbg_gate_fail counts phantom failures). NOT production.
+                                if(!(clock_locked_i && equ_locked_i && symbol_locked_i && align_locked_i))
                                     dbg_gate_fail    <= dbg_gate_fail + 2'd1;
-                                    state_on_success <= error;
+                                state_on_success <= link_established;
                                 end
-                                end 
             error:              state_on_success <= error;
         endcase
 
