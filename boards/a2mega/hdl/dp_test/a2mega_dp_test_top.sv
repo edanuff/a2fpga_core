@@ -18,7 +18,9 @@
 //
 //   led[0]  heartbeat (~1.5 Hz)      — bitstream alive
 //   led[1]  HPD level                — PD negotiation delivered a sink
-//   led[2]  link_established         — AUX/link training succeeded
+//   led[2]  freq_ok                  — clk_sym measured at 135 MHz
+//           (lags led[3] by the counter window, ~0.3-0.5 s; solid =
+//           bitstream running)
 //   led[3]  video_live               — main stream is being transmitted
 //
 // (LEDs are active-low on the carrier: anode to +3V3 through R23-R26.)
