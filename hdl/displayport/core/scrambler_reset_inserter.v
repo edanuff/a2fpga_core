@@ -82,33 +82,41 @@ initial begin
     out_data       = 72'b0;
 end
 
+// 2026-08-18: BS lands in the HIGH symbol whenever the frame's BS
+// position is odd (e.g. 1080p 2-lane HBR: BS_POS=3549) — the original
+// low-half-only logic then never emits ANY scrambler reset, and strict
+// sinks (DP->HDMI bridges) that wait for K28.0 to sync their
+// descrambler drop every lock the moment training ends (lived it:
+// Ugreen hub, C:8177 during TPS -> C:8000 at normal mode). Both halves
+// now handled; lanes are BS-aligned per the header note, and the
+// original substitute-on-following-event semantics are preserved.
+wire bs_low  = (in_data[8:0]  == BS);
+wire bs_high = (in_data[17:9] == BS);
+
 always @(posedge clk) begin
     //----------------------------------------------
     // Subsitute every 512nd Blank start (BS) symbol
-    // with a Scrambler Reset (SR) symbol. 
+    // with a Scrambler Reset (SR) symbol.
     //----------------------------------------------
     out_data  <= in_data;
 
     if(substitue_next == 1'b1) begin
-        if(in_data[8:0]   == BS) begin
-            out_data[8:0]   <= SR;
+        if(bs_low) begin
+            if(in_data[8:0]   == BS) out_data[8:0]   <= SR;
+            if(in_data[26:18] == BS) out_data[26:18] <= SR;
+            if(in_data[44:36] == BS) out_data[44:36] <= SR;
+            if(in_data[62:54] == BS) out_data[62:54] <= SR;
         end
-
-        if(in_data[26:18] == BS) begin
-            out_data[26:18] <= SR;
-        end
-
-        if(in_data[44:36] == BS) begin
-            out_data[44:36] <= SR;
-        end
-
-        if(in_data[62:54] == BS) begin
-            out_data[62:54] <= SR;
+        if(bs_high) begin
+            if(in_data[17:9]  == BS) out_data[17:9]  <= SR;
+            if(in_data[35:27] == BS) out_data[35:27] <= SR;
+            if(in_data[53:45] == BS) out_data[53:45] <= SR;
+            if(in_data[71:63] == BS) out_data[71:63] <= SR;
         end
     end
 
-    if(in_data[8:0] == BS) begin
-    	if(bs_count == 1'b0) begin
+    if(bs_low || bs_high) begin
+    	if(bs_count == 9'd0) begin
             substitue_next <= 1'b1;
     	end else begin
             substitue_next <= 1'b0;

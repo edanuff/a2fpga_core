@@ -117,26 +117,32 @@ end
 
 
 always @(posedge clk) begin    
+    // 2026-08-18: high-half SR detect fixed — was in_data[15:8] (8-bit
+    // misaligned slice, zero-extended vs 9-bit K28.0 = always false /
+    // dead code) so an SR in the high symbol never reset the LFSR.
+    // Correct slice: in_data[17:9]. (The reset assignments' use of
+    // lfsr_reset_state[0] for every bit is benign — reset state is
+    // all-ones.)
     //------------------------------------------
     // Apply vector to channel 0
     //------------------------------------------        
     out_data <= in_data ^ {flipping, flipping, flipping, flipping};
 
-    lfsr_state[0]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[8];
-    lfsr_state[1]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[9];
-    lfsr_state[2]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[10];
-    lfsr_state[3]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[11]                   ^ s1[8];
-    lfsr_state[4]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[12]          ^ s1[8]  ^ s1[9];
-    lfsr_state[5]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[13] ^ s1[8]  ^ s1[9]  ^ s1[10];
-    lfsr_state[6]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[14] ^ s1[9]  ^ s1[10] ^ s1[11];
-    lfsr_state[7]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[15] ^ s1[10] ^ s1[11] ^ s1[12];
-    lfsr_state[8]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[0]  ^ s1[11] ^ s1[12] ^ s1[13];
-    lfsr_state[9]  = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[1]  ^ s1[12] ^ s1[13] ^ s1[14];
-    lfsr_state[10] = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[2]  ^ s1[13] ^ s1[14] ^ s1[15];
-    lfsr_state[11] = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[3]  ^ s1[14] ^ s1[15];
-    lfsr_state[12] = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[4]  ^ s1[15];
-    lfsr_state[13] = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[5];
-    lfsr_state[14] = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[6];
-    lfsr_state[15] = (in_data[15:8] == SR) ? lfsr_reset_state[0]  : s1[7];                
+    lfsr_state[0]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[8];
+    lfsr_state[1]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[9];
+    lfsr_state[2]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[10];
+    lfsr_state[3]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[11]                   ^ s1[8];
+    lfsr_state[4]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[12]          ^ s1[8]  ^ s1[9];
+    lfsr_state[5]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[13] ^ s1[8]  ^ s1[9]  ^ s1[10];
+    lfsr_state[6]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[14] ^ s1[9]  ^ s1[10] ^ s1[11];
+    lfsr_state[7]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[15] ^ s1[10] ^ s1[11] ^ s1[12];
+    lfsr_state[8]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[0]  ^ s1[11] ^ s1[12] ^ s1[13];
+    lfsr_state[9]  = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[1]  ^ s1[12] ^ s1[13] ^ s1[14];
+    lfsr_state[10] = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[2]  ^ s1[13] ^ s1[14] ^ s1[15];
+    lfsr_state[11] = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[3]  ^ s1[14] ^ s1[15];
+    lfsr_state[12] = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[4]  ^ s1[15];
+    lfsr_state[13] = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[5];
+    lfsr_state[14] = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[6];
+    lfsr_state[15] = (in_data[17:9] == SR) ? lfsr_reset_state[0]  : s1[7];                
 end
 endmodule
