@@ -104,14 +104,12 @@ module link_signal_mgmt(
 
     assign active_channel_count = active_channel_count_i;
     assign voltage_level = channel_adjust[1:0];
-    // KNOWN-SUSPECT (2026-08-18, left in place for the instrumented
-    // baseline build): [3:0] into a 2-bit wire truncates to [1:0] — the
-    // SWING request — while the lane-0 pre-emphasis request is [3:2].
-    // The announced pre-emphasis therefore tracks the sink's swing bits.
-    // Fix candidate: channel_adjust[3:2]. Do not change until the A:
-    // telemetry confirms the sink requests preemp != swing on the
-    // failing path.
-    assign preemp_level  = channel_adjust[3:0];
+    // FIXED 2026-08-18: was [3:0] into a 2-bit wire — truncated to the
+    // SWING bits, so the parsed pre-emphasis request tracked the sink's
+    // swing request. Confirmed live once the truthful-declaration build
+    // woke the hub's adjust dialogue (A:0022 => misparsed preemp=2).
+    // Lane-0 pre-emphasis request is DPCD 0x206[3:2].
+    assign preemp_level  = channel_adjust[3:2];
     assign debug_adjust  = channel_adjust;
     
 initial begin
