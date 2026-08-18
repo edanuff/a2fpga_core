@@ -10,6 +10,12 @@ scannable ground truth.
 - **#**: test id (monotonic)
 - **GW**: FPGA bitstream — sha256 prefix of the flashed `.fs` (git-committed)
 - **FW**: ESP32 firmware — commit hash it was built from
+- **Board** (carrier+SOM pairs — SOMs migrated during the flash saga):
+  `B1` = carrier #1 (original) + SOM #2, in service from Sat 08-16 9am
+  (all Sat hub successes incl. first light 15:20 / 39ada3ca);
+  `pre-switch` = carrier #1 + SOM #1 (through Fri + Sat early AM);
+  `B2` = carrier #2 (fresh) + SOM #1 (revived), in service 08-17
+  (all 08-17 rows; 0/12+ hub draws).
 - **Sink**: `mon` (USB-C monitor direct) / `hubA` (Anker A8365 → HDMI) /
   other (add to roster below)
 - **Cable**: id from the cable roster below
