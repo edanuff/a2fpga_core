@@ -1,11 +1,11 @@
 //
 //Written by GowinSynthesis
-//Tool Version "V1.9.12.01"
-//Tue Aug 18 11:09:07 2026
+//Tool Version "V1.9.12.03"
+//Tue Aug 18 14:54:56 2026
 
 //Source file index table:
-//file0 "\/Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/ipcore/SERDES_IP/IPlib/CUSTOMIZED/data/customized_phy_wrapper.v"
-//file1 "\/Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/ipcore/SERDES_IP/IPlib/CUSTOMIZED/data/customized_phy.v"
+//file0 "\/Applications/GowinIDE V1.9.12.03.app/Contents/Resources/Gowin_EDA/IDE/ipcore/SERDES_IP/IPlib/CUSTOMIZED/data/customized_phy_wrapper.v"
+//file1 "\/Applications/GowinIDE V1.9.12.03.app/Contents/Resources/Gowin_EDA/IDE/ipcore/SERDES_IP/IPlib/CUSTOMIZED/data/customized_phy.v"
 `timescale 100 ps/100 ps
 module dp_phy (
   Q0_LANE2_PCS_RX_O_FABRIC_CLK,
