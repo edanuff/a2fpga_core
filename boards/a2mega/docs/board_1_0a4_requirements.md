@@ -43,16 +43,21 @@ no rev until the OPEN items that could change the netlist are closed.
    (bench supply masked it). Size for a bus-powered hub + downstream
    devices; consider soft-start on the switch.
 
-5a. **DP main-link channel margin review (mux segment)** — evidence
-   08-18: two same-design carriers split good/bad on the hub path
-   (B1 C:0177 golden vs B2 C:8011 both-lanes-CR-only, all sw/config
-   variables nulled with data, crystals both <10ppm). The deficit is
-   common-mode analog between FPGA and the sink's RX — TUSB1046A unit
-   tolerance, passives, or layout. Review: mux placement/routing
-   symmetry, AC-cap values/tolerance on the main-link pairs, ground
-   return continuity at the BTB; consider spec'ing tighter-tolerance
-   passives on the DP pairs. (Refclk jitter the unmeasured runner-up:
-   consider a jitter-specified 135M oscillator part.)
+5a. **DP main-link channel/launch review — DESIGN-WIDE, not unit** —
+   evidence 08-18: ALL converter-class sinks (3 hubs + a dongle, short
+   captive cables, bridge-grade RX) fail BOTH carriers; monitors (long
+   cables, display-controller RX) work on both; B1/B2 differ only as
+   unit variance straddling one hub's bar. All sw/config variables
+   nulled with instrumented data (C: per-lane, A: adjust, Q: ppm —
+   crystals <10ppm both). Best-fit mechanism: board-side impedance
+   discontinuity whose reflections short captive channels preserve and
+   long lossy cables dissipate. Review for 1.0a4: connector launch,
+   AC-cap selection/placement on the main-link pairs, mux output
+   routing, ground return at the BTB; tighter-tolerance passives;
+   jitter-specified 135M oscillator. NOTE: source-side viability on
+   converter sinks may ultimately come from the supported Gowin IP
+   stack (WS4) rather than board changes — treat this item as SI
+   hygiene, not the sole fix.
 
 ## STRONG candidates (cheap, would have saved days)
 
