@@ -18,9 +18,7 @@
 //
 //   led[0]  heartbeat (~1.5 Hz)      — bitstream alive
 //   led[1]  HPD level                — PD negotiation delivered a sink
-//   led[2]  freq_ok                  — clk_sym measured at 135 MHz
-//           (lags led[3] by the counter window, ~0.3-0.5 s; solid =
-//           bitstream running)
+//   led[2]  link_established         — AUX/link training succeeded
 //   led[3]  video_live               — main stream is being transmitted
 //
 // (LEDs are active-low on the carrier: anode to +3V3 through R23-R26.)
@@ -66,16 +64,8 @@ module a2mega_dp_test_top (
     //   closed-loop training. PULL_MODE UP/DOWN on the pads (cst) sets
     //   the AC-coupled DC point + defined idle polarity.
     // ------------------------------------------------------------------
-    localparam AUX_TLVDS = 0;   // lottery-check: blind-era pseudo-diff pad
-                                // (2 Vpp) — the only AUX drive the monitor
-                                // has ever demonstrably heard. cst pad
-                                // block switched to match.
-    // BLIND-ERA LOTTERY CHECK (2026-08-16 night): blind forced ON over
-    // the proven 2-lane HBR config, monitor-direct. Question: was the
-    // original blind-era winning streak luck (draw lottery unobserved)
-    // or is blind 2-lane on the monitor genuinely ~5/5 across power
-    // cycles and replugs? Restore the derived expression afterwards.
-    localparam AUX_BLIND = 1;
+    localparam AUX_TLVDS = 1;   // experiment ON; set 0 to restore proven path
+    localparam AUX_BLIND = (AUX_TLVDS != 0) ? 0 : 1;
 
     logic auxch_in, auxch_out, auxch_tri;
     generate if (AUX_TLVDS != 0) begin : g_aux_tlvds
@@ -194,9 +184,6 @@ module a2mega_dp_test_top (
     logic [7:0] debug;
     logic [7:0] serdes_status;
     logic [15:0] aux_dbg_rx;
-    logic [3:0]  aux_dbg_locks;
-    logic [7:0]  aux_dbg_gate;
-    logic [7:0]  aux_dbg_sink;
     logic       hpd_present_w;
     logic [4:0]  drp_idx;
     logic [31:0] drp_data;
@@ -205,8 +192,6 @@ module a2mega_dp_test_top (
 
     dp_transmitter #(
         .LANE_COUNT     (2),
-        .AUDIO_ENABLE   (0),   // round 19: SDP/audio OFF — video-restart discriminator
-
         .LINK_RATE_MBPS (2700),
         // 1.0a3: AUX receive is electrically dead (AC caps, no FPGA-side
         // bias, LVCMOS thresholds unreachable by a <=1.38 Vpp reply; board
@@ -245,11 +230,6 @@ module a2mega_dp_test_top (
         .video_live        (video_live),
         .debug             (debug),
         .debug_rx       (aux_dbg_rx),
-        .debug_locks    (aux_dbg_locks),
-        .debug_gate     (aux_dbg_gate),
-        .debug_sink     (aux_dbg_sink),
-        .debug_wdog     (aux_dbg_wdog),
-        .debug_wrusewd  (dbg_wrusewd_w),
         .clk_symbol_out    (clk_sym_w),
         .serdes_status     (serdes_status),
         .hpd_present_out   (hpd_present_w),
@@ -335,20 +315,14 @@ module a2mega_dp_test_top (
     logic [7:0] dbg_s0, dbg_s, frm_s0, frm_s;
     logic [2:0] flg_s0, flg_s;
     logic       c100_s0, c100_s;
-    logic [36:0] hp_s0, hp_s;
-    logic [3:0]  aux_dbg_wdog;
-    logic [3:0]  wdog_s0, wdog_s;
-    logic [9:0]  dbg_wrusewd_w;
-    logic [9:0]  wru_s0, wru_s;
+    logic [16:0] hp_s0, hp_s;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
         frm_s0 <= frame_cnt;      frm_s <= frm_s0;
         flg_s0 <= {dp_hpd, link_established, video_live};
         c100_s0 <= c100_cnt[26];  c100_s <= c100_s0;
-        hp_s0 <= {aux_dbg_sink, aux_dbg_gate, aux_dbg_locks, hpd_present_w, aux_dbg_rx};  hp_s <= hp_s0;  // S205 G: L: E: R:
-        wdog_s0 <= aux_dbg_wdog;  wdog_s <= wdog_s0;
-        wru_s0 <= dbg_wrusewd_w;  wru_s <= wru_s0;
+        hp_s0 <= {hpd_present_w, aux_dbg_rx};  hp_s <= hp_s0;  // E: = {sync,bytes}, R: = last byte
         flg_s  <= flg_s0;
     end
 
@@ -356,7 +330,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 67;
+    localparam int MSG_LEN = 42;
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -387,14 +361,7 @@ module a2mega_dp_test_top (
             msg[28]=" "; msg[29]=" "; msg[30]=" "; msg[31]=" ";
             msg[32]=" "; msg[33]=" "; msg[34]=" "; msg[35]=" ";
             msg[36]=" "; msg[37]=" "; msg[38]=" "; msg[39]=" ";
-            msg[40]=" "; msg[41]=" "; msg[42]=" "; msg[43]=" ";
-            msg[44]=" "; msg[45]=" "; msg[46]=" "; msg[47]=" ";
-            msg[48]=" "; msg[49]=" "; msg[50]=" "; msg[51]=" ";
-            msg[52]=" "; msg[53]=" "; msg[54]=" "; msg[55]=" ";
-            msg[56]=" "; msg[57]=" "; msg[58]=" "; msg[59]=" ";
-            msg[60]=" "; msg[61]=" "; msg[62]=" "; msg[63]=" ";
-            msg[64]=" "; msg[65]=" ";
-            msg[66]=8'h0A;
+            msg[40]=" "; msg[41]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -416,22 +383,7 @@ module a2mega_dp_test_top (
         msg[36]=" "; msg[37]="R"; msg[38]=":";
         msg[39]=hexch(hp_s[15:12]);           // last accepted byte (reply
         msg[40]=hexch(hp_s[11:8]);            //  header: ACK/NACK/DEFER)
-        msg[41]=" "; msg[42]="L"; msg[43]=":";
-        msg[44]=hexch(hp_s[20:17]);           // {clk,equ,sym,align}_locked
-        msg[45]=" "; msg[46]="G"; msg[47]=":";
-        msg[48]=hexch(hp_s[28:25]);           // locks LATCHED at check_wait
-        msg[49]=hexch(hp_s[24:21]);           // {gate_fails[1:0],timeouts[1:0]}
-        msg[50]=" "; msg[51]="K"; msg[52]=":";
-        msg[53]=hexch(hp_s[36:33]);           // DPCD 0x205 SINK_STATUS:
-        msg[54]=hexch(hp_s[32:29]);           //  bit0 = receiving stream
-        msg[55]=" "; msg[56]="W"; msg[57]=":";
-        msg[58]=hexch(wdog_s);                // {cold-rst forcing, tries[2:0]}
-        msg[59]=" "; msg[60]="U"; msg[61]=":";
-        msg[62]=hexch({3'b0, wru_s[9]});      // word-lane0 phy FIFO fill
-        msg[63]=hexch(wru_s[8:5]);            //   (5 bits, 2 hex)
-        msg[64]=hexch({3'b0, wru_s[4]});      // word-lane1 phy FIFO fill
-        msg[65]=hexch(wru_s[3:0]);
-        msg[66]=8'h0A;
+        msg[41]=8'h0A;
         end
     end
 
@@ -439,7 +391,7 @@ module a2mega_dp_test_top (
     logic [8:0]  baud_cnt = '0;
     logic        baud_tick;
     logic [24:0] msg_timer = '0;
-    logic [6:0]  msg_idx = MSG_LEN[6:0];   // idle when == MSG_LEN
+    logic [5:0]  msg_idx = MSG_LEN[5:0];   // idle when == MSG_LEN
     logic [3:0]  bit_idx = '0;
     logic [9:0]  shifter = 10'h3FF;
     always_ff @(posedge clk50_in) begin
@@ -448,7 +400,7 @@ module a2mega_dp_test_top (
         else baud_cnt <= baud_cnt + 9'd1;
 
         msg_timer <= msg_timer + 25'd1;
-        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[6:0]) begin
+        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[5:0]) begin
             msg_idx <= '0;                 // start a new message
             bit_idx <= 4'd10;              // force reload on next tick
             line_is_reg <= ~line_is_reg;   // alternate status / register
@@ -459,7 +411,7 @@ module a2mega_dp_test_top (
             reg_done_l <= drp_done;
         end
 
-        if (baud_tick && msg_idx != MSG_LEN[6:0]) begin
+        if (baud_tick && msg_idx != MSG_LEN[5:0]) begin
             if (bit_idx >= 4'd10) begin    // load next char: start+8+stop
                 shifter <= {1'b1, msg[msg_idx], 1'b0};
                 bit_idx <= 4'd0;
@@ -467,11 +419,11 @@ module a2mega_dp_test_top (
                 shifter <= {1'b1, shifter[9:1]};
                 bit_idx <= bit_idx + 4'd1;
                 if (bit_idx == 4'd9)
-                    msg_idx <= msg_idx + 7'd1;
+                    msg_idx <= msg_idx + 6'd1;
             end
         end
     end
-    assign uart_tx = (msg_idx == MSG_LEN[6:0]) ? 1'b1 : shifter[0];
+    assign uart_tx = (msg_idx == MSG_LEN[5:0]) ? 1'b1 : shifter[0];
 
     // ------------------------------------------------------------------
     // Line-rate verification: count clk_sym (the GTR12 TX word clock,
@@ -493,7 +445,6 @@ module a2mega_dp_test_top (
 
     logic [27:0] sym_cnt = '0, sym_last = '0, sym_delta = '0;
     logic [2:0]  tgl_sync = '0;
-    logic        cmp_lo = 1'b0, cmp_hi = 1'b0;
     logic        freq_ok = 1'b0;
     logic        clk_sym_w;
     always_ff @(posedge clk_sym_w) begin
@@ -504,13 +455,11 @@ module a2mega_dp_test_top (
             sym_last  <= sym_cnt;
         end
         // pipelined vs the snapshot: sym_delta is static for a full 1 s
-        // window, so extra compare latency costs nothing. Each 28-bit
-        // magnitude compare gets its own register stage (the two ANDed
-        // in one cycle missed 135 MHz by ~70 ps in some PnR seeds).
+        // window, so comparing it a cycle later costs nothing and keeps
+        // the wide subtract-compare off the single-cycle 135 MHz path.
         // 135 M ± ~2%: 132.3M .. 137.7M
-        cmp_lo  <= (sym_delta > 28'd132_300_000);
-        cmp_hi  <= (sym_delta < 28'd137_700_000);
-        freq_ok <= cmp_lo && cmp_hi;
+        freq_ok <= (sym_delta > 28'd132_300_000) &&
+                   (sym_delta < 28'd137_700_000);
     end
 
     // ------------------------------------------------------------------

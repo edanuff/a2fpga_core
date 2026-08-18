@@ -17,16 +17,16 @@ IO_PORT "button" IO_TYPE=LVCMOS15 PULL_MODE=UP BANK_VCCIO=1.5;
 // DP AUX pseudo-differential pair -> TUSB1046A AUX inputs (bias/AC
 // coupling on the carrier). G15/G16 = the old HDMI clock pair (true
 // differential pair), driven here as two single-ended LVCMOS33.
-// AUX pair: PSEUDO-DIFF (blind-era proven config, restored 2026-08-16
-// night for the lottery-check gauntlet — the monitor has never lit on
-// any TLVDS-pad build; all monitor successes were this 2 Vpp drive).
-// TLVDS closed-loop config (restore with AUX_TLVDS=1):
-//   IO_LOC  "dp_aux_p" G15,G16;
-//   IO_PORT "dp_aux_p" IO_TYPE=LVDS25 PULL_MODE=DOWN;
-IO_LOC  "dp_aux_p" G15;
-IO_PORT "dp_aux_p" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
-IO_LOC  "dp_aux_n" G16;
-IO_PORT "dp_aux_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+// AUX pair as true LVDS (closed-loop experiment; see top AUX_TLVDS):
+// G15/G16 = IOR24A/B true pair; LVDS25 output legal at VCCIO 3.3 on
+// GW5A (DS Table 2-5). PULL_MODE biases the AC-coupled receive side
+// (UP on true / DOWN on comp = defined idle). If PnR rejects PULL_MODE
+// on an LVDS pad, fall back to ELVDS_IOBUF + IO_TYPE=LVCMOS33D here.
+// Proven pseudo-diff config (restore with AUX_TLVDS=0):
+//   IO_PORT "dp_aux_p" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+//   IO_PORT "dp_aux_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "dp_aux_p" G15,G16;
+IO_PORT "dp_aux_p" IO_TYPE=LVDS25 PULL_MODE=DOWN;
 
 // Debug UART to the ESP32 (Serial1 RX side)
 IO_LOC  "uart_tx" H13;
