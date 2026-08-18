@@ -58,7 +58,7 @@ All three cables: all pins green incl. SBU; duplicate D+/D- red (normal).
 Weekend backfill: only rows with certain provenance; `?` = not recorded
 (the confounds that cost us two days). Rigor starts at #10.
 
-| # | date | Board | GW | FW | Sink | Cable | Orient | Brk | Pwr | EQ | Kind | Result | Notes |
+| # | Board | date | GW | FW | Sink | Cable | Orient | Brk | Pwr | EQ | Kind | Result | Notes |
 |---|------|-------|----|----|------|-------|--------|-----|-----|----|------|--------|-------|
 | 1 | orig? | 08-14 AM | 5d8e15f0 | (Fri AM) | mon | ? | both | **Y** | mon? | 1.0 | cold+hot | LIT both orientations | "streak" era; 30-min soak passed; breakout inline ALL Friday |
 | 2 | orig? | 08-15→16 | various | Sat/Sun | hubA | captive | n/a | N | bench (user 08-17: almost none in slot; 'slot' was mis-recorded) | 1.0→6.5 | many | mixed (2/5, 4/5, soaks clean) | closed-loop era; boot-draw model built here; conditions unlogged; 4/5 NOT reproducible 08-17 eve (row 18: 0/9 same bench) |
