@@ -44,7 +44,7 @@ All three cables: all pins green incl. SBU; duplicate D+/D- red (normal).
 | 5d8e15f0 | Fri 08-14 07:46 (a77e2422) | dp_test 2-lane HBR, CHAINED IP, pseudo-diff AUX, blind, 804mV. SecurityBit ON (pre-discovery) |
 | d8c22f27 | Sat 08-16 | dp_test 2-lane HBR "plan C" un-chained, TLVDS AUX, closed-loop |
 | 55571daf | Sun 08-16 | plan-C 2-lane + TLVDS + blind forced (lottery-check v2) |
-| 74759364 | Sun 08-16 | CHAINED IP + pseudo-diff + blind (lottery-check v3 = streak replica) |
+| 74759364 | B2 | Sun 08-16 | CHAINED IP + pseudo-diff + blind (lottery-check v3 = streak replica) |
 
 ## Firmware roster
 
@@ -58,28 +58,28 @@ All three cables: all pins green incl. SBU; duplicate D+/D- red (normal).
 Weekend backfill: only rows with certain provenance; `?` = not recorded
 (the confounds that cost us two days). Rigor starts at #10.
 
-| # | date | GW | FW | Sink | Cable | Orient | Brk | Pwr | EQ | Kind | Result | Notes |
-|---|------|----|----|------|-------|--------|-----|-----|----|------|--------|-------|
-| 1 | 08-14 AM | 5d8e15f0 | (Fri AM) | mon | ? | both | **Y** | mon? | 1.0 | cold+hot | LIT both orientations | "streak" era; 30-min soak passed; breakout inline ALL Friday |
-| 2 | 08-15→16 | various | Sat/Sun | hubA | captive | n/a | N | bench (user 08-17: almost none in slot; 'slot' was mis-recorded) | 1.0→6.5 | many | mixed (2/5, 4/5, soaks clean) | closed-loop era; boot-draw model built here; conditions unlogged; 4/5 NOT reproducible 08-17 eve (row 18: 0/9 same bench) |
-| 3 | 08-16 night | 55571daf | HEAD | mon | ? | ? | N | mon | 6.5 | cold ×2 | DARK 0/2 | TLVDS pad confound |
-| 4 | 08-16 night | 74759364 | HEAD | ? | ? | ? | N | mon | 6.5→1.0 live | cold ×3 + EQ | DARK 0/3 | streak-replica GW but TODAY's fw |
-| 5 | 08-16 night | 5d8e15f0 | HEAD | mon | ? | ? | N | mon | 6.5 | cold | DARK | "Friday binary" test — fw not reverted (invalid as Friday repro) |
-| 6 | 08-16 night | 5d8e15f0 | 98461af3 | mon | C1? | one | N | mon | 1.0 | cold ×1 + replug ×5 | LIT 5/5 | BREAKTHROUGH row; one orientation only |
-| 7 | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C1 | ? | N | mon | 1.0 | cold ×5 | LIT 4/5 | cold morning |
-| 8 | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C2,C3 | both | N | mon | 1.0/6.5/9.5/12.3 | cold+EQ steps | DARK all | full EQ range dark on C3 both orientations |
-| 9 | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C3 | **both** | **Y** | mon | 1.0 | cold | **LIT both orientations** | ROOT CAUSE row: AUX overdrive needs attenuation |
-| 10 | 08-17 | 5d8e15f0 (rewrite) | — | flash-tooling | — | — | — | mac | — | 3× flash populated | 2/3 first-attempt | loader a2mega2 SRAM-preload path; cycle-3 fail benign (no wedge) |
-| 11 | 08-17 | 5d8e15f0 (rewrite) | — | flash-tooling | — | — | — | mac | — | 6× flash populated | 5/6 first-attempt | wait-only (OFL_GW5A_SETTLE_MS=3500); cycle-4 fail benign; ZERO replugs/wedges across all 9 cycles (#10+#11) |
+| # | date | Board | GW | FW | Sink | Cable | Orient | Brk | Pwr | EQ | Kind | Result | Notes |
+|---|------|-------|----|----|------|-------|--------|-----|-----|----|------|--------|-------|
+| 1 | orig? | 08-14 AM | 5d8e15f0 | (Fri AM) | mon | ? | both | **Y** | mon? | 1.0 | cold+hot | LIT both orientations | "streak" era; 30-min soak passed; breakout inline ALL Friday |
+| 2 | orig? | 08-15→16 | various | Sat/Sun | hubA | captive | n/a | N | bench (user 08-17: almost none in slot; 'slot' was mis-recorded) | 1.0→6.5 | many | mixed (2/5, 4/5, soaks clean) | closed-loop era; boot-draw model built here; conditions unlogged; 4/5 NOT reproducible 08-17 eve (row 18: 0/9 same bench) |
+| 3 | orig? | 08-16 night | 55571daf | HEAD | mon | ? | ? | N | mon | 6.5 | cold ×2 | DARK 0/2 | TLVDS pad confound |
+| 4 | orig? | 08-16 night | 74759364 | HEAD | ? | ? | ? | N | mon | 6.5→1.0 live | cold ×3 + EQ | DARK 0/3 | streak-replica GW but TODAY's fw |
+| 5 | orig? | 08-16 night | 5d8e15f0 | HEAD | mon | ? | ? | N | mon | 6.5 | cold | DARK | "Friday binary" test — fw not reverted (invalid as Friday repro) |
+| 6 | orig? | 08-16 night | 5d8e15f0 | 98461af3 | mon | C1? | one | N | mon | 1.0 | cold ×1 + replug ×5 | LIT 5/5 | BREAKTHROUGH row; one orientation only |
+| 7 | orig? | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C1 | ? | N | mon | 1.0 | cold ×5 | LIT 4/5 | cold morning |
+| 8 | orig? | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C2,C3 | both | N | mon | 1.0/6.5/9.5/12.3 | cold+EQ steps | DARK all | full EQ range dark on C3 both orientations |
+| 9 | orig? | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C3 | **both** | **Y** | mon | 1.0 | cold | **LIT both orientations** | ROOT CAUSE row: AUX overdrive needs attenuation |
+| 10 | orig? | 08-17 | 5d8e15f0 (rewrite) | — | flash-tooling | — | — | — | mac | — | 3× flash populated | 2/3 first-attempt | loader a2mega2 SRAM-preload path; cycle-3 fail benign (no wedge) |
+| 11 | orig? | 08-17 | 5d8e15f0 (rewrite) | — | flash-tooling | — | — | — | mac | — | 6× flash populated | 5/6 first-attempt | wait-only (OFL_GW5A_SETTLE_MS=3500); cycle-4 fail benign; ZERO replugs/wedges across all 9 cycles (#10+#11) |
 
-| 12 | 08-17 | 74759364 | HEAD | flash-recovery | — | — | — | mac | — | SOM#1 revival | RECOVERED | fresh carrier (board B2) + SOM#1: ESP32 fw uploaded + WiFi provisioned (IP .116); preload-variant flash FAILED on corrupt flash (CRC err during JTAG load, ReadID fail — scanner interferes even with preload on pathological content); classic rescue path clean (JEDEC EF4017 = chip healthy, erase E:D, blank write 2:12 verify OK, auto-boot heartbeat). Saturday "SOM dead" verdict formally overturned |
+| 12 | B2 | 08-17 | 74759364 | HEAD | flash-recovery | — | — | — | mac | — | SOM#1 revival | RECOVERED | fresh carrier (board B2) + SOM#1: ESP32 fw uploaded + WiFi provisioned (IP .116); preload-variant flash FAILED on corrupt flash (CRC err during JTAG load, ReadID fail — scanner interferes even with preload on pathological content); classic rescue path clean (JEDEC EF4017 = chip healthy, erase E:D, blank write 2:12 verify OK, auto-boot heartbeat). Saturday "SOM dead" verdict formally overturned |
 
-| 13 | 08-17 | 74759364 | HEAD | mon | C3 | ? | **Y** | mon | 6.5 | cold | **LIT** | B2/SOM#1 first light. CLOSES: silicon-variation (dead — SOM#1 lights identical image), fresh-carrier bring-up (pass), Saturday-fw monitor guilt (exonerated — HEAD fw lights with AUX attenuation present) |
+| 13 | B2 | 08-17 | 74759364 | HEAD | mon | C3 | ? | **Y** | mon | 6.5 | cold | **LIT** | B2/SOM#1 first light. CLOSES: silicon-variation (dead — SOM#1 lights identical image), fresh-carrier bring-up (pass), Saturday-fw monitor guilt (exonerated — HEAD fw lights with AUX attenuation present) |
 
-| 14 | 08-17 | c85d3afc | HEAD | mon | C3 | both | Y and N | mon | 6.5 | cold ×4 | DARK all 4 | TLVDS clean test NEGATIVE: spec ~350mV doesn't light monitor direct OR breakout (attenuating weak signal only hurts). Hub ACKed TLVDS all Saturday => sink-dependent AUX RX thresholds. Neither 1.0a3 drive is in the 0.4-1.38Vpp spec window at the connector. CLOSES 1.0a4 open item A: resistive level/bias network on the LVCMOS path (≈1V diff at connector + defined CM + RX bias), NOT the TLVDS pad |
-| 15 | 08-17 PM | 74759364 | HEAD+net | hubA | ? | ? | N | hub | 6.5 | reload ×11 | K:00 all 11 | chained config on hub: AUX fine (D:2E) but ZERO symbol lock, deterministic — hub rejects chained outright (sink-dependence confirmed, high n). Via new telnet 'g' re-roll |
-| 16 | 08-17 PM | d8c22f27 | HEAD+net | hubA | ? | ? | N | hub | 6.5 | reload ×10 + retrain | K:00 all | plan-C via fpgastream (exact Sat binary, .fs→.bin converted). 'g' reload alone leaves ladder idle (no HPD re-delivery — closed-loop builds need 'r' HPD pulse after reload); with 'r': training starts, collapses pre-CR |
-| 17 | 08-17 PM | d8c22f27 | HEAD+net | hubA | ? | ? | N | hub | 1.0-12.3 | cold ×1 + EQ sweep | DARK, K:00 | fresh power-cycle of full chain: HPD present, training reaches channel-EQ (D:2A, L:8, G cycles) but NEVER completes, at ALL 4 EQ settings. NOTE: Sat 4/5 (row 2) was SLOT-powered — today's hub-powered bench persona was never in that dataset; persona or fw vintage = remaining deltas |
-| 18 | 08-17 eve | d8c22f27 | HEAD+net | hubA | captive | n/a | N | bench 5V (JTAG conn) | 6.5 | power-cycle ×9 | BAD 0/9 (K:00, D:2A stall) | TRUE power-on draw series (quad common block re-rolls ONLY on power cycle — reload cycles in rows 15-16 re-rolled nothing). 6 cycles w/ capture-device HDMI sink + 3 w/ monitor HDMI sink: identical stall => HDMI sink exonerated. vs Sat 4/5: P(0/9|p=0.8) ~ 5e-7 => NOT the same process. Every sw variable eliminated (gw binary exact, fw both vintages, EQ all, attach flow). Remaining: slot power (supply ramp?) or Sat 4/5 miscounted. NOTE rows 15-17 'persona' framing WRONG: board was never hub-powered — external 5V via JTAG conn throughout; hub is bus-powered FROM board; hub cable is captive (C1-C3 are monitor-path only) |
+| 14 | B2 | 08-17 | c85d3afc | HEAD | mon | C3 | both | Y and N | mon | 6.5 | cold ×4 | DARK all 4 | TLVDS clean test NEGATIVE: spec ~350mV doesn't light monitor direct OR breakout (attenuating weak signal only hurts). Hub ACKed TLVDS all Saturday => sink-dependent AUX RX thresholds. Neither 1.0a3 drive is in the 0.4-1.38Vpp spec window at the connector. CLOSES 1.0a4 open item A: resistive level/bias network on the LVCMOS path (≈1V diff at connector + defined CM + RX bias), NOT the TLVDS pad |
+| 15 | B2 | 08-17 PM | 74759364 | HEAD+net | hubA | ? | ? | N | hub | 6.5 | reload ×11 | K:00 all 11 | chained config on hub: AUX fine (D:2E) but ZERO symbol lock, deterministic — hub rejects chained outright (sink-dependence confirmed, high n). Via new telnet 'g' re-roll |
+| 16 | B2 | 08-17 PM | d8c22f27 | HEAD+net | hubA | ? | ? | N | hub | 6.5 | reload ×10 + retrain | K:00 all | plan-C via fpgastream (exact Sat binary, .fs→.bin converted). 'g' reload alone leaves ladder idle (no HPD re-delivery — closed-loop builds need 'r' HPD pulse after reload); with 'r': training starts, collapses pre-CR |
+| 17 | B2 | 08-17 PM | d8c22f27 | HEAD+net | hubA | ? | ? | N | hub | 1.0-12.3 | cold ×1 + EQ sweep | DARK, K:00 | fresh power-cycle of full chain: HPD present, training reaches channel-EQ (D:2A, L:8, G cycles) but NEVER completes, at ALL 4 EQ settings. NOTE: Sat 4/5 (row 2) was SLOT-powered — today's hub-powered bench persona was never in that dataset; persona or fw vintage = remaining deltas |
+| 18 | B2 | 08-17 eve | d8c22f27 | HEAD+net | hubA | captive | n/a | N | bench 5V (JTAG conn) | 6.5 | power-cycle ×9 | BAD 0/9 (K:00, D:2A stall) | TRUE power-on draw series (quad common block re-rolls ONLY on power cycle — reload cycles in rows 15-16 re-rolled nothing). 6 cycles w/ capture-device HDMI sink + 3 w/ monitor HDMI sink: identical stall => HDMI sink exonerated. vs Sat 4/5: P(0/9|p=0.8) ~ 5e-7 => NOT the same process. Every sw variable eliminated (gw binary exact, fw both vintages, EQ all, attach flow). Remaining: slot power (supply ramp?) or Sat 4/5 miscounted. NOTE rows 15-17 'persona' framing WRONG: board was never hub-powered — external 5V via JTAG conn throughout; hub is bus-powered FROM board; hub cable is captive (C1-C3 are monitor-path only) |
 
 <!-- new rows below; never reuse ids -->
