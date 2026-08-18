@@ -106,6 +106,7 @@ module dp_transmitter #(
     output logic [3:0]  debug_locks, // {clock,equ,symbol,align}_locked
     output logic [7:0]  debug_gate,  // latched-at-gate locks + fail/timeout ctrs
     output logic [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
+    output logic [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
     output logic [3:0]  debug_wdog,  // {cold-restart forcing, attempts[2:0]}
     output logic [9:0]  debug_wrusewd, // TX FIFO fill {word-lane0's, word-lane1's}
     // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
@@ -473,6 +474,7 @@ module dp_transmitter #(
         .debug_locks          (debug_locks),
         .debug_gate           (debug_gate),
         .debug_sink           (debug_sink),
+        .debug_adjust         (debug_adjust),
         .hpd                  (hpd),
         .auxch_in             (auxch_in),
         .auxch_out            (auxch_out),

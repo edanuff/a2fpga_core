@@ -84,6 +84,10 @@ module link_signal_mgmt(
         output  reg  preemp_3p5,
         output  reg  preemp_6p0,
     
+        // Raw sink ADJUST_REQUEST (DPCD 0x206/0x207 as received): the
+        // ground truth of what the sink is asking for, for telemetry.
+        output  [15:0] debug_adjust,
+
         output  reg  swing_0p4,
         output  reg  swing_0p6,
         output  reg  swing_0p8
@@ -100,7 +104,15 @@ module link_signal_mgmt(
 
     assign active_channel_count = active_channel_count_i;
     assign voltage_level = channel_adjust[1:0];
+    // KNOWN-SUSPECT (2026-08-18, left in place for the instrumented
+    // baseline build): [3:0] into a 2-bit wire truncates to [1:0] — the
+    // SWING request — while the lane-0 pre-emphasis request is [3:2].
+    // The announced pre-emphasis therefore tracks the sink's swing bits.
+    // Fix candidate: channel_adjust[3:2]. Do not change until the A:
+    // telemetry confirms the sink requests preemp != swing on the
+    // failing path.
     assign preemp_level  = channel_adjust[3:0];
+    assign debug_adjust  = channel_adjust;
     
 initial begin
     active_channel_count_i = 3'b0;

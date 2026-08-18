@@ -68,6 +68,7 @@ module channel_management #(
         output [3:0]  debug_locks, // {clock,equ,symbol,align}_locked (registered)
         output [7:0]  debug_gate,  // latched-at-gate locks + fail/timeout counters
         output [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
+        output [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
 
         input   hpd,
         input   auxch_in,
@@ -291,6 +292,7 @@ dp_register_decode i_dp_reg_decode(
 
 link_signal_mgmt i_link_signal_mgmt(
         .mgmt_clk             (clk100),
+        .debug_adjust         (debug_adjust),
 
         .tx_powerup           (tx_powerup), 
         
