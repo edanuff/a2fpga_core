@@ -325,6 +325,7 @@ module a2mega_dp_test_top (
     logic [7:0]  gate_s0, gate_s;
     logic [15:0] adj_s0, adj_s;
     logic [15:0] chst_s0, chst_s;
+    logic [27:0] symd_s0, symd_s;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
@@ -336,6 +337,8 @@ module a2mega_dp_test_top (
         gate_s0 <= aux_dbg_gate;   gate_s <= gate_s0;
         adj_s0  <= aux_dbg_adjust; adj_s  <= adj_s0;
         chst_s0 <= aux_dbg_chstate; chst_s <= chst_s0;
+        // quasi-static: sym_delta only changes once per 1 s window
+        symd_s0 <= sym_delta;       symd_s <= symd_s0;
     end
 
     // Y: link/video rise odometer — counts every establish (flg_s[1]) and
@@ -356,7 +359,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 66;   // > 63: msg_idx widened to [6:0]
+    localparam int MSG_LEN = 76;   // msg_idx is [6:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -393,7 +396,9 @@ module a2mega_dp_test_top (
             msg[52]=" "; msg[53]=" "; msg[54]=" "; msg[55]=" ";
             msg[56]=" "; msg[57]=" "; msg[58]=" "; msg[59]=" ";
             msg[60]=" "; msg[61]=" "; msg[62]=" "; msg[63]=" ";
-            msg[64]=" "; msg[65]=8'h0A;
+            msg[64]=" "; msg[65]=" "; msg[66]=" "; msg[67]=" ";
+            msg[68]=" "; msg[69]=" "; msg[70]=" "; msg[71]=" ";
+            msg[72]=" "; msg[73]=" "; msg[74]=" "; msg[75]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -431,7 +436,15 @@ module a2mega_dp_test_top (
         msg[62]=hexch(chst_s[11:8]);
         msg[63]=hexch(chst_s[7:4]);           // DPCD 0x202: [6:4]=lane1
         msg[64]=hexch(chst_s[3:0]);           //   [2:0]=lane0 {SYM,EQ,CR}
-        msg[65]=8'h0A;
+        msg[65]=" "; msg[66]="Q"; msg[67]=":";
+        msg[68]=hexch(symd_s[27:24]);         // symbol-clock 1s window count
+        msg[69]=hexch(symd_s[23:20]);         //   (135e6 nominal; 1 LSB =
+        msg[70]=hexch(symd_s[19:16]);         //    ~0.007 ppm — refclk ppm
+        msg[71]=hexch(symd_s[15:12]);         //    meter vs 50M crystal)
+        msg[72]=hexch(symd_s[11:8]);
+        msg[73]=hexch(symd_s[7:4]);
+        msg[74]=hexch(symd_s[3:0]);
+        msg[75]=8'h0A;
         end
     end
 
