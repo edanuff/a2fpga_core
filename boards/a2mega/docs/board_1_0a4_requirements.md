@@ -43,6 +43,17 @@ no rev until the OPEN items that could change the netlist are closed.
    (bench supply masked it). Size for a bus-powered hub + downstream
    devices; consider soft-start on the switch.
 
+5a. **DP main-link channel margin review (mux segment)** — evidence
+   08-18: two same-design carriers split good/bad on the hub path
+   (B1 C:0177 golden vs B2 C:8011 both-lanes-CR-only, all sw/config
+   variables nulled with data, crystals both <10ppm). The deficit is
+   common-mode analog between FPGA and the sink's RX — TUSB1046A unit
+   tolerance, passives, or layout. Review: mux placement/routing
+   symmetry, AC-cap values/tolerance on the main-link pairs, ground
+   return continuity at the BTB; consider spec'ing tighter-tolerance
+   passives on the DP pairs. (Refclk jitter the unmeasured runner-up:
+   consider a jitter-specified 135M oscillator part.)
+
 ## STRONG candidates (cheap, would have saved days)
 
 6. **AUX/SBU test points** (2 pads near the caps) — the entire AUX saga
