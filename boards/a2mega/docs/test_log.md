@@ -60,17 +60,17 @@ Weekend backfill: only rows with certain provenance; `?` = not recorded
 
 | # | Board | date | GW | FW | Sink | Cable | Orient | Brk | Pwr | EQ | Kind | Result | Notes |
 |---|------|-------|----|----|------|-------|--------|-----|-----|----|------|--------|-------|
-| 1 | orig? | 08-14 AM | 5d8e15f0 | (Fri AM) | mon | ? | both | **Y** | mon? | 1.0 | cold+hot | LIT both orientations | "streak" era; 30-min soak passed; breakout inline ALL Friday |
-| 2 | orig? | 08-15→16 | various | Sat/Sun | hubA | captive | n/a | N | bench (user 08-17: almost none in slot; 'slot' was mis-recorded) | 1.0→6.5 | many | mixed (2/5, 4/5, soaks clean) | closed-loop era; boot-draw model built here; conditions unlogged; 4/5 NOT reproducible 08-17 eve (row 18: 0/9 same bench) |
-| 3 | orig? | 08-16 night | 55571daf | HEAD | mon | ? | ? | N | mon | 6.5 | cold ×2 | DARK 0/2 | TLVDS pad confound |
-| 4 | orig? | 08-16 night | 74759364 | HEAD | ? | ? | ? | N | mon | 6.5→1.0 live | cold ×3 + EQ | DARK 0/3 | streak-replica GW but TODAY's fw |
-| 5 | orig? | 08-16 night | 5d8e15f0 | HEAD | mon | ? | ? | N | mon | 6.5 | cold | DARK | "Friday binary" test — fw not reverted (invalid as Friday repro) |
-| 6 | orig? | 08-16 night | 5d8e15f0 | 98461af3 | mon | C1? | one | N | mon | 1.0 | cold ×1 + replug ×5 | LIT 5/5 | BREAKTHROUGH row; one orientation only |
-| 7 | orig? | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C1 | ? | N | mon | 1.0 | cold ×5 | LIT 4/5 | cold morning |
-| 8 | orig? | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C2,C3 | both | N | mon | 1.0/6.5/9.5/12.3 | cold+EQ steps | DARK all | full EQ range dark on C3 both orientations |
-| 9 | orig? | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C3 | **both** | **Y** | mon | 1.0 | cold | **LIT both orientations** | ROOT CAUSE row: AUX overdrive needs attenuation |
-| 10 | orig? | 08-17 | 5d8e15f0 (rewrite) | — | flash-tooling | — | — | — | mac | — | 3× flash populated | 2/3 first-attempt | loader a2mega2 SRAM-preload path; cycle-3 fail benign (no wedge) |
-| 11 | orig? | 08-17 | 5d8e15f0 (rewrite) | — | flash-tooling | — | — | — | mac | — | 6× flash populated | 5/6 first-attempt | wait-only (OFL_GW5A_SETTLE_MS=3500); cycle-4 fail benign; ZERO replugs/wedges across all 9 cycles (#10+#11) |
+| 1 | pre-switch | 08-14 AM | 5d8e15f0 | (Fri AM) | mon | ? | both | **Y** | mon? | 1.0 | cold+hot | LIT both orientations | "streak" era; 30-min soak passed; breakout inline ALL Friday |
+| 2 | B1 | 08-15→16 | various | Sat/Sun | hubA | captive | n/a | N | bench (user 08-17: almost none in slot; 'slot' was mis-recorded) | 1.0→6.5 | many | mixed (2/5, 4/5, soaks clean) | closed-loop era; boot-draw model built here; conditions unlogged; 4/5 NOT reproducible 08-17 eve (row 18: 0/9 same bench) |
+| 3 | B1 | 08-16 night | 55571daf | HEAD | mon | ? | ? | N | mon | 6.5 | cold ×2 | DARK 0/2 | TLVDS pad confound |
+| 4 | B1 | 08-16 night | 74759364 | HEAD | ? | ? | ? | N | mon | 6.5→1.0 live | cold ×3 + EQ | DARK 0/3 | streak-replica GW but TODAY's fw |
+| 5 | B1 | 08-16 night | 5d8e15f0 | HEAD | mon | ? | ? | N | mon | 6.5 | cold | DARK | "Friday binary" test — fw not reverted (invalid as Friday repro) |
+| 6 | B1 | 08-16 night | 5d8e15f0 | 98461af3 | mon | C1? | one | N | mon | 1.0 | cold ×1 + replug ×5 | LIT 5/5 | BREAKTHROUGH row; one orientation only |
+| 7 | B1 | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C1 | ? | N | mon | 1.0 | cold ×5 | LIT 4/5 | cold morning |
+| 8 | B1 | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C2,C3 | both | N | mon | 1.0/6.5/9.5/12.3 | cold+EQ steps | DARK all | full EQ range dark on C3 both orientations |
+| 9 | B1 | 08-17 AM | 5d8e15f0 | 98461af3 | mon | C3 | **both** | **Y** | mon | 1.0 | cold | **LIT both orientations** | ROOT CAUSE row: AUX overdrive needs attenuation |
+| 10 | B1 | 08-17 | 5d8e15f0 (rewrite) | — | flash-tooling | — | — | — | mac | — | 3× flash populated | 2/3 first-attempt | loader a2mega2 SRAM-preload path; cycle-3 fail benign (no wedge) |
+| 11 | B1 | 08-17 | 5d8e15f0 (rewrite) | — | flash-tooling | — | — | — | mac | — | 6× flash populated | 5/6 first-attempt | wait-only (OFL_GW5A_SETTLE_MS=3500); cycle-4 fail benign; ZERO replugs/wedges across all 9 cycles (#10+#11) |
 
 | 12 | B2 | 08-17 | 74759364 | HEAD | flash-recovery | — | — | — | mac | — | SOM#1 revival | RECOVERED | fresh carrier (board B2) + SOM#1: ESP32 fw uploaded + WiFi provisioned (IP .116); preload-variant flash FAILED on corrupt flash (CRC err during JTAG load, ReadID fail — scanner interferes even with preload on pathological content); classic rescue path clean (JEDEC EF4017 = chip healthy, erase E:D, blank write 2:12 verify OK, auto-boot heartbeat). Saturday "SOM dead" verdict formally overturned |
 
