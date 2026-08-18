@@ -10,6 +10,16 @@ scannable ground truth.
 - **#**: test id (monotonic)
 - **GW**: FPGA bitstream — sha256 prefix of the flashed `.fs` (git-committed)
 - **FW**: ESP32 firmware — commit hash it was built from
+- **LEDs** (dp_test builds; silkscreen D1-D4, all active-low; user-verified
+  08-18): D1/D15=led0 heartbeat (flashing = configured). D2/D14=led1 HPD
+  (lit = attach+orientation+cable good; seldom dark). D3/R14=led2 freq_ok
+  135MHz (solid = bitstream running; lags D4 ~0.3-0.5s = counter window
+  latency, NOT clock latency; header comment in top.sv saying
+  'link_established' is STALE). D4/P14=led3 video_live — THE draw verdict,
+  delivered instantly: good draw = solid right away (training completes
+  <1s, before D3's window fills); bad draw = flashing (link-flap mode) or
+  dark (never-trains mode). No trains-after-retries mode exists at boot;
+  D4 at power-on is a complete instant classifier.
 - **Board** (carrier+SOM pairs — SOMs migrated during the flash saga):
   `B1` = carrier #1 (original) + SOM #2, in service from Sat 08-16 9am
   (all Sat hub successes incl. first light 15:20 / 39ada3ca);
