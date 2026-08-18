@@ -186,6 +186,7 @@ module a2mega_dp_test_top (
     logic [15:0] aux_dbg_rx;
     logic [7:0]  aux_dbg_gate;
     logic [15:0] aux_dbg_adjust;
+    logic [15:0] aux_dbg_chstate;
     logic       hpd_present_w;
     logic [4:0]  drp_idx;
     logic [31:0] drp_data;
@@ -234,6 +235,7 @@ module a2mega_dp_test_top (
         .debug_rx       (aux_dbg_rx),
         .debug_gate        (aux_dbg_gate),
         .debug_adjust      (aux_dbg_adjust),
+        .debug_chstate     (aux_dbg_chstate),
         .clk_symbol_out    (clk_sym_w),
         .serdes_status     (serdes_status),
         .hpd_present_out   (hpd_present_w),
@@ -322,6 +324,7 @@ module a2mega_dp_test_top (
     logic [16:0] hp_s0, hp_s;
     logic [7:0]  gate_s0, gate_s;
     logic [15:0] adj_s0, adj_s;
+    logic [15:0] chst_s0, chst_s;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
@@ -332,6 +335,7 @@ module a2mega_dp_test_top (
         flg_s  <= flg_s0;
         gate_s0 <= aux_dbg_gate;   gate_s <= gate_s0;
         adj_s0  <= aux_dbg_adjust; adj_s  <= adj_s0;
+        chst_s0 <= aux_dbg_chstate; chst_s <= chst_s0;
     end
 
     // Y: link/video rise odometer — counts every establish (flg_s[1]) and
@@ -352,7 +356,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 59;   // still < 63: fits the [5:0] msg_idx
+    localparam int MSG_LEN = 66;   // > 63: msg_idx widened to [6:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -387,7 +391,9 @@ module a2mega_dp_test_top (
             msg[44]=" "; msg[45]=" "; msg[46]=" "; msg[47]=" ";
             msg[48]=" "; msg[49]=" "; msg[50]=" "; msg[51]=" ";
             msg[52]=" "; msg[53]=" "; msg[54]=" "; msg[55]=" ";
-            msg[56]=" "; msg[57]=" "; msg[58]=8'h0A;
+            msg[56]=" "; msg[57]=" "; msg[58]=" "; msg[59]=" ";
+            msg[60]=" "; msg[61]=" "; msg[62]=" "; msg[63]=" ";
+            msg[64]=" "; msg[65]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -420,7 +426,12 @@ module a2mega_dp_test_top (
         msg[53]=" "; msg[54]="Y"; msg[55]=":";
         msg[56]=hexch(link_rises);            // link establish count
         msg[57]=hexch(vid_rises);             // video start count (D4 odometer)
-        msg[58]=8'h0A;
+        msg[58]=" "; msg[59]="C"; msg[60]=":";
+        msg[61]=hexch(chst_s[15:12]);         // DPCD 0x204 LANE_ALIGN_STATUS
+        msg[62]=hexch(chst_s[11:8]);
+        msg[63]=hexch(chst_s[7:4]);           // DPCD 0x202: [6:4]=lane1
+        msg[64]=hexch(chst_s[3:0]);           //   [2:0]=lane0 {SYM,EQ,CR}
+        msg[65]=8'h0A;
         end
     end
 
@@ -428,7 +439,7 @@ module a2mega_dp_test_top (
     logic [8:0]  baud_cnt = '0;
     logic        baud_tick;
     logic [24:0] msg_timer = '0;
-    logic [5:0]  msg_idx = MSG_LEN[5:0];   // idle when == MSG_LEN
+    logic [6:0]  msg_idx = MSG_LEN[6:0];   // idle when == MSG_LEN
     logic [3:0]  bit_idx = '0;
     logic [9:0]  shifter = 10'h3FF;
     always_ff @(posedge clk50_in) begin
@@ -437,7 +448,7 @@ module a2mega_dp_test_top (
         else baud_cnt <= baud_cnt + 9'd1;
 
         msg_timer <= msg_timer + 25'd1;
-        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[5:0]) begin
+        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[6:0]) begin
             msg_idx <= '0;                 // start a new message
             bit_idx <= 4'd10;              // force reload on next tick
             line_is_reg <= ~line_is_reg;   // alternate status / register
@@ -448,7 +459,7 @@ module a2mega_dp_test_top (
             reg_done_l <= drp_done;
         end
 
-        if (baud_tick && msg_idx != MSG_LEN[5:0]) begin
+        if (baud_tick && msg_idx != MSG_LEN[6:0]) begin
             if (bit_idx >= 4'd10) begin    // load next char: start+8+stop
                 shifter <= {1'b1, msg[msg_idx], 1'b0};
                 bit_idx <= 4'd0;
@@ -460,7 +471,7 @@ module a2mega_dp_test_top (
             end
         end
     end
-    assign uart_tx = (msg_idx == MSG_LEN[5:0]) ? 1'b1 : shifter[0];
+    assign uart_tx = (msg_idx == MSG_LEN[6:0]) ? 1'b1 : shifter[0];
 
     // ------------------------------------------------------------------
     // Line-rate verification: count clk_sym (the GTR12 TX word clock,

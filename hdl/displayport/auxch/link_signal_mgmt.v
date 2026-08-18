@@ -87,6 +87,7 @@ module link_signal_mgmt(
         // Raw sink ADJUST_REQUEST (DPCD 0x206/0x207 as received): the
         // ground truth of what the sink is asking for, for telemetry.
         output  [15:0] debug_adjust,
+        output  [15:0] debug_chstate,
 
         output  reg  swing_0p4,
         output  reg  swing_0p6,
@@ -111,6 +112,9 @@ module link_signal_mgmt(
     // Lane-0 pre-emphasis request is DPCD 0x206[3:2].
     assign preemp_level  = channel_adjust[3:2];
     assign debug_adjust  = channel_adjust;
+    // {DPCD 0x204 LANE_ALIGN_STATUS, DPCD 0x202 LANE0_1_STATUS}: the
+    // per-lane CR/EQ/SYM bits — one-lane-bad vs both-lanes-bad localizer.
+    assign debug_chstate = {channel_state[23:16], channel_state[7:0]};
     
 initial begin
     active_channel_count_i = 3'b0;
