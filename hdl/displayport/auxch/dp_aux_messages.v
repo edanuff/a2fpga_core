@@ -139,10 +139,10 @@ always @(posedge clk) begin
        // strict bridge CDRs mis-tune their tracking loops — candidate
        // for the "locks TPS, dies on scrambled data" class (Ugreen).
        // 0x00 = no downspread: declare what the clock actually does.
-       // TEMPORARILY back to 0x10 (2026-08-18): single-variable rule —
-       // the scrambler-reset fix ships alone first (Ugreen test); the
-       // truthful-downspread change validates in its own build after.
-       12'h084: begin aux_tx_data <= 8'h10; aux_tx_wr_en <= 1'b1; end
+       // UN-PARKED (same day): scrambler fix tested alone (Ugreen still
+       // C:8000) — truthful downspread now ships as the next single
+       // variable.
+       12'h084: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
 
        // Set link count 1
        12'h090: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end
