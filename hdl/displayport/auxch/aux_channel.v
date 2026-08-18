@@ -462,8 +462,16 @@ always @(posedge clk) begin
             // CR never completed). The GTR12 is fixed at 804 mV = DP swing
             // level 2, so blind mode always sends the 0p8/max message
             // (0x06/lane = level 2 + MAX_SWING_REACHED).
-            clock_voltage_0p4:    begin msg <= (BLIND_SINK != 0) ? 8'h18 : 8'h14; expected <= 8'h01; end
-            clock_voltage_0p6:    begin msg <= (BLIND_SINK != 0) ? 8'h18 : 8'h16; expected <= 8'h01; end
+            // TRUTHFUL DECLARATIONS (2026-08-18): the GTR12 drive is fixed
+            // (804/900 mV = DP swing level 2, preemp 0) — the closed-loop
+            // ladder used to walk declared levels 0->1->2 while the analog
+            // never moved, the exact declared-vs-actual mismatch the blind
+            // path already fixed ("sink calibrates against it and stalls",
+            // live-hit 08-14). Declare the truth (msg 0x18 = level 2 +
+            // MAX_SWING_REACHED, preemp 0) in EVERY set state; the ladder
+            // keeps its state walk for pacing/retry structure.
+            clock_voltage_0p4:    begin msg <= 8'h18; expected <= 8'h01; end
+            clock_voltage_0p6:    begin msg <= 8'h18; expected <= 8'h01; end
             clock_voltage_0p8:    begin msg <= 8'h18; expected <= 8'h01; end
             clock_wait:           begin msg <= 8'h00; expected <= 8'h00;  reset_addr_on_change <= 1'b1; end
             clock_test:           begin msg <= 8'h0D; expected <= 8'h09;  status_de_active <= 1'b1; reset_addr_on_change <= 1'b1; end
@@ -471,15 +479,18 @@ always @(posedge clk) begin
             clock_wait_after:     begin msg <= 8'h00; expected <= 8'h00;  end
                     
             align_training:       begin msg <= 8'h0F; expected <= 8'h01; end
-            align_p0_V0p4:        begin msg <= (BLIND_SINK != 0) ? 8'h18 : 8'h14; expected <= 8'h01; end
-            align_p0_V0p6:        begin msg <= (BLIND_SINK != 0) ? 8'h18 : 8'h16; expected <= 8'h01; end
+            // Truthful declarations here too: we never drive preemp — the
+            // p1/p2 messages (0x24..0x38) declared pre-emphasis the analog
+            // doesn't produce.
+            align_p0_V0p4:        begin msg <= 8'h18; expected <= 8'h01; end
+            align_p0_V0p6:        begin msg <= 8'h18; expected <= 8'h01; end
             align_p0_V0p8:        begin msg <= 8'h18; expected <= 8'h01; end
-            align_p1_V0p4:        begin msg <= 8'h24; expected <= 8'h01; end
-            align_p1_V0p6:        begin msg <= 8'h26; expected <= 8'h01; end
-            align_p1_V0p8:        begin msg <= 8'h28; expected <= 8'h01; end
-            align_p2_V0p4:        begin msg <= 8'h34; expected <= 8'h01; end
-            align_p2_V0p6:        begin msg <= 8'h36; expected <= 8'h01; end
-            align_p2_V0p8:        begin msg <= 8'h38; expected <= 8'h01; end
+            align_p1_V0p4:        begin msg <= 8'h18; expected <= 8'h01; end
+            align_p1_V0p6:        begin msg <= 8'h18; expected <= 8'h01; end
+            align_p1_V0p8:        begin msg <= 8'h18; expected <= 8'h01; end
+            align_p2_V0p4:        begin msg <= 8'h18; expected <= 8'h01; end
+            align_p2_V0p6:        begin msg <= 8'h18; expected <= 8'h01; end
+            align_p2_V0p8:        begin msg <= 8'h18; expected <= 8'h01; end
             align_wait0:          begin msg <= 8'h00; expected <= 8'h00; end
             align_wait1:          begin msg <= 8'h00; expected <= 8'h00; end
             align_wait2:          begin msg <= 8'h00; expected <= 8'h00; end
