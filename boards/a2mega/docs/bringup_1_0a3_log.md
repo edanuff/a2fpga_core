@@ -1283,3 +1283,38 @@ one-time ESP32 firmware upload:
 
 ESP32 firmware updates still need USB (no OTA partition). Gateware
 iteration is now: edit -> build -> `fpga_stream.py` -> auto-reload.
+
+## 2026-08-17 evening — hub re-baseline VERDICT + in-slot attach root-cause leads
+
+**Hub-path boot statistic (task #3), by construction:** 0/9 true power-on
+draws on the bench (6 capture-sink + 3 monitor-sink) + 1 in-slot = **0/10
+power-on draws, K:00 D:2A channel-EQ stall every time**. Saturday's "4/5"
+does not replicate under ANY tested condition; every software variable was
+eliminated (exact Sat gateware binary via .fs->.bin conversion, both fw
+vintages incl. 98461af3 hot-attach, EQ 1.0-12.3, attach flow, HDMI sink,
+reload-vs-power-cycle). User corrected the record: Sat hub tests were
+bench-powered (row 2 fixed), hub cable is captive, board externally
+powered via JTAG-connector 5V throughout. Honest current hub number:
+**~0/10, not 4/5**; Sat count likely optimistic/miscounted (conditions
+were unlogged). Harness lesson: quad-common-block draw re-rolls ONLY on
+power cycle — the 30+ 'g' reload cycles confirmed the draw survives
+reconfiguration (matches memory), so reload loops CANNOT measure this.
+
+**In-slot attach failures root-cause leads (task #1), instrumented:**
+- FUSB302 STATUS0=0x8x with port EMPTY = **VBUSOK asserted with no
+  partner: phantom VBUS backfeed** onto the connector rail from the
+  shared 5V plane (the vSafe0V precondition can never be met). Measured,
+  not inferred.
+- Hub attach in-slot **killed WiFi for ~1 min** (ESP32 did NOT reset —
+  log backlog intact): attach-inrush rail sag degrading RF. Bench supply
+  never glitched (stiffer feed). In-slot attach: 1/3 vs bench 9/9.
+- 1.0a4 implications: VBUS source-path isolation (load switch/ideal
+  diode, discharge FET) + local bulk cap for hub inrush.
+- FW to-do (task #1): attach-state logging, backfeed-tolerant source
+  attach (98461af3's approach), telnet-reachable PD restart; telnet
+  console mode does NOT feed CLI input (restart cmd inert) — QoL gap.
+
+Tooling shipped today and load-bearing throughout: fpgastream WiFi
+flashing, telnet 'g' reload, .fs->.bin converter (validated byte-exact),
+HDMI capture eyes (imagesnap loop in user Terminal; Claude Code app
+lacks camera TCC — workaround documented), automated boot classifier.
