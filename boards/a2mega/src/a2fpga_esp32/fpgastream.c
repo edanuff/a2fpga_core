@@ -195,18 +195,34 @@ static void serve_one(int fd)
             (unsigned long)size);
     ESP_LOGI(TAG, "stream install: %lu bytes", (unsigned long)size);
 
-    fpga_jtag_init_pins();
-    uint32_t id = fpga_jtag_idcode();
-    if (id != FPGA_JTAG_IDCODE_GW5AT60) {
-        fpga_jtag_release_pins();
-        ESP_LOGE(TAG, "live IDCODE %08lx", (unsigned long)id);
-        send_str(fd, "ERR JTAG IDCODE\n");
-        return;
+    /* GW5A auto-boot scanner race (native edition of the openFPGALoader
+     * saga): an UNCONFIGURED chip — e.g. after an interrupted stream
+     * left flash partially written — retries flash boot continuously,
+     * and its config engine races our JTAG-SPI passthrough: IDCODE
+     * reads garbage, flash mode won't enter. Settle-and-retry until
+     * entry wins. Winning ONCE is enough: the first erased block
+     * destroys the boot header, and the scanner stays quiet for the
+     * rest of the operation. (A configured chip parks its config
+     * engine and enters on the first try, as before.) */
+    bool entered = false;
+    uint32_t id = 0;
+    for (int try_n = 0; try_n < 10 && !entered; try_n++) {
+        if (try_n > 0) {
+            fpga_jtag_release_pins();
+            vTaskDelay(pdMS_TO_TICKS(700));
+        }
+        fpga_jtag_init_pins();
+        vTaskDelay(pdMS_TO_TICKS(try_n == 0 ? 100 : 400));
+        id = fpga_jtag_idcode();
+        if (id != FPGA_JTAG_IDCODE_GW5AT60)
+            continue;
+        if (fpga_jtag_flash_enter())     /* fabric (if any) dies here */
+            entered = true;
     }
-    if (!fpga_jtag_flash_enter()) {      /* fabric dies here */
-        fpga_jtag_reload();
+    if (!entered) {
         fpga_jtag_release_pins();
-        send_str(fd, "ERR FLASH MODE\n");
+        ESP_LOGE(TAG, "entry failed; last IDCODE %08lx", (unsigned long)id);
+        send_str(fd, "ERR JTAG ENTRY (10 tries)\n");
         return;
     }
 

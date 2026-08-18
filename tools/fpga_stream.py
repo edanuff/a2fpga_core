@@ -40,9 +40,24 @@ def main() -> int:
         s.settimeout(TIMEOUT_S)
         s.sendall(f"FPGA {len(data)}\n".encode())
         # Stream; the board paces us via TCP flow control while it
-        # programs/verifies pages.
-        for off in range(0, len(data), CHUNK):
-            s.sendall(data[off:off + CHUNK])
+        # programs/verifies pages. If the server aborts early (e.g.
+        # "ERR JTAG ENTRY"), it sends the reason and closes while we're
+        # still sending — surface the reason instead of a bare
+        # BrokenPipeError.
+        try:
+            for off in range(0, len(data), CHUNK):
+                s.sendall(data[off:off + CHUNK])
+        except (BrokenPipeError, ConnectionResetError):
+            try:
+                s2 = socket.create_connection((host, PORT), timeout=5)
+                s2.close()
+            except OSError:
+                pass
+            print("board aborted the transfer early — usually an "
+                  "\"ERR ...\" it sent before closing; check the board "
+                  "console, then retry (the retry loop in the service "
+                  "handles the auto-boot race)")
+            return 1
         # Read progress + final status lines.
         buf = b""
         while True:
