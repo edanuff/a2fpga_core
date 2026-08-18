@@ -187,6 +187,8 @@ module a2mega_dp_test_top (
     logic [7:0]  aux_dbg_gate;
     logic [15:0] aux_dbg_adjust;
     logic [15:0] aux_dbg_chstate;
+    logic [7:0]  aux_dbg_sink;
+    logic [7:0]  aux_dbg_caps;
     logic       hpd_present_w;
     logic [4:0]  drp_idx;
     logic [31:0] drp_data;
@@ -236,6 +238,8 @@ module a2mega_dp_test_top (
         .debug_gate        (aux_dbg_gate),
         .debug_adjust      (aux_dbg_adjust),
         .debug_chstate     (aux_dbg_chstate),
+        .debug_sink        (aux_dbg_sink),
+        .debug_caps        (aux_dbg_caps),
         .clk_symbol_out    (clk_sym_w),
         .serdes_status     (serdes_status),
         .hpd_present_out   (hpd_present_w),
@@ -326,6 +330,7 @@ module a2mega_dp_test_top (
     logic [15:0] adj_s0, adj_s;
     logic [15:0] chst_s0, chst_s;
     logic [27:0] symd_s0, symd_s;
+    logic [7:0] snk_s0, snk_s, cap_s0, cap_s;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
@@ -339,6 +344,8 @@ module a2mega_dp_test_top (
         chst_s0 <= aux_dbg_chstate; chst_s <= chst_s0;
         // quasi-static: sym_delta only changes once per 1 s window
         symd_s0 <= sym_delta;       symd_s <= symd_s0;
+        snk_s0 <= aux_dbg_sink;     snk_s <= snk_s0;
+        cap_s0 <= aux_dbg_caps;     cap_s <= cap_s0;
     end
 
     // Y: link/video rise odometer — counts every establish (flg_s[1]) and
@@ -359,7 +366,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 76;   // msg_idx is [6:0]
+    localparam int MSG_LEN = 86;   // msg_idx is [6:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -398,7 +405,10 @@ module a2mega_dp_test_top (
             msg[60]=" "; msg[61]=" "; msg[62]=" "; msg[63]=" ";
             msg[64]=" "; msg[65]=" "; msg[66]=" "; msg[67]=" ";
             msg[68]=" "; msg[69]=" "; msg[70]=" "; msg[71]=" ";
-            msg[72]=" "; msg[73]=" "; msg[74]=" "; msg[75]=8'h0A;
+            msg[72]=" "; msg[73]=" "; msg[74]=" "; msg[75]=" ";
+            msg[76]=" "; msg[77]=" "; msg[78]=" "; msg[79]=" ";
+            msg[80]=" "; msg[81]=" "; msg[82]=" "; msg[83]=" ";
+            msg[84]=" "; msg[85]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -444,7 +454,13 @@ module a2mega_dp_test_top (
         msg[72]=hexch(symd_s[11:8]);
         msg[73]=hexch(symd_s[7:4]);
         msg[74]=hexch(symd_s[3:0]);
-        msg[75]=8'h0A;
+        msg[75]=" "; msg[76]="K"; msg[77]=":";
+        msg[78]=hexch(snk_s[7:4]);            // DPCD 0x205 SINK_STATUS
+        msg[79]=hexch(snk_s[3:0]);
+        msg[80]=" "; msg[81]="X"; msg[82]=":";
+        msg[83]=hexch(cap_s[7:4]);            // {extfrm,r270,r162,valid}
+        msg[84]=hexch(cap_s[3:0]);            // max_downspread[3:0]
+        msg[85]=8'h0A;
         end
     end
 

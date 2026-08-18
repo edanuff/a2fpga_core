@@ -133,7 +133,13 @@ always @(posedge clk) begin
        12'h081: begin aux_tx_data <= 8'h01; aux_tx_wr_en <= 1'b1; end
        12'h082: begin aux_tx_data <= 8'h07; aux_tx_wr_en <= 1'b1; end
        12'h083: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
-       12'h084: begin aux_tx_data <= 8'h10; aux_tx_wr_en <= 1'b1; end
+       // TRUTHFUL DOWNSPREAD (2026-08-18): was 0x10 (SPREAD_AMP=1,
+       // inherited) — but the GTR12 QPLL does NO spread-spectrum (Q:
+       // meter: fixed +7.5ppm). Declaring SSC that never comes makes
+       // strict bridge CDRs mis-tune their tracking loops — candidate
+       // for the "locks TPS, dies on scrambled data" class (Ugreen).
+       // 0x00 = no downspread: declare what the clock actually does.
+       12'h084: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
 
        // Set link count 1
        12'h090: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end

@@ -70,6 +70,8 @@ module channel_management #(
         output [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
         output [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
         output [15:0] debug_chstate, // {0x204 align, 0x202 lane0/1 status}
+        output [7:0]  debug_caps,    // sink caps: {ext_framing, rate270,
+                                     //  rate162, dp_valid, max_downspread[3:0]}
 
         input   hpd,
         input   auxch_in,
@@ -190,6 +192,8 @@ assign     tx_preemp_0p0 = preemp_0p0_i;
 assign     tx_preemp_3p5 = preemp_3p5_i;
 assign     tx_preemp_6p0 = preemp_6p0_i;
            
+assign     debug_caps = {dp_extended_framing, dp_link_rate_2_70,
+                         dp_link_rate_1_62, dp_valid, dp_max_downspread[3:0]};
 assign     tx_swing_0p4 = swing_0p4_i;
 assign     tx_swing_0p6 = swing_0p6_i;
 assign     tx_swing_0p8 = swing_0p8_i;
