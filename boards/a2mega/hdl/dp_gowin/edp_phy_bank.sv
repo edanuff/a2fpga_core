@@ -8,9 +8,12 @@
 // EDP Encoder IP drives. Configuration inside the emission:
 //
 //   Q0 lanes 2+3, REFCLK1 @ 135 MHz external osc, QPLL0, 2.7 Gbps (HBR),
-//   1:20 user clock ratio (135 MHz fabric TX clock), hardened PCS 8b10b
-//   (encode_mode=8b10b, width 20), TX PN invert BOTH lanes (board P/N
-//   swap at the connector), txlev 13 (~804 mV), FFE auto, DRP port on.
+//   1:40 user clock ratio / 1:2 gear (67.5 MHz fabric TX clock, 32-bit
+//   +4K face — the ONLY geometry Gowin ships hardened 8b10b in; see WS4
+//   forensics §10: repaired 8b10b enables at 1:1 gear yielded a broken
+//   60.75 MHz fabric clock on silicon), hardened PCS 8b10b (width 20 on
+//   the wire), TX PN invert BOTH lanes (board P/N swap at the
+//   connector), txlev 13 (~804 mV), FFE auto, DRP port on.
 //
 // Board lane map (see transceiver_bank_gowin.v header): die lane 3 ->
 // TUSB1046A DP0 (main link lane 0), die lane 2 -> DP1 (main link lane 1).
@@ -38,17 +41,17 @@ module edp_phy_bank (
     input       [1:0] powerup_channel,   // from link policy (lane1, lane0)
     output reg  [1:0] tx_running,
 
-    // Link-symbol clock domain face (135 MHz, sourced from ln2 PCS)
+    // Link-word clock domain face (67.5 MHz = 2.7G/40, from ln2 PCS)
     output            tx_symbol_clk,
     output            tx_ready,          // ~tx_rst synced into ls domain;
                                          // use as the encoder's I_rst_n
     // Encoder byte+K streams: word lane 0 = main link lane 0 -> die ln3,
     // word lane 1 = main link lane 1 -> die ln2. Low byte transmits
     // first; txk bit N flags byte N (IPUG1043 3.4.1).
-    input      [15:0] ml0_txdata,
-    input       [1:0] ml0_txk,
-    input      [15:0] ml1_txdata,
-    input       [1:0] ml1_txk,
+    input      [31:0] ml0_txdata,
+    input       [3:0] ml0_txk,
+    input      [31:0] ml1_txdata,
+    input       [3:0] ml1_txk,
 
     // Raw bring-up status {txfifo_afull, txfifo_full, pll_lock,
     // lane_ok[1:0], ~tx_rst, tx_running[1:0]} — status only
