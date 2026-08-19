@@ -36,6 +36,14 @@ no rev until the OPEN items that could change the netlist are closed.
    internal pulls as RX bias, board network per the DK schematic values
    sized for 0.4-1.38Vpp TX at the connector; keep our shared-pair park
    discipline (their source never receives so never faced it).
+   Generational corroboration: Gowin's older (2024, 138K-kit) refdesign
+   used LVCMOS18D with NO pulls on either port; the current one added
+   PULL_MODE=DOWN on the receiving port — they learned the same
+   bias-behind-the-caps lesson our AUX saga did. DK_VIDEO hardware puts
+   source AUX on a 3.3V bank (G12/H12) so 3.3V AUX is vendor-shipped;
+   the matching software project (expected LVCMOS33D) not in our
+   archive — request alongside the ticket, or rely on our own round-6
+   LVCMOS33D input results.
 
 2. **RECONFIG_N (ball N12) routed to an ESP32 GPIO.** Bench/dev recovery
    and automated test-reroll. NOT a consumer-facing mechanism (decision
