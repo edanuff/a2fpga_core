@@ -371,6 +371,7 @@ static void cmd_process(String cmd) {
                             s->dhcp_enable ? "DHCP" : "STATIC IP");
                     ftpd_init();
                     telnetd_init();
+                    fpgastream_start();  /* see start_network() note */
                 } else {
                     Serial.println("wifi: bridge init failed");
                 }
@@ -897,6 +898,13 @@ static void start_network() {
                     s->dhcp_enable ? "DHCP" : "STATIC IP");
             ftpd_init();     /* FTP file drop for /sdcard once WiFi is up */
             telnetd_init();  /* remote console/menu mirror on port 23 */
+            /* Network bitstream flashing (port 2323, bench). Must NOT
+             * be FPGA-link-gated (bring-up bitstreams have no OSPI
+             * link) but MUST be behind wifi_bridge_init: calling
+             * lwIP sockets before the stack exists asserts in
+             * xQueueSemaphoreTake (fresh unprovisioned board, found
+             * the hard way 08-18). */
+            fpgastream_start();
         } else {
             osd_log("WIFI: INIT FAILED");
         }
@@ -1006,10 +1014,6 @@ void setup() {
 #endif
 
     start_network();      /* WiFi/telnet console first — never FPGA-gated */
-    fpgastream_start();   /* network bitstream flashing, port 2323 (bench).
-                           * Unconditional: must work when the FPGA runs a
-                           * bring-up bitstream with no OSPI link (its task
-                           * retries the bind until lwIP is up). */
 
     // Route the USB-JTAG bridge ONCE, after USB/CDC init, and never
     // unroute it. The old edge-triggered routing keyed on
