@@ -56,10 +56,17 @@ no rev until the OPEN items that could change the netlist are closed.
    pad/via/copper coupling and treat a 6x6 heatsink as standard fitment;
    (b) characterize and spec the margin-vs-temperature curve (soak test
    IN AN ENCLOSURE or with pre-warmed mux = the product condition);
-   (c) best-fit mechanism = mux linear-path bandwidth/jitter degrading
-   with die temp (narrow-spectrum TPS survives, broadband scrambled
-   data dies — ISI-class); component-level confirmation via selective
-   heating (mux vs cap bank) pending; (d) firmware lever: sweep mux RX
+   (c) best-fit mechanism REFINED (08-18/19): the thermal sensitivity is
+   at the sink's ACQUISITION threshold, not tracking — 1-hour warm soak
+   holds rock-solid once established (receiver hysteresis: CDR pull-in/
+   EQ-adapt/descrambler-sync need more eye than tracking); AUX, HPD,
+   refclk all exonerated at temp. User-visible failure mode = "attach
+   fails when warm", never "picture drops". Qualification metric =
+   WARM-ATTACH success rate (heat system THEN attach xN), not warm
+   retention. Note: the scrambler-reset fix (K28.0 per 512 BS) likely
+   strengthens retention further (periodic descrambler re-anchor).
+   Component-level confirmation via selective heating (mux vs cap bank)
+   pending; (d) firmware lever: sweep mux RX
    EQ at WARM temperature on a good SOM (prior sweeps were on the
    SOM-limited unit) — a hotter-compensating EQ setting may buy margin
    in firmware. IR-measured package temperature to be added when
