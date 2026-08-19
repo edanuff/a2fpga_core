@@ -1,7 +1,11 @@
 # WS4 — DP output on Gowin's own IP stack (a2mega_dp_gowin)
 
-**Status: BUILT, timing-clean, ready to flash. Not yet hardware-tested** (bench owned
-by another session at build time).
+**Status: hardware test 2026-08-19 FAILED (C:8011, CR-only, both lanes, every
+attempt) → ROOT-CAUSED same day against Gowin's own EDP reference design: the
+EDP PHY generator drops two hardened-8b10b CSR fields when targeting lanes 2/3.
+FIXED (4 CSR writes), REBUILT timing-clean — see §9 forensics. Ready to
+re-flash; on-hardware readback check: `CR` idx 10 (0x80946c) must read
+0x00013110.**
 
 Workstream 4 of the a2mega 1.0a3 bring-up: an alternative DP-output bitstream that
 replaces the hand-rolled DisplayPort core's main-link stream side and PHY mode with
@@ -253,3 +257,174 @@ regression; the EDP PHY preset itself has no 1.1 baseline to regress from).
 | Audio | Yes | No |
 | Observability | Full (pre/post scrambler taps possible) | Encoder is a black box; DRP + wire-level only |
 | Vendor support | None (open source) | Ticketable with a supported-stack repro — the strategic value of this build even if it fails identically |
+
+## 9. Forensics 2026-08-19 — CR-only stall root-caused via Gowin's EDP reference design
+
+### Hardware result (bench session, Anker DP→HDMI hub — the sink our core trains GOLDEN on, same session)
+
+`C:8011` on every attempt across 4 configuration draws: clock recovery locks on
+BOTH lanes, symbol lock NEVER. AUX conversation healthy (sink ADJUST_REQUEST
+0x22 = exactly our fixed drive), symbol clock +7 ppm. Deterministic — the exact
+historical "hardened-8b10b never symbol-locks (CR fine)" dead-end, now
+reproduced with Gowin's own encoder feeding Gowin's own PHY.
+
+### The new oracle
+
+Gowin's readable EDP reference design
+(`/Volumes/Storage/Downloads/Gowin_EDP_RefDesign/`, variant
+`Gowin_EDP_RefDesign_4ln_2560x1440_2p7_nodesteer` — same die GW5AT-60 rev B,
+same 2.7 G line rate, hardened 8b10b **including lanes 2/3**, silicon-validated,
+full RTL + serdes emission + CSR in the clear). Six generator emissions were
+cross-diffed register-by-register (CSRs parsed to addr→value maps,
+later-write-wins):
+
+| tag | source | lanes | mode | gear |
+|---|---|---|---|---|
+| A | ours, `serdes_edp/` (recovered d535df5f) | 2/3 | 8b10b | 1:1 |
+| B | ref 2560x1440_2p7_nodesteer | 0–3 | 8b10b | 1:2 |
+| C | our scratch generation (commit 8dc076e2) | 0/1 | 8b10b | 1:1 |
+| D | our 4-lane raw regen (commit 5986989d) | 0–3 | raw | 1:1 |
+| E | production raw (`gowin/60B/dp_serdes`) | 2/3 | raw | 1:1 |
+| — | ref 1920x1080_1p62 + 3840x2160_5p4 (rate-register control) | 0–3 | 8b10b | 1:2 |
+
+C is the killer datapoint: **same IDE generator, same EDP preset, same toml
+(2.7 G, 1:20, 8b10b, txlev 13, pol invert), only the lane pair differs** — and
+its CSR carries hardened-mode fields that A's does not.
+
+### Verdict — generator defect (half-bond class): two 8b10b-mode fields dropped on lanes 2/3
+
+| register | A (ours, ln2/3) | B (ref, ALL lanes) | C (scratch, ln0/1) | raw (D/E) |
+|---|---|---|---|---|
+| `0xNN6C` PCS lane cfg | `0x00010110` | `0x00013110` | `0x00013110` | `0x00010110` |
+| `0xNNa0` lane analog | `0x00005150` | `0x00005350` | `0x00005350` | `0x00005150` |
+
+Bits[13:12] of `0xNN6C` and bit 9 of `0xNNa0` are set in **every** hardened
+emission except the generator's lanes-2/3 output — our "hardened" lanes were
+carrying the **raw-mode** PCS configuration. Wire consequence: 8b10b datapath
+half-enabled → transition-rich non-8b10b serial content → CR locks (TPS1's
+alternating pattern survives any symbol-level garbling), symbol lock impossible
+(TPS2 needs valid symbols). Explains everything at once: deterministic,
+polarity-independent (both DRP polarity experiments ran on garbled-symbol
+streams), content-independent (fabric-8b10b era AND matched-encoder era failed
+identically), and lane-specific (every historical hardened attempt was on lanes
+2/3; the one lanes-0/1 generation was inspection-only and never flashed).
+
+**Fix applied** (commit 77da2a41): `dp_serdes.csr` — all three config-phase
+writes each of `0x80946c`/`0x80966c` → `0x00013110` (mid-sequence reset writes
+`0x00000110` preserved), `0x8084a0`/`0x8085a0` → `0x00005350`. No RTL, no
+gear, no interface change.
+
+### Deltas examined and deliberately NOT adopted (6-emission classification)
+
+- `0x809468` bit 6, `0x8086xx` per-lane-entry bit 8, `0x808930`
+  (`0x41a2`→`0x42a2`): **tx_gear 1:2** markers (B-only). Gowin ships hardened
+  8b10b only at 1:2 gear (all five ref variants), but C proves the generator
+  intends 1:1 hardened on lanes 0/1 with our exact bits — gear migration is
+  the documented fallback, not applied.
+- `0x80943c` bit 10 (`0x408` vs ref `0x8`): **tx_pol_invert** — board P/N
+  swap, keep. (Raw-mode pad probe 2026-08-13 proved the IP invert nets true
+  end-to-end.)
+- `0x808824`/`0x808838` (`0x1` vs `0x13`), `0x808888/8c`: lanes-0/1-enable
+  arrays (D raw-4-lane also has `0x13`) — position, keep.
+- `0x808760` bit 10, `0x808000`-vs-`0x808104` active-CMU hosting,
+  `0x8007a6`/`0x8009a6`, `0x801800`-vs-`0x801880` blocks, `0x800400` lane
+  codes: **refpad1/CMU position plumbing** — keep (production identical).
+- `0x800b91` bit 9: `cmu_reset_by_fabric` toml choice (true in ours AND
+  production) — keep.
+- `pcs_tx_clk_src` 2-vs-1: position-dependent plumbing (pair 0/1 emits 2,
+  pair 2/3 emits 1 under both IPs — 8b39a9ee correction) — keep.
+- `0xNNdc = 0x31` family: strides 0x200/lane (`0x8086dc`/`0x8088dc` ARE our
+  lanes 2/3) — already present, no action. (First-pass lane-block mapping got
+  this wrong; presence re-verified per-family.)
+- Drive delta vs production (txlev 13/FFE auto vs 15/manual 32:8, regs
+  `0x808434/438`): sink requests 0x22 = our current 804 mV; deterministic
+  0-for-N on the most tolerant sink ≠ the probabilistic margin signature;
+  **secondary candidate only** — revisit if symbol lock still fails after the
+  CSR fix.
+
+### Ranked fix list (as applied)
+
+1. **CSR 8b10b-enable patch (APPLIED)** — the four writes above. Confident:
+   three independent hardened emissions agree, two of them on this exact die
+   position or this exact board+toolchain.
+2. **`I_vb_id` 0x00 → 0x10 (APPLIED)** — AudioMute_Flag for the no-audio
+   stream; the reference `test_top.v` drives `8'h10`. Not symbol-lock
+   related; contract correctness.
+3. Drive matching production (900 mV + FFE 32:8) — NOT applied (see above).
+4. Gear 1:2 / X40 migration to the reference geometry — NOT applied; fully
+   mapped (encoder `TX_X40_MODE`/`SYM_WIDTH 32`/`COEF 2`, shim regen from
+   `SERDES_IP/IPlib/EDPPHY/data` templates + defines
+   `LINE2_EN/LINE3_EN/TX_X40_MODE/RX_X40_MODE/DRP`, CSR gear bits per table
+   above, strm PLL ÷2). The nuclear option if 1 fails on hardware.
+
+### Reference-design contract cross-checks (priorities 2–4, all clean)
+
+- **pll_init.v**: the 398-line MDRP ceremony is `PLL_INIT` — the standard
+  GW5A fabric-PLL init inside their `Gowin_PLL`/`pix_pll` IP wrappers (mdclk
+  port). Our PLL emissions carry the same engine; no SERDES involvement.
+- **Encoder driving contract** (`aux_tx.v`): tps1_en rises with the DPCD
+  0x102=0x21 write, tps1→tps2 and tps2→tps3 switch on the same edge as the
+  0x102 rewrite (no gaps, no overlap games), video_data_en rises when
+  0x102=0x00 lands; ~1 ms dwell per AUX command, advance on ACK only, **no
+  pass/fail gating** (open-loop walk). Our ladder's
+  tx_clock_train/tx_align_train/tx_link_established mapping is
+  contract-equivalent; nothing to change.
+- **Reference reset shape**: encoder `I_rst_n` and PHY `tx_rst` released
+  together (rst_n2), `fabric_rstn` 40 ms earlier, `tx_vld` tied 1 (their
+  FIFO never sees a stuffed-while-held state because the encoder is in reset
+  for the whole tx_rst hold). Our tx_vld write-gate achieves the same
+  lockstep start differently; keep ours (their tie-1 idiom failed on this
+  hardware in build #1).
+
+### §5 addendum — DP Aux IP v1.0 unblocked: it is the reference `auxlink/` RTL, APB-wrapped
+
+The reference design publishes the Aux engine **in the clear** and the port
+correspondence is exact:
+
+- IP TX face `O_tx_frame_type/O_tx_scrm_value/O_tx_tps1/2/3_en/
+  O_tx_video_data_en/O_tx_end/O_tx_aux_is_ok` ≡ `aux_tx.v` outputs
+  (name-for-name; IP adds `O_tx_lane_num[2:0]`). `IO_tx_man_p/n` +
+  `O_tx_man_test` ≡ `manchester_encode.v` pads. `FREQ` parameter ≡ their
+  aux-clock MHz parameter.
+- IP RX face ≡ `aux_rx.v` + `manchester_decode.v` (wrapper port names
+  `dec_frame_type/dec_scrm_value/dec_tps1..3_en` match aux_rx outputs), plus
+  `O_rx_hpd` (internalizes test_top's reset-driven HPD) and `O_rx_irqn`.
+- Generation defines (from the `dp_aux_top.v` template in the IDE bundle):
+  `TX_AUX_ENABLE`, `RX_AUX_ENABLE`, `DEBUG_ENABLE` (4×32-bit taps each way),
+  `DEF_RX_FREQ`, `module_name` — same encrypted-wrapper+defines pattern as
+  the encoder, so headless generation is available.
+- **What the "autonomous link policy" actually is** (from `aux_tx.v`): a
+  76-entry fixed command ROM — 250 ms wait; DPCD 0x600=0x01; read 0x200,
+  0x00000–0xF caps; EDID via I2C-over-AUX addr 0x50 in 16-byte MOT chunks;
+  0x600=0x01; 0x100=0x0A (HBR); 0x101=0x84 (enhanced + 4 lanes,
+  TPS3_SUPPORTED noted); 0x102=0x21→0x22→0x23→0x00 with 0x103–0x106 drive
+  updates computed from 0x206/0x207 reads
+  (`{2'b0, preemp[1:0], 1'b0, swing[1:0]}` per lane); `aux_is_ok` =
+  0x202/0x203 == 0x77/0x77. **Open-loop**: it never checks CR/EQ pass/fail,
+  never retries, never varies rate — an eDP-panel walk, not an adaptive
+  ladder. The scrambler-seed choice `O_scrm_value` = DPCD cap 0x0000D bit 0.
+- The DRP master port is the IP's addition (the readable reference never
+  touches DRP), as is the APB slave. Given the engine runs the fixed walk
+  autonomously, the APB map is most plausibly control/status/debug rather
+  than required servicing.
+- **Adoption verdict sharpened**: the IP's policy tier is *weaker* than our
+  closed-loop ladder for converter-class sinks (no retrain, fixed
+  4-lane/enhanced-framing constants in the reference ROM). Keep our ladder;
+  the IP remains interesting only as a Gowin-supported repro vehicle for
+  tickets.
+
+### Rebuild provenance (fix build)
+
+| | |
+|---|---|
+| Base | `c280bf5e` (tip of `claude/epic-lovelace-54ee14`) + fix commit `77da2a41` |
+| Toolchain | Gowin V1.9.12.03, `gw_sh` pipe method, `GPRJ=a2mega_dp_gowin.gprj` |
+| Timing | **0 setup / 0 hold; TNS 0.000 all domains.** Fmax: clk_sym 145.612 ≥ 135.007, clk_strm 160.463 ≥ 74.25, clk100 133.6 ≥ 100, clk50 103.2 ≥ 50, cm_life 147.7 ≥ 100 |
+| `a2mega_dp_gowin.fs` sha256 | `6cfa7a4d2d1a7f06f0359e2e2cb99fb8af927c72d9d7afce37899626ad73eb1b` |
+| `a2mega_dp_gowin.bin` sha256 | `c83456b8afbcf5475300e45d22588246f6d22339ef2fe9d69a682b585ab650e8` (gitignored) |
+| SECURITY_BIT | OFF (`//SecurityBit: OFF` verified in the .fs) |
+| Hardware check | `CR` idx 10 → `0x80946c` must read `0x00013110` (was `0x00010110`); then C: must progress past 0x8011 |
+
+Gowin-ticket material (strengthened): the EDP PHY generator emits raw-mode PCS
+lane configuration for lanes 2/3 under the EDP preset (this defect), on top of
+the known half-bond emission defect — both reproducible from the shipped IDE.
