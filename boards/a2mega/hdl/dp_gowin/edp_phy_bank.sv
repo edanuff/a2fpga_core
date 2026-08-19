@@ -233,9 +233,11 @@ module edp_phy_bank (
             5'd19: dump_addr_rom = 24'h8085c0;
             5'd20: dump_addr_rom = 24'h8084b8;
             5'd21: dump_addr_rom = 24'h8084bc;
-            // QPLL/refclk-adjacent lane blocks
-            5'd22: dump_addr_rom = 24'h800658;
-            5'd23: dump_addr_rom = 24'h800832;
+            // per-lane PMA TX-path mode selects (dropped-field #3 —
+            // hardened=0x00020000, raw=0x00010000; readback verifies
+            // the CSR fix landed, like idx 9/10 did for #1/#2)
+            5'd22: dump_addr_rom = 24'h8007a6;
+            5'd23: dump_addr_rom = 24'h8009a6;
             default: dump_addr_rom = 24'h000000;
         endcase
     endfunction
