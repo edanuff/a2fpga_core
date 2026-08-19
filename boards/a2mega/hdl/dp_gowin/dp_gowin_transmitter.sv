@@ -188,7 +188,9 @@ module dp_gowin_transmitter #(
         .I_tx_video_data_en (est_sync[2]),
         .I_frame_type       (1'b0),        // default framing (DPCD 0x101=0x02)
         .I_scrm_value       (1'b0),        // DP scrambler reset 0xFFFF
-        .I_vb_id            (8'h00),
+        .I_vb_id            (8'h10),      // AudioMute_Flag: no audio stream
+                                          // (matches Gowin EDP refdesign's
+                                          // no-audio contract; was 8'h00)
         .I_msa_mvid         (MVID),
         .I_msa_nvid         (NVID),
         .I_msa_htotal       (16'(H_TOTAL)),
