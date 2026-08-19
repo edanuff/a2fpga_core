@@ -1,12 +1,13 @@
 # WS4 — DP output on Gowin's own IP stack (a2mega_dp_gowin)
 
-**Status: hardware test 2026-08-19 FAILED (C:8011, CR-only) → root-caused
-against Gowin's EDP reference design (§9: generator drops hardened-8b10b CSR
-fields on lanes 2/3) → CSR fix VERIFIED IN SILICON (CR idx 0A = 0x00013110)
-but exposed a second-layer defect: hardened 8b10b at 1:1 gear yields a broken
-60.75 MHz word clock (§10) → MIGRATED to the reference 1:2/X40 geometry,
-REBUILT timing-clean. Ready to re-flash; on-hardware checks: Q: ≈ 67,500,000,
-D3 lit, CR idx 0A = 0x00013110, then C: past 0x8011.**
+**Status (2026-08-19, three forensics rounds): C:8011 → §9 found dropped
+hardened-mode CSR fields #1/#2 on lanes 2/3 (fix silicon-verified) → §10
+migrated to the reference 1:2/X40 geometry (the 60.75 MHz "broken clock"
+was a freq-meter duty artifact — retraction inside) → C:8000 regression →
+§11 found dropped mode field #3 (0x8007a6/0x8009a6, PMA TX-path select) —
+the emission is now reference-hardened modulo board facts. REBUILT
+timing-clean, fs 33f119de. On-hardware checks: CR 16/17 = 0x00020000,
+CR 09/0A unchanged, then C: expect CR back and symbol lock.**
 
 Workstream 4 of the a2mega 1.0a3 bring-up: an alternative DP-output bitstream that
 replaces the hand-rolled DisplayPort core's main-link stream side and PHY mode with
@@ -440,16 +441,28 @@ the known half-bond emission defect — both reproducible from the shipped IDE.
   `S:` mostly 0x38 / occasionally 0xBF, ladder cycles clock-training→error,
   C:8000 (no CR — line effectively broken).
 
-**60.75 MHz = 135 × 9/20 = 67.5 × 9/10 exactly.** Reading: with the
-8b10b-mode enables repaired but the gear registers still at 1:1, the PCS
-divider tree is half-migrated — it lands at the 1:2-gear clock (67.5 M)
-scaled by a spurious 9/10 (a divider pair programmed for one geometry driven
-by the other; the exact register pair needs GTR12 documentation — ticket
-question). The §9 inference error: the lanes-0/1 scratch emission (C) was
-**inspection-only, never flashed** — it proved the generator *emits* 1:1
-hardened configs, not that they *work*. They are broken by construction:
-**Gowin ships hardened 8b10b only at 1:2 gear** (all five refdesign
-variants), and that is load-bearing.
+**RETRACTED (same day): the half-migrated-divider theory was wrong — the
+9/20 reading was a MEASUREMENT ARTIFACT.** The X40 build then read Q ≈
+30.31 M = 67.5 × 0.449, i.e. the *same* ×0.45 factor across both geometries.
+Root cause: the hardened-mode PCS **gates the fabric clock during the
+ladder's teardown/powerup phases** (raw mode ran it continuously), and the
+frequency meter integrates edge counts over a 1 s crystal window — so the
+reading = true frequency × clock-running duty. Confirmed empirically:
+serdes_status running-duty (S ≠ 0x00 fraction) 0.42 vs Q ratio 0.448, within
+sampling noise. The clock architecture was therefore correct in *both*
+builds while running.
+
+**Freq-meter design lesson:** window counters lie under gated clocks. A
+future meter must either qualify the window with clock-activity (accumulate
+only while the DUT clock toggles) or measure **period** (timestamp N edges)
+instead of counting edges per wall-window.
+
+Still true and still the migration's justification: the §9 inference error —
+the lanes-0/1 scratch emission (C) was **inspection-only, never flashed** —
+and **Gowin ships hardened 8b10b only at 1:2 gear** (all five refdesign
+variants). The X40 geometry matches the only silicon-validated arrangement;
+whether 1:1 hardened could also have worked once all dropped mode fields
+(§11) were repaired is now academic.
 
 ### Migration applied (commit 68a30cc4) — all headless, mirroring the reference arrangement
 
@@ -482,9 +495,113 @@ format, extending the audited X20 form; encoder lane 0 → die ln3.
 | SECURITY_BIT | OFF (`//SecurityBit: OFF` verified in the .fs) |
 | Hardware checks | Q: ≈ 67,500,000 ±2% (was 60.75 M broken / 135.0 M pre-fix); D3 lit; `CR` idx 0A still `0x00013110`; then C: must progress past 0x8011 |
 
-Gowin ticket addendum: the EDP PHY generator offers TX User Clock Ratio 1:20
-(1:1 gear) under the hardened-8b10b EDP preset for **both** lane pairs, but
-the emitted configs produce a broken word clock once the (also mis-emitted,
-§9) mode enables are corrected — 1:1 hardened appears unimplemented in
-silicon or unreachable by the emitted divider programming; every shipped
-reference design uses 1:2. Two stacked generator defects total.
+Gowin ticket addendum: superseded by §11 — the "broken word clock" reading
+was a duty-cycle measurement artifact (see the §10 retraction above); the
+generator-defect count and mechanism are consolidated there.
+
+## 11. Forensics round 3 (2026-08-19) — C:8000 regression → dropped mode field #3 (0x8007a6/0x8009a6)
+
+### Hardware state entering this round (X40 build `0f416d7b`, B1)
+
+`CR 09 = 0x809468 = 0x173` and `CR 0A = 0x80946C = 0x13110` verified in the
+quad; AUX healthy (A:0022); clock architecture correct (Q duty-artifact
+resolved, §10). **But C:8000 — the sink cannot even clock-recover**, on the
+same sink that CR-locked (C:8011) against the *unfixed* emission. Since a
+working 8b10b encoder output is transition-rich by construction, C:8000
+implies the wire carries a static/degenerate signal — not garbled symbols.
+
+### Method flaw found in the §9 classification, and the systematic re-sweep
+
+§9 used "ours == production-raw ⇒ keep" for several registers — but that
+test only proves a value is the *raw* one, which is exactly wrong when
+hunting dropped hardened-mode fields. The correct mode fingerprint is the
+**hybrid scratch emission C (commit 8dc076e2)**: one file carrying hardened
+lanes 0/1 AND leftover-raw lanes 2/3 — its internal split IS the mode axis.
+Re-sweeping every remaining A-vs-B delta with that fingerprint found exactly
+one more mode field:
+
+| register family (`0x8003a6 + 0x200·lane`) | hardened | raw |
+|---|---|---|
+| B (ref, lanes 0–3 hardened, incl. 2/3) | `0x00020000` ×4 | — |
+| C (hybrid): ln0/ln1 vs ln2/ln3 **same file** | `0x00020000` | `0x00010000` |
+| D (4-lane raw) | — | `0x00010000` ×4 |
+| E (production raw 2/3) / A pre-fix | — | `0x00010000` |
+
+**Fix applied** (commit a7a6f5fc): `0x8007a6`/`0x8009a6` → `0x00020000`
+(single write each, mirroring B's choreography). DRP dump ROM idx 22/23
+(`CR 16`/`CR 17` on the UART) repurposed to read these back — expect
+`0x00020000`.
+
+### Mechanism (why #3 produces C:8000 while the unfixed build got C:8011)
+
+Best reading of the bit: **per-lane PMA TX input-path select** (raw parallel
+path vs PCS-encoded path). With #1/#2 repaired the PCS produces encoded
+output, but the PMA still serialized the *raw* input path — undriven in
+hardened mode ⇒ static/DC wire ⇒ no CR at all. Pre-fix, the raw path was
+the fed path ⇒ transition-rich wire ⇒ CR lockable but never symbol-valid.
+The three dropped fields are one coherent generator defect: the EDP preset
+targeting lanes 2/3 emits the **complete raw-mode lane configuration** for
+the PCS/PMA mode axis (`0xNN6C` bits 13:12, `0xNNa0` bit 9, `0xNNa6`
+16↔17) while claiming hardened 8b10b.
+
+### Coordinator items (1)–(4), all closed
+
+1. **Encoder→PCS wiring oracle-audited bit-for-bit**: the reference's own
+   `edp_phy.v` shim netlist packs `{byte→bits 7:0, k→bit 8, 0→bit 9}` per
+   slot, low-byte-first — identical to our regenerated shim and our .vg
+   audit. The encoder emits **raw bytes+K** (pre-encode); the hardened PCS
+   encodes. No fabric-side ordering exists to get wrong.
+2. **Symbol order**: slot 0 = low 10 bits = first byte in both; intra-word
+   transmit order is PCS-internal and CSR-identical to the reference.
+3. **tx_vld**: reference ties 1. The gated-fabric-clock finding *voids* the
+   original FIFO-park mechanism in hardened mode (a stopped write clock
+   cannot stuff the FIFO during the tx_rst hold), so our write-gate is
+   benign-but-unnecessary; kept for single-variable discipline.
+4. **`0x8084a0` bit 9 re-confirmed 8b10b-mode** by the C fingerprint (C's
+   hardened lanes 0x5350, raw lanes 0x5150). **`0x80943c` bit 10 confirmed
+   `tx_pol_invert`** — C's hardened lanes carry `0x408` *with* invert
+   enabled, so the generator considers invert+hardened a valid pairing.
+
+### Final residual A-vs-B diff (17 registers, all fingerprint-classified)
+
+2-lane vs 4-lane (`0x800400`, `0x800b91` bit 9, `0x808824/838`), lanes-0/1
+disabled state (`0x808284/384`, `0x8082c0/83c0`, `0x809000/200`,
+`0x80906c/26c`), refpad1/CMU-hosting board plumbing (`0x808000` vs
+`0x808104`, `0x808760` bit 10), and the board invert (`0x80943c/0x80963c`
+bit 10). **The emission is now the reference hardened configuration modulo
+{2 lanes, REFCLK1, TX PN invert, drive/FFE}.**
+
+### Ranked residual hypotheses (if C:8000/8011 persists after #3)
+
+1. **Invert-in-hardened corruption**: if the tx_data_manipulation invert
+   operates on the fabric-side `{invalid,k,byte}` word (pre-encode) rather
+   than the PMA serial stream, it flips the K/invalid flags — the hard
+   encoder then sees invalid+K-flagged garbage every symbol. Discriminator:
+   a bit10-clear build (`0x80943c/0x80963c` → `0x8`); an inverted-polarity
+   8b10b wire is still comma-detectable, so CR (and on polarity-tolerant
+   sinks even symbol lock) returning would convict the invert path. C's
+   generator output pairing invert with hardened argues *intended*-valid,
+   not silicon-valid.
+2. **tx_vld gating side-effect at X40**: tie `tx_vld` 1 (reference-exact).
+3. Beyond those, the fabric side has no remaining degrees of freedom — the
+   wire signal itself (AD3 lane probe, TX_PROBE-style build) becomes the
+   next instrument, and the ticket the next venue.
+
+### Rebuild provenance (a6-fix build)
+
+| | |
+|---|---|
+| Base | `c280bf5e` + `77da2a41` + `68a30cc4` + `a7a6f5fc` |
+| Toolchain | Gowin V1.9.12.03, `gw_sh` pipe method, `GPRJ=a2mega_dp_gowin.gprj` |
+| Timing | **0 setup / 0 hold; TNS 0.000 all domains.** Fmax: clk_sym 154.428 ≥ 67.499, clk_strm 194.484 ≥ 37.125, clk100 112.0 ≥ 100, clk50 131.6 ≥ 50, cm_life 162.3 ≥ 100 |
+| `a2mega_dp_gowin.fs` sha256 | `33f119de9225a4a8bfa382811b42f1fdfce445fd08ffe7422073e4ee3d102416` |
+| `a2mega_dp_gowin.bin` sha256 | `75f0dabf5cb69eb664c12a298cb2896ba79c3d4403bb764b22f1f4ed503291f2` (gitignored) |
+| SECURITY_BIT | OFF (`//SecurityBit: OFF` verified in the .fs) |
+| Hardware checks | `CR 16`/`CR 17` (0x8007a6/0x8009a6) = `0x00020000`; `CR 09`/`CR 0A` unchanged; Q ≈ 67.5 M × running-duty; then C: expect ≥ 0x8011 (CR back) and, if the PMA-path story is complete, symbol lock |
+
+Gowin ticket (consolidated): the EDP PHY preset targeting Q0 lanes 2/3
+emits the raw-mode values for **three** per-lane mode fields (`0xNN6C`
+[13:12], `0xNNa0` [9], `0xNNa6` [17:16]) while the same preset on lanes 0/1
+emits them correctly — plus the earlier half-bond defect and the SERDES-1.2
+regression, all reproducible from the shipped IDE. The 60.75 M "broken
+clock" report should NOT be included (measurement artifact, §10).
