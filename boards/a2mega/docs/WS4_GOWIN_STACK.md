@@ -1,11 +1,12 @@
 # WS4 — DP output on Gowin's own IP stack (a2mega_dp_gowin)
 
-**Status: hardware test 2026-08-19 FAILED (C:8011, CR-only, both lanes, every
-attempt) → ROOT-CAUSED same day against Gowin's own EDP reference design: the
-EDP PHY generator drops two hardened-8b10b CSR fields when targeting lanes 2/3.
-FIXED (4 CSR writes), REBUILT timing-clean — see §9 forensics. Ready to
-re-flash; on-hardware readback check: `CR` idx 10 (0x80946c) must read
-0x00013110.**
+**Status: hardware test 2026-08-19 FAILED (C:8011, CR-only) → root-caused
+against Gowin's EDP reference design (§9: generator drops hardened-8b10b CSR
+fields on lanes 2/3) → CSR fix VERIFIED IN SILICON (CR idx 0A = 0x00013110)
+but exposed a second-layer defect: hardened 8b10b at 1:1 gear yields a broken
+60.75 MHz word clock (§10) → MIGRATED to the reference 1:2/X40 geometry,
+REBUILT timing-clean. Ready to re-flash; on-hardware checks: Q: ≈ 67,500,000,
+D3 lit, CR idx 0A = 0x00013110, then C: past 0x8011.**
 
 Workstream 4 of the a2mega 1.0a3 bring-up: an alternative DP-output bitstream that
 replaces the hand-rolled DisplayPort core's main-link stream side and PHY mode with
@@ -428,3 +429,62 @@ correspondence is exact:
 Gowin-ticket material (strengthened): the EDP PHY generator emits raw-mode PCS
 lane configuration for lanes 2/3 under the EDP preset (this defect), on top of
 the known half-bond emission defect — both reproducible from the shipped IDE.
+
+## 10. Geometry migration 2026-08-19 — silicon falsified 1:1-gear hardened 8b10b; moved to the reference 1:2/X40
+
+### Hardware result of the §9 CSR-fix build (bin `c83456b8`, board B1)
+
+- **Fix verified in the quad**: `CR` idx 0A reads `0x80946C = 0x00013110`.
+- **New failure mode**: fabric word clock measures **~60.75 MHz** (Q: samples
+  60,747,983..60,761,166; rock-solid 135.001 M pre-fix). D3 (freq_ok) dark,
+  `S:` mostly 0x38 / occasionally 0xBF, ladder cycles clock-training→error,
+  C:8000 (no CR — line effectively broken).
+
+**60.75 MHz = 135 × 9/20 = 67.5 × 9/10 exactly.** Reading: with the
+8b10b-mode enables repaired but the gear registers still at 1:1, the PCS
+divider tree is half-migrated — it lands at the 1:2-gear clock (67.5 M)
+scaled by a spurious 9/10 (a divider pair programmed for one geometry driven
+by the other; the exact register pair needs GTR12 documentation — ticket
+question). The §9 inference error: the lanes-0/1 scratch emission (C) was
+**inspection-only, never flashed** — it proved the generator *emits* 1:1
+hardened configs, not that they *work*. They are broken by construction:
+**Gowin ships hardened 8b10b only at 1:2 gear** (all five refdesign
+variants), and that is load-bearing.
+
+### Migration applied (commit 68a30cc4) — all headless, mirroring the reference arrangement
+
+| piece | change |
+|---|---|
+| CSR gear registers | the 8 classified gear markers → reference values: `0x809468`/`0x809668` `0x133→0x173` (bit 6); entries `0x808610` `0x201A→0x211A`, `0x808618` `0x301A→0x311A`, `0x808630` `0x206→0x216`, `0x808638` `0x306→0x316` (bit 8); quad `0x808930` `0x41A2→0x42A2` + early `0x808918` `0x41FF→0x42FF`. Reset choreography, invert (`0x80943c` bit 10), refpad/CMU, FFE, lane-enable state untouched. |
+| EDP PHY shim | regenerated headlessly: IDE template trio (`ipcore/SERDES_IP/IPlib/EDPPHY/data/`) + hand-written defines `LINE2_EN/LINE3_EN/TX_X40_MODE/RX_X40_MODE/DRP`, `module_name edp_phy` (same defines shape as the refdesign's own `temp/edp_phy` generation), scratch GowinSynthesis run, then 696 chip-top IBUF/OBUF mechanically rewritten to assigns (the IP generator's own emission form). Port names identical; faces now 32-bit+4K. |
+| dp_serdes.v | user-face ports + edp_phy instance connections widened (16 substitutions); GTR12/upar_arbiter untouched. |
+| Encoder | `TX_X40_MODE`, `DEF_TX_SYM_WIDTH 32`, `DEF_TX_BPP_COEF 2` (= refdesign encoder defines modulo 2-lane/TPS set). 48-bit pix ports = pixel pairs; `I_ls_clk` remains the pcs_tx fabric-clock loopback, now 67.5 MHz — exactly test_top.v's arrangement. |
+| Clocks | word clock 67.5 MHz (2.7 G / 40); strm PLL 67.5 × 44/2 = 1485 MHz VCO / 40 = **37.125 MHz** (4 px/clk = 148.5 Mpx/s). First attempt 88/5÷32 tripped PA2078 — **PLLA PFD floor is 19 MHz**, 67.5/5 = 13.5 under it; 44/2 gives PFD 33.75. |
+| Top | colorbars in pixel-quad units (550/11/48/528), ports {hi,lo} pairs; freq_ok window → 66.15..68.85 M; led[2] = clk_sym==67.5 M. |
+| SDC | clk_sym 14.815 ns (same GTR12 LANE2 anchor), clk_strm 26.936 ns. |
+| MVID/NVID | **unchanged** (288358/524288): the DP convention is pixel-rate / link-symbol-rate (270 M) — fabric gearing does not enter it. |
+| toml sidecar | ln2/ln3 `tx_gear_rate`/`rx_gear_rate` → "1:2". |
+
+X40 TX packing audited in the synthesis netlist: `FABRIC_LN2/LN3_TXDATA_I`
+low 40 bits = `{0, k[i], byte[i]}` × 4 (upper 40 grounded) — the hardened
+format, extending the audited X20 form; encoder lane 0 → die ln3.
+
+### Rebuild provenance (geometry build)
+
+| | |
+|---|---|
+| Base | `c280bf5e` + `77da2a41` (CSR 8b10b fix) + `68a30cc4` (geometry) |
+| Toolchain | Gowin V1.9.12.03, `gw_sh` pipe method, `GPRJ=a2mega_dp_gowin.gprj` |
+| Timing | **0 setup / 0 hold; TNS 0.000 all domains.** Fmax: clk_sym 164.868 ≥ 67.499, clk_strm 175.150 ≥ 37.125, clk100 114.6 ≥ 100, clk50 123.8 ≥ 50, cm_life 147.4 ≥ 100 |
+| Resources | 3717 LUT / 2739 FF / 8 BSRAM / 2 PLLA |
+| `a2mega_dp_gowin.fs` sha256 | `3f458b4d54194e4df15ec655f414ca08088ea399b9eb8675f668749ec7d47e07` |
+| `a2mega_dp_gowin.bin` sha256 | `0f416d7b6228abbb626d587df83339203a45f6a6c932faad0bf55770ec92d2a5` (gitignored) |
+| SECURITY_BIT | OFF (`//SecurityBit: OFF` verified in the .fs) |
+| Hardware checks | Q: ≈ 67,500,000 ±2% (was 60.75 M broken / 135.0 M pre-fix); D3 lit; `CR` idx 0A still `0x00013110`; then C: must progress past 0x8011 |
+
+Gowin ticket addendum: the EDP PHY generator offers TX User Clock Ratio 1:20
+(1:1 gear) under the hardened-8b10b EDP preset for **both** lane pairs, but
+the emitted configs produce a broken word clock once the (also mis-emitted,
+§9) mode enables are corrected — 1:1 hardened appears unimplemented in
+silicon or unreachable by the emitted divider programming; every shipped
+reference design uses 1:2. Two stacked generator defects total.
