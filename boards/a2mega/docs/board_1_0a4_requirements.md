@@ -19,6 +19,19 @@ no rev until the OPEN items that could change the netlist are closed.
    as the driver and bias for it). **OPEN sub-question gating the exact
    values/topology: TLVDS clean test (task #2) + optional AD2 waveform
    of the working attenuated path — DO THIS EARLY THIS WEEK.**
+   **VENDOR-PROVEN TEMPLATE FOUND (08-19, Gowin EDP refdesign cst +
+   schematic)**: Gowin's own AUX front-end = SEPARATE TX and RX pin
+   PAIRS (4 FPGA pins) in differential-LVCMOS ("D") IO types — TX pair
+   PULL_MODE=NONE DRIVE=4 (gentle edges; board resistor network sets
+   connector swing), RX pair PULL_MODE=DOWN (ON-DIE pulls = the bias
+   behind the AC caps; no external bias resistors — confirmed against
+   their schematic). Separate pairs eliminate the whole shared-pair
+   family of problems (tri-state park, stored offset, counter-park).
+   RECOMMENDED 1.0a4 baseline: route AUX to 4 pins (TX pair + RX pair,
+   LVCMOS33D on our 3.3V bank or level-planned bank), resistor combiner
+   onto SBU sized for 0.4-1.38Vpp at the connector; internal pulls as
+   RX bias. Falls back to the single-pair TLVDS approach only if pins
+   are unavailable.
 
 2. **RECONFIG_N (ball N12) routed to an ESP32 GPIO.** Bench/dev recovery
    and automated test-reroll. NOT a consumer-facing mechanism (decision
