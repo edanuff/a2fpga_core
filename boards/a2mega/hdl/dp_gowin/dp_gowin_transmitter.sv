@@ -15,11 +15,15 @@
 //                 (serdes_edp/ via      -mode emission; hardened PCS
 //                 edp_phy_bank)         8b10b, matched to the encoder
 //
-// The encoder is fed push-style video (vs/hs/de + 2 pixels/clk) in the
+// The encoder is fed push-style video (vs/hs/de + 4 pixels/clk) in the
 // strm domain; it owns the strm->ls CDC through its internal line
-// buffer. Synchronous clocking: clk_strm = tx_symbol_clk * 44/5/16 =
-// 74.25 MHz (2 px/clk = 148.5 Mpx/s), so MISC0.0=1 and the exact
-// Mvid/Nvid pair is supplied (MVID_CUSTOMER).
+// buffer. GEOMETRY (WS4 §10): 1:40/X40 — the reference design's (and
+// Gowin's only shipped) hardened-8b10b geometry. tx_symbol_clk is the
+// link WORD clock 67.5 MHz (2.7G/40); the encoder emits 4 bytes+K per
+// lane per ls clock. Synchronous clocking: clk_strm = tx_symbol_clk *
+// 88/5/32 = 37.125 MHz (4 px/clk = 148.5 Mpx/s), so MISC0.0=1 and the
+// exact Mvid/Nvid pair is supplied (MVID_CUSTOMER, 270M-symbol-rate
+// convention — unchanged by fabric gearing).
 //
 // Feature deltas vs our core (accepted for this evaluation):
 //   - no audio (encoder v2.7 has no SDP/audio input ports)
@@ -51,13 +55,14 @@ module dp_gowin_transmitter #(
 )(
     input  logic clk100,           // 100 MHz management clock (AUX timing)
 
-    // Video stream, strm domain (2 pixels per clock, {B,G,R} per pixel)
-    output logic clk_strm,         // 74.25 MHz, locked to the link clock
+    // Video stream, strm domain (4 pixels per clock, {B,G,R} per pixel;
+    // each port carries a pixel pair {px_hi, px_lo}, BPP_COEF=2)
+    output logic clk_strm,         // 37.125 MHz, locked to the link clock
     input  logic pix_vs,           // positive pulse
     input  logic pix_hs,           // positive pulse
     input  logic pix_de,
-    input  logic [23:0] pix_data0, // pixel 2N
-    input  logic [23:0] pix_data1, // pixel 2N+1
+    input  logic [47:0] pix_data0, // pixels {4N+1, 4N}
+    input  logic [47:0] pix_data1, // pixels {4N+3, 4N+2}
 
     // Hotplug / AUX channel (front-end pads live in the board top)
     input  logic hpd,
@@ -75,7 +80,7 @@ module dp_gowin_transmitter #(
     output logic [15:0] debug_adjust,
     output logic [15:0] debug_chstate,
     output logic [7:0]  debug_caps,
-    output logic clk_symbol_out,   // 135 MHz link-symbol clock
+    output logic clk_symbol_out,   // 67.5 MHz link-word clock (2.7G/40)
     output logic [7:0] serdes_status,
     output logic hpd_present_out,
 
@@ -130,11 +135,12 @@ module dp_gowin_transmitter #(
     );
 
     // ------------------------------------------------------------------
-    // EDP PHY bank (hardened 8b10b, lanes 2/3, see edp_phy_bank.sv)
+    // EDP PHY bank (hardened 8b10b, lanes 2/3, 1:2 gear / 32-bit face,
+    // see edp_phy_bank.sv)
     // ------------------------------------------------------------------
     logic        tx_symbol_clk, phy_tx_ready;
-    logic [15:0] ml0_txdata, ml1_txdata;
-    logic [1:0]  ml0_txk, ml1_txk;
+    logic [31:0] ml0_txdata, ml1_txdata;
+    logic [3:0]  ml0_txk, ml1_txk;
 
     edp_phy_bank i_edp_phy_bank (
         .mgmt_clk        (clk100),
@@ -155,10 +161,11 @@ module dp_gowin_transmitter #(
     assign clk_symbol_out = tx_symbol_clk;
 
     // ------------------------------------------------------------------
-    // Stream clock: 135 MHz * 44/5 = 1188 MHz VCO, /16 = 74.25 MHz
-    // (2 px/clk = 148.5 Mpx/s, locked to the link clock -> MISC0.0=1)
+    // Stream clock: 67.5 MHz * 44/2 = 1485 MHz VCO, /40 = 37.125 MHz
+    // (4 px/clk = 148.5 Mpx/s, locked to the link clock -> MISC0.0=1;
+    // PFD = 67.5/2 = 33.75 MHz, inside the 19..87.5 MHz PLLA window)
     // ------------------------------------------------------------------
-    gowin_pixel_pll #(.ODIV0(16), .IDIV(5), .MDIV(44), .FCLKIN("135"))
+    gowin_pixel_pll #(.ODIV0(40), .IDIV(2), .MDIV(44), .FCLKIN("67.5"))
     i_strm_pll (
         .lock   (),
         .clkout (clk_strm),
@@ -178,7 +185,7 @@ module dp_gowin_transmitter #(
     assign video_live = tx_link_established;
 
     // ------------------------------------------------------------------
-    // Gowin EDP Encoder IP v2.7 (2 lanes, 1:20, 24 bpp, coef 1;
+    // Gowin EDP Encoder IP v2.7 (2 lanes, 1:40/X40, 24 bpp, coef 2;
     // configuration in edp_encoder/edp_encoder_defines.v)
     // ------------------------------------------------------------------
     EDP_Encoder_Top i_edp_encoder (

@@ -18,8 +18,8 @@ output edp_phy_ln2_pcs_rx_clk_o;
 output edp_phy_ln2_rxfifo_aempty_o;
 output edp_phy_ln2_pcs_tx_clk_o;
 output edp_phy_ln2_txfifo_afull_o;
-output [15:0] edp_phy_ln2_rxdata_o;
-output [1:0] edp_phy_ln2_rxk_o;
+output [31:0] edp_phy_ln2_rxdata_o;
+output [3:0] edp_phy_ln2_rxk_o;
 output edp_phy_ln3_cpll_ok_o;
 output edp_phy_ln3_pma_rx_lock_o;
 output edp_phy_ln3_align_link_o;
@@ -28,8 +28,8 @@ output edp_phy_ln3_pcs_rx_clk_o;
 output edp_phy_ln3_rxfifo_aempty_o;
 output edp_phy_ln3_pcs_tx_clk_o;
 output edp_phy_ln3_txfifo_afull_o;
-output [15:0] edp_phy_ln3_rxdata_o;
-output [1:0] edp_phy_ln3_rxk_o;
+output [31:0] edp_phy_ln3_rxdata_o;
+output [3:0] edp_phy_ln3_rxk_o;
 output edp_phy_qpll0_ok_o;
 output edp_phy_qpll1_ok_o;
 output [4:0] edp_phy_ln2_rxfifo_rdusewd_o;
@@ -53,8 +53,8 @@ input edp_phy_ln2_rxfifo_rden_i;
 input edp_phy_ln2_tx_rst_i;
 input edp_phy_ln2_fabric_tx_clk_i;
 input edp_phy_ln2_tx_vld_i;
-input [15:0] edp_phy_ln2_txdata_i;
-input [1:0] edp_phy_ln2_txk_i;
+input [31:0] edp_phy_ln2_txdata_i;
+input [3:0] edp_phy_ln2_txk_i;
 input edp_phy_ln3_fabric_rstn_i;
 input edp_phy_ln3_rx_rst_i;
 input edp_phy_ln3_fabric_rx_clk_i;
@@ -62,8 +62,8 @@ input edp_phy_ln3_rxfifo_rden_i;
 input edp_phy_ln3_tx_rst_i;
 input edp_phy_ln3_fabric_tx_clk_i;
 input edp_phy_ln3_tx_vld_i;
-input [15:0] edp_phy_ln3_txdata_i;
-input [1:0] edp_phy_ln3_txk_i;
+input [31:0] edp_phy_ln3_txdata_i;
+input [3:0] edp_phy_ln3_txk_i;
 input edp_phy_ln2_chbond_start_i;
 input edp_phy_ln3_chbond_start_i;
 input [23:0] edp_phy_drp_addr_i;
@@ -638,8 +638,8 @@ edp_phy edp_phy_inst (
     .ln2_rxfifo_aempty_o(edp_phy_ln2_rxfifo_aempty_o),
     .ln2_pcs_tx_clk_o(edp_phy_ln2_pcs_tx_clk_o),
     .ln2_txfifo_afull_o(edp_phy_ln2_txfifo_afull_o),
-    .ln2_rxdata_o(edp_phy_ln2_rxdata_o[15:0]),
-    .ln2_rxk_o(edp_phy_ln2_rxk_o[1:0]),
+    .ln2_rxdata_o(edp_phy_ln2_rxdata_o[31:0]),
+    .ln2_rxk_o(edp_phy_ln2_rxk_o[3:0]),
     .serdes_ln3_fabric_rstn_o(q0_fabric_ln3_rstn_i),
     .serdes_ln3_rx_rst_o(q0_lane3_pcs_rx_rst),
     .serdes_ln3_fabric_rx_clk_o(q0_lane3_fabric_rx_clk),
@@ -656,8 +656,8 @@ edp_phy edp_phy_inst (
     .ln3_rxfifo_aempty_o(edp_phy_ln3_rxfifo_aempty_o),
     .ln3_pcs_tx_clk_o(edp_phy_ln3_pcs_tx_clk_o),
     .ln3_txfifo_afull_o(edp_phy_ln3_txfifo_afull_o),
-    .ln3_rxdata_o(edp_phy_ln3_rxdata_o[15:0]),
-    .ln3_rxk_o(edp_phy_ln3_rxk_o[1:0]),
+    .ln3_rxdata_o(edp_phy_ln3_rxdata_o[31:0]),
+    .ln3_rxk_o(edp_phy_ln3_rxk_o[3:0]),
     .qpll0_ok_o(edp_phy_qpll0_ok_o),
     .qpll1_ok_o(edp_phy_qpll1_ok_o),
     .serdes_ln2_chbond_start_o(q0_lane2_chbond_start),
@@ -696,8 +696,8 @@ edp_phy edp_phy_inst (
     .ln2_tx_rst_i(edp_phy_ln2_tx_rst_i),
     .ln2_fabric_tx_clk_i(edp_phy_ln2_fabric_tx_clk_i),
     .ln2_tx_vld_i(edp_phy_ln2_tx_vld_i),
-    .ln2_txdata_i(edp_phy_ln2_txdata_i[15:0]),
-    .ln2_txk_i(edp_phy_ln2_txk_i[1:0]),
+    .ln2_txdata_i(edp_phy_ln2_txdata_i[31:0]),
+    .ln2_txk_i(edp_phy_ln2_txk_i[3:0]),
     .serdes_ln3_cpll_ok_i(q0_fabric_lane3_cmu_ok_o),
     .serdes_ln3_pma_rx_lock_i(q0_fabric_ln3_pma_rx_lock_o),
     .serdes_ln3_align_link_i(q0_lane3_align_link),
@@ -714,8 +714,8 @@ edp_phy edp_phy_inst (
     .ln3_tx_rst_i(edp_phy_ln3_tx_rst_i),
     .ln3_fabric_tx_clk_i(edp_phy_ln3_fabric_tx_clk_i),
     .ln3_tx_vld_i(edp_phy_ln3_tx_vld_i),
-    .ln3_txdata_i(edp_phy_ln3_txdata_i[15:0]),
-    .ln3_txk_i(edp_phy_ln3_txk_i[1:0]),
+    .ln3_txdata_i(edp_phy_ln3_txdata_i[31:0]),
+    .ln3_txk_i(edp_phy_ln3_txk_i[3:0]),
     .serdes_qpll0_ok_i(q0_fabric_cmu_ok_o),
     .serdes_qpll1_ok_i(q0_fabric_cmu1_ok_o),
     .serdes_ln2_rxfifo_rdusewd_i(q0_lane2_rx_if_fifo_rdusewd[4:0]),

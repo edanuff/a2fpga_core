@@ -10,13 +10,16 @@
 //
 //   led[0]  heartbeat (~1.5 Hz)      — bitstream alive
 //   led[1]  HPD level                — PD negotiation delivered a sink
-//   led[2]  clk_sym == 135 MHz       — QPLL/line rate verified
+//   led[2]  clk_sym == 67.5 MHz      — QPLL/line rate verified (link
+//                                       WORD clock at 1:40 gearing)
 //   led[3]  video_live               — main stream is being transmitted
 //
 // Differences vs the dp_test build (accepted for this evaluation):
 //   - no audio (the Gowin encoder has no audio/SDP inputs)
-//   - video is generated push-style at 2 px/clk in a 74.25 MHz stream
-//     domain (the encoder's line buffer owns the strm->ls CDC)
+//   - video is generated push-style at 4 px/clk in a 37.125 MHz stream
+//     domain (the encoder's line buffer owns the strm->ls CDC); X40
+//     geometry per WS4 forensics §10 (hardened 8b10b ships only at 1:2
+//     gear — the 1:1 attempt produced a broken 60.75 MHz word clock)
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
@@ -71,22 +74,24 @@ module a2mega_dp_gowin_top (
     );
 
     // ------------------------------------------------------------------
-    // Video timing + colorbars, strm domain (74.25 MHz, 2 px/clk).
+    // Video timing + colorbars, strm domain (37.125 MHz, 4 px/clk).
     // 1080p: H 1920/2200/44/192, V 1080/1125/5/41, positive syncs.
-    // Line layout (pair-of-pixels units, 1100/line): hsync [0,22),
-    // active [96,1056). Frame: vsync lines [0,5), active [41,1121).
+    // Line layout (quad-of-pixels units, 550/line): hsync [0,11),
+    // active [48,528). Frame: vsync lines [0,5), active [41,1121).
     // Pattern: eight 240-px vertical bars + 2-px white frame border.
+    // Each 48-bit port carries a pixel pair {px_hi, px_lo}; port 0 =
+    // pixels 4N+1,4N, port 1 = pixels 4N+3,4N+2 (encoder BPP_COEF=2).
     // ------------------------------------------------------------------
     logic clk_strm;
-    logic [10:0] hx = '0;           // 0..1099 pixel pairs
+    logic [9:0]  hx = '0;           // 0..549 pixel quads
     logic [10:0] vy = '0;           // 0..1124 lines
     logic        pix_vs, pix_hs, pix_de;
-    logic [23:0] pix_data0, pix_data1;
+    logic [47:0] pix_data0, pix_data1;
 
-    localparam int HP_TOTAL     = 1100;  // 2200 / 2
-    localparam int HP_SYNC      = 22;    // 44 / 2
-    localparam int HP_ACT_START = 96;    // 192 / 2
-    localparam int HP_ACT_END   = 1056;  // (192 + 1920) / 2
+    localparam int HP_TOTAL     = 550;   // 2200 / 4
+    localparam int HP_SYNC      = 11;    // 44 / 4
+    localparam int HP_ACT_START = 48;    // 192 / 4
+    localparam int HP_ACT_END   = 528;   // (192 + 1920) / 4
     localparam int V_TOTAL_L    = 1125;
     localparam int V_SYNC_L     = 5;
     localparam int V_ACT_START  = 41;
@@ -110,22 +115,24 @@ module a2mega_dp_gowin_top (
             pixel24 = bar24(x);
     endfunction
 
-    wire [11:0] act_x0 = {(hx - 11'(HP_ACT_START)), 1'b0};  // (hx-96)*2
+    wire [11:0] act_x0 = {(hx - 10'(HP_ACT_START)), 2'b00};  // (hx-48)*4
     wire [10:0] act_y  = vy - 11'(V_ACT_START);
 
     always_ff @(posedge clk_strm) begin
-        if (hx == 11'(HP_TOTAL - 1)) begin
+        if (hx == 10'(HP_TOTAL - 1)) begin
             hx <= '0;
             vy <= (vy == 11'(V_TOTAL_L - 1)) ? '0 : vy + 11'd1;
         end else
-            hx <= hx + 11'd1;
+            hx <= hx + 10'd1;
 
-        pix_hs    <= (hx < 11'(HP_SYNC));
+        pix_hs    <= (hx < 10'(HP_SYNC));
         pix_vs    <= (vy < 11'(V_SYNC_L));
-        pix_de    <= (hx >= 11'(HP_ACT_START)) && (hx < 11'(HP_ACT_END))
+        pix_de    <= (hx >= 10'(HP_ACT_START)) && (hx < 10'(HP_ACT_END))
                   && (vy >= 11'(V_ACT_START))  && (vy < 11'(V_ACT_END));
-        pix_data0 <= pixel24(act_x0,          act_y);
-        pix_data1 <= pixel24(act_x0 | 12'd1,  act_y);
+        pix_data0 <= {pixel24(act_x0 | 12'd1, act_y),
+                      pixel24(act_x0,         act_y)};
+        pix_data1 <= {pixel24(act_x0 | 12'd3, act_y),
+                      pixel24(act_x0 | 12'd2, act_y)};
     end
 
     // ------------------------------------------------------------------
@@ -363,7 +370,8 @@ module a2mega_dp_gowin_top (
 
     // ------------------------------------------------------------------
     // Line-rate verification: count clk_sym over a 1 s crystal window.
-    // 2.7 Gb/s / 20 = 135 M +/- tol -> led[2].
+    // 2.7 Gb/s / 40 = 67.5 M +/- tol -> led[2]. (X40 geometry: the
+    // fabric word clock is the 1:40 clock; 135 M was the X20 value.)
     // ------------------------------------------------------------------
     logic [25:0] win_cnt = '0;          // 0..49,999,999 @ 50 MHz
     logic        win_tgl = 1'b0;
@@ -385,9 +393,9 @@ module a2mega_dp_gowin_top (
             sym_delta <= sym_cnt - sym_last;   // registered snapshot
             sym_last  <= sym_cnt;
         end
-        // 135 M +/- ~2%: 132.3M .. 137.7M (pipelined vs the snapshot)
-        freq_ok <= (sym_delta > 28'd132_300_000) &&
-                   (sym_delta < 28'd137_700_000);
+        // 67.5 M +/- ~2%: 66.15M .. 68.85M (pipelined vs the snapshot)
+        freq_ok <= (sym_delta > 28'd66_150_000) &&
+                   (sym_delta < 28'd68_850_000);
     end
 
     // ------------------------------------------------------------------
@@ -399,7 +407,7 @@ module a2mega_dp_gowin_top (
 
     assign led[0] = ~hb_cnt[24];        // heartbeat
     assign led[1] = ~dp_hpd;            // HPD from the ESP32
-    assign led[2] = ~freq_ok;           // clk_sym == 135 MHz (line rate OK)
+    assign led[2] = ~freq_ok;           // clk_sym == 67.5 MHz (line rate OK)
     assign led[3] = ~video_live;        // pixels flowing
 
 endmodule
