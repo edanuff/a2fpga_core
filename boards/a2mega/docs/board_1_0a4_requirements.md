@@ -43,6 +43,28 @@ no rev until the OPEN items that could change the netlist are closed.
    (bench supply masked it). Size for a bus-powered hub + downstream
    devices; consider soft-start on the switch.
 
+5b. **TUSB1046A operating-temperature margin (REFRAMED 08-18 night:
+   normal heat, insufficient system margin)** — the mux runs "very hot"
+   on EVERY carrier: 634 mW (datasheet, DP4 mode, all four linear
+   channels always biased) in a 4x6 mm WQFN ≈ 2.6 W/cm² ⇒ case 50-60 °C
+   at bench ambient with correct pad/vias. NOT a defect (voiding theory
+   retired — both carriers identical); TI rates Tj to 105 °C. The defect
+   is SYSTEM margin: link outcomes demonstrably flip with mux-region
+   temperature (compressed-air experiment, rows 37-38), and the product
+   lives in an enclosed Apple II case at 35-40 °C ambient ⇒ die 60-75 °C
+   — the bench is the EASY case. Requirements: (a) maximize thermal
+   pad/via/copper coupling and treat a 6x6 heatsink as standard fitment;
+   (b) characterize and spec the margin-vs-temperature curve (soak test
+   IN AN ENCLOSURE or with pre-warmed mux = the product condition);
+   (c) best-fit mechanism = mux linear-path bandwidth/jitter degrading
+   with die temp (narrow-spectrum TPS survives, broadband scrambled
+   data dies — ISI-class); component-level confirmation via selective
+   heating (mux vs cap bank) pending; (d) firmware lever: sweep mux RX
+   EQ at WARM temperature on a good SOM (prior sweeps were on the
+   SOM-limited unit) — a hotter-compensating EQ setting may buy margin
+   in firmware. IR-measured package temperature to be added when
+   available.
+
 5a. **DP main-link channel/launch review — DESIGN-WIDE, not unit** —
    evidence 08-18: ALL converter-class sinks (3 hubs + a dongle, short
    captive cables, bridge-grade RX) fail BOTH carriers; monitors (long
