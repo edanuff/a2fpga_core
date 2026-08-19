@@ -155,6 +155,20 @@ module aux_channel #(
     reg [26:0]  link_check_count;
     reg [14:0]  count_100us;
     
+    // Link maturity (hybrid policy 2026-08-19): checks are FATAL from
+    // training until the link has passed MATURE_N consecutive 1 Hz
+    // checks with all locks, ADVISORY afterwards. Rationale: acquisition
+    // margin rides the thermal/sink stack while tracking margin sits
+    // above it (1 hr hot soak) — post-maturity teardowns convert
+    // survivable wobbles into fresh acquisition lotteries (the blind
+    // ladder's no-teardown policy was a large part of its monitor-era
+    // reliability). Mature teardown still fires on HPD loss, and an
+    // HPD IRQ demotes the link to immature so the sink's own retrain
+    // request gets a FATAL check (DP-native event-driven retrain).
+    localparam [3:0] MATURE_N = 4'd8;   // ~8 s at the 1 Hz check rate
+    reg  [3:0] mature_checks = 4'd0;
+    wire       link_mature   = (mature_checks >= MATURE_N);
+
     reg       adjust_de_active;
     reg       dp_reg_de_active;
     reg       edid_de_active;
@@ -404,15 +418,18 @@ always @(posedge clk) begin
             check_link:         state_on_success <= check_wait;
             check_wait:         begin
                                 dbg_gate_locks <= {clock_locked_i, equ_locked_i, symbol_locked_i, align_locked_i};
-                                // (check-non-fatal diagnostic reverted 08-18 night: it
-                                // answered the Ugreen question — genuine sink loss — and
-                                // then BLOCKED the Anker path's recovery-by-retrain on
-                                // marginal instances. Teardown/retrain is load-bearing.)
                                 if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
+                                    if(!link_mature)
+                                        mature_checks <= mature_checks + 4'd1;
                                     state_on_success <= link_established;
                                 end else begin
                                     dbg_gate_fail    <= dbg_gate_fail + 2'd1;
-                                    state_on_success <= error;
+                                    // Hybrid policy: fatal during acquisition/early
+                                    // life (retrain-until-caught is what converges
+                                    // marginal instances); advisory once mature
+                                    // (ride through wobbles on tracking margin).
+                                    state_on_success <= link_mature ? link_established
+                                                                    : error;
                                 end
                                 end
             error:              state_on_success <= error;
@@ -702,10 +719,25 @@ always @(posedge clk) begin
     // Holding here also restarts training from scratch whenever HPD
     // drops and returns.
     //---------------------------------------------------------------
-    if(BLIND_SINK != 0 && hpd_present == 1'b0) begin
+    if(hpd_present == 1'b0) begin
+        // Now unconditional (was BLIND_SINK-only): HPD gone = sink gone
+        // = full restart, for every build. This is also the MATURE
+        // phase's hard teardown trigger — sinks demonstrably drop HPD
+        // when abandoning a link (observed: Anker HPD-cycling).
         next_state <= reset;
         state      <= error;
     end
+
+    // Sink retrain request (HPD IRQ): demote to immature and check NOW —
+    // the next check_wait verdict is fatal if locks are gone.
+    if(hpd_irq == 1'b1 && state == link_established) begin
+        mature_checks <= 4'd0;
+        next_state    <= check_link;
+    end
+
+    // Maturity only accrues inside the established/check loop.
+    if(!(state == link_established || state == check_link || state == check_wait))
+        mature_checks <= 4'd0;
 
     //-----------------------------------------------
     // If the full message has been received, then 

@@ -546,9 +546,20 @@ module a2mega_dp_test_top (
     always_ff @(posedge clk50_in)
         hb_cnt <= hb_cnt + 25'd1;
 
+    // Honest D4 (2026-08-19): on closed-loop builds video_live alone can
+    // lie — we can stream into a deaf sink (all-LEDs-lit-but-dark,
+    // live-observed). Require the SINK's own lane status to confirm
+    // (DPCD 0x202 == 0x77: both lanes CR+EQ+SYM). Blind builds can't
+    // know, so they keep the transmit-side meaning.
+    logic [15:0] adj_chst_led;
+    always_ff @(posedge clk50_in)
+        adj_chst_led <= aux_dbg_chstate;    // loose 1FF sample is fine for an LED
+    wire sink_confirmed = (AUX_BLIND != 0) ? 1'b1
+                                           : (adj_chst_led[7:0] == 8'h77);
+
     assign led[0] = ~hb_cnt[24];        // heartbeat
     assign led[1] = ~dp_hpd;            // HPD from the ESP32
     assign led[2] = ~freq_ok;           // clk_sym == 135 MHz (line rate OK)
-    assign led[3] = ~video_live;        // pixels flowing
+    assign led[3] = ~(video_live && sink_confirmed);  // pixels flowing AND sink locked
 
 endmodule
