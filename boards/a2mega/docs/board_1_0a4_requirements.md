@@ -226,6 +226,30 @@ no rev until the OPEN items that could change the netlist are closed.
    drive/EQ (804→900 mV A/B in flight) + item 5a SI. Qualification must
    be margin-based (distance from the line), not pass/fail.
 
+5c. **Mux part grade + main-link AC cap values (decided 08-20):**
+   (a) **TUSB1046AI-DCI (industrial, -40..+85 °C) replaces the
+   commercial grade.** The 0-70 °C commercial rating is ambient; in an
+   enclosed Apple II case (35-40 °C ambient) with 634 mW self-heat, the
+   local ambient at the mux crowds the commercial limit exactly where
+   link margin is thinnest. I-grade removes the out-of-spec question
+   for cents. NOTE: same die, same margin-vs-temperature slope — this
+   guarantees operation, it does NOT buy acquisition margin; the
+   tolerance/drive work (5b) stands unchanged.
+   (b) **Main-link AC caps STAY 100 nF** (mid-window; 75-265 nF legal
+   per TUSB1046A and TUSB1146 datasheets and the alt-mode spec). The
+   TUSB1146 datasheet's 220 nF recommendation is USB3-Gen2-motivated,
+   and TI's caveat (larger caps can fail link with some Gen1 devices)
+   concerns USB3 receiver-detect RC timing — neither applies to a
+   DP-alt-mode-only port (DP discovers via HPD/AUX, not Rx-detect; at
+   2.7 G 8b10b the 100-vs-220 nF corner difference is irrelevant).
+   Changing a proven value with no identified benefit fails the
+   right-first-time rule. 100 nF also stays legal for the TUSB1146
+   BOM-swap option (decision D).
+   Reference: VESA DisplayPort Alt Mode 2.0 spec (local copy):
+   /Volumes/Storage/Downloads/1042674542-6-DisplayPort-Alt-Mode-v2-0-d7-Clean-0-182.pdf
+   — also the authority for pin-assignment C/D/E details (relevant to
+   the UtechSmart pin-assignment-D firmware gap).
+
 5a. **DP main-link channel/launch review — DESIGN-WIDE, not unit** —
    evidence 08-18: ALL converter-class sinks (3 hubs + a dongle, short
    captive cables, bridge-grade RX) fail BOTH carriers; monitors (long
