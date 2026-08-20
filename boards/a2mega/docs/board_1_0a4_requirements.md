@@ -199,14 +199,16 @@ no rev until the OPEN items that could change the netlist are closed.
 - **A. AUX network topology/values: CLOSED 08-20** — footprint-superset
   resolution written into item 1. The AD2 capture stays useful for
   choosing fitted values at bring-up but no longer gates the schematic.
-- **D. Optional DP redriver footprint between FPGA and mux — THE ONE
-  REMAINING USER DECISION.** The only potential *new* copper on the
-  list. For: it's the hardware fallback if drive/EQ margin work can't
-  clear the strict-converter bar (the 08-20 tolerance verdict raises its
-  odds of being needed); a DNP footprint costs board area, not risk.
-  Against: area/routing cost on dense main-link pairs, and the mux is
-  itself a linear redriver with unexplored EQ range (warm sweep on a
-  good SOM still pending). Decide before Thursday.
+- **D. DP redriver footprint: CLOSED 08-20 — NO (withdrawn).** The mux
+  IS a linear redriver; no reference design cascades a second redriver
+  into a redriving mux, for cause (series EQ stages amplify each other's
+  ISI/noise and the settings interact), and a bypassable DNP footprint
+  would add unpopulated-pad/jumper discontinuities on the main link —
+  the exact defect class item 5a exists to remove. Escalation path if
+  margin work ever proves insufficient: substitute a stronger SINGLE
+  stage in a future rev (TUSB546-class redriving mux, or retimer) —
+  never cascade. First exhaust: 804→900 mV/FFE A/B (in flight) + mux EQ
+  characterization at warm temperature on a good SOM.
 - **E. RECONFIG_N GPIO pick** (item 2): constraints — Hi-Z at ESP32
   power-on (no strapping pins: avoid GPIO0/3/45/46), open-drain drive,
   ~10 k board pull-up. Pick from the free-pin budget at schematic time.
