@@ -126,3 +126,21 @@ production configuration with **only the lane numbers changed**.
 face `dp_phy_q0_ln1_*` / `dp_phy_q0_ln2_*` (the pattern every 60B emission
 follows). If the 138 generator names them differently, adjust **the shim
 only** — never the shared `hdl/displayport/**`.
+
+## 900 mV / FFE-manual variant (the drive-margin A/B, queued 08-20)
+
+Same dialog as the baseline generation — load `dp_serdes.ipc` (now the
+generated 804 mV config), then change ONLY the AFE tab:
+
+- Differential Swing **804mV → 900mV**
+- FFE **Auto → Manual**, then set **C1 = 8** (C0 auto-adjusts 40 → 32 —
+  expected, matches the 60B production emission)
+
+Re-verify before OK (both fields reset-prone): Module Name
+`dp_serdes_138b`, refclk **135.000**, Internal Data Width **20**, TX
+bonding group unchanged. After OK: toml should show `txlev = 15` → wait —
+verify against the 60B production toml (`ffe_manual = true`, `txlev`
+matching its 900 mV value) rather than trusting this note; then the CSR
+cross-check (`serdes_toml_to_csr_138k.bin`) and the standard build. Keep
+the 804 mV emission's `.bin` archived first (bisect discipline): both
+variants must be flashable for the warm A/B.
