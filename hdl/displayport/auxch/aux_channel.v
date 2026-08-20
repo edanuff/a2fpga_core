@@ -168,6 +168,16 @@ module aux_channel #(
     localparam [3:0] MATURE_N = 4'd8;   // ~8 s at the 1 Hz check rate
     reg  [3:0] mature_checks = 4'd0;
     wire       link_mature   = (mature_checks >= MATURE_N);
+    // Double-confirm (2026-08-19 night, the video-start IRQ lesson):
+    // sinks (Anker) pulse HPD-IRQ AT video start; an immediate check
+    // then samples the status registers mid-transient and reads a
+    // normal settling blip as lock loss — the old ladder was immune
+    // only because it ignored IRQs and checked a second later. A
+    // single failed check therefore never tears down: it flags
+    // check_pending and re-checks; only two CONSECUTIVE failures are
+    // fatal (immature phase). Bisect-proven: 0d893690 (no IRQ path)
+    // passes where the first hybrid failed every video start.
+    reg        check_failed_once = 1'b0;
 
     reg       adjust_de_active;
     reg       dp_reg_de_active;
@@ -421,15 +431,23 @@ always @(posedge clk) begin
                                 if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
                                     if(!link_mature)
                                         mature_checks <= mature_checks + 4'd1;
+                                    check_failed_once <= 1'b0;
                                     state_on_success <= link_established;
                                 end else begin
                                     dbg_gate_fail    <= dbg_gate_fail + 2'd1;
                                     // Hybrid policy: fatal during acquisition/early
-                                    // life (retrain-until-caught is what converges
-                                    // marginal instances); advisory once mature
-                                    // (ride through wobbles on tracking margin).
-                                    state_on_success <= link_mature ? link_established
-                                                                    : error;
+                                    // life, advisory once mature — but ONLY on two
+                                    // consecutive failed checks (see check_failed_once
+                                    // note above: single blips are re-checked, not
+                                    // executed).
+                                    if(link_mature) begin
+                                        state_on_success <= link_established;
+                                    end else if(check_failed_once) begin
+                                        state_on_success <= error;
+                                    end else begin
+                                        check_failed_once <= 1'b1;
+                                        state_on_success  <= check_link;  // immediate re-check
+                                    end
                                 end
                                 end
             error:              state_on_success <= error;
@@ -736,8 +754,10 @@ always @(posedge clk) begin
     end
 
     // Maturity only accrues inside the established/check loop.
-    if(!(state == link_established || state == check_link || state == check_wait))
-        mature_checks <= 4'd0;
+    if(!(state == link_established || state == check_link || state == check_wait)) begin
+        mature_checks     <= 4'd0;
+        check_failed_once <= 1'b0;
+    end
 
     //-----------------------------------------------
     // If the full message has been received, then 
