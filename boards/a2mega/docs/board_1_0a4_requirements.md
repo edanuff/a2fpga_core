@@ -216,9 +216,19 @@ no rev until the OPEN items that could change the netlist are closed.
   unproven — full-datasheet check before counting on it. Never cascade
   redrivers. First exhaust: 804→900 mV/FFE A/B (in flight) + mux EQ
   characterization at warm temperature on a good SOM.
-- **E. RECONFIG_N GPIO pick** (item 2): constraints — Hi-Z at ESP32
-  power-on (no strapping pins: avoid GPIO0/3/45/46), open-drain drive,
-  ~10 k board pull-up. Pick from the free-pin budget at schematic time.
+- **E. RECONFIG_N GPIO: CLOSED 08-20 — ESP32 IO38** (non-strapping,
+  Hi-Z at ESP32 boot), open-drain low-only, never push-pull high.
+  **Board pull-up REQUIRED** (decision: on-board resistor, NOT
+  internal-pulls-only): 10 k (4.7 k acceptable) from RECONFIG_N (ball
+  N12) to the FPGA's CONFIG-BANK VCCIO (the bank rail, not blindly
+  3.3 V), placed at the FPGA/BTB end of the trace. Rationale: the 25 ns
+  reconfig trigger makes a weak-pull-only line a spurious-reconfig
+  antenna, and the ESP32's pull is absent during its boot/reset/reflash/
+  crash windows — exactly when the FPGA must ride through undisturbed.
+  Optional 100 pF-1 nF at the pin for glitch filtering (1-10 µs rise is
+  harmless vs the ms-scale POR timeline). Firmware: pin stays
+  unconfigured until well after boot; reconfig pulse deliberately long
+  (~1 ms), never near the 25 ns threshold.
 - **B. Hub-path re-baseline: CLOSED 08-17 eve** — verdict 0/10 power-on
   draws (D:2A channel-EQ stall, all sw variables eliminated; Sat '4/5'
   not replicable). No SI data implicating the board channel yet — the
