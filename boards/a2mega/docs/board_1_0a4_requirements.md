@@ -151,15 +151,30 @@ no rev until the OPEN items that could change the netlist are closed.
    via a non-VBUS path (2 or 3), the USB-C connection is "not happy" —
    the specific failure mode is not recalled/recorded and the cause is
    unknown; all that is established is that a problem is believed to
-   exist. 1.0a4 actions: (a) characterize on the bench pre-layout if
-   schedule allows — symptom first (what exactly breaks, on which
-   path), then cause; (b) review the ideal-diode/mux chain as a SYSTEM
-   with item 4's new VBUS eFuse — source priorities, backfeed
-   directions, and VCONN's role (the 08-17 "powered by VCONN = weird
-   results" anomaly belongs to this investigation); (c) note the bench
-   interaction: item 4's reverse blocking removes hub-backfeed as the
-   de-facto bench supply, so the bench powering story must be
-   deliberate on 1.0a4, not accidental.
+   exist. RESOLVED TO THE DOCUMENTED RECORD (08-20 doc search + user
+   reconciliation): the architecture is slot-5V→LM74700, USB-C
+   VBUS-in→PTC→LM66100, VBUS-out (source role)→TPS2553; the recorded
+   problem is at the PD-ATTACH layer — bringup log 08-17, measured:
+   "FUSB302 VBUSOK=1 with port EMPTY = phantom VBUS backfeed onto the
+   connector rail from the shared 5V plane" when slot-powered ⇒ the
+   vSafe0V source-attach precondition can never be met (in-slot attach
+   1/3 vs bench 9/9; fw had to drop the safety veto). So something in
+   the LM66100/TPS2553 arrangement leaks in reverse. It MANIFESTS
+   downstream as "HPD never arrives" (no attach → no alt-mode → no
+   HPD), which is why it was remembered as HPD-related.
+   1.0a4 actions: (a) BENCH CHARACTERIZATION before the power page is
+   final — DMM the connector VBUS pin vs the 5V plane with the port
+   empty, powered via (1) slot/LM74700 and (2) SOM-JTAG-5V-via-BTB;
+   walk TPS2553-output vs LM66100-cathode nodes to identify WHICH
+   element passes the leak; then attach a hub and record the failure
+   signature via p/u telemetry + HLVC (symptom on the record at last);
+   control run VBUS-powered. Outcome decides: keep LM66100/TPS2553 +
+   add item 4's blocking eFuse, or replace the arrangement. (b) VCONN's
+   role reviewed in the same pass (the 08-17 "powered by VCONN = weird
+   results" anomaly belongs here). (c) Bench interaction: item 4's
+   reverse blocking removes hub-backfeed as the de-facto bench supply,
+   so the bench powering story must be deliberate on 1.0a4, not
+   accidental.
 
 5. **Local bulk capacitance on the VBUS source rail** for bus-powered
    sink inrush: hub cold-boot inrush through the source switch sagged
