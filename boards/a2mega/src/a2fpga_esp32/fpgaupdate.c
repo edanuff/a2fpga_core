@@ -48,6 +48,7 @@ static bool     s_keepsram = false;
 static char     s_path[160];
 static char     s_msg[41];
 static uint32_t s_size;
+static uint32_t s_want_id;   /* IDCODE the checked image was built for */
 static bool     s_dirty = true;
 static uint8_t  s_page[FPU_PAGE];
 static uint8_t  s_back[FPU_PAGE];
@@ -149,9 +150,9 @@ bool fpgaupdate_erase_bitstream_region(void)
     fpga_jtag_init_pins();
 
     uint32_t id = fpga_jtag_idcode();
-    if (id != FPGA_JTAG_IDCODE_GW5AT60) {
-        ESP_LOGE(TAG, "erase: IDCODE %08lx != GW5AT-60 — fabric not alive; "
-                      "SRAM-load a bitstream first", (unsigned long)id);
+    if (id != FPGA_JTAG_IDCODE_GW5AT60 && id != FPGA_JTAG_IDCODE_GW5AST138) {
+        ESP_LOGE(TAG, "erase: IDCODE %08lx not a known SOM — fabric not "
+                      "alive; SRAM-load a bitstream first", (unsigned long)id);
         osd_log("FPGA ERASE: NO LIVE FABRIC");
         fpga_jtag_release_pins();
         return false;
@@ -246,9 +247,11 @@ static bool check_file(void)
         fail("BAD FILE SIZE");
         return false;
     }
-    /* Gowin sync word, then the embedded GW5AT-60 IDCODE somewhere in the
-     * header window (GW5A .fs header layout differs from GW2A, so scan
-     * rather than assume a fixed offset from the sync word). */
+    /* Gowin sync word, then the embedded SOM IDCODE (GW5AT-60 or
+     * GW5AST-138) somewhere in the header window (GW5A .fs header layout
+     * differs from GW2A, so scan rather than assume a fixed offset from
+     * the sync word). The matched IDCODE is kept in s_want_id and the live
+     * chip must equal it at install time. */
     int sync = -1;
     for (int i = 0; i + 2 <= (int)br; i++) {
         if (hdr[i] == 0xA5 && hdr[i + 1] == 0xC3) {
@@ -260,15 +263,15 @@ static bool check_file(void)
         fail("NOT A GOWIN BITSTREAM");
         return false;
     }
-    bool id_found = false;
-    for (int i = 0; i + 4 <= (int)br; i++) {
-        if (hdr[i] == 0x00 && hdr[i + 1] == 0x01 &&
-            hdr[i + 2] == 0x48 && hdr[i + 3] == 0x1B) {
-            id_found = true;
-            break;
-        }
+    s_want_id = 0;
+    for (int i = 0; i + 4 <= (int)br && !s_want_id; i++) {
+        if (hdr[i] != 0x00 || hdr[i + 1] != 0x01 || hdr[i + 3] != 0x1B)
+            continue;
+        uint32_t w = 0x00010000u | ((uint32_t)hdr[i + 2] << 8) | 0x1Bu;
+        if (w == FPGA_JTAG_IDCODE_GW5AT60 || w == FPGA_JTAG_IDCODE_GW5AST138)
+            s_want_id = w;
     }
-    if (!id_found) {
+    if (!s_want_id) {
         fail("BITSTREAM IS FOR ANOTHER FPGA");
         return false;
     }
@@ -293,9 +296,10 @@ static void install(void)
 
     /* Probe the live FPGA before killing it. */
     uint32_t id = fpga_jtag_idcode();
-    if (id != FPGA_JTAG_IDCODE_GW5AT60) {
+    if (id != s_want_id) {
         fclose(f);
-        ESP_LOGE(TAG, "live IDCODE %08lx != GW5AT-60", (unsigned long)id);
+        ESP_LOGE(TAG, "live IDCODE %08lx != image's %08lx",
+                 (unsigned long)id, (unsigned long)s_want_id);
         fail("JTAG IDCODE MISMATCH");
         return;
     }

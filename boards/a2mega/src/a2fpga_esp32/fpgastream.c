@@ -10,7 +10,8 @@
  *
  * Safety properties mirror fpgaupdate.c (same ancestry):
  *  - header validated BEFORE anything is touched: Gowin A5C3 sync word +
- *    embedded GW5AT-60 IDCODE in the first 4 KB, plus a live JTAG IDCODE
+ *    embedded SOM IDCODE (GW5AT-60 or GW5AST-138) in the first 4 KB, and
+ *    the live JTAG IDCODE must match the image's — plus a live JTAG IDCODE
  *    probe of the FPGA itself;
  *  - every page read back and compared after programming, one retry;
  *  - success: JTAG RELOAD boots the new bitstream, ESP32 restarts for a
@@ -127,24 +128,33 @@ static bool recv_header(int fd, uint32_t *size)
 }
 
 /* ---- header validation (same rules as fpgaupdate check_file) ------------- */
-static const char *validate_hdr(const uint8_t *hdr, uint32_t n, uint32_t size)
+static const char *validate_hdr(const uint8_t *hdr, uint32_t n, uint32_t size,
+                                uint32_t *chip_id)
 {
     if (n >= 4 && memcmp(hdr, "BFNP", 4) == 0)
         return "MCU FIRMWARE NOT FPGA";
     if (size < FS_MIN_SIZE || size > FS_MAX_SIZE)
         return "BAD SIZE";
-    bool sync = false, id = false;
+    bool sync = false;
     for (uint32_t i = 0; i + 2 <= n && !sync; i++)
         if (hdr[i] == 0xA5 && hdr[i + 1] == 0xC3)
             sync = true;
     if (!sync)
         return "NOT A GOWIN BITSTREAM";
-    for (uint32_t i = 0; i + 4 <= n && !id; i++)
-        if (hdr[i] == 0x00 && hdr[i + 1] == 0x01 &&
-            hdr[i + 2] == 0x48 && hdr[i + 3] == 0x1B)
-            id = true;
+    /* The image's embedded IDCODE names the die it was built for; the live
+     * chip must match it exactly (chip_id), so a 60B image can never land
+     * on a 138B SOM or vice versa. */
+    uint32_t id = 0;
+    for (uint32_t i = 0; i + 4 <= n && !id; i++) {
+        if (hdr[i] != 0x00 || hdr[i + 1] != 0x01 || hdr[i + 3] != 0x1B)
+            continue;
+        uint32_t w = 0x00010000u | ((uint32_t)hdr[i + 2] << 8) | 0x1Bu;
+        if (w == FPGA_JTAG_IDCODE_GW5AT60 || w == FPGA_JTAG_IDCODE_GW5AST138)
+            id = w;
+    }
     if (!id)
         return "BITSTREAM FOR ANOTHER FPGA";
+    *chip_id = id;
     return NULL;
 }
 
@@ -178,7 +188,8 @@ static void serve_one(int fd)
         send_str(fd, "ERR SHORT READ\n");
         return;
     }
-    const char *why = validate_hdr(s_hdr, hdr_len, size);
+    uint32_t want_id = 0;
+    const char *why = validate_hdr(s_hdr, hdr_len, size, &want_id);
     if (why) {
         char m[64];
         snprintf(m, sizeof(m), "ERR %s\n", why);
@@ -214,7 +225,7 @@ static void serve_one(int fd)
         fpga_jtag_init_pins();
         vTaskDelay(pdMS_TO_TICKS(try_n == 0 ? 100 : 400));
         id = fpga_jtag_idcode();
-        if (id != FPGA_JTAG_IDCODE_GW5AT60)
+        if (id != want_id)
             continue;
         if (fpga_jtag_flash_enter())     /* fabric (if any) dies here */
             entered = true;

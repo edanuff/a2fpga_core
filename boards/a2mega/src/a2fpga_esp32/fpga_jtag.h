@@ -11,7 +11,12 @@ extern "C" {
 #endif
 
 // GW5AT-60 JTAG IDCODE (openFPGALoader fpga_list)
-#define FPGA_JTAG_IDCODE_GW5AT60 0x0001481Bu
+#define FPGA_JTAG_IDCODE_GW5AT60   0x0001481Bu
+// GW5AST-138 JTAG IDCODE (read from the IDE-emitted 138B bitstream header;
+// the carrier accepts either SOM). Image checks derive the expected IDCODE
+// from the bitstream itself and require the live chip to match it, so the
+// wrong-die combination is refused in both directions.
+#define FPGA_JTAG_IDCODE_GW5AST138 0x0001081Bu
 
 void     fpga_jtag_init_pins(void);
 void     fpga_jtag_release_pins(void);
