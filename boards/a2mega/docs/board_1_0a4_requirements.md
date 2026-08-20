@@ -16,9 +16,10 @@ no rev until the OPEN items that could change the netlist are closed.
    for monitors). Design: bias divider network setting known common mode
    + zero standing differential at the receiver, and TX levels within
    spec (resistor divider/series attenuation, or commit to the TLVDS pad
-   as the driver and bias for it). **OPEN sub-question gating the exact
-   values/topology: TLVDS clean test (task #2) + optional AD2 waveform
-   of the working attenuated path — DO THIS EARLY THIS WEEK.**
+   as the driver and bias for it). *(Historical note: the original
+   design sketch said "zero standing differential" — superseded by the
+   RESOLVED DESIGN below, which deliberately parks a standing idle
+   offset; the old OPEN sub-question on values/topology is closed.)*
    **VENDOR PRECEDENT (08-19, Gowin EDP refdesign cst + DK_DP/DK_VIDEO
    schematics; CORRECTED reading — the cst's tx/rx pairs are TWO
    different DP PORTS' AUX channels, source and sink, each a single
@@ -45,42 +46,51 @@ no rev until the OPEN items that could change the netlist are closed.
    archive — request alongside the ticket, or rely on our own round-6
    LVCMOS33D input results.
 
-   **RESOLVED TOPOLOGY (08-20, freeze decision — footprint superset,
-   values by stuffing):** the 1.0a3 network is correct in kind and stays
-   put; the delta is purely additive. Existing (all stay as-is): C46/C47
-   0.1 µF AC caps + R31 100k→GND (AUX_P) / R32 100k→+3V3 (AUX_N) = the
-   DP-spec source presence bias, correctly on the LINE side of the caps,
-   placed near the mux; R33/R34 2 M→GND on SBU1/2 (TI bleed). Measured:
-   BTB→mux AUX run = **1.75 inches** — past critical length for
-   LVCMOS-class edges, i.e. today's undamped line genuinely rings (why
-   external attenuation "fixed" it). Additions: (a) **series R per leg AT
-   THE BTB PINS** (position is load-bearing: source termination must sit
-   at the driver end; the caps' position is a don't-care at 1 Mbps once
-   the source is damped). Fit small (0–50 Ω) for the TLVDS driver —
-   current-mode, series R is swing-transparent; 120 Ω stuffing option if
-   the LVCMOS33D fallback driver is ever used (sets ~1.0 Vpp against the
-   far 100 Ω termination, spec window 0.39–1.38). (b) **receiver-bias
-   divider on the PAD side (between series R and cap) — FITTED at first
-   assembly; this is the critical fix, not a contingency.** The bare
-   on-die-pull configuration is the one already proven offset-marginal
-   for monitor-class replies; pulls-only demotes to the simplification
-   fallback if bring-up proves the divider unnecessary. Bias REQUIREMENT
-   SPEC: (i) common mode 0.9-1.5 V — mid-window of the Gowin TLVDS input
-   CM range (verify exact window from DS at layout), away from the rail
-   edge where the pulldown hack parks it today; (ii) standing
-   differential offset 50-150 mV at idle, signed to read as line-idle
-   (DP idles AUX_P-low/AUX_N-high via the 100 k pair; confirm sign vs
-   RTL idle convention at bring-up — resistor swap if backwards);
-   (iii) per-leg Thevenin 20-60 kΩ (<1% signal loading vs ~100-200 Ω
-   source impedance, yet stiff vs leakage; 100 nF cap-node recharge
-   τ ≈ 3-6 ms, harmless for DC-balanced Manchester bursts). STARTING
-   FIT: per leg 100 k→3V3 / 47 k→GND (VCM ≈ 1.05 V, Thev ≈ 32 k);
-   offset via one leg's lower resistor 47 k→43 k (≈65 mV). Finalize
-   values at bring-up with the AD2 on the item-6 test pads.
-   (c) **test pads on the LINE-side node** (item 6), one per leg. Design
-   commitment: TLVDS as the driver (it's what reads converter replies
-   today); the R network supports both drivers unchanged. This closes
-   OPEN A structurally — no remaining data dependency for the schematic.
+   **RESOLVED DESIGN (08-20, freeze decision — FINAL VALUES, verified
+   by analysis and sim BEFORE fab; no rework or restuffing plan, and no
+   0201 anywhere in the AUX network — 0402 minimum):** the 1.0a3
+   network is correct in kind and stays put; the delta is purely
+   additive. Existing (all stay as-is): C46/C47 0.1 µF AC caps + R31
+   100k→GND (AUX_P) / R32 100k→+3V3 (AUX_N) = the DP-spec source
+   presence bias, correctly on the LINE side of the caps, placed near
+   the mux; R33/R34 2 M→GND on SBU1/2 (TI bleed). Measured: BTB→mux AUX
+   run = **1.75 inches** — past critical length for LVCMOS-class edges,
+   i.e. today's undamped line genuinely rings (why external attenuation
+   "fixed" it).
+
+   Additions, final values:
+   (a) **Series 47 Ω per leg AT THE BTB PINS** (position is
+   load-bearing: source termination sits at the driver end; the caps'
+   position is a don't-care at 1 Mbps once the source is damped). The
+   TLVDS driver is current-mode, so series R is swing-transparent —
+   47 Ω damps the line and costs nothing; it also remains spec-legal if
+   the LVCMOS33D fallback driver is ever selected (swing stays inside
+   the 0.39–1.38 Vpp window across 0–370 Ω, so no value change needed
+   for either driver). Driver commitment: TLVDS (the configuration that
+   reads converter replies today).
+   (b) **Receiver-bias divider on the PAD side** (between series R and
+   cap), fitted always — this is THE critical fix; the bare on-die-pull
+   configuration is the one proven offset-marginal for monitor-class
+   replies. Final values: **AUX_P: 100 k→3V3 / 43 k→GND (parks
+   ≈0.99 V); AUX_N: 100 k→3V3 / 47 k→GND (parks ≈1.05 V)** ⇒ common
+   mode ≈1.0 V (mid-window of the Gowin TLVDS input CM range — confirm
+   the DS window at layout review as a check), per-leg Thevenin ≈30 k
+   (<1% signal loading vs the ~100-200 Ω source impedance, stiff vs
+   leakage, 100 nF cap-node recharge τ ≈ 3 ms — harmless for
+   DC-balanced Manchester bursts), and a **≈65 mV standing idle offset
+   with P BELOW N — sign fixed by design analysis**: the receiver reads
+   logic 0 at idle, matching the DP line-idle convention (AUX_P low /
+   AUX_N high via the 100 k pair) and keeping the RX shift register
+   benign for the sync detector. Corroboration: the aux_interface.v
+   squelch comment (08-15) documents that today's zero-differential
+   idle makes the comparator CHATTER — this offset is the analog
+   squelch that comment says real AUX PHYs have; the digital squelch
+   demotes to belt-and-braces. The sign and levels are verified in the
+   AUX sim harness pre-fab as a CHECK, and the AD2 on the item-6 test
+   pads validates the built board — neither is a tuning step.
+   (c) **Test pads on the LINE-side node** (item 6), one per leg — for
+   validation measurement (the node the sink sees).
+   This closes OPEN A — no remaining data dependency for the schematic.
 
 2. **RECONFIG_N (ball N12) routed to an ESP32 GPIO.** Bench/dev recovery
    and automated test-reroll. NOT a consumer-facing mechanism (decision
