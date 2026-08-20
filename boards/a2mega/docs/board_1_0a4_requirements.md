@@ -59,15 +59,16 @@ no rev until the OPEN items that could change the netlist are closed.
    "fixed" it).
 
    Additions, final values:
-   (a) **Series 47 Ω per leg AT THE BTB PINS** (position is
+   (a) **Series 100 Ω per leg AT THE BTB PINS** (position is
    load-bearing: source termination sits at the driver end; the caps'
-   position is a don't-care at 1 Mbps once the source is damped). The
-   TLVDS driver is current-mode, so series R is swing-transparent —
-   47 Ω damps the line and costs nothing; it also remains spec-legal if
-   the LVCMOS33D fallback driver is ever selected (swing stays inside
-   the 0.39–1.38 Vpp window across 0–370 Ω, so no value change needed
-   for either driver). Driver commitment: TLVDS (the configuration that
-   reads converter replies today).
+   position is a don't-care at 1 Mbps once the source is damped).
+   CORRECTED 08-20 from an earlier 47 Ω draft — 47 Ω is NOT spec-legal
+   for the LVCMOS33D fallback driver (3.3 V into 2·Rs+100 Ω gives
+   1.70 Vpp > the 1.38 Vpp limit); 100 Ω gives 1.10 Vpp mid-window for
+   LVCMOS and is swing-transparent to the current-mode TLVDS driver, so
+   100 Ω is the one value legal for BOTH drivers with no change ever
+   needed. Driver commitment: TLVDS (the configuration that reads
+   converter replies today).
    (b) **Receiver-bias divider on the PAD side** (between series R and
    cap), fitted always — this is THE critical fix; the bare on-die-pull
    configuration is the one proven offset-marginal for monitor-class
@@ -90,6 +91,16 @@ no rev until the OPEN items that could change the netlist are closed.
    pads validates the built board — neither is a tuning step.
    (c) **Test pads on the LINE-side node** (item 6), one per leg — for
    validation measurement (the node the sink sees).
+   (d) **Companion cst change (gateware, lands with the board): AUX
+   pair PULL_MODE=NONE.** The on-die pulldown hack that biases 1.0a3
+   would sit in parallel with the divider (tens of kΩ to ground),
+   dragging both park levels down and shrinking the idle offset — the
+   board network replaces the pulls entirely.
+   Schematic review 08-20 (BTB sheet): series 100 Ω R66/R67 correct;
+   pin mapping correct (G15/IOR105A→DPAUX_P, G16/IOR105B→DPAUX_N);
+   ⚠ first draft had the 43 k/47 k lower resistors SWAPPED (parked P
+   above N = receiver idles 1) — 43 k belongs on the DPAUX_P leg, 47 k
+   on DPAUX_N. Caught against tb_aux_idle_bias's verified convention.
    This closes OPEN A — no remaining data dependency for the schematic.
 
 2. **RECONFIG_N (ball N12) routed to an ESP32 GPIO.** Bench/dev recovery
