@@ -45,6 +45,29 @@ no rev until the OPEN items that could change the netlist are closed.
    archive — request alongside the ticket, or rely on our own round-6
    LVCMOS33D input results.
 
+   **RESOLVED TOPOLOGY (08-20, freeze decision — footprint superset,
+   values by stuffing):** the 1.0a3 network is correct in kind and stays
+   put; the delta is purely additive. Existing (all stay as-is): C46/C47
+   0.1 µF AC caps + R31 100k→GND (AUX_P) / R32 100k→+3V3 (AUX_N) = the
+   DP-spec source presence bias, correctly on the LINE side of the caps,
+   placed near the mux; R33/R34 2 M→GND on SBU1/2 (TI bleed). Measured:
+   BTB→mux AUX run = **1.75 inches** — past critical length for
+   LVCMOS-class edges, i.e. today's undamped line genuinely rings (why
+   external attenuation "fixed" it). Additions: (a) **series R per leg AT
+   THE BTB PINS** (position is load-bearing: source termination must sit
+   at the driver end; the caps' position is a don't-care at 1 Mbps once
+   the source is damped). Fit small (0–50 Ω) for the TLVDS driver —
+   current-mode, series R is swing-transparent; 120 Ω stuffing option if
+   the LVCMOS33D fallback driver is ever used (sets ~1.0 Vpp against the
+   far 100 Ω termination, spec window 0.39–1.38). (b) **DNP receiver-bias
+   divider on the PAD side** (between series R and cap; e.g. 100k/100k
+   per leg to 3V3/GND) — default DNP, on-die pulls per the vendor recipe
+   are plan A; the footprints make plan B a stuffing change, not a spin.
+   (c) **test pads on the LINE-side node** (item 6), one per leg. Design
+   commitment: TLVDS as the driver (it's what reads converter replies
+   today); the R network supports both drivers unchanged. This closes
+   OPEN A structurally — no remaining data dependency for the schematic.
+
 2. **RECONFIG_N (ball N12) routed to an ESP32 GPIO.** Bench/dev recovery
    and automated test-reroll. NOT a consumer-facing mechanism (decision
    of record 2026-08-16: no user-level reconfiguration ever). Weak
@@ -55,6 +78,18 @@ no rev until the OPEN items that could change the netlist are closed.
    P/N swap is fine — tx_pol_invert handles it). 4-lane remains a future
    option; no change needed, just don't lose it.
 
+3b. **138K SOM compatibility: CLOSED, SILICON-VERIFIED, NO COPPER CHANGE
+   (08-20).** Ball-map audit (`SOM_138B_BALLMAP.md`): 176/180 carrier
+   balls MATCH; the 4 DIFFERs are SERDES lane relabelling of the same
+   pads (Q0 lanes 1↔3 transposed between dies — our pairs are die lanes
+   2+3 on the 60B, 1+2 on the 138B; TX master = die lane 2 on both;
+   REFCLK1 exact match; zero bank-VCCIO conflicts, the 60B's AB13 one
+   disappears). Verified end-to-end same day on B3 (first 138K article):
+   golden C:0177 + colorbars through the Anker hub (test log rows 54-55).
+   Cost of the die difference: one per-die SERDES IP regeneration,
+   config-only. Do not attempt to "fix" lane numbering in copper — the
+   1↔3 transposition means every routing needs per-die IP regen anyway.
+
 4. **VBUS source-path isolation + discharge** (evidence 08-17 eve,
    instrumented): FUSB302 reads VBUSOK=1 with the port EMPTY — the 5V
    plane backfeeds the connector VBUS rail, so the vSafe0V source-attach
@@ -62,11 +97,20 @@ no rev until the OPEN items that could change the netlist are closed.
    flakiness; 98461af3 had to remove the safety veto to attach at all).
    Fix: real load switch/ideal diode between plane and VBUS pin +
    discharge path, so VBUS is genuinely 0 V until sourced.
+   **Part-requirements spec (08-20):** eFuse-class device preferred —
+   one package gives all four needs: reverse blocking (kills the
+   backfeed that makes VBUSOK lie), output discharge (honest vSafe0V),
+   adjustable current limit ~2-3 A (bus-powered hub + downstream), and
+   programmable soft-start slew (which is also half of item 5's inrush
+   fix). Shortlist by stock at layout time.
 5. **Local bulk capacitance on the VBUS source rail** for bus-powered
    sink inrush: hub cold-boot inrush through the source switch sagged
    the shared rail hard enough to kill ESP32 WiFi for ~1 min in-slot
    (bench supply masked it). Size for a bus-powered hub + downstream
-   devices; consider soft-start on the switch.
+   devices; consider soft-start on the switch. With item 4's eFuse
+   slew-limiting the start, sizing is forgiving: ~330-470 µF bulk on the
+   VBUS source side + local ceramics, placed so hub-side sag cannot
+   couple into the ESP32's rail.
 
 5b. **TUSB1046A operating-temperature margin (REFRAMED 08-18 night:
    normal heat, insufficient system margin)** — the mux runs "very hot"
@@ -96,6 +140,18 @@ no rev until the OPEN items that could change the netlist are closed.
    SOM-limited unit) — a hotter-compensating EQ setting may buy margin
    in firmware. IR-measured package temperature to be added when
    available.
+   **08-19/20 data + REFRAMING:** heatsink on B1's mux = 46→40 °C, which
+   clears nothing new (Anker's acquisition bar >40 °C, Ugreen's <40 °C)
+   — copper/heatsinks alone cannot save the strict-sink class. And B3
+   (138K, heatsinked FPGA+mux, morning-ambient, ~90 min runtime) walked
+   the full depth-gauge arc anyway at the 804 mV baseline (row 57).
+   **TOLERANCE VERDICT: small thermal deltas flipping outcomes on a
+   cool, heatsinked board mean the operating point sits ON the margin
+   line — this is a link-budget/tolerance problem wearing a thermal
+   costume.** Board actions stay (pad/via farm, copper, heatsink as
+   standard fitment, keep-out) but the margin itself must come from
+   drive/EQ (804→900 mV A/B in flight) + item 5a SI. Qualification must
+   be margin-based (distance from the line), not pass/fail.
 
 5a. **DP main-link channel/launch review — DESIGN-WIDE, not unit** —
    evidence 08-18: ALL converter-class sinks (3 hubs + a dongle, short
@@ -122,20 +178,47 @@ no rev until the OPEN items that could change the netlist are closed.
 8. **Confirm SecurityBit=OFF is process default** in all shipping build
    configs (process config item, not board — listed so it ships in the
    same review).
+9. **Per-unit production screening test**: warm-attach against a strict
+   converter sink (the margin-stack model's qualification metric). This
+   is the test that would have caught SOM#1's TX deficit before it cost
+   bench days. Cheap: it's the existing telemetry harness + a heat gun.
+10. **Mux-region thermal probe point** (defined bare-copper spot or pad)
+   — IR guns have been fighting heatsinks and laser offset all week.
+11. **Recovery-ladder reality (process/firmware note, informs margin
+   priority):** 08-20 evidence — a wedged hub survives QUICK power
+   cycles (full PD renegotiation included) and clears only on a ~30 s
+   drain. So the planned virtual-replug firmware feature (PD
+   exit/re-enter) may NOT clear the worst converter wedge class; the
+   only real fix is not entering marginal territory — which is items
+   5a/5b's margin work. Also characterized: marginal acquisitions can
+   latch a rotated frame (offset+wraparound, both axes, sink-independent
+   — test log rows 49/53/56); clean catches always render true.
 
 ## OPEN questions that could still change the rev (close before Friday)
 
-- **A. AUX network topology/values** ← TLVDS clean test (+AD2 capture).
-  This is the only item where the schematic genuinely waits on data.
+- **A. AUX network topology/values: CLOSED 08-20** — footprint-superset
+  resolution written into item 1. The AD2 capture stays useful for
+  choosing fitted values at bring-up but no longer gates the schematic.
+- **D. Optional DP redriver footprint between FPGA and mux — THE ONE
+  REMAINING USER DECISION.** The only potential *new* copper on the
+  list. For: it's the hardware fallback if drive/EQ margin work can't
+  clear the strict-converter bar (the 08-20 tolerance verdict raises its
+  odds of being needed); a DNP footprint costs board area, not risk.
+  Against: area/routing cost on dense main-link pairs, and the mux is
+  itself a linear redriver with unexplored EQ range (warm sweep on a
+  good SOM still pending). Decide before Thursday.
+- **E. RECONFIG_N GPIO pick** (item 2): constraints — Hi-Z at ESP32
+  power-on (no strapping pins: avoid GPIO0/3/45/46), open-drain drive,
+  ~10 k board pull-up. Pick from the free-pin budget at schematic time.
 - **B. Hub-path re-baseline: CLOSED 08-17 eve** — verdict 0/10 power-on
   draws (D:2A channel-EQ stall, all sw variables eliminated; Sat '4/5'
   not replicable). No SI data implicating the board channel yet — the
   stall is at training, upstream of any margin question. Items 4/5 above
   (VBUS isolation + bulk cap) are the board-level fallout. Hub-viability
   hope now rides on WS4 (item C).
-- **C. Gowin IP assessment fallout** (new-IDE EDP PHY / encoder): if the
-  supported stack imposes pin/clock constraints we don't meet. Expected:
-  none (same quad, same refclk); verify during assessment.
+- **C. Gowin IP assessment fallout: CLOSED** (WS4 + the 08-20 parity
+  and 138B builds) — no pin/clock constraints we don't already meet;
+  our core remains production, the Gowin stack is ticket material.
 
 ## Explicitly NOT in this rev
 
