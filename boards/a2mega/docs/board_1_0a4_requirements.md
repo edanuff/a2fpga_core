@@ -306,11 +306,17 @@ no rev until the OPEN items that could change the netlist are closed.
   stage — the natural candidate is **TUSB1146** (same 4x6 WQFN-40,
   pin-compatible per family positioning ⇒ a BOM-line swap, zero copper;
   newer DP2.0/10G-rated part, so our 2.7G sits further inside its linear
-  region). Caveats verified 08-20 from TI docs: its headline ADAPTIVE EQ
-  is USB-path only — DP lanes get a conventional ladder ("up to 12dB @
-  5GHz", same range family as the 1046A's 1.0-12.3dB); it drops alt-mode
-  config F (unused by us). DP-path margin benefit is plausible but
-  unproven — full-datasheet check before counting on it. Never cascade
+  region). DATASHEET-RESOLVED 08-20 (§7.4.8): "The AEQ feature is NOT
+  supported on ... the DP[3:0] receivers. These receivers only support
+  fixed EQ" — the headline adaptive EQ serves USB DFP RX1/RX2 only
+  (disabled by default, wants I2C mode), which our DP-only port never
+  uses. DP lanes get the same DPEQ0/1-strapped 16-setting fixed ladder
+  as the 1046A. So the swap's only value is newer/wider-BW analog —
+  plausible headroom, NO adaptive feature. The temperature-tracking EQ
+  our margin problem wants does not exist in this family for DP; the
+  available lever remains 5b(d): characterize EQ-vs-temperature and
+  let firmware pick the setting (supported on the existing part). It
+  also drops alt-mode config F (unused by us). Never cascade
   redrivers. First exhaust: 804→900 mV/FFE A/B (in flight) + mux EQ
   characterization at warm temperature on a good SOM.
 - **E. RECONFIG_N GPIO: CLOSED 08-20 — ESP32 IO38** (non-strapping,
