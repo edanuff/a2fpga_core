@@ -47,8 +47,11 @@ no rev until the OPEN items that could change the netlist are closed.
    LVCMOS33D input results.
 
    **RESOLVED DESIGN (08-20, freeze decision — FINAL VALUES, verified
-   by analysis and sim BEFORE fab; no rework or restuffing plan, and no
-   0201 anywhere in the AUX network — 0402 minimum):** the 1.0a3
+   by analysis and sim BEFORE fab; no rework or restuffing plan.
+   Packages: 0201 per board standard — hand rework is infeasible below
+   1206 and 1206 doesn't fit this design, so package size buys no
+   contingency and correctness comes from pre-fab verification):** the
+   1.0a3
    network is correct in kind and stays put; the delta is purely
    additive. Existing (all stay as-is): C46/C47 0.1 µF AC caps + R31
    100k→GND (AUX_P) / R32 100k→+3V3 (AUX_N) = the DP-spec source
