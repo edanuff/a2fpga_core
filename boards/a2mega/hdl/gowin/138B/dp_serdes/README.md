@@ -138,9 +138,9 @@ generated 804 mV config), then change ONLY the AFE tab:
 
 Re-verify before OK (both fields reset-prone): Module Name
 `dp_serdes_138b`, refclk **135.000**, Internal Data Width **20**, TX
-bonding group unchanged. After OK: toml should show `txlev = 15` → wait —
-verify against the 60B production toml (`ffe_manual = true`, `txlev`
-matching its 900 mV value) rather than trusting this note; then the CSR
-cross-check (`serdes_toml_to_csr_138k.bin`) and the standard build. Keep
+bonding group unchanged. After OK the enabled lanes' toml must show
+`txlev = 15`, `ffe_manual = true`, `ffe_c0 = 32`, `ffe_c1 = 8` (the 60B
+production emission's exact 900 mV values); then the CSR cross-check
+(`serdes_toml_to_csr_138k.bin`) and the standard build. Keep
 the 804 mV emission's `.bin` archived first (bisect discipline): both
 variants must be flashable for the warm A/B.
