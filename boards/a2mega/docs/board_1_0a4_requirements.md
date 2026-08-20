@@ -206,8 +206,15 @@ no rev until the OPEN items that could change the netlist are closed.
   would add unpopulated-pad/jumper discontinuities on the main link —
   the exact defect class item 5a exists to remove. Escalation path if
   margin work ever proves insufficient: substitute a stronger SINGLE
-  stage in a future rev (TUSB546-class redriving mux, or retimer) —
-  never cascade. First exhaust: 804→900 mV/FFE A/B (in flight) + mux EQ
+  stage — the natural candidate is **TUSB1146** (same 4x6 WQFN-40,
+  pin-compatible per family positioning ⇒ a BOM-line swap, zero copper;
+  newer DP2.0/10G-rated part, so our 2.7G sits further inside its linear
+  region). Caveats verified 08-20 from TI docs: its headline ADAPTIVE EQ
+  is USB-path only — DP lanes get a conventional ladder ("up to 12dB @
+  5GHz", same range family as the 1046A's 1.0-12.3dB); it drops alt-mode
+  config F (unused by us). DP-path margin benefit is plausible but
+  unproven — full-datasheet check before counting on it. Never cascade
+  redrivers. First exhaust: 804→900 mV/FFE A/B (in flight) + mux EQ
   characterization at warm temperature on a good SOM.
 - **E. RECONFIG_N GPIO pick** (item 2): constraints — Hi-Z at ESP32
   power-on (no strapping pins: avoid GPIO0/3/45/46), open-drain drive,
