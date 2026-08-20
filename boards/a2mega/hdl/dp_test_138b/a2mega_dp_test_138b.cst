@@ -1,0 +1,64 @@
+// a2mega 1.0a3 DP bring-up (colorbars) — GW5AST-138B SOM variant
+//
+// Same carrier, same BALLS as hdl/dp_test/a2mega_dp_test.cst — the ball map
+// carries over 1:1 between the two PG484 SOMs (audited ball-by-ball against
+// the Gowin IDE package databases in docs/SOM_138B_BALLMAP.md: 176 MATCH /
+// 4 DIFFER, and all four DIFFERs are SERDES lane relabelling, not fabric).
+//
+// The ONLY delta below vs the 60B cst is `button`:
+//   ball AB13 sits in bank 9 on the GW5AT-60B (1.5 V, shared with the DDR3
+//   byte lane -> constrained LVCMOS15 there) but in bank 5 on the
+//   GW5AST-138B, whose other carrier members are all 3.3 V. Constrain it
+//   LVCMOS33 here. (dp_test uses no DDR3 at all, so bank 5 holds only this
+//   pin; `button` is an input, so 3.3 V is safe regardless of the SOM's
+//   AB13 wiring.) Same treatment as hdl/a2mega_138b.cst.
+//
+// Everything else — including the LVDS25 AUX pair — is unchanged: G15/G16 are
+// IOR105A/B on the 138B and remain a TRUE differential pair (TRUELVDS), so
+// the AUX_TLVDS front end stays legal.
+//
+// The DP main-link lanes (Q0 L1+L2 on THIS die — see SOM_138B_BALLMAP §2 —
+// vs L2/L3 on the 60B) and the 135 MHz refclk (Q0_REFCLK1, E10/F10, identical
+// on both dies) are dedicated SERDES bumps configured inside the generated
+// PHY IP: they take no constraints here.
+
+// 50 MHz SOM oscillator
+IO_LOC  "clk50_in" V22;
+IO_PORT "clk50_in" IO_TYPE=LVCMOS33 PULL_MODE=NONE BANK_VCCIO=3.3;
+
+// SOM pushbutton (active low) — reset.
+// *** 138B DELTA: bank 9 (1.5 V) on the 60B -> bank 5 (3.3 V) here ***
+IO_LOC  "button" AB13;
+IO_PORT "button" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+// DP AUX pseudo-differential pair -> TUSB1046A AUX inputs (bias/AC
+// coupling on the carrier). G15/G16 = the old HDMI clock pair (true
+// differential pair), driven here as true LVDS (see top AUX_TLVDS):
+// on the 138B these are IOR105A/B, still a true pair; LVDS25 output is
+// legal at VCCIO 3.3 on GW5A (DS Table 2-5). PULL_MODE biases the
+// AC-coupled receive side (defined idle). If PnR rejects PULL_MODE on an
+// LVDS pad, fall back to ELVDS_IOBUF + IO_TYPE=LVCMOS33D here.
+// Proven pseudo-diff config (restore with AUX_TLVDS=0):
+//   IO_PORT "dp_aux_p" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+//   IO_PORT "dp_aux_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "dp_aux_p" G15,G16;
+IO_PORT "dp_aux_p" IO_TYPE=LVDS25 PULL_MODE=DOWN;
+
+// Debug UART to the ESP32 (Serial1 RX side)
+IO_LOC  "uart_tx" H13;
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// HPD from the ESP32 (ESP32_GPIO0, J2.17). Pull down so HPD idles
+// deasserted while the ESP32 is unprogrammed or booting.
+IO_LOC  "dp_hpd" A19;
+IO_PORT "dp_hpd" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+
+// Carrier LEDs D1-D4, active low (anode +3V3 via R23-R26)
+IO_LOC  "led[0]" D15;
+IO_PORT "led[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "led[1]" D14;
+IO_PORT "led[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "led[2]" R14;
+IO_PORT "led[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "led[3]" P14;
+IO_PORT "led[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE;

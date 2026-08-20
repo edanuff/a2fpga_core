@@ -159,6 +159,21 @@ mistaken for "the same bitstream runs".
 1. **DP SERDES IP**: regenerate for **Q0 lanes 1 + 2**, master lane 2
    (§2). Everything else in the config is die-independent: REFCLK1 @ 135 MHz,
    QPLL0, 2.7 Gbps, width 20 raw, `tx_pol_invert` on both used lanes, DRP on.
+   ⚠ **This regeneration cannot be done by hand or headlessly** — it is not a
+   lane rename of the 60B emission. The dies use *different silicon
+   primitives*: the 60B emission instantiates `GTR12_QUADA`, and synthesising
+   it for the 138B fails with `ERROR (RP0008): There is no GTR12_QUADA
+   resource in current device`. The 138 die uses the multi-quad
+   **`GTR12_QUAD`** (parameter `POSITION = "Q0"|"Q1"`), whose port set differs
+   by 43 ports — the extra ones being inter-quad interconnect and
+   reference-clock steering (`INET_Q0_Q1`, `INET_Q_UPAR`, `INET_Q_PMAC`,
+   `FABRIC_REFCLK_OE_L_I/R_I`, `FABRIC_REFCLK_OUTPUT_SEL_I[4:0]`).
+   Consistently, the vendor's per-die CSR generator demands quad-topology
+   inputs the 60 flow lacks (`refomux0_sel`, `ref_prop_dir`, a full `[q1]`
+   block). Generation must run in the IDE IP Core Generator; the exact field
+   list is `hdl/gowin/138B/dp_serdes/README.md`.
+   *(Note this affects the die, not the package: only Q0 bonds out on PG484 on
+   both dies — the 138's second quad exists on the die but has no pads here.)*
 2. **DDR3 IO types**: the GW5AST die has no `SSTL15_I`/`SSTL15D_I` (PnR CT1109)
    — use `SSTL15`/`SSTL15D`, `DRIVE=8`. Already in `a2mega_138b.cst`.
 3. **PLLs**: the GW5AST die has **no PLLA resource at all** (PnR RP0008); every
@@ -176,8 +191,15 @@ mistaken for "the same bitstream runs".
 
 - **No carrier ball is power/GND/NC on one die and I/O on the other.** Checked
   all 180; zero `TYPE` mismatches.
-- **No second SERDES quad** exists on PG484 on either die, so nothing can be
-  gained (or lost) by quad reassignment.
+- **No second SERDES quad is bonded out** on PG484 on either die (the 138 die
+  *has* a Q1 — see §4 — but none of its pads reach this package), so nothing
+  can be gained or lost by quad reassignment on the carrier.
+- **Rotating the carrier's DP0..DP3 → TUSB1046A assignment cannot make the two
+  SOMs lane-identical**, so it is not a 1.0a4 option worth spending routing on.
+  Because the dies transpose lanes 1↔3, *any* choice of two adjacent pairs
+  lands on different die-lane pairs: DP0+DP1 gives {3,2} on the 60B and {1,2}
+  on the 138B; DP1+DP2 gives {2,1} and {2,3}. A per-die IP regeneration is
+  required under every routing, so the current routing is as good as any.
 - **The DP pads' TXM/TXP polarity order is identical**, so the "all four pairs
   P/N swapped" carrier fact — and its `tx_pol_invert` compensation — is
   die-independent.
