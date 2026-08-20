@@ -141,6 +141,26 @@ no rev until the OPEN items that could change the netlist are closed.
    adjustable current limit ~2-3 A (bus-powered hub + downstream), and
    programmable soft-start slew (which is also half of item 5's inrush
    fix). Shortlist by stock at layout time.
+4b. **Power-source architecture review (NEW 08-20 — user-corrected
+   topology).** Three 5V ingress paths exist: (1) USB-C VBUS — the
+   normal path (via LM66100DCKR? confirm from schematic); (2) Apple II
+   edge connector 5V through a transistor + LM74700 ideal-diode
+   controller; (3) the SOM's JTAG-connector 5V pin (for powering the SOM
+   during configuration), which connects through the BTB and feeds the
+   board. OPEN PROBLEM, uncharacterized on BOTH axes: when 5V arrives
+   via a non-VBUS path (2 or 3), the USB-C connection is "not happy" —
+   the specific failure mode is not recalled/recorded and the cause is
+   unknown; all that is established is that a problem is believed to
+   exist. 1.0a4 actions: (a) characterize on the bench pre-layout if
+   schedule allows — symptom first (what exactly breaks, on which
+   path), then cause; (b) review the ideal-diode/mux chain as a SYSTEM
+   with item 4's new VBUS eFuse — source priorities, backfeed
+   directions, and VCONN's role (the 08-17 "powered by VCONN = weird
+   results" anomaly belongs to this investigation); (c) note the bench
+   interaction: item 4's reverse blocking removes hub-backfeed as the
+   de-facto bench supply, so the bench powering story must be
+   deliberate on 1.0a4, not accidental.
+
 5. **Local bulk capacitance on the VBUS source rail** for bus-powered
    sink inrush: hub cold-boot inrush through the source switch sagged
    the shared rail hard enough to kill ESP32 WiFi for ~1 min in-slot
