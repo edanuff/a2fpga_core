@@ -90,8 +90,15 @@ production configuration with **only the lane numbers changed**.
    Equalization **Auto**, SD Threshold **100 mV**, ATT 7 / BOOST 9.
    *(The 60B production build later moved to 900 mV + FFE Manual C0=32/C1=8 as
    a drive experiment; start the 138B from the plain baseline.)*
-7. **Channel Bonding: None.** ⚠ The TX-bonding checkbox emits a broken
-   half-bond in both generator versions — never enable it (WS4 §9).
+7. **TX Channel Bonding: CHECKED** (Master Q0 Lane2, Read Start Depth 16) —
+   exactly as the sidecar prefills it and exactly as the hardware-proven 60B
+   production `.ipc` has it (`TX_CHANNEL_BONDING=true`). ⚠ Nuance from WS4
+   §9: the checkbox emits a *non-functional* bond (`chbond_enable=false` in
+   the toml — the "half-bond"), so bonding can never be *relied on*; but our
+   design doesn't rely on it — this group's real effect in our config is the
+   master-channel word-clock selection, which the shim and `.sdc` depend on.
+   Do not uncheck it. **RX Channel Bonding = None** (separate field) is the
+   one that stays off.
 8. OK, OK. Then **verify the emission before building**:
    - `serdes_tmp.toml` — `[q0.ln1]` and `[q0.ln2]` have `enable = true`,
      `tx_data_rate = "2.7G"`, `width_mode = 20`, `encode_mode = "OFF"`,
