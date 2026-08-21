@@ -24,23 +24,42 @@ through the hub, then the 65C816. Sim-first discipline throughout.
 Bar: **power-on → picture, reliably, in the full-core in-slot
 configuration** — because that is the configuration the CPU work lives in.
 
-- V1. **Offset/wrap fix.** Sim agent (in flight) delivers mechanism +
-  reproducer + proposed diff; user reviews; apply; re-run reproducer +
-  tb_sr_highhalf + video_restart tbs; hardware-verify on B3 (marginal
-  catches must render centered — or video starts made phase-deterministic
-  so marginal catches cannot latch a rotated frame).
-- V2. **Fold Stage-5 DP into the full core.** dp_test carries the
-  production link policy (v3: plain retrain, scrambler high-half fix,
-  truthful declarations, honest teardown) — the full `a2mega.gprj` core
-  predates it. Port + build + verify Apple II video over DP in-slot.
-- V3. **Repower reliability stats, defined bar:** ≥19/20 cold power-on
-  catches to picture (Anker + monitor, ambient bench) on the full core.
-  Log as test rows; this number is the go/no-go for Phase C.
-- V4 (ergonomics, strongly recommended before C): fw recovery ladder —
-  fix 'r' (HPD pulse > 2 ms), attempt virtual replug (PD exit/re-enter;
-  may not clear the drain-only wedge — row 57 — but cheap to try), and
-  document the 30 s full-drain as the last rung so a mid-session wedge
-  costs seconds-to-a-minute, not a debugging detour.
+**REORDERED 08-20 (user):** the full core takes a very long time to
+build; dp_test rebuilds in ~10 min with full telemetry. So EXHAUST the
+reliability exploration on the fast build first, port once, validate
+once. The Phase M firmware/gateware items are absorbed here in priority
+order (their full descriptions remain in Phase M below as reference).
+
+- V1. **Offset/wrap fix — ✅ DONE 08-20** (applied 6a0eaa3f, sim-proven,
+  hardware-confirmed row 62).
+- V2. **Fast-build reliability program (on dp_test), in order:**
+  1. Recovery-ergonomics fw (was V4): fix 'r' (HPD pulse > 2 ms) +
+     virtual replug (PD exit/re-enter) — these UNLOCK the per-setting
+     scans below (a fresh attach per data point stops costing a 30 s
+     cable ceremony); 30 s full-drain stays documented as last rung.
+  2. M1 completion: equilibrium thermal measurement + warm-attach
+     count → decide default-on for the lane disable.
+  3. M2: acquisition-per-setting EQ scan (full 16-step ladder,
+     physical/virtual reattach per setting).
+  4. M5: runtime swing/FFE via DRP — honor ADJUST_REQUEST (sim-first;
+     starts with the 804-vs-900 .csr diff; the biggest margin lever).
+  5. M6: POR correctness (refclk-stable gating; reconnect fabric POR
+     on the 60K emission and retest draw re-rolls).
+  6. M7: bonding / inter-lane startup skew (genuinely-bonded emission
+     via toml edit + CLI csr; power-up skew stats).
+  7. M3: pin-assignment D/F + mux DP2 mode (closes failure class 3;
+     testable on dp_test against the D/F-only hubs).
+  (M4 layout audit = desk work, runs in parallel with any of these.
+  Cold 804/900 A/B folds into whichever bench morning comes first.)
+- V3. **Fold Stage-5 DP into the full core (was V2) — AFTER the
+  reliability program**, carrying everything proven above in one port:
+  link policy, TLVDS AUX front-end + cst, telemetry serializer, LED
+  semantics, plus whatever V2 adds (ADJUST_REQUEST loop, POR fix,
+  bonding config, lane-disable policy). Build on 1.9.12.03,
+  SecurityBit OFF, timing-close the big design once.
+- V4. **Repower reliability bar (was V3):** ≥19/20 cold power-on catches
+  to picture (Anker + monitor, ambient) on the FULL CORE in-slot.
+  Go/no-go for Phase C.
 - Board roles: **B1 (60K, production v3) = the in-slot GS article**;
   B3 (138K) stays the DP margin/A/B testbed. 804/900 cold A/B continues
   opportunistically on B3 — it informs 1.0a4 margins, not this plan's
@@ -128,8 +147,8 @@ regardless of CPU presence).
   HyperRAM endgame, explicitly out of scope here).
 
 ## Phase M — margin & compatibility work items (user review 08-20;
-all firmware/gateware, no board change; interleave with V/U as bench
-time allows)
+all firmware/gateware, no board change). **ABSORBED into Phase V2's
+priority order 08-20** — kept here as the reference descriptions.
 
 - M1. **Disable the two unused mux DP lanes** (DPx_DISABLE bits, reg
   0x13, after orientation known — pick the right pair per FLIP). All
