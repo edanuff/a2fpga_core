@@ -76,6 +76,24 @@ observations, and the dB formula is the standard FFE de-emphasis model
 — both flagged for bench refinement (the per-level A/B in step 3 is
 also the empirical check).
 
+## Boot-path vs reconfig-path encoding quirk (08-21, ticket note)
+
+The BOOT csr always contains a base AFE write block (0x334=0xE000,
+0x338=0x0B00, FFE-manual bit unset so the coefficients are inert in
+Auto); non-default GUI choices APPEND override writes at the csr tail
+(the 900 build = 804 csr + 6 lines). Discrepancy: boot path writes
+0xE000 for toml txlev=13 where the Reconfiguration-dialog export writes
+0xD000 for the same level (both agree on 0xF000 at 15) — an
+off-by-one-with-clamp between the two generator paths. Resolution =
+the DRP peek reading the live register (queued with the config-path
+audit). Also recorded 08-21: the fabric csr_replay ROM is ON-DEMAND
+only (replay_req handshake; CR telemetry lines are the read-back dump
+display) — normal boots run pure vendor config-time values, so the
+804/900 hardware A/B was clean; the previously-stale shared ROM
+(60K-era in all 138B builds) was a dormant trap only, now regenerated
+per-build via gen_csr_replay.py <csr-path> (60B copy preserved as
+csr_replay_rom_60b.svh).
+
 ## Next steps
 1. ~~Fabric FSM (sim-first)~~ — **DONE 08-21**: `afe_adjust_seq.v` +
    unit & closed-loop TBs all PASS; design, sim results, and the

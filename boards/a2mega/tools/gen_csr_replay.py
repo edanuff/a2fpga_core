@@ -13,10 +13,19 @@ write sequence at runtime (common-block draw re-roll experiment,
 Output: hdl/displayport/gowin/csr_replay_rom.svh (repo root)
 """
 import re
+import sys
 import pathlib
 
 root = pathlib.Path(__file__).resolve().parents[1]
-csr = (root / "hdl/gowin/60B/dp_serdes/dp_serdes.csr").read_text()
+# Optional argv[1] = csr path (e.g. the 138B emission); default stays the
+# 60B production csr. ⚠ The output is one SHARED include consumed by
+# transceiver_bank_gowin.v — regenerate it from the csr matching the die
+# you are about to BUILD (stale-ROM trap, found 2026-08-21: every 138B
+# build to that date carried the 60K sequence; harmless only because
+# replay is on-demand).
+csr_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else (
+    root / "hdl/gowin/60B/dp_serdes/dp_serdes.csr")
+csr = csr_path.read_text()
 out = root.parents[1] / "hdl/displayport/gowin/csr_replay_rom.svh"
 
 writes = re.findall(r"upar_write_driver\(0x([0-9a-fA-F]+),0x([0-9a-fA-F]+)\)", csr)
