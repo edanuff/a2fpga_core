@@ -257,12 +257,13 @@ no rev until the OPEN items that could change the netlist are closed.
 
 5d. **TI app-note intake (08-20: SLLA404 = TUSB1046A config guide,
    SLLA365 = TUSB546 DP-only application; PDFs in this docs dir):**
-   (a) ⚠ FIRMWARE LEAD — **AUX SNOOP**: the mux monitors AUX traffic to
-   power DP lanes up/down; snoop-disabled (reg 0x13 bit7 in I2C mode,
-   per SLLA365 Table 1) forces ALL FOUR lanes always-enabled. Our x-dump
-   shows reg 0x13=0x00 = snoop ACTIVE — a snooper misparsing our
-   (historically out-of-spec) AUX could be lane-cycling under us.
-   One-register experiment; verify 1046A reg-map equivalence first.
+   (a) **AUX SNOOP: already handled — CLOSED.** The app-note lead
+   (snooper powers DP lanes from decoded AUX; disable = reg 0x13 bit7)
+   turned out to be firmware policy since 08-13: usbc_glue.cpp writes
+   TUSB_DP_SNOOP_DIS + AUX_SBU_OVR at every dp_enable, with forensics
+   ("bit us three ways") in the comment. The idle x-dump reading
+   0x13=0x00 is just the pre-attach default — the write lands at
+   alt-mode entry. No action; recorded so the lead isn't re-chased.
    (b) FIRMWARE — full 16-step DPEQ ladder via I2C (1.0..14.4 dB,
    SLLA404 Table 1); our 'e' key uses only the 4 pin-strap values
    (1.0/6.5/9.5/12.3) — finer margin characterization + 2 dB more max
