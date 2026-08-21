@@ -11,7 +11,8 @@ catches can ship a shifted screen; recovery requires a full re-acquisition).
 
 Status: **mechanism identified by RTL analysis and REPRODUCED in simulation**
 (`hdl/displayport/sim/tb_offset_wrap.v`). Fix proposed below as a diff
-(not applied — shared production RTL).
+(not applied — shared production RTL); the exact sim-verified patch is
+also saved apply-ready as `boards/a2mega/docs/offset_wrap_fix.patch`.
 
 ---
 
@@ -272,6 +273,11 @@ Every disturbance is healed by a single self-restart (the lone starved
 fetch is the trigger event); the idle->video switch re-fires in every
 scenario; the packer's own shadow-model equivalence assertions stay
 silent through every resync.
+
+The identical sweep at the **wide** geometry (real H 1920/2200, real
+FIFO) gives the same verdict — all 10 scenarios `dx=0 dy=0 UNIFORM
+STABLE`, `d_miss=1` per disturbance, switch re-fires everywhere:
+`RESULT: all scenarios kept the boot alignment — bug NOT reproduced.`
 
 ### Regression: existing testbench properties
 
