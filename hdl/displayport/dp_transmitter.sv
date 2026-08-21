@@ -58,6 +58,8 @@ module dp_transmitter #(
     // (a2mega 1.0a3). DPCD writes still transmit; replies are not awaited.
     // See aux_channel.v for the full contract. 0 = spec-compliant flow.
     parameter int BLIND_SINK      = 0,
+    // Closed-loop: restart the ladder when HPD drops >=2 ms (see aux_channel.v).
+    parameter int HPD_DISCONNECT_RESETS = 1,
     // Bring-up lane probe: force the SERDES powered and transmit a raw
     // ~4.2 MHz square on both lanes (scope-visible). See transceiver bank.
     parameter int TX_PROBE        = 0,
@@ -469,7 +471,8 @@ module dp_transmitter #(
     // Link policy: AUX channel, EDID/DPCD, link training
     // ------------------------------------------------------------------
     channel_management #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
-                         .BLIND_SINK(BLIND_SINK)) i_channel_management(
+                         .BLIND_SINK(BLIND_SINK),
+                         .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS)) i_channel_management(
         .clk100               (clk100),
         .debug                (debug),
         .debug_rx             (debug_rx),

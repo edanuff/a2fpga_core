@@ -60,7 +60,8 @@
 
 module channel_management #(
     parameter LINK_RATE_MBPS = 2700,
-    parameter BLIND_SINK = 0   // open-loop link policy (see aux_channel.v)
+    parameter BLIND_SINK = 0,  // open-loop link policy (see aux_channel.v)
+    parameter HPD_DISCONNECT_RESETS = 1  // closed-loop: reset ladder on HPD drop (see aux_channel.v)
 )(
         input  clk100,
         output [7:0] debug,
@@ -206,7 +207,8 @@ hotplug_decode i_hotplug_decode(
     );
 
 aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
-              .BLIND_SINK(BLIND_SINK)) i_aux_channel(
+              .BLIND_SINK(BLIND_SINK),
+              .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS)) i_aux_channel(
         .clk             (clk100),
         .debug_pmod      (debug),
         .debug_gate      (debug_gate),

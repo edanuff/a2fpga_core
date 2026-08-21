@@ -70,7 +70,19 @@
 // EQ/swing adaptation, no link-quality re-check. Default 0 = spec flow.
 module aux_channel #(
     parameter LINK_RATE_MBPS = 2700,
-    parameter BLIND_SINK = 0
+    parameter BLIND_SINK = 0,
+    // HPD_DISCONNECT_RESETS: in closed-loop mode (BLIND_SINK=0), restart
+    // the ladder from reset when hotplug_decode drops `present` (>=2 ms
+    // HPD low = disconnect per spec). Historically the closed-loop FSM
+    // ignored hpd_present entirely — which made a real unplug invisible
+    // until check_wait noticed, and made the firmware's HPD-pulse
+    // retrain ('r', 250 ms low) inert on every closed-loop build.
+    // CAUTION: an unconditional HPD reset was part of the retracted
+    // hybrid change set (test log row 51); the bisect analysis called
+    // this piece innocent but never isolated it empirically — hence a
+    // parameter, so the cold-Anker regression check can gate it and
+    // production can disable it independently of the fix's other users.
+    parameter HPD_DISCONNECT_RESETS = 1
 )(
         input        clk,
         output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
@@ -702,7 +714,8 @@ always @(posedge clk) begin
     // Holding here also restarts training from scratch whenever HPD
     // drops and returns.
     //---------------------------------------------------------------
-    if(BLIND_SINK != 0 && hpd_present == 1'b0) begin
+    if((BLIND_SINK != 0 || HPD_DISCONNECT_RESETS != 0) &&
+       hpd_present == 1'b0) begin
         next_state <= reset;
         state      <= error;
     end
