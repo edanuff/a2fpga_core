@@ -72,18 +72,30 @@ GS_D_DIR, GS_PH2, GS_RW, GS_RDY + GS_RDY_OUT, GS_RESET, GS_IRQ, GS_NMI,
 GS_ABORT, GS_BE, GS_VP, transceiver controls GS_DATA_~OE / GS_ADDR_~OE /
 GS_~OE. RTL: `boards/a2mega/hdl/twgs/65C816/P65C816.sv` (+ALU etc.) and
 `iigs_65816_wrapper.sv` (phi-phase state machine, CDC). Authority:
-`twgs_reference.md` (TWGS = the architecture template: CPU out of the
-motherboard socket, ribbon interposer to the card, motherboard never
-exceeds Fast speed).
+`twgs_reference.md` (TWGS = the architecture template).
+
+**Topology (user-corrected 08-20): there is NO socketed CPU, ever.**
+The ribbon cable plugs into the EMPTY IIgs CPU socket and carries all
+socket signals to the card in the slot. Expected operation: machine
+powers up → **the card holds the GS in reset while the FPGA
+configures** → reset released → our core executes at the socket pins.
+So CPU-vs-card contention does not exist as a category; the contention
+analysis is card-vs-MOTHERBOARD (data bus during reads; PH2/RDY/IRQ
+are motherboard-driven inputs — the FPI supplies PH2 into the socket
+regardless of CPU presence).
 
 - C0. **Circuit design review (paper, before power):** schematic walk of
   the GS_* transceiver chain — directions, OE polarities, 5 V
-  tolerance/level shifting, and CRITICALLY the power-on/config-time
-  state: pulls must hold every transceiver DISABLED while the FPGA is
-  unconfigured/reconfiguring so a half-alive card can never fight the
-  bus or damage a CPU. Also: physical interposer hardware status (ribbon
-  cable + socket plug — exists? needs fabrication?). Deliverable:
-  `GS_SOCKET_INTERFACE.md` signal-by-signal.
+  tolerance/level shifting — and CRITICALLY the unconfigured/config-time
+  board-level defaults, which must guarantee BOTH: (a) **GS /RES held
+  asserted while the FPGA is unconfigured or reconfiguring** (the
+  fabric cannot drive it during config — this hold must come from
+  pulls/buffer-enable defaults; it is the load-bearing element of the
+  power-up choreography) and (b) every bus transceiver DISABLED so a
+  half-alive card cannot fight motherboard drivers. Also: physical
+  interposer hardware status (ribbon cable + socket plug — exists?
+  needs fabrication?). Deliverable: `GS_SOCKET_INTERFACE.md`
+  signal-by-signal.
 - C1. **RTL inventory:** P65C816 core provenance/completeness;
   wrapper review against real 65816 bus timing — bank byte multiplexed
   on D0-7 during PHI1 (wrapper today shows 16-bit addr_out + dbg_addr
@@ -94,13 +106,15 @@ exceeds Fast speed).
   memory map). Milestones: reset-vector fetch ($00FFFC) → first N
   instructions match a golden trace from a software emulator → IRQ/RDY/
   stretch behavior correct. No hardware until this passes.
-- C3. **Passive hardware first (safest circuit exercise):** a
-  listen-only bitstream — all GS_* OEs held inactive, inputs only —
-  streaming captured PH2/RESET/bus activity via telemetry, with the
-  REAL CPU running the machine (through the interposer if its topology
-  passes through; observing only PH2/RESET/control if not). This
-  exercises the receive path of every level shifter with zero contention
-  risk and validates the C0 paper review on silicon.
+- C3. **Reset-parked listen first (safest circuit exercise — no CPU
+  exists to snoop):** ribbon in, listen-only bitstream — all GS_* OEs
+  inactive, /RES kept ASSERTED — observe PH2 (frequency/duty; the FPI
+  drives it into the socket even in reset), input levels (IRQ/NMI/RDY),
+  and stream them via telemetry. This exercises every level shifter
+  receive path with the machine safely parked, validating the C0 paper
+  review on silicon. Optional half-step before driving: release /RES
+  with the bus still undriven — the motherboard fetches floating
+  garbage harmlessly; confirms reset-release behavior in isolation.
 - C4. **First drive:** real CPU out, our core in. Milestone ladder:
   (a) sane vector fetch on the bus analyzer, (b) ROM startup executes
   (border/beep activity), (c) self-test progresses, (d) boot chime +
