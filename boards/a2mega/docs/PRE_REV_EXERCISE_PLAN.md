@@ -127,6 +127,48 @@ regardless of CPU presence).
   compatibility polish and NOT TransWarp acceleration (that is the
   HyperRAM endgame, explicitly out of scope here).
 
+## Phase M — margin & compatibility work items (user review 08-20;
+all firmware/gateware, no board change; interleave with V/U as bench
+time allows)
+
+- M1. **Disable the two unused mux DP lanes** (DPx_DISABLE bits, reg
+  0x13, after orientation known — pick the right pair per FLIP). All
+  four linear channels are biased today (634 mW assumes DP4); halving
+  the active DP path may cut self-heating on the very chip whose
+  temperature sets acquisition margin. Measure: IR temp before/after at
+  steady state + warm-attach reliability counts. One register.
+- M2. **EQ acquisition-per-setting scan** (full 16-step ladder, per-lane
+  where useful) using PHYSICAL reconnects per setting — the hold-sweep
+  (row 63) proved tracking spans the ladder; acquisition is the
+  discriminating axis. Reconcile the default-EQ history first (fw boot
+  default is setting 0 = 1.0 dB; rows 55-62 corrected; check what B1's
+  fw era actually defaulted to before trusting old sweep narratives).
+  The 1.0-vs-6.5 empirical gap on a ~1.5 dB channel = the equalizer is
+  compensating launch artifacts, not FR-4 loss (feeds 5a). Ceremony
+  cost argues for doing V4's virtual-replug first.
+- M3. **Pin-assignment D/F negotiation + mux DP2 mode** — firmware today
+  accepts only assignment C and always sets CTLSEL=DP4; hubs offering
+  only D/F never get Configure (= failure class 3, UtechSmart). Add:
+  accept D/F in PD, set the mux "USB3 + 2-lane DP" General mode, FPGA
+  already 2-lane. Also the doorway to Phase U USB3 coexistence.
+- M4. **Layout audit vs TI rules (folds into 5a review):** pre-mux
+  100 Ω / post-mux 90 Ω impedance boundary (suspect 1.0a3 routed
+  uniformly), AC-cap placement/symmetry (observed: all caps sit near
+  the mux — check against SLLA404 placement guidance), GND stitching
+  ≤200 mil at transitions, ≤2 vias/pair, no-stub rule for any test
+  structure.
+- M5. **Runtime TX swing/FFE via DRP — honor ADJUST_REQUEST (the big
+  one).** Gowin documents runtime txlev/FFE/Cm/C1 reconfiguration via
+  DRP on the 138 (ordered .csr sequences; GUI exports them). Our design
+  already has DRP machinery (upar_arbiter + CR-replay path). Concrete
+  register-extraction method: DIFF the 804 mV and 900 mV .csr emissions
+  (both tomls in git; serdes_toml_to_csr_138k regenerates either) — the
+  differing writes ARE the swing/FFE sequence. Then the sink's
+  ADJUST_REQUEST (A: field) becomes a real control loop instead of
+  fixed-max-swing truthful declarations — directly attacks failure
+  class 1 (EQ-never/analog margin). SIM-FIRST; test 60K equivalence
+  after.
+
 ## Phase P — remaining board-turn gates
 
 - P1. Item 4b DMM power-path characterization (slot/LM74700 and
