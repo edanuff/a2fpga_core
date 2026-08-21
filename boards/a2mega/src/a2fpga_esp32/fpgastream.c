@@ -233,8 +233,11 @@ static void serve_one(int fd)
         fpga_jtag_init_pins();
         vTaskDelay(pdMS_TO_TICKS(try_n == 0 ? 100 : 400));
         id = fpga_jtag_idcode();
-        if (id != want_id)
+        if (id != want_id) {
+            osd_log("FS TRY%d IDCODE %08lX (want %08lX)", try_n,
+                    (unsigned long)id, (unsigned long)want_id);
             continue;
+        }
         /* KEEPSRAM entry first (tries 0-4): a configured fabric keeps
          * the boot engine satisfied, so it never re-arms auto-boot from
          * the valid flash image mid-operation — on the GW5AST-138 a
@@ -259,17 +262,21 @@ static void serve_one(int fd)
         fpga_jtag_spi_xfer(0x9F, NULL, jedec, 3);
         if ((jedec[0] == 0xFF && jedec[1] == 0xFF) ||
             (jedec[0] == 0x00 && jedec[1] == 0x00)) {
-            ESP_LOGE(TAG, "SPI passthrough dead (JEDEC %02x%02x%02x), retry",
-                     jedec[0], jedec[1], jedec[2]);
+            osd_log("FS TRY%d %s ID OK JEDEC %02X%02X%02X", try_n,
+                    try_n < 5 ? "KEEP" : "FULL",
+                    jedec[0], jedec[1], jedec[2]);
             continue;
         }
         entered = true;
     }
     if (!entered) {
         fpga_jtag_release_pins();
-        ESP_LOGE(TAG, "entry failed; last IDCODE %08lx JEDEC %02x%02x%02x",
+        char em[64];
+        osd_log("FS TRYEND ID %08lX JEDEC %02X%02X%02X",
+                (unsigned long)id, jedec[0], jedec[1], jedec[2]);
+        snprintf(em, sizeof(em), "ERR JTAG ENTRY id=%08lx jedec=%02x%02x%02x\n",
                  (unsigned long)id, jedec[0], jedec[1], jedec[2]);
-        send_str(fd, "ERR JTAG ENTRY (10 tries)\n");
+        send_str(fd, em);
         return;
     }
     ESP_LOGI(TAG, "flash JEDEC %02x%02x%02x", jedec[0], jedec[1], jedec[2]);
