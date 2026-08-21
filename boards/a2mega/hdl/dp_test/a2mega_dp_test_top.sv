@@ -203,6 +203,14 @@ module a2mega_dp_test_top (
         // not field-modifiable). TX works — run the link policy open-loop.
         // Remove when a board rev provides a real AUX front-end.
         .BLIND_SINK     (AUX_BLIND),
+        // OFF (isolation, 08-21): the default-on HPD-disconnect reset
+        // RESET-STORMS on strict sinks that flap HPD/status during hard
+        // attaches (Ugreen: Y:FF saturation, C:/A: never accumulate —
+        // qualitatively unlike the plow-through ladder's real battles).
+        // Very plausibly the actual hybrid-regression mechanism (row 51).
+        // Costs the 'r' key until the reset is redesigned (train-phase
+        // masked / rate-limited); 'v' still provides re-rolls.
+        .HPD_DISCONNECT_RESETS(0),
         .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.
