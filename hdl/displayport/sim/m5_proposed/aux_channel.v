@@ -1,0 +1,758 @@
+///////////////////////////////////////////////////////////////////////////////
+// ./src/auxch/aux_channel.v : 
+//
+// Author: Mike Field <hamster@snap.net.nz>
+//
+// Part of the DisplayPort_Verlog project - an open implementation of the 
+// DisplayPort protocol for FPGA boards. 
+//
+// See https://github.com/hamsternz/DisplayPort_Verilog for latest versions.
+//
+///////////////////////////////////////////////////////////////////////////////
+// Version |  Notes
+// ----------------------------------------------------------------------------
+//   1.0   | Initial Release
+//
+///////////////////////////////////////////////////////////////////////////////
+//
+// MIT License
+// 
+// Copyright (c) 2019 Mike Field
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+//
+///////////////////////////////////////////////////////////////////////////////
+//
+// Want to say thanks?
+//
+// This design has taken many hours - 3 months of work for the initial VHDL
+// design, and another month or so to convert it to Verilog for this release.
+//
+// I'm more than happy to share it if you can make use of it. It is released
+// under the MIT license, so you are not under any onus to say thanks, but....
+//
+// If you what to say thanks for this design either drop me an email, or how about
+// trying PayPal to my email (hamster@snap.net.nz)?
+//
+//  Educational use - Enough for a beer
+//  Hobbyist use    - Enough for a pizza
+//  Research use    - Enough to take the family out to dinner
+//  Commercial use  - A weeks pay for an engineer (I wish!)
+//
+///////////////////////////////////////////////////////////////////////////////
+`timescale 1ns / 1ps
+
+// BLIND_SINK: open-loop link policy for boards whose AUX RECEIVE path is
+// electrically dead but whose transmit works (a2mega 1.0a3: AUX is
+// AC-coupled with bias only on the mux side; a DP AUX reply's <=1.38 Vpp
+// swing can never cross an LVCMOS33 input threshold, and the board cannot
+// be field-modified). Every DPCD WRITE still goes out on the wire — the
+// sink gets configured normally — but the FSM advances on a timer instead
+// of reply bytes, reply timeouts do not reset it, training status reads
+// are assumed good (fixed dwell per pattern), and the sink is assumed to
+// match the source's lane count and rate. Costs: no EDID, no per-lane
+// EQ/swing adaptation, no link-quality re-check. Default 0 = spec flow.
+module aux_channel #(
+    parameter LINK_RATE_MBPS = 2700,
+    parameter BLIND_SINK = 0,
+    // M5: 1 = closed-loop TX-AFE adjust — TRAINING_LANEx_SET declares the
+    // registered train_set_byte (msg 0x19) instead of the fixed 0x06
+    // constant (msg 0x18). 0 = legacy, byte-identical.
+    parameter AFE_ADJUST = 0
+)(
+        input        clk,
+        // ready-to-send TRAINING_LANEx_SET value from afe_adjust_seq
+        // (tie to 8'h06 when AFE_ADJUST == 0)
+        input  [7:0] train_set_byte,
+        output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
+        output [7:0] debug_gate,  // {locks@check_wait[3:0], gate_fails[1:0], timeouts[1:0]}
+        output [7:0] debug_sink,  // DPCD 0x205 SINK_STATUS (latched each status read)
+        output [15:0] debug_rx,   // = {last byte, sync hits, rx bytes} from aux_interface
+        //------------------------------
+        output reg   edid_de,
+        output reg   dp_reg_de,
+        output reg   adjust_de,
+        output reg   status_de,
+        output reg   [7:0] aux_addr,
+        output reg   [7:0] aux_data,
+        //------------------------------
+        input  [2:0] link_count,
+        //----------------------------
+        input        hpd_irq,
+        input        hpd_present,
+        //------------------------------
+        output reg  tx_powerup,
+        output reg  tx_clock_train,
+        output reg  tx_align_train,
+        output reg  tx_link_established,
+        //-------------------------------
+        input       swing_0p4,
+        input       swing_0p6,
+        input       swing_0p8,
+        input       preemp_0p0,
+        input       preemp_3p5,
+        input       preemp_6p0,
+        input       clock_locked,
+        input       equ_locked,
+        input       symbol_locked,
+        input       align_locked,
+        //------------------------------
+        input       dp_tx_hp_detect,
+        input       aux_in,
+        output      aux_out,
+        output      aux_tri
+    );
+
+    localparam [7:0] error = 8'h00, reset = 8'h01, check_presence = 8'h02;
+
+    // Gathering Display information 
+    localparam [7:0] edid_block0     = 8'h03, edid_block1    = 8'h04, edid_block2 = 8'h05, edid_block3 = 8'h06;
+    localparam [7:0] edid_block4     = 8'h08, edid_block5    = 8'h09, edid_block6 = 8'h0A, edid_block7 = 8'h0B;
+
+    // Gathering display Port information
+    localparam [7:0] read_sink_count = 8'h0C, read_registers = 8'h0D;
+
+    // Link configuration states 
+    localparam [7:0] set_channel_coding = 8'h0E, set_speed_270    = 8'h0F, set_downspread   = 8'h10;
+    localparam [7:0] set_link_count_1   = 8'h11, set_link_count_2 = 8'h12, set_link_count_4 = 8'h13;
+
+    // Link training - clock recovery
+    localparam [7:0] clock_training = 8'h14, clock_voltage_0p4 = 8'h15, clock_voltage_0p6 = 8'h16, clock_voltage_0p8 = 8'h17;
+    localparam [7:0] clock_wait     = 8'h18, clock_test        = 8'h19, clock_adjust      = 8'h1A, clock_wait_after  = 8'h1B;
+
+    // Link training - alignment and preemphasis
+    localparam [7:0] align_training = 8'h1C; 
+    localparam [7:0] align_p0_V0p4 = 8'h1D, align_p0_V0p6 = 8'h1E, align_p0_V0p8    = 8'h1F;
+    localparam [7:0] align_p1_V0p4 = 8'h20, align_p1_V0p6 = 8'h21, align_p1_V0p8    = 8'h22;
+    localparam [7:0] align_p2_V0p4 = 8'h23, align_p2_V0p6 = 8'h24, align_p2_V0p8    = 8'h25;
+    localparam [7:0] align_wait0   = 8'h26, align_wait1   = 8'h27, align_wait2      = 8'h28, align_wait3 = 8'h29;
+    localparam [7:0] align_test    = 8'h2A,  align_adjust = 8'h2B, align_wait_after = 8'h2C;   
+
+    // Link up.
+    localparam [7:0] switch_to_normal = 8'h2D, link_established = 8'h2E;
+
+    // DPCD power state D0 wake (inserted before link configuration)
+    localparam [7:0] set_power_d0 = 8'h31;
+
+    // Checking the state of the link
+    localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
+                    
+    reg  [7:0]  state            = error;
+    reg  [7:0]  next_state       = error;
+    reg  [7:0]  state_on_success = error;
+    reg         retry_now;
+    reg  [28:0] retry_count;
+    reg         link_check_now;
+    reg [26:0]  link_check_count;
+    reg [14:0]  count_100us;
+    
+    reg       adjust_de_active;
+    reg       dp_reg_de_active;
+    reg       edid_de_active;
+    reg       status_de_active;
+    reg       msg_de;
+    reg [7:0] msg;
+    wire      msg_busy;
+
+    wire       aux_tx_wr_en;
+    wire [7:0] aux_tx_data;
+    wire       aux_tx_full;
+
+    wire       aux_rx_rd_en;
+    wire [7:0] aux_rx_data;
+    wire       aux_rx_empty;
+
+    reg [7:0] link_count_sink;
+    
+    wire      channel_busy;
+    wire      channel_timeout;
+    
+    reg [7:0] expected;
+    reg [7:0] rx_byte_count;
+    reg [7:0] aux_addr_i;
+    reg reset_addr_on_change;
+    
+    reg       just_read_from_rx;
+    reg  [3:0] powerup_mask;
+
+    // Per-state dwell timer (blind mode). 2026-08-14: widened from bit 17
+    // (~1.3 ms @100 MHz) to bit 23 (~84 ms) after the AD3 AUX decode showed
+    // the sink ACKing every write yet LANE0_1_STATUS stuck at CR_DONE=0 —
+    // the 1.3 ms sprint through the training states gave the sink no time
+    // to lock TPS1 before we advanced to scrambled video. ~84 ms per state
+    // is deep inside every sink's training budget; the full ladder still
+    // completes in ~2 s after HPD.
+    reg [23:0] blind_dwell = 24'd0;
+
+    assign debug_pmod = state;
+
+    // BLIND_SINK: assume training succeeded (no status reads possible)
+    wire clock_locked_i  = clock_locked  | (BLIND_SINK != 0);
+
+    // Instrument (2026-08-15): the lock signals are decode-time pulses —
+    // sample them exactly when the check_wait gate evaluates, and count
+    // the two possible established-loop reset causes separately.
+    reg [3:0] dbg_gate_locks = 4'd0;
+    reg [1:0] dbg_gate_fail  = 2'd0;
+    reg [1:0] dbg_timeouts   = 2'd0;
+    assign debug_gate = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
+    assign debug_sink = dbg_sink_status;
+    // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
+    // read): bit0/1 = RECEIVE_PORT_0/1 "sink is receiving a valid main
+    // stream". Splits dark-screen-with-solid-link: 0 = our MSA/stream
+    // rejected (source side); 1 = sink sees the stream, its output stage
+    // is the problem (converter/HDCP side).
+    reg [7:0] dbg_sink_status = 8'd0;
+    wire equ_locked_i    = equ_locked    | (BLIND_SINK != 0);
+    wire symbol_locked_i = symbol_locked | (BLIND_SINK != 0);
+    wire align_locked_i  = align_locked  | (BLIND_SINK != 0);
+  
+
+initial begin
+    state            = error;
+    next_state       = error;
+    state_on_success = error;
+    retry_now        = 1'b0;
+    retry_count      = 29'h0200;
+    link_check_now   = 1'b0;
+    link_check_count = 27'h0200;
+    count_100us      = 15'd1000; 
+
+    adjust_de_active     = 1'b0;
+    dp_reg_de_active     = 1'b0;
+    edid_de_active       = 1'b0;
+    status_de_active     = 1'b0;
+    msg_de               = 1'b0;
+    msg                  = 8'b0;
+    link_count_sink      = 8'b0;
+    expected             = 8'b0;
+    rx_byte_count        = 8'b0;
+    aux_addr_i           = 8'b0;
+    reset_addr_on_change = 1'b0;
+
+    just_read_from_rx    = 1'b0;
+    powerup_mask         = 4'b0;
+
+    edid_de             = 1'b0;
+    dp_reg_de           = 1'b0;
+    adjust_de           = 1'b0;
+    status_de           = 1'b0;
+    aux_addr            = 8'b0;
+    aux_data            = 8'b0;
+    tx_powerup          = 1'b0;
+    tx_clock_train      = 1'b0;
+    tx_align_train      = 1'b0;
+    tx_link_established = 1'b0;
+end
+
+    // M5: which TRAINING_LANEx_SET message the set states send
+    wire [7:0] lane_set_msg = (AFE_ADJUST != 0) ? 8'h19 : 8'h18;
+
+dp_aux_messages #(.LINK_RATE_MBPS(LINK_RATE_MBPS)) i_aux_messages(
+         .clk          (clk),
+         .train_set_byte (train_set_byte),
+         // Interface to send messages
+         .msg_de       (msg_de),
+         .msg          (msg),
+         .busy         (msg_busy),
+         // Interface to the AUX Channel
+         .aux_tx_wr_en (aux_tx_wr_en),
+         .aux_tx_data  (aux_tx_data)
+     );
+
+aux_interface #(
+           // Blind mode: replies never come; don't hold `busy` 20 ms per
+           // transaction (sim-caught watchdog collision). 799 ticks = 400 us.
+           .REPLY_TIMEOUT_TICKS(BLIND_SINK != 0 ? 16'd799 : 16'd39999)
+       ) i_aux_interface(
+           .clk         (clk),
+           .debug_pmod  (debug_rx),   // {sync hits, rx bytes}
+            //---------------------------
+            .aux_in     (aux_in),
+            .aux_out    (aux_out),
+            .aux_tri    (aux_tri),
+            //----------------------------
+           .tx_wr_en    (aux_tx_wr_en),
+           .tx_data     (aux_tx_data),
+           .tx_full     (aux_tx_full),
+           //------------------------------
+           .rx_rd_en    (aux_rx_rd_en),
+           .rx_data     (aux_rx_data),
+           .rx_empty    (aux_rx_empty),
+           //------------------------------
+           .busy        (channel_busy),
+           .abort       (1'b0),   
+           .timeout     (channel_timeout)
+    );
+
+    assign aux_rx_rd_en = (!channel_busy) & (!aux_rx_empty);  // CHECK THIS!
+      
+always @(posedge clk) begin
+    //-----------------------------------------
+    // Are we going to change state this cycle?
+    //-----------------------------------------
+    msg_de <= 1'b0;
+     
+    if(next_state != state) begin
+        //-----------------------------------------------------------
+        // Get ready to count how many reply bytes have been received
+        //-----------------------------------------------------------
+        rx_byte_count <= 0;
+        
+        //-------------------------------------------------
+        // Controlling which FSM state to go to on success
+        //-------------------------------------------------
+        case(next_state)
+            reset:              state_on_success <= check_presence;
+            check_presence:     state_on_success <= read_sink_count;  // EDID skipped (DDC-class, converters DEFER it)                        
+            edid_block0:        state_on_success <= edid_block1;
+            edid_block1:        state_on_success <= edid_block2;
+            edid_block2:        state_on_success <= edid_block3;
+            edid_block3:        state_on_success <= edid_block4;
+            edid_block4:        state_on_success <= edid_block5;
+            edid_block5:        state_on_success <= edid_block6;
+            edid_block6:        state_on_success <= edid_block7;
+            edid_block7:        state_on_success <= read_sink_count;
+            read_sink_count:    state_on_success <= read_registers;        
+            read_registers:     state_on_success <= set_power_d0;
+            set_power_d0:       state_on_success <= set_channel_coding;
+            set_channel_coding: state_on_success <= set_speed_270;                        
+            set_speed_270:      state_on_success <= set_downspread;                        
+            set_downspread:     case(link_count)
+                                           3'b001:  state_on_success <= set_link_count_1;                        
+                                           3'b010:  state_on_success <= set_link_count_2;                        
+                                           3'b100:  state_on_success <= set_link_count_4;
+                                           default: state_on_success <= error;
+                                       endcase
+            set_link_count_1:   state_on_success <= clock_training; 
+            set_link_count_2:   state_on_success <= clock_training; 
+            set_link_count_4:   state_on_success <= clock_training; 
+            //----- Display Port clock training -------------------                        
+            clock_training:     state_on_success <= clock_voltage_0p4;
+            clock_voltage_0p4:  state_on_success <= clock_wait;
+            clock_voltage_0p6:  state_on_success <= clock_wait;
+            clock_voltage_0p8:  state_on_success <= clock_wait;
+            clock_wait:         state_on_success <= clock_test;                        
+            clock_test:         state_on_success <= clock_adjust;
+            clock_adjust:       state_on_success <= clock_wait_after;
+            clock_wait_after:   if(clock_locked_i == 1'b1) begin
+                                    state_on_success <= align_training;
+                                end else if(swing_0p8 == 1'b1) begin
+                                    state_on_success <= clock_voltage_0p8;
+                                end else if(swing_0p6 == 1'b1) begin
+                                    state_on_success <= clock_voltage_0p6;
+                                end else begin
+                                    state_on_success <= clock_voltage_0p4;
+                                end
+            //----- Display Port Alignment traning ------------                        
+            align_training:     if(swing_0p8 == 1'b1) begin
+                                     state_on_success <= align_p0_V0p8;
+                                end else if(swing_0p6 == 1'b1) begin
+                                     state_on_success <= align_p0_V0p6;
+                                end else begin
+                                     state_on_success <= align_p0_V0p4;
+                                end
+            align_p0_V0p4:      state_on_success <= align_wait0;
+            align_p0_V0p6:      state_on_success <= align_wait0;
+            align_p0_V0p8:      state_on_success <= align_wait0;
+            align_p1_V0p4:      state_on_success <= align_wait0;
+            align_p1_V0p6:      state_on_success <= align_wait0;
+            align_p1_V0p8:      state_on_success <= align_wait0;
+            align_p2_V0p4:      state_on_success <= align_wait0;
+            align_p2_V0p6:      state_on_success <= align_wait0;
+            align_p2_V0p8:      state_on_success <= align_wait0;
+            align_wait0:        state_on_success <= align_wait1;                        
+            align_wait1:        state_on_success <= align_wait2;                        
+            align_wait2:        state_on_success <= align_wait3;                        
+            align_wait3:        state_on_success <= align_test;                        
+            align_test:         state_on_success <= align_adjust;                        
+            align_adjust:       state_on_success <= align_wait_after;
+            align_wait_after:   if(symbol_locked_i == 1'b1) begin
+                                           state_on_success <= switch_to_normal;
+                                end else if(swing_0p8 == 1'b1) begin
+                                    if(preemp_6p0 == 1'b1) begin
+                                        state_on_success <= align_p2_V0p8;
+                                    end else if(preemp_3p5 == 1'b1) begin
+                                        state_on_success <= align_p1_V0p8;
+                                    end else begin
+                                        state_on_success <= align_p0_V0p8;
+                                    end
+                                end else if(swing_0p6 == 1'b1) begin
+                                    if(preemp_6p0 == 1'b1) begin
+                                        state_on_success <= align_p2_V0p6;
+                                    end else if(preemp_3p5 == 1'b1) begin
+                                        state_on_success <= align_p1_V0p6;
+                                    end else begin
+                                        state_on_success <= align_p0_V0p6;
+                                    end
+                                end else begin
+                                    if(preemp_6p0 == 1'b1) begin
+                                        state_on_success <= align_p2_V0p4;
+                                    end else if(preemp_3p5 == 1'b1) begin
+                                        state_on_success <= align_p1_V0p4;
+                                    end else begin
+                                        state_on_success <= align_p0_V0p4;
+                                    end 
+                                end                        
+            switch_to_normal:   state_on_success <= link_established;  
+            link_established:   state_on_success <= link_established;
+            check_link:         state_on_success <= check_wait;
+            check_wait:         begin
+                                dbg_gate_locks <= {clock_locked_i, equ_locked_i, symbol_locked_i, align_locked_i};
+                                // (check-non-fatal diagnostic reverted 08-18 night: it
+                                // answered the Ugreen question — genuine sink loss — and
+                                // then BLOCKED the Anker path's recovery-by-retrain on
+                                // marginal instances. Teardown/retrain is load-bearing.)
+                                if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
+                                    state_on_success <= link_established;
+                                end else begin
+                                    dbg_gate_fail    <= dbg_gate_fail + 2'd1;
+                                    state_on_success <= error;
+                                end
+                                end
+            error:              state_on_success <= error;
+        endcase
+
+        //----------------------------------------------------------
+        // Controlling what message will be sent, how many words are 
+        // expected back, and where it will be routed
+        //
+        // NOTE: If you set 'expected' incorrectly then bytes will
+        //       get left in the RX FIFO, potentially corrupting things
+        //----------------------------------------------------------
+        msg_de               <= 1'b1;
+        status_de_active     <= 1'b0;
+        adjust_de_active     <= 1'b0;
+        dp_reg_de_active     <= 1'b0;
+        edid_de_active       <= 1'b0;
+        reset_addr_on_change <= 1'b0;                
+        case(next_state)
+            reset:                begin msg <= 8'h00; expected <= 8'h00; end
+            // 2026-08-15: presence via NATIVE DPCD read (msg 0x03 = sink
+            // count @ 0x200), not the I2C address-phase to 0x50 — DP->HDMI
+            // converters DEFER all DDC-class traffic indefinitely while
+            // their HDMI side settles, pinning the ladder at step one.
+            check_presence:       begin msg <= 8'h03; expected <= 8'h02; reset_addr_on_change <= 1'b1; end
+
+            edid_block0:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
+            edid_block1:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
+            edid_block2:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
+            edid_block3:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
+            edid_block4:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
+            edid_block5:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
+            edid_block6:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
+            edid_block7:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
+                    
+            read_sink_count:      begin msg <= 8'h03; expected <= 8'h02; reset_addr_on_change <= 1'b1; end
+            read_registers:       begin msg <= 8'h04; expected <= 8'h0D; dp_reg_de_active <= 1'b1; end
+            set_power_d0:         begin msg <= 8'h13; expected <= 8'h01; end
+            set_channel_coding:   begin msg <= 8'h06; expected <= 8'h01;  end
+            set_speed_270:        begin msg <= 8'h07; expected <= 8'h01;  end
+            set_downspread:       begin msg <= 8'h08; expected <= 8'h01;  end
+            set_link_count_1:     begin msg <= 8'h09; expected <= 8'h01;  end
+            set_link_count_2:     begin msg <= 8'h0A; expected <= 8'h01;  end
+            set_link_count_4:     begin msg <= 8'h0B; expected <= 8'h01;  end
+                    
+            clock_training:       begin msg <= 8'h0C; expected <= 8'h01;  end
+            // BLIND_SINK: TRAINING_LANEx_SET must DECLARE what the TX
+            // actually drives — the sink calibrates against it and stalls
+            // while its ADJUST_REQUEST goes unanswered (live-hit 2026-08-14:
+            // monitor requested 0x22 all training while we declared level 0;
+            // CR never completed). The GTR12 is fixed at 804 mV = DP swing
+            // level 2, so blind mode always sends the 0p8/max message
+            // (0x06/lane = level 2 + MAX_SWING_REACHED).
+            // TRUTHFUL DECLARATIONS (2026-08-18): the GTR12 drive is fixed
+            // (804/900 mV = DP swing level 2, preemp 0) — the closed-loop
+            // ladder used to walk declared levels 0->1->2 while the analog
+            // never moved, the exact declared-vs-actual mismatch the blind
+            // path already fixed ("sink calibrates against it and stalls",
+            // live-hit 08-14). Declare the truth (msg 0x18 = level 2 +
+            // MAX_SWING_REACHED, preemp 0) in EVERY set state; the ladder
+            // keeps its state walk for pacing/retry structure.
+            clock_voltage_0p4:    begin msg <= lane_set_msg; expected <= 8'h01; end
+            clock_voltage_0p6:    begin msg <= lane_set_msg; expected <= 8'h01; end
+            clock_voltage_0p8:    begin msg <= lane_set_msg; expected <= 8'h01; end
+            clock_wait:           begin msg <= 8'h00; expected <= 8'h00;  reset_addr_on_change <= 1'b1; end
+            clock_test:           begin msg <= 8'h0D; expected <= 8'h09;  status_de_active <= 1'b1; reset_addr_on_change <= 1'b1; end
+            clock_adjust:         begin msg <= 8'h0E; expected <= 8'h03;  adjust_de_active <= 1'b1; end
+            clock_wait_after:     begin msg <= 8'h00; expected <= 8'h00;  end
+                    
+            align_training:       begin msg <= 8'h0F; expected <= 8'h01; end
+            // Truthful declarations here too: we never drive preemp — the
+            // p1/p2 messages (0x24..0x38) declared pre-emphasis the analog
+            // doesn't produce.
+            align_p0_V0p4:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p0_V0p6:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p0_V0p8:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p1_V0p4:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p1_V0p6:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p1_V0p8:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p2_V0p4:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p2_V0p6:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p2_V0p8:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_wait0:          begin msg <= 8'h00; expected <= 8'h00; end
+            align_wait1:          begin msg <= 8'h00; expected <= 8'h00; end
+            align_wait2:          begin msg <= 8'h00; expected <= 8'h00; end
+            align_wait3:          begin msg <= 8'h00; expected <= 8'h00;  reset_addr_on_change <= 1'b1; end
+            align_test:           begin msg <= 8'h0D; expected <= 8'h09;  status_de_active <= 1'b1; reset_addr_on_change <= 1'b1; end
+            align_adjust:         begin msg <= 8'h0E; expected <= 8'h03;  adjust_de_active <= 1'b1; end
+            align_wait_after:     begin msg <= 8'h00; expected <= 8'h00; end
+            switch_to_normal:     begin msg <= 8'h11; expected <= 8'h01; end
+            link_established:     begin msg <= 8'h00; expected <= 8'h00; reset_addr_on_change <= 1'b1; end
+            check_link:           begin msg <= 8'h0D; expected <= 8'h09; status_de_active <= 1'b1;  end
+            check_wait:           begin msg <= 8'h00; expected <= 8'h00; end
+            error:                begin msg <= 8'h00; end
+            default:              begin msg <= 8'h00; end
+        endcase
+
+        //------------------------------------------------------
+        // Set the control signals the state for the link state,  
+        // transceivers andmain channel pipeline 
+        //------------------------------------------------------
+        tx_powerup          <= 1'b0; 
+        tx_clock_train      <= 1'b0; 
+        tx_align_train      <= 1'b0; 
+        tx_link_established <= 1'b0;
+        case(next_state)
+            clock_training:       begin tx_powerup <= 1'b1; tx_clock_train <= 1'b1; end
+            clock_voltage_0p4:    begin tx_powerup <= 1'b1; tx_clock_train <= 1'b1; end
+            clock_voltage_0p6:    begin tx_powerup <= 1'b1; tx_clock_train <= 1'b1; end
+            clock_voltage_0p8:    begin tx_powerup <= 1'b1; tx_clock_train <= 1'b1; end
+            clock_wait:           begin tx_powerup <= 1'b1; tx_clock_train <= 1'b1; end
+            clock_test:           begin tx_powerup <= 1'b1; tx_clock_train <= 1'b1; end
+            clock_adjust:         begin tx_powerup <= 1'b1; tx_clock_train <= 1'b1; end
+            clock_wait_after:     begin tx_powerup <= 1'b1; tx_clock_train <= 1'b1; end
+                    
+            align_training:       begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_p0_V0p4:        begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_p0_V0p6:        begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_p0_V0p8:        begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_p1_V0p4:        begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_p1_V0p6:        begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_p1_V0p8:        begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_p2_V0p4:        begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_p2_V0p6:        begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_p2_V0p8:        begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_wait0:          begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_wait1:          begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_wait2:          begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_wait3:          begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_test:           begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_adjust:         begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            align_wait_after:     begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            switch_to_normal:     begin tx_powerup <= 1'b1; end
+            link_established:     begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            check_link:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            check_wait:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+        endcase
+    end
+
+    //------------------------------------------------------
+    // Manage the small timer that counts how long we have 
+    // been in the current state (used for implementing 
+    // short waits for some FSM states) 
+    //------------------------------------------------------
+    if(state == next_state) begin
+        count_100us <= count_100us - 1;
+    end else begin
+        count_100us <= 15'd9999;                                        
+        if(reset_addr_on_change == 1'b1) begin
+            aux_addr_i <= 8'h0;
+        end                                       
+    end
+    state <= next_state;
+            
+    //-----------------------------------------------------------
+    // How a short wait is implemented...
+    //
+    // Has the 100us pause expired, when no data was expected?
+    // If so, move to the next test.            
+    //-----------------------------------------------------------
+    if(expected == 8'h00 && count_100us[14] == 1'b1) begin
+        next_state <= state_on_success;
+    end
+
+    //-----------------------------------------------------------
+    // BLIND_SINK: reply bytes will never arrive. Advance once the
+    // request has fully left the wire (channel idle) and a dwell
+    // has elapsed — the sink still RECEIVED the message; we simply
+    // do not wait to hear back. The dwell is ~1.3 ms (not the
+    // 100 us wait-state timer): with no status readback, each
+    // training pattern must persist long enough for a slow sink to
+    // adapt; the whole walk stays ~60 ms, inside the watchdog.
+    //-----------------------------------------------------------
+    if(state == next_state) begin
+        blind_dwell <= blind_dwell + 24'd1;
+    end else begin
+        blind_dwell <= 24'd0;
+    end
+    if(BLIND_SINK != 0 && channel_busy == 1'b0 && blind_dwell[23] == 1'b1) begin
+        next_state <= state_on_success;
+    end
+            
+    //------------------------------------------------------------
+    // Processing the data that has been received from the sink
+    // over the AUX channel. The data bytes are just streamed out
+    // to a downstream component that uses the values, and may 
+    // set flags that feed back in to control the FSM.
+    //------------------------------------------------------------
+    edid_de    <= 1'b0;
+    adjust_de  <= 1'b0;
+    dp_reg_de  <= 1'b0;                                
+    status_de  <= 1'b0;
+    if(channel_busy == 1'b0) begin
+        if(just_read_from_rx == 1'b1) begin
+            // Is this a short read?
+            if(rx_byte_count != expected-1 && aux_rx_empty == 1'b1) begin
+                next_state <= error;
+            end
+                                
+            if(rx_byte_count == 8'h00) begin
+                //------------------------------------------------
+                // Is the Ack missing? This doesn't work correctly
+                // if only byte is expected, as it gets overwritten 
+                // by the following 'if' statement.
+                //
+                // Do not change this behaviour, by what it should do
+                // is test for "In progress" or "Again" requests, and 
+                // retry the current operation.
+                //---------------------------------------------------- 
+                if(aux_rx_data != 8'h00) begin
+                    next_state <= error;
+                end
+                if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
+                    next_state <= state_on_success;
+                end
+                //--------------------------------------------
+                // Has the Sink indicated that we should retry
+                // the current command, to allow the sink time
+                // to process the request?
+                //
+                // This only works if there is just one byte
+                // in the FIFO. This only works for DPCD
+                // transactions that aeert "AUX DEFER"
+                //--------------------------------------------
+                if(aux_rx_data == 8'h20) begin
+                   // just flip states to force a retry.
+                    state      <= state_on_success;
+                    next_state <= state;  
+                end
+            end else begin
+                //-----------------------------------------------------------------
+                // Process a non-ack data byte, routing it out using the DE signals
+                //-----------------------------------------------------------------
+                edid_de    <= edid_de_active;
+                adjust_de  <= adjust_de_active;
+                dp_reg_de  <= dp_reg_de_active;                                
+                status_de  <= status_de_active;                                
+
+                aux_data   <= aux_rx_data;
+                aux_addr   <= aux_addr_i;
+                aux_addr_i <= aux_addr_i+1;
+                if(status_de_active == 1'b1 && aux_addr_i == 8'd5)
+                    dbg_sink_status <= aux_rx_data;                        
+                        
+                if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
+                    next_state <= state_on_success;
+                    if(reset_addr_on_change == 1'b1) begin
+                        aux_addr_i <= 8'h00; 
+                    end
+                end
+            end
+        end
+    end
+
+    //---------------------------------------------------
+    // Manage the AUX channel timeout and the retry to  
+    // establish a link. 
+    //-----------------------------------------------------------                            
+    //    if channel_timeout = 1'b1 or (state /= reset and state /= link_established and retry_now = 1'b1) then
+    // (BLIND_SINK: reply timeouts are the EXPECTED outcome of every
+    // transaction — they must not reset the FSM. The periodic retry_now
+    // watchdog is kept in both modes.)
+    if (BLIND_SINK == 0 && channel_timeout == 1'b1)
+        dbg_timeouts <= dbg_timeouts + 2'd1;
+    if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
+                                  (state != reset      && state != link_established &&
+                                   state != check_link && state != check_wait       && retry_now == 1'b1)) begin
+        next_state <= reset;
+        state      <= error;
+    end
+    
+    //-----------------------------------------------
+    // If the link was established, then every
+    // now and then check the state of the link
+    //-----------------------------------------------
+    if(state == link_established && link_check_now == 1'b1) begin
+        next_state <= check_link;
+    end
+
+    //---------------------------------------------------------------
+    // BLIND_SINK: hold the ladder until a sink is actually present.
+    // The spec flow was implicitly gated by "the sink replies"; with
+    // replies assumed, the ladder would otherwise walk to
+    // link_established against an empty connector — and a monitor
+    // attached later would never see the training patterns it needs
+    // (live-hit on board #1: led2/3 asserted on a PC with no sink).
+    // Holding here also restarts training from scratch whenever HPD
+    // drops and returns.
+    //---------------------------------------------------------------
+    if(BLIND_SINK != 0 && hpd_present == 1'b0) begin
+        next_state <= reset;
+        state      <= error;
+    end
+
+    //-----------------------------------------------
+    // If the full message has been received, then 
+    // read any waiting data out of the FIFO.
+    // Also update the count of bytes read.
+    //-----------------------------------------------
+    if(channel_busy == 1'b0 && aux_rx_empty == 1'b0) begin
+        just_read_from_rx <= 1'b1;
+    end else begin
+        just_read_from_rx <= 1'b0;
+    end
+    if(just_read_from_rx == 1'b1) begin
+        rx_byte_count <= rx_byte_count+1;
+    end
+
+    //---------------------------------------
+    // Manage the reset timer
+    //---------------------------------------
+    if(retry_count == 0) begin
+        retry_now   <= 1'b1;
+        // Blind mode walks the ladder at ~84 ms/state (~2.1 s total) —
+        // the 0.5 s watchdog reset every walk forever (live-hit
+        // 2026-08-14: D cycling 02..06). 4 s keeps the watchdog while
+        // clearing the full walk with 2x margin.
+        retry_count <= (BLIND_SINK != 0) ? 29'd399999999 : 29'd49999999;
+    end else begin
+        retry_now   <= 1'b0;
+        retry_count <= retry_count - 1;
+    end
+    if(link_check_count == 0) begin
+        link_check_now   <= 1'b1;
+        // PPS actually became a 2Hz pulse....
+        link_check_count <= 27'd99999999;
+    end else begin
+        link_check_now   <= 1'b0;
+        link_check_count <= link_check_count - 1;
+    end
+end        
+endmodule
