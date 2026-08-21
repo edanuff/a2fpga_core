@@ -235,8 +235,22 @@ static void serve_one(int fd)
         id = fpga_jtag_idcode();
         if (id != want_id)
             continue;
-        if (!fpga_jtag_flash_enter())    /* fabric (if any) dies here */
-            continue;
+        /* KEEPSRAM entry first (tries 0-4): a configured fabric keeps
+         * the boot engine satisfied, so it never re-arms auto-boot from
+         * the valid flash image mid-operation — on the GW5AST-138 a
+         * full SRAM-erase entry re-arms it immediately and the config
+         * engine owns the SPI bus (dead passthrough on EVERY attempt
+         * with a bootable image in flash; blank-flash streams were
+         * unaffected — live-hit B3 08-20). Fall back to the full
+         * enter (tries 5+) for the blank/unconfigured-chip case where
+         * there is no fabric to keep. */
+        if (try_n < 5) {
+            if (!fpga_jtag_flash_enter_keepsram())
+                continue;
+        } else {
+            if (!fpga_jtag_flash_enter())   /* fabric (if any) dies here */
+                continue;
+        }
         /* Entry alone is not proof the JTAG->SPI passthrough is live:
          * a dead passthrough returns all-ones, which reads as
          * busy-forever in the erase poll (live-hit: ERASE FAILED with
