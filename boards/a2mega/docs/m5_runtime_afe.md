@@ -47,20 +47,44 @@ write 4 to latch new values.
   build exactly + strobe), sw13_manual_c1_0, sw15_cm5_c1_8 (located the
   CM field), and the empty auto variants kept as negative evidence.
 
-## Next steps
+## DP level mapping (derived 08-21 — engineering model, refine on bench)
 
-1. DP level mapping table: VS levels 0-3 → txlev values via the guide's
-   swing-mV table (anchors: 13=804 mV, 15=900 mV); PE levels 0-3
-   (0/3.5/6/9.5 dB) → C1 values. Deliverable: (VS,PE) → (txlev,CM,C1)
-   for the legal DP combos.
-2. Fabric FSM (sim-first): small sequence ROM + player driving the
+Swing law (IPUG1024 range 180-900 mV + our anchors txlev 13=804 /
+15=900): **Vdiffpp = 180 + 48·txlev mV**, linear, all 16 steps.
+
+FFE model (observed GUI behavior C1=8→C0=32, C1=0→C0=40 ⇒ C0 = 40−C1,
+constant total drive): de-emphasis dB = 20·log10(40/(40−2·C1)).
+
+| DP VS level | nominal | txlev (actual mV) |
+|---|---|---|
+| 0 | 400 mV | 5 (420) |
+| 1 | 600 mV | 9 (612) |
+| 2 | 800 mV | 13 (804) |
+| 3 | 1200 mV | 15 (900 = our max; declare MAX_SWING_REACHED) |
+
+| DP PE level | nominal dB | C1 (actual dB) |
+|---|---|---|
+| 0 | 0 | 0 (0) |
+| 1 | 3.5 | 7 (3.7) |
+| 2 | 6.0 | 10 (6.0 exact) |
+| 3 | 9.5 | 13 (9.1; declare MAX_PE at 3) |
+
+CM stays 0 (no pre-shoot tap in DP 1.x training). Note the resident
+900 mV build's C1=8 ≈ 4.4 dB sits between PE1 and PE2. CAVEATS: the
+swing law is exact by construction; the C0=40−C1 rule rests on two GUI
+observations, and the dB formula is the standard FFE de-emphasis model
+— both flagged for bench refinement (the per-level A/B in step 3 is
+also the empirical check).
+
+## Next steps
+1. Fabric FSM (sim-first): small sequence ROM + player driving the
    existing upar_arbiter DRP port; triggered by link_signal_mgmt when
    ADJUST_REQUEST differs from current levels, during TPS phases;
    TRAINING_LANE_SET then reports the actually-applied levels.
-3. Bench validation before automation: gateware hook to fire a stored
+2. Bench validation before automation: gateware hook to fire a stored
    sequence on command (telnet-triggered via ESP32/OSPI register) —
    apply swing changes on a live link, watch C:/Y:/A: telemetry.
-4. 60K equivalence: repeat the dialog exports from a 60K project
+3. 60K equivalence: repeat the dialog exports from a 60K project
    session; verify the same register family/stride (per-die check —
    do NOT assume).
 
