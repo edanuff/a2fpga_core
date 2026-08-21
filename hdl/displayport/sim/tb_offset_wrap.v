@@ -81,20 +81,43 @@
 //     hdl/displayport/core/skew_channels.v
 //   vvp /tmp/tb_offset_wrap.vvp
 //
-// (a full run is ~35 M symbol cycles; allow several minutes)
+// The full 1080p geometry is impractically slow in iverilog (~2.25 M
+// symbol cycles per frame, ~45 frames per sweep). The geometry is
+// parameterized and every stall/phase scales in line-times, so use a
+// shrunken config for iteration — mechanism-identical:
+//   tiny (seconds):      -Ptb_offset_wrap.H_VISIBLE=64
+//                        -Ptb_offset_wrap.H_TOTAL=110
+//                        -Ptb_offset_wrap.V_VISIBLE=48
+//                        -Ptb_offset_wrap.V_TOTAL=60
+//   wide (real H + FIFO arithmetic, ~minutes):
+//                        -Ptb_offset_wrap.V_VISIBLE=64
+//                        -Ptb_offset_wrap.V_TOTAL=70
+// Results 2026-08-20 (see boards/a2mega/docs/offset_wrap_investigation.md):
+// baseline reproduces the bug (controls/sub-saturation (0,0); saturating
+// stalls -> per-phase-different stable wrapped offsets, e.g. real-width
+// dx=266 / dx=466,dy=9 / dx=666,dy=18 / dx=64,dy=41); the proposed
+// SOF-recheck + starved-fetch resync patch pins all scenarios to (0,0).
 
 `timescale 1ps/1ps
 
-module tb_offset_wrap;
+module tb_offset_wrap #(
+    // 1080p 2-lane HBR geometry (production config) by default. All
+    // stall lengths / restart phases below are expressed in line-times
+    // and frame fractions, so the FIFO-saturation physics scale: a
+    // shrunken geometry (fast iteration, e.g. -Ptb_offset_wrap.H_VISIBLE=64
+    // -Ptb_offset_wrap.H_TOTAL=110 -Ptb_offset_wrap.V_VISIBLE=48
+    // -Ptb_offset_wrap.V_TOTAL=60) exercises the identical mechanism —
+    // H_TOTAL must be a multiple of 11 (the 11:10 pixel:symbol ratio).
+    parameter H_VISIBLE = 1920, H_TOTAL = 2200,
+    parameter V_VISIBLE = 1080, V_TOTAL = 1125
+);
 
-    // ---------------- 1080p 2-lane HBR geometry (production config) ----
-    localparam H_VISIBLE = 1920, H_TOTAL = 2200;
-    localparam V_VISIBLE = 1080, V_TOTAL = 1125;
     localparam TU_SIZE = 64;
-    localparam SYMS_PER_LINE = 4000;          // 2200*2*10/11
-    localparam VALID_NUM = 2112, VALID_DEN = 40;
-    localparam WORDS_PER_LINE = 960;          // H_VISIBLE/2
-    localparam FIFO_ADDR_BITS = 12;           // clog2(3*960)=12 -> depth 4096
+    localparam SYMS_PER_LINE = H_TOTAL*2*10/11;
+    localparam CYCLES_PER_LINE = SYMS_PER_LINE/2;
+    localparam VALID_NUM = 2112, VALID_DEN = 40;   // TU*3*11 / 2*10*2
+    localparam WORDS_PER_LINE = H_VISIBLE/2;
+    localparam FIFO_ADDR_BITS = $clog2(3*WORDS_PER_LINE);
     localparam FRAME_PIX = H_VISIBLE*V_VISIBLE;
 
     // ---------------- clocks: exact 11:10 pixel:symbol ratio -----------
@@ -158,7 +181,7 @@ module tb_offset_wrap;
         .clk(clk_sym), .reset(reset),
         .mvid_byte(8'hA6), .maud_byte(8'h00), .audio_mute(1'b1),
         .fifo_rdata(fifo_rpix), .fifo_rsof(fifo_rsof), .fifo_rvalid(fifo_rvalid),
-        .fifo_rd(fifo_rd), .fifo_rlevel({3'b000, fifo_rlevel}),
+        .fifo_rd(fifo_rd), .fifo_rlevel(16'(fifo_rlevel)),
         .capture_arm(capture_arm), .ready(pk_ready), .data(packed_data),
         .sdp_gap(sdp_gap), .frame_pulse(frame_pulse), .underrun(underrun)
     );
@@ -298,7 +321,7 @@ module tb_offset_wrap;
     // the restart phase within the frame
     task automatic wait_line(input integer l);
         begin
-            wait (i_packer.line_num == l[10:0] && i_packer.line_cycle == 11'd1000);
+            wait (i_packer.line_num == l && i_packer.line_cycle == CYCLES_PER_LINE/2);
         end
     endtask
 
@@ -313,7 +336,8 @@ module tb_offset_wrap;
         input integer pix_stall,     // pixel-periods the PIXEL clock stops
         input integer both_stall     // pixel-periods BOTH stop together
     );
-        integer fc0, d0, m0, t0;
+        integer fc0, d0, m0, t0, d1x, d1y;
+        reg stable;
         begin
             scen_n = scen_n + 1;
             wait_line(at_line);
@@ -340,16 +364,25 @@ module tb_offset_wrap;
             clock_train = 0; align_train = 1; #(2000*220);
             align_train = 0;
             link_established = 1;
-            // settle: transition frame(s) flush through, then measure
+            // settle: transition frames + the marginal-level sputter tail
+            // (drops/misses stop once the FIFO level re-converges to a
+            // non-colliding operating point), then measure two frames
+            // apart to prove the offset has frozen
             fc0 = frame_count;
-            wait (frame_count >= fc0 + 3);
-            // idle->video switch must have re-fired (tb_video_restart
-            // property) by now; give it one more frame if not
+            wait (frame_count >= fc0 + 6);
+            d1x = cur_dx; d1y = cur_dy;
+            wait (frame_count >= fc0 + 8);
+            stable = cur_uniform && (cur_dx == d1x) && (cur_dy == d1y);
+            // idle->video switch re-fire (tb_video_restart property):
+            // needs >=64k idle symbols after re-establish, which can
+            // exceed a small frame — allow up to 20 more frames
             t0 = frame_count;
-            if (!switched) wait (frame_count >= t0 + 1 || switched);
-            $display("SCEN %0d %0s @line %0d: dx=%0d dy=%0d %0s  (d_drop=%0d d_miss=%0d, switch=%0d, shift=%0d,%0d)",
+            while (!switched && frame_count < t0 + 20)
+                @(posedge clk_sym);
+            $display("SCEN %0d %0s @line %0d: dx=%0d dy=%0d %0s %0s (d_drop=%0d d_miss=%0d, switch=%0d, shift=%0d,%0d)",
                      scen_n, name, at_line, cur_dx, cur_dy,
                      cur_uniform ? "UNIFORM" : "MIXED",
+                     stable ? "STABLE" : "SETTLING",
                      drop_cnt-d0, miss_cnt-m0, switched,
                      cur_dx-prev_dx, cur_dy-prev_dy);
             if (!cur_uniform || cur_dx != prev_dx || cur_dy != prev_dy)
@@ -373,17 +406,33 @@ module tb_offset_wrap;
             $display("*** BOOT MISALIGNED — clean-start alignment broken ***");
         prev_dx = cur_dx; prev_dy = cur_dy;
 
-        //            name                    line  sym    pix    both
-        scenario("CONTROL retrain-only      ",  100,     0,     0,     0);
-        scenario("CONTROL both-clocks-stall ",  300, 0,     0,     30000);
-        scenario("SYM-stall  5k (sub-satur.)",  200,  5000,     0,     0);
-        scenario("SYM-stall 20k             ",  100, 20000,     0,     0);
-        scenario("SYM-stall 20k             ",  700, 20000,     0,     0);
-        scenario("SYM-stall 20k (vblank)    ", 1100, 20000,     0,     0);
-        scenario("SYM-stall 50k             ",  300, 50000,     0,     0);
-        scenario("PIX-stall 20k             ",  100,     0, 20000,     0);
-        scenario("PIX-stall 35k             ",  800,     0, 35000,     0);
-        scenario("PIX-stall  2k (short)     ",  400,     0,  2000,     0);
+        // Stall lengths in pixel-clock periods, expressed in line-times
+        // (H_TOTAL pixel clocks = 1 line). Saturation thresholds:
+        //   overflow  (SYM stall): needs > ~3.3 line-times (FIFO free
+        //             space above the ~1-line operating level)
+        //   underrun  (PIX stall): needs only ~1 line-time (PREFILL is
+        //             exactly one line) — the slack asymmetry
+        //   name                          line          sym-stall  pix-stall  both
+        scenario("CONTROL retrain-only      ", V_VISIBLE/10,
+                 0, 0, 0);
+        scenario("CONTROL both-clock-stall  ", V_VISIBLE/4,
+                 0, 0, 27*H_TOTAL/2);
+        scenario("SYM-stall 1.5 ln (sub-sat)", V_VISIBLE/5,
+                 3*H_TOTAL/2, 0, 0);
+        scenario("SYM-stall 9 ln            ", V_VISIBLE/10,
+                 9*H_TOTAL, 0, 0);
+        scenario("SYM-stall 9 ln            ", 2*V_VISIBLE/3,
+                 9*H_TOTAL, 0, 0);
+        scenario("SYM-stall 9 ln (vblank)   ", V_VISIBLE + (V_TOTAL-V_VISIBLE)/2,
+                 9*H_TOTAL, 0, 0);
+        scenario("SYM-stall 23 ln           ", V_VISIBLE/4,
+                 23*H_TOTAL, 0, 0);
+        scenario("PIX-stall 9 ln            ", V_VISIBLE/10,
+                 0, 9*H_TOTAL, 0);
+        scenario("PIX-stall 16 ln           ", 3*V_VISIBLE/4,
+                 0, 16*H_TOTAL, 0);
+        scenario("PIX-stall 0.9 ln (short)  ", V_VISIBLE/3,
+                 0, 9*H_TOTAL/10, 0);
 
         $display("");
         if (scen_fail == 0)
