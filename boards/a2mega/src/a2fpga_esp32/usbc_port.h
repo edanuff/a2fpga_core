@@ -41,6 +41,7 @@ typedef enum {
     USBC_STATE_DP_ACTIVE,
     USBC_STATE_USB_ONLY,
     USBC_STATE_HARD_RESET_OFF,
+    USBC_STATE_VIRTUAL_DETACH,
 } usbc_state_t;
 
 typedef enum {
@@ -133,6 +134,17 @@ void usbc_port_disable(usbc_port_t *port);
 
 /* Call from one task every 1 ms and immediately after FUSB302 INT_N falls. */
 int usbc_port_task(usbc_port_t *port);
+
+/* Virtual replug: emulate a physical unplug/replug without touching a
+ * cable — DP outputs down, VBUS off, PD receiver off, and CC
+ * terminations OPENED (fusb302_disable), so the partner sees a true
+ * detach. After hold_ms the port re-enters unattached and the normal
+ * DRP toggle / attach / alt-mode ceremony runs from scratch. Bench
+ * primitive for renegotiation-inclusive acquisition statistics
+ * (PRE_REV_EXERCISE_PLAN V2.1); known limit: may not clear the
+ * drain-only hub wedge class (test log row 57), which needs its caps
+ * drained — this clears everything a detach clears. */
+int usbc_port_virtual_replug(usbc_port_t *port, uint32_t hold_ms);
 
 const char *usbc_port_state_name(usbc_state_t state);
 

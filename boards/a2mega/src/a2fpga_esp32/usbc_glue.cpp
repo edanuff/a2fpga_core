@@ -262,6 +262,17 @@ static void hal_set_fpga_hpd(void *ctx, bool level)
 /* Telnet 'r': drop HPD to the FPGA for ~250 ms and restore — restarts
  * the gateware's blind AUX/training ladder on demand (BLIND_SINK resets
  * on hpd_present falling). No cables touched, nothing power-cycles. */
+/* Telnet 'v': virtual replug — full detach illusion (CC open + VBUS off
+ * + DP down) for 3 s, then a from-scratch attach ceremony. The
+ * renegotiation-inclusive re-roll the 'g' harness can't provide on
+ * strict sinks (row 42). */
+extern "C" void usbc_virtual_replug(void)
+{
+    osd_log("VIRTUAL REPLUG: detaching 3 s (CC open)");
+    if (usbc_port_virtual_replug(&s_port, 3000u) != 0)
+        osd_log("VIRTUAL REPLUG: port not running");
+}
+
 extern "C" void usbc_hpd_retrain(void)
 {
     if (!s_hpd_level) {

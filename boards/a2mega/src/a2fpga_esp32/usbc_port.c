@@ -776,6 +776,10 @@ static int service_state_timer(usbc_port_t *port)
             fall_back_to_usb_only(port, "DP Alt Mode response timeout");
         }
         break;
+    case USBC_STATE_VIRTUAL_DETACH:
+        if (time_reached(now, port->deadline_ms))
+            return enter_unattached(port);
+        break;
     case USBC_STATE_HARD_RESET_OFF:
         if (time_reached(now, port->deadline_ms)) {
             if (fusb302_configure_source(&port->fusb302, port->polarity,
@@ -847,6 +851,23 @@ static int handle_toggle_result(usbc_port_t *port,
         return enter_unattached(port);
     }
     }
+}
+
+int usbc_port_virtual_replug(usbc_port_t *port, uint32_t hold_ms)
+{
+    if (port == NULL || port->state == USBC_STATE_DISABLED)
+        return -1;
+    set_dp_outputs(port, false, false);
+    set_usb_role(port, USBC_USB_ROLE_OFF);
+    set_vbus(port, false);
+    (void)fusb302_set_pd_receiver(&port->fusb302, false);
+    (void)fusb302_disable(&port->fusb302);   /* CC open = true detach */
+    reset_protocol(port);
+    port->state = USBC_STATE_VIRTUAL_DETACH;
+    port->deadline_ms = now_ms(port) + hold_ms;
+    log_message(port, USBC_LOG_WARNING,
+                "virtual replug: CC open, holding detached");
+    return 0;
 }
 
 static int begin_hard_reset_recovery(usbc_port_t *port)
@@ -937,7 +958,7 @@ const char *usbc_port_state_name(usbc_state_t state)
         "vdm-wait-identity",
         "vdm-wait-svids", "vdm-wait-modes", "vdm-wait-enter",
         "vdm-wait-status", "vdm-wait-configure", "dp-active",
-        "usb-only", "hard-reset-off",
+        "usb-only", "hard-reset-off", "virtual-detach",
     };
     const size_t count = sizeof(names) / sizeof(names[0]);
     return (size_t)state < count ? names[state] : "invalid";

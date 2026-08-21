@@ -23,6 +23,7 @@ void usbc_mux_dump_log(void);   /* TUSB1046A regs via osd_log (AUX snooper) */
 void usbc_mux_eq_cycle(void);   /* cycle DP RX EQ presets live (telnet 'e') */
 void usbc_mux_eq_step(int dir); /* fine step through all 16 settings (telnet '+'/'-') */
 void usbc_mux_lanes23_toggle(void); /* M1: toggle unused mux DP2/DP3 inputs (telnet 'l') */
+void usbc_virtual_replug(void); /* V2.1: 3s CC-open detach + fresh attach ceremony (telnet 'v') */
 void usbc_mux_flip_toggle(void);/* toggle FLIPSEL convention live ('f') */
 void usbc_hpd_retrain(void);    /* pulse HPD low 250 ms: ladder restart ('r') */
 void usbc_fusb_dump_log(void);  /* raw FUSB302B status regs ('u') */
