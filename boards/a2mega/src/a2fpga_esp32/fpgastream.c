@@ -56,11 +56,14 @@ static void flash_write_enable(void)
 
 static bool flash_wait_busy(uint32_t loops)
 {
+    uint32_t n = 0;
     while (loops--) {
         uint8_t rx = 0xFF;
         fpga_jtag_spi_xfer(0x05, NULL, &rx, 1);
         if (!(rx & 0x01))
             return true;
+        if ((++n & 0x3FF) == 0)
+            vTaskDelay(1);               /* yield on long erases */
     }
     return false;
 }
@@ -71,7 +74,11 @@ static bool flash_erase_block(uint32_t addr)
     uint8_t tx[3] = { (uint8_t)(addr >> 16), (uint8_t)(addr >> 8),
                       (uint8_t)addr };
     fpga_jtag_spi_xfer(0xD8, tx, NULL, 3);
-    return flash_wait_busy(20000);
+    if (!flash_wait_busy(60000)) {
+        ESP_LOGE(TAG, "erase timeout at block 0x%06lx", (unsigned long)addr);
+        return false;
+    }
+    return true;
 }
 
 static bool flash_program_page(uint32_t addr, const uint8_t *data, uint32_t n)
@@ -217,6 +224,7 @@ static void serve_one(int fd)
      * engine and enters on the first try, as before.) */
     bool entered = false;
     uint32_t id = 0;
+    uint8_t jedec[3] = { 0, 0, 0 };
     for (int try_n = 0; try_n < 10 && !entered; try_n++) {
         if (try_n > 0) {
             fpga_jtag_release_pins();
@@ -227,15 +235,32 @@ static void serve_one(int fd)
         id = fpga_jtag_idcode();
         if (id != want_id)
             continue;
-        if (fpga_jtag_flash_enter())     /* fabric (if any) dies here */
-            entered = true;
+        if (!fpga_jtag_flash_enter())    /* fabric (if any) dies here */
+            continue;
+        /* Entry alone is not proof the JTAG->SPI passthrough is live:
+         * a dead passthrough returns all-ones, which reads as
+         * busy-forever in the erase poll (live-hit: ERASE FAILED with
+         * flash content untouched, B3/138K 08-20). Verify with a JEDEC
+         * ID read before trusting the path. */
+        fpga_jtag_spi_xfer(0x9F, NULL, jedec, 3);
+        if ((jedec[0] == 0xFF && jedec[1] == 0xFF) ||
+            (jedec[0] == 0x00 && jedec[1] == 0x00)) {
+            ESP_LOGE(TAG, "SPI passthrough dead (JEDEC %02x%02x%02x), retry",
+                     jedec[0], jedec[1], jedec[2]);
+            continue;
+        }
+        entered = true;
     }
     if (!entered) {
         fpga_jtag_release_pins();
-        ESP_LOGE(TAG, "entry failed; last IDCODE %08lx", (unsigned long)id);
+        ESP_LOGE(TAG, "entry failed; last IDCODE %08lx JEDEC %02x%02x%02x",
+                 (unsigned long)id, jedec[0], jedec[1], jedec[2]);
         send_str(fd, "ERR JTAG ENTRY (10 tries)\n");
         return;
     }
+    ESP_LOGI(TAG, "flash JEDEC %02x%02x%02x", jedec[0], jedec[1], jedec[2]);
+    osd_log("FPGASTREAM: FLASH JEDEC %02X%02X%02X",
+            jedec[0], jedec[1], jedec[2]);
 
     bool ok = true;
     for (uint32_t a = 0; ok && a < size; a += FS_BLOCK) {
