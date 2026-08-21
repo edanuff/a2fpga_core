@@ -48,6 +48,14 @@ extern "C" {
 #define TUSB1046_REG_DPEQ32  0x11   /* DP3EQ_SEL[7:4] | DP2EQ_SEL[3:0] */
 #define TUSB1046_REG_DPCTL3  0x13   /* AUX_SNOOP_DISABLE | AUX_SBU_OVR | DPx_DISABLE */
 #define TUSB_DP_SNOOP_DIS    0x80   /* lanes governed by DPx_DISABLE (all default-enabled) */
+/* DS Table 15: reg 0x13 bits [3:0] = DP3..DP0_DISABLE, honored only when
+ * AUX_SNOOP_DISABLE=1 (our permanent policy). The FPGA drives mux inputs
+ * DP0/DP1 only (both orientations — FLIPSEL does connector mapping), so
+ * DP2+DP3 are pure bias load: 634 mW assumes all four channels lit.
+ * M1 experiment (exercise plan): disable the unused pair, measure mux
+ * temperature + warm-attach margin. Live-toggleable (telnet 'l') for
+ * one-variable A/B. */
+#define TUSB_DP23_DISABLE    0x0C
 
 /* DP receiver EQ. CRITICAL (board #1 root-cause candidate, 2026-08-12):
  * in I2C mode the DPEQ strap pins double as address pins and float, so
@@ -57,6 +65,11 @@ extern "C" {
  * register EQ is mandatory in I2C mode; SPEC.md always said EQ is
  * "register-settable instead of strap resistors". Setting 0 = 1.0 dB. */
 static uint8_t s_dp_eq_setting = 0;
+
+/* M1: unused-mux-lane disable state (default OFF = stock all-four-lit
+ * behavior; toggle live via telnet 'l' for thermal/margin A/B). */
+static bool s_lanes23_off = false;
+static uint8_t s_dpctl3_last = 0;
 
 static usbc_port_t s_port;
 static SemaphoreHandle_t s_wake;
@@ -204,7 +217,9 @@ static void hal_set_tusb1046(void *ctx, bool dp_enable, bool flipped)
          * switch was effectively open, our AUX bursts reached the monitor
          * only capacitively, and the sink never replied to ANY request.
          * 01 = AUXp->SBU1/AUXn->SBU2 (normal), 10 = crossed (flipped). */
-        uint8_t dc = TUSB_DP_SNOOP_DIS | (flip_eff ? 0x20 : 0x10);
+        uint8_t dc = TUSB_DP_SNOOP_DIS | (flip_eff ? 0x20 : 0x10) |
+                     (s_lanes23_off ? TUSB_DP23_DISABLE : 0);
+        s_dpctl3_last = dc;
         if (i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_DPCTL3, &dc, 1) != 0)
             Serial.println("[usbc] TUSB1046A snoop-disable/aux-ovr write FAILED");
         /* FLIPSEL steers BOTH the SBU/AUX crossbar and the SS-lane
@@ -463,6 +478,23 @@ extern "C" void usbc_mux_eq_step(int dir)
  * General register in place. If the CC->FLIPSEL mapping convention is
  * inverted, this one bit un-crosses the AUX pair AND moves the DP lanes
  * onto the connector pins the sink actually watches. */
+/* M1: live-toggle the unused mux DP inputs (DP2/DP3) for the thermal /
+ * warm-attach A/B. Rewrites DPCTL3 in place on the running link — the
+ * used pair (DP0/DP1) is untouched, so video must survive; if it dies,
+ * the driven-input assumption was wrong and this instantly shows it. */
+extern "C" void usbc_mux_lanes23_toggle(void)
+{
+    s_lanes23_off = !s_lanes23_off;
+    uint8_t dc = (uint8_t)((s_dpctl3_last & (uint8_t)~TUSB_DP23_DISABLE) |
+                           (s_lanes23_off ? TUSB_DP23_DISABLE : 0));
+    if (i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_DPCTL3, &dc, 1) == 0) {
+        s_dpctl3_last = dc;
+        osd_log("MUX LANES 2/3: %s (DPCTL3=%02X)",
+                s_lanes23_off ? "DISABLED" : "ENABLED", dc);
+    } else
+        osd_log("MUX LANES 2/3: WRITE FAILED");
+}
+
 extern "C" void usbc_mux_flip_toggle(void)
 {
     s_flip_invert = !s_flip_invert;

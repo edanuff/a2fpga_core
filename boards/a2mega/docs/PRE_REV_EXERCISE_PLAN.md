@@ -169,6 +169,28 @@ time allows)
   class 1 (EQ-never/analog margin). SIM-FIRST; test 60K equivalence
   after.
 
+- M6. **POR correctness (user, 08-20).** (a) The Customized PHY guide
+  requires refclk STABLE before releasing global POR; our logic releases
+  por_n from the link power request — gate it on a verified
+  refclk-stable condition instead (the freq counter / freq_ok already
+  exists in fabric). (b) The 60K emission has por_toggle_by_fabric=FALSE
+  (WS4: fabric POR never connected — the historical por_n "placebo
+  resets") while the 138K has TRUE ⇒ every POR/retry experiment on the
+  60K is suspect: the documented global SERDES reset never happened.
+  Regenerate the 60K with fabric POR connected (or CSR-poke) and retest
+  whether a REAL POR re-rolls boot draws — candidate contributor to the
+  power-up/configuration lottery.
+- M7. **TX bonding / inter-lane startup skew (user, 08-20).** Both
+  active lanes run the half-bond (chbond_enable=false) — inter-lane
+  startup skew is nondeterministic per power-up (independent FIFO
+  read-starts), and strict converter RXes may be intolerant of the bad
+  draws. Warranted: repeated-power-up lane-to-lane skew measurement,
+  and/or comparison against a GENUINELY bonded emission — now feasible
+  without the GUI's broken checkbox: hand-edit chbond_enable=true in
+  the toml and generate the CSR via serdes_toml_to_csr_<die>k.bin
+  (flag as generator-unverified; sim/bench validate). Common master +
+  controlled FIFO read-start depth per the guide.
+
 ## Phase P — remaining board-turn gates
 
 - P1. Item 4b DMM power-path characterization (slot/LM74700 and
