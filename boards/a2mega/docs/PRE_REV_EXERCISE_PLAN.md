@@ -86,15 +86,13 @@ regardless of CPU presence).
 
 - C0. **Circuit design review (paper, before power):** schematic walk of
   the GS_* transceiver chain — directions, OE polarities, 5 V
-  tolerance/level shifting — and CRITICALLY the unconfigured/config-time
-  board-level defaults, which must guarantee BOTH: (a) **GS /RES held
-  asserted while the FPGA is unconfigured or reconfiguring** (the
-  fabric cannot drive it during config — this hold must come from
-  pulls/buffer-enable defaults; it is the load-bearing element of the
-  power-up choreography) and (b) every bus transceiver DISABLED so a
-  half-alive card cannot fight motherboard drivers. Also: physical
-  interposer hardware status (ribbon cable + socket plug — exists?
-  needs fabrication?). Deliverable: `GS_SOCKET_INTERFACE.md`
+  tolerance/level shifting — and the unconfigured/config-time
+  transceiver-disable defaults (a half-alive card must not fight
+  motherboard drivers). The reset-hold-during-config is a WORKING card
+  design (user, 08-20) — no verification needed, it is simply the
+  choreography the bring-up relies on. Also: physical interposer
+  hardware status (ribbon cable + socket plug — exists? needs
+  fabrication?). Deliverable: `GS_SOCKET_INTERFACE.md`
   signal-by-signal.
 - C1. **RTL inventory:** P65C816 core provenance/completeness;
   wrapper review against real 65816 bus timing — bank byte multiplexed
@@ -115,7 +113,7 @@ regardless of CPU presence).
   review on silicon. Optional half-step before driving: release /RES
   with the bus still undriven — the motherboard fetches floating
   garbage harmlessly; confirms reset-release behavior in isolation.
-- C4. **First drive:** real CPU out, our core in. Milestone ladder:
+- C4. **First drive:** our core takes the socket. Milestone ladder:
   (a) sane vector fetch on the bus analyzer, (b) ROM startup executes
   (border/beep activity), (c) self-test progresses, (d) boot chime +
   GS text screen (GS video is the motherboard's own — it renders if the
