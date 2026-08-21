@@ -77,10 +77,9 @@ observations, and the dB formula is the standard FFE de-emphasis model
 also the empirical check).
 
 ## Next steps
-1. Fabric FSM (sim-first): small sequence ROM + player driving the
-   existing upar_arbiter DRP port; triggered by link_signal_mgmt when
-   ADJUST_REQUEST differs from current levels, during TPS phases;
-   TRAINING_LANE_SET then reports the actually-applied levels.
+1. ~~Fabric FSM (sim-first)~~ — **DONE 08-21**: `afe_adjust_seq.v` +
+   unit & closed-loop TBs all PASS; design, sim results, and the
+   propose-only shared-RTL diffs live in `m5_afe_adjust_design.md`.
 2. Bench validation before automation: gateware hook to fire a stored
    sequence on command (telnet-triggered via ESP32/OSPI register) —
    apply swing changes on a live link, watch C:/Y:/A: telemetry.
