@@ -1,7 +1,7 @@
 //
 //Written by GowinSynthesis
 //Tool Version "V1.9.12.03"
-//Thu Aug 20 09:50:24 2026
+//Thu Aug 20 17:26:15 2026
 
 //Source file index table:
 //file0 "\/Applications/GowinIDE V1.9.12.03.app/Contents/Resources/Gowin_EDA/IDE/ipcore/SERDES_IP/IPlib/CUSTOMIZED/data/customized_phy_wrapper.v"
