@@ -1,6 +1,11 @@
 # a2mega 1.0a4 — board revision requirements (rev gate)
 
-**Ship gate: end of this week (target Fri 2026-08-22).** Every item is
+**Ship gate REVISED 08-20: the send is gated on the pre-revision
+exercise plan (`PRE_REV_EXERCISE_PLAN.md`) — steady video → USB 2.0
+through hub → 65C816 in-circuit emulation (the unverified socket
+circuit) → item 4b power DMM. This document is COMPLETE and parked;
+Phase C/P findings fold in before the send.** (Original gate below was
+Fri 2026-08-22, superseded.) Every item is
 EVIDENCED (links to test log / bringup log) or marked OPEN with the
 experiment that closes it. Nothing goes on the board without a reason;
 no rev until the OPEN items that could change the netlist are closed.
