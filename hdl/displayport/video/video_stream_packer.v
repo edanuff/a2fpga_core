@@ -465,6 +465,27 @@ module video_stream_packer #(
     end
 
     reg fetch_r, prime_r, load0_r;
+    // ------------------------------------------------------------------
+    // OFFSET-WRAP FIX (proposed): frame-boundary SOF verification.
+    // The FIFO's start-of-frame marker must arrive exactly at the
+    // frame's first prime fetch. Any word slip (overflow drop or
+    // underrun miss during a retrain battle) breaks the invariant; on
+    // detection fall back to the !running re-alignment sequence
+    // (discard to SOF, PREFILL, restart at a frame boundary) instead of
+    // rendering a permanently rotated image. Presents downstream as a
+    // normal source_ready-drop video restart.
+    // ------------------------------------------------------------------
+    wire frame_first_fetch = prime_r && (line_num == {$clog2(V_TOTAL){1'b0}});
+    wire sof_mismatch = fifo_rvalid &&
+                        ((frame_first_fetch && !fifo_rsof) ||
+                         (fetch_r && !frame_first_fetch && fifo_rsof));
+    // A starved fetch (underrun) is itself a slip event: the walk
+    // advances without consuming. A frame-phase disturbance can settle
+    // into a frame-aligned net-zero drop/miss limit cycle that the SOF
+    // check alone cannot see (offset 0 but per-line wobble) — every
+    // such state exhibits starved fetches, so restarting on the first
+    // one heals it too.
+    wire fetch_starved = fetch_r && !fifo_rvalid;
     reg [1:0] dec_px_r, dec_fs_r, dec_fe_r;
     reg [1:0] dec_ph_r [0:1];
     initial begin
@@ -697,6 +718,22 @@ module video_stream_packer #(
                                                           : line_num + 1'b1;
                 end else begin
                     line_cycle <= line_cycle + 1'b1;
+                end
+
+                // OFFSET-WRAP FIX: pixel-vs-framing slip detected — stop
+                // streaming and re-align at the next frame start. The
+                // counters are zeroed so the pre-start flag pipeline
+                // recomputes from the same state as after a reset (they
+                // freeze while !running; leaving them at mid-frame
+                // values would leak stale prime/fetch decisions into
+                // the first cycles of the restart). Placed after the
+                // counter increment so the zeroing wins.
+                if (sof_mismatch || fetch_starved) begin
+                    running    <= 1'b0;
+                    ready      <= 1'b0;
+                    start_ok   <= 1'b0;
+                    line_cycle <= 0;
+                    line_num   <= 0;
                 end
             end
         end
