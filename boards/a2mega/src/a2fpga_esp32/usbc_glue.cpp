@@ -421,15 +421,40 @@ extern "C" void usbc_mux_dump_log(void)
  * Table 7 gains at 4.05 GHz: 0=1.0 dB, 3=6.5 dB, 6=9.5 dB, 10=12.3 dB
  * (10 = the floating-strap default that motivated all of this). Writes
  * take effect immediately on the running link — A/B without reflashing. */
+/* Full 16-step ladder, gains at 4.05 GHz (SLLA404 Table 1). The 'e'
+ * cycle only visits 4 of these; '+'/'-' step through all 16 — the mux
+ * has 12 settings (incl. a 14.4 dB top) the presets never reach. */
+static const char *eq_gain_db[16] = {
+    "1.0", "3.3", "4.9", "6.5", "7.5", "8.6", "9.5", "10.4",
+    "11.1", "11.7", "12.3", "12.8", "13.2", "13.6", "14.0", "14.4" };
+
 extern "C" void usbc_mux_eq_cycle(void)
 {
     static const uint8_t presets[4] = { 0, 3, 6, 10 };
-    static const char *gains[4] = { "1.0", "6.5", "9.5", "12.3" };
     static uint8_t idx = 0;
     idx = (uint8_t)((idx + 1) & 3);
     s_dp_eq_setting = presets[idx];
     if (tusb_write_dp_eq(s_dp_eq_setting) == 0)
-        osd_log("MUX EQ: SETTING %u (%s DB)", presets[idx], gains[idx]);
+        osd_log("MUX EQ: SETTING %u (%s DB)", s_dp_eq_setting,
+                eq_gain_db[s_dp_eq_setting]);
+    else
+        osd_log("MUX EQ: WRITE FAILED");
+}
+
+/* Fine EQ step (telnet '+'/'-'), clamped at the ladder ends. Writes take
+ * effect immediately on the running link, same as the preset cycle. */
+extern "C" void usbc_mux_eq_step(int dir)
+{
+    int next = (int)s_dp_eq_setting + dir;
+    if (next < 0 || next > 15) {
+        osd_log("MUX EQ: AT LADDER END (SETTING %u, %s DB)",
+                s_dp_eq_setting, eq_gain_db[s_dp_eq_setting]);
+        return;
+    }
+    s_dp_eq_setting = (uint8_t)next;
+    if (tusb_write_dp_eq(s_dp_eq_setting) == 0)
+        osd_log("MUX EQ: SETTING %u (%s DB)", s_dp_eq_setting,
+                eq_gain_db[s_dp_eq_setting]);
     else
         osd_log("MUX EQ: WRITE FAILED");
 }

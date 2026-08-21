@@ -166,7 +166,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2mega remote console\r\n"
-                "keys: c=console m=menu p=pd x=regs e=eq f=flip r=retrain g=fpgareload u=fusb q=quit\r\n"
+                "keys: c=console m=menu p=pd x=regs e=eq +/-=eqstep f=flip r=retrain g=fpgareload u=fusb q=quit\r\n"
                 "menu: up/down move, left/right change, enter/a=ok,\r\n"
                 "      esc/backspace/b=back, y=view, s/tab=select\r\n\r\n");
 
@@ -269,6 +269,15 @@ static void session(int fd)
                 /* Cycle DP receiver EQ presets on the mux, live. */
 #if A2MEGA_HAS_USBC_PD
                 usbc_mux_eq_cycle();
+#else
+                tn_puts(fd, "eq: not built for this board rev\r\n");
+#endif
+                continue;
+            }
+            if (esc_st == 0 && (ch == '+' || ch == '-') && !menu_mode) {
+                /* Fine EQ step: all 16 mux settings (1.0..14.4 dB). */
+#if A2MEGA_HAS_USBC_PD
+                usbc_mux_eq_step(ch == '+' ? 1 : -1);
 #else
                 tn_puts(fd, "eq: not built for this board rev\r\n");
 #endif
