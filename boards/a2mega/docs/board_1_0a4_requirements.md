@@ -255,6 +255,29 @@ no rev until the OPEN items that could change the netlist are closed.
    — also the authority for pin-assignment C/D/E details (relevant to
    the UtechSmart pin-assignment-D firmware gap).
 
+5d. **TI app-note intake (08-20: SLLA404 = TUSB1046A config guide,
+   SLLA365 = TUSB546 DP-only application; PDFs in this docs dir):**
+   (a) ⚠ FIRMWARE LEAD — **AUX SNOOP**: the mux monitors AUX traffic to
+   power DP lanes up/down; snoop-disabled (reg 0x13 bit7 in I2C mode,
+   per SLLA365 Table 1) forces ALL FOUR lanes always-enabled. Our x-dump
+   shows reg 0x13=0x00 = snoop ACTIVE — a snooper misparsing our
+   (historically out-of-spec) AUX could be lane-cycling under us.
+   One-register experiment; verify 1046A reg-map equivalence first.
+   (b) FIRMWARE — full 16-step DPEQ ladder via I2C (1.0..14.4 dB,
+   SLLA404 Table 1); our 'e' key uses only the 4 pin-strap values
+   (1.0/6.5/9.5/12.3) — finer margin characterization + 2 dB more max
+   gain available; per-lane independent EQ override exists (SLLA365
+   regs 0x10/0x11). (c) EQ-method corroboration of 5a: TI's method =
+   match EQ to pre-mux channel loss; ours is ~2 in ≈ 1.5 dB ⇒ prescribed
+   setting 0-1, yet empirically 6.5+ wins ⇒ the extra EQ compensates
+   reflections/launch, not loss. (d) Layout law: 90 Ω ±15%
+   connector-side, ≤2 vias/pair, GND stitching ≤200 mil at transitions,
+   ≥135° bends, no plane splits; **AC caps max 0402** (0201 std ok);
+   **test points series+symmetric only, NEVER stubs** — hard constraint
+   on item 7's test structure. (e) SLLA365 source-app AUX bias = AUXP
+   100k-down / AUXN 100k-up on the mux side of the caps — verbatim our
+   R31/R32; the 1.0a4 AUX network matches TI's own app note.
+
 5a. **DP main-link channel/launch review — DESIGN-WIDE, not unit** —
    evidence 08-18: ALL converter-class sinks (3 hubs + a dongle, short
    captive cables, bridge-grade RX) fail BOTH carriers; monitors (long
