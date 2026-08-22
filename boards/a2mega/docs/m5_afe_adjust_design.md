@@ -509,10 +509,16 @@ optionally surface `dbg_afe` in a UART field for live telemetry.
 
 ## 8. Open items / next steps
 
-1. **Apply + build**: land 7a (copy from m5_proposed), apply 7b, build
-   the 138B dp_test target, confirm timing (the AFE player is tiny; the
-   only new cross-domain paths are the toggle handshake + quasi-static
-   payloads).
+1. **Apply + build — DONE 08-21 (c403e98f + 04f6a809)**: 7a 3-way-merged
+   onto V2.1 (not copied — the m5_proposed files predate the HPD param),
+   7b applied, afe_adjust_seq.v added to the gprj, debug_afe exported
+   and serialized as telemetry field `M:` = {seq_err,known} {pe,vs}.
+   Closed-loop tb re-run PASS against the real merged auxch files. 138B
+   build bin 972110be: timing 0/0 (clk_sym Fmax 149.2), SecurityBit OFF.
+   Existing set_clock_groups -asynchronous covers the new CDC pairs the
+   same way as the wdog replay handshake (no explicit false paths were
+   needed; timing clean). BENCH PENDING: predictions Anker M:12, Ugreen
+   M:16 (first-ever pre-emphasis grant), M:2x/3x = seq_err.
 2. **SDC**: add false-path (or set_max_delay) on
    `i_afe_adjust/apply_tgl -> tgl_sync`, `ack_tgl -> ack_sync`,
    `vs_lat/pe_lat -> vs_s/pe_s`, `seq_err -> err_sync` — same treatment
