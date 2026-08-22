@@ -44,6 +44,13 @@ module tb_afe_adjust_closedloop;
     always #4.1 drp_clk = ~drp_clk;
 
     integer errors = 0;
+    // DRP slave write latency. 3000 drp clocks x 8 writes ~ 200 us per
+    // sequence — longer than the AUX gap between the ADJUST read and the
+    // next lane-set message (the 100 us wait_after state), so the ladder's afe_hold MUST engage for the
+    // sink-requested change (makes the wire invariant below non-vacuous).
+    localparam integer READY_DELAY = 3000;
+    integer hold_seen = 0, wire_while_busy = 0;
+    always @(posedge clk100) if (dut.i_aux_channel.afe_hold) hold_seen = hold_seen + 1;
 
     // ------------------------------------------------------------------
     // DUT: the proposed channel_management with AFE_ADJUST=1
@@ -152,7 +159,7 @@ module tb_afe_adjust_closedloop;
         if (drp_wren && !wren_d) rd_cnt <= 0;
         if (drp_wren && wren_d) begin
             rd_cnt <= rd_cnt + 1;
-            if (rd_cnt == 6) begin
+            if (rd_cnt == READY_DELAY) begin
                 drp_ready <= 1'b1;
                 wr_addr[wr_cnt] <= drp_addr;
                 wr_data[wr_cnt] <= drp_wrdata;
@@ -288,6 +295,9 @@ module tb_afe_adjust_closedloop;
                     if (req_addr == 20'h00103) begin
                         lane_set_log[ls_cnt] = req[4];
                         ls_cnt = ls_cnt + 1;
+                        // invariant: a lane-set byte never reaches the wire
+                        // while the sequencer is still applying/evaluating
+                        if (afe_busy) wire_while_busy = wire_while_busy + 1;
                         if (req[5] !== req[4] || req[6] !== req[4] ||
                             req[7] !== req[4]) begin
                             errors = errors + 1;
@@ -417,6 +427,14 @@ module tb_afe_adjust_closedloop;
             $display("FAIL: training patterns not cleared (0x102=%02x)", last_pattern);
         end
 
+        if (wire_while_busy != 0) begin
+            errors = errors + 1;
+            $display("FAIL: %0d TRAINING_LANE_SET write(s) on the wire while afe_busy", wire_while_busy);
+        end else if (hold_seen == 0) begin
+            errors = errors + 1;
+            $display("FAIL: afe_hold never engaged (invariant vacuous) — slave too fast?");
+        end else
+            $display("  ok: afe_hold engaged %0d clocks; no lane-set on the wire while busy", hold_seen);
         if (errors == 0)
             $display("PASS: closed-loop — sink ADJUST_REQUEST applied over DRP once per change, TRAINING_LANE_SET on the wire reflects applied levels + caps, link trains");
         else
