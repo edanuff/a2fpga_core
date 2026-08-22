@@ -122,3 +122,17 @@ See the tail of this file (appended when the overnight chain finishes).
   core last closed at "Stage 6 WIP", 98351d9a). **V3 full-core-port
   item: pipeline the packer's e_tu_pos compare and re-time cy_5; do not
   flash this full-core bin.** Not a regression of tonight's review work.
+
+## Bench validation (08-22 am, rows 79-80)
+
+`7c06083f` VALIDATED on both hubs → **138B candidate of record**. Anker:
+power-on clean (M:12 = the new healthy steady-state), v-draw failures were
+its known environmental modes (phantom; sleeping-monitor storm — cleared
+instantly by an HDMI replug at the hub, the new fast recovery). Ugreen:
+battled pre-drain (hub state), **Y:11/11/11/22 flat after a full drain** —
+identical to 48576c12's best. Drain recipe refined: the essential element
+is unplugging HDMI (+5 V keeps the converter partially alive). 48576c12
+is unreproducible from source (deterministic 860d2c93, 40 setup
+violations in the vendor upar_arbiter @ cm_life) — every benched bin is
+archived from now on; the marginal vendor-arbiter timing path is a
+standing item for the Gowin ticket / SDC review.
