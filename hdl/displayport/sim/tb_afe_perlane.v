@@ -61,7 +61,7 @@ module tb_afe_perlane;
     endtask
     task settle; begin #(30_000); end endtask
 
-    integer errors = 0;
+    integer errors = 0, wr_before = 0;
     // one lane's 4-write block: base+0x34 txlev, +0x38 C1, +0xd8 enable, +0xd8 strobe
     task check_block(input integer b, input [23:0] base, input [3:0] txlev,
                      input [4:0] c1, input [255:0] name);
@@ -129,17 +129,36 @@ module tb_afe_perlane;
         check_bytes(16'h2E2E, "both lanes now VS2/PE1");
 
         // ---- 6. commit discipline: declaration waits for completion -----
-        send_adjust(2'd0, 2'd0, 2'd0, 2'd0);
+        send_adjust(2'd1, 2'd0, 2'd1, 2'd0);   // non-zero: a real request
         #400;
         if (!busy || byte_o !== 16'h2E2E) begin errors = errors + 1;
             $display("FAIL: declaration moved before the sequence completed (busy=%0d bytes=%04x)",
                      busy, byte_o); end
         else $display("  ok: in-flight -> still declares the committed levels");
         settle;
-        check_bytes(16'h0000, "VS0/PE0 committed on completion");
-        if (dbg[3:0] !== 4'h0 || dbg1 !== 4'h0) begin errors = errors + 1;
-            $display("FAIL: dbg lane0 %0h lane1 %0h (want 0/0)", dbg[3:0], dbg1); end
+        check_bytes(16'h0101, "VS1/PE0 committed on completion");
+        if (dbg[3:0] !== 4'h1 || dbg1 !== 4'h1) begin errors = errors + 1;
+            $display("FAIL: dbg lane0 %0h lane1 %0h (want 1/1)", dbg[3:0], dbg1); end
         else $display("  ok: dbg_afe/dbg_afe1 report their own lanes");
+
+        // ---- 7. all-zero request is "no request" (row 81) --------------
+        // get to a known non-zero state first
+        send_adjust(2'd2, 2'd0, 2'd2, 2'd0); settle;
+        check_bytes(16'h0606, "back to VS2/PE0 both lanes");
+        wr_before = wr_cnt;
+        send_adjust(2'd0, 2'd0, 2'd0, 2'd0); settle;   // A:0000
+        if (wr_cnt != wr_before) begin errors = errors + 1;
+            $display("FAIL: all-zero request wrote %0d (want 0 — 'no request')",
+                     wr_cnt - wr_before); end
+        else $display("  ok: A:0000 ignored as 'no request' — no writes");
+        check_bytes(16'h0606, "A:0000 leaves the applied levels standing");
+        // a zero request on ONE lane only is still a real request
+        send_adjust(2'd0, 2'd0, 2'd2, 2'd0); settle;
+        if (wr_cnt != wr_before + 8) begin errors = errors + 1;
+            $display("FAIL: lane-0-only zero should still apply (wrote %0d)",
+                     wr_cnt - wr_before); end
+        else $display("  ok: zero on ONE lane is still honored");
+        check_bytes(16'h0600, "lane 0 at VS0/PE0, lane 1 unchanged");
 
         if (errors == 0)
             $display("PASS: per-lane values with all-lane application — own request, own LANE_BASE payload, own declared byte, no FFE-mode split");

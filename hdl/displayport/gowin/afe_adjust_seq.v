@@ -60,6 +60,17 @@
 //     asked yet") from being mistaken for a VS0/PE0 request.
 //   - a new application is never started while one is in flight; an
 //     adjust byte arriving mid-flight is latched and evaluated after.
+//   - IGNORE_ZERO_REQUEST (default 1): an ADJUST_REQUEST byte that is
+//     ALL ZERO is treated as "no request" and skipped entirely. Hardware
+//     evidence (test log row 81, Ugreen): a locked sink reports 0x00 to
+//     mean "no adjustment needed", not "drive me at VS0/PE0" — honoring
+//     it literally dropped BOTH lanes to 420 mV and, because the applied
+//     state is now retained across training transitions (item 4), the
+//     link then RAN at minimum swing until the next retrain. A:0000 is
+//     also what the telemetry shows during reset storms, so honoring it
+//     would leave a struggling link at minimum drive. The cost is that a
+//     sink genuinely asking for VS0/PE0 on every lane cannot get it —
+//     an implausible ask, VS0 being the weakest drive available.
 //
 // Commit discipline (user review items 3-5, 08-21):
 //   - "applied" (what train_set_byte declares) is committed only when the
@@ -126,6 +137,8 @@ module afe_adjust_seq #(
     // (804 mV) and spends its next request on pre-emphasis instead.
     parameter [1:0]  MAX_VS = 2'd2,
     parameter [1:0]  MAX_PE = 2'd3,
+    // 1: an all-zero ADJUST_REQUEST byte is "no request" (see header)
+    parameter IGNORE_ZERO_REQUEST = 1,
     parameter [7:0]  IDLE_SET_BYTE = 8'h06     // legacy swing2+MAX_SWING
 )(
     // ---- management-clock domain (AUX ladder) ------------------------
@@ -245,6 +258,9 @@ end else begin : g_on
     reg       eval_pend     = 1'b0;   // an adjust byte awaits evaluation
     reg [2*NUM_LANES-1:0] vs_pend = {2*NUM_LANES{1'b0}};
     reg [2*NUM_LANES-1:0] pe_pend = {2*NUM_LANES{1'b0}};
+    // whole 0x206 byte == 0 (every lane's VS and PE), sampled with adj_d
+    wire req_all_zero = (vs_request == {2*NUM_LANES{1'b0}}) &&
+                        (pe_request == {2*NUM_LANES{1'b0}});
 
     // Per lane: clamp the pending request to the declared ceilings, then
     // sanitise to the DP rule VS + PE <= 3 (PE yields; swing is what the
@@ -288,8 +304,10 @@ end else begin : g_on
             // drop a stale pending request
             eval_pend <= 1'b0;
         end else begin
-            // capture: one snapshot per ADJUST_REQUEST read (= iteration)
-            if (adj_d) begin
+            // capture: one snapshot per ADJUST_REQUEST read (= iteration).
+            // An all-zero byte is "no request" when IGNORE_ZERO_REQUEST
+            // (row 81) — skipped, so the applied levels simply stand.
+            if (adj_d && !(IGNORE_ZERO_REQUEST != 0 && req_all_zero)) begin
                 vs_pend   <= vs_request;
                 pe_pend   <= pe_request;
                 eval_pend <= 1'b1;

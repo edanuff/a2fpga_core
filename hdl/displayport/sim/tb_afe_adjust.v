@@ -22,7 +22,8 @@
 //      (byte 0x09).
 //   8. A request arriving while a (slowed) sequence is in flight is not
 //      lost and never interleaves: two complete back-to-back 8-write
-//      sequences, final applied = the latest request.
+//      sequences, final applied = the latest request. (The queued
+//      request is non-zero: an all-zero byte is "no request" — row 81.)
 //   9. Write-timeout: a sequence whose ready never comes completes by
 //      timeout and raises the sticky seq_err debug bit.
 //  10. ENABLE_AFE_ADJUST=0 twin fed the same stimuli: zero DRP activity,
@@ -294,7 +295,7 @@ module tb_afe_adjust;
 
         // ---- 6. not training: ignored ---------------------------------
         @(negedge mgmt_clk) training_active = 1'b0;
-        send_adjust(2'd0, 2'd0);
+        send_adjust(2'd1, 2'd1);   // non-zero, so this really tests the training gate
         #5000;
         check_count(24, "request outside training ignored");
 
@@ -314,14 +315,14 @@ module tb_afe_adjust;
         send_adjust(2'd2, 2'd1);
         wait (afe_busy);
         #300;                                    // mid-sequence
-        send_adjust(2'd0, 2'd0);
+        send_adjust(2'd0, 2'd1);   // non-zero: all-zero is "no request" (row 81)
         // afe_busy stays high across the queued evaluation, so one
         // edge-sampled wait covers both back-to-back sequences
         wait_idle;
         check_count(48, "mid-flight change: two atomic sequences");
         check_seq(32, 4'd13, 5'd7,  "in-flight VS2/PE1 completes");
-        check_seq(40, 4'd5,  5'd0,  "queued VS0/PE0 applied after");
-        check_byte(8'h00, "final byte VS0/PE0");
+        check_seq(40, 4'd5,  5'd7,  "queued VS0/PE1 applied after");
+        check_byte(8'h08, "final byte VS0/PE1");
         ready_delay = 6;
 
         // ---- 9. timeout: sequence completes, sticky error -------------
