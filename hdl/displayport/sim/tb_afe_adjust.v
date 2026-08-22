@@ -87,7 +87,7 @@ module tb_afe_adjust;
         .vs_request      ({vs_request,vs_request}),
         .pe_request      ({pe_request,pe_request}),
         .adjust_de       (adjust_de),
-        .training_active (training_active), .phy_reinit(1'b0),
+        .training_active (training_active), .phase_done(phase_done), .phy_reinit(1'b0),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
         .dbg_afe         (dbg_afe), .dbg_afe1(),
@@ -116,7 +116,7 @@ module tb_afe_adjust;
         .vs_request      ({vs_request,vs_request}),
         .pe_request      ({pe_request,pe_request}),
         .adjust_de       (adjust_de),
-        .training_active (training_active), .phy_reinit(1'b0),
+        .training_active (training_active), .phase_done(phase_done), .phy_reinit(1'b0),
         .train_set_byte  (off_byte),
         .afe_busy        (off_busy),
         .dbg_afe         (off_dbg), .dbg_afe1(),
@@ -182,6 +182,9 @@ module tb_afe_adjust;
     // Checks
     // ------------------------------------------------------------------
     integer errors = 0;
+    // phase_done = 0: the trained phase never reports success, which is
+    // the condition under which ADJUST_REQUESTs are applied at all.
+    reg phase_done = 1'b0;
     integer base_cnt;
     integer k;
 

@@ -16,15 +16,20 @@
 //      TRAINING_LANEx_SET write on the wire declares 0x27
 //      (vs3 + MAX_SWING_REACHED, pe2) — including the align-phase sets,
 //      where the unchanged request is debounced (no third application).
-//   4. Total DRP writes = exactly 16; every 0x103 write carries the same
-//      value on all four lane bytes; no lane-set value other than
-//      0x02/0x27 ever appears.
+//   4. Total DRP writes = exactly 16; no lane-set value other than
+//      0x02/0x27 ever appears. (Since the per-lane change the sink's
+//      symmetric request makes 0x103 and 0x104 carry the same value;
+//      per-lane divergence is covered by tb_afe_perlane.)
+//   5. No TRAINING_LANE_SET reaches the wire while afe_busy (the ladder's
+//      afe_hold), with the DRP slave slowed past the 100 us wait_after.
 //
-// Run: iverilog -g2012 -o /tmp/tb_afe_cl.vvp \
+// Run (PRODUCTION RTL — the m5_proposed copies this header used to name
+// are pre-merge snapshots and no longer elaborate):
+//   iverilog -g2012 -o /tmp/tb_afe_cl.vvp \
 //        hdl/displayport/sim/tb_afe_adjust_closedloop.v \
-//        hdl/displayport/sim/m5_proposed/channel_managemnt.v \
-//        hdl/displayport/sim/m5_proposed/aux_channel.v \
-//        hdl/displayport/sim/m5_proposed/dp_aux_messages.v \
+//        hdl/displayport/auxch/channel_managemnt.v \
+//        hdl/displayport/auxch/aux_channel.v \
+//        hdl/displayport/auxch/dp_aux_messages.v \
 //        hdl/displayport/auxch/aux_interface.v \
 //        hdl/displayport/auxch/link_signal_mgmt.v \
 //        hdl/displayport/auxch/edid_decode.v \
@@ -44,6 +49,9 @@ module tb_afe_adjust_closedloop;
     always #4.1 drp_clk = ~drp_clk;
 
     integer errors = 0;
+    // phase_done = 0: the trained phase never reports success, which is
+    // the condition under which ADJUST_REQUESTs are applied at all.
+    reg phase_done = 1'b0;
     // DRP slave write latency. 3000 drp clocks x 8 writes ~ 200 us per
     // sequence — longer than the AUX gap between the ADJUST read and the
     // next lane-set message (the 100 us wait_after state), so the ladder's afe_hold MUST engage for the
@@ -126,7 +134,7 @@ module tb_afe_adjust_closedloop;
         .vs_request      ({debug_adjust[5:4], debug_adjust[1:0]}),
         .pe_request      ({debug_adjust[7:6], debug_adjust[3:2]}),
         .adjust_de       (adjust_evt),
-        .training_active (tx_clock_train | tx_align_train), .phy_reinit(1'b0),
+        .training_active (tx_clock_train | tx_align_train), .phase_done(phase_done), .phy_reinit(1'b0),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
         .dbg_afe         (dbg_afe),

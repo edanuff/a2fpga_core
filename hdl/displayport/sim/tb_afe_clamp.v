@@ -12,6 +12,7 @@ module tb_afe_clamp;
     always #4.1 drp_clk  = ~drp_clk;
     reg [1:0] vs_request = 0, pe_request = 0;
     reg adjust_de = 0, training_active = 0;
+    reg phase_done = 0;
     wire [15:0] byte_o; wire busy; wire [5:0] dbg;
     wire req; reg gnt = 0; wire [23:0] addr; wire [31:0] data; wire wren; reg ready = 0;
 
@@ -19,7 +20,7 @@ module tb_afe_clamp;
         .LANE_BASE0(24'h808300), .LANE_BASE1(24'h808400),
         .INIT_VS(2'd2), .INIT_PE(2'd0)) dut (   // MAX_VS/MAX_PE at defaults (2 / 3)
         .mgmt_clk(mgmt_clk), .vs_request({vs_request,vs_request}), .pe_request({pe_request,pe_request}),
-        .adjust_de(adjust_de), .training_active(training_active), .phy_reinit(1'b0),
+        .adjust_de(adjust_de), .training_active(training_active), .phase_done(phase_done), .phy_reinit(1'b0),
         .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));

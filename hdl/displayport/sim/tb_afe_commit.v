@@ -14,13 +14,14 @@ module tb_afe_commit;
     always #4.1 drp_clk  = ~drp_clk;
     reg [1:0] vs_request = 0, pe_request = 0;
     reg adjust_de = 0, training_active = 0, phy_reinit = 0, slave_dead = 0;
+    reg phase_done = 0;
     wire [15:0] byte_o; wire busy; wire [5:0] dbg;
     wire req; reg gnt = 0; wire [23:0] addr; wire [31:0] data; wire wren; reg ready = 0;
     afe_adjust_seq #(.ENABLE_AFE_ADJUST(1), .NUM_LANES(2),
         .LANE_BASE0(24'h808300), .LANE_BASE1(24'h808400),
         .INIT_VS(2'd2), .INIT_PE(2'd0), .APPLY_ON_TRAINING_START(1)) dut (
         .mgmt_clk(mgmt_clk), .vs_request({vs_request,vs_request}), .pe_request({pe_request,pe_request}),
-        .adjust_de(adjust_de), .training_active(training_active), .phy_reinit(phy_reinit),
+        .adjust_de(adjust_de), .training_active(training_active), .phase_done(phase_done), .phy_reinit(phy_reinit),
         .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));

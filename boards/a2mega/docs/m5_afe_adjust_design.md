@@ -636,8 +636,32 @@ FFE **Auto** under `APPLY_ON_TRAINING_START = 0` — two different analog
 modes on a link that depends on lane matching, which is the very asymmetry
 this feature exists to remove, and a PHY state nothing has ever benched.
 Row 76/77 established that the Auto->manual flip is itself perturbing, so
-doing it to one lane only is the worst of both worlds. Re-writing a lane
-with the values it already holds is a no-op for the analog state.
+doing it to one lane only is the worst of both worlds.
+
+**CORRECTION (08-22, user review).** An earlier version of this section
+claimed that re-writing a lane with the values it already holds is "a
+no-op for the analog state". That is WRONG. The write sequence includes
+the FFE manual-enable (base+0xd8 = 0x010) and the APPLY strobe, so a lane
+that was still on the boot csr's FFE **Auto** transitions Auto->Manual even
+though its numeric VS/PE are unchanged — and Auto->Manual is precisely the
+perturbation rows 76/77 measured. So all-lane application is NOT free: it
+trades "one lane perturbed, modes split" for "both lanes perturbed, modes
+matched". Which is actually better on this hardware is an OPEN BENCH
+QUESTION, not something settled by argument.
+
+Partial evidence so far: row 81's A:0000 event was exactly an all-lane
+apply mid-training (both lanes Auto->Manual plus new values) and the link
+trained CLEAN (Y:11 flat) — so a SINGLE mid-training all-lane apply is not
+catastrophic. Row 76's damage came from re-applying at EVERY training
+start, which is a different exposure. Neither observation covers a genuine
+asymmetric request.
+
+**To settle it**, an actual asymmetric case (A:0026-like) must be forced on
+the bench and the two policies compared; both hubs settle at symmetric
+A:0022, so the sink will not produce it on its own. That needs a request
+injection/override mechanism (build-time forced lane-1 nibble, or a runtime
+telnet override) — NOT YET BUILT. Until then `ALL-LANE` is the working
+default because it keeps the modes matched, not because it is proven best.
 
 A useful consequence: "any lane changed" is just a whole-vector compare of
 `{pe_clamped, vs_clamped}` against `{applied_pe, applied_vs}`, so no lane
@@ -688,12 +712,25 @@ these boards fail on with marginal sinks or longer cables. It trained fine
 here, which is a useful margin data point for the Ugreen but not a defense
 of the policy.
 
-**Policy (user decision).** `IGNORE_ZERO_REQUEST` (default 1): if the WHOLE
-0x206 byte is zero — every lane's VS and PE — the byte is skipped at capture
-and the applied levels stand. A zero on ONE lane is still a genuine
-asymmetric request and is honored. The cost is that a sink genuinely asking
-for VS0/PE0 on every lane cannot get it; VS0 is the weakest drive available,
-so that ask is implausible.
+**Policy — REVISED 08-22 after user review.** The first fix suppressed any
+all-zero request. That is a **compatibility heuristic, not DP semantics**:
+0x00 literally encodes VS0/PE0 and is not a defined "no request" sentinel.
+The same event also showed the Ugreen running CLEAN at 420 mV, which
+refutes the earlier claim here that a genuine VS0 request is "implausible"
+— that claim is RETRACTED.
+
+The protocol-correct discriminator is the **immediately preceding link
+status**, now implemented as the `phase_done` input (§14): if the phase
+being trained already reports success, the ladder advances and the
+accompanying request is dropped WHATEVER its value; if the applicable
+status failed, the request is honored literally, including zero. Reset-storm
+values are suppressed by `phy_reinit` — because the transaction is invalid
+and the PHY is re-initialising, not because the value happens to be zero.
+
+`IGNORE_ZERO_REQUEST` is retained as a per-sink workaround but now defaults
+to **0 (OFF)**. It is not shared-default policy and not the final protocol
+answer; enable it for a specific board only if a specific sink is shown to
+need it.
 
 **Sims.** `tb_afe_perlane` covers both the ignored all-zero case and the
 one-lane-zero case. Two scenarios in `tb_afe_adjust` had been using all-zero
@@ -706,3 +743,40 @@ whether the apply path costs margin when actually exercised: it fired for
 real on hardware (mid-training DRP writes + APPLY strobe on both lanes) and
 the link trained with the cleanest possible signature. The `AFE_INIT_VS=1`
 experiment is no longer needed.
+
+
+## 14. Status-gated adjustment (`phase_done`, 08-22)
+
+DP link training says: read LANE_STATUS, then ADJUST_REQUEST; if the phase
+under training already succeeded, ADVANCE — do not apply the request. The
+sequencer now takes a `phase_done` level and samples it WITH each request
+(`pend_done`), so the decision uses the status that actually accompanied
+that request rather than a later one.
+
+Wiring in `dp_transmitter` (no new plumbing — `debug_locks` already carries
+`{clock, equ, symbol, align}_locked`, registered in `channel_managemnt`):
+
+```
+.phase_done (tx_clock_train ? debug_locks[3]                     // CR: clock lock
+                            : (tx_align_train ? (&debug_locks[2:0])  // EQ: equ+sym+align
+                                              : 1'b0))
+```
+
+Consequences:
+- a locked sink that emits `A:0000` is ignored because its STATUS says the
+  phase is done, not because the value is zero — the row-81 420 mV drop is
+  prevented by the protocol-correct mechanism;
+- a sink that genuinely wants VS0/PE0 while a phase is still FAILING gets
+  it, literally;
+- storms are handled by `phy_reinit` (PLL unlock / PCS reset / CSR replay).
+
+`tb_afe_perlane` covers both halves: a request accompanied by `phase_done`
+is dropped and the committed levels stand; the identical request with the
+phase failing applies normally. `tb_afe_zeroreq` covers the opt-in
+workaround separately.
+
+Bench note: two benches had been connecting `phase_done` to an UNDECLARED
+identifier, which Verilog makes an implicit wire at `z` — poisoning the
+gate and silently disabling every apply. iverilog does not error on this.
+Both now declare it explicitly; worth remembering when adding ports to
+shared RTL that many benches instantiate.

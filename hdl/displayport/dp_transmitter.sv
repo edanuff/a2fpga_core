@@ -517,6 +517,13 @@ module dp_transmitter #(
         .pe_request      ({debug_adjust[7:6], debug_adjust[3:2]}),
         .adjust_de       (adjust_evt),
         .training_active (tx_clock_train | tx_align_train),
+        // Protocol gate: the phase that is currently being trained already
+        // reports success -> the ladder advances, so the accompanying
+        // ADJUST_REQUEST must NOT be applied. debug_locks =
+        // {clock, equ, symbol, align}_locked (registered in channel_managemnt).
+        .phase_done      (tx_clock_train ? debug_locks[3]
+                                         : (tx_align_train ? (&debug_locks[2:0])
+                                                           : 1'b0)),
         // PHY (re)initialising: PLL unlocked, PCS TX in reset, or the
         // watchdog replaying the boot CSR — all return the AFE to boot
         // state, so the sequencer must forget what it applied.

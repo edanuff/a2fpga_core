@@ -60,17 +60,29 @@
 //     asked yet") from being mistaken for a VS0/PE0 request.
 //   - a new application is never started while one is in flight; an
 //     adjust byte arriving mid-flight is latched and evaluated after.
-//   - IGNORE_ZERO_REQUEST (default 1): an ADJUST_REQUEST byte that is
-//     ALL ZERO is treated as "no request" and skipped entirely. Hardware
-//     evidence (test log row 81, Ugreen): a locked sink reports 0x00 to
-//     mean "no adjustment needed", not "drive me at VS0/PE0" — honoring
-//     it literally dropped BOTH lanes to 420 mV and, because the applied
-//     state is now retained across training transitions (item 4), the
-//     link then RAN at minimum swing until the next retrain. A:0000 is
-//     also what the telemetry shows during reset storms, so honoring it
-//     would leave a struggling link at minimum drive. The cost is that a
-//     sink genuinely asking for VS0/PE0 on every lane cannot get it —
-//     an implausible ask, VS0 being the weakest drive available.
+//   - PHASE_DONE GATE (the protocol-correct discriminator): a request is
+//     applied only while the CURRENT training phase has NOT yet reported
+//     success. DP training says: read LANE_STATUS and ADJUST_REQUEST,
+//     and if the applicable phase (CR during TPS1, EQ/symbol/align
+//     during TPS2+) is already done, ADVANCE — do not adjust. The
+//     `phase_done` input carries exactly that, so a request that arrives
+//     alongside a successful status is dropped whatever its value, and a
+//     request that arrives with a FAILED status is honored literally,
+//     INCLUDING an all-zero (VS0/PE0) one, which is a legal encoding.
+//   - reset-storm values are suppressed by `phy_reinit` (PLL unlocked /
+//     PCS in reset / CSR replay), i.e. because the transaction is
+//     invalid and the PHY is re-initialising — NOT because the value
+//     happens to be zero.
+//   - IGNORE_ZERO_REQUEST (default 0 = OFF): a COMPATIBILITY WORKAROUND,
+//     not protocol semantics — 0x00 literally encodes VS0/PE0 and is not
+//     a defined "no request" sentinel. Some sinks emit it to mean "no
+//     adjustment needed" once locked (test log row 81, Ugreen: honoring
+//     it dropped both lanes to 420 mV, which persists thanks to the
+//     item-4 retention). Note the same event showed the Ugreen running
+//     CLEAN at 420 mV, so a genuine VS0 request is NOT implausible and
+//     this must not be the default policy. Enable per board only if a
+//     specific sink is shown to need it; the phase_done gate above is
+//     the mechanism that should normally prevent the drop.
 //
 // Commit discipline (user review items 3-5, 08-21):
 //   - "applied" (what train_set_byte declares) is committed only when the
@@ -137,8 +149,10 @@ module afe_adjust_seq #(
     // (804 mV) and spends its next request on pre-emphasis instead.
     parameter [1:0]  MAX_VS = 2'd2,
     parameter [1:0]  MAX_PE = 2'd3,
-    // 1: an all-zero ADJUST_REQUEST byte is "no request" (see header)
-    parameter IGNORE_ZERO_REQUEST = 1,
+    // Compatibility workaround, OFF by default (see header): 1 = treat an
+    // all-zero ADJUST_REQUEST byte as "no request". Protocol-correct
+    // suppression is the phase_done gate, not this.
+    parameter IGNORE_ZERO_REQUEST = 0,
     parameter [7:0]  IDLE_SET_BYTE = 8'h06     // legacy swing2+MAX_SWING
 )(
     // ---- management-clock domain (AUX ladder) ------------------------
@@ -149,6 +163,10 @@ module afe_adjust_seq #(
     input  wire  [2*NUM_LANES-1:0] pe_request,
     input  wire        adjust_de,        // pulse: 0x206 byte just captured
     input  wire        training_active,  // tx_clock_train | tx_align_train
+    input  wire        phase_done,       // the CURRENT training phase already
+                                         //   reports success (CR lock during
+                                         //   TPS1; equ+symbol+align during
+                                         //   TPS2+) -> advance, do not adjust
     input  wire        phy_reinit,       // level: PHY (re)initialising — the
                                          //   applied state is forgotten
     // TRAINING_LANEx_SET values, packed {lane1, lane0}: [7:0] -> DPCD
@@ -265,6 +283,7 @@ end else begin : g_on
     wire req_all_zero = (vs_request == {2*NUM_LANES{1'b0}}) &&
                         (pe_request == {2*NUM_LANES{1'b0}});
     reg  pend_zero = 1'b0;
+    reg  pend_done = 1'b0;   // phase_done sampled with the request
 
     // Per lane: clamp the pending request to the declared ceilings, then
     // sanitise to the DP rule VS + PE <= 3 (PE yields; swing is what the
@@ -313,6 +332,9 @@ end else begin : g_on
                 vs_pend   <= vs_request;
                 pe_pend   <= pe_request;
                 pend_zero <= req_all_zero;
+                // status that accompanied THIS request (the ladder reads
+                // LANE_STATUS immediately before ADJUST_REQUEST)
+                pend_done <= phase_done;
                 eval_pend <= 1'b1;
             end
             if (!busy) begin
@@ -331,11 +353,12 @@ end else begin : g_on
                         applied_pe <= {NUM_LANES{INIT_PE}};
                     end
                 end else if (eval_pend && !adj_d) begin
-                    // An all-zero byte is "no request" when
-                    // IGNORE_ZERO_REQUEST (row 81): drop it here, so the
-                    // applied levels simply stand.
+                    // Drop the request when the phase already succeeded
+                    // (protocol: advance, do not adjust), or when the
+                    // all-zero workaround is enabled and it is all zero.
                     eval_pend <= 1'b0;
-                    if (!(IGNORE_ZERO_REQUEST != 0 && pend_zero) &&
+                    if (!pend_done &&
+                        !(IGNORE_ZERO_REQUEST != 0 && pend_zero) &&
                         ({pe_clamped, vs_clamped} != {applied_pe, applied_vs})) begin
                         target_vs <= vs_clamped;
                         target_pe <= pe_clamped;

@@ -29,6 +29,7 @@ module tb_afe_perlane;
     // packed {lane1, lane0}
     reg  [3:0] vs_request = 0, pe_request = 0;
     reg        adjust_de = 0, training_active = 0;
+    reg phase_done = 0;
     wire [15:0] byte_o; wire busy; wire [5:0] dbg; wire [3:0] dbg1;
     wire req; reg gnt = 0; wire [23:0] addr; wire [31:0] data; wire wren; reg ready = 0;
 
@@ -37,7 +38,7 @@ module tb_afe_perlane;
         .INIT_VS(2'd2), .INIT_PE(2'd0), .APPLY_ON_TRAINING_START(0),
         .MAX_VS(2'd2), .MAX_PE(2'd3)) dut (
         .mgmt_clk(mgmt_clk), .vs_request(vs_request), .pe_request(pe_request),
-        .adjust_de(adjust_de), .training_active(training_active), .phy_reinit(1'b0),
+        .adjust_de(adjust_de), .training_active(training_active), .phase_done(phase_done), .phy_reinit(1'b0),
         .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(dbg1),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));
@@ -141,24 +142,37 @@ module tb_afe_perlane;
             $display("FAIL: dbg lane0 %0h lane1 %0h (want 1/1)", dbg[3:0], dbg1); end
         else $display("  ok: dbg_afe/dbg_afe1 report their own lanes");
 
-        // ---- 7. all-zero request is "no request" (row 81) --------------
-        // get to a known non-zero state first
+        // ---- 7. DEFAULT: an all-zero request is a LEGAL VS0/PE0 ask ----
+        // (0x00 is not a "no request" sentinel; IGNORE_ZERO_REQUEST is a
+        // per-sink workaround, default OFF — see tb_afe_zeroreq)
         send_adjust(2'd2, 2'd0, 2'd2, 2'd0); settle;
         check_bytes(16'h0606, "back to VS2/PE0 both lanes");
         wr_before = wr_cnt;
-        send_adjust(2'd0, 2'd0, 2'd0, 2'd0); settle;   // A:0000
-        if (wr_cnt != wr_before) begin errors = errors + 1;
-            $display("FAIL: all-zero request wrote %0d (want 0 — 'no request')",
-                     wr_cnt - wr_before); end
-        else $display("  ok: A:0000 ignored as 'no request' — no writes");
-        check_bytes(16'h0606, "A:0000 leaves the applied levels standing");
-        // a zero request on ONE lane only is still a real request
-        send_adjust(2'd0, 2'd0, 2'd2, 2'd0); settle;
+        send_adjust(2'd0, 2'd0, 2'd0, 2'd0); settle;   // A:0000, phase NOT done
         if (wr_cnt != wr_before + 8) begin errors = errors + 1;
-            $display("FAIL: lane-0-only zero should still apply (wrote %0d)",
+            $display("FAIL: all-zero request must be honored by default (wrote %0d)",
                      wr_cnt - wr_before); end
-        else $display("  ok: zero on ONE lane is still honored");
-        check_bytes(16'h0600, "lane 0 at VS0/PE0, lane 1 unchanged");
+        else $display("  ok: A:0000 honored literally when the phase has NOT succeeded");
+        check_bytes(16'h0000, "all-zero -> VS0/PE0 both lanes");
+
+        // ---- 8. PHASE_DONE gate: status success wins over any request ---
+        // the ladder read LANE_STATUS just before ADJUST_REQUEST; if the
+        // phase already succeeded we advance and must NOT adjust
+        wr_before = wr_cnt;
+        phase_done = 1'b1;
+        send_adjust(2'd2, 2'd1, 2'd2, 2'd1); settle;   // a real, different ask
+        if (wr_cnt != wr_before) begin errors = errors + 1;
+            $display("FAIL: request accompanied by phase_done applied %0d writes",
+                     wr_cnt - wr_before); end
+        else $display("  ok: phase_done -> request dropped, applied levels stand");
+        check_bytes(16'h0000, "phase_done leaves the committed levels alone");
+        phase_done = 1'b0;
+        send_adjust(2'd2, 2'd1, 2'd2, 2'd1); settle;   // same ask, phase failed
+        if (wr_cnt != wr_before + 8) begin errors = errors + 1;
+            $display("FAIL: same request with a FAILED phase must apply (wrote %0d)",
+                     wr_cnt - wr_before); end
+        else $display("  ok: same request honored once the phase reports failure");
+        check_bytes(16'h2E2E, "VS2/PE1 applied on both lanes");
 
         if (errors == 0)
             $display("PASS: per-lane values with all-lane application — own request, own LANE_BASE payload, own declared byte, no FFE-mode split");
