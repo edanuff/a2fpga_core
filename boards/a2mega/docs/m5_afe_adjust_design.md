@@ -663,3 +663,46 @@ snapshot — so like item 6, this path is architecturally correct but not yet
 exercised by our hardware. `MAX_VS`/`MAX_PE` remain common to both lanes;
 per-lane ceilings would only be justified by evidence of a fixed mux
 asymmetry.
+
+## 13. An all-zero ADJUST_REQUEST is "no request" (row 81, 08-22)
+
+**Observed.** On the per-lane build (`6b39e155`, Ugreen), one v-draw ended
+with `M:10 M1:0` — both lanes applied at **VS0/PE0 = 420 mV**, down from the
+INIT VS2/804 mV. The sink had sent `A:0000`; the sequencer honored it
+literally, the DRP sequence fired mid-training, committed on ack, and the
+link trained clean (Y:11 flat) — then **ran at minimum swing** until the
+next retrain.
+
+**Why it appeared now.** The behavior is not new, but its persistence is.
+Before the item-4 retention change the applied state was cleared whenever
+`training_active` fell, so a 420 mV excursion evaporated at the end of every
+training run and was never visible in telemetry. Retention (correctly) makes
+the applied state stick, which converted a transient into a lasting
+condition — a latent policy bug surfaced by a correct fix.
+
+**Why it matters.** Many sinks report `ADJUST_REQUEST = 0x00` to mean "no
+adjustment needed" once locked, not "drive me at level 0". Telemetry also
+shows `A:0000` during reset storms (row 79), so honoring it literally would
+leave a *struggling* link at minimum drive — the exact intermittent class
+these boards fail on with marginal sinks or longer cables. It trained fine
+here, which is a useful margin data point for the Ugreen but not a defense
+of the policy.
+
+**Policy (user decision).** `IGNORE_ZERO_REQUEST` (default 1): if the WHOLE
+0x206 byte is zero — every lane's VS and PE — the byte is skipped at capture
+and the applied levels stand. A zero on ONE lane is still a genuine
+asymmetric request and is honored. The cost is that a sink genuinely asking
+for VS0/PE0 on every lane cannot get it; VS0 is the weakest drive available,
+so that ask is implausible.
+
+**Sims.** `tb_afe_perlane` covers both the ignored all-zero case and the
+one-lane-zero case. Two scenarios in `tb_afe_adjust` had been using all-zero
+requests — including the "requests outside training are ignored" gate, which
+would otherwise have kept passing for the wrong reason — and now use
+non-zero requests.
+
+**Note for item 6.** This event also answered the standing question of
+whether the apply path costs margin when actually exercised: it fired for
+real on hardware (mid-training DRP writes + APPLY strobe on both lanes) and
+the link trained with the cleanest possible signature. The `AFE_INIT_VS=1`
+experiment is no longer needed.
