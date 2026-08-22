@@ -258,9 +258,13 @@ end else begin : g_on
     reg       eval_pend     = 1'b0;   // an adjust byte awaits evaluation
     reg [2*NUM_LANES-1:0] vs_pend = {2*NUM_LANES{1'b0}};
     reg [2*NUM_LANES-1:0] pe_pend = {2*NUM_LANES{1'b0}};
-    // whole 0x206 byte == 0 (every lane's VS and PE), sampled with adj_d
+    // whole 0x206 byte == 0 (every lane's VS and PE). Registered ALONGSIDE
+    // vs_pend/pe_pend at capture rather than gating the capture enable, so
+    // the comparator sits parallel to the existing pend loads instead of
+    // adding depth ahead of them (the enable path is timing-sensitive).
     wire req_all_zero = (vs_request == {2*NUM_LANES{1'b0}}) &&
                         (pe_request == {2*NUM_LANES{1'b0}});
+    reg  pend_zero = 1'b0;
 
     // Per lane: clamp the pending request to the declared ceilings, then
     // sanitise to the DP rule VS + PE <= 3 (PE yields; swing is what the
@@ -305,11 +309,10 @@ end else begin : g_on
             eval_pend <= 1'b0;
         end else begin
             // capture: one snapshot per ADJUST_REQUEST read (= iteration).
-            // An all-zero byte is "no request" when IGNORE_ZERO_REQUEST
-            // (row 81) — skipped, so the applied levels simply stand.
-            if (adj_d && !(IGNORE_ZERO_REQUEST != 0 && req_all_zero)) begin
+            if (adj_d) begin
                 vs_pend   <= vs_request;
                 pe_pend   <= pe_request;
+                pend_zero <= req_all_zero;
                 eval_pend <= 1'b1;
             end
             if (!busy) begin
@@ -328,8 +331,12 @@ end else begin : g_on
                         applied_pe <= {NUM_LANES{INIT_PE}};
                     end
                 end else if (eval_pend && !adj_d) begin
+                    // An all-zero byte is "no request" when
+                    // IGNORE_ZERO_REQUEST (row 81): drop it here, so the
+                    // applied levels simply stand.
                     eval_pend <= 1'b0;
-                    if ({pe_clamped, vs_clamped} != {applied_pe, applied_vs}) begin
+                    if (!(IGNORE_ZERO_REQUEST != 0 && pend_zero) &&
+                        ({pe_clamped, vs_clamped} != {applied_pe, applied_vs})) begin
                         target_vs <= vs_clamped;
                         target_pe <= pe_clamped;
                         vs_lat    <= vs_clamped;
