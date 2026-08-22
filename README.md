@@ -103,6 +103,8 @@ The A2N20v2 has a 4-switch DIP switch that controls the following settings:
 
 For ROM 00/01 IIgs models (such as the Woz edition), the A2N20v2 must be placed in Slot 3.  For ROM 03 models, it should work in any slot. This is because it requires the M2B0 signal which is only present in Slot 3 of the original IIgs models, but which is present in slots 1-6 of the ROM 03 model. 
 
+**Troubleshooting — intermittent boot or disk failures:** if the card boots unreliably, drops to the monitor after stepping the drive, or shows disk read/write errors, measure your Apple II's 5 V rail under load before suspecting the gateware. A supply that has drifted or is out of trim — even a modern replacement — can sit near 4.75 V, which is low enough to cause marginal bus sampling and present exactly like an intermittent gateware bug. Aim for ~5.05 V; many supplies have a trim potentiometer for this.
+
 [A2N20v2 Board Support Project (Schematics, Project Files)](boards/a2n20v2/)
 
 ### Work-in-progress A2N20v2 variants
