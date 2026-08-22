@@ -121,6 +121,7 @@ module dp_transmitter #(
     output logic [7:0]  debug_caps,    // sink capability profile
     output logic [3:0]  debug_wdog,  // {cold-restart forcing, attempts[2:0]}
     output logic [9:0]  debug_wrusewd, // TX FIFO fill {word-lane0's, word-lane1's}
+    output logic [5:0]  debug_afe,     // M5 applied AFE: {seq_err, known, pe[1:0], vs[1:0]}
     // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
     // e.g. an in-fabric line-rate check against a known crystal.
     output logic clk_symbol_out,
@@ -502,7 +503,7 @@ module dp_transmitter #(
         .training_active (tx_clock_train | tx_align_train),
         .train_set_byte  (train_set_byte),
         .afe_busy        (),
-        .dbg_afe         (),
+        .dbg_afe         (debug_afe),
         .drp_clk         (afe_drp_clk),
         .drp_req         (afe_drp_req),
         .drp_gnt         (afe_drp_gnt),

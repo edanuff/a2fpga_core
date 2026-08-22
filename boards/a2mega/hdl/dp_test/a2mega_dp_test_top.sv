@@ -187,6 +187,7 @@ module a2mega_dp_test_top (
     logic [7:0]  aux_dbg_gate;
     logic [15:0] aux_dbg_adjust;
     logic [15:0] aux_dbg_chstate;
+    logic [5:0]  aux_dbg_afe;      // M5 applied AFE levels (telemetry M:)
     logic [7:0]  aux_dbg_sink;
     logic [7:0]  aux_dbg_caps;
     logic       hpd_present_w;
@@ -250,6 +251,7 @@ module a2mega_dp_test_top (
         .debug_gate        (aux_dbg_gate),
         .debug_adjust      (aux_dbg_adjust),
         .debug_chstate     (aux_dbg_chstate),
+        .debug_afe         (aux_dbg_afe),
         .debug_sink        (aux_dbg_sink),
         .debug_caps        (aux_dbg_caps),
         .clk_symbol_out    (clk_sym_w),
@@ -343,6 +345,7 @@ module a2mega_dp_test_top (
     logic [15:0] chst_s0, chst_s;
     logic [27:0] symd_s0, symd_s;
     logic [7:0] snk_s0, snk_s, cap_s0, cap_s;
+    logic [5:0] afe_s0, afe_s;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
@@ -358,6 +361,7 @@ module a2mega_dp_test_top (
         symd_s0 <= sym_delta;       symd_s <= symd_s0;
         snk_s0 <= aux_dbg_sink;     snk_s <= snk_s0;
         cap_s0 <= aux_dbg_caps;     cap_s <= cap_s0;
+        afe_s0 <= aux_dbg_afe;      afe_s <= afe_s0;
     end
 
     // Y: link/video rise odometer — counts every establish (flg_s[1]) and
@@ -378,7 +382,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 86;   // msg_idx is [6:0]
+    localparam int MSG_LEN = 91;   // msg_idx is [6:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -420,7 +424,8 @@ module a2mega_dp_test_top (
             msg[72]=" "; msg[73]=" "; msg[74]=" "; msg[75]=" ";
             msg[76]=" "; msg[77]=" "; msg[78]=" "; msg[79]=" ";
             msg[80]=" "; msg[81]=" "; msg[82]=" "; msg[83]=" ";
-            msg[84]=" "; msg[85]=8'h0A;
+            msg[84]=" "; msg[85]=" "; msg[86]=" "; msg[87]=" ";
+            msg[88]=" "; msg[89]=" "; msg[90]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -472,7 +477,10 @@ module a2mega_dp_test_top (
         msg[80]=" "; msg[81]="X"; msg[82]=":";
         msg[83]=hexch(cap_s[7:4]);            // {extfrm,r270,r162,valid}
         msg[84]=hexch(cap_s[3:0]);            // max_downspread[3:0]
-        msg[85]=8'h0A;
+        msg[85]=" "; msg[86]="M"; msg[87]=":";
+        msg[88]=hexch({2'b0, afe_s[5:4]});    // M5 applied AFE: {seq_err, known}
+        msg[89]=hexch(afe_s[3:0]);            //   {pe[1:0], vs[1:0]} actually applied
+        msg[90]=8'h0A;
         end
     end
 
