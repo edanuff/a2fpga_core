@@ -20,7 +20,7 @@ module tb_afe_noinit;
         .INIT_VS(2'd2), .INIT_PE(2'd0), .APPLY_ON_TRAINING_START(0)) dut (
         .mgmt_clk(mgmt_clk), .vs_request({vs_request,vs_request}), .pe_request({pe_request,pe_request}),
         .adjust_de(adjust_de), .training_active(training_active), .phase_done(phase_done), .phy_reinit(1'b0),
-        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(),
+        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(), .dbg_evt(dbg_evt),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));
     integer rd_cnt = 0, wr_cnt = 0; reg wren_d = 0; reg [31:0] wr_data [0:255];
@@ -37,6 +37,8 @@ module tb_afe_noinit;
               @(negedge mgmt_clk); adjust_de = 0; end
     endtask
     integer errors = 0;
+
+    wire [11:0] dbg_evt;
     initial begin
         #100; training_active = 1; #(20_000);
         if (wr_cnt != 0) begin errors = errors + 1; $display("FAIL: INIT produced %0d DRP writes (want 0)", wr_cnt); end

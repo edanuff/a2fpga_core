@@ -780,3 +780,31 @@ identifier, which Verilog makes an implicit wire at `z` — poisoning the
 gate and silently disabling every apply. iverilog does not error on this.
 Both now declare it explicitly; worth remembering when adding ports to
 shared RTL that many benches instantiate.
+
+## 15. Bench instrumentation: the `N:` counters (08-22)
+
+Row 82 could not distinguish "the guard worked" from "no stimulus arrived":
+we saw no 420 mV excursion, but never observed an `A:0000` either. Three
+saturating 4-bit counters in the mgmt domain close that gap
+(`dbg_evt`, cleared on `phy_reinit`):
+
+| digit | counts |
+|-------|--------|
+| `N:` [11:8] | all-zero ADJUST_REQUESTs **seen** |
+| `N:` [7:4]  | requests **dropped by the phase_done gate** |
+| `N:` [3:0]  | DRP sequences **applied and committed** |
+
+Telemetry field `N:<zero><drops><applies>`, `MSG_LEN` 96 -> 102.
+Reading: `N:0xx` = no A:0000 ever arrived (the mechanism is untested, not
+proven); `N:11x` = one arrived AND the gate rejected it; a rising third
+digit with a locked link means something is still applying mid-stream.
+
+`tb_afe_perlane` asserts all three (1 / 1 / 7 in its scenario), and the
+ENABLE=0 twin in `tb_afe_adjust` asserts they stay 0.
+
+Cost (the reason to check — see the 0.15% `cm_life` margin): build
+`bd29a66f`, 0/0, `cm_life` Fmax **100.382 MHz** — slightly BETTER than the
+uninstrumented phase-gate build (100.150) and the zero-guard build
+(100.216). Placement noise dominates at this margin; the counters are not
+free of risk, they simply landed well this time. `clk_pix` gave back the
+headroom instead (149.128 vs 167.372), which is the same reshuffling.

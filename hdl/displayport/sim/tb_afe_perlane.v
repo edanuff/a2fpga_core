@@ -39,7 +39,7 @@ module tb_afe_perlane;
         .MAX_VS(2'd2), .MAX_PE(2'd3)) dut (
         .mgmt_clk(mgmt_clk), .vs_request(vs_request), .pe_request(pe_request),
         .adjust_de(adjust_de), .training_active(training_active), .phase_done(phase_done), .phy_reinit(1'b0),
-        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(dbg1),
+        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(dbg1), .dbg_evt(dbg_evt),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));
 
@@ -63,6 +63,8 @@ module tb_afe_perlane;
     task settle; begin #(30_000); end endtask
 
     integer errors = 0, wr_before = 0;
+
+    wire [11:0] dbg_evt;
     // one lane's 4-write block: base+0x34 txlev, +0x38 C1, +0xd8 enable, +0xd8 strobe
     task check_block(input integer b, input [23:0] base, input [3:0] txlev,
                      input [4:0] c1, input [255:0] name);
@@ -173,6 +175,20 @@ module tb_afe_perlane;
                      wr_cnt - wr_before); end
         else $display("  ok: same request honored once the phase reports failure");
         check_bytes(16'h2E2E, "VS2/PE1 applied on both lanes");
+
+        // ---- 9. instrumentation counters (bench evidence, dbg_evt) -----
+        // zero_cnt must have seen the A:0000 of step 7; drop_cnt must have
+        // recorded exactly the one phase_done drop of step 8; appl_cnt must
+        // match the sequences actually applied (wr_cnt / 8).
+        if (dbg_evt[11:8] !== 4'd1) begin errors = errors + 1;
+            $display("FAIL: zero_cnt %0d want 1", dbg_evt[11:8]); end
+        else $display("  ok: zero_cnt = 1 (the A:0000 was SEEN, not merely absent)");
+        if (dbg_evt[7:4] !== 4'd1) begin errors = errors + 1;
+            $display("FAIL: drop_cnt %0d want 1", dbg_evt[7:4]); end
+        else $display("  ok: drop_cnt = 1 (the phase_done gate demonstrably FIRED)");
+        if (dbg_evt[3:0] !== (wr_cnt/8)) begin errors = errors + 1;
+            $display("FAIL: appl_cnt %0d want %0d", dbg_evt[3:0], wr_cnt/8); end
+        else $display("  ok: appl_cnt = %0d matches the applied sequences", dbg_evt[3:0]);
 
         if (errors == 0)
             $display("PASS: per-lane values with all-lane application — own request, own LANE_BASE payload, own declared byte, no FFE-mode split");

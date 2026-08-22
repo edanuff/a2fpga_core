@@ -22,7 +22,7 @@ module tb_afe_zeroreq;
         .mgmt_clk(mgmt_clk), .vs_request(vs_request), .pe_request(pe_request),
         .adjust_de(adjust_de), .training_active(training_active),
         .phase_done(phase_done), .phy_reinit(1'b0),
-        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(dbg1),
+        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(dbg1), .dbg_evt(dbg_evt),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));
     integer rd_cnt = 0, wr_cnt = 0; reg wren_d = 0;
@@ -39,6 +39,8 @@ module tb_afe_zeroreq;
               adjust_de = 1; @(negedge mgmt_clk); adjust_de = 0; end
     endtask
     integer errors = 0, wr_before = 0;
+
+    wire [11:0] dbg_evt;
     initial begin
         #100; training_active = 1; #(30_000);
         // all-zero: suppressed by the workaround

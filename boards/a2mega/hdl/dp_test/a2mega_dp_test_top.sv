@@ -189,6 +189,7 @@ module a2mega_dp_test_top (
     logic [15:0] aux_dbg_chstate;
     logic [5:0]  aux_dbg_afe;    // M5 applied AFE lane 0 (telemetry M:)
     logic [3:0]  aux_dbg_afe1;   // M5 applied AFE lane 1 (telemetry M1:)
+    logic [11:0] aux_dbg_evt;    // M5 {zero_seen, gate_drops, applies} (telemetry N:)
     logic [7:0]  aux_dbg_sink;
     logic [7:0]  aux_dbg_caps;
     logic       hpd_present_w;
@@ -261,6 +262,7 @@ module a2mega_dp_test_top (
         .debug_chstate     (aux_dbg_chstate),
         .debug_afe         (aux_dbg_afe),
         .debug_afe1        (aux_dbg_afe1),
+        .debug_evt         (aux_dbg_evt),
         .debug_sink        (aux_dbg_sink),
         .debug_caps        (aux_dbg_caps),
         .clk_symbol_out    (clk_sym_w),
@@ -356,6 +358,7 @@ module a2mega_dp_test_top (
     logic [7:0] snk_s0, snk_s, cap_s0, cap_s;
     logic [5:0] afe_s0, afe_s;
     logic [3:0] afe1_s0, afe1_s;   // lane 1 {pe, vs}
+    logic [11:0] evt_s0, evt_s;    // {zero_seen, gate_drops, applies}
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
@@ -373,6 +376,7 @@ module a2mega_dp_test_top (
         cap_s0 <= aux_dbg_caps;     cap_s <= cap_s0;
         afe_s0 <= aux_dbg_afe;      afe_s <= afe_s0;
         afe1_s0 <= aux_dbg_afe1;    afe1_s <= afe1_s0;
+        evt_s0 <= aux_dbg_evt;      evt_s <= evt_s0;
     end
 
     // Y: link/video rise odometer — counts every establish (flg_s[1]) and
@@ -393,7 +397,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 96;   // msg_idx is [6:0] (127 max)
+    localparam int MSG_LEN = 102;  // msg_idx is [6:0] (127 max)
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -437,7 +441,9 @@ module a2mega_dp_test_top (
             msg[80]=" "; msg[81]=" "; msg[82]=" "; msg[83]=" ";
             msg[84]=" "; msg[85]=" "; msg[86]=" "; msg[87]=" ";
             msg[88]=" "; msg[89]=" "; msg[90]=" "; msg[91]=" ";
-            msg[92]=" "; msg[93]=" "; msg[94]=" "; msg[95]=8'h0A;
+            msg[92]=" "; msg[93]=" "; msg[94]=" "; msg[95]=" ";
+            msg[96]=" "; msg[97]=" "; msg[98]=" "; msg[99]=" ";
+            msg[100]=" "; msg[101]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -496,7 +502,14 @@ module a2mega_dp_test_top (
         // SEPARATE field so existing M: parsing/log history stays valid.
         msg[90]=" "; msg[91]="M"; msg[92]="1"; msg[93]=":";
         msg[94]=hexch(afe1_s);                //   LANE 1 {pe[1:0], vs[1:0]} applied
-        msg[95]=8'h0A;
+        // M5 instrumentation: N:<zero_seen><gate_drops><applies>. Without
+        // the first two digits an absent 420 mV excursion cannot be told
+        // apart from an absent A:0000 stimulus (test log row 82).
+        msg[95]=" "; msg[96]="N"; msg[97]=":";
+        msg[98]=hexch(evt_s[11:8]);           //   all-zero requests SEEN
+        msg[99]=hexch(evt_s[7:4]);            //   dropped by the phase_done gate
+        msg[100]=hexch(evt_s[3:0]);           //   DRP sequences applied
+        msg[101]=8'h0A;
         end
     end
 

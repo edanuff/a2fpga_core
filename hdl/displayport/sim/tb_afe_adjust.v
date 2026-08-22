@@ -90,7 +90,7 @@ module tb_afe_adjust;
         .training_active (training_active), .phase_done(phase_done), .phy_reinit(1'b0),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
-        .dbg_afe         (dbg_afe), .dbg_afe1(),
+        .dbg_afe         (dbg_afe), .dbg_afe1(), .dbg_evt(dbg_evt),
         .drp_clk         (drp_clk),
         .drp_req         (drp_req),
         .drp_gnt         (drp_gnt),
@@ -119,7 +119,7 @@ module tb_afe_adjust;
         .training_active (training_active), .phase_done(phase_done), .phy_reinit(1'b0),
         .train_set_byte  (off_byte),
         .afe_busy        (off_busy),
-        .dbg_afe         (off_dbg), .dbg_afe1(),
+        .dbg_afe         (off_dbg), .dbg_afe1(), .dbg_evt(off_evt),
         .drp_clk         (drp_clk),
         .drp_req         (off_req),
         .drp_gnt         (1'b1),
@@ -133,9 +133,14 @@ module tb_afe_adjust;
     always @(posedge drp_clk)
         if (off_req !== 1'b0 || off_wren !== 1'b0)
             off_violations = off_violations + 1;
-    always @(posedge mgmt_clk)
-        if (off_byte !== 16'h0606)   // both lanes tied to the legacy byte
+    always @(posedge mgmt_clk) begin
+        // disabled twin: byte tied to the legacy value on BOTH lanes and
+        // every instrumentation counter held at zero
+        if (off_byte !== 16'h0606)
             off_violations = off_violations + 1;
+        if (off_evt !== 12'd0)
+            off_violations = off_violations + 1;
+    end
 
     // ------------------------------------------------------------------
     // Mock DRP slave: grant after a few cycles; each accepted write gets
@@ -182,6 +187,9 @@ module tb_afe_adjust;
     // Checks
     // ------------------------------------------------------------------
     integer errors = 0;
+
+    wire [11:0] dbg_evt;
+    wire [11:0] off_evt;
     // phase_done = 0: the trained phase never reports success, which is
     // the condition under which ADJUST_REQUESTs are applied at all.
     reg phase_done = 1'b0;

@@ -49,6 +49,8 @@ module tb_afe_adjust_closedloop;
     always #4.1 drp_clk = ~drp_clk;
 
     integer errors = 0;
+
+    wire [11:0] dbg_evt;
     // phase_done = 0: the trained phase never reports success, which is
     // the condition under which ADJUST_REQUESTs are applied at all.
     reg phase_done = 1'b0;
@@ -138,7 +140,7 @@ module tb_afe_adjust_closedloop;
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
         .dbg_afe         (dbg_afe),
-        .dbg_afe1        (),
+        .dbg_afe1        (), .dbg_evt(dbg_evt),
         .drp_clk         (drp_clk),
         .drp_req         (drp_req),
         .drp_gnt         (drp_gnt),

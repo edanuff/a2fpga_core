@@ -130,6 +130,9 @@ module dp_transmitter #(
     output logic [9:0]  debug_wrusewd, // TX FIFO fill {word-lane0's, word-lane1's}
     output logic [5:0]  debug_afe,     // M5 applied AFE lane 0: {seq_err, known, pe[1:0], vs[1:0]}
     output logic [3:0]  debug_afe1,    // M5 applied AFE lane 1: {pe[1:0], vs[1:0]}
+    // M5 bench instrumentation: {all-zero requests seen, requests dropped
+    // by the phase_done gate, DRP sequences applied} — saturating 4-bit
+    output logic [11:0] debug_evt,
     // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
     // e.g. an in-fabric line-rate check against a known crystal.
     output logic clk_symbol_out,
@@ -532,6 +535,7 @@ module dp_transmitter #(
         .afe_busy        (afe_busy_w),
         .dbg_afe         (debug_afe),
         .dbg_afe1        (debug_afe1),
+        .dbg_evt         (debug_evt),
         .drp_clk         (afe_drp_clk),
         .drp_req         (afe_drp_req),
         .drp_gnt         (afe_drp_gnt),

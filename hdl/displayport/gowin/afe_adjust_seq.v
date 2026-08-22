@@ -175,6 +175,13 @@ module afe_adjust_seq #(
     output wire        afe_busy,         // adjust pending / application in flight
     output wire  [5:0] dbg_afe,          // lane 0 {seq_err, known, pe, vs}
     output wire  [3:0] dbg_afe1,         // lane 1 {pe[1:0], vs[1:0]}
+    // Instrumentation for the bench (saturating, cleared on phy_reinit):
+    //   [11:8] all-zero ADJUST_REQUESTs SEEN (proves A:0000 occurred)
+    //   [7:4]  requests DROPPED by the phase_done gate (proves it fired)
+    //   [3:0]  DRP sequences applied and committed
+    // Without the first two an absent excursion cannot be told apart from
+    // an absent stimulus (test log row 82).
+    output wire [11:0] dbg_evt,
     // ---- DRP-clock domain (SERDES UPAR/DRP port) ---------------------
     input  wire        drp_clk,
     output wire        drp_req,          // want the DRP port (level)
@@ -191,6 +198,7 @@ generate if (ENABLE_AFE_ADJUST == 0) begin : g_off
     assign afe_busy       = 1'b0;
     assign dbg_afe        = 6'd0;
     assign dbg_afe1       = 4'd0;
+    assign dbg_evt        = 12'd0;
     assign drp_req        = 1'b0;
     assign drp_addr       = 24'd0;
     assign drp_wrdata     = 32'd0;
@@ -284,6 +292,9 @@ end else begin : g_on
                         (pe_request == {2*NUM_LANES{1'b0}});
     reg  pend_zero = 1'b0;
     reg  pend_done = 1'b0;   // phase_done sampled with the request
+    // bench instrumentation (saturating 4-bit, see dbg_evt)
+    reg [3:0] zero_cnt = 4'd0, drop_cnt = 4'd0, appl_cnt = 4'd0;
+    assign dbg_evt = {zero_cnt, drop_cnt, appl_cnt};
 
     // Per lane: clamp the pending request to the declared ceilings, then
     // sanitise to the DP rule VS + PE <= 3 (PE yields; swing is what the
@@ -314,6 +325,7 @@ end else begin : g_on
         adj_d      <= adjust_de;
         if (ack_evt) busy_r <= 1'b0;
         // sequence completion: commit only on success (item 3)
+        if (ack_evt && !fail_w && (appl_cnt != 4'hF)) appl_cnt <= appl_cnt + 4'd1;
         if (ack_evt && !fail_w) begin
             applied_vs <= target_vs;
             applied_pe <= target_pe;
@@ -322,6 +334,7 @@ end else begin : g_on
             // the PHY is being re-initialised: whatever we wrote is gone
             applied_known <= 1'b0;
             eval_pend     <= 1'b0;
+            zero_cnt <= 4'd0; drop_cnt <= 4'd0; appl_cnt <= 4'd0;
         end else if (!training_active) begin
             // training ended: RETAIN the committed state (item 4); only
             // drop a stale pending request
@@ -332,6 +345,8 @@ end else begin : g_on
                 vs_pend   <= vs_request;
                 pe_pend   <= pe_request;
                 pend_zero <= req_all_zero;
+                if (req_all_zero && (zero_cnt != 4'hF))
+                    zero_cnt <= zero_cnt + 4'd1;
                 // status that accompanied THIS request (the ladder reads
                 // LANE_STATUS immediately before ADJUST_REQUEST)
                 pend_done <= phase_done;
@@ -357,6 +372,8 @@ end else begin : g_on
                     // (protocol: advance, do not adjust), or when the
                     // all-zero workaround is enabled and it is all zero.
                     eval_pend <= 1'b0;
+                    if (pend_done && (drop_cnt != 4'hF))
+                        drop_cnt <= drop_cnt + 4'd1;
                     if (!pend_done &&
                         !(IGNORE_ZERO_REQUEST != 0 && pend_zero) &&
                         ({pe_clamped, vs_clamped} != {applied_pe, applied_vs})) begin

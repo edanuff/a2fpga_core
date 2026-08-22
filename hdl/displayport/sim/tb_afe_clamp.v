@@ -21,7 +21,7 @@ module tb_afe_clamp;
         .INIT_VS(2'd2), .INIT_PE(2'd0)) dut (   // MAX_VS/MAX_PE at defaults (2 / 3)
         .mgmt_clk(mgmt_clk), .vs_request({vs_request,vs_request}), .pe_request({pe_request,pe_request}),
         .adjust_de(adjust_de), .training_active(training_active), .phase_done(phase_done), .phy_reinit(1'b0),
-        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(),
+        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(), .dbg_evt(dbg_evt),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));
 
@@ -46,6 +46,8 @@ module tb_afe_clamp;
     task settle; begin #(20_000); end endtask   // 20 us: sequence completes
 
     integer errors = 0, base;
+
+    wire [11:0] dbg_evt;
     task check_app(input integer b, input [3:0] txlev, input [4:0] c1, input [7:0] exp_byte, input [255:0] name);
         begin
             // write b+0 = lane0 swing, b+1 = lane0 FFE, b+4 = lane1 swing, b+5 = lane1 FFE
