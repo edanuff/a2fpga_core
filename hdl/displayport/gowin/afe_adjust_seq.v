@@ -10,6 +10,22 @@
 // TX-AFE write sequence over the SERDES DRP/UPAR port, then reports the
 // actually-applied levels for TRAINING_LANE_SET construction.
 //
+// PER-LANE (review item 2, 08-22): the sink asks per lane — 0x206[3:0] is
+// lane 0, [7:4] lane 1 — and our two physical lanes are asymmetric (mux /
+// channel), so each lane carries its OWN requested levels, its OWN DRP
+// payload (its own LANE_BASE) and its OWN TRAINING_LANEx_SET byte
+// (0x103 lane 0, 0x104 lane 1). Requests, applied state and the declared
+// bytes are packed little-lane-first: {lane1, lane0}.
+//
+// APPLICATION POLICY (user decision 08-22): per-lane VALUES, ALL-LANE
+// APPLICATION — when ANY lane's request changes, every lane is written
+// with its own levels. Writing only the changed lane would leave one lane
+// in manual FFE while the other stayed in the boot csr's FFE Auto (under
+// APPLY_ON_TRAINING_START = 0), i.e. two different analog modes on a link
+// that depends on lane matching — the very asymmetry this feature exists
+// to remove, and an unbenched PHY state. The cost is re-writing a lane
+// with the values it already had, which is a no-op for the analog state.
+//
 // Register model (GW5AST-138B Customized PHY; VERIFIED 08-21, two
 // independent sources — boards/a2mega/docs/m5_runtime_afe.md):
 //   per-lane base: lane1 = 0x8083xx, lane2 = 0x8084xx (stride 0x100)
@@ -66,8 +82,8 @@
 //     drive it), and MAX_PE is declared when PE cannot rise further at
 //     the applied swing (pe == MAX_PE or vs + pe == 3).
 //
-// TRAINING_LANE_SET reporting: train_set_byte is the ready-to-send DPCD
-// 0x103-0x106 value {2'b00, MAX_PE, pe[1:0], MAX_SWING, vs[1:0]} echoing
+// TRAINING_LANE_SET reporting: train_set_byte carries one ready-to-send
+// DPCD 0x103/0x104 value PER LANE, {2'b00, MAX_PE, pe[1:0], MAX_SWING, vs[1:0]} echoing
 // the applied levels; the MAX flags assert at level 3 (VS3 applies our
 // 900 mV ceiling, PE3 our 9.1 dB ceiling — both truthfully declared as
 // "maximum reached"). Before the first application (and always when
@@ -114,15 +130,20 @@ module afe_adjust_seq #(
 )(
     // ---- management-clock domain (AUX ladder) ------------------------
     input  wire        mgmt_clk,
-    input  wire  [1:0] vs_request,       // parsed ADJUST_REQUEST lane0 swing
-    input  wire  [1:0] pe_request,       //   (DPCD 0x206[1:0] / 0x206[3:2])
+    // parsed ADJUST_REQUEST, packed per lane {lane1, lane0}: lane N swing
+    // = DPCD 0x206[4N+1:4N], pre-emphasis = 0x206[4N+3:4N+2]
+    input  wire  [2*NUM_LANES-1:0] vs_request,
+    input  wire  [2*NUM_LANES-1:0] pe_request,
     input  wire        adjust_de,        // pulse: 0x206 byte just captured
     input  wire        training_active,  // tx_clock_train | tx_align_train
     input  wire        phy_reinit,       // level: PHY (re)initialising — the
                                          //   applied state is forgotten
-    output wire  [7:0] train_set_byte,   // TRAINING_LANEx_SET value to send
+    // TRAINING_LANEx_SET values, packed {lane1, lane0}: [7:0] -> DPCD
+    // 0x103, [15:8] -> 0x104
+    output wire  [8*NUM_LANES-1:0] train_set_byte,
     output wire        afe_busy,         // adjust pending / application in flight
-    output wire  [5:0] dbg_afe,          // {seq_err, known, pe[1:0], vs[1:0]}
+    output wire  [5:0] dbg_afe,          // lane 0 {seq_err, known, pe, vs}
+    output wire  [3:0] dbg_afe1,         // lane 1 {pe[1:0], vs[1:0]}
     // ---- DRP-clock domain (SERDES UPAR/DRP port) ---------------------
     input  wire        drp_clk,
     output wire        drp_req,          // want the DRP port (level)
@@ -135,9 +156,10 @@ module afe_adjust_seq #(
 
 generate if (ENABLE_AFE_ADJUST == 0) begin : g_off
     // Feature disabled: constant tie-offs, no DRP activity ever.
-    assign train_set_byte = IDLE_SET_BYTE;
+    assign train_set_byte = {NUM_LANES{IDLE_SET_BYTE}};
     assign afe_busy       = 1'b0;
     assign dbg_afe        = 6'd0;
+    assign dbg_afe1       = 4'd0;
     assign drp_req        = 1'b0;
     assign drp_addr       = 24'd0;
     assign drp_wrdata     = 32'd0;
@@ -185,6 +207,7 @@ end else begin : g_on
         endcase
     endfunction
 
+    // v/p are the payload OF THE LANE i[3:2] (selected at the call site)
     function [31:0] seq_data(input [3:0] i, input [1:0] v, input [1:0] p);
         case (i[1:0])
             2'd0: seq_data = {16'd0, vs_txlev(v), 12'd0};   // txlev << 12
@@ -197,14 +220,14 @@ end else begin : g_on
     // ------------------------------------------------------------------
     // Management-side trigger / bookkeeping
     // ------------------------------------------------------------------
-    reg [1:0] applied_vs    = 2'd0;   // COMMITTED (declared) levels
-    reg [1:0] applied_pe    = 2'd0;
+    reg [2*NUM_LANES-1:0] applied_vs = {2*NUM_LANES{1'b0}};  // COMMITTED
+    reg [2*NUM_LANES-1:0] applied_pe = {2*NUM_LANES{1'b0}};
     reg       applied_known = 1'b0;
-    reg [1:0] target_vs     = 2'd0;   // levels of the sequence in flight
-    reg [1:0] target_pe     = 2'd0;
+    reg [2*NUM_LANES-1:0] target_vs  = {2*NUM_LANES{1'b0}};  // in flight
+    reg [2*NUM_LANES-1:0] target_pe  = {2*NUM_LANES{1'b0}};
     reg       apply_tgl     = 1'b0;
-    reg [1:0] vs_lat        = 2'd0;   // quasi-static payload for the DRP side
-    reg [1:0] pe_lat        = 2'd0;
+    reg [2*NUM_LANES-1:0] vs_lat = {2*NUM_LANES{1'b0}};  // DRP-side payload
+    reg [2*NUM_LANES-1:0] pe_lat = {2*NUM_LANES{1'b0}};
     reg [1:0] ack_sync      = 2'b00;
     reg       ack_sync_d    = 1'b0;
     wire      ack_tgl_w;              // from DRP side
@@ -220,16 +243,31 @@ end else begin : g_on
     reg       adj_d         = 1'b0;   // adjust_de delayed: parsed request
                                       // registers hold the new value now
     reg       eval_pend     = 1'b0;   // an adjust byte awaits evaluation
-    reg [1:0] vs_pend       = 2'd0;
-    reg [1:0] pe_pend       = 2'd0;
+    reg [2*NUM_LANES-1:0] vs_pend = {2*NUM_LANES{1'b0}};
+    reg [2*NUM_LANES-1:0] pe_pend = {2*NUM_LANES{1'b0}};
 
-    // clamp the pending request to the declared ceilings, then sanitise
-    // to the DP rule VS + PE <= 3 (PE yields; swing is what the sink
-    // primarily asked for)
-    wire [1:0] vs_clamped = (vs_pend > MAX_VS) ? MAX_VS : vs_pend;
-    wire [1:0] pe_ceiling = (pe_pend > MAX_PE) ? MAX_PE : pe_pend;
-    wire [2:0] vs_pe_sum  = {1'b0, vs_clamped} + {1'b0, pe_ceiling};
-    wire [1:0] pe_clamped = (vs_pe_sum > 3'd3) ? (2'd3 - vs_clamped) : pe_ceiling;
+    // Per lane: clamp the pending request to the declared ceilings, then
+    // sanitise to the DP rule VS + PE <= 3 (PE yields; swing is what the
+    // sink primarily asked for). The whole-vector compare against
+    // applied_* below is therefore exactly "any lane changed".
+    wire [2*NUM_LANES-1:0] vs_clamped, pe_clamped;
+    reg  baseline = 1'b0;
+    // declared before the g_lane block below, which reads it
+    genvar gl;
+    for (gl = 0; gl < NUM_LANES; gl = gl + 1) begin : g_lane
+        wire [1:0] l_vs_c  = (vs_pend[2*gl +: 2] > MAX_VS) ? MAX_VS : vs_pend[2*gl +: 2];
+        wire [1:0] l_pe_ce = (pe_pend[2*gl +: 2] > MAX_PE) ? MAX_PE : pe_pend[2*gl +: 2];
+        wire [2:0] l_sum   = {1'b0, l_vs_c} + {1'b0, l_pe_ce};
+        assign vs_clamped[2*gl +: 2] = l_vs_c;
+        assign pe_clamped[2*gl +: 2] = (l_sum > 3'd3) ? (2'd3 - l_vs_c) : l_pe_ce;
+        // declaration byte for this lane (committed levels only)
+        wire l_max_sw = (applied_vs[2*gl +: 2] >= MAX_VS);
+        wire l_max_pe = (applied_pe[2*gl +: 2] >= MAX_PE) ||
+                        ({1'b0, applied_vs[2*gl +: 2]} + {1'b0, applied_pe[2*gl +: 2]} >= 3'd3);
+        assign train_set_byte[8*gl +: 8] = baseline
+            ? {2'b00, l_max_pe, applied_pe[2*gl +: 2], l_max_sw, applied_vs[2*gl +: 2]}
+            : IDLE_SET_BYTE;
+    end
 
     always @(posedge mgmt_clk) begin
         ack_sync   <= {ack_sync[0], ack_tgl_w};
@@ -261,15 +299,15 @@ end else begin : g_on
                     applied_known <= 1'b1;
                     if (APPLY_ON_TRAINING_START != 0) begin
                         // write INIT; declaration commits on completion
-                        target_vs <= INIT_VS;
-                        target_pe <= INIT_PE;
-                        vs_lat    <= INIT_VS;
-                        pe_lat    <= INIT_PE;
+                        target_vs <= {NUM_LANES{INIT_VS}};
+                        target_pe <= {NUM_LANES{INIT_PE}};
+                        vs_lat    <= {NUM_LANES{INIT_VS}};
+                        pe_lat    <= {NUM_LANES{INIT_PE}};
                         apply_tgl <= ~apply_tgl; busy_r <= 1'b1;
                     end else begin
                         // trust the resident (boot) config = INIT
-                        applied_vs <= INIT_VS;
-                        applied_pe <= INIT_PE;
+                        applied_vs <= {NUM_LANES{INIT_VS}};
+                        applied_pe <= {NUM_LANES{INIT_PE}};
                     end
                 end else if (eval_pend && !adj_d) begin
                     eval_pend <= 1'b0;
@@ -290,18 +328,12 @@ end else begin : g_on
     // has completed; =0: training has started and the boot config is
     // assumed) it is the legacy byte. MAX_PE is truthful at the applied
     // swing (DP: VS+PE<=3).
-    reg  baseline = 1'b0;
     always @(posedge mgmt_clk)
         if (phy_reinit)                         baseline <= 1'b0;
         else if (ack_evt && !fail_w)            baseline <= 1'b1;
         else if (applied_known && (APPLY_ON_TRAINING_START == 0)) baseline <= 1'b1;
 
-    wire max_sw = (applied_vs >= MAX_VS);
-    wire max_pe = (applied_pe >= MAX_PE) ||
-                  ({1'b0, applied_vs} + {1'b0, applied_pe} >= 3'd3);
-    assign train_set_byte = baseline
-        ? {2'b00, max_pe, applied_pe, max_sw, applied_vs}
-        : IDLE_SET_BYTE;
+    // (per-lane declaration bytes are assigned in the g_lane block above)
     // afe_busy also covers the evaluation latency after an ADJUST byte
     // (adjust_de -> adj_d -> eval_pend -> launch) so the AUX ladder's hold
     // sees it BEFORE the lane-set message that follows a 0x206 read can
@@ -320,8 +352,8 @@ end else begin : g_on
     reg [1:0]  tgl_sync  = 2'b00;
     reg        ack_tgl   = 1'b0;
     reg        req_token = 1'b0;
-    reg [1:0]  vs_s      = 2'd0;
-    reg [1:0]  pe_s      = 2'd0;
+    reg [2*NUM_LANES-1:0] vs_s = {2*NUM_LANES{1'b0}};
+    reg [2*NUM_LANES-1:0] pe_s = {2*NUM_LANES{1'b0}};
     reg [3:0]  widx      = 4'd0;
     reg [11:0] tmo       = 12'd0;
     reg [3:0]  gap       = 4'd0;
@@ -359,7 +391,9 @@ end else begin : g_on
             end
             S_SETUP: begin
                 addr_r   <= seq_addr(widx);
-                wrdata_r <= seq_data(widx, vs_s, pe_s);
+                // payload of the lane this write index belongs to
+                wrdata_r <= seq_data(widx, vs_s[2*widx[3:2] +: 2],
+                                           pe_s[2*widx[3:2] +: 2]);
                 wren_r   <= 1'b1;
                 tmo      <= 12'd0;
                 dstate   <= S_WAIT;
@@ -395,7 +429,12 @@ end else begin : g_on
     reg [1:0] err_sync = 2'b00;
     always @(posedge mgmt_clk)
         err_sync <= {err_sync[0], seq_err};
-    assign dbg_afe = {err_sync[1], baseline, applied_pe, applied_vs};
+    assign dbg_afe = {err_sync[1], baseline, applied_pe[1:0], applied_vs[1:0]};
+    if (NUM_LANES > 1) begin : g_dbg1
+        assign dbg_afe1 = {applied_pe[3:2], applied_vs[3:2]};
+    end else begin : g_dbg1_off
+        assign dbg_afe1 = 4'd0;
+    end
 
 end endgenerate
 

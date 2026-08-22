@@ -70,8 +70,9 @@ module dp_aux_messages #(
 
    // M5 runtime AFE adjust: the TRAINING_LANEx_SET value message 0x19
    // declares — the ACTUALLY-APPLIED swing/pre-emphasis + cap flags from
-   // afe_adjust_seq. Tie to 8'h06 (legacy swing2+MAX_SWING) when unused.
-   input  [7:0] train_set_byte,
+   // afe_adjust_seq, PER LANE: [7:0] = lane 0 (DPCD 0x103), [15:8] =
+   // lane 1 (0x104). Tie to 16'h0606 (legacy swing2+MAX_SWING) when unused.
+   input  [15:0] train_set_byte,
 
    // Interface to the AUX Channel
    output reg       aux_tx_wr_en,
@@ -204,10 +205,14 @@ always @(posedge clk) begin
        12'h191: begin aux_tx_data <= 8'h01; aux_tx_wr_en <= 1'b1; end
        12'h192: begin aux_tx_data <= 8'h03; aux_tx_wr_en <= 1'b1; end
        12'h193: begin aux_tx_data <= 8'h03; aux_tx_wr_en <= 1'b1; end
-       12'h194: begin aux_tx_data <= train_set_byte; aux_tx_wr_en <= 1'b1; end
-       12'h195: begin aux_tx_data <= train_set_byte; aux_tx_wr_en <= 1'b1; end
-       12'h196: begin aux_tx_data <= train_set_byte; aux_tx_wr_en <= 1'b1; end
-       12'h197: begin aux_tx_data <= train_set_byte; aux_tx_wr_en <= 1'b1; end
+       // PER LANE: 0x103 <= lane 0 byte, 0x104 <= lane 1 byte. Lanes 2/3
+       // (0x105/0x106) are not part of our 2-lane link and are ignored by
+       // the sink; they mirror lanes 0/1 so the message keeps its 4-byte
+       // length (AUX timing identical to msg 0x18 and to the previous 0x19).
+       12'h194: begin aux_tx_data <= train_set_byte[7:0];  aux_tx_wr_en <= 1'b1; end  // 0x103 lane 0
+       12'h195: begin aux_tx_data <= train_set_byte[15:8]; aux_tx_wr_en <= 1'b1; end  // 0x104 lane 1
+       12'h196: begin aux_tx_data <= train_set_byte[7:0];  aux_tx_wr_en <= 1'b1; end  // 0x105 (unused lane)
+       12'h197: begin aux_tx_data <= train_set_byte[15:8]; aux_tx_wr_en <= 1'b1; end  // 0x106 (unused lane)
 
        // Resd lane align status for all four lanes
        12'h100: begin aux_tx_data <= 8'h90; aux_tx_wr_en <= 1'b1; end

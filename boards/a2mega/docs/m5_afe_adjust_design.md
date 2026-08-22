@@ -601,3 +601,65 @@ Open question carried forward: the apply path itself (8 writes + strobe
 while training runs) may cost margin when exercised — answering it needs
 a sink that asks for ≠INIT (PE1 or VS1); the Ugreen and (predicted) Anker
 only exercise the no-write path.
+
+## 12. Per-lane ADJUST_REQUEST (review item 2, applied 08-22)
+
+The sink asks per lane (DPCD 0x206: lane 0 = [3:0], lane 1 = [7:4]) and our
+two physical lanes are asymmetric (mux / channel). Until now the sequencer
+consumed only lane 0's nibble and drove BOTH lanes with it, while msg 0x19
+wrote that one byte to 0x103-0x106 — so lane 1 could be driven at a level it
+never asked for and its TRAINING_LANE1_SET declared lane 0's level.
+
+**What changed.** Requests, applied/target state, the DRP payload and the
+declared bytes are per lane, packed `{lane1, lane0}`:
+- `afe_adjust_seq`: `vs_request`/`pe_request` `[2*NUM_LANES-1:0]`,
+  `train_set_byte` `[8*NUM_LANES-1:0]`, new `dbg_afe1[3:0]` (lane 1
+  `{pe, vs}`); clamp, VS+PE<=3 sanitising and the MAX flags are evaluated
+  per lane in a `g_lane` generate block; the DRP player selects each
+  write's payload from the lane the write index belongs to.
+- `dp_aux_messages` msg 0x19: `0x103 <= [7:0]` (lane 0), `0x104 <= [15:8]`
+  (lane 1); 0x105/0x106 (unused lanes on a 2-lane link) mirror them so the
+  message keeps its 4-byte length — AUX timing is byte-identical to msg
+  0x18 and to the previous 0x19, and `expected` in `aux_channel` is
+  unchanged.
+- `dp_transmitter`: lane 1's nibble needs no new decode —
+  `link_signal_mgmt` already captures the whole 0x206 byte into
+  `channel_adjust[7:0]`, exported as `debug_adjust`, so the wiring is
+  `.vs_request({debug_adjust[5:4], debug_adjust[1:0]})` and
+  `.pe_request({debug_adjust[7:6], debug_adjust[3:2]})`.
+
+**Application policy — per-lane VALUES, ALL-LANE APPLICATION** (user
+decision 08-22). When any lane's request changes, every lane is written
+with its own levels. Writing only the changed lane (the original proposal)
+would leave one lane in manual FFE while the other stayed in the boot csr's
+FFE **Auto** under `APPLY_ON_TRAINING_START = 0` — two different analog
+modes on a link that depends on lane matching, which is the very asymmetry
+this feature exists to remove, and a PHY state nothing has ever benched.
+Row 76/77 established that the Auto->manual flip is itself perturbing, so
+doing it to one lane only is the worst of both worlds. Re-writing a lane
+with the values it already holds is a no-op for the analog state.
+
+A useful consequence: "any lane changed" is just a whole-vector compare of
+`{pe_clamped, vs_clamped}` against `{applied_pe, applied_vs}`, so no lane
+mask and no mask-walking state are needed in the DRP player.
+
+**Telemetry.** `M:` still carries lane 0 (unchanged, so the existing test-log
+history and parsers stay valid); lane 1 is a NEW `M1:<hex>` field
+(`{pe, vs}`), `MSG_LEN` 91 -> 96. Without it a per-lane divergence would be
+invisible on the bench.
+
+**Sims.** `tb_afe_perlane.v` (new): A:0026 writes lane 0's block at
+0x8083xx with C1=7 and lane 1's at 0x8084xx with C1=0 in the same sequence,
+declares `{lane1 0x06, lane0 0x2E}`, debounces a repeat, moves only lane 1's
+byte on a lane-1-only change, clamps/sanitises per lane, and keeps the
+commit-on-completion discipline. The existing benches drive symmetric
+requests (replicated to both lanes) and pass unchanged — i.e. with a
+symmetric sink the per-lane module behaves exactly as before.
+
+**Still open.** Whether a sink that asks A:0026 actually trains better with
+lane 1 left at PE0 is a bench question. Both our hubs settle at A:0022
+(symmetric), and the one A:0026 observation (rows 74/75) was a mid-training
+snapshot — so like item 6, this path is architecturally correct but not yet
+exercised by our hardware. `MAX_VS`/`MAX_PE` remain common to both lanes;
+per-lane ceilings would only be justified by evidence of a fixed mux
+asymmetry.

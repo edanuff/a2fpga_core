@@ -62,7 +62,7 @@ module tb_afe_adjust;
     endtask
 
     // DUT (enabled)
-    wire [7:0]  train_set_byte;
+    wire [15:0] train_set_byte;
     wire        afe_busy;
     wire [5:0]  dbg_afe;
     wire        drp_req;
@@ -83,13 +83,13 @@ module tb_afe_adjust;
         .MAX_PE            (2'd3)    //   (production default is MAX_VS=2, see tb_afe_clamp)
     ) dut (
         .mgmt_clk        (mgmt_clk),
-        .vs_request      (vs_request),
-        .pe_request      (pe_request),
+        .vs_request      ({vs_request,vs_request}),
+        .pe_request      ({pe_request,pe_request}),
         .adjust_de       (adjust_de),
         .training_active (training_active), .phy_reinit(1'b0),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
-        .dbg_afe         (dbg_afe),
+        .dbg_afe         (dbg_afe), .dbg_afe1(),
         .drp_clk         (drp_clk),
         .drp_req         (drp_req),
         .drp_gnt         (drp_gnt),
@@ -100,7 +100,7 @@ module tb_afe_adjust;
     );
 
     // Disabled twin: same stimuli, must stay inert
-    wire [7:0]  off_byte;
+    wire [15:0] off_byte;
     wire        off_busy;
     wire [5:0]  off_dbg;
     wire        off_req;
@@ -112,13 +112,13 @@ module tb_afe_adjust;
         .ENABLE_AFE_ADJUST (0)
     ) dut_off (
         .mgmt_clk        (mgmt_clk),
-        .vs_request      (vs_request),
-        .pe_request      (pe_request),
+        .vs_request      ({vs_request,vs_request}),
+        .pe_request      ({pe_request,pe_request}),
         .adjust_de       (adjust_de),
         .training_active (training_active), .phy_reinit(1'b0),
         .train_set_byte  (off_byte),
         .afe_busy        (off_busy),
-        .dbg_afe         (off_dbg),
+        .dbg_afe         (off_dbg), .dbg_afe1(),
         .drp_clk         (drp_clk),
         .drp_req         (off_req),
         .drp_gnt         (1'b1),
@@ -133,7 +133,7 @@ module tb_afe_adjust;
         if (off_req !== 1'b0 || off_wren !== 1'b0)
             off_violations = off_violations + 1;
     always @(posedge mgmt_clk)
-        if (off_byte !== 8'h06)
+        if (off_byte !== 16'h0606)   // both lanes tied to the legacy byte
             off_violations = off_violations + 1;
 
     // ------------------------------------------------------------------
@@ -235,10 +235,10 @@ module tb_afe_adjust;
 
     task check_byte(input [7:0] want, input [255:0] label);
         begin
-            if (train_set_byte !== want) begin
+            if (train_set_byte[7:0] !== want) begin
                 errors = errors + 1;
                 $display("FAIL(%0s): train_set_byte %02x want %02x",
-                         label, train_set_byte, want);
+                         label, train_set_byte[7:0], want);
             end
         end
     endtask

@@ -67,8 +67,9 @@ module channel_management #(
         input  clk100,
         // M5 runtime AFE adjust: applied-level declaration in, one pulse
         // out per received ADJUST_REQUEST 0x206 byte (afe_adjust_seq's
-        // evaluation/debounce tick). train_set_byte: tie 8'h06 when off.
-        input  [7:0] train_set_byte,
+        // evaluation/debounce tick). train_set_byte is PER LANE: [7:0]
+        // lane 0 (0x103), [15:8] lane 1 (0x104); tie 16'h0606 when off.
+        input  [15:0] train_set_byte,
         input        afe_busy,      // M5: hold next lane-set while applying (tie 0 when off)
         output       adjust_evt,
         output [7:0] debug,

@@ -86,9 +86,10 @@ module aux_channel #(
     parameter AFE_ADJUST = 0
 )(
         input        clk,
-        // ready-to-send TRAINING_LANEx_SET value from afe_adjust_seq
-        // (tie to 8'h06 when AFE_ADJUST == 0)
-        input  [7:0] train_set_byte,
+        // ready-to-send TRAINING_LANEx_SET values from afe_adjust_seq,
+        // per lane: [7:0] lane 0 (0x103), [15:8] lane 1 (0x104)
+        // (tie to 16'h0606 when AFE_ADJUST == 0)
+        input  [15:0] train_set_byte,
         // M5: hold the NEXT lane-set message while the AFE sequencer is
         // applying (or evaluating) a request, so the declared levels are
         // in effect on the wire before the sink reads them. Tie 1'b0

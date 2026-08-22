@@ -60,7 +60,7 @@ module tb_afe_adjust_closedloop;
     wire        tx_clock_train, tx_align_train, tx_link_established;
     wire [3:0]  tx_powerup_channel;
     wire [15:0] debug_adjust;
-    wire [7:0]  train_set_byte;
+    wire [15:0] train_set_byte;
     wire        adjust_evt;
 
     channel_management #(
@@ -123,13 +123,14 @@ module tb_afe_adjust_closedloop;
         .MAX_PE            (2'd3)    //   (production default is MAX_VS=2, see tb_afe_clamp)
     ) i_afe (
         .mgmt_clk        (clk100),
-        .vs_request      (debug_adjust[1:0]),
-        .pe_request      (debug_adjust[3:2]),
+        .vs_request      ({debug_adjust[5:4], debug_adjust[1:0]}),
+        .pe_request      ({debug_adjust[7:6], debug_adjust[3:2]}),
         .adjust_de       (adjust_evt),
         .training_active (tx_clock_train | tx_align_train), .phy_reinit(1'b0),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
         .dbg_afe         (dbg_afe),
+        .dbg_afe1        (),
         .drp_clk         (drp_clk),
         .drp_req         (drp_req),
         .drp_gnt         (drp_gnt),
@@ -417,10 +418,10 @@ module tb_afe_adjust_closedloop;
         // after training ends (training_active low) the declaration
         // intentionally reverts to the idle byte; no lane-set message is
         // sent in that window, and a re-train re-baselines via INIT
-        if (train_set_byte !== 8'h27) begin
+        if (train_set_byte[7:0] !== 8'h27) begin
             errors = errors + 1;
             $display("FAIL: post-training train_set_byte %02x want 27 (retained)",
-                     train_set_byte);
+                     train_set_byte[7:0]);
         end
         if (last_pattern !== 8'h00) begin
             errors = errors + 1;

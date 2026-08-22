@@ -128,7 +128,8 @@ module dp_transmitter #(
     output logic [7:0]  debug_caps,    // sink capability profile
     output logic [3:0]  debug_wdog,  // {cold-restart forcing, attempts[2:0]}
     output logic [9:0]  debug_wrusewd, // TX FIFO fill {word-lane0's, word-lane1's}
-    output logic [5:0]  debug_afe,     // M5 applied AFE: {seq_err, known, pe[1:0], vs[1:0]}
+    output logic [5:0]  debug_afe,     // M5 applied AFE lane 0: {seq_err, known, pe[1:0], vs[1:0]}
+    output logic [3:0]  debug_afe1,    // M5 applied AFE lane 1: {pe[1:0], vs[1:0]}
     // GTR12 TX word clock (line-rate/20) for board-level diagnostics —
     // e.g. an in-fabric line-rate check against a known crystal.
     output logic clk_symbol_out,
@@ -488,7 +489,8 @@ module dp_transmitter #(
     // ------------------------------------------------------------------
     // M5 runtime AFE adjust: ADJUST_REQUEST -> DRP sequence -> truthful
     // TRAINING_LANE_SET. Tied off (byte-identical legacy) when disabled.
-    logic [7:0]  train_set_byte;
+    // per lane: [7:0] = lane 0 (DPCD 0x103), [15:8] = lane 1 (0x104)
+    logic [15:0] train_set_byte;
     logic        adjust_evt;
     logic        afe_busy_w, afe_phy_reinit;
     logic        afe_drp_clk, afe_drp_req, afe_drp_gnt;
@@ -508,8 +510,11 @@ module dp_transmitter #(
         .APPLY_ON_TRAINING_START (AFE_APPLY_ON_START)
     ) i_afe_adjust (
         .mgmt_clk        (clk100),
-        .vs_request      (debug_adjust[1:0]),
-        .pe_request      (debug_adjust[3:2]),
+        // per-lane ADJUST_REQUEST nibbles of DPCD 0x206 as captured by
+        // link_signal_mgmt.channel_adjust (= debug_adjust[7:0]):
+        //   lane 0: VS [1:0], PE [3:2];  lane 1: VS [5:4], PE [7:6]
+        .vs_request      ({debug_adjust[5:4], debug_adjust[1:0]}),
+        .pe_request      ({debug_adjust[7:6], debug_adjust[3:2]}),
         .adjust_de       (adjust_evt),
         .training_active (tx_clock_train | tx_align_train),
         // PHY (re)initialising: PLL unlocked, PCS TX in reset, or the
@@ -519,6 +524,7 @@ module dp_transmitter #(
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy_w),
         .dbg_afe         (debug_afe),
+        .dbg_afe1        (debug_afe1),
         .drp_clk         (afe_drp_clk),
         .drp_req         (afe_drp_req),
         .drp_gnt         (afe_drp_gnt),

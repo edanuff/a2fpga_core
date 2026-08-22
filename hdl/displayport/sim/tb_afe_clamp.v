@@ -12,15 +12,15 @@ module tb_afe_clamp;
     always #4.1 drp_clk  = ~drp_clk;
     reg [1:0] vs_request = 0, pe_request = 0;
     reg adjust_de = 0, training_active = 0;
-    wire [7:0] byte_o; wire busy; wire [5:0] dbg;
+    wire [15:0] byte_o; wire busy; wire [5:0] dbg;
     wire req; reg gnt = 0; wire [23:0] addr; wire [31:0] data; wire wren; reg ready = 0;
 
     afe_adjust_seq #(.ENABLE_AFE_ADJUST(1), .NUM_LANES(2),
         .LANE_BASE0(24'h808300), .LANE_BASE1(24'h808400),
         .INIT_VS(2'd2), .INIT_PE(2'd0)) dut (   // MAX_VS/MAX_PE at defaults (2 / 3)
-        .mgmt_clk(mgmt_clk), .vs_request(vs_request), .pe_request(pe_request),
+        .mgmt_clk(mgmt_clk), .vs_request({vs_request,vs_request}), .pe_request({pe_request,pe_request}),
         .adjust_de(adjust_de), .training_active(training_active), .phy_reinit(1'b0),
-        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg),
+        .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg), .dbg_afe1(),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));
 
@@ -53,9 +53,9 @@ module tb_afe_clamp;
                 errors = errors + 1; $display("FAIL %0s: swing data %08x/%08x (want txlev %0d)", name, wr_data[b+0], wr_data[b+4], txlev); end
             if (wr_data[b+1] !== {19'd0, c1, 8'd0}) begin
                 errors = errors + 1; $display("FAIL %0s: FFE data %08x (want C1 %0d)", name, wr_data[b+1], c1); end
-            if (byte_o !== exp_byte) begin
-                errors = errors + 1; $display("FAIL %0s: byte %02x (want %02x)", name, byte_o, exp_byte); end
-            else $display("  ok: %0s -> txlev %0d, C1 %0d, byte 0x%02x", name, txlev, c1, byte_o);
+            if (byte_o[7:0] !== exp_byte) begin
+                errors = errors + 1; $display("FAIL %0s: byte %02x (want %02x)", name, byte_o[7:0], exp_byte); end
+            else $display("  ok: %0s -> txlev %0d, C1 %0d, byte 0x%02x", name, txlev, c1, byte_o[7:0]);
         end
     endtask
 
@@ -66,13 +66,13 @@ module tb_afe_clamp;
         // the Ugreen's escalation: VS3/PE0 -> clamped to VS2, NO new application
         send_adjust(2'd3, 2'd0); settle;
         if (wr_cnt != 8) begin errors = errors + 1; $display("FAIL: VS3/PE0 must clamp to the already-applied VS2 (no writes), got %0d", wr_cnt); end
-        else $display("  ok: VS3/PE0 request clamps to VS2 -> no re-application, byte 0x%02x", byte_o);
+        else $display("  ok: VS3/PE0 request clamps to VS2 -> no re-application, byte 0x%02x", byte_o[7:0]);
         // the hoped-for request: VS3/PE1 -> VS2 + PE1 = txlev 13 / C1 7, byte 0x0E (telemetry M:06 established / M:16 in training)
         send_adjust(2'd3, 2'd1); settle;
         check_app(8, 4'd13, 5'd7, 8'h2E, "VS3/PE1 -> clamped VS2 + PE1");  // {00,maxpe1(VS2+PE1=3),pe01,maxsw1,vs10}
         // VS+PE<=3 sanitising: VS3/PE3 -> VS2 (ceiling) + PE1 (3-2) = already applied -> NO writes, byte 0x2E
         send_adjust(2'd3, 2'd3); settle;
-        if (wr_cnt != 16 || byte_o !== 8'h2E) begin errors = errors + 1; $display("FAIL: VS3/PE3 must sanitise to VS2/PE1 (no writes, 0x2E); writes %0d byte %02x", wr_cnt, byte_o); end
+        if (wr_cnt != 16 || byte_o[7:0] !== 8'h2E) begin errors = errors + 1; $display("FAIL: VS3/PE3 must sanitise to VS2/PE1 (no writes, 0x2E); writes %0d byte %02x", wr_cnt, byte_o[7:0]); end
         else $display("  ok: VS3/PE3 -> sanitised to VS2/PE1 (already applied), no writes, byte 0x2E");
         // VS0/PE3 is a legal combination (sum 3): txlev 5 / C1 13, MAX_PE flagged, byte 0x2C
         send_adjust(2'd0, 2'd3); settle;

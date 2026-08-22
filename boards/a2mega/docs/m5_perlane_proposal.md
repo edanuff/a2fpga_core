@@ -1,6 +1,22 @@
 # M5 per-lane ADJUST_REQUEST — proposal (review item 2)
 
-Status: PROPOSE-ONLY. Nothing under `hdl/displayport/` outside
+Status: **REVIEWED AND APPLIED 08-22** — see `m5_afe_adjust_design.md` §12
+for the version that actually landed. This document is kept as the
+proposal record; two things changed in review:
+1. **Apply policy**: the proposal wrote only the CHANGED lane. Applied
+   version writes ALL lanes with their own per-lane values, because the
+   proposal's policy would split the two lanes between manual FFE and the
+   boot csr's FFE Auto under `APPLY_ON_TRAINING_START = 0` (unbenched
+   analog asymmetry on a link that depends on lane matching). This also
+   removed the lane mask and the `S_NEXT` walk entirely.
+2. **Telemetry**: lane 1 is now in the UART/telnet message as a new `M1:`
+   field (open question 3 resolved — without it the feature could not be
+   validated on the bench).
+The applied version is rebased onto the items-3/4/5 sequencer
+(commit-on-ack, `phy_reinit`/retention, VS+PE<=3), which this proposal
+predates (see §4).
+
+Original status: PROPOSE-ONLY. Nothing under `hdl/displayport/` outside
 `hdl/displayport/sim/m5_proposed/` was modified. Not built with gw_sh.
 Baseline for every diff: commit `df553c79` (HEAD at the time of writing).
 
