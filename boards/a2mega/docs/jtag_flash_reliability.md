@@ -763,3 +763,38 @@ via flash_rescue erase is QUEUED and would confirm.
   elapsed time + progress lines regardless.
 - Blinking power/done LEDs = supply brownout (cable/port), a separate
   failure layer — fix power before touching JTAG theories.
+
+## NEVER run a flash on a caller-side timeout (08-22)
+
+**Incident.** A flash of `50c4fc2c` was launched in the foreground under a
+5-minute cap. It ran long, the cap killed `openFPGALoader` mid-operation,
+and that left the ESP32's USB-JTAG endpoint wedged: the next attempt could
+not even probe the chain —
+
+```
+xfer: usb bulk write failed with error -8 LIBUSB_ERROR_OVERFLOW Overflow
+writeTDI: read failed
+JTAG init failed with: Unknown device with IDCODE: 0x555555aa
+```
+
+`flash.sh` behaved correctly: it detected the unhealthy chain and REFUSED
+the retry instead of writing blind into a wedge.
+
+**Recovery (worked first try, no rescue core needed):** unplug/replug the
+USB-C cable at the Mac to reset the JTAG endpoint, then re-run the flash.
+The retry read `JEDEC ID: 0xef4017` (Winbond W25Q64), wrote, and passed
+`--verify` — which also proves the interrupted write left nothing corrupt,
+since the image is fully overwritten and read back.
+
+Note: `auto_boot_1st_fail` / `auto_boot_2nd_fail` appearing in the status
+dump after such an event is the EXPECTED artifact of a chip with no valid
+image to auto-boot — a symptom of the earlier interruption, not a new
+failure, and it clears with the successful write.
+
+**Rule.** Flash operations must never be interruptible by the caller's own
+clock. Run them detached (`nohup ... &`) and poll the log for
+`=== FLASH EXIT`, or give any wrapper a timeout far beyond the worst-case
+write. A killed write costs a wedge and a physical replug at best, and can
+leave a partially-written chip at worst. Same family of lesson as
+"archive every benched bin": operations that touch hardware state must be
+allowed to finish.
