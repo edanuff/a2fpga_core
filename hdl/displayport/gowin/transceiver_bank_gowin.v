@@ -174,6 +174,17 @@ module transceiver_bank_gowin #(
         probe_cnt <= probe_cnt + 7'd1;
     wire [19:0] probe_word = (probe_cnt < 7'd96) ? 20'hFFFFF : 20'h00000;
 
+    // CDC synchronizer state for the SERDES status bits (see the block
+    // below for the rationale); declared here because the mgmt_clk logic
+    // that follows consumes lane_ready_m.
+    (* ASYNC_REG = "TRUE" *) reg [1:0] pll_lock_s   = 2'b00;
+    (* ASYNC_REG = "TRUE" *) reg [1:0] lane_rdy0_s  = 2'b00;
+    (* ASYNC_REG = "TRUE" *) reg [1:0] lane_rdy1_s  = 2'b00;
+    (* ASYNC_REG = "TRUE" *) reg [1:0] fifo_afull_s = 2'b00;
+    (* ASYNC_REG = "TRUE" *) reg [1:0] fifo_full_s  = 2'b00;
+    wire       pll_lock_m   = pll_lock_s[1];
+    wire [1:0] lane_ready_m = {lane_rdy1_s[1], lane_rdy0_s[1]};
+
     reg [15:0] seq_count = 0;
     always @(posedge mgmt_clk) begin
         if (powerup_eff == 2'b00) begin
@@ -187,13 +198,37 @@ module transceiver_bank_gowin #(
                 pcs_tx_rst <= 1'b0;      // ~330 us after powerup; ungated
             else
                 seq_count <= seq_count + 1'b1;
-            // status only — consumed by nothing critical
-            tx_running <= {2{!pcs_tx_rst}} & powerup_eff & lane_ready;
+            // status only — consumed by nothing critical.
+            // lane_ready is a SERDES IP output ASYNCHRONOUS to mgmt_clk:
+            // use the 2FF-synchronized copy (cdc_constraint_audit.md §3).
+            tx_running <= {2{!pcs_tx_rst}} & powerup_eff & lane_ready_m;
         end
     end
 
-    assign serdes_status = {fifo_afull_used, fifo_full_used,
-                            pll_lock, lane_ready, ~pcs_tx_rst, tx_running};
+    // ------------------------------------------------------------------
+    // CDC (audit 08-22, cdc_constraint_audit.md §3): pll_lock, lane_ready
+    // and the TX FIFO flags are NOT in mgmt_clk — pll_lock/lane_ready are
+    // SERDES IP outputs asynchronous to it, the FIFO flags belong to
+    // tx_symbol_clk. They were previously read directly by mgmt_clk logic
+    // and published as a mixed-domain vector, so `serdes_status` handed its
+    // consumers bits from three domains. Every bit is 2FF-synchronized into
+    // mgmt_clk here, before any use, so `serdes_status` is a single-domain
+    // vector and consumers (e.g. dp_transmitter's phy_reinit) are safe.
+    // These are slow status bits; the synchronizer latency is irrelevant.
+    // NOTE: the SDC exempts all cross-domain paths
+    // (set_clock_groups -asynchronous), so STA does NOT check these — the
+    // 2FF pairs are the only thing making them sound.
+    // ------------------------------------------------------------------
+    always @(posedge mgmt_clk) begin
+        pll_lock_s   <= {pll_lock_s[0],   pll_lock};
+        lane_rdy0_s  <= {lane_rdy0_s[0],  lane_ready[0]};
+        lane_rdy1_s  <= {lane_rdy1_s[0],  lane_ready[1]};
+        fifo_afull_s <= {fifo_afull_s[0], fifo_afull_used};
+        fifo_full_s  <= {fifo_full_s[0],  fifo_full_used};
+    end
+
+    assign serdes_status = {fifo_afull_s[1], fifo_full_s[1],
+                            pll_lock_m, lane_ready_m, ~pcs_tx_rst, tx_running};
 
     // release the encoder reset synchronously to the word clock
     reg [1:0] enc_rst_sync = 2'b11;

@@ -363,6 +363,11 @@ module a2mega_dp_test_top (
     logic [5:0] afe_s0, afe_s;
     logic [3:0] afe1_s0, afe1_s;   // lane 1 {pe, vs}
     logic [11:0] evt_s0, evt_s;    // {zero_seen, gate_drops, applies}
+    logic [7:0]  d4_cnt_s0, d4_cnt_s;  // FREE-RUNNING D4 assertion count
+    // driven by the acquisition-counter block further down; declared here
+    // because the telemetry sampler below consumes d4_cnt
+    logic        d4_r   = 1'b0;
+    logic [7:0]  d4_cnt = 8'd0;
     always_ff @(posedge clk50_in) begin
         st_s0  <= serdes_status;  st_s  <= st_s0;
         dbg_s0 <= debug;          dbg_s <= dbg_s0;
@@ -381,6 +386,7 @@ module a2mega_dp_test_top (
         afe_s0 <= aux_dbg_afe;      afe_s <= afe_s0;
         afe1_s0 <= aux_dbg_afe1;    afe1_s <= afe1_s0;
         evt_s0 <= aux_dbg_evt;      evt_s <= evt_s0;
+        d4_cnt_s0 <= d4_cnt;        d4_cnt_s <= d4_cnt_s0;
     end
 
     // Y: link/video rise odometer — counts every establish (flg_s[1]) and
@@ -401,7 +407,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 102;  // msg_idx is [6:0] (127 max)
+    localparam int MSG_LEN = 107;  // msg_idx is [6:0] (127 max)
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -447,7 +453,8 @@ module a2mega_dp_test_top (
             msg[88]=" "; msg[89]=" "; msg[90]=" "; msg[91]=" ";
             msg[92]=" "; msg[93]=" "; msg[94]=" "; msg[95]=" ";
             msg[96]=" "; msg[97]=" "; msg[98]=" "; msg[99]=" ";
-            msg[100]=" "; msg[101]=8'h0A;
+            msg[100]=" "; msg[101]=" "; msg[102]=" "; msg[103]=" ";
+            msg[104]=" "; msg[105]=" "; msg[106]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -513,7 +520,13 @@ module a2mega_dp_test_top (
         msg[98]=hexch(evt_s[11:8]);           //   all-zero requests SEEN
         msg[99]=hexch(evt_s[7:4]);            //   dropped by the phase_done gate
         msg[100]=hexch(evt_s[3:0]);           //   DRP sequences applied
-        msg[101]=8'h0A;
+        // L: = FREE-RUNNING D4 assertion count (2 hex, wraps). The reader
+        // takes deltas: delta of 1 = locked on the first lightup (0 blinks),
+        // delta of N = N-1 failed attempts first.
+        msg[101]=" "; msg[102]="L"; msg[103]=":";
+        msg[104]=hexch(d4_cnt_s[7:4]);
+        msg[105]=hexch(d4_cnt_s[3:0]);
+        msg[106]=8'h0A;
         end
     end
 
@@ -614,5 +627,30 @@ module a2mega_dp_test_top (
     assign led[1] = ~dp_hpd;            // HPD from the ESP32
     assign led[2] = ~freq_ok;           // clk_sym == 135 MHz (line rate OK)
     assign led[3] = ~(video_live && sink_confirmed);  // pixels flowing AND sink locked
+
+    // ------------------------------------------------------------------
+    // Acquisition-attempt counter (test log row 86). Blinks-to-lock is the
+    // best predictor we have of build reliability, but it is STOCHASTIC
+    // run-to-run (one bitstream measured {0,1,1,6,1}), so a comparison
+    // needs ~10 samples per build — untenable when each sample costs a
+    // physical power cycle. This counts D4's rising edges in fabric so a
+    // telnet 'v' draw plus a telemetry read is one unattended sample.
+    //   d4_cnt = FREE-RUNNING count of (video_live && sink_confirmed)
+    //            rising edges. 8-bit, wraps; the reader takes DELTAS
+    //            between telemetry samples.
+    // v1 of this counter reset on !dp_hpd and was BROKEN: a failed
+    // acquisition usually drops HPD, so the reset wiped the preceding
+    // attempts and it read 1 whether the user saw 0 blinks or 1 (measured
+    // both ways, test log row 87). Free-running removes any dependence on
+    // reset semantics: delta-1 = the number of failed attempts before the
+    // lock that held.
+    // NOTE: a 'v' virtual replug is NOT identical to a power cycle (the
+    // reset scope differs) — calibrate before treating them as equivalent.
+    // ------------------------------------------------------------------
+    always_ff @(posedge clk50_in) begin
+        d4_r <= (video_live && sink_confirmed);
+        if ((video_live && sink_confirmed) && !d4_r)
+            d4_cnt <= d4_cnt + 8'd1;    // free-running, wraps
+    end
 
 endmodule
