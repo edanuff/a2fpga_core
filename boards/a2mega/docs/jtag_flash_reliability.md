@@ -798,3 +798,29 @@ write. A killed write costs a wedge and a physical replug at best, and can
 leave a partially-written chip at worst. Same family of lesson as
 "archive every benched bin": operations that touch hardware state must be
 allowed to finish.
+
+## Timing margin note: cm_life is the pressure point (08-22)
+
+The 138B dp_test design closes 0/0 with TNS 0.000, but the Fmax summary
+shows how little room is left on one domain:
+
+| clock   | constraint | actual Fmax | margin |
+|---------|-----------|-------------|--------|
+| clk50   | 50.000    | 94.406      | huge   |
+| clk100  | 100.000   | 103.603     | 3.6%   |
+| clk_sym | 135.007   | 137.675     | 2.0%   |
+| clk_pix | 148.500   | 150.900     | 1.6%   |
+| **cm_life** | **100.000** | **100.216** | **0.2%** |
+
+`cm_life` carries the vendor `upar_arbiter` and the bank's DRP/replay
+engine. It is why an 8-bit comparator added to the M5 capture-enable path
+tipped the whole design into 7 setup violations (deterministic across three
+re-rolls), and why the same logic moved one pipeline stage later closes
+cleanly again. Consequences to keep in mind:
+
+- treat ANY logic added near the DRP/mgmt path as timing-relevant, however
+  trivial it looks;
+- a build that closes is not evidence of margin — check the Fmax table;
+- ARCHIVE every bitstream that reaches hardware. PnR here is deterministic
+  for a given source, but a source that no longer exists cannot be rebuilt
+  (48576c12), and placement is fragile enough that small edits move it.
