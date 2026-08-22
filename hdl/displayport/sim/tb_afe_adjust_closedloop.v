@@ -110,7 +110,9 @@ module tb_afe_adjust_closedloop;
         .LANE_BASE0        (24'h808300),
         .LANE_BASE1        (24'h808400),
         .INIT_VS           (2'd2),
-        .INIT_PE           (2'd0)
+        .INIT_PE           (2'd0),
+        .MAX_VS            (2'd3),   // echo mode: preserves the VS3 assertions below
+        .MAX_PE            (2'd3)    //   (production default is MAX_VS=2, see tb_afe_clamp)
     ) i_afe (
         .mgmt_clk        (clk100),
         .vs_request      (debug_adjust[1:0]),

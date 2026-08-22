@@ -71,6 +71,8 @@ module dp_transmitter #(
     parameter [23:0] AFE_LANE_BASE1 = 24'h808400,  //  re-verify per die!
     parameter [1:0]  AFE_INIT_VS    = 2'd2,        // VS2 = 804 mV baseline
     parameter [1:0]  AFE_INIT_PE    = 2'd0,
+    parameter [1:0]  AFE_MAX_VS     = 2'd2,        // declared swing ceiling (row 75)
+    parameter [1:0]  AFE_MAX_PE     = 2'd3,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -494,7 +496,9 @@ module dp_transmitter #(
         .LANE_BASE0        (AFE_LANE_BASE0),
         .LANE_BASE1        (AFE_LANE_BASE1),
         .INIT_VS           (AFE_INIT_VS),
-        .INIT_PE           (AFE_INIT_PE)
+        .INIT_PE           (AFE_INIT_PE),
+        .MAX_VS            (AFE_MAX_VS),
+        .MAX_PE            (AFE_MAX_PE)
     ) i_afe_adjust (
         .mgmt_clk        (clk100),
         .vs_request      (debug_adjust[1:0]),

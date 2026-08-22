@@ -551,3 +551,23 @@ Committed (new files only — no shared production RTL modified):
 
 Propose-only (not applied): §7a diffs (verified), §7b drafts
 (transceiver_bank_gowin.v, dp_transmitter.sv, board-top parameter).
+
+## 10. Declared-ceiling clamp (adopted 08-21 after first hardware, test log row 75)
+
+First hardware: truthful "VS2, more available" made the Ugreen escalate
+to VS3 (A:0033); we applied 900 mV/C1=0 and every catch battled
+(Y:77-AA) vs production's clean Y:11s. Our 900 mV hardware maximum sits
+nearer DP nominal VS2 (800 mV) than VS3 (1200 mV), so declaring VS3
+reachable overstated the PHY. Fix = the §4 reporting flip, made a
+parameter: `MAX_VS` (default 2) / `MAX_PE` (default 3) — requests above
+the ceiling are clamped and the MAX flag is raised AT the ceiling.
+Expected sink behavior: settle at VS2 and spend the next request on
+pre-emphasis (as it did under the legacy 0x06 declaration), which is
+now GRANTED. Wire byte for VS2+PE1 = 0x0E; telemetry M:06 established
+(M:16 while training, known=1). Verified: tb_afe_clamp (INIT at ceiling
+= legacy 0x06; VS3 request clamps with no re-application; VS3/PE1 ->
+txlev 13/C1 7 byte 0x0E; VS3/PE3 -> both flags 0x3E; VS1 honored 0x01);
+existing unit/closed-loop benches pinned to MAX_VS=3 keep their VS3-echo
+proofs. Build: see provenance commit. Also learned: 900 mV + C1=0 DOES
+train the Ugreen — the old 900 build's 0-for-all was the 900 + C1=8
+combination.

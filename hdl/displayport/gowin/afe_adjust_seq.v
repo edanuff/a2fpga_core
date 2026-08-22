@@ -81,6 +81,14 @@ module afe_adjust_seq #(
     parameter [1:0]  INIT_VS    = 2'd2,        // baseline at training start
     parameter [1:0]  INIT_PE    = 2'd0,        //   (VS2/PE0 = 804 mV, 0 dB)
     parameter APPLY_ON_TRAINING_START = 1,     // 0: trust resident config
+    // Declared ceilings (row 75): requests above these are CLAMPED and
+    // the MAX_SWING / MAX_PE flags are raised AT the ceiling. Our 900 mV
+    // hardware max sits nearer DP nominal VS2 (800 mV) than VS3 (1200),
+    // so declaring VS3 reachable overstated the PHY — sinks escalated to
+    // it and trained worse. Default MAX_VS=2: the sink settles at VS2
+    // (804 mV) and spends its next request on pre-emphasis instead.
+    parameter [1:0]  MAX_VS = 2'd2,
+    parameter [1:0]  MAX_PE = 2'd3,
     parameter [7:0]  IDLE_SET_BYTE = 8'h06     // legacy swing2+MAX_SWING
 )(
     // ---- management-clock domain (AUX ladder) ------------------------
@@ -208,11 +216,11 @@ end else begin : g_on
                     end
                 end else if (eval_pend && !adj_d) begin
                     eval_pend <= 1'b0;
-                    if ({pe_pend, vs_pend} != {applied_pe, applied_vs}) begin
-                        applied_vs <= vs_pend;
-                        applied_pe <= pe_pend;
-                        vs_lat     <= vs_pend;
-                        pe_lat     <= pe_pend;
+                    if ({pe_clamped, vs_clamped} != {applied_pe, applied_vs}) begin
+                        applied_vs <= vs_clamped;
+                        applied_pe <= pe_clamped;
+                        vs_lat     <= vs_clamped;
+                        pe_lat     <= pe_clamped;
                         apply_tgl  <= ~apply_tgl;
                     end
                 end
@@ -220,8 +228,11 @@ end else begin : g_on
         end
     end
 
-    wire max_sw = (applied_vs == 2'd3);
-    wire max_pe = (applied_pe == 2'd3);
+    // clamp the pending request to the declared ceilings
+    wire [1:0] vs_clamped = (vs_pend > MAX_VS) ? MAX_VS : vs_pend;
+    wire [1:0] pe_clamped = (pe_pend > MAX_PE) ? MAX_PE : pe_pend;
+    wire max_sw = (applied_vs >= MAX_VS);
+    wire max_pe = (applied_pe >= MAX_PE);
     assign train_set_byte = applied_known
         ? {2'b00, max_pe, applied_pe, max_sw, applied_vs}
         : IDLE_SET_BYTE;

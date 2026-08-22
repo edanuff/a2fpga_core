@@ -76,7 +76,9 @@ module tb_afe_adjust;
         .LANE_BASE0        (24'h808300),
         .LANE_BASE1        (24'h808400),
         .INIT_VS           (2'd2),
-        .INIT_PE           (2'd0)
+        .INIT_PE           (2'd0),
+        .MAX_VS            (2'd3),   // echo mode: preserves the VS3 assertions below
+        .MAX_PE            (2'd3)    //   (production default is MAX_VS=2, see tb_afe_clamp)
     ) dut (
         .mgmt_clk        (mgmt_clk),
         .vs_request      (vs_request),
