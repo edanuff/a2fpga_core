@@ -59,10 +59,18 @@ module dp_transmitter #(
     // See aux_channel.v for the full contract. 0 = spec-compliant flow.
     parameter int BLIND_SINK      = 0,
     // Closed-loop: restart the ladder when HPD drops >=2 ms (see aux_channel.v).
-    parameter int HPD_DISCONNECT_RESETS = 1,
+    // DEFAULT OFF (row 72): hubs flap HPD while their monitor sleeps -> reset storm.
+    parameter int HPD_DISCONNECT_RESETS = 0,
     // Bring-up lane probe: force the SERDES powered and transmit a raw
     // ~4.2 MHz square on both lanes (scope-visible). See transceiver bank.
     parameter int TX_PROBE        = 0,
+    // M5: honor the sink's ADJUST_REQUEST — apply swing/pre-emphasis via
+    // the SERDES DRP during training (afe_adjust_seq; m5_runtime_afe.md).
+    parameter int ENABLE_AFE_ADJUST = 0,
+    parameter [23:0] AFE_LANE_BASE0 = 24'h808300,  // 138B die lane 1 —
+    parameter [23:0] AFE_LANE_BASE1 = 24'h808400,  //  re-verify per die!
+    parameter [1:0]  AFE_INIT_VS    = 2'd2,        // VS2 = 804 mV baseline
+    parameter [1:0]  AFE_INIT_PE    = 2'd0,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -470,10 +478,47 @@ module dp_transmitter #(
     // ------------------------------------------------------------------
     // Link policy: AUX channel, EDID/DPCD, link training
     // ------------------------------------------------------------------
+    // M5 runtime AFE adjust: ADJUST_REQUEST -> DRP sequence -> truthful
+    // TRAINING_LANE_SET. Tied off (byte-identical legacy) when disabled.
+    logic [7:0]  train_set_byte;
+    logic        adjust_evt;
+    logic        afe_drp_clk, afe_drp_req, afe_drp_gnt;
+    logic        afe_drp_wren, afe_drp_ready;
+    logic [23:0] afe_drp_addr;
+    logic [31:0] afe_drp_wrdata;
+
+    afe_adjust_seq #(
+        .ENABLE_AFE_ADJUST (ENABLE_AFE_ADJUST),
+        .NUM_LANES         (2),                 // matches the 2-lane bank
+        .LANE_BASE0        (AFE_LANE_BASE0),
+        .LANE_BASE1        (AFE_LANE_BASE1),
+        .INIT_VS           (AFE_INIT_VS),
+        .INIT_PE           (AFE_INIT_PE)
+    ) i_afe_adjust (
+        .mgmt_clk        (clk100),
+        .vs_request      (debug_adjust[1:0]),
+        .pe_request      (debug_adjust[3:2]),
+        .adjust_de       (adjust_evt),
+        .training_active (tx_clock_train | tx_align_train),
+        .train_set_byte  (train_set_byte),
+        .afe_busy        (),
+        .dbg_afe         (),
+        .drp_clk         (afe_drp_clk),
+        .drp_req         (afe_drp_req),
+        .drp_gnt         (afe_drp_gnt),
+        .drp_addr        (afe_drp_addr),
+        .drp_wrdata      (afe_drp_wrdata),
+        .drp_wren        (afe_drp_wren),
+        .drp_ready       (afe_drp_ready)
+    );
+
     channel_management #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
                          .BLIND_SINK(BLIND_SINK),
-                         .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS)) i_channel_management(
+                         .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS),
+                         .AFE_ADJUST(ENABLE_AFE_ADJUST)) i_channel_management(
         .clk100               (clk100),
+        .train_set_byte       (train_set_byte),
+        .adjust_evt           (adjust_evt),
         .debug                (debug),
         .debug_rx             (debug_rx),
         .debug_locks          (debug_locks),
@@ -626,6 +671,7 @@ module dp_transmitter #(
     assign drp_dbg_done = 1'b0;
     assign wdog_replay_ack = wdog_replay_req;  // no DRP on this PHY
     assign debug_wrusewd = 10'd0;
+    assign afe_drp_clk = clk100; assign afe_drp_gnt = afe_drp_req; assign afe_drp_ready = 1'b1;
 `elsif DP_VENDOR_GOWIN
     transceiver_bank_gowin #(.TX_PROBE(TX_PROBE)) i_transceiver_bank(
         .mgmt_clk        (clk100),
@@ -650,6 +696,13 @@ module dp_transmitter #(
         .dbg_done        (drp_dbg_done),
         .replay_req      (wdog_replay_req),
         .replay_ack      (wdog_replay_ack),
+        .afe_drp_clk     (afe_drp_clk),
+        .afe_drp_req     (afe_drp_req),
+        .afe_drp_gnt     (afe_drp_gnt),
+        .afe_drp_addr    (afe_drp_addr),
+        .afe_drp_wrdata  (afe_drp_wrdata),
+        .afe_drp_wren    (afe_drp_wren),
+        .afe_drp_ready   (afe_drp_ready),
         .dbg_wrusewd     (debug_wrusewd)
     );
     assign tx_running[3:2] = 2'b00;
@@ -664,6 +717,7 @@ module dp_transmitter #(
     assign serdes_status = 8'h3F;
     assign wdog_replay_ack = wdog_replay_req;  // no DRP in the sim stub
     assign debug_wrusewd = 10'd0;
+    assign afe_drp_clk = clk100; assign afe_drp_gnt = afe_drp_req; assign afe_drp_ready = 1'b1;
     assign drp_dbg_data = 32'd0;
     assign drp_dbg_addr = 24'd0;
     assign drp_dbg_done = 1'b0;

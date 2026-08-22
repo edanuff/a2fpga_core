@@ -96,7 +96,18 @@ module transceiver_bank_gowin #(
     // config-time draw to word-level FIFO/serializer offset - which a
     // per-lane rd_start_depth DRP adjust could then cancel. Quasi-static
     // once parked; sampled loosely by the debug UART.
-    output      [9:0] dbg_wrusewd
+    output      [9:0] dbg_wrusewd,
+    // M5 runtime AFE adjust (afe_adjust_seq): auxiliary DRP WRITE port,
+    // arbitrated against the background register dump and the CSR replay.
+    // Same clock domain as the engine (drp_clk_w, exported); the player
+    // owns the port for one whole sequence per grant (~us).
+    output            afe_drp_clk,
+    input             afe_drp_req,
+    output            afe_drp_gnt,
+    input      [23:0] afe_drp_addr,
+    input      [31:0] afe_drp_wrdata,
+    input             afe_drp_wren,
+    output            afe_drp_ready
 );
 
     // ------------------------------------------------------------------
@@ -226,6 +237,14 @@ module transceiver_bank_gowin #(
     wire        drp_ready_w;
     reg         drp_wren_r   = 1'b0;
     reg  [31:0] drp_wrdata_r = 32'd0;
+    // M5 AFE port: pass-through mux; grant owned by the engine FSM below
+    reg         afe_gnt_r = 1'b0;
+    assign afe_drp_clk   = drp_clk_w;
+    assign afe_drp_gnt   = afe_gnt_r;
+    assign afe_drp_ready = drp_ready_w;
+    wire        drp_wren_mux   = afe_gnt_r ? afe_drp_wren   : drp_wren_r;
+    wire [23:0] drp_addr_mux   = afe_gnt_r ? afe_drp_addr   : drp_addr_r;
+    wire [31:0] drp_wrdata_mux = afe_gnt_r ? afe_drp_wrdata : drp_wrdata_r;
 
     // por_n: release after power-up request (refclk must be stable; the
     // board's clock generator is programmed before the FPGA runs)
@@ -356,10 +375,10 @@ module transceiver_bank_gowin #(
         .dp_phy_q0_ln0_rx_cdr_lock_o (),
         // DRP: register dump + CSR replay bridge
         .dp_phy_drp_clk_o           (drp_clk_w),
-        .dp_phy_drp_addr_i          (drp_addr_r),
-        .dp_phy_drp_wren_i          (drp_wren_r),
-        .dp_phy_drp_wrdata_i        (drp_wrdata_r),
-        .dp_phy_drp_strb_i          (drp_wren_r ? 8'hFF : 8'b0),
+        .dp_phy_drp_addr_i          (drp_addr_mux),
+        .dp_phy_drp_wren_i          (drp_wren_mux),
+        .dp_phy_drp_wrdata_i        (drp_wrdata_mux),
+        .dp_phy_drp_strb_i          (drp_wren_mux ? 8'hFF : 8'b0),
         .dp_phy_drp_rden_i          (drp_rden_r),
         .dp_phy_drp_ready_o         (drp_ready_w),
         .dp_phy_drp_rdvld_o         (drp_rdvld_w),
@@ -455,10 +474,10 @@ module transceiver_bank_gowin #(
         .dp_phy_q0_ln2_rx_cdr_lock_o (),
         // DRP: read-only register-dump bridge (writes never enabled)
         .dp_phy_drp_clk_o           (drp_clk_w),
-        .dp_phy_drp_addr_i          (drp_addr_r),
-        .dp_phy_drp_wren_i          (drp_wren_r),
-        .dp_phy_drp_wrdata_i        (drp_wrdata_r),
-        .dp_phy_drp_strb_i          (drp_wren_r ? 8'hFF : 8'b0),
+        .dp_phy_drp_addr_i          (drp_addr_mux),
+        .dp_phy_drp_wren_i          (drp_wren_mux),
+        .dp_phy_drp_wrdata_i        (drp_wrdata_mux),
+        .dp_phy_drp_strb_i          (drp_wren_mux ? 8'hFF : 8'b0),
         .dp_phy_drp_rden_i          (drp_rden_r),
         .dp_phy_drp_ready_o         (drp_ready_w),
         .dp_phy_drp_rdvld_o         (drp_rdvld_w),
@@ -520,10 +539,10 @@ module transceiver_bank_gowin #(
         .dp_phy_q0_ln1_rx_cdr_lock_o (),
         // DRP: read-only register-dump bridge (writes never enabled)
         .dp_phy_drp_clk_o           (drp_clk_w),
-        .dp_phy_drp_addr_i          (drp_addr_r),
-        .dp_phy_drp_wren_i          (drp_wren_r),
-        .dp_phy_drp_wrdata_i        (drp_wrdata_r),
-        .dp_phy_drp_strb_i          (drp_wren_r ? 8'hFF : 8'b0),
+        .dp_phy_drp_addr_i          (drp_addr_mux),
+        .dp_phy_drp_wren_i          (drp_wren_mux),
+        .dp_phy_drp_wrdata_i        (drp_wrdata_mux),
+        .dp_phy_drp_strb_i          (drp_wren_mux ? 8'hFF : 8'b0),
         .dp_phy_drp_rden_i          (drp_rden_r),
         .dp_phy_drp_ready_o         (drp_ready_w),
         .dp_phy_drp_rdvld_o         (drp_rdvld_w),
@@ -613,17 +632,28 @@ module transceiver_bank_gowin #(
             3'd0: begin
                 drp_rden_r <= 1'b0;
                 drp_wren_r <= 1'b0;
-                rd_gap <= rd_gap + 18'd1;
-                // replay writes use a short inter-op gap (whole pass
-                // ~200 us); background reads keep the leisurely one
-                if (replay_pend ? rd_gap[4] : (&rd_gap)) begin
-                    rd_tmo <= 16'd0;
-                    if (replay_pend) begin
-                        rd_state <= 3'd3;
-                        {drp_addr_r, drp_wrdata_r} <= csr_replay_rom(replay_idx);
-                    end else begin
-                        rd_state <= 3'd1;
-                        drp_addr_r <= dump_addr_rom(idx_sync);
+                if (afe_gnt_r) begin
+                    // M5: AFE player owns the port until its req falls
+                    if (!afe_drp_req) begin
+                        afe_gnt_r <= 1'b0;
+                        rd_gap    <= 18'd0;
+                    end
+                end else if (afe_drp_req && !replay_pend) begin
+                    // recovery replay outranks tuning for NEW grants
+                    afe_gnt_r <= 1'b1;
+                end else begin
+                    rd_gap <= rd_gap + 18'd1;
+                    // replay writes use a short inter-op gap (whole pass
+                    // ~200 us); background reads keep the leisurely one
+                    if (replay_pend ? rd_gap[4] : (&rd_gap)) begin
+                        rd_tmo <= 16'd0;
+                        if (replay_pend) begin
+                            rd_state <= 3'd3;
+                            {drp_addr_r, drp_wrdata_r} <= csr_replay_rom(replay_idx);
+                        end else begin
+                            rd_state <= 3'd1;
+                            drp_addr_r <= dump_addr_rom(idx_sync);
+                        end
                     end
                 end
             end
@@ -676,6 +706,9 @@ module transceiver_bank_gowin #(
     assign dbg_done = 1'b0;
     assign replay_ack = replay_req;   // no DRP in the stub: ack instantly
     assign dbg_wrusewd = 10'd0;
+    assign afe_drp_clk   = mgmt_clk;  // M5 port: instant ack, no DRP in the stub
+    assign afe_drp_gnt   = afe_drp_req;
+    assign afe_drp_ready = 1'b1;
     assign tx_symbol_clk = refclk0;
 
     reg [7:0] fake_lock_cnt = 0;

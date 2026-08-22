@@ -33,7 +33,8 @@ module tb_hpd_disconnect_reset;
     reg  hpd_present_a = 1'b1;
     wire auxa_tri;
     aux_channel #(.BLIND_SINK(0), .HPD_DISCONNECT_RESETS(1)) dut_a (
-        .clk(clk), .debug_pmod(), .debug_gate(), .debug_sink(),
+        .clk(clk), .train_set_byte(8'h06),
+        .debug_pmod(), .debug_gate(), .debug_sink(),
         .debug_rx(), .edid_de(), .dp_reg_de(), .adjust_de(),
         .status_de(), .aux_addr(), .aux_data(), .link_count(3'd2),
         .hpd_irq(1'b0), .hpd_present(hpd_present_a),
@@ -50,7 +51,8 @@ module tb_hpd_disconnect_reset;
     reg  hpd_present_b = 1'b1;
     wire auxb_tri;
     aux_channel #(.BLIND_SINK(0), .HPD_DISCONNECT_RESETS(0)) dut_b (
-        .clk(clk), .debug_pmod(), .debug_gate(), .debug_sink(),
+        .clk(clk), .train_set_byte(8'h06),
+        .debug_pmod(), .debug_gate(), .debug_sink(),
         .debug_rx(), .edid_de(), .dp_reg_de(), .adjust_de(),
         .status_de(), .aux_addr(), .aux_data(), .link_count(3'd2),
         .hpd_irq(1'b0), .hpd_present(hpd_present_b),

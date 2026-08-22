@@ -68,6 +68,11 @@ module dp_aux_messages #(
    input  [7:0] msg,
    output reg   busy,
 
+   // M5 runtime AFE adjust: the TRAINING_LANEx_SET value message 0x19
+   // declares — the ACTUALLY-APPLIED swing/pre-emphasis + cap flags from
+   // afe_adjust_seq. Tie to 8'h06 (legacy swing2+MAX_SWING) when unused.
+   input  [7:0] train_set_byte,
+
    // Interface to the AUX Channel
    output reg       aux_tx_wr_en,
    output reg [7:0] aux_tx_data
@@ -191,7 +196,20 @@ always @(posedge clk) begin
        12'h0F3: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
        12'h0F4: begin aux_tx_data <= 8'h22; aux_tx_wr_en <= 1'b1; end
 
-       // Resd lane align status for all four lanes 
+       // M5: dynamic TRAINING_LANEx_SET (DPCD 0x103-0x106) — declares the
+       // levels the TX-AFE ACTUALLY drives (registered train_set_byte from
+       // afe_adjust_seq) instead of a fixed constant. Selected by
+       // aux_channel in every set state when AFE_ADJUST != 0.
+       12'h190: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end
+       12'h191: begin aux_tx_data <= 8'h01; aux_tx_wr_en <= 1'b1; end
+       12'h192: begin aux_tx_data <= 8'h03; aux_tx_wr_en <= 1'b1; end
+       12'h193: begin aux_tx_data <= 8'h03; aux_tx_wr_en <= 1'b1; end
+       12'h194: begin aux_tx_data <= train_set_byte; aux_tx_wr_en <= 1'b1; end
+       12'h195: begin aux_tx_data <= train_set_byte; aux_tx_wr_en <= 1'b1; end
+       12'h196: begin aux_tx_data <= train_set_byte; aux_tx_wr_en <= 1'b1; end
+       12'h197: begin aux_tx_data <= train_set_byte; aux_tx_wr_en <= 1'b1; end
+
+       // Resd lane align status for all four lanes
        12'h100: begin aux_tx_data <= 8'h90; aux_tx_wr_en <= 1'b1; end
        12'h101: begin aux_tx_data <= 8'h02; aux_tx_wr_en <= 1'b1; end
        12'h102: begin aux_tx_data <= 8'h04; aux_tx_wr_en <= 1'b1; end

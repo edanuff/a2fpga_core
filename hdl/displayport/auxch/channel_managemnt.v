@@ -61,9 +61,15 @@
 module channel_management #(
     parameter LINK_RATE_MBPS = 2700,
     parameter BLIND_SINK = 0,  // open-loop link policy (see aux_channel.v)
-    parameter HPD_DISCONNECT_RESETS = 1  // closed-loop: reset ladder on HPD drop (see aux_channel.v)
+    parameter HPD_DISCONNECT_RESETS = 0, // closed-loop HPD-drop reset — DEFAULT OFF (row 72 flap storms; see aux_channel.v)
+    parameter AFE_ADJUST = 0   // M5: closed-loop TX-AFE adjust (aux_channel.v)
 )(
         input  clk100,
+        // M5 runtime AFE adjust: applied-level declaration in, one pulse
+        // out per received ADJUST_REQUEST 0x206 byte (afe_adjust_seq's
+        // evaluation/debounce tick). train_set_byte: tie 8'h06 when off.
+        input  [7:0] train_set_byte,
+        output       adjust_evt,
         output [7:0] debug,
         output [15:0] debug_rx,  // AUX RX: {last byte, sync hits, accepted bytes} (registered)
         output [3:0]  debug_locks, // {clock,equ,symbol,align}_locked (registered)
@@ -206,10 +212,16 @@ hotplug_decode i_hotplug_decode(
         .present (hpd_present)
     );
 
+    // M5: the ADJUST_REQUEST lane0/1 byte (DPCD 0x206) is the aux_addr==0
+    // beat of the adjust read — one pulse per training iteration.
+    assign adjust_evt = adjust_de & (aux_addr == 8'h00);
+
 aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .BLIND_SINK(BLIND_SINK),
-              .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS)) i_aux_channel(
+              .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS),
+              .AFE_ADJUST(AFE_ADJUST)) i_aux_channel(
         .clk             (clk100),
+        .train_set_byte  (train_set_byte),
         .debug_pmod      (debug),
         .debug_gate      (debug_gate),
         .debug_sink      (debug_sink),

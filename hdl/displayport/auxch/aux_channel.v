@@ -73,18 +73,22 @@ module aux_channel #(
     parameter BLIND_SINK = 0,
     // HPD_DISCONNECT_RESETS: in closed-loop mode (BLIND_SINK=0), restart
     // the ladder from reset when hotplug_decode drops `present` (>=2 ms
-    // HPD low = disconnect per spec). Historically the closed-loop FSM
-    // ignored hpd_present entirely — which made a real unplug invisible
-    // until check_wait noticed, and made the firmware's HPD-pulse
-    // retrain ('r', 250 ms low) inert on every closed-loop build.
-    // CAUTION: an unconditional HPD reset was part of the retracted
-    // hybrid change set (test log row 51); the bisect analysis called
-    // this piece innocent but never isolated it empirically — hence a
-    // parameter, so the cold-Anker regression check can gate it and
-    // production can disable it independently of the fix's other users.
-    parameter HPD_DISCONNECT_RESETS = 1
+    // HPD low = disconnect per spec). ⚠ ROW-72 VERDICT: DEFAULT OFF —
+    // hubs FLAP HPD while their downstream monitor sleeps, and each
+    // flap resets the ladder = reset storm, dark until monitor wake
+    // (the old plow-through ladder had video ready at wake; plausibly
+    // the retracted hybrid's actual mechanism, row 51). Re-enable only
+    // after the flap-tolerant redesign (sustained-disconnect-only).
+    parameter HPD_DISCONNECT_RESETS = 0,
+    // M5: 1 = closed-loop TX-AFE adjust — TRAINING_LANEx_SET declares the
+    // registered train_set_byte (msg 0x19) instead of the fixed 0x06
+    // constant (msg 0x18). 0 = legacy, byte-identical.
+    parameter AFE_ADJUST = 0
 )(
         input        clk,
+        // ready-to-send TRAINING_LANEx_SET value from afe_adjust_seq
+        // (tie to 8'h06 when AFE_ADJUST == 0)
+        input  [7:0] train_set_byte,
         output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
         output [7:0] debug_gate,  // {locks@check_wait[3:0], gate_fails[1:0], timeouts[1:0]}
         output [7:0] debug_sink,  // DPCD 0x205 SINK_STATUS (latched each status read)
@@ -266,8 +270,12 @@ initial begin
     tx_link_established = 1'b0;
 end
 
+    // M5: which TRAINING_LANEx_SET message the set states send
+    wire [7:0] lane_set_msg = (AFE_ADJUST != 0) ? 8'h19 : 8'h18;
+
 dp_aux_messages #(.LINK_RATE_MBPS(LINK_RATE_MBPS)) i_aux_messages(
          .clk          (clk),
+         .train_set_byte (train_set_byte),
          // Interface to send messages
          .msg_de       (msg_de),
          .msg          (msg),
@@ -486,9 +494,9 @@ always @(posedge clk) begin
             // live-hit 08-14). Declare the truth (msg 0x18 = level 2 +
             // MAX_SWING_REACHED, preemp 0) in EVERY set state; the ladder
             // keeps its state walk for pacing/retry structure.
-            clock_voltage_0p4:    begin msg <= 8'h18; expected <= 8'h01; end
-            clock_voltage_0p6:    begin msg <= 8'h18; expected <= 8'h01; end
-            clock_voltage_0p8:    begin msg <= 8'h18; expected <= 8'h01; end
+            clock_voltage_0p4:    begin msg <= lane_set_msg; expected <= 8'h01; end
+            clock_voltage_0p6:    begin msg <= lane_set_msg; expected <= 8'h01; end
+            clock_voltage_0p8:    begin msg <= lane_set_msg; expected <= 8'h01; end
             clock_wait:           begin msg <= 8'h00; expected <= 8'h00;  reset_addr_on_change <= 1'b1; end
             clock_test:           begin msg <= 8'h0D; expected <= 8'h09;  status_de_active <= 1'b1; reset_addr_on_change <= 1'b1; end
             clock_adjust:         begin msg <= 8'h0E; expected <= 8'h03;  adjust_de_active <= 1'b1; end
@@ -498,15 +506,15 @@ always @(posedge clk) begin
             // Truthful declarations here too: we never drive preemp — the
             // p1/p2 messages (0x24..0x38) declared pre-emphasis the analog
             // doesn't produce.
-            align_p0_V0p4:        begin msg <= 8'h18; expected <= 8'h01; end
-            align_p0_V0p6:        begin msg <= 8'h18; expected <= 8'h01; end
-            align_p0_V0p8:        begin msg <= 8'h18; expected <= 8'h01; end
-            align_p1_V0p4:        begin msg <= 8'h18; expected <= 8'h01; end
-            align_p1_V0p6:        begin msg <= 8'h18; expected <= 8'h01; end
-            align_p1_V0p8:        begin msg <= 8'h18; expected <= 8'h01; end
-            align_p2_V0p4:        begin msg <= 8'h18; expected <= 8'h01; end
-            align_p2_V0p6:        begin msg <= 8'h18; expected <= 8'h01; end
-            align_p2_V0p8:        begin msg <= 8'h18; expected <= 8'h01; end
+            align_p0_V0p4:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p0_V0p6:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p0_V0p8:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p1_V0p4:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p1_V0p6:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p1_V0p8:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p2_V0p4:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p2_V0p6:        begin msg <= lane_set_msg; expected <= 8'h01; end
+            align_p2_V0p8:        begin msg <= lane_set_msg; expected <= 8'h01; end
             align_wait0:          begin msg <= 8'h00; expected <= 8'h00; end
             align_wait1:          begin msg <= 8'h00; expected <= 8'h00; end
             align_wait2:          begin msg <= 8'h00; expected <= 8'h00; end

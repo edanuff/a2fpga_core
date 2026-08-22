@@ -211,6 +211,10 @@ module a2mega_dp_test_top (
         // Costs the 'r' key until the reset is redesigned (train-phase
         // masked / rate-limited); 'v' still provides re-rolls.
         .HPD_DISCONNECT_RESETS(0),
+        // M5 (user-approved 08-21): honor ADJUST_REQUEST via DRP —
+        // per-sink swing/pre-emphasis instead of a fixed goldilocks drive.
+        // 138B lane bases (re-verify before enabling on the 60K die).
+        .ENABLE_AFE_ADJUST(1),
         .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.
