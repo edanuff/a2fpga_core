@@ -41,8 +41,10 @@ order (their full descriptions remain in Phase M below as reference).
      count → decide default-on for the lane disable.
   3. M2: acquisition-per-setting EQ scan (full 16-step ladder,
      physical/virtual reattach per setting).
-  4. M5: runtime swing/FFE via DRP — honor ADJUST_REQUEST (sim-first;
-     starts with the 804-vs-900 .csr diff; the biggest margin lever).
+  4. M5: runtime swing/FFE via DRP — honor ADJUST_REQUEST. **DESIGNED,
+     SIM-PROVEN, APPLIED, BUILT 08-21 (bin 972110be; user green-lit
+     after the overdrive verdict, rows 68-74) — bench validation next
+     (telemetry M: field shows applied levels: Anker 12, Ugreen 16).**
   5. M6: POR correctness (refclk-stable gating; reconnect fabric POR
      on the 60K emission and retest draw re-rolls).
   6. M7: bonding / inter-lane startup skew (genuinely-bonded emission
