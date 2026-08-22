@@ -1,0 +1,14 @@
+--- a/hdl/displayport/auxch/channel_managemnt.v
++++ b/hdl/displayport/auxch/channel_managemnt.v
+@@ -67,8 +67,9 @@
+         input  clk100,
+         // M5 runtime AFE adjust: applied-level declaration in, one pulse
+         // out per received ADJUST_REQUEST 0x206 byte (afe_adjust_seq's
+-        // evaluation/debounce tick). train_set_byte: tie 8'h06 when off.
+-        input  [7:0] train_set_byte,
++        // evaluation/debounce tick). train_set_byte is PER LANE: [7:0]
++        // lane 0 (0x103), [15:8] lane 1 (0x104); tie 16'h0606 when off.
++        input  [15:0] train_set_byte,
+         output       adjust_evt,
+         output [7:0] debug,
+         output [15:0] debug_rx,  // AUX RX: {last byte, sync hits, accepted bytes} (registered)
