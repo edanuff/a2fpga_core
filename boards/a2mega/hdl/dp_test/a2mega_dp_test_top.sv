@@ -216,6 +216,9 @@ module a2mega_dp_test_top (
         // per-sink swing/pre-emphasis instead of a fixed goldilocks drive.
         // 138B lane bases (re-verify before enabling on the 60K die).
         .ENABLE_AFE_ADJUST(1),
+        // Isolation A/B (row 76): no INIT re-application — trust the boot
+        // csr (804/FFE-auto); DRP only fires on a real sink change.
+        .AFE_APPLY_ON_START(0),
         .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.

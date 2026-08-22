@@ -73,6 +73,11 @@ module dp_transmitter #(
     parameter [1:0]  AFE_INIT_PE    = 2'd0,
     parameter [1:0]  AFE_MAX_VS     = 2'd2,        // declared swing ceiling (row 75)
     parameter [1:0]  AFE_MAX_PE     = 2'd3,
+    // 1 = re-apply INIT via DRP at every training start (row 76: the
+    // strobe + FFE auto->manual switch perturbs the PHY mid-training;
+    // Ugreen battled Y:77-99 at the SAME levels production catches
+    // clean). 0 = trust the boot csr; apply only on a real sink change.
+    parameter int    AFE_APPLY_ON_START = 1,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -498,7 +503,8 @@ module dp_transmitter #(
         .INIT_VS           (AFE_INIT_VS),
         .INIT_PE           (AFE_INIT_PE),
         .MAX_VS            (AFE_MAX_VS),
-        .MAX_PE            (AFE_MAX_PE)
+        .MAX_PE            (AFE_MAX_PE),
+        .APPLY_ON_TRAINING_START (AFE_APPLY_ON_START)
     ) i_afe_adjust (
         .mgmt_clk        (clk100),
         .vs_request      (debug_adjust[1:0]),
