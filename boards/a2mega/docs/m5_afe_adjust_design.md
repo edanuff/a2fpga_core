@@ -571,3 +571,33 @@ existing unit/closed-loop benches pinned to MAX_VS=3 keep their VS3-echo
 proofs. Build: see provenance commit. Also learned: 900 mV + C1=0 DOES
 train the Ugreen — the old 900 build's 0-for-all was the 900 + C1=8
 combination.
+
+## 11. Apply-on-training-start is the wrong default (adopted 08-21, test log rows 76-77)
+
+Row 76 (clamp build 84be7590) settled the sink at VS2/PE0 — production's
+exact levels — yet every catch battled Y:77-99 where production 8db62fa3
+catches Y:11-33.  The only remaining difference was the *act* of applying:
+`APPLY_ON_TRAINING_START=1` fires the 8-write DRP sequence plus the APPLY
+strobe at every training start, and converts the boot csr's FFE **Auto**
+into manual/C1=0 — an analog change mid-training.
+
+Row 77 (48576c12, `AFE_APPLY_ON_START=0`) is the A/B: identical RTL and
+levels, no INIT writes.  Result: 8/8, **Y:11 flat on every v-draw** — the
+cleanest readings the board has produced.  Hypothesis confirmed.
+
+**Production policy (final):**
+- The boot csr is the baseline (804 mV / FFE Auto on 138B).  The sequencer
+  declares INIT (`0x06`: VS2 at the MAX_VS=2 ceiling) without writing.
+- DRP writes happen only when a sink's ADJUST_REQUEST differs from what is
+  applied; a request back to INIT re-applies (the PHY is manual by then).
+- `tb_afe_noinit.v` locks this contract: zero writes at training start,
+  zero writes for a request equal to INIT, 8 writes on a real change,
+  re-apply on return, no writes on subsequent training starts.
+- `dp_transmitter` default `AFE_APPLY_ON_START` stays 1 for Xilinx/stub
+  parity; every Gowin top must set 0 (138B dp_test does).  TODO when M5
+  reaches the 60K: confirm its boot csr carries the same base AFE writes.
+
+Open question carried forward: the apply path itself (8 writes + strobe
+while training runs) may cost margin when exercised — answering it needs
+a sink that asks for ≠INIT (PE1 or VS1); the Ugreen and (predicted) Anker
+only exercise the no-write path.
