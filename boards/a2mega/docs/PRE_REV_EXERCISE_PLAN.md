@@ -50,8 +50,9 @@ order (their full descriptions remain in Phase M below as reference).
      USER REVIEW 08-21 night (m5_review_0821.md): items 1 (60K gprjs
      broken/unsafe → die package), 3 (commit-on-DRP-ack + ladder hold),
      4 (state retention + phy_reinit), 5 (VS+PE<=3) FIXED in 2e6013f9,
-     sim-proven, builds queued, NOT flashed; item 2 per-lane = proposal
-     awaiting review; item 6 apply-path validation = backlog (option:
+     sim-proven, builds queued, NOT flashed; item 2 per-lane APPLIED
+     08-22 after review (per-lane values + all-lane application,
+     M1: telemetry; design doc §12); item 6 apply-path validation = backlog (option:
      one-build AFE_INIT_VS=1 offset to force a real apply on A:0022).**
   5. M6: POR correctness (refclk-stable gating; reconnect fabric POR
      on the 60K emission and retest draw re-rolls).

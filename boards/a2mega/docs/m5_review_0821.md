@@ -136,3 +136,13 @@ is unreproducible from source (deterministic 860d2c93, 40 setup
 violations in the vendor upar_arbiter @ cm_life) — every benched bin is
 archived from now on; the marginal vendor-arbiter timing path is a
 standing item for the Gowin ticket / SDC review.
+
+## Item 2 applied (08-22)
+
+Reviewed with the user; two changes from the proposal (apply policy, lane-1
+telemetry) — details in `m5_afe_adjust_design.md` §12 and the annotated
+`m5_perlane_proposal.md`. 138B build: Setup 0 / Hold 0, //SecurityBit: OFF,
+**bin sha 6b39e155** (archived, NOT flashed — B3 runs 7c06083f). Since both
+hubs settle at symmetric A:0022, the expected bench behavior is IDENTICAL
+to 7c06083f; the per-lane path only differs when a sink asks asymmetrically.
+New telemetry field `M1:<hex>` = lane 1 {pe, vs}.
