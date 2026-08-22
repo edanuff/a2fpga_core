@@ -145,4 +145,7 @@ telemetry) — details in `m5_afe_adjust_design.md` §12 and the annotated
 **bin sha 6b39e155** (archived, NOT flashed — B3 runs 7c06083f). Since both
 hubs settle at symmetric A:0022, the expected bench behavior is IDENTICAL
 to 7c06083f; the per-lane path only differs when a sink asks asymmetrically.
-New telemetry field `M1:<hex>` = lane 1 {pe, vs}.
+New telemetry field `M1:<hex>` = lane 1 {pe, vs}. 60K dp_test also
+rebuilt clean with the per-lane widths (Setup 0 / Hold 0, //SecurityBit: OFF,
+bin sha 79bdb842) — the AFE stays a tie-off there (die package), so this
+only proves the widened ports elaborate and route on the 60B.
