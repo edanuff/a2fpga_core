@@ -78,6 +78,9 @@ module dp_transmitter #(
     // Ugreen battled Y:77-99 at the SAME levels production catches
     // clean). 0 = trust the boot csr; apply only on a real sink change.
     parameter int    AFE_APPLY_ON_START = 1,
+    // Row 84 isolation switch: 0 = never assert phase_done (pre-gate
+    // decision), 1 = the protocol gate of design-doc §14.
+    parameter bit    ENABLE_PHASE_DONE_GATE = 1,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -524,9 +527,16 @@ module dp_transmitter #(
         // reports success -> the ladder advances, so the accompanying
         // ADJUST_REQUEST must NOT be applied. debug_locks =
         // {clock, equ, symbol, align}_locked (registered in channel_managemnt).
-        .phase_done      (tx_clock_train ? debug_locks[3]
-                                         : (tx_align_train ? (&debug_locks[2:0])
-                                                           : 1'b0)),
+        // ISOLATION BUILD (row 84): gate decision disabled, everything else
+        // (ports, counters, placement pressure) retained. Restores the
+        // pre-gate DECISION while keeping the pre-gate logic present, so a
+        // blink-count comparison attributes the regression to the gate's
+        // decision or to placement. Restore the expression below to ship.
+        .phase_done      (ENABLE_PHASE_DONE_GATE ?
+                            (tx_clock_train ? debug_locks[3]
+                                            : (tx_align_train ? (&debug_locks[2:0])
+                                                              : 1'b0))
+                          : 1'b0),
         // PHY (re)initialising: PLL unlocked, PCS TX in reset, or the
         // watchdog replaying the boot CSR — all return the AFE to boot
         // state, so the sequencer must forget what it applied.

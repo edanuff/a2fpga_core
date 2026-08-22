@@ -225,6 +225,10 @@ module a2mega_dp_test_top (
         // Isolation A/B (row 76): no INIT re-application — trust the boot
         // csr (804/FFE-auto); DRP only fires on a real sink change.
         .AFE_APPLY_ON_START(0),
+        // Row 85 placement experiment: gate back ON, placement perturbed
+        // via the placer effort switch (identical netlist) to test whether
+        // the row-84 regression tracks the gate or the placement.
+        .ENABLE_PHASE_DONE_GATE(1),
         .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.
