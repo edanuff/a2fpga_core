@@ -490,6 +490,7 @@ module dp_transmitter #(
     // TRAINING_LANE_SET. Tied off (byte-identical legacy) when disabled.
     logic [7:0]  train_set_byte;
     logic        adjust_evt;
+    logic        afe_busy_w, afe_phy_reinit;
     logic        afe_drp_clk, afe_drp_req, afe_drp_gnt;
     logic        afe_drp_wren, afe_drp_ready;
     logic [23:0] afe_drp_addr;
@@ -511,8 +512,12 @@ module dp_transmitter #(
         .pe_request      (debug_adjust[3:2]),
         .adjust_de       (adjust_evt),
         .training_active (tx_clock_train | tx_align_train),
+        // PHY (re)initialising: PLL unlocked, PCS TX in reset, or the
+        // watchdog replaying the boot CSR — all return the AFE to boot
+        // state, so the sequencer must forget what it applied.
+        .phy_reinit      (afe_phy_reinit),
         .train_set_byte  (train_set_byte),
-        .afe_busy        (),
+        .afe_busy        (afe_busy_w),
         .dbg_afe         (debug_afe),
         .drp_clk         (afe_drp_clk),
         .drp_req         (afe_drp_req),
@@ -522,6 +527,10 @@ module dp_transmitter #(
         .drp_wren        (afe_drp_wren),
         .drp_ready       (afe_drp_ready)
     );
+    // serdes_status = {fifo_afull, fifo_full, pll_lock, lane_ready[1:0],
+    // ~pcs_tx_rst, tx_running[1:0]} (Gowin bank; 8'h3F on stubs).
+    assign afe_phy_reinit = ~serdes_status[5] | ~serdes_status[2] | wdog_replay_req;
+
 
     channel_management #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
                          .BLIND_SINK(BLIND_SINK),
@@ -529,6 +538,7 @@ module dp_transmitter #(
                          .AFE_ADJUST(ENABLE_AFE_ADJUST)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
+        .afe_busy             (afe_busy_w),
         .adjust_evt           (adjust_evt),
         .debug                (debug),
         .debug_rx             (debug_rx),

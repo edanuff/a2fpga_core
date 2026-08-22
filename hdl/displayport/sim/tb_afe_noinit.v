@@ -18,7 +18,7 @@ module tb_afe_noinit;
         .LANE_BASE0(24'h808300), .LANE_BASE1(24'h808400),
         .INIT_VS(2'd2), .INIT_PE(2'd0), .APPLY_ON_TRAINING_START(0)) dut (
         .mgmt_clk(mgmt_clk), .vs_request(vs_request), .pe_request(pe_request),
-        .adjust_de(adjust_de), .training_active(training_active),
+        .adjust_de(adjust_de), .training_active(training_active), .phy_reinit(1'b0),
         .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));

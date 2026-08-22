@@ -41,6 +41,7 @@
         <File path="../../hdl/displayport/core/scrambler_reset_inserter.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/core/skew_channels.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/dp_transmitter.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/afe_adjust_seq.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/benz_encode.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/enc_8b10b.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/lane_encoder_8b10b.v" type="file.verilog" enable="1"/>

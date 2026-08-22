@@ -5,6 +5,7 @@
     <Version>5</Version>
     <Device name="GW5AT-60B" pn="GW5AT-LV60PG484AC1/I0">gw5at60b-002</Device>
     <FileList>
+        <File path="hdl/dp_test/dp_test_die_pkg_60b.sv" type="file.verilog" enable="1"/>
         <File path="hdl/dp_gowin_defines.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/60B/dp_serdes/dp_phy/dp_phy.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/60B/dp_serdes/dp_serdes.v" type="file.verilog" enable="1"/>
@@ -28,6 +29,7 @@
         <File path="../../hdl/displayport/core/scrambler_reset_inserter.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/core/skew_channels.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/dp_transmitter.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/afe_adjust_seq.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/benz_encode.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/enc_8b10b.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/lane_encoder_8b10b.v" type="file.verilog" enable="1"/>

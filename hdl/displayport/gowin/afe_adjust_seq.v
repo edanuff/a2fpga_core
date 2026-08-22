@@ -45,6 +45,27 @@
 //   - a new application is never started while one is in flight; an
 //     adjust byte arriving mid-flight is latched and evaluated after.
 //
+// Commit discipline (user review items 3-5, 08-21):
+//   - "applied" (what train_set_byte declares) is committed only when the
+//     DRP sequence COMPLETES SUCCESSFULLY (ack from the DRP side with no
+//     write timeout). While a sequence is in flight the declaration keeps
+//     the previous committed levels, and afe_busy tells the AUX ladder to
+//     hold its next TRAINING_LANEx_SET message until the new analog state
+//     is really in effect. A failed sequence (timeout) does NOT commit:
+//     the declaration stays truthful to the old levels and seq_err flags
+//     it (sticky, telemetry M:2x/3x).
+//   - the committed state is RETAINED across training-pattern transitions
+//     (training_active falling) — the PHY keeps whatever was last written.
+//     It is forgotten only on phy_reinit (PHY reset / PLL unlock / lane
+//     not ready), after which the next training start re-baselines:
+//     APPLY_ON_TRAINING_START=1 writes INIT, =0 assumes the boot config
+//     (INIT) is resident without writing — valid exactly because a real
+//     PHY re-initialisation is what cleared the state.
+//   - requests are sanitised to the DP 1.x rule VS + PE <= 3 after the
+//     ceiling clamp (a sink must not ask for more; a source must not
+//     drive it), and MAX_PE is declared when PE cannot rise further at
+//     the applied swing (pe == MAX_PE or vs + pe == 3).
+//
 // TRAINING_LANE_SET reporting: train_set_byte is the ready-to-send DPCD
 // 0x103-0x106 value {2'b00, MAX_PE, pe[1:0], MAX_SWING, vs[1:0]} echoing
 // the applied levels; the MAX flags assert at level 3 (VS3 applies our
@@ -97,8 +118,10 @@ module afe_adjust_seq #(
     input  wire  [1:0] pe_request,       //   (DPCD 0x206[1:0] / 0x206[3:2])
     input  wire        adjust_de,        // pulse: 0x206 byte just captured
     input  wire        training_active,  // tx_clock_train | tx_align_train
+    input  wire        phy_reinit,       // level: PHY (re)initialising — the
+                                         //   applied state is forgotten
     output wire  [7:0] train_set_byte,   // TRAINING_LANEx_SET value to send
-    output wire        afe_busy,         // application in flight
+    output wire        afe_busy,         // adjust pending / application in flight
     output wire  [5:0] dbg_afe,          // {seq_err, known, pe[1:0], vs[1:0]}
     // ---- DRP-clock domain (SERDES UPAR/DRP port) ---------------------
     input  wire        drp_clk,
@@ -174,15 +197,25 @@ end else begin : g_on
     // ------------------------------------------------------------------
     // Management-side trigger / bookkeeping
     // ------------------------------------------------------------------
-    reg [1:0] applied_vs    = 2'd0;
+    reg [1:0] applied_vs    = 2'd0;   // COMMITTED (declared) levels
     reg [1:0] applied_pe    = 2'd0;
     reg       applied_known = 1'b0;
+    reg [1:0] target_vs     = 2'd0;   // levels of the sequence in flight
+    reg [1:0] target_pe     = 2'd0;
     reg       apply_tgl     = 1'b0;
     reg [1:0] vs_lat        = 2'd0;   // quasi-static payload for the DRP side
     reg [1:0] pe_lat        = 2'd0;
     reg [1:0] ack_sync      = 2'b00;
+    reg       ack_sync_d    = 1'b0;
     wire      ack_tgl_w;              // from DRP side
-    wire      busy = (apply_tgl != ack_sync[1]);
+    wire      fail_w;                 // from DRP side: last sequence timed out
+    // busy_r is set in the same clocked block (same NBA delta) as the
+    // launch and the eval_pend clear, so afe_busy is glitch-free across
+    // the launch edge in simulation too (the toggle compare alone rises
+    // one delta after eval_pend falls; hardware never sees that, sims do).
+    reg       busy_r = 1'b0;
+    wire      busy = busy_r | (apply_tgl != ack_sync[1]);
+    wire      ack_evt = (ack_sync[1] != ack_sync_d);   // sequence finished
 
     reg       adj_d         = 1'b0;   // adjust_de delayed: parsed request
                                       // registers hold the new value now
@@ -190,13 +223,32 @@ end else begin : g_on
     reg [1:0] vs_pend       = 2'd0;
     reg [1:0] pe_pend       = 2'd0;
 
+    // clamp the pending request to the declared ceilings, then sanitise
+    // to the DP rule VS + PE <= 3 (PE yields; swing is what the sink
+    // primarily asked for)
+    wire [1:0] vs_clamped = (vs_pend > MAX_VS) ? MAX_VS : vs_pend;
+    wire [1:0] pe_ceiling = (pe_pend > MAX_PE) ? MAX_PE : pe_pend;
+    wire [2:0] vs_pe_sum  = {1'b0, vs_clamped} + {1'b0, pe_ceiling};
+    wire [1:0] pe_clamped = (vs_pe_sum > 3'd3) ? (2'd3 - vs_clamped) : pe_ceiling;
+
     always @(posedge mgmt_clk) begin
-        ack_sync <= {ack_sync[0], ack_tgl_w};
-        adj_d    <= adjust_de;
-        if (!training_active) begin
-            // training ended (or never ran): next run re-baselines
+        ack_sync   <= {ack_sync[0], ack_tgl_w};
+        ack_sync_d <= ack_sync[1];
+        adj_d      <= adjust_de;
+        if (ack_evt) busy_r <= 1'b0;
+        // sequence completion: commit only on success (item 3)
+        if (ack_evt && !fail_w) begin
+            applied_vs <= target_vs;
+            applied_pe <= target_pe;
+        end
+        if (phy_reinit) begin
+            // the PHY is being re-initialised: whatever we wrote is gone
             applied_known <= 1'b0;
             eval_pend     <= 1'b0;
+        end else if (!training_active) begin
+            // training ended: RETAIN the committed state (item 4); only
+            // drop a stale pending request
+            eval_pend <= 1'b0;
         end else begin
             // capture: one snapshot per ADJUST_REQUEST read (= iteration)
             if (adj_d) begin
@@ -207,36 +259,57 @@ end else begin : g_on
             if (!busy) begin
                 if (!applied_known) begin
                     applied_known <= 1'b1;
-                    applied_vs    <= INIT_VS;
-                    applied_pe    <= INIT_PE;
                     if (APPLY_ON_TRAINING_START != 0) begin
+                        // write INIT; declaration commits on completion
+                        target_vs <= INIT_VS;
+                        target_pe <= INIT_PE;
                         vs_lat    <= INIT_VS;
                         pe_lat    <= INIT_PE;
-                        apply_tgl <= ~apply_tgl;
+                        apply_tgl <= ~apply_tgl; busy_r <= 1'b1;
+                    end else begin
+                        // trust the resident (boot) config = INIT
+                        applied_vs <= INIT_VS;
+                        applied_pe <= INIT_PE;
                     end
                 end else if (eval_pend && !adj_d) begin
                     eval_pend <= 1'b0;
                     if ({pe_clamped, vs_clamped} != {applied_pe, applied_vs}) begin
-                        applied_vs <= vs_clamped;
-                        applied_pe <= pe_clamped;
-                        vs_lat     <= vs_clamped;
-                        pe_lat     <= pe_clamped;
-                        apply_tgl  <= ~apply_tgl;
+                        target_vs <= vs_clamped;
+                        target_pe <= pe_clamped;
+                        vs_lat    <= vs_clamped;
+                        pe_lat    <= pe_clamped;
+                        apply_tgl <= ~apply_tgl; busy_r <= 1'b1;
                     end
                 end
             end
         end
     end
 
-    // clamp the pending request to the declared ceilings
-    wire [1:0] vs_clamped = (vs_pend > MAX_VS) ? MAX_VS : vs_pend;
-    wire [1:0] pe_clamped = (pe_pend > MAX_PE) ? MAX_PE : pe_pend;
+    // Declaration echoes the COMMITTED levels only. Until the first
+    // baseline is established (APPLY_ON_TRAINING_START=1: the INIT write
+    // has completed; =0: training has started and the boot config is
+    // assumed) it is the legacy byte. MAX_PE is truthful at the applied
+    // swing (DP: VS+PE<=3).
+    reg  baseline = 1'b0;
+    always @(posedge mgmt_clk)
+        if (phy_reinit)                         baseline <= 1'b0;
+        else if (ack_evt && !fail_w)            baseline <= 1'b1;
+        else if (applied_known && (APPLY_ON_TRAINING_START == 0)) baseline <= 1'b1;
+
     wire max_sw = (applied_vs >= MAX_VS);
-    wire max_pe = (applied_pe >= MAX_PE);
-    assign train_set_byte = applied_known
+    wire max_pe = (applied_pe >= MAX_PE) ||
+                  ({1'b0, applied_vs} + {1'b0, applied_pe} >= 3'd3);
+    assign train_set_byte = baseline
         ? {2'b00, max_pe, applied_pe, max_sw, applied_vs}
         : IDLE_SET_BYTE;
-    assign afe_busy = busy;
+    // afe_busy also covers the evaluation latency after an ADJUST byte
+    // (adjust_de -> adj_d -> eval_pend -> launch) so the AUX ladder's hold
+    // sees it BEFORE the lane-set message that follows a 0x206 read can
+    // be issued — the DRP launch is 3 clocks behind the byte, the ladder
+    // can change state 1 clock after it.
+    // (single flat assign from registers: a wire chain busy->afe_busy
+    // shows a delta-cycle glitch in event-driven sims at the launch edge)
+    assign afe_busy = busy_r | (apply_tgl != ack_sync[1]) | adjust_de | adj_d | eval_pend;
 
     // ------------------------------------------------------------------
     // DRP-side sequence player
@@ -253,11 +326,13 @@ end else begin : g_on
     reg [11:0] tmo       = 12'd0;
     reg [3:0]  gap       = 4'd0;
     reg        seq_err   = 1'b0;   // sticky: a write never saw ready
+    reg        seq_fail  = 1'b0;   // per-sequence: settled before ack_tgl
     reg [23:0] addr_r    = 24'd0;
     reg [31:0] wrdata_r  = 32'd0;
     reg        wren_r    = 1'b0;
 
     assign ack_tgl_w  = ack_tgl;
+    assign fail_w     = seq_fail;   // quasi-static by the time ack is seen
     assign drp_req    = (dstate != S_IDLE);
     assign drp_addr   = addr_r;
     assign drp_wrdata = wrdata_r;
@@ -274,6 +349,7 @@ end else begin : g_on
                     vs_s      <= vs_lat;
                     pe_s      <= pe_lat;
                     widx      <= 4'd0;
+                    seq_fail  <= 1'b0;
                     dstate    <= S_REQ;
                 end
             end
@@ -291,8 +367,10 @@ end else begin : g_on
             S_WAIT: begin                      // wren held until ready/timeout
                 tmo <= tmo + 12'd1;
                 if (drp_ready || (&tmo)) begin
-                    if (!drp_ready)
-                        seq_err <= 1'b1;
+                    if (!drp_ready) begin
+                        seq_err  <= 1'b1;
+                        seq_fail <= 1'b1;
+                    end
                     wren_r <= 1'b0;
                     gap    <= 4'd0;
                     dstate <= S_GAP;
@@ -317,7 +395,7 @@ end else begin : g_on
     reg [1:0] err_sync = 2'b00;
     always @(posedge mgmt_clk)
         err_sync <= {err_sync[0], seq_err};
-    assign dbg_afe = {err_sync[1], applied_known, applied_pe, applied_vs};
+    assign dbg_afe = {err_sync[1], baseline, applied_pe, applied_vs};
 
 end endgenerate
 

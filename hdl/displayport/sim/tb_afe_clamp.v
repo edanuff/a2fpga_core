@@ -19,7 +19,7 @@ module tb_afe_clamp;
         .LANE_BASE0(24'h808300), .LANE_BASE1(24'h808400),
         .INIT_VS(2'd2), .INIT_PE(2'd0)) dut (   // MAX_VS/MAX_PE at defaults (2 / 3)
         .mgmt_clk(mgmt_clk), .vs_request(vs_request), .pe_request(pe_request),
-        .adjust_de(adjust_de), .training_active(training_active),
+        .adjust_de(adjust_de), .training_active(training_active), .phy_reinit(1'b0),
         .train_set_byte(byte_o), .afe_busy(busy), .dbg_afe(dbg),
         .drp_clk(drp_clk), .drp_req(req), .drp_gnt(gnt), .drp_addr(addr),
         .drp_wrdata(data), .drp_wren(wren), .drp_ready(ready));
@@ -69,15 +69,19 @@ module tb_afe_clamp;
         else $display("  ok: VS3/PE0 request clamps to VS2 -> no re-application, byte 0x%02x", byte_o);
         // the hoped-for request: VS3/PE1 -> VS2 + PE1 = txlev 13 / C1 7, byte 0x0E (telemetry M:06 established / M:16 in training)
         send_adjust(2'd3, 2'd1); settle;
-        check_app(8, 4'd13, 5'd7, 8'h0E, "VS3/PE1 -> clamped VS2 + PE1");  // {00,maxpe0,pe01,maxsw1,vs10}
-        // ceiling on PE too: VS3/PE3 -> txlev 13 / C1 13, MAX_PE+MAX_SWING = 0x3E
+        check_app(8, 4'd13, 5'd7, 8'h2E, "VS3/PE1 -> clamped VS2 + PE1");  // {00,maxpe1(VS2+PE1=3),pe01,maxsw1,vs10}
+        // VS+PE<=3 sanitising: VS3/PE3 -> VS2 (ceiling) + PE1 (3-2) = already applied -> NO writes, byte 0x2E
         send_adjust(2'd3, 2'd3); settle;
-        check_app(16, 4'd13, 5'd13, 8'h3E, "VS3/PE3 -> both ceilings");
+        if (wr_cnt != 16 || byte_o !== 8'h2E) begin errors = errors + 1; $display("FAIL: VS3/PE3 must sanitise to VS2/PE1 (no writes, 0x2E); writes %0d byte %02x", wr_cnt, byte_o); end
+        else $display("  ok: VS3/PE3 -> sanitised to VS2/PE1 (already applied), no writes, byte 0x2E");
+        // VS0/PE3 is a legal combination (sum 3): txlev 5 / C1 13, MAX_PE flagged, byte 0x2C
+        send_adjust(2'd0, 2'd3); settle;
+        check_app(16, 4'd5, 5'd13, 8'h38, "VS0/PE3 -> legal, honored");  // {00,maxpe1,pe11,maxsw0,vs00}
         // below ceiling still honored: VS1/PE0 -> txlev 9 / C1 0, byte 0x01
         send_adjust(2'd1, 2'd0); settle;
         check_app(24, 4'd9, 5'd0, 8'h01, "VS1/PE0 -> honored, no flags");
         if (dbg[5]) begin errors = errors + 1; $display("FAIL: seq_err set"); end
-        if (errors == 0) $display("PASS: declared-ceiling clamp (MAX_VS=2) — VS2 ceiling flagged, PE honored, below-ceiling honored");
+        if (errors == 0) $display("PASS: declared-ceiling clamp (MAX_VS=2) + VS+PE<=3 sanitising");
         else $display("FAIL: %0d error(s)", errors);
         $finish;
     end

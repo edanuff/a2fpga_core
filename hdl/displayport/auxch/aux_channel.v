@@ -89,6 +89,11 @@ module aux_channel #(
         // ready-to-send TRAINING_LANEx_SET value from afe_adjust_seq
         // (tie to 8'h06 when AFE_ADJUST == 0)
         input  [7:0] train_set_byte,
+        // M5: hold the NEXT lane-set message while the AFE sequencer is
+        // applying (or evaluating) a request, so the declared levels are
+        // in effect on the wire before the sink reads them. Tie 1'b0
+        // when AFE_ADJUST == 0.
+        input        afe_busy,
         output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
         output [7:0] debug_gate,  // {locks@check_wait[3:0], gate_fails[1:0], timeouts[1:0]}
         output [7:0] debug_sink,  // DPCD 0x205 SINK_STATUS (latched each status read)
@@ -272,6 +277,16 @@ end
 
     // M5: which TRAINING_LANEx_SET message the set states send
     wire [7:0] lane_set_msg = (AFE_ADJUST != 0) ? 8'h19 : 8'h18;
+    // M5 hold: the pending transition would issue a lane-set message and
+    // the AFE sequencer has not finished applying the levels it declares.
+    // Holding here (before the state change) leaves every other path of
+    // the FSM untouched: no message is sent, so no reply/timeout logic
+    // runs; the 100 us timer is re-armed each held cycle.
+    wire afe_hold = (AFE_ADJUST != 0) && afe_busy && (next_state != state) && (
+        next_state == clock_voltage_0p4 || next_state == clock_voltage_0p6 || next_state == clock_voltage_0p8 ||
+        next_state == align_p0_V0p4 || next_state == align_p0_V0p6 || next_state == align_p0_V0p8 ||
+        next_state == align_p1_V0p4 || next_state == align_p1_V0p6 || next_state == align_p1_V0p8 ||
+        next_state == align_p2_V0p4 || next_state == align_p2_V0p6 || next_state == align_p2_V0p8);
 
 dp_aux_messages #(.LINK_RATE_MBPS(LINK_RATE_MBPS)) i_aux_messages(
          .clk          (clk),
@@ -318,7 +333,7 @@ always @(posedge clk) begin
     //-----------------------------------------
     msg_de <= 1'b0;
      
-    if(next_state != state) begin
+    if(next_state != state && !afe_hold) begin
         //-----------------------------------------------------------
         // Get ready to count how many reply bytes have been received
         //-----------------------------------------------------------
@@ -581,11 +596,12 @@ always @(posedge clk) begin
         count_100us <= count_100us - 1;
     end else begin
         count_100us <= 15'd9999;                                        
-        if(reset_addr_on_change == 1'b1) begin
+        if(reset_addr_on_change == 1'b1 && !afe_hold) begin
             aux_addr_i <= 8'h0;
         end                                       
     end
-    state <= next_state;
+    if(!afe_hold)
+        state <= next_state;
             
     //-----------------------------------------------------------
     // How a short wait is implemented...

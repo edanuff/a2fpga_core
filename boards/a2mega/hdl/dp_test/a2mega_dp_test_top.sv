@@ -214,8 +214,12 @@ module a2mega_dp_test_top (
         .HPD_DISCONNECT_RESETS(0),
         // M5 (user-approved 08-21): honor ADJUST_REQUEST via DRP —
         // per-sink swing/pre-emphasis instead of a fixed goldilocks drive.
-        // 138B lane bases (re-verify before enabling on the 60K die).
-        .ENABLE_AFE_ADJUST(1),
+        // Die-specific: the enable and the DRP lane bases come from the
+        // per-project dp_test_die_pkg (138B = ON + verified bases; 60B =
+        // OFF until its DRP export is verified) — this top is shared.
+        .ENABLE_AFE_ADJUST(dp_test_die_pkg::ENABLE_AFE_ADJUST),
+        .AFE_LANE_BASE0   (dp_test_die_pkg::AFE_LANE_BASE0),
+        .AFE_LANE_BASE1   (dp_test_die_pkg::AFE_LANE_BASE1),
         // Isolation A/B (row 76): no INIT re-application — trust the boot
         // csr (804/FFE-auto); DRP only fires on a real sink change.
         .AFE_APPLY_ON_START(0),

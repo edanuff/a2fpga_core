@@ -69,6 +69,7 @@ module channel_management #(
         // out per received ADJUST_REQUEST 0x206 byte (afe_adjust_seq's
         // evaluation/debounce tick). train_set_byte: tie 8'h06 when off.
         input  [7:0] train_set_byte,
+        input        afe_busy,      // M5: hold next lane-set while applying (tie 0 when off)
         output       adjust_evt,
         output [7:0] debug,
         output [15:0] debug_rx,  // AUX RX: {last byte, sync hits, accepted bytes} (registered)
@@ -222,6 +223,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .AFE_ADJUST(AFE_ADJUST)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),
+        .afe_busy        (afe_busy),
         .debug_pmod      (debug),
         .debug_gate      (debug_gate),
         .debug_sink      (debug_sink),

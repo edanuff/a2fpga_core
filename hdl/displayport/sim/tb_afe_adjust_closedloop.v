@@ -13,12 +13,12 @@
 //      on the WIRE declares it (0x02).
 //   3. The sink's ADJUST_REQUEST = VS3/PE2 (0xBB) causes exactly ONE
 //      further application (txlev 15 / C1 10), after which every
-//      TRAINING_LANEx_SET write on the wire declares 0x17
+//      TRAINING_LANEx_SET write on the wire declares 0x27
 //      (vs3 + MAX_SWING_REACHED, pe2) — including the align-phase sets,
 //      where the unchanged request is debounced (no third application).
 //   4. Total DRP writes = exactly 16; every 0x103 write carries the same
 //      value on all four lane bytes; no lane-set value other than
-//      0x02/0x17 ever appears.
+//      0x02/0x27 ever appears.
 //
 // Run: iverilog -g2012 -o /tmp/tb_afe_cl.vvp \
 //        hdl/displayport/sim/tb_afe_adjust_closedloop.v \
@@ -64,6 +64,7 @@ module tb_afe_adjust_closedloop;
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
         .adjust_evt           (adjust_evt),
+        .afe_busy             (afe_busy),
         .debug                (),
         .debug_rx             (),
         .debug_locks          (),
@@ -118,7 +119,7 @@ module tb_afe_adjust_closedloop;
         .vs_request      (debug_adjust[1:0]),
         .pe_request      (debug_adjust[3:2]),
         .adjust_de       (adjust_evt),
-        .training_active (tx_clock_train | tx_align_train),
+        .training_active (tx_clock_train | tx_align_train), .phy_reinit(1'b0),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
         .dbg_afe         (dbg_afe),
@@ -365,7 +366,7 @@ module tb_afe_adjust_closedloop;
     // ------------------------------------------------------------------
     // Main check sequence
     // ------------------------------------------------------------------
-    integer saw02, saw17, sawother, first17;
+    integer saw02, saw27, sawother, first27;
     initial begin
         wait (tx_link_established);
         #200_000;                       // let trailing AUX traffic finish
@@ -378,37 +379,37 @@ module tb_afe_adjust_closedloop;
         end else
             $display("  ok: exactly two AFE applications (16 DRP writes)");
         check_seq(0, 4'd13, 5'd0,  "INIT VS2/PE0");
-        check_seq(8, 4'd15, 5'd10, "adjust VS3/PE2");
+        check_seq(8, 4'd15, 5'd0, "adjust VS3/PE2 -> sanitised VS3/PE0 (VS+PE<=3)");
 
-        // lane-set wire log: some 0x02 first, then only 0x17, nothing else
-        saw02 = 0; saw17 = 0; sawother = 0; first17 = -1;
+        // lane-set wire log: some 0x02 first, then only 0x27, nothing else
+        saw02 = 0; saw27 = 0; sawother = 0; first27 = -1;
         for (m = 0; m < ls_cnt; m = m + 1) begin
             if (lane_set_log[m] === 8'h02) begin
                 saw02 = saw02 + 1;
-                if (first17 >= 0) begin
+                if (first27 >= 0) begin
                     errors = errors + 1;
-                    $display("FAIL: 0x02 lane-set after 0x17 (idx %0d)", m);
+                    $display("FAIL: 0x02 lane-set after 0x27 (idx %0d)", m);
                 end
-            end else if (lane_set_log[m] === 8'h17) begin
-                saw17 = saw17 + 1;
-                if (first17 < 0) first17 = m;
+            end else if (lane_set_log[m] === 8'h27) begin
+                saw27 = saw27 + 1;
+                if (first27 < 0) first27 = m;
             end else
                 sawother = sawother + 1;
         end
-        if (ls_cnt < 2 || saw02 < 1 || saw17 < 1 || sawother != 0) begin
+        if (ls_cnt < 2 || saw02 < 1 || saw27 < 1 || sawother != 0) begin
             errors = errors + 1;
-            $display("FAIL: lane-set wire log bad: n=%0d 02s=%0d 17s=%0d other=%0d",
-                     ls_cnt, saw02, saw17, sawother);
+            $display("FAIL: lane-set wire log bad: n=%0d 02s=%0d 27s=%0d other=%0d",
+                     ls_cnt, saw02, saw27, sawother);
         end else
-            $display("  ok: wire TRAINING_LANE_SET: %0d x 0x02 (INIT) then %0d x 0x17 (VS3+MAX_SWING/PE2)",
-                     saw02, saw17);
+            $display("  ok: wire TRAINING_LANE_SET: %0d x 0x02 (INIT) then %0d x 0x27 (VS3+MAX_SWING, PE sanitised to 0 +MAX_PE)",
+                     saw02, saw27);
 
         // after training ends (training_active low) the declaration
         // intentionally reverts to the idle byte; no lane-set message is
         // sent in that window, and a re-train re-baselines via INIT
-        if (train_set_byte !== 8'h06) begin
+        if (train_set_byte !== 8'h27) begin
             errors = errors + 1;
-            $display("FAIL: post-training train_set_byte %02x want 06 (idle)",
+            $display("FAIL: post-training train_set_byte %02x want 27 (retained)",
                      train_set_byte);
         end
         if (last_pattern !== 8'h00) begin

@@ -11,13 +11,15 @@
 //      strobe), correct per-lane base addressing, byte -> 0x02.
 //   3. An ADJUST_REQUEST equal to the applied levels never re-applies
 //      (debounce: unchanged request across iterations = no DRP writes).
-//   4. A differing request (VS3/PE2) applies txlev 15 / C1 10 and the
-//      reported byte carries MAX_SWING (0x17); repeating the same
-//      request applies nothing further.
-//   5. PE3 request sets MAX_PE (byte 0x3F, C1 13).
+//   4. A differing request (VS3/PE0) applies txlev 15 / C1 0; the byte
+//      carries MAX_SWING + MAX_PE (0x27: at VS3 no PE may be added — DP
+//      rule VS+PE<=3); repeating it, or the illegal VS3/PE2 (sanitised to
+//      VS3/PE0), applies nothing further.
+//   5. VS0/PE3 (legal, sum 3) applies txlev 5 / C1 13, MAX_PE (0x38).
 //   6. Requests while training_active=0 are ignored.
-//   7. Re-entering training re-baselines (INIT applied once again), then
-//      VS1/PE1 maps to txlev 9 / C1 7 (byte 0x09).
+//   7. Re-entering training RETAINS the committed state (no re-INIT; only
+//      phy_reinit forgets — tb_afe_commit), then VS1/PE1 -> txlev 9 / C1 7
+//      (byte 0x09).
 //   8. A request arriving while a (slowed) sequence is in flight is not
 //      lost and never interleaves: two complete back-to-back 8-write
 //      sequences, final applied = the latest request.
@@ -84,7 +86,7 @@ module tb_afe_adjust;
         .vs_request      (vs_request),
         .pe_request      (pe_request),
         .adjust_de       (adjust_de),
-        .training_active (training_active),
+        .training_active (training_active), .phy_reinit(1'b0),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
         .dbg_afe         (dbg_afe),
@@ -113,7 +115,7 @@ module tb_afe_adjust;
         .vs_request      (vs_request),
         .pe_request      (pe_request),
         .adjust_de       (adjust_de),
-        .training_active (training_active),
+        .training_active (training_active), .phy_reinit(1'b0),
         .train_set_byte  (off_byte),
         .afe_busy        (off_busy),
         .dbg_afe         (off_dbg),
@@ -221,8 +223,12 @@ module tb_afe_adjust;
 
     task wait_idle;                    // sequence completion (mgmt view)
         begin
+            // Sample afe_busy on clock edges, as the hardware consumer
+            // (the AUX ladder's hold) does. A level-sensitive wait() on a
+            // multi-input combinational signal can wake on an NBA-region
+            // intermediate value (delta glitch) and return early.
             wait (afe_busy);
-            wait (!afe_busy);
+            do @(posedge mgmt_clk); while (afe_busy);
             #200;                      // let the last recorded write settle
         end
     endtask
@@ -268,23 +274,23 @@ module tb_afe_adjust;
         #5000;
         check_count(8, "matching request applies nothing");
 
-        // ---- 4. VS3/PE2: apply, MAX_SWING, debounce -------------------
-        send_adjust(2'd3, 2'd2);
+        // ---- 4. VS3/PE0: apply, MAX_SWING (+MAX_PE by VS+PE<=3), debounce
+        send_adjust(2'd3, 2'd0);
         wait_idle;
-        check_count(16, "VS3/PE2 applied once");
-        check_seq(8, 4'd15, 5'd10, "VS3/PE2 txlev15/C1=10");
-        check_byte(8'h17, "VS3/PE2 byte: MAX_SWING, pe=2");
-        send_adjust(2'd3, 2'd2);   // further iterations, request unchanged
-        send_adjust(2'd3, 2'd2);
+        check_count(16, "VS3/PE0 applied once");
+        check_seq(8, 4'd15, 5'd0, "VS3/PE0 txlev15/C1=0");
+        check_byte(8'h27, "VS3/PE0 byte: MAX_SWING+MAX_PE(sum 3)");
+        send_adjust(2'd3, 2'd0);   // further iterations, request unchanged
+        send_adjust(2'd3, 2'd2);   // illegal VS3/PE2 -> sanitised VS3/PE0 = applied
         #8000;
-        check_count(16, "unchanged request: debounced");
+        check_count(16, "unchanged/sanitised request: debounced");
 
-        // ---- 5. PE3: MAX_PE -------------------------------------------
-        send_adjust(2'd3, 2'd3);
+        // ---- 5. VS0/PE3 (legal): MAX_PE ------------------------------
+        send_adjust(2'd0, 2'd3);
         wait_idle;
-        check_count(24, "PE3 applied once");
-        check_seq(16, 4'd15, 5'd13, "VS3/PE3 txlev15/C1=13");
-        check_byte(8'h3F, "VS3/PE3 byte: MAX_SWING+MAX_PE");
+        check_count(24, "VS0/PE3 applied once");
+        check_seq(16, 4'd5, 5'd13, "VS0/PE3 txlev5/C1=13");
+        check_byte(8'h38, "VS0/PE3 byte: MAX_PE");
 
         // ---- 6. not training: ignored ---------------------------------
         @(negedge mgmt_clk) training_active = 1'b0;
@@ -294,13 +300,13 @@ module tb_afe_adjust;
 
         // ---- 7. re-enter training: re-baseline, then VS1/PE1 ----------
         @(negedge mgmt_clk) training_active = 1'b1;
-        wait_idle;
-        check_count(32, "re-training re-applies INIT");
-        check_seq(24, 4'd13, 5'd0, "re-INIT VS2/PE0");
+        #5000;                                   // nothing to wait for: no write
+        check_count(24, "re-training retains state (no re-INIT)");
+        check_byte(8'h38, "retained byte across training restart");
         send_adjust(2'd1, 2'd1);
         wait_idle;
-        check_count(40, "VS1/PE1 applied");
-        check_seq(32, 4'd9, 5'd7, "VS1/PE1 txlev9/C1=7");
+        check_count(32, "VS1/PE1 applied");
+        check_seq(24, 4'd9, 5'd7, "VS1/PE1 txlev9/C1=7");
         check_byte(8'h09, "VS1/PE1 byte");
 
         // ---- 8. request change mid-flight: applied after, atomic ------
@@ -309,11 +315,12 @@ module tb_afe_adjust;
         wait (afe_busy);
         #300;                                    // mid-sequence
         send_adjust(2'd0, 2'd0);
-        wait (!afe_busy);                        // first sequence done
-        wait_idle;                               // second follows on its own
-        check_count(56, "mid-flight change: two atomic sequences");
-        check_seq(40, 4'd13, 5'd7,  "in-flight VS2/PE1 completes");
-        check_seq(48, 4'd5,  5'd0,  "queued VS0/PE0 applied after");
+        // afe_busy stays high across the queued evaluation, so one
+        // edge-sampled wait covers both back-to-back sequences
+        wait_idle;
+        check_count(48, "mid-flight change: two atomic sequences");
+        check_seq(32, 4'd13, 5'd7,  "in-flight VS2/PE1 completes");
+        check_seq(40, 4'd5,  5'd0,  "queued VS0/PE0 applied after");
         check_byte(8'h00, "final byte VS0/PE0");
         ready_delay = 6;
 
