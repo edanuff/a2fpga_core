@@ -97,3 +97,7 @@ sink-requested change on the final configuration:
 ## Builds
 
 See the tail of this file (appended when the overnight chain finishes).
+
+- 60K `a2mega_dp_test.gprj` (item 1 verification): synthesis + PnR PASS,
+  Setup 0 / Hold 0, ~1 min (21:14-21:15); package resolved, AFE
+  elaborated OFF; //SecurityBit: OFF; bin sha 5eddf85b. Not flashed (B1 not on the bench).
