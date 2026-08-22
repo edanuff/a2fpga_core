@@ -107,3 +107,18 @@ See the tail of this file (appended when the overnight chain finishes).
   48576c12). Expected bench behavior on both hubs: identical to row 77/78
   (no-write path; the new logic only changes what happens on a real
   request, on DRP failure, and after a PHY reinit).
+- 60K full core `a2mega.gprj` (item 1: was unbuildable — unknown module):
+  now ELABORATES and builds (21:48-22:24, 36 min with the Gowin IDE open —
+  first attempt stalled in routing and hit the 1800 s guard; IDE
+  contention pattern). //SecurityBit: OFF. **BUT 37 setup violations, none in the
+  M5/auxch logic** (AFE is a tie-off on the 60K). Worst paths:
+  `i_dp_video_timing cy_5` (clk_pix, -2.26 ns), `video_stream_packer
+  e_tu_pos_3 -> fetch_r / e_phase / dec_fe_r` (clk_sym 135 MHz, -1.60 /
+  -1.08 / -0.89 ns), `transceiver_bank replay_idx -> drp_wrdata_r`
+  (cm_life, -1.29), `osd_overlay` (clk_pix, -0.87). The packer paths are
+  the OFFSET-FIX v3 logic (continuous SOF / starved-fetch resync) — it
+  closes on the 138B dp_test at clk_sym 149.2 but not on the 60K full
+  core's denser placement; dp_video_timing/osd may be pre-existing (full
+  core last closed at "Stage 6 WIP", 98351d9a). **V3 full-core-port
+  item: pipeline the packer's e_tu_pos compare and re-time cy_5; do not
+  flash this full-core bin.** Not a regression of tonight's review work.
