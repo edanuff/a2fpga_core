@@ -12,6 +12,7 @@ Coming soon
 - [Agent & contributor guide](../../AGENTS.md)
 - [This board's tasks & status (TODO.md)](TODO.md)
 - Board design docs:
+  - [HyperRAM bandwidth budget (§3)](../../docs/memory_bandwidth_analysis.md#3-a2p25--hyperram-bandwidth-budget) — framebuffer + fabric Ensoniq + shadow memory on the a2-p25 board rev
   - [LCAM capture session notes](docs/LCAM_SESSION_NOTES.md)
   - [ESP32 SPI protocol](docs/ESP32_SPI_PROTOCOL.md)
   - [ESP32 firmware (a2fpga_esp32)](src/a2fpga_esp32/README.md)

@@ -1,14 +1,26 @@
-# Memory Bandwidth Analysis — A2N20v2-GS (SDRAM) & A2Mega (DDR3)
+# Memory Bandwidth Analysis — A2N20v2-GS (SDRAM), A2Mega (DDR3) & A2P25 (HyperRAM)
 
 ## Context
 
-Both boards currently use their external memory exclusively for framebuffer storage.
-Two expansion scenarios are under consideration:
+Three expansion scenarios are under consideration. In each, BSRAM pressure is the
+motivation and external-memory bandwidth is the question:
 
-1. **A2N20v2-GS**: Move Apple II shadow memory from BSRAM to SDRAM (freeing BSRAM — currently 44/46 = 96% full)
-2. **A2Mega**: Move Ensoniq DOC5503 64 KB sound RAM from BSRAM to DDR3 (freeing BSRAM — currently 107/118 = 91% full)
+1. **A2N20v2-GS** (§1): Move Apple II shadow memory from BSRAM to SDRAM (freeing BSRAM — currently 44/46 = 96% full)
+2. **A2Mega** (§2): Move Ensoniq DOC5503 64 KB sound RAM from BSRAM to DDR3 (freeing BSRAM — currently 107/118 = 91% full)
+3. **A2P25** (§3): Add a 64 Mbit HyperBus PSRAM to a board that has none, then move
+   shadow memory, a new 480p framebuffer, and a fabric Ensoniq DOC5503 into it
+   (currently 45/56 = 81% full, no external memory, DOC emulated on the ESP32-S3)
+
+The first two boards use their external memory exclusively for framebuffer storage today.
 
 This document presents the current bandwidth budget and projected utilization under each scenario to determine feasibility.
+
+> **Note on the VGC/SHR aux banks.** Sections 1 and 2 conclude that
+> `hires_aux_2000_5FFF` and `hires_aux_6000_9FFF` must remain in BSRAM for read-time
+> `interleave_mux` reconstruction. **That conclusion has since been superseded** by
+> the `VGC_IN_SDRAM` pre-interleaved write path (see §3.7), which is shipped on
+> a2n20v2-Enhanced dual-rate. Sections 1 and 2 are left as written for their
+> bandwidth analysis; treat their BSRAM-retention numbers as a floor, not a limit.
 
 ---
 
@@ -675,7 +687,348 @@ Potential future uses beyond Ensoniq and shadow memory:
 
 ---
 
-## 3. Comparison Summary
+## 3. A2P25 — HyperRAM Bandwidth Budget
+
+### 3.0 Scenario
+
+The a2p25 as built has no external memory at all: all video shadow RAM lives in
+BSRAM, the Ensoniq DOC5503 is emulated in software on the ESP32-S3 (fed by the
+LCAM bus stream, with audio returned over I2S), and video goes straight to HDMI
+through `apple_video` with no framebuffer.
+
+The `a2-p25` board revision (repo `/Users/edanuff/GitHub/a2-p25`, commit 800cd75
+"Add HyperRAM, turn FPGA-MCU interconnect into QSPI, remove LCAM") adds a
+**64 Mbit HyperBus PSRAM** and frees the pins for it by consolidating the
+FPGA↔ESP32 link to QSPI. The scenario this section evaluates:
+
+1. Move the **Ensoniq DOC5503 back into the FPGA**, with its 64 KB wave RAM in HyperRAM
+2. Add a **480p framebuffer** in HyperRAM
+3. Move **all Apple II shadow memory** to HyperRAM (see §3.7 — this turns out to be
+   the enabling move, not an extra cost)
+
+### 3.1 Hardware Parameters
+
+| Parameter | Value |
+|-----------|-------|
+| Device | GW5A-LV25MG121NC1/I0 (Tang Primer 25K SOM), 56 BSRAM, 11520 CLS |
+| Memory | ISSI `IS66WVH8M8ALL-166B1LI` — 64 Mbit (8 MB) HyperBus PSRAM, BGA-24 |
+| VCC / VCCQ | +3V3 (board net), FPGA bank LVCMOS33 |
+| HyperBus width | x8 DDR (2 bytes per CK cycle) |
+| **HyperBus CK** | **108 MHz** (synchronous 2:1 with `clk_logic`) |
+| **Peak bandwidth** | 108 MHz × 16 bits = **1,728 Mbps (216 MB/s)** |
+| IP user clock (`clk_out`) | **54 MHz = `clk_logic`** — no CDC required |
+| IP user data width | 32 bits (`4 × Dq`), 4-bit `data_mask` (byte enables) |
+| Initial latency @108 MHz | 5 CK (latency code); **variable** (unfixed) latency recommended |
+| Max CS# low time (tCSM) | 4 µs → bursts bounded well below this anyway |
+
+**Do not plan on 166 MHz.** The `-166` speed grade is margin, not a target. At
+LVCMOS33 the GW5A is being asked for 216 Mbps/pin at 108 MHz already; 166 MHz
+would be 332 Mbps/pin at 3.3 V. The budget below closes comfortably at 108, and
+108 is the frequency that makes the clock tree fall out cleanly (§3.3).
+
+### 3.2 Gowin HyperRAM Memory Interface IP (IPUG944)
+
+Present in the installed IDE at `ipcore/HYPERRAM` (IP v2.3), with a GW5A-specific
+implementation (`data/hpram_code_5A.v`). `GW5A-25A` is in the supported-device list.
+
+**User-side interface (`HPRAM_TOP.v`):**
+
+```
+input   clk, memory_clk, pll_lock, rst_n
+input   addr[ADDR_WIDTH-1:0], cmd, cmd_en
+input   wr_data[4*DQ_WIDTH-1:0]      // 32 bits for Dq=8
+input   data_mask[MASK_WIDTH-1:0]    // 4 bits — byte enables
+output  rd_data[4*DQ_WIDTH-1:0], rd_data_valid
+output  init_calib, clk_out
+```
+
+This is **`mem_port_if` in all but name**: 32-bit data, 4-bit byte enables, single
+command port, valid-qualified read return. Unlike the a2mega DDR3 integration there
+is no 128-bit-vs-32-bit packing layer to write — the arbiter pattern from
+`hdl/ddr3/ddr3_ports.sv` ports over directly, minus the width adaptation.
+
+**Clock relationship.** x8 DDR carries 16 bits per CK; a 32-bit user word is therefore
+2 CK. With CK = 108 MHz the IP's `clk_out` is **54 MHz — exactly `clk_logic`**. The
+whole memory subsystem is synchronous to the existing logic domain:
+
+- **No async FIFOs anywhere.** On a2mega, `ddr3_port_cdc` FIFOs consumed 33 of 90
+  BSRAM blocks; that entire category does not exist here.
+- No exposure to the GW5AT async-FIFO CDC corruption class (see `ddr3-notes`).
+- The arbiter runs at 54 MHz, not 108 — the a2n20v2 lesson that an 8th SDRAM port
+  fails 108 MHz timing on the arbitration cone (Fmax ~96) does not bind here.
+
+**IP options that matter:**
+
+| Option | Setting | Why |
+|--------|---------|-----|
+| Clock Type | `SINGLE` | Board leaves CK# (pad B1) unconnected — supported |
+| Fixed Latency Enable | **unfixed (variable)** | ~20% of the bus back; every client here tolerates jitter (§3.5) |
+| Buffer Type | **SSRAM or LUT**, not BSRAM | Keeps IP buffers off the block-RAM budget |
+| Memory Type | ISSI entry | See §3.8 — the exact part is not in the dropdown |
+| Addr Width | sized for 64 Mbit | IP list carries the 256 Mbit ISSI part |
+
+### 3.3 Clock Tree — PLL Retune Required
+
+Current PLLA (`boards/a2p25/hdl/gowin/gowin_pll/gowin_pll_mod.v`): 50 MHz in,
+IDIV 1, MDIV 27 → **VCO 1350**, with ODIV 50/10/25 → 27 / 135 / 54 MHz.
+
+**1350 ÷ 108 = 12.5.** The current VCO cannot produce a synchronous 108 MHz — the
+same trap identified in the a2mega HyperRAM study.
+
+Retune to **VCO 1080** (IDIV 5, MDIV 108):
+
+| Output | ODIV | Use |
+|--------|------|-----|
+| 27 MHz | 40 | `clk_pixel` |
+| 54 MHz | 20 | `clk_logic` (= IP `clk_out`) |
+| 108 MHz | 10 | HyperBus CK |
+| 135 MHz | 8 | `clk_hdmi` (5× pixel) |
+| 216 MHz | 5 | IP `memory_clk`, if required |
+
+All five integer from one PLL. `CLKOUT3-6` are currently disabled and available.
+Verify MDIV = 108 and VCO = 1080 are inside the GW5A PLLA legal ranges in the IP
+generator before committing; VCO 2160 is the fallback with the same divisor set.
+
+### 3.4 Video Architecture Change
+
+A framebuffer requires the **pixel-stream** path, not the current real-time renderer:
+
+| Current | With framebuffer |
+|---------|-----------------|
+| `apple_video` → HDMI directly | `apple_video_gen` + `vgc_gen` → `pixel_stream_if` |
+| — | 2 × `framebuffer_writer` |
+| — | `framebuffer_480p` (2 × `mem_port_if`) |
+
+All of these are shared modules already proven on a2n20v2-GS and a2mega. Use
+`framebuffer_480p.sv` rather than `sdram_framebuffer.sv`: its 8 line banks and
+12-line prefetch lead were built for a high-latency shared bus, which is what
+HyperBus is.
+
+### 3.5 Transaction Overhead and Burst Sizing
+
+HyperBus overhead per transaction, at CK = 108 MHz with variable latency:
+
+| Phase | CK cycles |
+|-------|-----------|
+| CA (48-bit command/address over x8 DDR) | 3 |
+| Initial latency (1× typical, 2× on refresh collision) | ~6 |
+| CS# turnaround / tCSHI | ~2 |
+| **Overhead** | **~11 CK = ~5.5 user cycles** |
+| Data | N/4 user cycles for N bytes |
+
+**Burst size dominates everything.** A 16-byte transaction is 4 data cycles against
+5.5 of overhead — 42% efficiency. A 64-byte transaction is 16 against 5.5 — 74%.
+
+Two changes follow, and they are the difference between this fitting and not:
+
+1. **`FB_READ_BURST_WORDS` 4 → 16** (16 B → 64 B line-fetch bursts).
+2. **Write-combine the framebuffer write FIFO.** `framebuffer_480p` already
+   accumulates 8 pixels into one 128-bit (16-byte) word
+   (`hdl/video/framebuffer_480p.sv`, `wr_accum_r`), and consecutive entries are
+   address-sequential along a scanline. Merging 4 of them into one 64-byte HyperBus
+   burst in the port adapter takes FB writes from 37% of the bus to 17%.
+
+**Counter-rule: cap bursts at 64 B and re-arbitrate between them.** The rev-3
+header of `hdl/sound/doc5503_pipelined.sv` documents the a2mega failure mode
+precisely — a framebuffer line fetch issued as ~40 non-preemptible grants produced
+service tails of tens of microseconds for the lowest-priority client. With a 64-byte
+cap the worst-case tail any client sees is one in-flight burst (~250 ns), which every
+deadline in §3.6 absorbs comfortably.
+
+### 3.6 Client Access Patterns and Deadlines
+
+| Client | Deadline | Source of slack |
+|--------|----------|-----------------|
+| FB line fetch | ~380 µs | 12-line prefetch lead (`PREFETCH_LEAD_LINES = 12`) |
+| FB pixel writes | ~38 µs | 64-entry × 8 px write FIFO at 13.5 Mpx/s |
+| Shadow read (`apple_video_gen`) | **~1.85 µs** | 112 logic cycles per chunk (28 px × GAP_CYCLES 4), ~10 needed |
+| Shadow read (`vgc_gen`) | ~1.2 µs | 64 cycles of pixel output per fetched word |
+| DOC5503 wavetable | ~2.2 µs | 1.117 µs oscillator slot × 2-sample lookahead issue |
+| CPU writes (shadow / GLU) | none (posted) | 16-deep write queue in `apple_memory_sdram` |
+
+Worst-case service tail with the 64-byte burst cap: one FB burst (~250 ns) + one DOC
+burst (~176 ns) + one CPU write (~100 ns) + own latency (~120 ns) ≈ **650 ns**,
+against a 1.85 µs tightest deadline. ~2.8× margin.
+
+**DOC5503 read rate is measured, not estimated.** The rev-3 pipelined DOC uses
+16-byte cache lines with a two-line-per-oscillator direct-mapped store and lookahead
+issue; its header records **56–70k grants/s with all 32 oscillators running**
+(~2–3% of arbiter time on a2mega's DDR3). Use `doc5503_pipelined.sv`, never
+`doc5503.sv` — the latter's timeout mechanism is what failed on a shared bus.
+
+**The CPU write streams are mutually exclusive.** Shadow-RAM writes and GLU
+wave-RAM writes both originate from the single Apple II bus; the 6502/65816 cannot
+write to video shadow and DOC sound RAM in the same cycle. They share one budget
+line, they do not stack. Ceiling is one write per bus cycle (1 MHz on a II/IIe,
+~560K/s realistic for a 2.8 MHz IIgs `STZ abs` loop). Note that aux-region writes
+**dual-issue** (flat + pre-interleaved) when `VGC_IN_SDRAM = 1`, so the transaction
+count can be up to 2× the bus-write count.
+
+### 3.7 The Enabling Move: All Shadow Memory to HyperRAM
+
+The earlier GS and a2mega analyses in this document concluded that the two SHR aux
+banks must stay in BSRAM, because real IIgs software writes non-linearized
+($2000–$5FFF and $6000–$9FFF as separate hires banks) before activating SHR, and
+`interleave_mux` reconstructs byte order at read time.
+
+**That constraint has since been lifted.** `apple_memory_sdram.sv` gained
+`VGC_IN_SDRAM` (2026-07-05, commit 77a8810 on PR #43): aux writes dual-issue to a
+**pre-interleaved** region whose word layout is already in `interleave_mux` output
+format, so a VGC fetch is a single 32-bit read. VGC and `apple_video_gen` share one
+port through a latch-and-replay arbiter. Shipped on a2n20v2-Enhanced dual-rate,
+which went 45/46 → 29/46 as a result.
+
+⚠️ **`VGC_IN_SDRAM` still needs IIgs hardware validation.** a2p25 is `GS = 1`, so
+this is a prerequisite, not an optional extra.
+
+With `VGC_MEMORY = 1, VGC_IN_SDRAM = 1`, everything leaves BSRAM:
+
+| Block | ADDR_WIDTH | Blocks | Destination |
+|-------|-----------|--------|-------------|
+| `text_vram` | 10 | 2 | HyperRAM |
+| `hires_main_2000_5FFF` | 12 | 8 | HyperRAM |
+| `hires_aux_2000_5FFF` | 12 | 8 | HyperRAM (pre-interleaved) |
+| `hires_aux_6000_9FFF` | 12 | 8 | HyperRAM (pre-interleaved) |
+| **Total freed** | | **26** | |
+
+### 3.8 BSRAM Budget
+
+Current a2p25 build: **45/56 (81%)**, 11 blocks free.
+
+| Change | Δ blocks |
+|--------|---------|
+| Shadow + SHR aux → HyperRAM (§3.7) | **−26** |
+| `framebuffer_480p` line buffer (8192 × 18b = 8 banks) | +8 |
+| DOC5503 pipelined oscillator state / line store | +1–2 |
+| Ensoniq 64 KB wave RAM | +0 (HyperRAM) |
+| HyperRAM IP buffers (`Buffer Type = SSRAM/LUT`) | +0 |
+| CDC FIFOs | +0 (synchronous — see §3.2) |
+| **Projected** | **~29/56 (52%)** |
+
+**This is the headline result.** Adding a framebuffer, a hardware Ensoniq, and 8 MB
+of external memory *reduces* BSRAM pressure from 81% to ~52%, leaving 27 blocks free.
+
+Contrast with keeping shadow in BSRAM: 45 − 0 + 8 + 2 = **55/56 (98%)** — buildable
+only by shrinking `NUM_LINE_BANKS` and would leave nothing for future cores.
+
+**CLS** is the parallel constraint: 6216/11520 (54%) today. Adding the pipelined
+DOC, the framebuffer, the pixel-stream generators, and the HyperRAM IP should land
+around 80–85%. a2mega ships at 91%, so this is livable but worth watching.
+
+### 3.9 Projected Bandwidth Budget
+
+CK = 108 MHz, user clock 54 MHz, variable latency, 64-byte FB bursts, all shadow in
+HyperRAM. Costs are in user cycles (54 M/s available).
+
+| Client | Transactions/s | Size | user-cyc/s | % of 54 M |
+|--------|---------------|------|-----------|-----------|
+| FB writes (write-combined) | 422K | 64 B | 9.1 M | 16.8% |
+| FB line fetches | 252K | 64 B | 5.4 M | 10.0% |
+| Shadow reads — `apple_video_gen` (20/line × 192 × 60) | 230K | 4 B | 1.5 M | 2.8% |
+| Shadow reads — `vgc_gen` SHR (49/line × 200 × 60) | 588K | 4 B | 3.8 M | 7.1% |
+| DOC5503 wavetable (32 osc running) | 70K | 16 B | 0.7 M | 1.3% |
+| CPU writes — shadow **or** GLU, dual-issued aux | ≤1.12 M | 4 B | 7.3 M | 13.5% |
+| **Total worst-case** | | | **27.8 M** | **~52%** |
+| **Headroom** | | | **26.2 M** | **~48%** |
+| Steady state (no CPU write storm) | | | ~20.5 M | ~38% |
+
+Notes on the worst case:
+
+- `apple_video_gen` and `vgc_gen` are counted **simultaneously**. Only one is ever
+  displayed (SHR is fullscreen), but both keep fetching — a request once issued must
+  always complete, per the arbiter comment in `apple_memory_sdram.sv`.
+- The CPU write row is the absolute ceiling (one write per bus cycle, every write to
+  a dual-issued aux address). Realistic sustained rates are 3–5× lower.
+- FB rates assume the Apple II geometry (560 × 240 stored, 2× vertical scale to 480p).
+  VGC geometry (640 × 200) is within 1% of the same load.
+
+**Verdict: feasible with ~48% headroom.** Moving shadow memory into HyperRAM costs
+~10% of the bus (the two shadow-read rows) and returns 26 BSRAM blocks — an
+unambiguously good trade on a 56-block device.
+
+### 3.10 Memory Map
+
+8 MB available; ~700 KB used.
+
+| Region | Byte address | Size | Use |
+|--------|-------------|------|-----|
+| Framebuffer | 0x000000 | ~270 KB | 560 × 240 × RGB565 (640 × 200 in VGC) |
+| Shadow memory | 0x100000 | 64 KB | Text + hires, main/aux interleaved |
+| SHR aux (pre-interleaved) | 0x120000 | 32 KB | `VGC_IN_SDRAM` region |
+| Ensoniq wave RAM | 0x200000 | 64 KB | DOC5503 wavetable + GLU writes |
+| **Free** | | **~7.3 MB** | Disk cache, IIgs banks, future cores |
+
+### 3.11 Board-Level Findings (a2-p25 rev)
+
+Verified against `/Users/edanuff/GitHub/a2-p25` at commit 6971f51.
+
+**Pin map — 11 FPGA nets, CK# and RESET# not routed:**
+
+| Signal | Connector | Pin |
+|--------|-----------|-----|
+| `PSRAM_~CS` | BTB0 | 21 |
+| `PSRAM_RWDS` | BTB0 | 23 |
+| `PSRAM_CK` | BTB0 | 33 |
+| `PSRAM_DQ0..DQ7` | BTB1 | 22, 24, 26, 28, 30, 32, 34, 36 |
+| CK# (pad B1) | — | `no_connect` |
+| RESET# (pad A4) | — | `no_connect` |
+
+Four items to resolve before fab:
+
+**1. RESET# is floating.** Pad A4 is `unconnected-(U17-~{RESET}-PadA4)` and no
+pull-up appears in the BOM. Most HyperRAM parts have an internal pull-up on RESET#,
+but a floating CMOS input on a 166 MHz part should not rely on it — and the IP drives
+`O_hpram_reset_n` as a real port, so with it unconnected there is no hardware reset
+path at all. An FPGA reconfigure without a power cycle can then leave the PSRAM
+holding a stale CR0. **Preferred fix: route RESET# to a spare ESP32-S3 GPIO** (the
+ESP32 side has pins available now that LCAM is gone) — costs no FPGA pin and gives a
+genuine hardware reset. Minimum fix: 10K pull-up to VCC.
+
+**2. RWDS is on a different connector — and probably a different bank — from DQ.**
+RWDS is the source-synchronous DDR read strobe; the PHY delays it and captures DQ
+with it. BTB0 carries `VCCIO0/1` and `VCCIO6/7`; BTB1 carries `VCCIO2/3`. If the
+Primer 25K SOM pinout puts RWDS in a different I/O bank from the byte lane, that is a
+separate delay/DLL calibration domain plus inter-bank skew, and Gowin memory-interface
+IP generally requires the group in one bank. **Check IPUG944's pin-placement rules
+against the SOM ball map.** If same-bank is required, moving RWDS onto a BTB1 pin is a
+respin. `PSRAM_CK` is on BTB0 as well; being FPGA-driven and output-only it is the
+lesser concern, but CK→DQ skew still affects write timing.
+
+**3. The exact part is not in the IP's memory list.** IPUG944 offers `W956x8MKY`,
+`S27KS0641`, and `IS66WVH32M8DBLL`. The board carries `IS66WVH8M8ALL` — same ISSI
+HyperRAM family and identical HyperBus protocol, but 64 Mbit rather than 256 Mbit and a
+different revision suffix. Select the ISSI entry and set Addr Width accordingly, then
+verify the CR0 values the IP writes during init (latency code, drive strength, refresh
+rate) are legal for the `ALL` part. Also confirm from the datasheet that VCC max covers
+the board's 3.3 V rail and that the 166 MHz rating holds there — this is the
+3.0 V-nominal part.
+
+**4. LVCMOS33 at 216 Mbps/pin.** 108 MHz DDR on 3.3 V GW5A I/O is the open electrical
+question and the reason not to reach for 166 MHz. Memory-side drive strength is
+IP-configurable (35/50/100/200 Ω); set FPGA-side drive and slew deliberately rather
+than taking defaults.
+
+**5. UART is gone.** The FPGA↔ESP32 link is now QSPI (6 pins) + INT# + RECONFIG# +
+JTAG; `uart_tx`/`uart_rx` were sacrificed. Console traffic tunnels over the existing
+`esp32_spi_proto_proc.sv` register protocol with INT# for RX-ready. **Do not make
+HyperRAM bring-up depend on that path** — use `DebugOverlay` for `init_calib`,
+first-read-back, and error counters, since it reaches HDMI with nothing else working.
+
+### 3.12 Implementation Order
+
+1. PLL retune to VCO 1080 (§3.3) — independent, verifiable in isolation.
+2. HyperRAM IP instantiation + `mem_port_if` adapter + arbiter (`ddr3_ports.sv`
+   pattern at 54 MHz), with a loopback self-test reported via `DebugOverlay`.
+3. Ensoniq: `doc5503_pipelined` with wave RAM in HyperRAM. Lowest bandwidth
+   (1.3%), highest value, and the ideal PHY shakedown load — same rationale as
+   the a2mega HyperRAM migration order.
+4. Framebuffer: pixel-stream conversion (§3.4) plus the burst-sizing changes (§3.5).
+5. Shadow memory: `apple_memory_sdram` with `VGC_MEMORY = 1, VGC_IN_SDRAM = 1`.
+   Gated on IIgs hardware validation of `VGC_IN_SDRAM`.
+
+---
+
+## 4. Comparison Summary
 
 ### A2N20v2-GS: Shadow Memory → SDRAM
 
@@ -703,6 +1056,22 @@ Potential future uses beyond Ensoniq and shadow memory:
 | Shadow read latency | 4 cycles (BSRAM) | ~15 clk_logic (~270 ns) | Within 112-cycle chunk |
 | VGC changes | None | None (stays in BSRAM) | None |
 | Architecture change | None | Multi-port DDR3 interface | Moderate complexity |
+
+### A2P25: Framebuffer + Ensoniq + Shadow Memory → HyperRAM
+
+| Metric | Current | Projected | Delta |
+|--------|---------|-----------|-------|
+| External memory | none | 64 Mbit HyperBus @ 108 MHz CK | +216 MB/s |
+| HyperRAM utilization | — | ~52% worst case, ~38% steady | 48% headroom |
+| BSRAM usage | 45/56 (81%) | ~29/56 (52%) | **-16 blocks** |
+| CLS usage | 6216/11520 (54%) | ~80–85% (est.) | watch item |
+| CDC FIFOs | — | **none** (IP `clk_out` = 54 MHz = `clk_logic`) | 0 blocks |
+| Ensoniq DOC5503 | ESP32-S3 software | fabric `doc5503_pipelined`, wave RAM in HyperRAM | 1.3% of bus |
+| Framebuffer | none (direct HDMI) | `framebuffer_480p` | 27% of bus |
+| Shadow memory | BSRAM (26 blocks) | HyperRAM incl. SHR aux (`VGC_IN_SDRAM`) | -26 blocks, +10% bus |
+| Video architecture | `apple_video` real-time | pixel-stream + `framebuffer_writer` | Moderate |
+| PLL | VCO 1350 (27/135/54) | VCO 1080 (27/54/108/135/216) | Retune required |
+| Board changes | — | 4 items to resolve pre-fab (§3.11) | RESET# NC is the bug |
 
 ### Key Takeaways
 
@@ -747,3 +1116,20 @@ Potential future uses beyond Ensoniq and shadow memory:
    video reads from SDRAM with interleaved byte_en encoding, VGC reads from BSRAM.
    The SDRAM storage layout and `video_mem_if.q` pass-through pattern can be directly
    reused on both boards.
+
+8. **A2P25 inverts the usual trade.** Adding a framebuffer, a fabric Ensoniq, and 8 MB
+   of external RAM *lowers* BSRAM pressure from 81% to ~52%, because moving all four
+   shadow blocks (including both SHR aux banks via `VGC_IN_SDRAM`) frees 26 blocks
+   against ~10 consumed. Shadow-in-HyperRAM costs ~10% of the bus and is the enabling
+   move, not an extra burden.
+
+9. **The 2:1 synchronous clock is what makes A2P25 cheap.** x8 DDR at 108 MHz yields a
+   32-bit user word at exactly 54 MHz = `clk_logic`, so the memory subsystem needs no
+   CDC at all. On a2mega the equivalent CDC FIFOs cost 33 of 90 BSRAM blocks. Pick the
+   HyperBus frequency to land the IP's `clk_out` on the existing logic clock — this is
+   worth more than raw MHz.
+
+10. **Burst size, not clock rate, sets HyperBus throughput.** At 16-byte granularity
+    the framebuffer alone consumes 37% of a 108 MHz HyperBus; at 64 bytes it consumes
+    17%. Conversely, uncapped bursts reproduce the a2mega service-tail failure. 64 bytes
+    with re-arbitration between bursts satisfies both constraints.
