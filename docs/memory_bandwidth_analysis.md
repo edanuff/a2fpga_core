@@ -1027,17 +1027,34 @@ on `clk_x2p`, the pinout is settled. The one thing to watch is distribution of t
 216 MHz `clk_x2p` to I/O registers across four banks (2, 3, 4, 7), which is a
 clock-resource question rather than a skew question.
 
-### 3.12 Board-Level Items to Resolve Before Fab
+### 3.12 Board-Level Items to Confirm Before Fab
 
-**1. RESET# is floating.** Pad A4 is `unconnected-(U17-~{RESET}-PadA4)` and no
-pull-up appears in the BOM. Most HyperRAM parts have an internal pull-up on RESET#,
-but a floating CMOS input on a 166 MHz part should not rely on it — and the IP drives
-`O_hpram_reset_n` as a real port, so with it unconnected there is no hardware reset
-path at all. An FPGA reconfigure without a power cycle can then leave the PSRAM
-holding a stale CR0. **Preferred fix: route RESET# to a spare ESP32-S3 GPIO** (the
-ESP32 side has pins available now that LCAM is gone) — costs no FPGA pin and gives a
-genuine hardware reset. Minimum fix: 10K pull-up to VCC. **This is the only item in
-this section that is a defect rather than a verification step.**
+None of these is a defect — the board as drawn is buildable. They are settings and
+datasheet checks that must not be left to defaults.
+
+**1. RESET# unconnected — verified correct, no action.** Pad A4 is
+`unconnected-(U17-~{RESET}-PadA4)`. This is the datasheet-specified use, not an
+omission: *"The slave RESET# input includes a weak pull-up, if RESET# is left
+unconnected it will be pulled up to the HIGH state."* Three checks confirm it is safe
+here:
+
+- **No antenna.** The pad carries zero copper — no segment, via, arc, or zone
+  references the net. The weak internal pull-up drives only the bare 0.41 mm BGA pad,
+  which is the best case for a deliberately floating input.
+- **No stale-config hazard.** The IP takes `Initial_Latency`, `Drive_Strength`,
+  `Fixed_Latency_Enable`, `Refresh_Rate`, `PASR`, `Deep_Power_Down` and
+  `Hybrid_Sleep_Mode` as generation parameters. Those are CR0/CR1 fields, so the IP
+  must program the configuration registers during `init_calib` — it cannot honour a
+  non-default latency or drive strength otherwise. A warm FPGA reconfigure that leaves
+  a stale CR0 is therefore self-healing.
+- **No hung-state hazard.** HyperBus returns to STANDBY whenever CS# is deasserted for
+  tCSHI, so there is no sequence that strands the device somewhere only a hardware
+  reset can recover from. Deep power-down would be the one exception, and the IP is
+  configured `Deep_Power_Down = "OFF"`.
+
+`O_hpram_reset_n` is simply left unconnected on the IP instance. Adding a DNP 10K
+pull-up footprint is harmless insurance if the layout near U17 has easy room, but it
+is not required and is not worth perturbing a routed BGA escape for.
 
 **2. The exact part is not in the IP's memory list.** IPUG944 offers `W956x8MKY`,
 `S27KS0641`, and `IS66WVH32M8DBLL`. The board carries `IS66WVH8M8ALL` — same ISSI
@@ -1121,7 +1138,7 @@ first-read-back, and error counters, since it reaches HDMI with nothing else wor
 | Video architecture | `apple_video` real-time | pixel-stream + `framebuffer_writer` | Moderate |
 | PLL | VCO 1350 (27/135/54) | VCO 1080 (27/54/108/135/216) | Retune required |
 | Pin-to-pin skew (pkg + SOM + board) | — | 90 ps across all 11 signals | 2% UI @108 MHz |
-| Board changes | — | pinout verified (§3.11); 5 items pre-fab (§3.12) | RESET# NC is the only defect |
+| Board changes | — | pinout verified (§3.11); 5 checks pre-fab (§3.12) | **no defects found** |
 
 ### Key Takeaways
 
