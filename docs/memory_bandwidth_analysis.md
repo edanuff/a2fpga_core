@@ -958,22 +958,76 @@ unambiguously good trade on a 56-block device.
 | Ensoniq wave RAM | 0x200000 | 64 KB | DOC5503 wavetable + GLU writes |
 | **Free** | | **~7.3 MB** | Disk cache, IIgs banks, future cores |
 
-### 3.11 Board-Level Findings (a2-p25 rev)
+### 3.11 Pin, Bank and Skew Analysis (a2-p25 rev)
 
-Verified against `/Users/edanuff/GitHub/a2-p25` at commit 6971f51.
+Verified against `/Users/edanuff/GitHub/a2-p25` at commit 6971f51, the Tang Primer 25K
+SOM schematic (`Tang_Primer_25K_52300_Schematic.pdf`), the SOM pin-length table
+(`Tang_Primer_25K_52300_Pin_Length_table.xlsx`), and Gowin's Arora-V package
+propagation-delay table (TN725-1.2, sheet `GW5A-25`, column `GW5A-LV25MG121N`).
 
-**Pin map — 11 FPGA nets, CK# and RESET# not routed:**
+**Full signal map.** Eleven FPGA nets; CK# (pad B1) and RESET# (pad A4) are
+`no_connect` on the memory. "DQ grp" is the Gowin DQ-group annotation from the SOM
+schematic; "copper" is SOM internal trace + a2-p25 board trace at ~150 ps/inch.
 
-| Signal | Connector | Pin |
-|--------|-----------|-----|
-| `PSRAM_~CS` | BTB0 | 21 |
-| `PSRAM_RWDS` | BTB0 | 23 |
-| `PSRAM_CK` | BTB0 | 33 |
-| `PSRAM_DQ0..DQ7` | BTB1 | 22, 24, 26, 28, 30, 32, 34, 36 |
-| CK# (pad B1) | — | `no_connect` |
-| RESET# (pad A4) | — | `no_connect` |
+| Signal | BTB | Pin | Site | Bank | DQ grp | Ball | Pkg (ps) | SOM (mil) | Board (mil) | **Total (ps)** |
+|--------|-----|-----|------|------|--------|------|---------:|----------:|------------:|---------------:|
+| `PSRAM_CK` | BTB0 | 33 | IOT1A | 7 | — (GCLKT_15) | J11 | 33.9 | 199.5 | 984.0 | **211.5** |
+| `PSRAM_~CS` | BTB0 | 21 | IOB56B | 4 | — | C3 | 27.1 | 526.2 | 982.8 | **253.4** |
+| `PSRAM_RWDS` | BTB0 | 23 | IOB60A | 4 | — | E3 | 10.6 | 599.0 | 1071.6 | **261.2** |
+| `PSRAM_DQ0` | BTB1 | 22 | IOR31A | 2 | DQ3 | L4 | 8.1 | 731.6 | 1137.6 | **288.4** |
+| `PSRAM_DQ1` | BTB1 | 24 | IOR31B | 2 | DQ3 | L3 | 12.3 | 731.1 | 1111.4 | **288.6** |
+| `PSRAM_DQ2` | BTB1 | 26 | IOR33A | 2 | — | J1 | 18.9 | 596.7 | 905.8 | **244.3** |
+| `PSRAM_DQ3` | BTB1 | 28 | IOR33B | 2 | — | J2 | 14.8 | 591.9 | 870.2 | **234.1** |
+| `PSRAM_DQ4` | BTB1 | 30 | IOB89A | 3 | DQ4 | G4 | 19.0 | 416.7 | 790.1 | **200.1** |
+| `PSRAM_DQ5` | BTB1 | 32 | IOB89B | 3 | DQ4 | H4 | 17.4 | 417.0 | 788.9 | **198.3** |
+| `PSRAM_DQ6` | BTB1 | 34 | IOB91A | 3 | DQ4 | H1 | 13.0 | 555.4 | 769.5 | **211.7** |
+| `PSRAM_DQ7` | BTB1 | 36 | IOB91B | 3 | DQ4 | H2 | 17.0 | 555.6 | 876.4 | **231.8** |
 
-Four items to resolve before fab:
+**Skew is a non-issue — do not spend more effort on length tuning.**
+
+| Measure | Value | @108 MHz (UI = 4630 ps) | @166 MHz (UI = 3012 ps) |
+|---------|------:|------------------------:|------------------------:|
+| DQ[7:0] spread | 90.3 ps | 2.0% UI | 3.0% UI |
+| bank 2 vs bank 3 DQ mean | 53.4 ps | 1.2% UI | 1.8% UI |
+| RWDS vs DQ mean | +24.0 ps | 0.5% UI | 0.8% UI |
+| CK vs DQ mean | −25.7 ps | 0.6% UI | 0.9% UI |
+| whole 11-signal group | 90.3 ps | 2.0% UI | 3.0% UI |
+
+The board traces are already well equalized (~1135 mil, ±10 mil ≈ 1.5 ps). The
+dominant term is the **SOM's own internal routing** (199–732 mil, an 80 ps spread)
+which is not under this board's control — and it is still only 2% of a bit time.
+
+**The bank split is architectural, not electrical.** DQ[7:0] spans two banks and three
+DQ-group states (DQ0–1 in group DQ3, DQ2–3 in no group at all, DQ4–7 in group DQ4),
+RWDS and CS# are in bank 4 with no DQ group, and CK is in bank 7. The only DQS-capable
+pins in reach — `IOR18A`/`IOR18B` (`DQ2/DQS_23`, BTB1 pins 6 and 8) — are occupied by
+`HDMI_TX2` and cannot be freed. So **if the PHY required DQS-group placement, no pin
+swap could fix it.**
+
+**It does not.** Synthesizing the GW5A HyperRAM IP standalone
+(`ipcore/HYPERRAM/data/hpram_code_5A.v` + a hand-written `hpram_define.v` /
+`hpram_param.v`, `GW5A-LV25MG121NC1/I0`) shows the GW5A implementation referencing
+`dll_lock`, `dll_rsti`, `uddcntln`, `stop`, `pause` and a `clk_x2p` capture clock —
+the port names of Gowin's `DLL`/`DLLDLY` primitives. The GW5A PHY is a **DLL-trained
+delay-line capture** design (which is what `init_calib` trains), not DQS-group
+source-synchronous capture. A trained delay line needs delay resources on the DQ pins,
+not DQS-group membership, and one shared delay code across DQ[7:0] is comfortable
+against 90 ps of physical spread.
+
+**Recommendation: leave CK in bank 7.** Moving it to bank 4 changes CK from 25.7 ps
+early to roughly 17 ps late relative to the DQ mean — both under 1% UI, so there is no
+signal-integrity reason to move it. Make the move only if IPUG944 turns out to require
+CK/CS#/RWDS co-location. CS# placement is irrelevant either way: it is asserted for a
+whole transaction, not sampled per-UI.
+
+**Residual verification** (cheap, before fab): generate the IP for `GW5A-25A`, write a
+`.cst` with exactly these balls — CK `J11`, CS# `C3`, RWDS `E3`, DQ0–7
+`L4 L3 J1 J2 G4 H4 H1 H2` — and run PnR. If the placer accepts them and timing closes
+on `clk_x2p`, the pinout is settled. The one thing to watch is distribution of the
+216 MHz `clk_x2p` to I/O registers across four banks (2, 3, 4, 7), which is a
+clock-resource question rather than a skew question.
+
+### 3.12 Board-Level Items to Resolve Before Fab
 
 **1. RESET# is floating.** Pad A4 is `unconnected-(U17-~{RESET}-PadA4)` and no
 pull-up appears in the BOM. Most HyperRAM parts have an internal pull-up on RESET#,
@@ -982,31 +1036,26 @@ but a floating CMOS input on a 166 MHz part should not rely on it — and the IP
 path at all. An FPGA reconfigure without a power cycle can then leave the PSRAM
 holding a stale CR0. **Preferred fix: route RESET# to a spare ESP32-S3 GPIO** (the
 ESP32 side has pins available now that LCAM is gone) — costs no FPGA pin and gives a
-genuine hardware reset. Minimum fix: 10K pull-up to VCC.
+genuine hardware reset. Minimum fix: 10K pull-up to VCC. **This is the only item in
+this section that is a defect rather than a verification step.**
 
-**2. RWDS is on a different connector — and probably a different bank — from DQ.**
-RWDS is the source-synchronous DDR read strobe; the PHY delays it and captures DQ
-with it. BTB0 carries `VCCIO0/1` and `VCCIO6/7`; BTB1 carries `VCCIO2/3`. If the
-Primer 25K SOM pinout puts RWDS in a different I/O bank from the byte lane, that is a
-separate delay/DLL calibration domain plus inter-bank skew, and Gowin memory-interface
-IP generally requires the group in one bank. **Check IPUG944's pin-placement rules
-against the SOM ball map.** If same-bank is required, moving RWDS onto a BTB1 pin is a
-respin. `PSRAM_CK` is on BTB0 as well; being FPGA-driven and output-only it is the
-lesser concern, but CK→DQ skew still affects write timing.
-
-**3. The exact part is not in the IP's memory list.** IPUG944 offers `W956x8MKY`,
+**2. The exact part is not in the IP's memory list.** IPUG944 offers `W956x8MKY`,
 `S27KS0641`, and `IS66WVH32M8DBLL`. The board carries `IS66WVH8M8ALL` — same ISSI
 HyperRAM family and identical HyperBus protocol, but 64 Mbit rather than 256 Mbit and a
-different revision suffix. Select the ISSI entry and set Addr Width accordingly, then
-verify the CR0 values the IP writes during init (latency code, drive strength, refresh
-rate) are legal for the `ALL` part. Also confirm from the datasheet that VCC max covers
-the board's 3.3 V rail and that the 166 MHz rating holds there — this is the
-3.0 V-nominal part.
+different revision suffix. Select the ISSI entry (`` `define ISSI66_PSRAM ``) and set
+Addr Width accordingly, then verify the CR0 values the IP writes during init (latency
+code, drive strength, refresh rate) are legal for the `ALL` part. Also confirm from the
+datasheet that VCC max covers the board's 3.3 V rail and that the 166 MHz rating holds
+there — this is the 3.0 V-nominal part.
 
-**4. LVCMOS33 at 216 Mbps/pin.** 108 MHz DDR on 3.3 V GW5A I/O is the open electrical
+**3. LVCMOS33 at 216 Mbps/pin.** 108 MHz DDR on 3.3 V GW5A I/O is the open electrical
 question and the reason not to reach for 166 MHz. Memory-side drive strength is
 IP-configurable (35/50/100/200 Ω); set FPGA-side drive and slew deliberately rather
 than taking defaults.
+
+**4. Clock Type must be `SINGLE`.** CK# is not routed. The IP supports this
+(`` `define CLK_SINGLE ``), but it is a wizard setting that must not be left at its
+default.
 
 **5. UART is gone.** The FPGA↔ESP32 link is now QSPI (6 pins) + INT# + RECONFIG# +
 JTAG; `uart_tx`/`uart_rx` were sacrificed. Console traffic tunnels over the existing
@@ -1014,7 +1063,7 @@ JTAG; `uart_tx`/`uart_rx` were sacrificed. Console traffic tunnels over the exis
 HyperRAM bring-up depend on that path** — use `DebugOverlay` for `init_calib`,
 first-read-back, and error counters, since it reaches HDMI with nothing else working.
 
-### 3.12 Implementation Order
+### 3.13 Implementation Order
 
 1. PLL retune to VCO 1080 (§3.3) — independent, verifiable in isolation.
 2. HyperRAM IP instantiation + `mem_port_if` adapter + arbiter (`ddr3_ports.sv`
@@ -1071,7 +1120,8 @@ first-read-back, and error counters, since it reaches HDMI with nothing else wor
 | Shadow memory | BSRAM (26 blocks) | HyperRAM incl. SHR aux (`VGC_IN_SDRAM`) | -26 blocks, +10% bus |
 | Video architecture | `apple_video` real-time | pixel-stream + `framebuffer_writer` | Moderate |
 | PLL | VCO 1350 (27/135/54) | VCO 1080 (27/54/108/135/216) | Retune required |
-| Board changes | — | 4 items to resolve pre-fab (§3.11) | RESET# NC is the bug |
+| Pin-to-pin skew (pkg + SOM + board) | — | 90 ps across all 11 signals | 2% UI @108 MHz |
+| Board changes | — | pinout verified (§3.11); 5 items pre-fab (§3.12) | RESET# NC is the only defect |
 
 ### Key Takeaways
 
@@ -1129,7 +1179,15 @@ first-read-back, and error counters, since it reaches HDMI with nothing else wor
    HyperBus frequency to land the IP's `clk_out` on the existing logic clock — this is
    worth more than raw MHz.
 
-10. **Burst size, not clock rate, sets HyperBus throughput.** At 16-byte granularity
+10. **Verify PHY architecture before agonizing over pin placement.** The a2p25
+    HyperBus pinout spans four I/O banks and three DQ-group states, which looks fatal
+    if the PHY captures reads with RWDS as a DQS. Synthesizing Gowin's GW5A HyperRAM
+    IP standalone showed a DLL-trained delay-line PHY (`dll_lock`, `uddcntln`,
+    `clk_x2p`) instead, which does not care about DQ-group membership. Measured skew
+    across package + SOM + board is 90 ps — 2% of a UI at 108 MHz. The bank split was
+    a non-problem; the layout effort that mattered was already done.
+
+11. **Burst size, not clock rate, sets HyperBus throughput.** At 16-byte granularity
     the framebuffer alone consumes 37% of a 108 MHz HyperBus; at 64 bytes it consumes
     17%. Conversely, uncapped bursts reproduce the a2mega service-tail failure. 64 bytes
     with re-arbitration between bursts satisfies both constraints.
