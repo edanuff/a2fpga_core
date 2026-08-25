@@ -110,3 +110,45 @@ session):
 1. **Acquisition / blinks-to-lock** — ours, genuinely stochastic
    (row 86: {0,1,1,6,1} on one bitstream), still unexplained.
 2. **Post-lock blanking on the Fangor** — not ours; monitor/cable.
+
+## Build A/B — Anker + Sceptre only (08-24)
+
+Cleanest cell: no known confound (the Fangor's cable is suspect). Board
+warmed with 2 uncounted cycles before each block so both blocks are
+measured warm.
+
+**Counting convention pinned:** the user's number = the number of D4
+lightups = `L:` exactly. ("1" = locked on the first lightup, `L:01`.)
+Earlier matrix rows recorded as "0 blinks" mean the same thing as "1" here.
+
+### Block 1 — `f569d4f8` (per-lane M5 + phase_done gate + CDC fixes)
+
+| cycle | count (= L:) | telemetry |
+|-------|--------------|-----------|
+| 1 | 6 | |
+| 2 | 1 | |
+| 3 | 1 | |
+| 4 | 6 | |
+| 5 | 1 | `L:01 Y:11 C:0177 D:2E S:24 A:0022 M:12/2 N:020` |
+
+**Distribution: {6, 1, 1, 6, 1}** — median 1, two outliers at 6.
+
+🔎 **STRONGLY BIMODAL: the value is 1 or 6, never 2-5.** That is not
+continuous noise — it points to a DISCRETE retry path of fixed length. The
+link either acquires on the first attempt, or it enters something that
+costs ~5 extra attempts before succeeding.
+
+**Prime suspect: the retry watchdog in `dp_transmitter`** (`wdog_count`
+[2:0], `wdog_force`, `debug_wdog = {forcing, attempts[2:0]}`). A
+fixed-budget retry loop would produce exactly this shape.
+
+⚠️ **INSTRUMENTATION GAP: `debug_wdog` is NOT in the telemetry message.**
+Fields carry S/D/F/HLVC/P/E/R/A/G/Y/C/Q/K/X/M/M1/N/L — `K:` is DPCD 0x205
+sink status and `X:` is the capability profile; neither is the watchdog.
+Adding `debug_wdog` would test the bimodality hypothesis directly and is
+the highest-value next instrumentation step after this A/B.
+
+Note the similarity to `1f99bdb1`'s earlier manual data {0,1,1,6,1}
+(row 86) — same bimodal shape, same values. If block 2 reproduces it, the
+two builds are indistinguishable on this metric and the bimodality is
+intrinsic to the design rather than to either build.
