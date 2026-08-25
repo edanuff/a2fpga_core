@@ -97,6 +97,11 @@ module aux_channel #(
         input        afe_busy,
         output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
         output [7:0] debug_gate,  // {locks@check_wait[3:0], gate_fails[1:0], timeouts[1:0]}
+        // TEARDOWN ATTRIBUTION (08-24): the two counters above are 2 bits
+        // and WRAP, so a run of ~7 link teardowns cannot be split between
+        // the check_wait gate and AUX timeouts. These are the same two
+        // events counted 4-bit SATURATING, purely for diagnosis.
+        output [7:0] debug_teardown,  // {gate_fail_sat[3:0], timeout_sat[3:0]}
         output [7:0] debug_sink,  // DPCD 0x205 SINK_STATUS (latched each status read)
         output [15:0] debug_rx,   // = {last byte, sync hits, rx bytes} from aux_interface
         //------------------------------
@@ -225,8 +230,11 @@ module aux_channel #(
     // the two possible established-loop reset causes separately.
     reg [3:0] dbg_gate_locks = 4'd0;
     reg [1:0] dbg_gate_fail  = 2'd0;
+    reg [3:0] dbg_gate_fail_sat = 4'd0;   // saturating twin, for attribution
+    reg [3:0] dbg_timeout_sat   = 4'd0;
     reg [1:0] dbg_timeouts   = 2'd0;
-    assign debug_gate = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
+    assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
+    assign debug_teardown = {dbg_gate_fail_sat, dbg_timeout_sat};
     assign debug_sink = dbg_sink_status;
     // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
     // read): bit0/1 = RECEIVE_PORT_0/1 "sink is receiving a valid main
@@ -448,6 +456,8 @@ always @(posedge clk) begin
                                     state_on_success <= link_established;
                                 end else begin
                                     dbg_gate_fail    <= dbg_gate_fail + 2'd1;
+                                    if (dbg_gate_fail_sat != 4'hF)
+                                        dbg_gate_fail_sat <= dbg_gate_fail_sat + 4'd1;
                                     state_on_success <= error;
                                 end
                                 end
@@ -712,8 +722,11 @@ always @(posedge clk) begin
     // (BLIND_SINK: reply timeouts are the EXPECTED outcome of every
     // transaction — they must not reset the FSM. The periodic retry_now
     // watchdog is kept in both modes.)
-    if (BLIND_SINK == 0 && channel_timeout == 1'b1)
+    if (BLIND_SINK == 0 && channel_timeout == 1'b1) begin
         dbg_timeouts <= dbg_timeouts + 2'd1;
+        if (dbg_timeout_sat != 4'hF)
+            dbg_timeout_sat <= dbg_timeout_sat + 4'd1;
+    end
     if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
                                   (state != reset      && state != link_established &&
                                    state != check_link && state != check_wait       && retry_now == 1'b1)) begin

@@ -190,6 +190,8 @@ module a2mega_dp_test_top (
     logic [5:0]  aux_dbg_afe;    // M5 applied AFE lane 0 (telemetry M:)
     logic [3:0]  aux_dbg_afe1;   // M5 applied AFE lane 1 (telemetry M1:)
     logic [11:0] aux_dbg_evt;    // M5 {zero_seen, gate_drops, applies} (telemetry N:)
+    logic [3:0]  aux_dbg_wdog;   // {cold-restart forcing, attempts[2:0]} (telemetry W:)
+    logic [7:0]  aux_dbg_tear;   // {gate_fail_sat, timeout_sat} (telemetry T:)
     logic [7:0]  aux_dbg_sink;
     logic [7:0]  aux_dbg_caps;
     logic       hpd_present_w;
@@ -267,6 +269,8 @@ module a2mega_dp_test_top (
         .debug_afe         (aux_dbg_afe),
         .debug_afe1        (aux_dbg_afe1),
         .debug_evt         (aux_dbg_evt),
+        .debug_wdog        (aux_dbg_wdog),
+        .debug_teardown    (aux_dbg_tear),
         .debug_sink        (aux_dbg_sink),
         .debug_caps        (aux_dbg_caps),
         .clk_symbol_out    (clk_sym_w),
@@ -364,6 +368,8 @@ module a2mega_dp_test_top (
     logic [3:0] afe1_s0, afe1_s;   // lane 1 {pe, vs}
     logic [11:0] evt_s0, evt_s;    // {zero_seen, gate_drops, applies}
     logic [7:0]  d4_cnt_s0, d4_cnt_s;  // FREE-RUNNING D4 assertion count
+    logic [3:0]  wdog_s0, wdog_s;      // watchdog {forcing, attempts}
+    logic [7:0]  tear_s0, tear_s;      // {gate_fail_sat, timeout_sat}
     // driven by the acquisition-counter block further down; declared here
     // because the telemetry sampler below consumes d4_cnt
     logic        d4_r   = 1'b0;
@@ -387,6 +393,8 @@ module a2mega_dp_test_top (
         afe1_s0 <= aux_dbg_afe1;    afe1_s <= afe1_s0;
         evt_s0 <= aux_dbg_evt;      evt_s <= evt_s0;
         d4_cnt_s0 <= d4_cnt;        d4_cnt_s <= d4_cnt_s0;
+        wdog_s0 <= aux_dbg_wdog;    wdog_s <= wdog_s0;
+        tear_s0 <= aux_dbg_tear;    tear_s <= tear_s0;
     end
 
     // Y: link/video rise odometer — counts every establish (flg_s[1]) and
@@ -407,7 +415,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 107;  // msg_idx is [6:0] (127 max)
+    localparam int MSG_LEN = 122;  // msg_idx is [6:0] (127 max)
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -454,7 +462,11 @@ module a2mega_dp_test_top (
             msg[92]=" "; msg[93]=" "; msg[94]=" "; msg[95]=" ";
             msg[96]=" "; msg[97]=" "; msg[98]=" "; msg[99]=" ";
             msg[100]=" "; msg[101]=" "; msg[102]=" "; msg[103]=" ";
-            msg[104]=" "; msg[105]=" "; msg[106]=8'h0A;
+            msg[104]=" "; msg[105]=" "; msg[106]=" "; msg[107]=" ";
+            msg[108]=" "; msg[109]=" "; msg[110]=" "; msg[111]=" ";
+            msg[112]=" "; msg[113]=" "; msg[114]=" "; msg[115]=" ";
+            msg[116]=" "; msg[117]=" "; msg[118]=" "; msg[119]=" ";
+            msg[120]=" "; msg[121]=8'h0A;
         end else begin
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
         msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
@@ -526,7 +538,27 @@ module a2mega_dp_test_top (
         msg[101]=" "; msg[102]="L"; msg[103]=":";
         msg[104]=hexch(d4_cnt_s[7:4]);
         msg[105]=hexch(d4_cnt_s[3:0]);
-        msg[106]=8'h0A;
+        // W: = AUTO-RECOVERY WATCHDOG {forcing, attempts[2:0]} (WDOG_CAP=7).
+        // The decisive field for the bimodal 1-or-7 acquisition: if attempts
+        // are non-zero on a bad cycle and zero on a good one, the watchdog
+        // is tearing down established links (acquisition_matrix_results.md).
+        msg[106]=" "; msg[107]="W"; msg[108]=":";
+        msg[109]=hexch(wdog_s);
+        // K2: = DPCD 0x205 SINK_STATUS repeated. The telnet bridge drops one
+        // character per chunk boundary and has been truncating the K: field's
+        // LOW nibble — which is exactly the debug_sink[1:0] the watchdog
+        // tests. Re-emitting it here gives a second chance at the value.
+        msg[110]=" "; msg[111]="K"; msg[112]="2"; msg[113]=":";
+        msg[114]=hexch(snk_s[7:4]);
+        msg[115]=hexch(snk_s[3:0]);
+        // T: = TEARDOWN ATTRIBUTION {gate_fail_sat, timeout_sat}, 4-bit
+        // saturating each. Splits the ~7 teardowns of a bad acquisition
+        // between the check_wait gate (sink reported a lane unlocked) and
+        // AUX transaction timeouts. The G: field's twins are 2-bit and wrap.
+        msg[116]=" "; msg[117]="T"; msg[118]=":";
+        msg[119]=hexch(tear_s[7:4]);   // gate failures (saturating)
+        msg[120]=hexch(tear_s[3:0]);   // AUX timeouts  (saturating)
+        msg[121]=8'h0A;
         end
     end
 
