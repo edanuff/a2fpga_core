@@ -152,3 +152,56 @@ Note the similarity to `1f99bdb1`'s earlier manual data {0,1,1,6,1}
 (row 86) — same bimodal shape, same values. If block 2 reproduces it, the
 two builds are indistinguishable on this metric and the bimodality is
 intrinsic to the design rather than to either build.
+
+## 🔎 MECHANISM CANDIDATE: the auto-recovery watchdog (08-24)
+
+Telemetry from a bad (6-count) cycle vs a good (1-count) cycle on
+Anker+Sceptre, `f569d4f8`:
+
+| field | good | bad | |
+|---|---|---|---|
+| `L:` | 01 | **07** | D4 assertions |
+| `Y:` | 11 | **77** | link-establish / video-start odometer |
+| `C:` | 0177 | 0177 | golden training — IDENTICAL |
+| `D:` | 2E | 2E | link established — IDENTICAL |
+| `S:` | 24 | 24 | PLL locked, PCS out of reset — IDENTICAL |
+| `A:` `M:` `N:` | 0022 / 12,2 / 020 | 0022 / 12,2 / 020 | IDENTICAL |
+
+**Only the counters differ. Every state field is identical.** So the bad
+case is not "training struggles to converge" — the link **fully establishes
+seven times** and is torn down six times before it sticks.
+
+`dp_transmitter`'s AUTO-RECOVERY WATCHDOG matches this exactly:
+- fires when `tx_link_established && (debug_sink[1:0] == 2'b00)` — i.e. the
+  link is up but DPCD 0x205 reports no stream — after `WDOG_GRACE` (8 s);
+- action is a genuine cold restart: por_n low + full CSR replay + bring-up;
+- **`WDOG_CAP = 7`** attempts, re-armed on success.
+
+Either it never fires (`Y:11`) or it runs its whole budget (`Y:77`) —
+which IS the observed bimodality (1 or 6/7, never 2-5).
+
+**Not yet proven.** The decisive evidence is whether the watchdog actually
+fired, i.e. `debug_wdog = {forcing, attempts[2:0]}`, and that signal is NOT
+in the telemetry message.
+
+### ⚠️ Instrumentation bug found while chasing this
+
+The telnet bridge **drops one character at each chunk boundary**. The
+reassembled DP message is **104 printable chars; the source emits 106**.
+The two missing characters land exactly at observed chunk boundaries —
+after `K:` and after `R:`. Consequences:
+- **`K:` is losing its low nibble**, which is exactly the `debug_sink[1:0]`
+  the watchdog tests — so the sink-status route to confirming this
+  hypothesis is unavailable over telnet;
+- any field straddling a boundary silently loses digits in EVERY read.
+  `Y:`, `L:`, `C:`, `A:` have parsed as full-width consistently, so the
+  values used above are believed sound, but this deserves a fix.
+
+### Next step (highest value)
+
+Add `debug_wdog` to the telemetry message. It answers the question
+directly — attempts > 0 on bad cycles and 0 on good ones would confirm the
+watchdog as the mechanism — and it sidesteps the truncated `K:` field.
+If confirmed, the fix is about the watchdog's trigger condition (why does a
+working, streaming link report `SINK_STATUS[1:0] == 0`?), not about link
+training at all.
