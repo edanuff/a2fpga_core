@@ -59,3 +59,37 @@ from slow acquisition.
 - Y: tracks difficulty so far: sample 1 (4 blinks) Y:66, sample 2 (5 blinks)
   Y:88 — the battle counter rises with the blink count, a third independent
   signal agreeing that these were hard acquisitions.
+
+## Fangor post-lock dropouts — our DP link is NOT involved (08-24)
+
+Ugreen + Fangor, board power-cycled, user observed the picture dropping and
+recovering **several times in a row**. Telemetry sampled 6 times over ~35 s
+during the episode:
+
+```
+S:24 D:2E HLVC:111x Y:11 C:0177 L:01   (identical every sample)
+```
+
+- `L:01` never incremented → D4 (`video_live && sink_confirmed`) never
+  deasserted, so our side never lost the sink.
+- `HLVC` H/L/V all constant 1 → HPD present, link established, video live
+  throughout. (The 4th digit is a clk100 liveness toggle and is SUPPOSED to
+  alternate line-to-line.)
+- `Y:11` → no battling. `C:0177` → golden training. `D:2E` → link
+  established. `S:24` → PLL locked, PCS out of reset.
+
+**Conclusion: the dropouts occur downstream of our DisplayPort link.** The
+hub continued reporting both lanes CR+EQ+SYM locked while the picture
+blanked repeatedly. No amount of link-training work on our side addresses
+this.
+
+⚠️ CAVEAT ON EARLIER READING: sample 1 (cell A) showed `L:06` vs an expected
+`05` and that extra count was attributed to the observed dropout. If
+dropouts do not move `L:` at all — as this episode shows — that attribution
+was wrong and the +1 was something else.
+
+**Next control (user): drive the Fangor from a DIFFERENT source device.**
+- drops with another device -> monitor or cable, not our board; stop
+  treating Fangor dropouts as a DP finding.
+- clean with another device -> something specific to our signal or the
+  hub's conversion of it upsets this monitor despite a perfect DP link.
