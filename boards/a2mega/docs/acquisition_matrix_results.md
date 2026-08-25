@@ -361,3 +361,55 @@ dependency entirely.
 suspect** wherever a chunk boundary may have landed inside a field. Values
 confirmed by a second independent field (e.g. `L:` vs `Y:`, or `K2:` vs
 `K:`) are the trustworthy ones.
+
+## ✅ TRANSPORT FIXED — teardown ATTRIBUTED (08-24, build 51c659c0)
+
+Telemetry now emits as four lines of 36/30/31/23 chars, all under the
+ESP32 console's 39-column limit. First bad cycle read after the fix:
+
+```
+S:24 D:2E F:EC HLVC:1110 P:1 E:22 R:0 A:0022 G:F4 Y:99 C:0177
+Q:80BF63E K:03 X:91 W:0 T:50 M:12 M1:2 N:020 L:09
+missing: none — all four lines intact
+```
+
+**Self-consistency restored:** `T:` gate_fail = 5, `G:`'s 2-bit twin = 1,
+and 5 mod 4 = 1 ✓. The impossible disagreement is gone, confirming the
+corruption was purely transport (and that the RTL was always correct, as
+`tb_gate_fail_counters.v` proved).
+
+### 🎯 ATTRIBUTION
+
+| | value |
+|---|---|
+| establishes (`Y:`/`L:`) | 9 (so 8 teardowns) |
+| **check_wait gate failures** | **5** |
+| **AUX timeouts** | **0** |
+| watchdog attempts (`W:`) | 0 |
+| final sink status (`K:`) | 03 (streaming) |
+| final training (`C:`) | 0177 golden |
+
+**5 of the 8 teardowns are the `check_wait` gate**: the periodic link
+re-check read the sink's lane status, found not-all-four locked, and tore
+the link down to retrain. AUX transaction timeouts contribute NOTHING, and
+the watchdog is uninvolved.
+
+⚠️ RETRACTION: the earlier claim that a clean cycle showed 12 AUX timeouts
+("routine pre-lock DEFERs") came from the corrupted `T:0C` reading. AUX
+timeouts are zero. That inference is withdrawn.
+
+3 of the 8 teardowns remain unattributed — either another re-entry path
+into `link_established`, or a counting subtlety in how `Y:` tallies
+establishes.
+
+### Next step
+
+`G:`'s high nibble is `dbg_gate_locks`, latched at EVERY `check_wait`
+evaluation — so it shows `F` (all locked) because the LAST evaluation
+passed. To learn WHICH lock bit drops, latch the locks **only on the
+failing evaluation** (a sticky first-failure snapshot). That names the
+culprit among clock / equ / symbol / align, which determines the fix:
+- align (DPCD 0x204) flapping -> tolerate a transient before teardown;
+- a lane's CR/EQ bit dropping -> genuine signal marginality;
+- all bits clear -> the status read itself is returning stale/garbage,
+  which would make the gate the bug rather than the messenger.
