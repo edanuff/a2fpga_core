@@ -413,3 +413,58 @@ culprit among clock / equ / symbol / align, which determines the fix:
 - a lane's CR/EQ bit dropping -> genuine signal marginality;
 - all bits clear -> the status read itself is returning stale/garbage,
   which would make the gate the bug rather than the messenger.
+
+## 🎯 THE GATE FAILS ON ALL-ZERO STATUS, NOT ON A MARGINAL LANE (08-24, build 85a182b7)
+
+`T:` now carries a sticky mask of which lock bits were clear at a failing
+`check_wait` evaluation.
+
+| | good cycle | bad cycle |
+|---|---|---|
+| `T:` | **000** | **F50** |
+| decode | no gate failures at all | mask=**F**, gate_fails=**5**, aux_timeouts=**0** |
+| `L:` / `Y:` | 01 / 11 | 09 / 99 |
+| `K:` `C:` `W:` | 03 / 0177 / 0 | 03 / 0177 / 0 |
+
+**mask = F means ALL FOUR lock bits (clock, equ, symbol, align) were clear
+at a failing evaluation.** That is not how a marginal link degrades — a
+signal-integrity problem drops one bit on one lane. And the link ends
+golden (`C:0177`) with the sink streaming (`K:03`).
+
+### Why all-zero implicates stale/absent status, not the sink
+
+In `link_signal_mgmt.v`:
+- `clock_locked` / `equ_locked` / `symbol_locked` are derived from
+  `channel_state` through a `case(active_channel_count_i)`;
+- **`align_locked <= channel_state[16]` is assigned OUTSIDE that case.**
+
+So align reading 0 cannot be explained by a lane-count mismatch — it means
+`channel_state` itself was **zero**. `channel_state` is zeroed in exactly
+one place: the `else` branch of `if(tx_powerup == 1'b1)`, i.e. whenever the
+PHY is powered down — which is what a teardown does.
+
+`tx_powerup` is held high across `link_established` / `check_link` /
+`check_wait` (verified), so the zeroing does NOT happen during the check
+sequence itself. The consistent reading is:
+
+**a teardown zeroes `channel_state`; the ladder retrains; if the next
+`check_link` status read has not repopulated `channel_state` by the time
+`check_wait` evaluates, the gate sees all-zero and tears down AGAIN** —
+a self-sustaining loop that runs until one cycle's status read lands in
+time. That matches everything observed: the bimodality (either the first
+check lands cleanly, or you get a run of them), gate_fails=5 with 8
+teardowns, and zero AUX timeouts.
+
+### Proposed fix (shared RTL — NOT applied, needs review)
+
+The gate must not tear down a link on ABSENT data. Require that a status
+read actually completed since entering `check_link` before the gate is
+allowed to fail — i.e. evaluate the locks only when `channel_state` has
+been freshly written, and otherwise treat the check as "no information"
+and stay in `link_established`.
+
+⚠️ This is load-bearing code: the in-source comment records that a previous
+"check-non-fatal" change was REVERTED on 08-18 because it blocked the
+Anker's recovery-by-retrain. The fix must distinguish "no fresh status"
+(do nothing) from "fresh status says a lane is lost" (tear down and
+retrain, as today). Sim first — `tb_gate_fail_counters.v` is the harness.
