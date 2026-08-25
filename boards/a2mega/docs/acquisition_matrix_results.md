@@ -205,3 +205,54 @@ watchdog as the mechanism — and it sidesteps the truncated `K:` field.
 If confirmed, the fix is about the watchdog's trigger condition (why does a
 working, streaming link report `SINK_STATUS[1:0] == 0`?), not about link
 training at all.
+
+## Watchdog REFUTED; teardown-from-established is the real mechanism (08-24)
+
+Build `0bf0c6f5` added `W:` (`debug_wdog = {forcing, attempts[2:0]}`) and
+`K2:` (DPCD 0x205 re-emitted past the telnet truncation).
+
+| field | good cycle | bad cycle (6) |
+|---|---|---|
+| `W:` | **0** | **0** |
+| `K2:` | 03 | 03 |
+| `L:` | 01 | 08 |
+| `Y:` | 11 | 88 |
+| `G:` | **F0** | **F4** |
+| `C:` `D:` `S:` `A:` `M:` `N:` | golden/identical | golden/identical |
+
+**The auto-recovery watchdog is REFUTED: `W:0` on the bad cycle — it never
+fired.** `WDOG_CAP = 7` matching `Y:77` was a coincidence and was
+over-weighted. `K2:03` also shows the sink reported streaming throughout,
+so the watchdog's trigger condition was never even close.
+
+**What the data does say:** the link ENTERS `link_established` 8 times and
+is torn down 7 times, with every state field golden each time. Teardown of
+a working link — not a training convergence problem.
+
+From `aux_channel.v`, only two paths tear down an established link:
+1. **`check_wait` gate failure** — the periodic link re-check
+   (`link_check_now` -> `check_link` -> `check_wait`) requires ALL of
+   clock/equ/symbol/align locked; if any is clear it does
+   `dbg_gate_fail++` and jumps to `error` (full retrain). The in-source
+   comment records that this teardown/retrain is deliberate and
+   load-bearing for Anker recovery.
+2. **`channel_timeout`** — an AUX transaction timeout resets the FSM
+   (`dbg_timeouts++`).
+   (`retry_now` is NOT a path: `link_established` is explicitly excluded.)
+
+`G:` moved from `F0` (good) to `F4` (bad) = `gate_fail` 0 -> 1, so path 1
+fired at least once. But:
+
+⚠️ **BOTH COUNTERS ARE 2 BITS AND WRAP.** `gate_fail = 01` could be 1 or 5;
+`timeouts = 00` could be 0, 4 or 8. With 7 teardowns to account for, the
+telemetry **cannot attribute them**. This is the blocker.
+
+### Next step
+
+Widen `dbg_gate_fail` and `dbg_timeouts` to 4-bit saturating counters (or
+add wider mirrors) so the 7 teardowns can be split between "sink reported a
+lane unlocked at the re-check" and "AUX transaction timed out". Those two
+lead to completely different fixes:
+- gate failures -> the sink's lane status is genuinely dropping, or the
+  re-check is too strict / racing the sink's own status update;
+- timeouts -> an AUX reliability problem, not a link problem at all.
