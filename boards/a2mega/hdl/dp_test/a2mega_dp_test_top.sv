@@ -415,7 +415,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 122;  // msg_idx is [6:0] (127 max)
+    localparam int MSG_LEN = 124;  // msg_idx is [6:0] (127 max)
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -445,14 +445,14 @@ module a2mega_dp_test_top (
             msg[24]=" "; msg[25]=" "; msg[26]=" "; msg[27]=" ";
             msg[28]=" "; msg[29]=" "; msg[30]=" "; msg[31]=" ";
             msg[32]=" "; msg[33]=" "; msg[34]=" "; msg[35]=" ";
-            msg[36]=" "; msg[37]=" "; msg[38]=" "; msg[39]=" ";
+            msg[36]=8'h0A; msg[37]=" "; msg[38]=" "; msg[39]=" ";
             msg[40]=" "; msg[41]=" "; msg[42]=" "; msg[43]=" ";
             msg[44]=" "; msg[45]=" "; msg[46]=" "; msg[47]=" ";
             msg[48]=" "; msg[49]=" "; msg[50]=" "; msg[51]=" ";
             msg[52]=" "; msg[53]=" "; msg[54]=" "; msg[55]=" ";
             msg[56]=" "; msg[57]=" "; msg[58]=" "; msg[59]=" ";
             msg[60]=" "; msg[61]=" "; msg[62]=" "; msg[63]=" ";
-            msg[64]=" "; msg[65]=" "; msg[66]=" "; msg[67]=" ";
+            msg[64]=" "; msg[65]=" "; msg[66]=" "; msg[67]=8'h0A;
             msg[68]=" "; msg[69]=" "; msg[70]=" "; msg[71]=" ";
             msg[72]=" "; msg[73]=" "; msg[74]=" "; msg[75]=" ";
             msg[76]=" "; msg[77]=" "; msg[78]=" "; msg[79]=" ";
@@ -460,105 +460,66 @@ module a2mega_dp_test_top (
             msg[84]=" "; msg[85]=" "; msg[86]=" "; msg[87]=" ";
             msg[88]=" "; msg[89]=" "; msg[90]=" "; msg[91]=" ";
             msg[92]=" "; msg[93]=" "; msg[94]=" "; msg[95]=" ";
-            msg[96]=" "; msg[97]=" "; msg[98]=" "; msg[99]=" ";
+            msg[96]=" "; msg[97]=" "; msg[98]=" "; msg[99]=8'h0A;
             msg[100]=" "; msg[101]=" "; msg[102]=" "; msg[103]=" ";
             msg[104]=" "; msg[105]=" "; msg[106]=" "; msg[107]=" ";
             msg[108]=" "; msg[109]=" "; msg[110]=" "; msg[111]=" ";
             msg[112]=" "; msg[113]=" "; msg[114]=" "; msg[115]=" ";
             msg[116]=" "; msg[117]=" "; msg[118]=" "; msg[119]=" ";
-            msg[120]=" "; msg[121]=8'h0A;
+            msg[120]=" "; msg[121]=" "; msg[122]=" "; msg[123]=8'h0A;
         end else begin
-        msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S"; msg[4]=":";
-        msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]);
-        msg[7]=" "; msg[8]="D"; msg[9]=":";
-        msg[10]=hexch(dbg_s[7:4]); msg[11]=hexch(dbg_s[3:0]);
-        msg[12]=" "; msg[13]="F"; msg[14]=":";
-        msg[15]=hexch(frm_s[7:4]); msg[16]=hexch(frm_s[3:0]);
-        msg[17]=" "; msg[18]="H"; msg[19]="L"; msg[20]="V"; msg[21]="C";
-        msg[22]=":";
-        msg[23]=8'h30 + 8'(flg_s[2]);
-        msg[24]=8'h30 + 8'(flg_s[1]);
-        msg[25]=8'h30 + 8'(flg_s[0]);
-        msg[26]=8'h30 + 8'(c100_s);   // alternates line-to-line iff clk100 alive
-        msg[27]=" "; msg[28]="P"; msg[29]=":";
-        msg[30]=8'h30 + 8'(hp_s[16]);         // hpd_present (the gate)
-        msg[31]=" "; msg[32]="E"; msg[33]=":";
-        msg[34]=hexch(hp_s[7:4]);             // sync-pattern hits (mod 16)
-        msg[35]=hexch(hp_s[3:0]);             // accepted rx bytes (mod 16)
-        msg[36]=" "; msg[37]="R"; msg[38]=":";
-        msg[39]=hexch(hp_s[15:12]);           // last accepted byte (reply
-        msg[40]=hexch(hp_s[11:8]);            //  header: ACK/NACK/DEFER)
-        msg[41]=" "; msg[42]="A"; msg[43]=":";
-        msg[44]=hexch(adj_s[15:12]);          // sink ADJUST_REQUEST raw:
-        msg[45]=hexch(adj_s[11:8]);           //  0x207 (lane1 nibbles)
-        msg[46]=hexch(adj_s[7:4]);            //  0x206[7:4] ln1 pre|sw
-        msg[47]=hexch(adj_s[3:0]);            //  0x206[3:0] ln0 pre|sw
-        msg[48]=" "; msg[49]="G"; msg[50]=":";
-        msg[51]=hexch(gate_s[7:4]);           // locks at check_wait gate
-        msg[52]=hexch(gate_s[3:0]);           // {gate_fails, timeouts}
-        msg[53]=" "; msg[54]="Y"; msg[55]=":";
-        msg[56]=hexch(link_rises);            // link establish count
-        msg[57]=hexch(vid_rises);             // video start count (D4 odometer)
-        msg[58]=" "; msg[59]="C"; msg[60]=":";
-        msg[61]=hexch(chst_s[15:12]);         // DPCD 0x204 LANE_ALIGN_STATUS
-        msg[62]=hexch(chst_s[11:8]);
-        msg[63]=hexch(chst_s[7:4]);           // DPCD 0x202: [6:4]=lane1
-        msg[64]=hexch(chst_s[3:0]);           //   [2:0]=lane0 {SYM,EQ,CR}
-        msg[65]=" "; msg[66]="Q"; msg[67]=":";
-        msg[68]=hexch(symd_s[27:24]);         // symbol-clock 1s window count
-        msg[69]=hexch(symd_s[23:20]);         //   (135e6 nominal; 1 LSB =
-        msg[70]=hexch(symd_s[19:16]);         //    ~0.007 ppm — refclk ppm
-        msg[71]=hexch(symd_s[15:12]);         //    meter vs 50M crystal)
-        msg[72]=hexch(symd_s[11:8]);
-        msg[73]=hexch(symd_s[7:4]);
-        msg[74]=hexch(symd_s[3:0]);
-        msg[75]=" "; msg[76]="K"; msg[77]=":";
-        msg[78]=hexch(snk_s[7:4]);            // DPCD 0x205 SINK_STATUS
-        msg[79]=hexch(snk_s[3:0]);
-        msg[80]=" "; msg[81]="X"; msg[82]=":";
-        msg[83]=hexch(cap_s[7:4]);            // {extfrm,r270,r162,valid}
-        msg[84]=hexch(cap_s[3:0]);            // max_downspread[3:0]
-        msg[85]=" "; msg[86]="M"; msg[87]=":";
-        msg[88]=hexch({2'b0, afe_s[5:4]});    // M5 applied AFE: {seq_err, known}
-        msg[89]=hexch(afe_s[3:0]);            //   LANE 0 {pe[1:0], vs[1:0]} applied
-        // Lane 1's applied levels (per-lane M5, review item 2): kept in a
-        // SEPARATE field so existing M: parsing/log history stays valid.
-        msg[90]=" "; msg[91]="M"; msg[92]="1"; msg[93]=":";
-        msg[94]=hexch(afe1_s);                //   LANE 1 {pe[1:0], vs[1:0]} applied
-        // M5 instrumentation: N:<zero_seen><gate_drops><applies>. Without
-        // the first two digits an absent 420 mV excursion cannot be told
-        // apart from an absent A:0000 stimulus (test log row 82).
-        msg[95]=" "; msg[96]="N"; msg[97]=":";
-        msg[98]=hexch(evt_s[11:8]);           //   all-zero requests SEEN
-        msg[99]=hexch(evt_s[7:4]);            //   dropped by the phase_done gate
-        msg[100]=hexch(evt_s[3:0]);           //   DRP sequences applied
-        // L: = FREE-RUNNING D4 assertion count (2 hex, wraps). The reader
-        // takes deltas: delta of 1 = locked on the first lightup (0 blinks),
-        // delta of N = N-1 failed attempts first.
-        msg[101]=" "; msg[102]="L"; msg[103]=":";
-        msg[104]=hexch(d4_cnt_s[7:4]);
-        msg[105]=hexch(d4_cnt_s[3:0]);
-        // W: = AUTO-RECOVERY WATCHDOG {forcing, attempts[2:0]} (WDOG_CAP=7).
-        // The decisive field for the bimodal 1-or-7 acquisition: if attempts
-        // are non-zero on a bad cycle and zero on a good one, the watchdog
-        // is tearing down established links (acquisition_matrix_results.md).
-        msg[106]=" "; msg[107]="W"; msg[108]=":";
-        msg[109]=hexch(wdog_s);
-        // K2: = DPCD 0x205 SINK_STATUS repeated. The telnet bridge drops one
-        // character per chunk boundary and has been truncating the K: field's
-        // LOW nibble — which is exactly the debug_sink[1:0] the watchdog
-        // tests. Re-emitting it here gives a second chance at the value.
-        msg[110]=" "; msg[111]="K"; msg[112]="2"; msg[113]=":";
-        msg[114]=hexch(snk_s[7:4]);
-        msg[115]=hexch(snk_s[3:0]);
-        // T: = TEARDOWN ATTRIBUTION {gate_fail_sat, timeout_sat}, 4-bit
-        // saturating each. Splits the ~7 teardowns of a bad acquisition
-        // between the check_wait gate (sink reported a lane unlocked) and
-        // AUX transaction timeouts. The G: field's twins are 2-bit and wrap.
-        msg[116]=" "; msg[117]="T"; msg[118]=":";
-        msg[119]=hexch(tear_s[7:4]);   // gate failures (saturating)
-        msg[120]=hexch(tear_s[3:0]);   // AUX timeouts  (saturating)
-        msg[121]=8'h0A;
+        // ---------------------------------------------------------------
+        // FOUR SHORT LINES, each <= 39 printable chars (08-24).
+        // The ESP32 console is 39 columns (osd_console.c CON_COLS) and
+        // osd_log() formats into char[CON_COLS+1], so ANY longer line is
+        // chunked and LOSES ONE CHARACTER PER BOUNDARY — that corrupted
+        // K:'s low nibble and made the two gate_fail counters appear to
+        // disagree when RTL simulation proves they track exactly
+        // (tb_gate_fail_counters.v). Staying under the console width
+        // removes the transport loss entirely.
+        // Line 1 keeps the "DP S:" prefix so existing greps still match.
+        // ---------------------------------------------------------------
+        // L1: DP S:xx D:xx F:xx HLVC:xxxx P:x E:xx            (36 chars)
+        msg[0]="D"; msg[1]="P"; msg[2]=" ";
+        msg[3]="S"; msg[4]=":"; msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]); msg[7]=" ";
+        msg[8]="D"; msg[9]=":"; msg[10]=hexch(dbg_s[7:4]); msg[11]=hexch(dbg_s[3:0]); msg[12]=" ";
+        msg[13]="F"; msg[14]=":"; msg[15]=hexch(frm_s[7:4]); msg[16]=hexch(frm_s[3:0]); msg[17]=" ";
+        msg[18]="H"; msg[19]="L"; msg[20]="V"; msg[21]="C"; msg[22]=":";
+        msg[23]=8'h30 + 8'(flg_s[2]); msg[24]=8'h30 + 8'(flg_s[1]);
+        msg[25]=8'h30 + 8'(flg_s[0]); msg[26]=8'h30 + 8'(c100_s); msg[27]=" ";
+        msg[28]="P"; msg[29]=":"; msg[30]=8'h30 + 8'(hp_s[16]); msg[31]=" ";
+        msg[32]="E"; msg[33]=":"; msg[34]=hexch(hp_s[7:4]); msg[35]=hexch(hp_s[3:0]);
+        msg[36]=8'h0A;
+        // L2: D2 R:x A:xxxx G:xx Y:xx C:xxxx                  (30 chars)
+        msg[37]="D"; msg[38]="2"; msg[39]=" ";
+        msg[40]="R"; msg[41]=":"; msg[42]=hexch(hp_s[15:12]); msg[43]=" ";
+        msg[44]="A"; msg[45]=":"; msg[46]=hexch(adj_s[15:12]); msg[47]=hexch(adj_s[11:8]);
+        msg[48]=hexch(adj_s[7:4]); msg[49]=hexch(adj_s[3:0]); msg[50]=" ";
+        msg[51]="G"; msg[52]=":"; msg[53]=hexch(gate_s[7:4]); msg[54]=hexch(gate_s[3:0]); msg[55]=" ";
+        msg[56]="Y"; msg[57]=":"; msg[58]=hexch(link_rises); msg[59]=hexch(vid_rises); msg[60]=" ";
+        msg[61]="C"; msg[62]=":"; msg[63]=hexch(chst_s[15:12]); msg[64]=hexch(chst_s[11:8]);
+        msg[65]=hexch(chst_s[7:4]); msg[66]=hexch(chst_s[3:0]);
+        msg[67]=8'h0A;
+        // L3: D3 Q:xxxxxxx K:xx X:xx W:x T:xx                 (31 chars)
+        //   K: is now the FULL sink status — the truncation that forced the
+        //   K2: duplicate is gone, so K2: is retired.
+        msg[68]="D"; msg[69]="3"; msg[70]=" ";
+        msg[71]="Q"; msg[72]=":"; msg[73]=hexch(symd_s[27:24]); msg[74]=hexch(symd_s[23:20]);
+        msg[75]=hexch(symd_s[19:16]); msg[76]=hexch(symd_s[15:12]); msg[77]=hexch(symd_s[11:8]);
+        msg[78]=hexch(symd_s[7:4]); msg[79]=hexch(symd_s[3:0]); msg[80]=" ";
+        msg[81]="K"; msg[82]=":"; msg[83]=hexch(snk_s[7:4]); msg[84]=hexch(snk_s[3:0]); msg[85]=" ";
+        msg[86]="X"; msg[87]=":"; msg[88]=hexch(cap_s[7:4]); msg[89]=hexch(cap_s[3:0]); msg[90]=" ";
+        msg[91]="W"; msg[92]=":"; msg[93]=hexch(wdog_s); msg[94]=" ";
+        msg[95]="T"; msg[96]=":"; msg[97]=hexch(tear_s[7:4]); msg[98]=hexch(tear_s[3:0]);
+        msg[99]=8'h0A;
+        // L4: D4 M:xx M1:x N:xxx L:xx                         (23 chars)
+        msg[100]="D"; msg[101]="4"; msg[102]=" ";
+        msg[103]="M"; msg[104]=":"; msg[105]=hexch({2'b0, afe_s[5:4]}); msg[106]=hexch(afe_s[3:0]); msg[107]=" ";
+        msg[108]="M"; msg[109]="1"; msg[110]=":"; msg[111]=hexch(afe1_s); msg[112]=" ";
+        msg[113]="N"; msg[114]=":"; msg[115]=hexch(evt_s[11:8]); msg[116]=hexch(evt_s[7:4]);
+        msg[117]=hexch(evt_s[3:0]); msg[118]=" ";
+        msg[119]="L"; msg[120]=":"; msg[121]=hexch(d4_cnt_s[7:4]); msg[122]=hexch(d4_cnt_s[3:0]);
+        msg[123]=8'h0A;
         end
     end
 
