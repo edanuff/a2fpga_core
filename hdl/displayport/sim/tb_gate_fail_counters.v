@@ -16,7 +16,12 @@ module tb_gate_fail_counters;
     reg clk = 0;
     always #5 clk = ~clk;
 
-    wire [7:0] debug_gate, debug_teardown;
+    wire [7:0]  debug_gate;
+    wire [11:0] debug_teardown;
+    // drive the four lock inputs so the fail-mask can be checked
+    // start with ONLY align clear, so the sticky fail-mask has a specific
+    // expected value; an all-low start would OR in every bit immediately
+    reg clk_lk = 1'b1, equ_lk = 1'b1, sym_lk = 1'b1, aln_lk = 1'b0;
     aux_channel #(.BLIND_SINK(0), .AFE_ADJUST(0)) dut (
         .clk(clk), .train_set_byte(16'h0606), .afe_busy(1'b0),
         .debug_pmod(), .debug_gate(debug_gate), .debug_teardown(debug_teardown),
@@ -26,9 +31,8 @@ module tb_gate_fail_counters;
         .tx_powerup(), .tx_clock_train(), .tx_align_train(), .tx_link_established(),
         .swing_0p4(1'b0), .swing_0p6(1'b0), .swing_0p8(1'b1),
         .preemp_0p0(1'b1), .preemp_3p5(1'b0), .preemp_6p0(1'b0),
-        // locks LOW -> the check_wait gate must FAIL
-        .clock_locked(1'b0), .equ_locked(1'b0), .symbol_locked(1'b0),
-        .align_locked(1'b0), .dp_tx_hp_detect(1'b1),
+        .clock_locked(clk_lk), .equ_locked(equ_lk), .symbol_locked(sym_lk),
+        .align_locked(aln_lk), .dp_tx_hp_detect(1'b1),
         .aux_in(1'b0), .aux_out(), .aux_tri()
     );
 
@@ -83,8 +87,22 @@ module tb_gate_fail_counters;
             end
         end
 
+        // ---- fail-mask: does it name the bit that was clear? ----------
+        // every failure so far had ONLY align clear -> mask must be 0001
+        if (debug_teardown[11:8] !== 4'b0001) begin
+            errors = errors + 1;
+            $display("FAIL: align-only failure gave mask %04b (want 0001)", debug_teardown[11:8]);
+        end else $display("  ok: align-only failure -> mask 0001");
+        // now only SYMBOL clear -> mask accumulates bit1 as well (sticky OR)
+        clk_lk = 1; equ_lk = 1; sym_lk = 0; aln_lk = 1;
+        drive_gate_fail;
+        if (debug_teardown[11:8] !== 4'b0011) begin
+            errors = errors + 1;
+            $display("FAIL: after symbol failure mask %04b (want 0011 sticky)", debug_teardown[11:8]);
+        end else $display("  ok: symbol failure ORs in -> mask 0011 (sticky)");
+
         if (errors == 0)
-            $display("PASS: counters TRACK in RTL (2-bit == sat mod 4 at every step) — the hardware disagreement is NOT an RTL logic bug");
+            $display("PASS: counters track (2-bit == sat mod 4) AND the fail-mask names which lock bit was clear");
         else
             $display("FAIL: %0d error(s) — RTL bug reproduced in simulation", errors);
         $finish;

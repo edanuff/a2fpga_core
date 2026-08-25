@@ -191,7 +191,7 @@ module a2mega_dp_test_top (
     logic [3:0]  aux_dbg_afe1;   // M5 applied AFE lane 1 (telemetry M1:)
     logic [11:0] aux_dbg_evt;    // M5 {zero_seen, gate_drops, applies} (telemetry N:)
     logic [3:0]  aux_dbg_wdog;   // {cold-restart forcing, attempts[2:0]} (telemetry W:)
-    logic [7:0]  aux_dbg_tear;   // {gate_fail_sat, timeout_sat} (telemetry T:)
+    logic [11:0] aux_dbg_tear;   // {fail_mask, gate_fail_sat, timeout_sat} (T:)
     logic [7:0]  aux_dbg_sink;
     logic [7:0]  aux_dbg_caps;
     logic       hpd_present_w;
@@ -369,7 +369,7 @@ module a2mega_dp_test_top (
     logic [11:0] evt_s0, evt_s;    // {zero_seen, gate_drops, applies}
     logic [7:0]  d4_cnt_s0, d4_cnt_s;  // FREE-RUNNING D4 assertion count
     logic [3:0]  wdog_s0, wdog_s;      // watchdog {forcing, attempts}
-    logic [7:0]  tear_s0, tear_s;      // {gate_fail_sat, timeout_sat}
+    logic [11:0] tear_s0, tear_s;      // {fail_mask, gate_fail_sat, timeout_sat}
     // driven by the acquisition-counter block further down; declared here
     // because the telemetry sampler below consumes d4_cnt
     logic        d4_r   = 1'b0;
@@ -415,7 +415,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 124;  // msg_idx is [6:0] (127 max)
+    localparam int MSG_LEN = 125;  // msg_idx is [6:0] (127 max)
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -460,13 +460,14 @@ module a2mega_dp_test_top (
             msg[84]=" "; msg[85]=" "; msg[86]=" "; msg[87]=" ";
             msg[88]=" "; msg[89]=" "; msg[90]=" "; msg[91]=" ";
             msg[92]=" "; msg[93]=" "; msg[94]=" "; msg[95]=" ";
-            msg[96]=" "; msg[97]=" "; msg[98]=" "; msg[99]=8'h0A;
-            msg[100]=" "; msg[101]=" "; msg[102]=" "; msg[103]=" ";
+            msg[96]=" "; msg[97]=" "; msg[98]=" "; msg[99]=" ";
+            msg[100]=8'h0A; msg[101]=" "; msg[102]=" "; msg[103]=" ";
             msg[104]=" "; msg[105]=" "; msg[106]=" "; msg[107]=" ";
             msg[108]=" "; msg[109]=" "; msg[110]=" "; msg[111]=" ";
             msg[112]=" "; msg[113]=" "; msg[114]=" "; msg[115]=" ";
             msg[116]=" "; msg[117]=" "; msg[118]=" "; msg[119]=" ";
-            msg[120]=" "; msg[121]=" "; msg[122]=" "; msg[123]=8'h0A;
+            msg[120]=" "; msg[121]=" "; msg[122]=" "; msg[123]=" ";
+            msg[124]=8'h0A;
         end else begin
         // ---------------------------------------------------------------
         // FOUR SHORT LINES, each <= 39 printable chars (08-24).
@@ -510,16 +511,20 @@ module a2mega_dp_test_top (
         msg[81]="K"; msg[82]=":"; msg[83]=hexch(snk_s[7:4]); msg[84]=hexch(snk_s[3:0]); msg[85]=" ";
         msg[86]="X"; msg[87]=":"; msg[88]=hexch(cap_s[7:4]); msg[89]=hexch(cap_s[3:0]); msg[90]=" ";
         msg[91]="W"; msg[92]=":"; msg[93]=hexch(wdog_s); msg[94]=" ";
-        msg[95]="T"; msg[96]=":"; msg[97]=hexch(tear_s[7:4]); msg[98]=hexch(tear_s[3:0]);
-        msg[99]=8'h0A;
+        // T:<fail_mask><gate_fail><timeout> — fail_mask names WHICH lock
+        // bit was clear at a failing check_wait: {clock,equ,symbol,align},
+        // sticky-ORed over every failure (sim: tb_gate_fail_counters).
+        msg[95]="T"; msg[96]=":"; msg[97]=hexch(tear_s[11:8]);
+        msg[98]=hexch(tear_s[7:4]); msg[99]=hexch(tear_s[3:0]);
+        msg[100]=8'h0A;
         // L4: D4 M:xx M1:x N:xxx L:xx                         (23 chars)
-        msg[100]="D"; msg[101]="4"; msg[102]=" ";
-        msg[103]="M"; msg[104]=":"; msg[105]=hexch({2'b0, afe_s[5:4]}); msg[106]=hexch(afe_s[3:0]); msg[107]=" ";
-        msg[108]="M"; msg[109]="1"; msg[110]=":"; msg[111]=hexch(afe1_s); msg[112]=" ";
-        msg[113]="N"; msg[114]=":"; msg[115]=hexch(evt_s[11:8]); msg[116]=hexch(evt_s[7:4]);
-        msg[117]=hexch(evt_s[3:0]); msg[118]=" ";
-        msg[119]="L"; msg[120]=":"; msg[121]=hexch(d4_cnt_s[7:4]); msg[122]=hexch(d4_cnt_s[3:0]);
-        msg[123]=8'h0A;
+        msg[101]="D"; msg[102]="4"; msg[103]=" ";
+        msg[104]="M"; msg[105]=":"; msg[106]=hexch({2'b0, afe_s[5:4]}); msg[107]=hexch(afe_s[3:0]); msg[108]=" ";
+        msg[109]="M"; msg[110]="1"; msg[111]=":"; msg[112]=hexch(afe1_s); msg[113]=" ";
+        msg[114]="N"; msg[115]=":"; msg[116]=hexch(evt_s[11:8]); msg[117]=hexch(evt_s[7:4]);
+        msg[118]=hexch(evt_s[3:0]); msg[119]=" ";
+        msg[120]="L"; msg[121]=":"; msg[122]=hexch(d4_cnt_s[7:4]); msg[123]=hexch(d4_cnt_s[3:0]);
+        msg[124]=8'h0A;
         end
     end
 

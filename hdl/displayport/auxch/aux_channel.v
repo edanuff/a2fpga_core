@@ -101,7 +101,12 @@ module aux_channel #(
         // and WRAP, so a run of ~7 link teardowns cannot be split between
         // the check_wait gate and AUX timeouts. These are the same two
         // events counted 4-bit SATURATING, purely for diagnosis.
-        output [7:0] debug_teardown,  // {gate_fail_sat[3:0], timeout_sat[3:0]}
+        // [11:8] = sticky mask of WHICH lock bits were CLEAR at a FAILING
+        //          check_wait evaluation, OR-accumulated over all failures:
+        //          {clock, equ, symbol, align}. debug_gate's locks field
+        //          latches EVERY evaluation, so it shows the last (passing)
+        //          one and cannot name the culprit.
+        output [11:0] debug_teardown, // {fail_mask, gate_fail_sat, timeout_sat}
         output [7:0] debug_sink,  // DPCD 0x205 SINK_STATUS (latched each status read)
         output [15:0] debug_rx,   // = {last byte, sync hits, rx bytes} from aux_interface
         //------------------------------
@@ -232,9 +237,10 @@ module aux_channel #(
     reg [1:0] dbg_gate_fail  = 2'd0;
     reg [3:0] dbg_gate_fail_sat = 4'd0;   // saturating twin, for attribution
     reg [3:0] dbg_timeout_sat   = 4'd0;
+    reg [3:0] dbg_fail_mask     = 4'd0;   // which locks were clear at a failure
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
-    assign debug_teardown = {dbg_gate_fail_sat, dbg_timeout_sat};
+    assign debug_teardown = {dbg_fail_mask, dbg_gate_fail_sat, dbg_timeout_sat};
     assign debug_sink = dbg_sink_status;
     // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
     // read): bit0/1 = RECEIVE_PORT_0/1 "sink is receiving a valid main
@@ -458,6 +464,10 @@ always @(posedge clk) begin
                                     dbg_gate_fail    <= dbg_gate_fail + 2'd1;
                                     if (dbg_gate_fail_sat != 4'hF)
                                         dbg_gate_fail_sat <= dbg_gate_fail_sat + 4'd1;
+                                    // remember WHICH bits were clear (sticky OR)
+                                    dbg_fail_mask <= dbg_fail_mask |
+                                        ~{clock_locked_i, equ_locked_i,
+                                          symbol_locked_i, align_locked_i};
                                     state_on_success <= error;
                                 end
                                 end

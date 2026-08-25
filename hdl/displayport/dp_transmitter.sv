@@ -133,7 +133,7 @@ module dp_transmitter #(
     // Teardown attribution (08-24): saturating 4-bit counts of the two
     // paths that tear down an ESTABLISHED link — the check_wait gate and
     // AUX transaction timeouts. The debug_gate twins are 2-bit and wrap.
-    output logic [7:0]  debug_teardown,  // {gate_fail_sat, timeout_sat}
+    output logic [11:0]  debug_teardown,  // {gate_fail_sat, timeout_sat}
     output logic [9:0]  debug_wrusewd, // TX FIFO fill {word-lane0's, word-lane1's}
     output logic [5:0]  debug_afe,     // M5 applied AFE lane 0: {seq_err, known, pe[1:0], vs[1:0]}
     output logic [3:0]  debug_afe1,    // M5 applied AFE lane 1: {pe[1:0], vs[1:0]}
