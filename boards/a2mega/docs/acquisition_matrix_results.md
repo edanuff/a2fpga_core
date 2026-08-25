@@ -18,6 +18,7 @@ from slow acquisition.
 | 2 | B | warm-ish (regimen) | 5 | 08 | 06 | **+2 unseen** | 88 | 0177 | 0022 | User reported 5 blinks then SOLID — no visible dropout — yet L: counted 2 assertions beyond blinks+1 |
 | 3 | C | warm-ish (regimen) | 5 | 08 | 06 | **+2 unseen** | 88 | 0177 | 0022 | IDENTICAL to sample 2 in every field, despite a different hub AND a different monitor |
 | 4 | D | warm-ish (regimen) | **0** | 01 | 01 | 0 | 11 | 0177 | 0022 | Colorbars on the FIRST lightup — cleanest possible. ⚠ 4th cycle of the pass = warmest board; position/thermal confound is live |
+| 5 | B *(pass 2)* | warm-ish (regimen) | 2 | 03 | 03 | 0 | 33 | 0177 | 0022 | **WITHIN-CELL REPEAT of sample 2 (5 blinks / L:08 / Y:88) — same hub, same monitor, same build, now 2 blinks / L:03 / Y:33** |
 
 ## Running observations
 
@@ -40,6 +41,18 @@ from slow acquisition.
   is clean" are perfectly confounded. Sample 1 (A) is separately confounded
   as the TRUE COLD start. This is exactly what the rotated passes exist to
   break — pass 2 runs B,C,D,A and pass 3 runs C,D,A,B.
+- 🔑 **WITHIN-CELL VARIANCE RIVALS BETWEEN-CELL VARIANCE.** Cell B measured 5
+  blinks then 2 blinks on identical hardware and build. That spread is as
+  large as the spread that separated the "good" and "bad" cells in pass 1.
+  Consequence: **the hub/monitor combination is not established as the
+  dominant factor**, and no cell-vs-cell claim from pass 1 survives. This
+  is the same stochastic behavior as row 86 ({0,1,1,6,1} on one bitstream),
+  now reproduced inside the matrix.
+- 🌡️ **Weak warm-up signal worth watching (NOT established):** by cycle
+  number the results are 4, 5, 5, 0, 2 — the first three cycles are the
+  worst and the last two the best, consistent with a board that acquires
+  better once warm. Confounded with cell identity; the remaining rotated
+  passes are what would separate them.
 - 📈 **`Y:` is an excellent difficulty proxy.** Across pass 1 it tracked the
   blink count monotonically: 4 blinks -> Y:66, 5 -> Y:88, 5 -> Y:88,
   0 -> Y:11. Three independent signals (eye, L:, Y:) agree on ordering.
