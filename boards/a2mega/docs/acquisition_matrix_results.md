@@ -88,8 +88,25 @@ this.
 dropouts do not move `L:` at all — as this episode shows — that attribution
 was wrong and the +1 was something else.
 
-**Next control (user): drive the Fangor from a DIFFERENT source device.**
-- drops with another device -> monitor or cable, not our board; stop
-  treating Fangor dropouts as a DP finding.
-- clean with another device -> something specific to our signal or the
-  hub's conversion of it upsets this monitor despite a perfect DP link.
+**CONTROL RESULT (08-24): the Fangor drops with ANOTHER SOURCE DEVICE too —
+likely a cable issue.** So the post-lock blanking is NOT ours, confirmed
+from both directions: our telemetry showed a perfectly stable link during
+the episodes, and the monitor misbehaves independently of our board.
+
+**Consequences for the matrix:**
+- Fangor cells (A and C) carry a KNOWN-BAD variable. Their post-lock
+  dropout observations are void.
+- Their blinks-to-lock numbers are *probably* still meaningful (acquisition
+  happens before any downstream blanking) but are no longer clean data —
+  a flaky HDMI link could plausibly disturb the hub's downstream state and
+  feed back into re-attach behavior.
+- **Recommended: replace the Fangor's HDMI cable and re-run cells A and C,
+  or drop the Fangor from the matrix until the cable is ruled out.**
+  Continuing to collect Fangor samples over a suspect cable would spend
+  bench cycles generating data we would have to discard.
+
+**Two distinct phenomena, now separated** (they had been treated as one all
+session):
+1. **Acquisition / blinks-to-lock** — ours, genuinely stochastic
+   (row 86: {0,1,1,6,1} on one bitstream), still unexplained.
+2. **Post-lock blanking on the Fangor** — not ours; monitor/cable.
