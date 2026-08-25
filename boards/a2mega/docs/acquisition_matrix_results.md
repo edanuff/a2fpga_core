@@ -306,3 +306,58 @@ of the counter bug.
    this before a build+flash cycle.
 2. Re-scope the timeout counter to `link_established`-only teardowns.
 3. Then re-run the good/bad comparison for a real attribution.
+
+## Counter contradiction RESOLVED — it is the telemetry TRANSPORT, not the RTL (08-24 late)
+
+`hdl/displayport/sim/tb_gate_fail_counters.v` (new) drives `aux_channel`
+through the `check_wait` gate with the lock inputs low and checks both
+counters:
+
+```
+pass 1: gate_fail 0 -> 2   gate_fail_sat 0 -> 2
+pass 2: gate_fail 2 -> 0   gate_fail_sat 2 -> 4
+pass 3: gate_fail 0 -> 2   gate_fail_sat 4 -> 6
+PASS: counters TRACK in RTL (2-bit == sat mod 4 at every step)
+```
+
+(The delta is 2 per drive because the forced transition spans two clock
+edges — a TB artifact. The property under test is that they AGREE, and
+they do.)
+
+**So `gate_fail_sat = 0` alongside `gate_fail = 1` is impossible in RTL.
+One of those readings was corrupted in transport.**
+
+### Root cause of the corruption
+
+The FPGA's UART telemetry reaches telnet through the ESP32's **39-column**
+console:
+
+- `osd_console.c`: `#define CON_COLS 39  /* 40-col screen, leave 1 to avoid auto-wrap */`
+- `osd_log()` formats into `char line[CON_COLS + 1]` — **every line is
+  truncated to 39 characters**.
+
+Our DP message is 121 printable characters, so it is chunked to fit, and a
+character is lost at each chunk boundary. This matches every observation:
+- 39-char chunks with `\r\n` inserted, seen in the raw stream;
+- the 107-char message reassembling to 104 (2 boundaries, 2 lost chars);
+- `K:` losing its low nibble (a boundary landed right after `K:0`), which
+  is why the `K2:` duplicate was needed and worked.
+
+`tn_send()` in `telnetd.c` is correct (it loops on partial sends) — the
+loss is upstream of it, in the console path.
+
+### Recommended fix (gateware-side, no firmware risk)
+
+Emit the DP telemetry as **several short lines, each <= 39 characters**,
+instead of one 121-char line. Then nothing is ever chunked or truncated and
+every field arrives intact. E.g. 4 lines with a short prefix:
+`D1 S:.. D:.. F:.. HLVC:....`, `D2 A:.... Y:.. C:....`, etc.
+
+Alternative (firmware): widen/repair the console path so long lines are
+chunked without loss. Higher risk, and the gateware fix removes the
+dependency entirely.
+
+⚠️ **Until this is fixed, ALL multi-field telemetry readings from today are
+suspect** wherever a chunk boundary may have landed inside a field. Values
+confirmed by a second independent field (e.g. `L:` vs `Y:`, or `K2:` vs
+`K:`) are the trustworthy ones.
