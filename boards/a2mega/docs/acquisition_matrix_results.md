@@ -256,3 +256,53 @@ lead to completely different fixes:
 - gate failures -> the sink's lane status is genuinely dropping, or the
   re-check is too strict / racing the sink's own status update;
 - timeouts -> an AUX reliability problem, not a link problem at all.
+
+## Teardown attribution attempt — INCONCLUSIVE, instrumentation contradicts itself (08-24 late)
+
+Build `86cc4125` added `T:` = `{gate_fail_sat[3:0], timeout_sat[3:0]}`,
+4-bit saturating twins of the 2-bit counters already in `G:`.
+
+| | good cycle (1) | bad cycle (6) |
+|---|---|---|
+| `L:` / `Y:` | 01 / 11 | **09 / 99** (9 establishes, 8 teardowns) |
+| `G:` | F0 | **F4** -> 2-bit gate_fail = 1 |
+| `T:` | 0C | **0C** -> 4-bit gate_fail_sat = **0**, timeout_sat = 12 |
+| `W:` / `K2:` | 0 / 03 | 0 / 03 |
+
+⚠️ **THE TWO GATE_FAIL COUNTERS DISAGREE.** `G:`'s 2-bit counter reads 1;
+the new 4-bit saturating twin reads 0. They increment on the SAME line, in
+the SAME always block, with only one assignment site each (verified by
+grep) — so they cannot legitimately differ. Stable across repeated samples,
+so it is not a transient.
+
+The timeout pair IS self-consistent (2-bit reads 0, saturating reads 12,
+12 mod 4 = 0), so the `debug_teardown` bus and telemetry path work; only
+the gate_fail half misbehaves.
+
+**Attribution is therefore UNRESOLVED.** Do not read `T:0C` as "no gate
+failures" — the counter is not trustworthy until this is explained.
+
+Also learned: `timeout_sat = 12` on a CLEAN cycle, meaning AUX timeouts are
+routine during the pre-lock ladder walk (expected with a DEFER-ing
+converter). So the timeout counter as built is not teardown-specific — it
+should be scoped to timeouts occurring FROM `link_established` to be useful
+for attribution. That is a design flaw in my instrumentation, independent
+of the counter bug.
+
+### What IS established
+
+- The link enters `link_established` 9 times and is torn down 8 times, with
+  every state field golden (`C:0177`, `D:2E`, `S:24`, `A:0022`, `M:12/2`).
+- The auto-recovery watchdog is NOT involved (`W:0`, and `K2:03` shows the
+  sink reporting a stream).
+- `G:` moves F0 -> F4 between good and bad cycles, so the `check_wait` gate
+  path does fire on bad cycles — but how many of the 8 teardowns it
+  accounts for is unknown.
+
+### Next session
+
+1. Debug the `gate_fail_sat` counter — simulate `aux_channel`'s check_wait
+   path and confirm both counters advance together. A sim would have caught
+   this before a build+flash cycle.
+2. Re-scope the timeout counter to `link_established`-only teardowns.
+3. Then re-run the good/bad comparison for a real attribution.
