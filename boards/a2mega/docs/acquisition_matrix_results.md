@@ -700,3 +700,31 @@ Open items carried:
 - Settling-phase teardowns on the pre-drain build reset the grace window
   (window re-arms per establish) — with drain+kick this interaction
   disappears.
+
+## Kick build first bench session (08-25 morning, COLD bench, build b241cf74)
+
+| cycle | screen | telemetry | verdict |
+|---|---|---|---|
+| 1 (cold start) | colorbars, no delay noticed | KICKS=1, B:reason=6, K:03, Y:22/L:02 | dark entry (or slow cold wake) RESCUED by one kick |
+| 2 | up → brief black → reappeared | KICKS=1, B:reason=6, K:03 | **dark entry rescued LIVE — user watched the ~3 s recovery** |
+| 3 | black, D3+D4 blink storm, stayed black | KICKS=7 then W:7, K:00, **C:0000**, Y:5C | **DEEPER WEDGE: sink answers ZEROS for lane status (vs the 8177 wedge); 7 ladder retrains + 7 PHY cold restarts all failed; permanent** |
+
+Findings:
+1. **The kick works for entry-window darks** (2/3 this morning) — exactly
+   the rescue the accidental teardowns provided, now deliberate, visible
+   as a ~3 s blink instead of permanent darkness.
+2. **A fully-wedged converter is beyond ANY link-side action** — 14
+   combined recovery attempts, zero effect. C:0000 (AUX answering zeros)
+   marks this deeper state; the C:8177 wedge and the C:0000 wedge may be
+   stages of the same hang.
+3. ⚠️ **A/B RE-EVALUATION: dark entry appears COLD-CORRELATED, not
+   build-correlated.** 3/3 dark entries this cold morning on the kick
+   build; last night's 0/8 (pre-drain) ran on a warm, heavily-cycled
+   bench, the 2/4 (drain) earlier. The "drain removed the rescue and
+   caused the darks" conclusion (p~0.09) is CONFOUNDED with
+   temperature/time-of-day and is hereby DOWNGRADED to unproven. The kick
+   remains justified on direct evidence (2 live rescues; watchdog
+   provably useless), independent of that A/B.
+4. UX: dual budget exhaustion (7 kicks + 7 wdog) = a long D3/D4 blink
+   storm before permanent dark. Consider a combined cap or backoff if
+   deep wedges are not rare.
