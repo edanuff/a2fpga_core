@@ -739,3 +739,31 @@ the kick rescues entry-window darks; dual-budget exhaustion cannot reach a
 fully-wedged converter (n=2, both flavors). Probe queued: HDMI-only replug
 on a wedged state — clears it => hang lives HDMI-side in the hub; doesn't
 => DP/USB-C side, full drain required.
+
+## 🔬 HDMI-ONLY REPLUG PROBE — the wedge anatomized (08-25)
+
+On the warm deep wedge (KICKS=7, W:7, C:8177/K:00): user replugged ONLY
+the HDMI cable at the hub. **Colorbars returned INSTANTLY — no kick, no
+retrain, no delay.** Telemetry after: picture visibly up while the sink
+STILL answers `K:00` (not streaming) and `C:8177`; AUX timeouts saturated.
+
+1. **Our DP link was healthy through the entire wedge** — video flowed the
+   moment the HDMI side was kicked, with zero link-side action. The wedge
+   lives in the hub's HDMI-side machinery.
+2. **The hub's AUX/status engine freezes INDEPENDENTLY of its video path**
+   and STAYS frozen: it reports "not streaming" while demonstrably
+   displaying. Post-wedge DPCD status from this hub is fiction.
+3. ⚠️ **DESIGN LANDMINE (survived by luck): with K frozen at 00 and a
+   WORKING picture, an unexhausted kick budget would tear down the healthy
+   link every KICK_CLKS forever.** Stability right now exists only because
+   the budget was already spent. Mitigations: (a) the budget re-arms only
+   on K==03, which a frozen 00 can never fake — accidentally the correct
+   fail-safe direction; KEEP IT THAT WAY (never self-re-arm on time);
+   (b) consider requiring the kick to observe at least one K!=0 reading
+   in the current attach before arming at all (a sink that NEVER reported
+   streaming is indistinguishable from a frozen one).
+
+Revised wedge model: one hub hang with two observable stages
+(status-frozen-plausible C:8177, status-zeros C:0000), video path
+recoverable from OUTSIDE (HDMI replug) at least in the 8177 stage;
+link-side actions (kick, watchdog) reach it only during entry.
