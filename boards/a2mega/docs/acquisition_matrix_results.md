@@ -639,7 +639,7 @@ drain fix — and compare stable-dark incidence/persistence over cycles.
 
 ## A/B: drain build vs pre-drain build — stable-dark incidence (08-24 eve)
 
-Same bench, same hub (Ugreen+Sceptre), same evening, alternating only the
+Same bench, same hub (Anker+Sceptre — CORRECTED 08-25, was mislabeled Ugreen), same evening, alternating only the
 bitstream. All cycles user-observed with telemetry read each time.
 
 | build | cycles | clean | settling | **dark** |
@@ -767,3 +767,71 @@ Revised wedge model: one hub hang with two observable stages
 (status-frozen-plausible C:8177, status-zeros C:0000), video path
 recoverable from OUTSIDE (HDMI replug) at least in the 8177 stage;
 link-side actions (kick, watchdog) reach it only during entry.
+
+
+## ⚠️ ERRATA AND STATUS RECLASSIFICATION (08-25, user review)
+
+**Hub labeling correction.** Every session from the "Build A/B" section
+onward (build A/B, observation build, grace build, kick build) ran on the
+**ANKER + Sceptre**, not the Ugreen. In-line labels corrected where found;
+any remaining "Ugreen" in those sections should be read as Anker. The
+Ugreen's separately-established profile (clean Y:11 warm draws, rows
+80-83) is unaffected. The settling signature and the wedge behavior
+characterized this week belong to the ANKER.
+
+**Hypotheses, not established facts** (language above may overstate):
+- "The late-reply teardowns were an accidental rescue" — HYPOTHESIS. The
+  supporting A/B was session/temperature-confounded (acknowledged above)
+  and the cold-correlation replacement was itself refuted.
+- "~7 s HDMI-side bring-up / converter settling" — HYPOTHESIS inferred
+  from suppressed-poll counts and timing; not independently measured.
+- What IS directly observed: the deterministic first-failure snapshot
+  (01/00/80 at ~1 s); picture stable through suppressed status failures;
+  the deep wedge unreachable by 7 kicks + 7 watchdog restarts; HDMI-only
+  replug restoring the picture instantly while AUX still answers K:00.
+
+**Kick build `b241cf74` reclassified: EXPERIMENTAL, UNSUCCESSFUL** by the
+user-visible metric. Session outcome (6 cycles, Anker, one morning):
+2 clean first-try, 2 distracting kick-recoveries, 2 persistent dark
+failures — versus the informal legacy profile of ~1/2 first-try, ~1/2
+delayed, darks rare. Kick development is STOPPED pending the three-build
+comparison below; no retuning.
+
+**Design rules adopted:**
+- `K:00` alone must never trigger a production recovery action: HDMI
+  colorbars were directly observed working while the hub kept reporting
+  K:00. An `ever_streaming` prerequisite does NOT fix this — the status
+  engine can freeze after streaming was observed.
+- Deep-dark is a SEPARATE, HDMI-SIDE failure class. On occurrence: FIRST
+  perform the HDMI-only replug probe (no DP retrain), record whether the
+  picture returns and whether AUX stays frozen. Do not spend kick/watchdog
+  budgets on a state shown unreachable from the DP side.
+
+## THREE-BUILD COMPARISON PROTOCOL (08-25)
+
+Builds (all archived):
+- `f569d4f8` — TRUE legacy baseline (no grace, no drain, no kick; has the
+  late-reply bug and full instrumentation).
+- `4ff799d9` — grace window only (retains the late-reply bug).
+- `7b872b57` — grace + late-reply drain, no kick.
+
+Procedure per cycle (identical every time):
+1. Power down the board; unplug HDMI at the hub; wait ~30 s.
+2. Reconnect HDMI (⚠ row 89), power up.
+3. USER records: colorbars immediately / delayed (elapsed seconds + D4
+   events observed) / persistent dark; and if delayed or suppressed-status
+   activity occurs, whether the picture stays stable once up.
+4. Telemetry read each cycle: Y, L, C, K, teardown reason (B:), suppressed
+   count (J: obs digit).
+Primary metrics: SCREEN TRUTH + time-to-stable-colorbars. D4 and K: are
+secondary (AUX status shown capable of freezing while the picture works).
+
+n >= 8 cycles per build; INTERLEAVE or rotate build order across the
+session so hub history/temperature/time-of-day are not correlated with
+build. No inference from a single block.
+
+If, after the distributions, a kick is still justified: first candidate is
+DIAGNOSTIC and strictly bounded — at most ONE kick per physical attach,
+attach-scoped window that does NOT restart after retraining — and is not
+called a production fix until it beats BOTH baselines on first-try rate,
+delay, and dark-failure rate.
