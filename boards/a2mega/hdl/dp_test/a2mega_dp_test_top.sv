@@ -192,7 +192,8 @@ module a2mega_dp_test_top (
     logic [11:0] aux_dbg_evt;    // M5 {zero_seen, gate_drops, applies} (telemetry N:)
     logic [3:0]  aux_dbg_wdog;   // {cold-restart forcing, attempts[2:0]} (telemetry W:)
     logic [15:0] aux_dbg_tear;   // {first_mask, fail_mask, gate_sat, timeout_sat}
-    logic [7:0]  aux_dbg_auxerr; // {short_reply_sat, nack_sat} (J:)
+    logic [15:0] aux_dbg_auxerr; // {short, nack, other, obs_suppressed} (J:)
+    logic [27:0] aux_dbg_errdet; // first teardown {reason, state, exp, rxc} (B:)
     logic [31:0] aux_dbg_snap;   // first-failure snapshot (Z:)
     logic [7:0]  aux_dbg_sink;
     logic [7:0]  aux_dbg_caps;
@@ -233,6 +234,11 @@ module a2mega_dp_test_top (
         // via the placer effort switch (identical netlist) to test whether
         // the row-84 regression tracks the gate or the placement.
         .ENABLE_PHASE_DONE_GATE(1),
+        // ⚠ DIAGNOSTIC BUILD: gate teardowns are SUPPRESSED for ~6 s after
+        // establishing (recorded in J:'s 4th digit). Answers whether the
+        // converter's 01/00/80 status self-recovers without retraining and
+        // whether the picture stays up meanwhile. SET BACK TO 0 TO SHIP.
+        .GATE_OBSERVE(1),
         .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.
@@ -274,6 +280,7 @@ module a2mega_dp_test_top (
         .debug_wdog        (aux_dbg_wdog),
         .debug_teardown    (aux_dbg_tear),
         .debug_aux_err     (aux_dbg_auxerr),
+        .debug_err_detail  (aux_dbg_errdet),
         .debug_snapshot    (aux_dbg_snap),
         .debug_sink        (aux_dbg_sink),
         .debug_caps        (aux_dbg_caps),
@@ -374,7 +381,8 @@ module a2mega_dp_test_top (
     logic [7:0]  d4_cnt_s0, d4_cnt_s;  // FREE-RUNNING D4 assertion count
     logic [3:0]  wdog_s0, wdog_s;      // watchdog {forcing, attempts}
     logic [15:0] tear_s0, tear_s;      // {first,sticky,gate,timeout}
-    logic [7:0]  aerr_s0, aerr_s;      // {short, nack}
+    logic [15:0] aerr_s0, aerr_s;      // {short, nack, other, obs}
+    logic [27:0] edet_s0, edet_s;      // first teardown detail
     logic [31:0] snap_s0, snap_s;      // first-failure snapshot
     // driven by the acquisition-counter block further down; declared here
     // because the telemetry sampler below consumes d4_cnt
@@ -402,6 +410,7 @@ module a2mega_dp_test_top (
         wdog_s0 <= aux_dbg_wdog;    wdog_s <= wdog_s0;
         tear_s0 <= aux_dbg_tear;    tear_s <= tear_s0;
         aerr_s0 <= aux_dbg_auxerr;  aerr_s <= aerr_s0;
+        edet_s0 <= aux_dbg_errdet;  edet_s <= edet_s0;
         snap_s0 <= aux_dbg_snap;    snap_s <= snap_s0;
     end
 
@@ -423,7 +432,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 145;  // five lines; msg_idx is [7:0]
+    localparam int MSG_LEN = 157;  // five lines; msg_idx is [7:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -480,16 +489,20 @@ module a2mega_dp_test_top (
             msg[132]=" "; msg[133]=" "; msg[134]=" "; msg[135]=" ";
             msg[136]=" "; msg[137]=" "; msg[138]=" "; msg[139]=" ";
             msg[140]=" "; msg[141]=" "; msg[142]=" "; msg[143]=" ";
-            msg[144]=8'h0A;
+            msg[144]=" "; msg[145]=" "; msg[146]=" "; msg[147]=" ";
+            msg[148]=" "; msg[149]=" "; msg[150]=" "; msg[151]=" ";
+            msg[152]=" "; msg[153]=" "; msg[154]=" "; msg[155]=" ";
+            msg[156]=8'h0A;
         end else begin
         // ---------------------------------------------------------------
-        // FIVE SHORT LINES, each <= 39 printable chars — the ESP32 console
-        // is 39 columns and DROPS A CHARACTER at every longer-line chunk
-        // boundary (see acquisition_matrix_results.md). This block and the
-        // idle padding are GENERATED together; keep them in sync.
-        //   T: = {first_fail_mask, sticky_fail_mask, gate_fails, timeouts}
-        //   Z: = first-failure snapshot {0x204,0x203,0x202, seq, tsl_100ms}
-        //   J: = {short_replies, non_ACKs} during check_link
+        // FIVE SHORT LINES, each <= 39 printable chars (39-col console
+        // drops a char per longer-line chunk). GENERATED with the idle
+        // padding below; keep in sync.
+        //   T: {first_fail_mask, sticky_mask, gate_fails, timeouts}
+        //   Z: first gate-failure snapshot {0x204,0x203,0x202, seq, tsl}
+        //   J: {short_replies, non_ACKs, other_teardowns, observe_suppressed}
+        //   B: first teardown {reason, from_state, expected, rx_count}
+        //      reason: 0=untagged 1=short 2=nACK 3=gate 4=timeout 5=retry
         // ---------------------------------------------------------------
         msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S";
         msg[4]=":"; msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]); msg[7]=" ";
@@ -528,7 +541,10 @@ module a2mega_dp_test_top (
         msg[130]=":"; msg[131]=hexch(snap_s[31:28]); msg[132]=hexch(snap_s[27:24]); msg[133]=hexch(snap_s[23:20]);
         msg[134]=hexch(snap_s[19:16]); msg[135]=hexch(snap_s[15:12]); msg[136]=hexch(snap_s[11:8]); msg[137]=hexch(snap_s[7:4]);
         msg[138]=hexch(snap_s[3:0]); msg[139]=" "; msg[140]="J"; msg[141]=":";
-        msg[142]=hexch(aerr_s[7:4]); msg[143]=hexch(aerr_s[3:0]); msg[144]=8'h0A;
+        msg[142]=hexch(aerr_s[15:12]); msg[143]=hexch(aerr_s[11:8]); msg[144]=hexch(aerr_s[7:4]); msg[145]=hexch(aerr_s[3:0]);
+        msg[146]=" "; msg[147]="B"; msg[148]=":"; msg[149]=hexch(edet_s[27:24]);
+        msg[150]=hexch(edet_s[23:20]); msg[151]=hexch(edet_s[19:16]); msg[152]=hexch(edet_s[15:12]); msg[153]=hexch(edet_s[11:8]);
+        msg[154]=hexch(edet_s[7:4]); msg[155]=hexch(edet_s[3:0]); msg[156]=8'h0A;
         end
     end
 

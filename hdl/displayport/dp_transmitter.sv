@@ -81,6 +81,11 @@ module dp_transmitter #(
     // Row 84 isolation switch: 0 = never assert phase_done (pre-gate
     // decision), 1 = the protocol gate of design-doc §14.
     parameter bit    ENABLE_PHASE_DONE_GATE = 1,
+    // DIAGNOSTIC (08-24): bounded observation window — a failing periodic
+    // link check within ~6 s of establishing records instead of tearing
+    // down (answers whether the converter's bad status self-recovers
+    // without training patterns). NOT for production builds.
+    parameter bit    GATE_OBSERVE = 0,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -128,7 +133,8 @@ module dp_transmitter #(
     output logic [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
     output logic [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
     output logic [23:0] debug_chstate, // raw DPCD {0x204, 0x203, 0x202}
-    output logic [7:0]  debug_aux_err,  // {short_reply_sat, nack_sat} in check_link
+    output logic [15:0] debug_aux_err,  // {short, nack, other, observe_suppressed}
+    output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
     output logic [3:0]  debug_wdog,  // {cold-restart forcing, attempts[2:0]}
@@ -568,7 +574,8 @@ module dp_transmitter #(
     channel_management #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
                          .BLIND_SINK(BLIND_SINK),
                          .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS),
-                         .AFE_ADJUST(ENABLE_AFE_ADJUST)) i_channel_management(
+                         .AFE_ADJUST(ENABLE_AFE_ADJUST),
+                         .GATE_OBSERVE(GATE_OBSERVE)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
         .afe_busy             (afe_busy_w),
@@ -582,6 +589,7 @@ module dp_transmitter #(
         .debug_adjust         (debug_adjust),
         .debug_chstate        (debug_chstate),
         .debug_aux_err        (debug_aux_err),
+        .debug_err_detail     (debug_err_detail),
         .debug_snapshot       (debug_snapshot),
         .debug_caps           (debug_caps),
         .hpd                  (hpd),

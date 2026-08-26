@@ -60,6 +60,34 @@ module tb_gate_fail_counters;
         end
     endtask
 
+    // ---- observe-window DUT: same drive, GATE_OBSERVE=1 ----------------
+    wire [7:0]  o_gate; wire [15:0] o_tear; wire [15:0] o_aerr;
+    aux_channel #(.BLIND_SINK(0), .AFE_ADJUST(0),
+                  .GATE_OBSERVE(1), .GATE_OBSERVE_CLKS(30'd100_000)) dut_o (
+        .clk(clk), .train_set_byte(16'h0606), .afe_busy(1'b0),
+        .debug_pmod(), .debug_gate(o_gate), .debug_teardown(o_tear),
+        .debug_aux_err(o_aerr), .debug_err_detail(), .gate_fail_evt(), .status_seq(),
+        .debug_sink(), .debug_rx(), .edid_de(), .dp_reg_de(), .adjust_de(),
+        .status_de(), .aux_addr(), .aux_data(), .link_count(3'd2),
+        .hpd_irq(1'b0), .hpd_present(1'b1),
+        .tx_powerup(), .tx_clock_train(), .tx_align_train(), .tx_link_established(),
+        .swing_0p4(1'b0), .swing_0p6(1'b0), .swing_0p8(1'b1),
+        .preemp_0p0(1'b1), .preemp_3p5(1'b0), .preemp_6p0(1'b0),
+        .clock_locked(clk_lk), .equ_locked(equ_lk), .symbol_locked(sym_lk),
+        .align_locked(aln_lk), .dp_tx_hp_detect(1'b1),
+        .aux_in(1'b0), .aux_out(), .aux_tri()
+    );
+    task drive_gate_obs;
+        begin
+            @(negedge clk);
+            force dut_o.state      = CHECK_LINK;
+            force dut_o.next_state = CHECK_WAIT;
+            @(posedge clk); @(negedge clk);
+            release dut_o.state; release dut_o.next_state;
+            @(negedge clk);
+        end
+    endtask
+
     initial begin
         #200;
         $display("initial: debug_gate=%02x (gate_fail=%0d)  debug_teardown=%02x (gate_fail_sat=%0d)",
@@ -105,8 +133,30 @@ module tb_gate_fail_counters;
                      debug_teardown[11:8], debug_teardown[15:12]);
         end else $display("  ok: symbol failure -> sticky 0011, first STAYS 0001");
 
+        // ---- observation window: suppress inside, tear down after -----
+        // dut_o starts outside the established set -> obs_timer 0 -> ACTIVE
+        force dut_o.obs_timer = 30'd10;          // inside the window
+        drive_gate_obs;
+        if (o_aerr[3:0] === 4'd0 || dut_o.state_on_success !== dut_o.link_established) begin
+            errors = errors + 1;
+            $display("FAIL: in-window gate failure not suppressed (obs=%0d target=%02x)",
+                     o_aerr[3:0], dut_o.state_on_success);
+        end else $display("  ok: in-window failure SUPPRESSED (obs=%0d, stays established)", o_aerr[3:0]);
+        if (o_tear[7:4] !== 4'd0) begin
+            errors = errors + 1;
+            $display("FAIL: suppressed failure counted as a gate teardown");
+        end else $display("  ok: suppressed failure not counted as a teardown");
+        force dut_o.obs_timer = 30'd200_000;     // beyond the window
+        drive_gate_obs;
+        release dut_o.obs_timer;
+        if (o_tear[7:4] === 4'd0 || dut_o.state_on_success !== dut_o.error) begin
+            errors = errors + 1;
+            $display("FAIL: post-window failure did not tear down (gate=%0d target=%02x)",
+                     o_tear[7:4], dut_o.state_on_success);
+        end else $display("  ok: post-window failure tears down normally (gate=%0d)", o_tear[7:4]);
+
         if (errors == 0)
-            $display("PASS: counters track (2-bit == sat mod 4) AND the fail-mask names which lock bit was clear");
+            $display("PASS: counters track (2-bit == sat mod 4) AND the fail-mask names the clear bit AND the observe window suppresses-then-restores");
         else
             $display("FAIL: %0d error(s) — RTL bug reproduced in simulation", errors);
         $finish;

@@ -83,7 +83,18 @@ module aux_channel #(
     // M5: 1 = closed-loop TX-AFE adjust — TRAINING_LANEx_SET declares the
     // registered train_set_byte (msg 0x19) instead of the fixed 0x06
     // constant (msg 0x18). 0 = legacy, byte-identical.
-    parameter AFE_ADJUST = 0
+    parameter AFE_ADJUST = 0,
+    // DIAGNOSTIC ONLY (08-24, observation-window experiment): while the
+    // link has been in the established set for less than GATE_OBSERVE_CLKS,
+    // a failing check_wait evaluation is SUPPRESSED — the ladder stays in
+    // link_established and keeps polling — instead of tearing down. This
+    // answers, on hardware: (1) does the converter's 01/00/80 status
+    // recover to 77/xx/x1 WITHOUT training patterns being sent, and
+    // (2) does the picture stay up while the DP status reads bad. The
+    // window is bounded so a genuine persistent loss still retrains
+    // (window expiry restores normal teardown). NOT for production.
+    parameter GATE_OBSERVE = 0,
+    parameter GATE_OBSERVE_CLKS = 30'd600_000_000  // ~6 s @ 100 MHz
 )(
         input        clk,
         // ready-to-send TRAINING_LANEx_SET values from afe_adjust_seq,
@@ -115,7 +126,15 @@ module aux_channel #(
         // (state == check_link): short replies and non-ACK replies both
         // jump straight to `error` and were previously UNCOUNTED — credible
         // sources of teardowns the gate/timeout counters cannot see.
-        output [7:0] debug_aux_err,   // {short_reply_sat[3:0], nack_sat[3:0]}
+        // teardown-reason counters, all scoped to the ESTABLISHED SET
+        // (link_established / check_link / check_wait):
+        // {short_reply, non_ACK, other/unattributed, observe_suppressed}
+        output [15:0] debug_aux_err,
+        // CENTRALIZED first-teardown detail latch (latched at the first
+        // transition to `error` from the established set since config):
+        // {reason[3:0], from_state[7:0], expected[7:0], rx_byte_count[7:0]}
+        // reason: 1=short reply, 2=non-ACK, 3=gate, 4=AUX timeout, 5=retry
+        output [27:0] debug_err_detail,
         // 1-clk pulse on a failing check_wait evaluation (snapshot trigger)
         output reg   gate_fail_evt,
         // completed periodic status reads: increments when the 0x204 byte
@@ -255,12 +274,28 @@ module aux_channel #(
     reg [3:0] dbg_fail_mask     = 4'd0;   // sticky OR over all failures
     reg [3:0] dbg_first_mask    = 4'd0;   // the FIRST failure only
     reg       first_latched     = 1'b0;
-    reg [3:0] dbg_short_sat     = 4'd0;   // short replies in check_link
-    reg [3:0] dbg_nack_sat      = 4'd0;   // non-ACK replies in check_link
+    reg [3:0] dbg_short_sat     = 4'd0;   // short replies (established set)
+    reg [3:0] dbg_nack_sat      = 4'd0;   // non-ACK replies (established set)
+    reg [3:0] dbg_other_sat     = 4'd0;   // error entries w/o a tagged reason
+    reg [3:0] dbg_obs_sat       = 4'd0;   // gate failures SUPPRESSED (observe)
+    reg        err_evt          = 1'b0;   // tagged error-entry event
+    reg [3:0]  err_reason       = 4'd0;
+    reg [7:0]  err_from         = 8'd0;
+    reg [7:0]  err_exp          = 8'd0;
+    reg [7:0]  err_rxc          = 8'd0;
+    reg [27:0] err_detail       = 28'd0;
+    reg        err_detail_v     = 1'b0;
+    reg [29:0] obs_timer        = 30'd0;  // time in the established set
+    reg [7:0]  state_d          = 8'd0;
+    reg        inest_d          = 1'b0;
+    wire in_established_set = (state == link_established) ||
+                              (state == check_link) || (state == check_wait);
+    wire obs_active = (GATE_OBSERVE != 0) && (obs_timer < GATE_OBSERVE_CLKS);
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
     assign debug_teardown = {dbg_first_mask, dbg_fail_mask, dbg_gate_fail_sat, dbg_timeout_sat};
-    assign debug_aux_err  = {dbg_short_sat, dbg_nack_sat};
+    assign debug_aux_err  = {dbg_short_sat, dbg_nack_sat, dbg_other_sat, dbg_obs_sat};
+    assign debug_err_detail = err_detail;
     assign debug_sink = dbg_sink_status;
     // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
     // read): bit0/1 = RECEIVE_PORT_0/1 "sink is receiving a valid main
@@ -368,6 +403,31 @@ always @(posedge clk) begin
     //-----------------------------------------
     msg_de <= 1'b0;
     gate_fail_evt <= 1'b0;
+    err_evt <= 1'b0;
+    // observation-window timer: time spent continuously in the
+    // established set (saturating; resets on leaving the set)
+    if (in_established_set) begin
+        if (obs_timer != 30'h3FFFFFFF) obs_timer <= obs_timer + 30'd1;
+    end else
+        obs_timer <= 30'd0;
+    // centralized first-teardown detail (from the established set)
+    if (err_evt && !err_detail_v) begin
+        err_detail_v <= 1'b1;
+        err_detail   <= {err_reason, err_from, err_exp, err_rxc};
+    end
+    // OTHER: an entry into `error` from the established set that no site
+    // tagged — the safety net that catches teardown paths the reason
+    // sites miss (the reason this latch is centralized at all)
+    state_d  <= state;
+    inest_d  <= in_established_set;
+    if (state == error && state_d != error && inest_d && !err_evt) begin
+        if (dbg_other_sat != 4'hF)
+            dbg_other_sat <= dbg_other_sat + 4'd1;
+        if (!err_detail_v) begin
+            err_detail_v <= 1'b1;
+            err_detail   <= {4'd0, state_d, expected, rx_byte_count};
+        end
+    end
     // freshness token: the 0x204 byte of a status read was just delivered
     if (status_de == 1'b1 && aux_addr == 8'd4)
         status_seq <= status_seq + 4'd1;
@@ -484,10 +544,30 @@ always @(posedge clk) begin
                                 // marginal instances. Teardown/retrain is load-bearing.)
                                 if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
                                     state_on_success <= link_established;
+                                end else if (obs_active) begin
+                                    // OBSERVATION WINDOW: record, do NOT
+                                    // tear down; stay established and keep
+                                    // polling so the status trajectory is
+                                    // visible in C: at the poll cadence.
+                                    if (dbg_obs_sat != 4'hF)
+                                        dbg_obs_sat <= dbg_obs_sat + 4'd1;
+                                    state_on_success <= link_established;
+                                    dbg_fail_mask <= dbg_fail_mask |
+                                        ~{clock_locked_i, equ_locked_i,
+                                          symbol_locked_i, align_locked_i};
+                                    if (!first_latched) begin
+                                        first_latched  <= 1'b1;
+                                        dbg_first_mask <= ~{clock_locked_i, equ_locked_i,
+                                                            symbol_locked_i, align_locked_i};
+                                    end
+                                    gate_fail_evt <= 1'b1;
                                 end else begin
                                     dbg_gate_fail    <= dbg_gate_fail + 2'd1;
                                     if (dbg_gate_fail_sat != 4'hF)
                                         dbg_gate_fail_sat <= dbg_gate_fail_sat + 4'd1;
+                                    err_evt <= 1'b1; err_reason <= 4'd3;
+                                    err_from <= state; err_exp <= expected;
+                                    err_rxc <= rx_byte_count;
                                     // remember WHICH bits were clear (sticky OR)
                                     dbg_fail_mask <= dbg_fail_mask |
                                         ~{clock_locked_i, equ_locked_i,
@@ -697,8 +777,16 @@ always @(posedge clk) begin
             // Is this a short read?
             if(rx_byte_count != expected-1 && aux_rx_empty == 1'b1) begin
                 next_state <= error;
-                if (state == check_link && dbg_short_sat != 4'hF)
+                // scope: the whole established set — a LATE reply spilling
+                // into a state with expected==0 (expected-1 wraps to 0xFF)
+                // lands here and was previously invisible
+                if (in_established_set && dbg_short_sat != 4'hF)
                     dbg_short_sat <= dbg_short_sat + 4'd1;
+                if (in_established_set) begin
+                    err_evt <= 1'b1; err_reason <= 4'd1;
+                    err_from <= state; err_exp <= expected;
+                    err_rxc <= rx_byte_count;
+                end
             end
                                 
             if(rx_byte_count == 8'h00) begin
@@ -713,8 +801,13 @@ always @(posedge clk) begin
                 //---------------------------------------------------- 
                 if(aux_rx_data != 8'h00) begin
                     next_state <= error;
-                    if (state == check_link && dbg_nack_sat != 4'hF)
+                    if (in_established_set && dbg_nack_sat != 4'hF)
                         dbg_nack_sat <= dbg_nack_sat + 4'd1;
+                    if (in_established_set) begin
+                        err_evt <= 1'b1; err_reason <= 4'd2;
+                        err_from <= state; err_exp <= expected;
+                        err_rxc <= rx_byte_count;
+                    end
                 end
                 if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
                     next_state <= state_on_success;
@@ -776,6 +869,11 @@ always @(posedge clk) begin
                                    state != check_link && state != check_wait       && retry_now == 1'b1)) begin
         next_state <= reset;
         state      <= error;
+        if (in_established_set) begin
+            err_evt <= 1'b1;
+            err_reason <= (BLIND_SINK == 0 && channel_timeout == 1'b1) ? 4'd4 : 4'd5;
+            err_from <= state; err_exp <= expected; err_rxc <= rx_byte_count;
+        end
     end
     
     //-----------------------------------------------
