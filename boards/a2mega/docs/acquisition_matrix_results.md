@@ -938,3 +938,27 @@ black-box story:
 Bench law refined: HDMI-replug recovery = operating the ONLY reset input
 we can reach (standby/wake); it is deterministic for the quiet-frozen
 wedge because that path is hardware-level.
+
+## ANKER INTERNAL CHAIN COMPLETED — VL103 DATASHEET (08-26)
+
+`VL103_Datasheet_r080.pdf` (VIA Labs VL103, DP Alt-mode & PD3.0 controller
+w/ auto-standby; 8051-class MCU, ROM+SRAM, optionally SHARES SPI flash
+with the VLI hub controller). Chain: us -> USB-C -> **VL103** (CC/PD/
+alt-mode, AUX_CH+SBU switch, HPD input, own MCU) -> **IT6563** (DP->HDMI,
+own MCU) -> HDMI -> monitor.
+
+- AUX physically routes THROUGH the VL103's switch; HPD is a chain:
+  IT6563 DP_HPD -> VL103 HPD pin -> PD Attention/Status-Update messages ->
+  our FUSB302/ESP32 -> FPGA. The HDMI replug recovery traverses the whole
+  chain — hence exactly one clean retrain (Y+1) when it fires.
+- **Variant -> chip attribution (architecturally grounded, still needing
+  direct proof):** quiet-frozen wedge = IT6563 MCU hang (established);
+  flap-storm = VL103 layer (owns CC/PD/alt-mode/HPD — the thrashing
+  layer; HDMI replug cannot reach it; the full drain power-cycles it).
+- VL103 "smart auto-standby" (deep power save when idle) = one more
+  stateful attach-path behavior to remember for first-attach-after-idle
+  anomalies.
+- THREE firmware-bearing MCUs sit between our FPGA and the monitor
+  (VL103, IT6563, VLI hub — first and last sharing one flash image). The
+  reliability physiology of this hub is firmware, not signal integrity —
+  consistent with every measurement this week.
