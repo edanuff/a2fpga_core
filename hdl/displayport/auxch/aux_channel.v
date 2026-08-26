@@ -99,7 +99,22 @@ module aux_channel #(
     // retrains — at most delayed by the grace period after an establish.
     // Default 0 = byte-identical legacy behavior.
     parameter GATE_GRACE = 0,
-    parameter GATE_GRACE_CLKS = 30'd800_000_000  // ~8 s @ 100 MHz
+    parameter GATE_GRACE_CLKS = 30'd800_000_000, // ~8 s @ 100 MHz
+    // DARK-STATE KICK (08-24, replaces an ACCIDENTAL mechanism): the A/B
+    // showed the converter can wedge into "perfect lanes, SINK_STATUS=0,
+    // dark" (C:8177/K:00) and that the late-reply teardown BUG was what
+    // had been rescuing it — a ladder teardown arriving during the wedge
+    // entry re-engages the sink, while the watchdog's PHY cold restart is
+    // hardware-refuted (7 attempts, zero effect). With the bug fixed
+    // (drained), this provides the same rescue DELIBERATELY: if the link
+    // is established but the sink has reported not-streaming for
+    // KICK_CLKS, tear down and retrain. Budgeted (KICK_CAP, re-armed
+    // whenever streaming is observed) so a truly dead sink does not
+    // retrain forever. Closed-loop only: blind builds cannot read
+    // SINK_STATUS. Default 0 = legacy.
+    parameter GATE_KICK  = 0,
+    parameter KICK_CLKS  = 30'd250_000_000,      // ~2.5 s @ 100 MHz
+    parameter [2:0] KICK_CAP = 3'd7
 )(
         input        clk,
         // ready-to-send TRAINING_LANEx_SET values from afe_adjust_seq,
@@ -133,8 +148,9 @@ module aux_channel #(
         // sources of teardowns the gate/timeout counters cannot see.
         // teardown-reason counters, all scoped to the ESTABLISHED SET
         // (link_established / check_link / check_wait):
-        // {short_reply, non_ACK, other/unattributed, observe_suppressed}
-        output [15:0] debug_aux_err,
+        // {short_reply, non_ACK, other/unattributed, observe_suppressed,
+        //  dark_kicks}
+        output [19:0] debug_aux_err,
         // CENTRALIZED first-teardown detail latch (latched at the first
         // transition to `error` from the established set since config):
         // {reason[3:0], from_state[7:0], expected[7:0], rx_byte_count[7:0]}
@@ -283,6 +299,9 @@ module aux_channel #(
     reg [3:0] dbg_nack_sat      = 4'd0;   // non-ACK replies (established set)
     reg [3:0] dbg_other_sat     = 4'd0;   // error entries w/o a tagged reason
     reg [3:0] dbg_obs_sat       = 4'd0;   // gate failures SUPPRESSED (observe)
+    reg [3:0] dbg_kick_sat      = 4'd0;   // dark-state kicks fired
+    reg [29:0] kick_timer       = 30'd0;
+    reg [2:0]  kick_cnt         = 3'd0;   // budget used since last streaming
     reg        err_evt          = 1'b0;   // tagged error-entry event
     reg [3:0]  err_reason       = 4'd0;
     reg [7:0]  err_from         = 8'd0;
@@ -299,7 +318,8 @@ module aux_channel #(
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
     assign debug_teardown = {dbg_first_mask, dbg_fail_mask, dbg_gate_fail_sat, dbg_timeout_sat};
-    assign debug_aux_err  = {dbg_short_sat, dbg_nack_sat, dbg_other_sat, dbg_obs_sat};
+    assign debug_aux_err  = {dbg_short_sat, dbg_nack_sat, dbg_other_sat,
+                             dbg_obs_sat, dbg_kick_sat};
     assign debug_err_detail = err_detail;
     assign debug_sink = dbg_sink_status;
     // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
@@ -949,6 +969,33 @@ always @(posedge clk) begin
     end else begin
         link_check_now   <= 1'b0;
         link_check_count <= link_check_count - 1;
+    end
+
+    //-----------------------------------------------------------
+    // DARK-STATE KICK (see the parameter comment). Placed LAST in
+    // this block so its teardown wins the nonblocking ordering.
+    // dbg_sink_status[1:0] is DPCD 0x205 bits[1:0], latched at each
+    // periodic status read (~1 Hz); a healthy link refreshes it to
+    // non-zero well inside KICK_CLKS.
+    //-----------------------------------------------------------
+    if (dbg_sink_status[1:0] != 2'b00) begin
+        kick_timer <= 30'd0;
+        kick_cnt   <= 3'd0;              // streaming observed: re-arm budget
+    end else if (!in_established_set) begin
+        kick_timer <= 30'd0;             // timer runs only while established
+    end else if (GATE_KICK != 0 && BLIND_SINK == 0 && kick_cnt != KICK_CAP) begin
+        if (kick_timer >= KICK_CLKS) begin
+            kick_timer <= 30'd0;
+            kick_cnt   <= kick_cnt + 3'd1;
+            if (dbg_kick_sat != 4'hF)
+                dbg_kick_sat <= dbg_kick_sat + 4'd1;
+            next_state <= reset;
+            state      <= error;
+            err_evt    <= 1'b1; err_reason <= 4'd6;
+            err_from   <= state; err_exp <= expected;
+            err_rxc    <= rx_byte_count;
+        end else
+            kick_timer <= kick_timer + 30'd1;
     end
 end        
 endmodule

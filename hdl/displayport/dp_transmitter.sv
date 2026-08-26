@@ -89,6 +89,13 @@ module dp_transmitter #(
     // teardown->retrain behavior applies unchanged. 0 = legacy.
     parameter bit    GATE_GRACE = 0,
     parameter        GATE_GRACE_CLKS = 30'd800_000_000,
+    // Dark-state kick (08-24): established + sink not-streaming for
+    // KICK_CLKS -> ladder teardown/retrain, budgeted. The deliberate
+    // replacement for the accidental stray-byte rescue the drain removed
+    // (A/B: darks 2/4 with drain alone vs 0/8 with the accident present);
+    // the watchdog's PHY cold restart is hardware-refuted for this state.
+    parameter bit    GATE_KICK = 0,
+    parameter        KICK_CLKS = 30'd250_000_000,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -136,7 +143,7 @@ module dp_transmitter #(
     output logic [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
     output logic [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
     output logic [23:0] debug_chstate, // raw DPCD {0x204, 0x203, 0x202}
-    output logic [15:0] debug_aux_err,  // {short, nack, other, observe_suppressed}
+    output logic [19:0] debug_aux_err,  // {short, nack, other, obs, dark_kicks}
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
@@ -579,7 +586,9 @@ module dp_transmitter #(
                          .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS),
                          .AFE_ADJUST(ENABLE_AFE_ADJUST),
                          .GATE_GRACE(GATE_GRACE),
-                         .GATE_GRACE_CLKS(GATE_GRACE_CLKS)) i_channel_management(
+                         .GATE_GRACE_CLKS(GATE_GRACE_CLKS),
+                         .GATE_KICK(GATE_KICK),
+                         .KICK_CLKS(KICK_CLKS)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
         .afe_busy             (afe_busy_w),

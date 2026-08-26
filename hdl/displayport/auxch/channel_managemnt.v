@@ -64,7 +64,9 @@ module channel_management #(
     parameter HPD_DISCONNECT_RESETS = 0, // closed-loop HPD-drop reset — DEFAULT OFF (row 72 flap storms; see aux_channel.v)
     parameter AFE_ADJUST = 0,  // M5: closed-loop TX-AFE adjust (aux_channel.v)
     parameter GATE_GRACE = 0,      // gate grace period (aux_channel.v)
-    parameter GATE_GRACE_CLKS = 30'd800_000_000
+    parameter GATE_GRACE_CLKS = 30'd800_000_000,
+    parameter GATE_KICK = 0,       // dark-state kick (aux_channel.v)
+    parameter KICK_CLKS = 30'd250_000_000
 )(
         input  clk100,
         // M5 runtime AFE adjust: applied-level declaration in, one pulse
@@ -82,7 +84,7 @@ module channel_management #(
         output [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
         output [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
         output [23:0] debug_chstate, // raw DPCD {0x204, 0x203, 0x202}
-        output [15:0] debug_aux_err, // {short, nack, other, observe_suppressed}
+        output [19:0] debug_aux_err, // {short, nack, other, obs, dark_kicks}
         output [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
         // ATOMIC FIRST-FAILURE SNAPSHOT (second-opinion instrumentation,
         // 08-24): latched in the same clock as the FIRST failing check_wait
@@ -269,7 +271,8 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .BLIND_SINK(BLIND_SINK),
               .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS),
               .AFE_ADJUST(AFE_ADJUST), .GATE_GRACE(GATE_GRACE),
-              .GATE_GRACE_CLKS(GATE_GRACE_CLKS)) i_aux_channel(
+              .GATE_GRACE_CLKS(GATE_GRACE_CLKS), .GATE_KICK(GATE_KICK),
+              .KICK_CLKS(KICK_CLKS)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),

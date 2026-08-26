@@ -60,8 +60,25 @@ module tb_gate_fail_counters;
         end
     endtask
 
-    // ---- observe-window DUT: same drive, GATE_OBSERVE=1 ----------------
-    wire [7:0]  o_gate; wire [15:0] o_tear; wire [15:0] o_aerr;
+    // ---- observe-window DUT: same drive, GATE_GRACE=1 ------------------
+    wire [7:0]  o_gate; wire [15:0] o_tear; wire [19:0] o_aerr;
+    // ---- kick DUT: GATE_KICK=1 with a tiny KICK_CLKS -------------------
+    wire [7:0]  k_gate; wire [15:0] k_tear; wire [19:0] k_aerr; wire [27:0] k_edet;
+    aux_channel #(.BLIND_SINK(0), .AFE_ADJUST(0),
+                  .GATE_KICK(1), .KICK_CLKS(30'd500), .KICK_CAP(3'd2)) dut_k (
+        .clk(clk), .train_set_byte(16'h0606), .afe_busy(1'b0),
+        .debug_pmod(), .debug_gate(k_gate), .debug_teardown(k_tear),
+        .debug_aux_err(k_aerr), .debug_err_detail(k_edet), .gate_fail_evt(), .status_seq(),
+        .debug_sink(), .debug_rx(), .edid_de(), .dp_reg_de(), .adjust_de(),
+        .status_de(), .aux_addr(), .aux_data(), .link_count(3'd2),
+        .hpd_irq(1'b0), .hpd_present(1'b1),
+        .tx_powerup(), .tx_clock_train(), .tx_align_train(), .tx_link_established(),
+        .swing_0p4(1'b0), .swing_0p6(1'b0), .swing_0p8(1'b1),
+        .preemp_0p0(1'b1), .preemp_3p5(1'b0), .preemp_6p0(1'b0),
+        .clock_locked(1'b1), .equ_locked(1'b1), .symbol_locked(1'b1),
+        .align_locked(1'b1), .dp_tx_hp_detect(1'b1),
+        .aux_in(1'b0), .aux_out(), .aux_tri()
+    );
     aux_channel #(.BLIND_SINK(0), .AFE_ADJUST(0),
                   .GATE_GRACE(1), .GATE_GRACE_CLKS(30'd100_000)) dut_o (
         .clk(clk), .train_set_byte(16'h0606), .afe_busy(1'b0),
@@ -137,11 +154,11 @@ module tb_gate_fail_counters;
         // dut_o starts outside the established set -> obs_timer 0 -> ACTIVE
         force dut_o.obs_timer = 30'd10;          // inside the window
         drive_gate_obs;
-        if (o_aerr[3:0] === 4'd0 || dut_o.state_on_success !== dut_o.link_established) begin
+        if (o_aerr[7:4] === 4'd0 || dut_o.state_on_success !== dut_o.link_established) begin
             errors = errors + 1;
             $display("FAIL: in-window gate failure not suppressed (obs=%0d target=%02x)",
-                     o_aerr[3:0], dut_o.state_on_success);
-        end else $display("  ok: in-window failure SUPPRESSED (obs=%0d, stays established)", o_aerr[3:0]);
+                     o_aerr[7:4], dut_o.state_on_success);
+        end else $display("  ok: in-window failure SUPPRESSED (obs=%0d, stays established)", o_aerr[7:4]);
         if (o_tear[7:4] !== 4'd0) begin
             errors = errors + 1;
             $display("FAIL: suppressed failure counted as a gate teardown");
@@ -182,8 +199,70 @@ module tb_gate_fail_counters;
                 $display("  ok: late reply with expected==0 DRAINED — no error, no count");
         end
 
+        // ---- DARK-STATE KICK ------------------------------------------
+        // established + sink_status==0 for KICK_CLKS -> ladder teardown,
+        // reason 6; re-armed by streaming; budget stops it.
+        begin : kick_test
+            // hold the FSM in link_established with the sink NOT streaming
+            force dut_k.state          = dut_k.link_established;
+            force dut_k.next_state     = dut_k.link_established;
+            force dut_k.dbg_sink_status = 8'h00;
+            repeat (300) @(posedge clk);           // accrue part of KICK_CLKS
+            // release BEFORE the kick fires: a forced reg would swallow the
+            // teardown assignment; the released regs RETAIN link_established
+            // so the timer keeps accruing on an unforced FSM
+            release dut_k.state; release dut_k.next_state;
+            repeat (400) @(posedge clk);           // total > KICK_CLKS=500
+            @(negedge clk);
+            if (k_aerr[3:0] !== 4'd1 || k_edet[27:24] !== 4'd6) begin
+                errors = errors + 1;
+                $display("FAIL: kick did not fire/tag (kicks=%0d reason=%0d)",
+                         k_aerr[3:0], k_edet[27:24]);
+            end else $display("  ok: kick fired after KICK_CLKS, reason=6 latched");
+            // `error` is a one-cycle transient; by check time the FSM has
+            // restarted the ladder walk. Torn-down = no longer established.
+            if (dut_k.state === dut_k.link_established) begin
+                errors = errors + 1;
+                $display("FAIL: kick did not tear down (still established)");
+            end else $display("  ok: kick tears down and restarts the walk (state=%02x)", dut_k.state);
+            // budget: second kick allowed, third blocked (KICK_CAP=2)
+            force dut_k.state      = dut_k.link_established;
+            force dut_k.next_state = dut_k.link_established;
+            repeat (700) @(posedge clk);
+            if (k_aerr[3:0] !== 4'd2) begin
+                errors = errors + 1;
+                $display("FAIL: second kick within budget did not fire (kicks=%0d)", k_aerr[3:0]);
+            end else $display("  ok: second kick fires (budget 2)");
+            force dut_k.state      = dut_k.link_established;
+            force dut_k.next_state = dut_k.link_established;
+            repeat (900) @(posedge clk);
+            if (k_aerr[3:0] !== 4'd2) begin
+                errors = errors + 1;
+                $display("FAIL: kick fired past its budget (kicks=%0d)", k_aerr[3:0]);
+            end else $display("  ok: budget exhausted -> no further kicks");
+            // streaming re-arms: sink reports 03, then dark again
+            force dut_k.dbg_sink_status = 8'h03;
+            repeat (5) @(posedge clk);
+            force dut_k.dbg_sink_status = 8'h00;
+            repeat (700) @(posedge clk);
+            if (k_aerr[3:0] !== 4'd3) begin
+                errors = errors + 1;
+                $display("FAIL: streaming did not re-arm the budget (kicks=%0d)", k_aerr[3:0]);
+            end else $display("  ok: streaming re-arms the budget (3rd kick after re-arm)");
+            // healthy link never kicks: streaming continuously
+            force dut_k.dbg_sink_status = 8'h03;
+            force dut_k.state      = dut_k.link_established;
+            force dut_k.next_state = dut_k.link_established;
+            repeat (900) @(posedge clk);
+            if (k_aerr[3:0] !== 4'd3) begin
+                errors = errors + 1;
+                $display("FAIL: kick fired on a STREAMING link");
+            end else $display("  ok: streaming link never kicked");
+            release dut_k.state; release dut_k.next_state; release dut_k.dbg_sink_status;
+        end
+
         if (errors == 0)
-            $display("PASS: counters track (2-bit == sat mod 4) AND the fail-mask names the clear bit AND the grace window suppresses-then-restores AND late replies drain");
+            $display("PASS: counters track (2-bit == sat mod 4) AND the fail-mask names the clear bit AND grace suppress/restore AND late-reply drain AND the dark-state kick (fire/budget/re-arm/streaming-never)");
         else
             $display("FAIL: %0d error(s) — RTL bug reproduced in simulation", errors);
         $finish;
