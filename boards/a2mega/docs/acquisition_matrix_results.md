@@ -851,6 +851,13 @@ delay, and dark-failure rate.
 | 2 | delayed colorbars, stable | none | settling class: J:1025, 1 gate teardown, ended K:03 C:0177 |
 | 3 | wedged black | HDMI replug while POWERED DOWN recovered | plain power cycle (no HDMI touch) preceded it |
 
+**Block 1 COMPLETE (8 cycles): 2 clean (c5,c7), 3 delayed-stable
+(c2,c4,c8), 3 dark/wedge (c1 full-drain, c3 off-state-replug, c6
+powered-replug).** Same build measured 0/8 darks two nights ago under the
+same plain-cycle procedure — the between-SESSION swing dwarfs any
+between-build difference seen so far. Recovery ladder is probabilistic:
+powered replug failed on c1's storm but worked on c6's.
+
 **New observations:** two wedges in a row is NEW behavior; wedge followed a
 plain power cycle; HDMI replug with the board OFF also clears it. The
 powered-replug failure on cycle 1 vs its instant success yesterday
