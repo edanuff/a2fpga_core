@@ -905,3 +905,36 @@ their instrumentation — correctly characterized as: right by DP protocol,
 wrong for this converter's failure physiology. Revisit if a sink appears
 that is harmed by the storms (the original motivation) — and then enable
 grace ALONE, per-board, with these results in hand.
+
+## MECHANISM CORRECTED FROM THE IT6563 DATASHEET (08-25; the Anker's DP->HDMI chip)
+
+Datasheet: `IT6563_FN_Datasheet_v0.92.pdf` (ITE IT6563FN, DP1.2a RX +
+HDMI2.0 TX with EMBEDDED MCU + flash). Corrections to the earlier
+black-box story:
+
+1. **Why the powered HDMI replug always works — documented standby
+   behavior (p13):** "HDMI Monitor un-plug, the IT6563 de-assert DP HPD,
+   and still continue Polling HDMI Plug-in status." HDMI unplug -> chip
+   standby + DP HPD DE-ASSERTED toward us; replug -> wake + HPD
+   re-asserted. From our side that is a full clean DP hot-plug, which
+   re-runs the chip's entire bring-up. CORRECTION: the recovery is NOT
+   retrain-free — Y: ticked +1 during recovery = exactly one clean
+   HPD-driven retrain. The earlier "picture returned with zero link-side
+   action" claim is amended: zero action FROM US; one clean retrain FROM
+   the chip's own HPD cycle.
+2. **Why 7 kicks + 7 watchdog restarts do nothing:** DP-side teardowns
+   retrain the link but nothing on the DP side operates the IT6563's
+   standby/wake machinery — only HDMI_HPD does.
+3. **Why AUX answers while wedged:** the AUX controller + DPCD table +
+   EDID RAM are an autonomous HARDWARE block; the EMBEDDED MCU updates
+   the status registers. A hung MCU = stale-but-served DPCD — the frozen
+   C:8177/K:00 and the post-recovery K:00-while-displaying, exactly as
+   measured. The wedge is best explained as an MCU FIRMWARE HANG; the
+   standby/HPD logic survives it.
+4. Notable for the future: the chip is programmable over DP AUX (ISP);
+   and the two wedge flavors (status frozen-plausible vs zeros) fit
+   "MCU hung at different points".
+
+Bench law refined: HDMI-replug recovery = operating the ONLY reset input
+we can reach (standby/wake); it is deterministic for the quiet-frozen
+wedge because that path is hardware-level.
