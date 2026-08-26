@@ -815,9 +815,15 @@ Builds (all archived):
 - `4ff799d9` — grace window only (retains the late-reply bug).
 - `7b872b57` — grace + late-reply drain, no kick.
 
-Procedure per cycle (identical every time):
-1. Power down the board; unplug HDMI at the hub; wait ~30 s.
-2. Reconnect HDMI (⚠ row 89), power up.
+Procedure per cycle — AMENDED 08-25 (user): **plain board power cycle,
+no HDMI manipulation.** This is the HISTORICAL procedure the baseline
+impressions were formed under; the originally-written per-cycle HDMI
+unplug was an accidental procedure change. Because the board is
+hub-backfed, every cycle is a hot re-attach to a still-running hub — hub
+state carried across attaches is part of what is being measured.
+HDMI actions are RECOVERY STEPS ONLY, each recorded when used:
+(a) HDMI replug, board powered; (b) HDMI replug, board off; (c) full
+drain. Wedge rate under plain cycling is a primary per-build outcome.
 3. USER records: colorbars immediately / delayed (elapsed seconds + D4
    events observed) / persistent dark; and if delayed or suppressed-status
    activity occurs, whether the picture stays stable once up.
@@ -835,3 +841,20 @@ DIAGNOSTIC and strictly bounded — at most ONE kick per physical attach,
 attach-scoped window that does NOT restart after retraining — and is not
 called a production fix until it beats BOTH baselines on first-try rate,
 delay, and dark-failure rate.
+
+
+## Block 1 (`4ff799d9`, Anker+Sceptre, 08-25, plain-cycle procedure)
+
+| cycle | screen | recovery needed | telemetry notes |
+|---|---|---|---|
+| 1 | persistent dark | HDMI replug (powered) FAILED -> full drain recovered | flap-storm class: Y:FF churn, 12 late-reply + 11 gate + 15 other teardowns, W:7; NOT the quiet frozen wedge |
+| 2 | delayed colorbars, stable | none | settling class: J:1025, 1 gate teardown, ended K:03 C:0177 |
+| 3 | wedged black | HDMI replug while POWERED DOWN recovered | plain power cycle (no HDMI touch) preceded it |
+
+**New observations:** two wedges in a row is NEW behavior; wedge followed a
+plain power cycle; HDMI replug with the board OFF also clears it. The
+powered-replug failure on cycle 1 vs its instant success yesterday
+separates the deep states further (flap-storm vs quiet-frozen). Elevated
+wedge rate today (across kick AND grace-only builds) points at hub-state/
+session effects dominating build identity — the interleaved protocol is
+the only defensible comparison.
