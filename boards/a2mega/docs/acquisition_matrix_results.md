@@ -468,3 +468,53 @@ and stay in `link_established`.
 Anker's recovery-by-retrain. The fix must distinguish "no fresh status"
 (do nothing) from "fresh status says a lane is lost" (tear down and
 retrain, as today). Sim first — `tb_gate_fail_counters.v` is the harness.
+
+## Second opinion adopted; hypothesis ranking REVISED (08-24, build ea52aafc)
+
+The stale-channel_state theory is demoted to LAST. Verified against the
+code (user's second opinion, both claims confirmed):
+
+1. **Initial-qualification / maintenance mismatch (new #1).**
+   `align_wait_after` advances to `switch_to_normal` on `symbol_locked`
+   ALONE — `align_locked` (DPCD 0x204 INTERLANE_ALIGN_DONE) is never
+   required to establish, and D4 checks only `0x202 == 0x77`. But the
+   periodic gate demands all four. The design can legally establish, light
+   D4, then "discover" align=0 at the first poll and tear down: visible
+   D4 assertions + retraining with NO staleness and NO signal problem.
+   The 1-or-6 shape fits the free-running ~1 s `link_check_count` poll
+   cadence (flash spacing at ~1 s intervals would corroborate — bench ear).
+2. **Real transient lane/align status from the converter**, amplified by
+   the teardown/retrain loop.
+3. **Short or non-ACK periodic AUX replies** — both jump straight to
+   `error` and were UNCOUNTED (verified); credible source of the 3
+   unattributed teardowns. "0 AUX timeouts" never exonerated this path.
+4. Stale local `channel_state` (my prior #1): a retrain cannot re-establish
+   without fresh status reads, and the periodic read commits 0x202-0x204
+   several clocks before `check_wait` evaluates. Kept only as a defensive
+   check via the freshness token.
+
+Also corrected: sticky mask F is NOT four independent failures — the lock
+bits are hierarchical by mask construction (CR loss forces EQ/symbol clear:
+0x11 ⊂ 0x33 ⊂ 0x77), so F can accumulate from one CR event plus one align
+event.
+
+### Instrumentation in ea52aafc (all sim-verified before build)
+
+- `T:` = 4 digits `{first_fail_mask, sticky_mask, gate_fails, timeouts}` —
+  the FIRST-failure mask is non-sticky and latched once.
+- `Z:` = atomic first-failure snapshot `{raw 0x204, 0x203, 0x202,
+  status_seq, time-since-established/100ms}` latched in the same clock as
+  the first failing evaluation.
+- `J:` = `{short_replies, non_ACKs}` during `check_link` (previously
+  invisible).
+- Telemetry now FIVE lines (36/30/33/23/18 chars), msg_idx widened.
+
+### Decisive decode for the next bad cycle
+
+| Z: / T: / J: reading | verdict |
+|---|---|
+| `0x202=77, 0x204 bit0=0`, first_mask=0001 | **#1: qualification mismatch** — fix is to require align at initial qualification (or tolerate it at the gate) |
+| one lane's CR/EQ/symbol missing in 0x202 | #2: genuine marginality |
+| raw all zero + status_seq advanced | sink/converter actually returned zeros |
+| raw all zero + status_seq NOT advanced | #4: stale-state race after all |
+| J: accounts for ~3 | #3 confirmed for the unattributed teardowns |
