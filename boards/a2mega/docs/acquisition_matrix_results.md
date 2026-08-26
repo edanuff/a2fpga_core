@@ -728,3 +728,14 @@ Findings:
 4. UX: dual budget exhaustion (7 kicks + 7 wdog) = a long D3/D4 blink
    storm before permanent dark. Consider a combined cap or backoff if
    deep wedges are not rare.
+
+**08-25 later: COLD-CORRELATION REFUTED by its own prediction.** After two
+clean warm cycles, a deep wedge occurred AT STANDARD TEMPS (KICKS=7+W:7,
+C:8177/K:00 flavor, Y:8F/L:0F saturated by the attempt storm). Dark-entry
+driver: UNKNOWN — not build (confounded A/B), not simply temperature
+(refuted). Session tally on b241cf74: 6 cycles = 2 clean, 2 rescued darks,
+2 deep wedges (one C:0000, one C:8177 flavor). What survives scrutiny:
+the kick rescues entry-window darks; dual-budget exhaustion cannot reach a
+fully-wedged converter (n=2, both flavors). Probe queued: HDMI-only replug
+on a wedged state — clears it => hang lives HDMI-side in the hub; doesn't
+=> DP/USB-C side, full drain required.
