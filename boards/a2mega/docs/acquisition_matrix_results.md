@@ -518,3 +518,38 @@ event.
 | raw all zero + status_seq advanced | sink/converter actually returned zeros |
 | raw all zero + status_seq NOT advanced | #4: stale-state race after all |
 | J: accounts for ~3 | #3 confirmed for the unattributed teardowns |
+
+## 🧪 OBSERVATION-WINDOW RESULT (08-24, build 4ff799d9, GATE_OBSERVE=1)
+
+Cycle report (user): picture up after a short delay, STABLE.
+Sticky read: `T:FF11  Z:80000019  J:1026  B:12E0008  Y:22 L:02 K:03 C:0177`
+
+**Q2 (picture during bad status): YES — SURVIVES.** OBS_SUPPRESSED=6: the
+gate wanted to tear down six times; the picture stayed up throughout.
+
+**Q1 (recovery without training patterns): MOSTLY.** Bad status persisted
+~6 polls (~6 s). Total establishes collapsed from 6-10 (pre-observe) to 2.
+BUT gate_fails=1 — one real teardown after window expiry — so the bad
+status outlasted the 6 s window by ~1 poll. NOT yet separated: longer
+window ⇒ zero teardowns, vs converter needed that one retrain.
+
+**Late-reply path CONFIRMED (B:12E0008):** first teardown = short-reply
+from `link_established` (0x2E) with expected=0, rx_count=8 — a late 8-byte
+AUX reply tripping the expected-1 wraparound check. The second opinion's
+predicted invisible path, directly observed.
+
+This cycle's first-failure snapshot: 0x202=00 (both lanes nil, vs 01
+before), 0x204=80, seq=1, t=900 ms — same 900 ms first-poll timing.
+
+⚠️ OPEN — counter accounting does not close: tagged entries (gate 1 +
+timeout 1 + short 1 + other 2 = 5) exceed what 2 establishes can express.
+Prime suspect: the short-read site evaluates per received byte. Counters
+are qualitatively right, not yet quantitatively trustworthy.
+
+### Implications
+- Tolerance is now EVIDENCE-BACKED: 6 suppressed teardowns, stable picture.
+- The production shape is: tolerate gate failures for a window/N polls
+  (which also starves the late-reply loop of its teardown-churn), plus
+  fix the expected==0 wraparound so late replies are DRAINED, not fatal.
+- Next diagnostic iteration if wanted: window 6->10 s to test for a
+  zero-teardown cycle; fix the per-byte counting.
