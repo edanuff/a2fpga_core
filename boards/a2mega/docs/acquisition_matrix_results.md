@@ -599,3 +599,40 @@ cycles, not argument.
 
 RECOVERY: power cycle (the watchdog budget is exhausted; nothing on our
 side will act further).
+
+## Second consecutive stable-dark; drain-regression hypothesis now LEAD (08-24 eve)
+
+Cycle 4 on the grace build: lit up, went dark — SAME frozen signature
+(C:8177 / K:00 / Y:18 / L:08 / W:7). Corrections and new facts:
+
+- **RETRACTED: "wdog replay_req stuck".** W:7 = {forcing=0, count=7}: the
+  watchdog is IDLE with budget spent, and idle forces replay_req low.
+  M:02 is benign (baseline cleared by the replay pulses; cannot
+  re-establish until a training pattern next runs).
+- **AUX is ALIVE in the dark state**: E: drifts (91→66→44) across samples
+  while K:/C: stay frozen — the sink genuinely answers 8177/00 over a
+  working AUX channel.
+- **UNRESOLVED: G:00 and N:000** — as if the periodic check never latched
+  its locks nibble in minutes of link_established, which contradicts the
+  1 Hz link_check cadence + live AUX. Could not be closed remotely.
+
+**Incidence: 2 consecutive stable-darks on the drain build, vs rare
+(~none observed in dozens of cycles) before it.** The flagged hypothesis
+is promoted to LEAD for the PERSISTENCE (not the entry) of the dark
+state: pre-drain, a stray/late AUX byte arriving in link_established
+tripped the expected==0 wraparound and tore the link down — a de-facto
+(accidental) recovery kick for a sink that had stopped consuming the
+stream. The drain now eats those bytes silently, so the ladder sits
+established forever while the sink stays dark, and the watchdog's 7
+attempts do not help (proven above).
+
+**Next bench experiment (A/B, one flash): reflash 4ff799d9** — the
+observation build, which has ALL the same instrumentation but NOT the
+drain fix — and compare stable-dark incidence/persistence over cycles.
+- dark occurs and SELF-RECOVERS via a spurious-teardown retrain ⇒ the
+  drain removed a load-bearing accident; the production fix must replace
+  it with a DELIBERATE kick (e.g. drained stray bytes while established
+  AND !streaming ⇒ treat as a nudge to retrain, or let the watchdog act
+  on it) rather than silence.
+- dark equally persistent there ⇒ the drain is innocent; entry mechanism
+  investigation continues (video flapped 8x before settling dark).
