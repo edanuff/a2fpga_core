@@ -76,10 +76,25 @@ module channel_management #(
         output [15:0] debug_rx,  // AUX RX: {last byte, sync hits, accepted bytes} (registered)
         output [3:0]  debug_locks, // {clock,equ,symbol,align}_locked (registered)
         output [7:0]  debug_gate,  // latched-at-gate locks + fail/timeout counters
-        output [11:0]  debug_teardown, // {gate_fail_sat[3:0], timeout_sat[3:0]} (08-24)
+        output [15:0]  debug_teardown, // {first_mask, fail_mask, gate_fail_sat, timeout_sat}
         output [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
         output [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
-        output [15:0] debug_chstate, // {0x204 align, 0x202 lane0/1 status}
+        output [23:0] debug_chstate, // raw DPCD {0x204, 0x203, 0x202}
+        output [7:0]  debug_aux_err, // {short_reply_sat, nack_sat} in check_link
+        // ATOMIC FIRST-FAILURE SNAPSHOT (second-opinion instrumentation,
+        // 08-24): latched in the same clock as the FIRST failing check_wait
+        // evaluation since config. {raw 0x204, 0x203, 0x202 at that moment,
+        // status_seq (completed periodic status reads = freshness token),
+        // time since the last link_established rise in 100 ms units,
+        // saturating}. Decisive decode:
+        //   0x202=77, 0x204[0]=0            -> initial-qualification mismatch
+        //                                      (align never required at
+        //                                      switch_to_normal, only at the
+        //                                      periodic gate)
+        //   one lane's CR/EQ/symbol missing -> genuine marginality
+        //   raw all zero + fresh seq        -> sink/converter returned zero
+        //   raw all zero + STALE seq        -> the stale-channel_state race
+        output [31:0] debug_snapshot, // {chstate24, status_seq4, tsl4}
         output [7:0]  debug_caps,    // sink caps: {ext_framing, rate270,
                                      //  rate162, dp_valid, max_downspread[3:0]}
 
@@ -219,6 +234,34 @@ hotplug_decode i_hotplug_decode(
     // beat of the adjust read — one pulse per training iteration.
     assign adjust_evt = adjust_de & (aux_addr == 8'h00);
 
+    // ---- first-failure snapshot (see the port comment) ----------------
+    wire       gate_fail_evt_w;
+    wire [3:0] status_seq_w;
+    reg [31:0] snap_r    = 32'd0;
+    reg        snapped_r = 1'b0;
+    // time since the last link_established rise, 100 ms units, saturating
+    reg [3:0]  tsl_r     = 4'd0;
+    reg [23:0] tsl_tick  = 24'd0;
+    reg        est_d     = 1'b0;
+    always @(posedge clk100) begin
+        est_d <= tx_link_established;
+        if (tx_link_established && !est_d) begin
+            tsl_r <= 4'd0; tsl_tick <= 24'd0;
+        end else if (tx_link_established) begin
+            if (tsl_tick == 24'd9_999_999) begin   // 100 ms @ clk100
+                tsl_tick <= 24'd0;
+                if (tsl_r != 4'hF) tsl_r <= tsl_r + 4'd1;
+            end else
+                tsl_tick <= tsl_tick + 24'd1;
+        end
+        if (gate_fail_evt_w && !snapped_r) begin
+            snapped_r <= 1'b1;
+            snap_r    <= {debug_chstate, status_seq_w, tsl_r};
+        end
+    end
+    assign debug_snapshot = snap_r;
+
+
 aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .BLIND_SINK(BLIND_SINK),
               .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS),
@@ -229,6 +272,9 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
         .debug_pmod      (debug),
         .debug_gate      (debug_gate),
         .debug_teardown  (debug_teardown),
+        .debug_aux_err   (debug_aux_err),
+        .gate_fail_evt   (gate_fail_evt_w),
+        .status_seq      (status_seq_w),
         .debug_sink      (debug_sink),
         .debug_rx        (debug_rx_w),
          //------------------------------

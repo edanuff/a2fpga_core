@@ -106,7 +106,21 @@ module aux_channel #(
         //          {clock, equ, symbol, align}. debug_gate's locks field
         //          latches EVERY evaluation, so it shows the last (passing)
         //          one and cannot name the culprit.
-        output [11:0] debug_teardown, // {fail_mask, gate_fail_sat, timeout_sat}
+        // [15:12] = NON-STICKY mask of the FIRST failing evaluation only —
+        //           the sticky OR below cannot distinguish one all-zero
+        //           failure from several hierarchical single-bit failures
+        //           (CR loss forces EQ/symbol clear by mask construction).
+        output [15:0] debug_teardown, // {first_mask, fail_mask, gate_fail_sat, timeout_sat}
+        // teardown-relevant AUX reply errors during the periodic check
+        // (state == check_link): short replies and non-ACK replies both
+        // jump straight to `error` and were previously UNCOUNTED — credible
+        // sources of teardowns the gate/timeout counters cannot see.
+        output [7:0] debug_aux_err,   // {short_reply_sat[3:0], nack_sat[3:0]}
+        // 1-clk pulse on a failing check_wait evaluation (snapshot trigger)
+        output reg   gate_fail_evt,
+        // completed periodic status reads: increments when the 0x204 byte
+        // of a check_link read is delivered (freshness token)
+        output reg [3:0] status_seq,
         output [7:0] debug_sink,  // DPCD 0x205 SINK_STATUS (latched each status read)
         output [15:0] debug_rx,   // = {last byte, sync hits, rx bytes} from aux_interface
         //------------------------------
@@ -182,6 +196,7 @@ module aux_channel #(
     reg  [7:0]  next_state       = error;
     reg  [7:0]  state_on_success = error;
     reg         retry_now;
+    initial begin gate_fail_evt = 1'b0; status_seq = 4'd0; end
     reg  [28:0] retry_count;
     reg         link_check_now;
     reg [26:0]  link_check_count;
@@ -237,10 +252,15 @@ module aux_channel #(
     reg [1:0] dbg_gate_fail  = 2'd0;
     reg [3:0] dbg_gate_fail_sat = 4'd0;   // saturating twin, for attribution
     reg [3:0] dbg_timeout_sat   = 4'd0;
-    reg [3:0] dbg_fail_mask     = 4'd0;   // which locks were clear at a failure
+    reg [3:0] dbg_fail_mask     = 4'd0;   // sticky OR over all failures
+    reg [3:0] dbg_first_mask    = 4'd0;   // the FIRST failure only
+    reg       first_latched     = 1'b0;
+    reg [3:0] dbg_short_sat     = 4'd0;   // short replies in check_link
+    reg [3:0] dbg_nack_sat      = 4'd0;   // non-ACK replies in check_link
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
-    assign debug_teardown = {dbg_fail_mask, dbg_gate_fail_sat, dbg_timeout_sat};
+    assign debug_teardown = {dbg_first_mask, dbg_fail_mask, dbg_gate_fail_sat, dbg_timeout_sat};
+    assign debug_aux_err  = {dbg_short_sat, dbg_nack_sat};
     assign debug_sink = dbg_sink_status;
     // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
     // read): bit0/1 = RECEIVE_PORT_0/1 "sink is receiving a valid main
@@ -347,6 +367,10 @@ always @(posedge clk) begin
     // Are we going to change state this cycle?
     //-----------------------------------------
     msg_de <= 1'b0;
+    gate_fail_evt <= 1'b0;
+    // freshness token: the 0x204 byte of a status read was just delivered
+    if (status_de == 1'b1 && aux_addr == 8'd4)
+        status_seq <= status_seq + 4'd1;
      
     if(next_state != state && !afe_hold) begin
         //-----------------------------------------------------------
@@ -468,6 +492,12 @@ always @(posedge clk) begin
                                     dbg_fail_mask <= dbg_fail_mask |
                                         ~{clock_locked_i, equ_locked_i,
                                           symbol_locked_i, align_locked_i};
+                                    if (!first_latched) begin
+                                        first_latched  <= 1'b1;
+                                        dbg_first_mask <= ~{clock_locked_i, equ_locked_i,
+                                                            symbol_locked_i, align_locked_i};
+                                    end
+                                    gate_fail_evt <= 1'b1;
                                     state_on_success <= error;
                                 end
                                 end
@@ -667,6 +697,8 @@ always @(posedge clk) begin
             // Is this a short read?
             if(rx_byte_count != expected-1 && aux_rx_empty == 1'b1) begin
                 next_state <= error;
+                if (state == check_link && dbg_short_sat != 4'hF)
+                    dbg_short_sat <= dbg_short_sat + 4'd1;
             end
                                 
             if(rx_byte_count == 8'h00) begin
@@ -681,6 +713,8 @@ always @(posedge clk) begin
                 //---------------------------------------------------- 
                 if(aux_rx_data != 8'h00) begin
                     next_state <= error;
+                    if (state == check_link && dbg_nack_sat != 4'hF)
+                        dbg_nack_sat <= dbg_nack_sat + 4'd1;
                 end
                 if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
                     next_state <= state_on_success;

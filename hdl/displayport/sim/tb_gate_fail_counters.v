@@ -17,7 +17,8 @@ module tb_gate_fail_counters;
     always #5 clk = ~clk;
 
     wire [7:0]  debug_gate;
-    wire [11:0] debug_teardown;
+    wire [15:0] debug_teardown;
+    wire [7:0]  debug_aux_err;
     // drive the four lock inputs so the fail-mask can be checked
     // start with ONLY align clear, so the sticky fail-mask has a specific
     // expected value; an all-low start would OR in every bit immediately
@@ -25,6 +26,7 @@ module tb_gate_fail_counters;
     aux_channel #(.BLIND_SINK(0), .AFE_ADJUST(0)) dut (
         .clk(clk), .train_set_byte(16'h0606), .afe_busy(1'b0),
         .debug_pmod(), .debug_gate(debug_gate), .debug_teardown(debug_teardown),
+        .debug_aux_err(debug_aux_err), .gate_fail_evt(), .status_seq(),
         .debug_sink(), .debug_rx(), .edid_de(), .dp_reg_de(), .adjust_de(),
         .status_de(), .aux_addr(), .aux_data(), .link_count(3'd2),
         .hpd_irq(1'b0), .hpd_present(1'b1),
@@ -89,17 +91,19 @@ module tb_gate_fail_counters;
 
         // ---- fail-mask: does it name the bit that was clear? ----------
         // every failure so far had ONLY align clear -> mask must be 0001
-        if (debug_teardown[11:8] !== 4'b0001) begin
+        if (debug_teardown[11:8] !== 4'b0001 || debug_teardown[15:12] !== 4'b0001) begin
             errors = errors + 1;
-            $display("FAIL: align-only failure gave mask %04b (want 0001)", debug_teardown[11:8]);
-        end else $display("  ok: align-only failure -> mask 0001");
+            $display("FAIL: align-only failures: sticky %04b first %04b (want 0001/0001)",
+                     debug_teardown[11:8], debug_teardown[15:12]);
+        end else $display("  ok: align-only failure -> sticky 0001, first 0001");
         // now only SYMBOL clear -> mask accumulates bit1 as well (sticky OR)
         clk_lk = 1; equ_lk = 1; sym_lk = 0; aln_lk = 1;
         drive_gate_fail;
-        if (debug_teardown[11:8] !== 4'b0011) begin
+        if (debug_teardown[11:8] !== 4'b0011 || debug_teardown[15:12] !== 4'b0001) begin
             errors = errors + 1;
-            $display("FAIL: after symbol failure mask %04b (want 0011 sticky)", debug_teardown[11:8]);
-        end else $display("  ok: symbol failure ORs in -> mask 0011 (sticky)");
+            $display("FAIL: after symbol failure: sticky %04b (want 0011), first %04b (must STAY 0001)",
+                     debug_teardown[11:8], debug_teardown[15:12]);
+        end else $display("  ok: symbol failure -> sticky 0011, first STAYS 0001");
 
         if (errors == 0)
             $display("PASS: counters track (2-bit == sat mod 4) AND the fail-mask names which lock bit was clear");

@@ -186,12 +186,14 @@ module a2mega_dp_test_top (
     logic [15:0] aux_dbg_rx;
     logic [7:0]  aux_dbg_gate;
     logic [15:0] aux_dbg_adjust;
-    logic [15:0] aux_dbg_chstate;
+    logic [23:0] aux_dbg_chstate;   // raw {0x204, 0x203, 0x202}
     logic [5:0]  aux_dbg_afe;    // M5 applied AFE lane 0 (telemetry M:)
     logic [3:0]  aux_dbg_afe1;   // M5 applied AFE lane 1 (telemetry M1:)
     logic [11:0] aux_dbg_evt;    // M5 {zero_seen, gate_drops, applies} (telemetry N:)
     logic [3:0]  aux_dbg_wdog;   // {cold-restart forcing, attempts[2:0]} (telemetry W:)
-    logic [11:0] aux_dbg_tear;   // {fail_mask, gate_fail_sat, timeout_sat} (T:)
+    logic [15:0] aux_dbg_tear;   // {first_mask, fail_mask, gate_sat, timeout_sat}
+    logic [7:0]  aux_dbg_auxerr; // {short_reply_sat, nack_sat} (J:)
+    logic [31:0] aux_dbg_snap;   // first-failure snapshot (Z:)
     logic [7:0]  aux_dbg_sink;
     logic [7:0]  aux_dbg_caps;
     logic       hpd_present_w;
@@ -271,6 +273,8 @@ module a2mega_dp_test_top (
         .debug_evt         (aux_dbg_evt),
         .debug_wdog        (aux_dbg_wdog),
         .debug_teardown    (aux_dbg_tear),
+        .debug_aux_err     (aux_dbg_auxerr),
+        .debug_snapshot    (aux_dbg_snap),
         .debug_sink        (aux_dbg_sink),
         .debug_caps        (aux_dbg_caps),
         .clk_symbol_out    (clk_sym_w),
@@ -361,7 +365,7 @@ module a2mega_dp_test_top (
     logic [16:0] hp_s0, hp_s;
     logic [7:0]  gate_s0, gate_s;
     logic [15:0] adj_s0, adj_s;
-    logic [15:0] chst_s0, chst_s;
+    logic [23:0] chst_s0, chst_s;
     logic [27:0] symd_s0, symd_s;
     logic [7:0] snk_s0, snk_s, cap_s0, cap_s;
     logic [5:0] afe_s0, afe_s;
@@ -369,7 +373,9 @@ module a2mega_dp_test_top (
     logic [11:0] evt_s0, evt_s;    // {zero_seen, gate_drops, applies}
     logic [7:0]  d4_cnt_s0, d4_cnt_s;  // FREE-RUNNING D4 assertion count
     logic [3:0]  wdog_s0, wdog_s;      // watchdog {forcing, attempts}
-    logic [11:0] tear_s0, tear_s;      // {fail_mask, gate_fail_sat, timeout_sat}
+    logic [15:0] tear_s0, tear_s;      // {first,sticky,gate,timeout}
+    logic [7:0]  aerr_s0, aerr_s;      // {short, nack}
+    logic [31:0] snap_s0, snap_s;      // first-failure snapshot
     // driven by the acquisition-counter block further down; declared here
     // because the telemetry sampler below consumes d4_cnt
     logic        d4_r   = 1'b0;
@@ -395,6 +401,8 @@ module a2mega_dp_test_top (
         d4_cnt_s0 <= d4_cnt;        d4_cnt_s <= d4_cnt_s0;
         wdog_s0 <= aux_dbg_wdog;    wdog_s <= wdog_s0;
         tear_s0 <= aux_dbg_tear;    tear_s <= tear_s0;
+        aerr_s0 <= aux_dbg_auxerr;  aerr_s <= aerr_s0;
+        snap_s0 <= aux_dbg_snap;    snap_s <= snap_s0;
     end
 
     // Y: link/video rise odometer — counts every establish (flg_s[1]) and
@@ -415,7 +423,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 125;  // msg_idx is [6:0] (127 max)
+    localparam int MSG_LEN = 145;  // five lines; msg_idx is [7:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -461,70 +469,66 @@ module a2mega_dp_test_top (
             msg[88]=" "; msg[89]=" "; msg[90]=" "; msg[91]=" ";
             msg[92]=" "; msg[93]=" "; msg[94]=" "; msg[95]=" ";
             msg[96]=" "; msg[97]=" "; msg[98]=" "; msg[99]=" ";
-            msg[100]=8'h0A; msg[101]=" "; msg[102]=" "; msg[103]=" ";
+            msg[100]=" "; msg[101]=8'h0A; msg[102]=" "; msg[103]=" ";
             msg[104]=" "; msg[105]=" "; msg[106]=" "; msg[107]=" ";
             msg[108]=" "; msg[109]=" "; msg[110]=" "; msg[111]=" ";
             msg[112]=" "; msg[113]=" "; msg[114]=" "; msg[115]=" ";
             msg[116]=" "; msg[117]=" "; msg[118]=" "; msg[119]=" ";
             msg[120]=" "; msg[121]=" "; msg[122]=" "; msg[123]=" ";
-            msg[124]=8'h0A;
+            msg[124]=" "; msg[125]=8'h0A; msg[126]=" "; msg[127]=" ";
+            msg[128]=" "; msg[129]=" "; msg[130]=" "; msg[131]=" ";
+            msg[132]=" "; msg[133]=" "; msg[134]=" "; msg[135]=" ";
+            msg[136]=" "; msg[137]=" "; msg[138]=" "; msg[139]=" ";
+            msg[140]=" "; msg[141]=" "; msg[142]=" "; msg[143]=" ";
+            msg[144]=8'h0A;
         end else begin
         // ---------------------------------------------------------------
-        // FOUR SHORT LINES, each <= 39 printable chars (08-24).
-        // The ESP32 console is 39 columns (osd_console.c CON_COLS) and
-        // osd_log() formats into char[CON_COLS+1], so ANY longer line is
-        // chunked and LOSES ONE CHARACTER PER BOUNDARY — that corrupted
-        // K:'s low nibble and made the two gate_fail counters appear to
-        // disagree when RTL simulation proves they track exactly
-        // (tb_gate_fail_counters.v). Staying under the console width
-        // removes the transport loss entirely.
-        // Line 1 keeps the "DP S:" prefix so existing greps still match.
+        // FIVE SHORT LINES, each <= 39 printable chars — the ESP32 console
+        // is 39 columns and DROPS A CHARACTER at every longer-line chunk
+        // boundary (see acquisition_matrix_results.md). This block and the
+        // idle padding are GENERATED together; keep them in sync.
+        //   T: = {first_fail_mask, sticky_fail_mask, gate_fails, timeouts}
+        //   Z: = first-failure snapshot {0x204,0x203,0x202, seq, tsl_100ms}
+        //   J: = {short_replies, non_ACKs} during check_link
         // ---------------------------------------------------------------
-        // L1: DP S:xx D:xx F:xx HLVC:xxxx P:x E:xx            (36 chars)
-        msg[0]="D"; msg[1]="P"; msg[2]=" ";
-        msg[3]="S"; msg[4]=":"; msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]); msg[7]=" ";
-        msg[8]="D"; msg[9]=":"; msg[10]=hexch(dbg_s[7:4]); msg[11]=hexch(dbg_s[3:0]); msg[12]=" ";
-        msg[13]="F"; msg[14]=":"; msg[15]=hexch(frm_s[7:4]); msg[16]=hexch(frm_s[3:0]); msg[17]=" ";
-        msg[18]="H"; msg[19]="L"; msg[20]="V"; msg[21]="C"; msg[22]=":";
-        msg[23]=8'h30 + 8'(flg_s[2]); msg[24]=8'h30 + 8'(flg_s[1]);
-        msg[25]=8'h30 + 8'(flg_s[0]); msg[26]=8'h30 + 8'(c100_s); msg[27]=" ";
+        msg[0]="D"; msg[1]="P"; msg[2]=" "; msg[3]="S";
+        msg[4]=":"; msg[5]=hexch(st_s[7:4]); msg[6]=hexch(st_s[3:0]); msg[7]=" ";
+        msg[8]="D"; msg[9]=":"; msg[10]=hexch(dbg_s[7:4]); msg[11]=hexch(dbg_s[3:0]);
+        msg[12]=" "; msg[13]="F"; msg[14]=":"; msg[15]=hexch(frm_s[7:4]);
+        msg[16]=hexch(frm_s[3:0]); msg[17]=" "; msg[18]="H"; msg[19]="L";
+        msg[20]="V"; msg[21]="C"; msg[22]=":"; msg[23]=8'h30 + 8'(flg_s[2]);
+        msg[24]=8'h30 + 8'(flg_s[1]); msg[25]=8'h30 + 8'(flg_s[0]); msg[26]=8'h30 + 8'(c100_s); msg[27]=" ";
         msg[28]="P"; msg[29]=":"; msg[30]=8'h30 + 8'(hp_s[16]); msg[31]=" ";
         msg[32]="E"; msg[33]=":"; msg[34]=hexch(hp_s[7:4]); msg[35]=hexch(hp_s[3:0]);
         msg[36]=8'h0A;
-        // L2: D2 R:x A:xxxx G:xx Y:xx C:xxxx                  (30 chars)
-        msg[37]="D"; msg[38]="2"; msg[39]=" ";
-        msg[40]="R"; msg[41]=":"; msg[42]=hexch(hp_s[15:12]); msg[43]=" ";
-        msg[44]="A"; msg[45]=":"; msg[46]=hexch(adj_s[15:12]); msg[47]=hexch(adj_s[11:8]);
-        msg[48]=hexch(adj_s[7:4]); msg[49]=hexch(adj_s[3:0]); msg[50]=" ";
-        msg[51]="G"; msg[52]=":"; msg[53]=hexch(gate_s[7:4]); msg[54]=hexch(gate_s[3:0]); msg[55]=" ";
-        msg[56]="Y"; msg[57]=":"; msg[58]=hexch(link_rises); msg[59]=hexch(vid_rises); msg[60]=" ";
-        msg[61]="C"; msg[62]=":"; msg[63]=hexch(chst_s[15:12]); msg[64]=hexch(chst_s[11:8]);
-        msg[65]=hexch(chst_s[7:4]); msg[66]=hexch(chst_s[3:0]);
-        msg[67]=8'h0A;
-        // L3: D3 Q:xxxxxxx K:xx X:xx W:x T:xx                 (31 chars)
-        //   K: is now the FULL sink status — the truncation that forced the
-        //   K2: duplicate is gone, so K2: is retired.
-        msg[68]="D"; msg[69]="3"; msg[70]=" ";
-        msg[71]="Q"; msg[72]=":"; msg[73]=hexch(symd_s[27:24]); msg[74]=hexch(symd_s[23:20]);
-        msg[75]=hexch(symd_s[19:16]); msg[76]=hexch(symd_s[15:12]); msg[77]=hexch(symd_s[11:8]);
-        msg[78]=hexch(symd_s[7:4]); msg[79]=hexch(symd_s[3:0]); msg[80]=" ";
-        msg[81]="K"; msg[82]=":"; msg[83]=hexch(snk_s[7:4]); msg[84]=hexch(snk_s[3:0]); msg[85]=" ";
-        msg[86]="X"; msg[87]=":"; msg[88]=hexch(cap_s[7:4]); msg[89]=hexch(cap_s[3:0]); msg[90]=" ";
-        msg[91]="W"; msg[92]=":"; msg[93]=hexch(wdog_s); msg[94]=" ";
-        // T:<fail_mask><gate_fail><timeout> — fail_mask names WHICH lock
-        // bit was clear at a failing check_wait: {clock,equ,symbol,align},
-        // sticky-ORed over every failure (sim: tb_gate_fail_counters).
-        msg[95]="T"; msg[96]=":"; msg[97]=hexch(tear_s[11:8]);
-        msg[98]=hexch(tear_s[7:4]); msg[99]=hexch(tear_s[3:0]);
-        msg[100]=8'h0A;
-        // L4: D4 M:xx M1:x N:xxx L:xx                         (23 chars)
-        msg[101]="D"; msg[102]="4"; msg[103]=" ";
-        msg[104]="M"; msg[105]=":"; msg[106]=hexch({2'b0, afe_s[5:4]}); msg[107]=hexch(afe_s[3:0]); msg[108]=" ";
-        msg[109]="M"; msg[110]="1"; msg[111]=":"; msg[112]=hexch(afe1_s); msg[113]=" ";
-        msg[114]="N"; msg[115]=":"; msg[116]=hexch(evt_s[11:8]); msg[117]=hexch(evt_s[7:4]);
-        msg[118]=hexch(evt_s[3:0]); msg[119]=" ";
-        msg[120]="L"; msg[121]=":"; msg[122]=hexch(d4_cnt_s[7:4]); msg[123]=hexch(d4_cnt_s[3:0]);
-        msg[124]=8'h0A;
+        msg[37]="D"; msg[38]="2"; msg[39]=" "; msg[40]="R";
+        msg[41]=":"; msg[42]=hexch(hp_s[15:12]); msg[43]=" "; msg[44]="A";
+        msg[45]=":"; msg[46]=hexch(adj_s[15:12]); msg[47]=hexch(adj_s[11:8]); msg[48]=hexch(adj_s[7:4]);
+        msg[49]=hexch(adj_s[3:0]); msg[50]=" "; msg[51]="G"; msg[52]=":";
+        msg[53]=hexch(gate_s[7:4]); msg[54]=hexch(gate_s[3:0]); msg[55]=" "; msg[56]="Y";
+        msg[57]=":"; msg[58]=hexch(link_rises); msg[59]=hexch(vid_rises); msg[60]=" ";
+        msg[61]="C"; msg[62]=":"; msg[63]=hexch(chst_s[23:20]); msg[64]=hexch(chst_s[19:16]);
+        msg[65]=hexch(chst_s[7:4]); msg[66]=hexch(chst_s[3:0]); msg[67]=8'h0A;
+        msg[68]="D"; msg[69]="3"; msg[70]=" "; msg[71]="Q";
+        msg[72]=":"; msg[73]=hexch(symd_s[27:24]); msg[74]=hexch(symd_s[23:20]); msg[75]=hexch(symd_s[19:16]);
+        msg[76]=hexch(symd_s[15:12]); msg[77]=hexch(symd_s[11:8]); msg[78]=hexch(symd_s[7:4]); msg[79]=hexch(symd_s[3:0]);
+        msg[80]=" "; msg[81]="K"; msg[82]=":"; msg[83]=hexch(snk_s[7:4]);
+        msg[84]=hexch(snk_s[3:0]); msg[85]=" "; msg[86]="X"; msg[87]=":";
+        msg[88]=hexch(cap_s[7:4]); msg[89]=hexch(cap_s[3:0]); msg[90]=" "; msg[91]="W";
+        msg[92]=":"; msg[93]=hexch(wdog_s); msg[94]=" "; msg[95]="T";
+        msg[96]=":"; msg[97]=hexch(tear_s[15:12]); msg[98]=hexch(tear_s[11:8]); msg[99]=hexch(tear_s[7:4]);
+        msg[100]=hexch(tear_s[3:0]); msg[101]=8'h0A;
+        msg[102]="D"; msg[103]="4"; msg[104]=" "; msg[105]="M";
+        msg[106]=":"; msg[107]=hexch({2'b0, afe_s[5:4]}); msg[108]=hexch(afe_s[3:0]); msg[109]=" ";
+        msg[110]="M"; msg[111]="1"; msg[112]=":"; msg[113]=hexch(afe1_s);
+        msg[114]=" "; msg[115]="N"; msg[116]=":"; msg[117]=hexch(evt_s[11:8]);
+        msg[118]=hexch(evt_s[7:4]); msg[119]=hexch(evt_s[3:0]); msg[120]=" "; msg[121]="L";
+        msg[122]=":"; msg[123]=hexch(d4_cnt_s[7:4]); msg[124]=hexch(d4_cnt_s[3:0]); msg[125]=8'h0A;
+        msg[126]="D"; msg[127]="5"; msg[128]=" "; msg[129]="Z";
+        msg[130]=":"; msg[131]=hexch(snap_s[31:28]); msg[132]=hexch(snap_s[27:24]); msg[133]=hexch(snap_s[23:20]);
+        msg[134]=hexch(snap_s[19:16]); msg[135]=hexch(snap_s[15:12]); msg[136]=hexch(snap_s[11:8]); msg[137]=hexch(snap_s[7:4]);
+        msg[138]=hexch(snap_s[3:0]); msg[139]=" "; msg[140]="J"; msg[141]=":";
+        msg[142]=hexch(aerr_s[7:4]); msg[143]=hexch(aerr_s[3:0]); msg[144]=8'h0A;
         end
     end
 
@@ -532,7 +536,7 @@ module a2mega_dp_test_top (
     logic [8:0]  baud_cnt = '0;
     logic        baud_tick;
     logic [24:0] msg_timer = '0;
-    logic [6:0]  msg_idx = MSG_LEN[6:0];   // idle when == MSG_LEN
+    logic [7:0]  msg_idx = MSG_LEN[7:0];   // idle when == MSG_LEN
     logic [3:0]  bit_idx = '0;
     logic [9:0]  shifter = 10'h3FF;
     always_ff @(posedge clk50_in) begin
@@ -541,7 +545,7 @@ module a2mega_dp_test_top (
         else baud_cnt <= baud_cnt + 9'd1;
 
         msg_timer <= msg_timer + 25'd1;
-        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[6:0]) begin
+        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[7:0]) begin
             msg_idx <= '0;                 // start a new message
             bit_idx <= 4'd10;              // force reload on next tick
             line_is_reg <= ~line_is_reg;   // alternate status / register
@@ -552,7 +556,7 @@ module a2mega_dp_test_top (
             reg_done_l <= drp_done;
         end
 
-        if (baud_tick && msg_idx != MSG_LEN[6:0]) begin
+        if (baud_tick && msg_idx != MSG_LEN[7:0]) begin
             if (bit_idx >= 4'd10) begin    // load next char: start+8+stop
                 shifter <= {1'b1, msg[msg_idx], 1'b0};
                 bit_idx <= 4'd0;
@@ -564,7 +568,7 @@ module a2mega_dp_test_top (
             end
         end
     end
-    assign uart_tx = (msg_idx == MSG_LEN[6:0]) ? 1'b1 : shifter[0];
+    assign uart_tx = (msg_idx == MSG_LEN[7:0]) ? 1'b1 : shifter[0];
 
     // ------------------------------------------------------------------
     // Line-rate verification: count clk_sym (the GTR12 TX word clock,
@@ -617,7 +621,7 @@ module a2mega_dp_test_top (
     // know, so they keep the transmit-side meaning.
     logic [15:0] adj_chst_led;
     always_ff @(posedge clk50_in)
-        adj_chst_led <= aux_dbg_chstate;    // loose 1FF sample is fine for an LED
+        adj_chst_led <= aux_dbg_chstate[15:0];  // [7:0]=0x202 is all D4 uses
     wire sink_confirmed = (AUX_BLIND != 0) ? 1'b1
                                            : (adj_chst_led[7:0] == 8'h77);
 
