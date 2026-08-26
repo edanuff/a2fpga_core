@@ -63,7 +63,7 @@ module tb_gate_fail_counters;
     // ---- observe-window DUT: same drive, GATE_OBSERVE=1 ----------------
     wire [7:0]  o_gate; wire [15:0] o_tear; wire [15:0] o_aerr;
     aux_channel #(.BLIND_SINK(0), .AFE_ADJUST(0),
-                  .GATE_OBSERVE(1), .GATE_OBSERVE_CLKS(30'd100_000)) dut_o (
+                  .GATE_GRACE(1), .GATE_GRACE_CLKS(30'd100_000)) dut_o (
         .clk(clk), .train_set_byte(16'h0606), .afe_busy(1'b0),
         .debug_pmod(), .debug_gate(o_gate), .debug_teardown(o_tear),
         .debug_aux_err(o_aerr), .debug_err_detail(), .gate_fail_evt(), .status_seq(),
@@ -155,8 +155,35 @@ module tb_gate_fail_counters;
                      o_tear[7:4], dut_o.state_on_success);
         end else $display("  ok: post-window failure tears down normally (gate=%0d)", o_tear[7:4]);
 
+        // ---- late-reply drain: stray bytes with expected==0 are benign --
+        // (previously: expected-1 wrapped to 0xFF and the short-read check
+        // tore down a healthy established link on a stale reply)
+        begin : late_reply
+            reg [7:0] err_before;
+            err_before = {4'd0, dut.dbg_short_sat};
+            @(negedge clk);
+            force dut.state       = dut.link_established;
+            force dut.next_state  = dut.link_established;
+            force dut.expected    = 8'h00;
+            force dut.channel_busy = 1'b0;
+            force dut.aux_rx_empty = 1'b0;   // stray bytes present
+            force dut.aux_rx_data  = 8'hA5;
+            repeat (4) @(posedge clk);       // several beats of draining
+            force dut.aux_rx_empty = 1'b1;   // drained
+            repeat (2) @(posedge clk);
+            release dut.state; release dut.next_state; release dut.expected;
+            release dut.channel_busy; release dut.aux_rx_empty; release dut.aux_rx_data;
+            @(negedge clk);
+            if (dut.state == dut.error || {4'd0, dut.dbg_short_sat} != err_before) begin
+                errors = errors + 1;
+                $display("FAIL: late reply with expected==0 caused error/short-count (state=%02x short=%0d)",
+                         dut.state, dut.dbg_short_sat);
+            end else
+                $display("  ok: late reply with expected==0 DRAINED — no error, no count");
+        end
+
         if (errors == 0)
-            $display("PASS: counters track (2-bit == sat mod 4) AND the fail-mask names the clear bit AND the observe window suppresses-then-restores");
+            $display("PASS: counters track (2-bit == sat mod 4) AND the fail-mask names the clear bit AND the grace window suppresses-then-restores AND late replies drain");
         else
             $display("FAIL: %0d error(s) — RTL bug reproduced in simulation", errors);
         $finish;

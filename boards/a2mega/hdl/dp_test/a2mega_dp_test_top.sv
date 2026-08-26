@@ -234,11 +234,13 @@ module a2mega_dp_test_top (
         // via the placer effort switch (identical netlist) to test whether
         // the row-84 regression tracks the gate or the placement.
         .ENABLE_PHASE_DONE_GATE(1),
-        // ⚠ DIAGNOSTIC BUILD: gate teardowns are SUPPRESSED for ~6 s after
-        // establishing (recorded in J:'s 4th digit). Answers whether the
-        // converter's 01/00/80 status self-recovers without retraining and
-        // whether the picture stays up meanwhile. SET BACK TO 0 TO SHIP.
-        .GATE_OBSERVE(1),
+        // Gate grace period, PRODUCTION (08-24): rides out the converter's
+        // ~7 s post-establish status settling (n=2 identical bad cycles:
+        // 6 suppressed polls, stable picture throughout) instead of the
+        // 6-blink teardown storms. 8 s window; after it, teardown/retrain
+        // behavior is unchanged (the 08-18 Anker recovery lesson).
+        .GATE_GRACE(1),
+        .GATE_GRACE_CLKS(30'd800_000_000),
         .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.

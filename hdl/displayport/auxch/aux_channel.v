@@ -84,17 +84,22 @@ module aux_channel #(
     // registered train_set_byte (msg 0x19) instead of the fixed 0x06
     // constant (msg 0x18). 0 = legacy, byte-identical.
     parameter AFE_ADJUST = 0,
-    // DIAGNOSTIC ONLY (08-24, observation-window experiment): while the
-    // link has been in the established set for less than GATE_OBSERVE_CLKS,
-    // a failing check_wait evaluation is SUPPRESSED — the ladder stays in
-    // link_established and keeps polling — instead of tearing down. This
-    // answers, on hardware: (1) does the converter's 01/00/80 status
-    // recover to 77/xx/x1 WITHOUT training patterns being sent, and
-    // (2) does the picture stay up while the DP status reads bad. The
-    // window is bounded so a genuine persistent loss still retrains
-    // (window expiry restores normal teardown). NOT for production.
-    parameter GATE_OBSERVE = 0,
-    parameter GATE_OBSERVE_CLKS = 30'd600_000_000  // ~6 s @ 100 MHz
+    // GATE GRACE PERIOD (08-24, promoted from the observation-window
+    // diagnostic after hardware evidence): for GATE_GRACE_CLKS after the
+    // link enters the established set, a failing periodic check is
+    // recorded but NOT acted on — the ladder stays established and keeps
+    // polling. Grounds (acquisition_matrix_results.md, n=2 identical bad
+    // cycles): the DP->HDMI converter reports regressed lane status
+    // (0x202=01/00, INTERLANE_ALIGN 0, LINK_STATUS_UPDATED set) for ~7 s
+    // after first qualifying while the picture is demonstrably stable;
+    // teardown+retrain during that phase fixes nothing and produced the
+    // 6-blink acquisition storms. The window is BOUNDED: after it, the
+    // 08-18 load-bearing behavior (teardown -> recovery-by-retrain, the
+    // Anker lesson) applies unchanged, so a genuine persistent loss still
+    // retrains — at most delayed by the grace period after an establish.
+    // Default 0 = byte-identical legacy behavior.
+    parameter GATE_GRACE = 0,
+    parameter GATE_GRACE_CLKS = 30'd800_000_000  // ~8 s @ 100 MHz
 )(
         input        clk,
         // ready-to-send TRAINING_LANEx_SET values from afe_adjust_seq,
@@ -290,7 +295,7 @@ module aux_channel #(
     reg        inest_d          = 1'b0;
     wire in_established_set = (state == link_established) ||
                               (state == check_link) || (state == check_wait);
-    wire obs_active = (GATE_OBSERVE != 0) && (obs_timer < GATE_OBSERVE_CLKS);
+    wire obs_active = (GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS);
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
     assign debug_teardown = {dbg_first_mask, dbg_fail_mask, dbg_gate_fail_sat, dbg_timeout_sat};
@@ -410,10 +415,19 @@ always @(posedge clk) begin
         if (obs_timer != 30'h3FFFFFFF) obs_timer <= obs_timer + 30'd1;
     end else
         obs_timer <= 30'd0;
-    // centralized first-teardown detail (from the established set)
-    if (err_evt && !err_detail_v) begin
-        err_detail_v <= 1'b1;
-        err_detail   <= {err_reason, err_from, err_exp, err_rxc};
+    // centralized first-teardown detail (from the established set).
+    // The per-reason counters are ALSO incremented here — once per tagged
+    // event — instead of at the sites: the short-read site evaluates per
+    // received byte and over-counted (accounting discrepancy, 08-24).
+    if (err_evt) begin
+        if (!err_detail_v) begin
+            err_detail_v <= 1'b1;
+            err_detail   <= {err_reason, err_from, err_exp, err_rxc};
+        end
+        if (err_reason == 4'd1 && dbg_short_sat != 4'hF)
+            dbg_short_sat <= dbg_short_sat + 4'd1;
+        if (err_reason == 4'd2 && dbg_nack_sat != 4'hF)
+            dbg_nack_sat <= dbg_nack_sat + 4'd1;
     end
     // OTHER: an entry into `error` from the established set that no site
     // tagged — the safety net that catches teardown paths the reason
@@ -545,10 +559,10 @@ always @(posedge clk) begin
                                 if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
                                     state_on_success <= link_established;
                                 end else if (obs_active) begin
-                                    // OBSERVATION WINDOW: record, do NOT
-                                    // tear down; stay established and keep
-                                    // polling so the status trajectory is
-                                    // visible in C: at the poll cadence.
+                                    // GRACE PERIOD: record, do NOT tear
+                                    // down; stay established and keep
+                                    // polling (status stays visible in C:
+                                    // at the poll cadence).
                                     if (dbg_obs_sat != 4'hF)
                                         dbg_obs_sat <= dbg_obs_sat + 4'd1;
                                     state_on_success <= link_established;
@@ -774,14 +788,16 @@ always @(posedge clk) begin
     status_de  <= 1'b0;
     if(channel_busy == 1'b0) begin
         if(just_read_from_rx == 1'b1) begin
-            // Is this a short read?
-            if(rx_byte_count != expected-1 && aux_rx_empty == 1'b1) begin
+            // Is this a short read? ONLY meaningful when a reply is
+            // actually outstanding: with expected==0 the expected-1
+            // comparison wraps to 0xFF and a LATE reply spilling into
+            // link_established/check_wait became a spurious teardown
+            // (caught on hardware: B: reason=short from 0x2E, expected=0,
+            // rx=8 — a stale check_link reply). With expected==0 the
+            // bytes are simply DRAINED (aux_rx_rd_en already empties the
+            // FIFO) and ignored.
+            if(expected != 8'h00 && rx_byte_count != expected-1 && aux_rx_empty == 1'b1) begin
                 next_state <= error;
-                // scope: the whole established set — a LATE reply spilling
-                // into a state with expected==0 (expected-1 wraps to 0xFF)
-                // lands here and was previously invisible
-                if (in_established_set && dbg_short_sat != 4'hF)
-                    dbg_short_sat <= dbg_short_sat + 4'd1;
                 if (in_established_set) begin
                     err_evt <= 1'b1; err_reason <= 4'd1;
                     err_from <= state; err_exp <= expected;
@@ -799,10 +815,8 @@ always @(posedge clk) begin
                 // is test for "In progress" or "Again" requests, and 
                 // retry the current operation.
                 //---------------------------------------------------- 
-                if(aux_rx_data != 8'h00) begin
+                if(expected != 8'h00 && aux_rx_data != 8'h00) begin
                     next_state <= error;
-                    if (in_established_set && dbg_nack_sat != 4'hF)
-                        dbg_nack_sat <= dbg_nack_sat + 4'd1;
                     if (in_established_set) begin
                         err_evt <= 1'b1; err_reason <= 4'd2;
                         err_from <= state; err_exp <= expected;

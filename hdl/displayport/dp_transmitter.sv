@@ -81,11 +81,14 @@ module dp_transmitter #(
     // Row 84 isolation switch: 0 = never assert phase_done (pre-gate
     // decision), 1 = the protocol gate of design-doc §14.
     parameter bit    ENABLE_PHASE_DONE_GATE = 1,
-    // DIAGNOSTIC (08-24): bounded observation window — a failing periodic
-    // link check within ~6 s of establishing records instead of tearing
-    // down (answers whether the converter's bad status self-recovers
-    // without training patterns). NOT for production builds.
-    parameter bit    GATE_OBSERVE = 0,
+    // Gate grace period (08-24, hardware-evidenced): failing periodic
+    // link checks within GATE_GRACE_CLKS of establishing are recorded,
+    // not acted on — rides out the DP->HDMI converter's ~7 s status
+    // settling (during which the picture is provably stable) instead of
+    // teardown-storming. Bounded: after the window, the load-bearing
+    // teardown->retrain behavior applies unchanged. 0 = legacy.
+    parameter bit    GATE_GRACE = 0,
+    parameter        GATE_GRACE_CLKS = 30'd800_000_000,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -575,7 +578,8 @@ module dp_transmitter #(
                          .BLIND_SINK(BLIND_SINK),
                          .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS),
                          .AFE_ADJUST(ENABLE_AFE_ADJUST),
-                         .GATE_OBSERVE(GATE_OBSERVE)) i_channel_management(
+                         .GATE_GRACE(GATE_GRACE),
+                         .GATE_GRACE_CLKS(GATE_GRACE_CLKS)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
         .afe_busy             (afe_busy_w),
