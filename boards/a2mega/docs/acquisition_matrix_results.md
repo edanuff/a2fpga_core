@@ -553,3 +553,49 @@ are qualitatively right, not yet quantitatively trustworthy.
   fix the expected==0 wraparound so late replies are DRAINED, not fatal.
 - Next diagnostic iteration if wanted: window 6->10 s to test for a
   zero-teardown cycle; fix the per-byte counting.
+
+## 🕳️ STABLE-DARK CAPTURED UNDER FULL INSTRUMENTATION (08-24, build 7b872b57)
+
+Third cycle on the grace build: colorbars appeared fast, DROPPED after a
+few seconds, screen stayed black. Telemetry, sustained for minutes:
+
+```
+HLVC:111x  C:8177  K:00  Y:18  L:08  T:0000  J:0000  B:0000000  W:0 -> 7
+```
+
+- `C:8177`: the sink reports PERFECT lane status (CR+EQ+SYM both lanes,
+  INTERLANE_ALIGN done, LINK_STATUS_UPDATED). The periodic gate PASSES —
+  the grace window and the teardown paths are uninvolved (T/J/B all zero).
+- `K:00`: SINK_STATUS = no stream. Dark.
+- `Y:18 / L:08`: established ONCE; video flapped 8 times, then dark.
+- This is the HISTORICAL stable-dark state the 08-16 auto-recovery
+  watchdog was built for — first time captured with full counters.
+
+**WATCHDOG RESULT: fired its ENTIRE budget (W:7 = 7 cold-restart attempts,
+por_n pulse + full CSR replay each) with ZERO effect.** And through all 7
+attempts, `Y:`/`L:`/`C:` never moved — the ladder never observed the link
+drop and the sink's status readings never changed even transiently, across
+7 PHY resets that each kill our TX for ~2 ms.
+
+**Most consistent reading: the CONVERTER'S STATUS/STREAM ENGINE IS FROZEN**
+— it answers AUX from a latched state (8177/00 forever) and does not
+consume the stream, regardless of link-level action on our side. That
+would explain: (a) 7 CMU re-draws fixing nothing — evidence AGAINST the
+old bad-CMU-draw theory for this family; (b) the historical fact that only
+power-drain recoveries (hub power + HDMI unplug) ever cleared it; (c) the
+retracted "hybrid mechanism" observations.
+
+Open alternatives not excluded: our MSA/stream became invalid in a way the
+sink registers only in SINK_STATUS (but then a watchdog CSR-replay retrain
+should have rebuilt it); or wdog_force is not actually reaching the PHY in
+this build (but then attempts would also not increment... they did).
+
+⚠️ Honest flag: the late-reply DRAIN removed a class of spurious teardowns
+that previously caused full retrains from established. It is CONCEIVABLE
+those accidental teardowns sometimes rescued this state early (while the
+converter was still responsive). Stable-dark predates today's changes, but
+the drain may have widened its window. Needs incidence data over more
+cycles, not argument.
+
+RECOVERY: power cycle (the watchdog budget is exhausted; nothing on our
+side will act further).
