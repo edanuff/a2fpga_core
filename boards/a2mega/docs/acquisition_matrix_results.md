@@ -865,3 +865,43 @@ separates the deep states further (flap-storm vs quiet-frozen). Elevated
 wedge rate today (across kick AND grace-only builds) points at hub-state/
 session effects dominating build identity — the interleaved protocol is
 the only defensible comparison.
+
+## THREE-BUILD COMPARISON — ROUND 1 COMPLETE (08-25, Anker+Sceptre, plain cycles, one session, blocks adjacent)
+
+| build | policy | fast | delayed | dark | recoveries used |
+|---|---|---|---|---|---|
+| `4ff799d9` (block 1) | grace only | 2 | 3 | 3 | drain, off-replug, powered-replug |
+| `f569d4f8` (block 2) | LEGACY | 5 | 3 | **0** | none (one downstream blink self-recovered) |
+| `7b872b57` (block 3) | grace+drain | 4 | 0 | **4** | powered-replug x4 |
+
+**The interruption hypothesis made a PREDICTION before block 3 (wedge rate
+>= grace-only's) and it held.** Coherent model: the converter enters a bad
+phase on ~half of attaches this session. With settling-phase teardowns
+(legacy), every bad phase resolves as delayed-but-successful (~3-6 blinks).
+With teardowns suppressed (grace+drain), every bad phase COMPLETES into a
+quiet-frozen wedge — block 3 had ZERO delayed cycles: binary clean-or-dark.
+Grace-only sits between (late-reply teardowns = partial interruption).
+Legacy 0/8 vs grace+drain 4/8: Fisher p≈0.04, same session, adjacent
+blocks. Caveats: one session, one hub, n=8/block; block order not yet
+counterbalanced (round 2 pending if wanted).
+
+**Recovery regularity:** the quiet-frozen wedge (C:8177/K:00, zero
+teardowns) was cleared by a POWERED HDMI replug 5/5 times across blocks.
+The flap-storm variant (block 1 c1) did NOT clear that way. Variant ->
+recovery mapping is now usable bench procedure.
+
+## RECOMMENDATION (one change, per protocol)
+
+**Make `f569d4f8` the production candidate of record** (it already
+contains the CDC fixes, per-lane M5, phase_done gate, zero-request guard,
+and counter v2 — its "legacy" aspect is only the LADDER POLICY: no grace,
+no drain, no kick). On this hub, the protocol-correct grace/drain policies
+convert recoverable delays into unrecoverable wedges; the legacy storm
+behavior is the accepted historical profile (half fast, half ~3-6 s
+delayed, darks rare).
+
+Grace/drain/kick remain in the tree as parameters (all default-off) with
+their instrumentation — correctly characterized as: right by DP protocol,
+wrong for this converter's failure physiology. Revisit if a sink appears
+that is harmed by the storms (the original motivation) — and then enable
+grace ALONE, per-board, with these results in hand.
