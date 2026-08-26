@@ -636,3 +636,67 @@ drain fix — and compare stable-dark incidence/persistence over cycles.
   on it) rather than silence.
 - dark equally persistent there ⇒ the drain is innocent; entry mechanism
   investigation continues (video flapped 8x before settling dark).
+
+## A/B: drain build vs pre-drain build — stable-dark incidence (08-24 eve)
+
+Same bench, same hub (Ugreen+Sceptre), same evening, alternating only the
+bitstream. All cycles user-observed with telemetry read each time.
+
+| build | cycles | clean | settling | **dark** |
+|---|---|---|---|---|
+| `7b872b57` grace + **drain** | 4 | 2 | 1 | **2 (both persistent, unrecovered)** |
+| `4ff799d9` grace-window, **no drain** | 8 | 4 | 4 | **0** |
+
+Fisher-exact on 2/4 vs 0/8 gives p≈0.09 — **suggestive, not conclusive**;
+the sample is small and stable-dark may cluster with converter state. But
+the qualitative evidence stacks the same way:
+
+- On the pre-drain build, EVERY settling cycle shows late-reply teardowns
+  firing (`short`=1-2, `B:12E0008` each time) — the exact events the drain
+  suppresses. These teardowns retrain the link during the converter's
+  fragile settling phase.
+- On the drain build, both darks entered after video flapped 8x
+  (`Y:x8/L:08`) and then NOTHING further ever happened: no teardowns
+  (J:0000), watchdog budget spent uselessly (W:7, sink answers frozen at
+  8177/00 through 7 PHY resets).
+- Interpretation: during settling, the converter sometimes wedges into
+  its dark state; a teardown+retrain arriving DURING that entry window
+  (which the stray-byte bug conveniently provided) re-engages it before
+  the wedge completes. Remove the accidental kick and the wedge, once
+  entered, is permanent — nothing at the DP link level reaches it.
+
+### Verdict on the drain fix
+
+The drain is CORRECT as a matter of protocol (a stale reply must not be
+treated as a link failure) but it removed an accidental safety mechanism.
+Ship the drain only together with a DELIBERATE replacement kick.
+
+## REVISED PRODUCTION FIX PLAN
+
+Keep (hardware-validated):
+1. **GATE_GRACE window** (8 s) — rides out the settling storms; validated
+   on both builds (suppressed polls with stable picture, establishes
+   collapsed 6-10 -> 1-3).
+2. **Late-reply DRAIN** — correct, but ONLY with (3).
+3. **NEW: deliberate dark-state kick.** Trigger: established AND
+   NOT streaming (`debug_sink[1:0]==0`) persisting N seconds — the same
+   condition the watchdog uses, but the ACTION is a LADDER teardown ->
+   full retrain (what the accidental kick did), NOT the watchdog's
+   PHY-level cold restart, which is PROVEN useless against this state
+   (W:7, zero effect, n=2). Suggested N ≈ 2-3 s (the accidental kick
+   fired within ~1-2 s; the watchdog's 8 s grace never got a chance).
+   Bounded budget like the watchdog's, re-armed on streaming, so a truly
+   dead sink does not retrain forever.
+4. **Watchdog demotion.** Its v3 recovery (por_n + CSR replay) is
+   hardware-refuted for the stable-dark family it was built for. Keep it
+   as a last-resort backstop AFTER (3) exhausts, or retire it for closed
+   -loop builds; decide after (3) has bench data.
+
+Open items carried:
+- `G:00`/`N:000` anomaly in the dark state (checks not latching) —
+  unresolved; may fall out of understanding the wedge entry.
+- Dark ENTRY mechanism (video flaps x8 then sink deafness) — untouched by
+  all of the above; the kick treats the symptom, deliberately.
+- Settling-phase teardowns on the pre-drain build reset the grace window
+  (window re-arms per establish) — with drain+kick this interaction
+  disappears.
