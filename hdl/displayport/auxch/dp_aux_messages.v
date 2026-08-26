@@ -73,6 +73,12 @@ module dp_aux_messages #(
    // afe_adjust_seq, PER LANE: [7:0] = lane 0 (DPCD 0x103), [15:8] =
    // lane 1 (0x104). Tie to 16'h0606 (legacy swing2+MAX_SWING) when unused.
    input  [15:0] train_set_byte,
+   // IRQ SERVICE (08-26): the DEVICE_SERVICE_IRQ_VECTOR bits captured from
+   // the last status read, written BACK to DPCD 0x201 (write-1s-to-clear)
+   // by msg 0x1A. A conformant source must acknowledge sink IRQs; ours
+   // never did — every frozen-wedge snapshot showed LINK_STATUS_UPDATED
+   // latched with the sink waiting for service that never came.
+   input  [7:0] irq_clear_byte,
 
    // Interface to the AUX Channel
    output reg       aux_tx_wr_en,
@@ -213,6 +219,14 @@ always @(posedge clk) begin
        12'h195: begin aux_tx_data <= train_set_byte[15:8]; aux_tx_wr_en <= 1'b1; end  // 0x104 lane 1
        12'h196: begin aux_tx_data <= train_set_byte[7:0];  aux_tx_wr_en <= 1'b1; end  // 0x105 (unused lane)
        12'h197: begin aux_tx_data <= train_set_byte[15:8]; aux_tx_wr_en <= 1'b1; end  // 0x106 (unused lane)
+
+       // IRQ service: native 1-byte WRITE of the latched vector back to
+       // DPCD 0x201 — write-1s-to-clear acknowledgment (msg 0x1A)
+       12'h1A0: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end
+       12'h1A1: begin aux_tx_data <= 8'h02; aux_tx_wr_en <= 1'b1; end
+       12'h1A2: begin aux_tx_data <= 8'h01; aux_tx_wr_en <= 1'b1; end
+       12'h1A3: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
+       12'h1A4: begin aux_tx_data <= irq_clear_byte; aux_tx_wr_en <= 1'b1; end
 
        // Resd lane align status for all four lanes
        12'h100: begin aux_tx_data <= 8'h90; aux_tx_wr_en <= 1'b1; end

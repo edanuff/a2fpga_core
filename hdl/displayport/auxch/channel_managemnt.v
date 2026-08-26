@@ -66,7 +66,9 @@ module channel_management #(
     parameter GATE_GRACE = 0,      // gate grace period (aux_channel.v)
     parameter GATE_GRACE_CLKS = 30'd800_000_000,
     parameter GATE_KICK = 0,       // dark-state kick (aux_channel.v)
-    parameter KICK_CLKS = 30'd250_000_000
+    parameter KICK_CLKS = 30'd250_000_000,
+    parameter IRQ_SERVICE = 0,     // sink-IRQ servicing (aux_channel.v)
+    parameter LATE_REPLY_DRAIN = 0 // 0 = legacy error behavior
 )(
         input  clk100,
         // M5 runtime AFE adjust: applied-level declaration in, one pulse
@@ -84,7 +86,7 @@ module channel_management #(
         output [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
         output [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
         output [23:0] debug_chstate, // raw DPCD {0x204, 0x203, 0x202}
-        output [19:0] debug_aux_err, // {short, nack, other, obs, dark_kicks}
+        output [23:0] debug_aux_err, // {short, nack, other, obs, kicks, irq_services}
         output [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
         // ATOMIC FIRST-FAILURE SNAPSHOT (second-opinion instrumentation,
         // 08-24): latched in the same clock as the FIRST failing check_wait
@@ -272,7 +274,8 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .HPD_DISCONNECT_RESETS(HPD_DISCONNECT_RESETS),
               .AFE_ADJUST(AFE_ADJUST), .GATE_GRACE(GATE_GRACE),
               .GATE_GRACE_CLKS(GATE_GRACE_CLKS), .GATE_KICK(GATE_KICK),
-              .KICK_CLKS(KICK_CLKS)) i_aux_channel(
+              .KICK_CLKS(KICK_CLKS), .IRQ_SERVICE(IRQ_SERVICE),
+              .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),

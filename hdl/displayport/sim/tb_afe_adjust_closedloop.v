@@ -76,6 +76,7 @@ module tb_afe_adjust_closedloop;
     channel_management #(
         .LINK_RATE_MBPS (2700),
         .BLIND_SINK     (0),
+        .IRQ_SERVICE    (1),
         .AFE_ADJUST     (1)
     ) dut (
         .clk100               (clk100),
@@ -187,12 +188,17 @@ module tb_afe_adjust_closedloop;
     reg [7:0] r205 = 8'h00;            // sink status
     reg [7:0] r206 = 8'hBB;            // ADJUST_REQUEST: VS3/PE2 both lanes
 
+    reg [7:0] m_irq_vec = 8'h00;       // raised by the TB, cleared by
+    integer   irq_writes = 0;          //   write-1s-to-clear from the DUT
+    integer   irq_t0_mark = 0;
+    reg [7:0] irq_write_val = 8'h00;
     function [7:0] dpcd_read(input [19:0] a);
         case (a)
             20'h00000: dpcd_read = 8'h11;   // DPCD rev 1.1
             20'h00001: dpcd_read = 8'h0A;   // 2.7 Gbps
             20'h00002: dpcd_read = 8'h82;   // enhanced framing, 2 lanes
             20'h00200: dpcd_read = 8'h01;   // sink count
+            20'h00201: dpcd_read = m_irq_vec; // DEVICE_SERVICE_IRQ_VECTOR
             20'h00202: dpcd_read = r202;
             20'h00204: dpcd_read = r204;
             20'h00205: dpcd_read = r205;
@@ -303,6 +309,12 @@ module tb_afe_adjust_closedloop;
                     rlen = dlen + 1;
                     send_reply;
                 end else if (req[0][7:4] == 4'h8) begin // native write
+                    if (req_addr == 20'h00201) begin
+                        // IRQ acknowledgment: write-1s-to-clear
+                        irq_writes    = irq_writes + 1;
+                        irq_write_val = req[4];
+                        m_irq_vec     = m_irq_vec & ~req[4];
+                    end
                     if (req_addr == 20'h00103) begin
                         lane_set_log[ls_cnt] = req[4];
                         ls_cnt = ls_cnt + 1;
@@ -394,6 +406,23 @@ module tb_afe_adjust_closedloop;
 
         $display("  ok: ladder trained to link_established (t=%0t)", $time);
 
+        // raise a sink IRQ once established: SINK_SPECIFIC (0x40), and
+        // deliver it the way hardware does — an HPD IRQ pulse into the
+        // (formerly dangling) hpd_irq input. The fix must react with an
+        // IMMEDIATE status read (not the 1 s poll, which would blow the
+        // TB watchdog) and acknowledge via a 0x201 write-back.
+        m_irq_vec = 8'h40; irq_t0_mark = $time;
+        force dut.i_aux_channel.hpd_irq = 1'b1;
+        repeat (3) @(posedge clk100);
+        release dut.i_aux_channel.hpd_irq;
+        begin : wait_irq_service
+            integer t0; t0 = $time;
+            while (irq_writes == 0 && ($time - t0) < 5_000_000)
+                #10_000;
+        end
+        if (irq_writes != 0)
+            $display("  ok: HPD IRQ pulse triggered an immediate service (%0d ns after pulse)", $time - irq_t0_mark);
+
         if (wr_cnt !== 16) begin
             errors = errors + 1;
             $display("FAIL: DRP writes = %0d, want 16 (INIT + one adjust)", wr_cnt);
@@ -401,6 +430,30 @@ module tb_afe_adjust_closedloop;
             $display("  ok: exactly two AFE applications (16 DRP writes)");
         check_seq(0, 4'd13, 5'd0,  "INIT VS2/PE0");
         check_seq(8, 4'd15, 5'd0, "adjust VS3/PE2 -> sanitised VS3/PE0 (VS+PE<=3)");
+
+        // ---- IRQ SERVICE (08-26): sink raised 0x40 in 0x201 mid-run; the
+        // source must have READ it and WRITTEN IT BACK (write-1s-to-clear)
+        // without tearing the link down.
+        if (irq_writes == 0) begin
+            errors = errors + 1;
+            $display("FAIL: IRQ vector never serviced (no 0x201 write)");
+        end else begin
+            if (irq_write_val !== 8'h40) begin
+                errors = errors + 1;
+                $display("FAIL: 0x201 write value %02x (want 40)", irq_write_val);
+            end else
+                $display("  ok: IRQ vector serviced — 0x201 write-back of 0x40");
+            if (m_irq_vec !== 8'h00) begin
+                errors = errors + 1;
+                $display("FAIL: vector not cleared at the sink (%02x)", m_irq_vec);
+            end else
+                $display("  ok: write-1s-to-clear left the sink vector empty");
+            if (irq_writes > 1) begin
+                errors = errors + 1;
+                $display("FAIL: 0x201 written %0d times (want exactly 1)", irq_writes);
+            end else
+                $display("  ok: exactly one acknowledgment write");
+        end
 
         // lane-set wire log: some 0x02 first, then only 0x27, nothing else
         saw02 = 0; saw27 = 0; sawother = 0; first27 = -1;
@@ -454,7 +507,7 @@ module tb_afe_adjust_closedloop;
     end
 
     initial begin
-        #60_000_000;                    // 60 ms
+        #120_000_000;                   // doubled for the IRQ-service scenario
         $display("FAIL: TB watchdog timeout (state=%02x wr_cnt=%0d ls_cnt=%0d)",
                  dut.i_aux_channel.state, wr_cnt, ls_cnt);
         $finish;

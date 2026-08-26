@@ -114,7 +114,21 @@ module aux_channel #(
     // SINK_STATUS. Default 0 = legacy.
     parameter GATE_KICK  = 0,
     parameter KICK_CLKS  = 30'd250_000_000,      // ~2.5 s @ 100 MHz
-    parameter [2:0] KICK_CAP = 3'd7
+    parameter [2:0] KICK_CAP = 3'd7,
+    // IRQ SERVICE (08-26, conformance fix): react to the sink's HPD IRQ
+    // pulse with an IMMEDIATE status read (instead of the 1 Hz poll), and
+    // acknowledge DEVICE_SERVICE_IRQ_VECTOR (0x201) by writing the read
+    // value back (write-1s-to-clear). We NEVER did either: hpd_irq was a
+    // dangling input and the 0x201 byte was read and discarded — while
+    // every frozen-wedge snapshot showed LINK_STATUS_UPDATED latched with
+    // the sink's MCU waiting for service (IT6563: the Attention->IRQ chain
+    // works end-to-end through the VL103/PD/ESP32 and died at this input).
+    // Conformant sources (Macs) service IRQs within 100 ms and never drive
+    // this hub into its wedge states. Default 0 = legacy for other builds.
+    parameter IRQ_SERVICE = 0,
+    // Late-reply drain (08-24) is now parameterized so a build can carry
+    // the LEGACY error behavior exactly (round-1 comparison baseline).
+    parameter LATE_REPLY_DRAIN = 0
 )(
         input        clk,
         // ready-to-send TRAINING_LANEx_SET values from afe_adjust_seq,
@@ -150,7 +164,7 @@ module aux_channel #(
         // (link_established / check_link / check_wait):
         // {short_reply, non_ACK, other/unattributed, observe_suppressed,
         //  dark_kicks}
-        output [19:0] debug_aux_err,
+        output [23:0] debug_aux_err,  // + [3:0] = IRQ services performed
         // CENTRALIZED first-teardown detail latch (latched at the first
         // transition to `error` from the established set since config):
         // {reason[3:0], from_state[7:0], expected[7:0], rx_byte_count[7:0]}
@@ -228,6 +242,7 @@ module aux_channel #(
 
     // DPCD power state D0 wake (inserted before link configuration)
     localparam [7:0] set_power_d0 = 8'h31;
+    localparam [7:0] irq_clear    = 8'h32;
 
     // Checking the state of the link
     localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
@@ -302,6 +317,10 @@ module aux_channel #(
     reg [3:0] dbg_kick_sat      = 4'd0;   // dark-state kicks fired
     reg [29:0] kick_timer       = 30'd0;
     reg [2:0]  kick_cnt         = 3'd0;   // budget used since last streaming
+    reg [7:0]  irq_vec_r        = 8'd0;   // last nonzero 0x201 read
+    reg [7:0]  irq_clear_byte_r = 8'd0;   // value being written back
+    reg        irq_pending      = 1'b0;   // hpd_irq seen; service due
+    reg [3:0]  dbg_irq_sat      = 4'd0;   // IRQ services performed
     reg        err_evt          = 1'b0;   // tagged error-entry event
     reg [3:0]  err_reason       = 4'd0;
     reg [7:0]  err_from         = 8'd0;
@@ -313,13 +332,14 @@ module aux_channel #(
     reg [7:0]  state_d          = 8'd0;
     reg        inest_d          = 1'b0;
     wire in_established_set = (state == link_established) ||
-                              (state == check_link) || (state == check_wait);
+                              (state == check_link) || (state == check_wait) ||
+                              (state == irq_clear);
     wire obs_active = (GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS);
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
     assign debug_teardown = {dbg_first_mask, dbg_fail_mask, dbg_gate_fail_sat, dbg_timeout_sat};
     assign debug_aux_err  = {dbg_short_sat, dbg_nack_sat, dbg_other_sat,
-                             dbg_obs_sat, dbg_kick_sat};
+                             dbg_obs_sat, dbg_kick_sat, dbg_irq_sat};
     assign debug_err_detail = err_detail;
     assign debug_sink = dbg_sink_status;
     // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
@@ -386,6 +406,7 @@ end
 dp_aux_messages #(.LINK_RATE_MBPS(LINK_RATE_MBPS)) i_aux_messages(
          .clk          (clk),
          .train_set_byte (train_set_byte),
+         .irq_clear_byte (irq_clear_byte_r),
          // Interface to send messages
          .msg_de       (msg_de),
          .msg          (msg),
@@ -570,6 +591,7 @@ always @(posedge clk) begin
             switch_to_normal:   state_on_success <= link_established;  
             link_established:   state_on_success <= link_established;
             check_link:         state_on_success <= check_wait;
+            irq_clear:          state_on_success <= link_established;
             check_wait:         begin
                                 dbg_gate_locks <= {clock_locked_i, equ_locked_i, symbol_locked_i, align_locked_i};
                                 // (check-non-fatal diagnostic reverted 08-18 night: it
@@ -577,7 +599,8 @@ always @(posedge clk) begin
                                 // then BLOCKED the Anker path's recovery-by-retrain on
                                 // marginal instances. Teardown/retrain is load-bearing.)
                                 if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
-                                    state_on_success <= link_established;
+                                    state_on_success <= (IRQ_SERVICE != 0 && irq_vec_r != 8'h00)
+                                                        ? irq_clear : link_established;
                                 end else if (obs_active) begin
                                     // GRACE PERIOD: record, do NOT tear
                                     // down; stay established and keep
@@ -626,6 +649,12 @@ always @(posedge clk) begin
         //       get left in the RX FIFO, potentially corrupting things
         //----------------------------------------------------------
         msg_de               <= 1'b1;
+        if (next_state == irq_clear) begin
+            irq_clear_byte_r <= irq_vec_r;   // stable for the message TX
+            irq_vec_r        <= 8'h00;
+            if (dbg_irq_sat != 4'hF)
+                dbg_irq_sat <= dbg_irq_sat + 4'd1;
+        end
         status_de_active     <= 1'b0;
         adjust_de_active     <= 1'b0;
         dp_reg_de_active     <= 1'b0;
@@ -706,6 +735,8 @@ always @(posedge clk) begin
             link_established:     begin msg <= 8'h00; expected <= 8'h00; reset_addr_on_change <= 1'b1; end
             check_link:           begin msg <= 8'h0D; expected <= 8'h09; status_de_active <= 1'b1;  end
             check_wait:           begin msg <= 8'h00; expected <= 8'h00; end
+            // write the latched vector back to 0x201 (ACK reply = 1 byte)
+            irq_clear:            begin msg <= 8'h1A; expected <= 8'h01; end
             error:                begin msg <= 8'h00; end
             default:              begin msg <= 8'h00; end
         endcase
@@ -749,6 +780,7 @@ always @(posedge clk) begin
             link_established:     begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             check_link:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             check_wait:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            irq_clear:            begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
         endcase
     end
 
@@ -774,7 +806,16 @@ always @(posedge clk) begin
     // Has the 100us pause expired, when no data was expected?
     // If so, move to the next test.            
     //-----------------------------------------------------------
-    if(expected == 8'h00 && count_100us[14] == 1'b1) begin
+    // RACE FIX (08-26, found in sim while adding IRQ service): this timer
+    // advance must only fire from a SETTLED state. `count_100us` free-runs
+    // and WRAPS while sitting in link_established (reload happens only on
+    // a transition), so its bit14 is stale-high ~50% of the time; firing
+    // during the one-cycle transition INTO check_link (old expected==0,
+    // old state_on_success==link_established) bounced the FSM straight
+    // back out before the status read ran — periodic link checks silently
+    // skipped on a coin flip. This is the mechanism behind the dark-state
+    // G:00/N:000 anomaly (checks "not running" for minutes).
+    if(state == next_state && expected == 8'h00 && count_100us[14] == 1'b1) begin
         next_state <= state_on_success;
     end
 
@@ -816,7 +857,7 @@ always @(posedge clk) begin
             // rx=8 — a stale check_link reply). With expected==0 the
             // bytes are simply DRAINED (aux_rx_rd_en already empties the
             // FIFO) and ignored.
-            if(expected != 8'h00 && rx_byte_count != expected-1 && aux_rx_empty == 1'b1) begin
+            if((LATE_REPLY_DRAIN == 0 || expected != 8'h00) && rx_byte_count != expected-1 && aux_rx_empty == 1'b1) begin
                 next_state <= error;
                 if (in_established_set) begin
                     err_evt <= 1'b1; err_reason <= 4'd1;
@@ -835,7 +876,7 @@ always @(posedge clk) begin
                 // is test for "In progress" or "Again" requests, and 
                 // retry the current operation.
                 //---------------------------------------------------- 
-                if(expected != 8'h00 && aux_rx_data != 8'h00) begin
+                if((LATE_REPLY_DRAIN == 0 || expected != 8'h00) && aux_rx_data != 8'h00) begin
                     next_state <= error;
                     if (in_established_set) begin
                         err_evt <= 1'b1; err_reason <= 4'd2;
@@ -873,7 +914,10 @@ always @(posedge clk) begin
                 aux_addr   <= aux_addr_i;
                 aux_addr_i <= aux_addr_i+1;
                 if(status_de_active == 1'b1 && aux_addr_i == 8'd5)
-                    dbg_sink_status <= aux_rx_data;                        
+                    dbg_sink_status <= aux_rx_data;
+                // DEVICE_SERVICE_IRQ_VECTOR: previously read and DISCARDED
+                if(status_de_active == 1'b1 && aux_addr_i == 8'd1 && aux_rx_data != 8'h00)
+                    irq_vec_r <= aux_rx_data;                        
                         
                 if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
                     next_state <= state_on_success;
@@ -900,7 +944,8 @@ always @(posedge clk) begin
     end
     if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
                                   (state != reset      && state != link_established &&
-                                   state != check_link && state != check_wait       && retry_now == 1'b1)) begin
+                                   state != check_link && state != check_wait       &&
+                                   state != irq_clear  && retry_now == 1'b1)) begin
         next_state <= reset;
         state      <= error;
         if (in_established_set) begin
@@ -914,8 +959,12 @@ always @(posedge clk) begin
     // If the link was established, then every
     // now and then check the state of the link
     //-----------------------------------------------
-    if(state == link_established && link_check_now == 1'b1) begin
-        next_state <= check_link;
+    if (IRQ_SERVICE != 0 && hpd_irq)
+        irq_pending <= 1'b1;
+    if(state == link_established &&
+       (link_check_now == 1'b1 || (IRQ_SERVICE != 0 && irq_pending))) begin
+        next_state  <= check_link;
+        irq_pending <= 1'b0;
     end
 
     //---------------------------------------------------------------

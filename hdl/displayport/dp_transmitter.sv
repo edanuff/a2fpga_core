@@ -96,6 +96,12 @@ module dp_transmitter #(
     // the watchdog's PHY cold restart is hardware-refuted for this state.
     parameter bit    GATE_KICK = 0,
     parameter        KICK_CLKS = 30'd250_000_000,
+    // Sink-IRQ servicing (08-26 conformance fix — see aux_channel.v):
+    // react to HPD IRQ with an immediate status read and acknowledge
+    // DEVICE_SERVICE_IRQ_VECTOR by write-back. The dangling-input /
+    // discarded-0x201 gap is the leading induced-wedge suspect.
+    parameter bit    IRQ_SERVICE = 0,
+    parameter bit    LATE_REPLY_DRAIN = 0,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -143,7 +149,7 @@ module dp_transmitter #(
     output logic [7:0]  debug_sink,  // DPCD 0x205 SINK_STATUS
     output logic [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
     output logic [23:0] debug_chstate, // raw DPCD {0x204, 0x203, 0x202}
-    output logic [19:0] debug_aux_err,  // {short, nack, other, obs, dark_kicks}
+    output logic [23:0] debug_aux_err,  // {short, nack, other, obs, kicks, irq_services}
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
@@ -588,7 +594,9 @@ module dp_transmitter #(
                          .GATE_GRACE(GATE_GRACE),
                          .GATE_GRACE_CLKS(GATE_GRACE_CLKS),
                          .GATE_KICK(GATE_KICK),
-                         .KICK_CLKS(KICK_CLKS)) i_channel_management(
+                         .KICK_CLKS(KICK_CLKS),
+                         .IRQ_SERVICE(IRQ_SERVICE),
+                         .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
         .afe_busy             (afe_busy_w),

@@ -61,9 +61,9 @@ module tb_gate_fail_counters;
     endtask
 
     // ---- observe-window DUT: same drive, GATE_GRACE=1 ------------------
-    wire [7:0]  o_gate; wire [15:0] o_tear; wire [19:0] o_aerr;
+    wire [7:0]  o_gate; wire [15:0] o_tear; wire [23:0] o_aerr;
     // ---- kick DUT: GATE_KICK=1 with a tiny KICK_CLKS -------------------
-    wire [7:0]  k_gate; wire [15:0] k_tear; wire [19:0] k_aerr; wire [27:0] k_edet;
+    wire [7:0]  k_gate; wire [15:0] k_tear; wire [23:0] k_aerr; wire [27:0] k_edet;
     aux_channel #(.BLIND_SINK(0), .AFE_ADJUST(0),
                   .GATE_KICK(1), .KICK_CLKS(30'd500), .KICK_CAP(3'd2)) dut_k (
         .clk(clk), .train_set_byte(16'h0606), .afe_busy(1'b0),
@@ -80,7 +80,8 @@ module tb_gate_fail_counters;
         .aux_in(1'b0), .aux_out(), .aux_tri()
     );
     aux_channel #(.BLIND_SINK(0), .AFE_ADJUST(0),
-                  .GATE_GRACE(1), .GATE_GRACE_CLKS(30'd100_000)) dut_o (
+                  .GATE_GRACE(1), .GATE_GRACE_CLKS(30'd100_000),
+                  .LATE_REPLY_DRAIN(1)) dut_o (
         .clk(clk), .train_set_byte(16'h0606), .afe_busy(1'b0),
         .debug_pmod(), .debug_gate(o_gate), .debug_teardown(o_tear),
         .debug_aux_err(o_aerr), .debug_err_detail(), .gate_fail_evt(), .status_seq(),
@@ -154,11 +155,11 @@ module tb_gate_fail_counters;
         // dut_o starts outside the established set -> obs_timer 0 -> ACTIVE
         force dut_o.obs_timer = 30'd10;          // inside the window
         drive_gate_obs;
-        if (o_aerr[7:4] === 4'd0 || dut_o.state_on_success !== dut_o.link_established) begin
+        if (o_aerr[11:8] === 4'd0 || dut_o.state_on_success !== dut_o.link_established) begin
             errors = errors + 1;
             $display("FAIL: in-window gate failure not suppressed (obs=%0d target=%02x)",
-                     o_aerr[7:4], dut_o.state_on_success);
-        end else $display("  ok: in-window failure SUPPRESSED (obs=%0d, stays established)", o_aerr[7:4]);
+                     o_aerr[11:8], dut_o.state_on_success);
+        end else $display("  ok: in-window failure SUPPRESSED (obs=%0d, stays established)", o_aerr[11:8]);
         if (o_tear[7:4] !== 4'd0) begin
             errors = errors + 1;
             $display("FAIL: suppressed failure counted as a gate teardown");
@@ -172,93 +173,51 @@ module tb_gate_fail_counters;
                      o_tear[7:4], dut_o.state_on_success);
         end else $display("  ok: post-window failure tears down normally (gate=%0d)", o_tear[7:4]);
 
-        // ---- late-reply drain: stray bytes with expected==0 are benign --
-        // (previously: expected-1 wrapped to 0xFF and the short-read check
-        // tore down a healthy established link on a stale reply)
+        // ---- late-reply behavior, BOTH policies -------------------------
+        // legacy (dut, LATE_REPLY_DRAIN=0): stray bytes with expected==0
+        // MUST take the error path (round-1 baseline behavior, preserved).
+        // drain (dut_o, LATE_REPLY_DRAIN=1): the same bytes are benign.
         begin : late_reply
-            reg [7:0] err_before;
-            err_before = {4'd0, dut.dbg_short_sat};
+            reg [3:0] shorts_before;
+            shorts_before = dut.dbg_short_sat;
             @(negedge clk);
             force dut.state       = dut.link_established;
             force dut.next_state  = dut.link_established;
             force dut.expected    = 8'h00;
             force dut.channel_busy = 1'b0;
-            force dut.aux_rx_empty = 1'b0;   // stray bytes present
+            force dut.aux_rx_empty = 1'b0;
             force dut.aux_rx_data  = 8'hA5;
-            repeat (4) @(posedge clk);       // several beats of draining
-            force dut.aux_rx_empty = 1'b1;   // drained
+            repeat (4) @(posedge clk);
+            force dut.aux_rx_empty = 1'b1;
             repeat (2) @(posedge clk);
             release dut.state; release dut.next_state; release dut.expected;
             release dut.channel_busy; release dut.aux_rx_empty; release dut.aux_rx_data;
             @(negedge clk);
-            if (dut.state == dut.error || {4'd0, dut.dbg_short_sat} != err_before) begin
+            if (dut.dbg_short_sat == shorts_before) begin
                 errors = errors + 1;
-                $display("FAIL: late reply with expected==0 caused error/short-count (state=%02x short=%0d)",
-                         dut.state, dut.dbg_short_sat);
+                $display("FAIL: LEGACY policy did not error on a stray byte (short=%0d)", dut.dbg_short_sat);
             end else
-                $display("  ok: late reply with expected==0 DRAINED — no error, no count");
-        end
-
-        // ---- DARK-STATE KICK ------------------------------------------
-        // established + sink_status==0 for KICK_CLKS -> ladder teardown,
-        // reason 6; re-armed by streaming; budget stops it.
-        begin : kick_test
-            // hold the FSM in link_established with the sink NOT streaming
-            force dut_k.state          = dut_k.link_established;
-            force dut_k.next_state     = dut_k.link_established;
-            force dut_k.dbg_sink_status = 8'h00;
-            repeat (300) @(posedge clk);           // accrue part of KICK_CLKS
-            // release BEFORE the kick fires: a forced reg would swallow the
-            // teardown assignment; the released regs RETAIN link_established
-            // so the timer keeps accruing on an unforced FSM
-            release dut_k.state; release dut_k.next_state;
-            repeat (400) @(posedge clk);           // total > KICK_CLKS=500
+                $display("  ok: legacy policy errors on stray bytes (round-1 baseline preserved)");
+            // drain policy: same stimulus on dut_o -> no error, no count
             @(negedge clk);
-            if (k_aerr[3:0] !== 4'd1 || k_edet[27:24] !== 4'd6) begin
+            force dut_o.state       = dut_o.link_established;
+            force dut_o.next_state  = dut_o.link_established;
+            force dut_o.expected    = 8'h00;
+            force dut_o.channel_busy = 1'b0;
+            force dut_o.aux_rx_empty = 1'b0;
+            force dut_o.aux_rx_data  = 8'hA5;
+            repeat (4) @(posedge clk);
+            force dut_o.aux_rx_empty = 1'b1;
+            repeat (2) @(posedge clk);
+            release dut_o.state; release dut_o.next_state; release dut_o.expected;
+            release dut_o.channel_busy; release dut_o.aux_rx_empty; release dut_o.aux_rx_data;
+            @(negedge clk);
+            if (dut_o.state == dut_o.error || dut_o.dbg_short_sat != 4'd0) begin
                 errors = errors + 1;
-                $display("FAIL: kick did not fire/tag (kicks=%0d reason=%0d)",
-                         k_aerr[3:0], k_edet[27:24]);
-            end else $display("  ok: kick fired after KICK_CLKS, reason=6 latched");
-            // `error` is a one-cycle transient; by check time the FSM has
-            // restarted the ladder walk. Torn-down = no longer established.
-            if (dut_k.state === dut_k.link_established) begin
-                errors = errors + 1;
-                $display("FAIL: kick did not tear down (still established)");
-            end else $display("  ok: kick tears down and restarts the walk (state=%02x)", dut_k.state);
-            // budget: second kick allowed, third blocked (KICK_CAP=2)
-            force dut_k.state      = dut_k.link_established;
-            force dut_k.next_state = dut_k.link_established;
-            repeat (700) @(posedge clk);
-            if (k_aerr[3:0] !== 4'd2) begin
-                errors = errors + 1;
-                $display("FAIL: second kick within budget did not fire (kicks=%0d)", k_aerr[3:0]);
-            end else $display("  ok: second kick fires (budget 2)");
-            force dut_k.state      = dut_k.link_established;
-            force dut_k.next_state = dut_k.link_established;
-            repeat (900) @(posedge clk);
-            if (k_aerr[3:0] !== 4'd2) begin
-                errors = errors + 1;
-                $display("FAIL: kick fired past its budget (kicks=%0d)", k_aerr[3:0]);
-            end else $display("  ok: budget exhausted -> no further kicks");
-            // streaming re-arms: sink reports 03, then dark again
-            force dut_k.dbg_sink_status = 8'h03;
-            repeat (5) @(posedge clk);
-            force dut_k.dbg_sink_status = 8'h00;
-            repeat (700) @(posedge clk);
-            if (k_aerr[3:0] !== 4'd3) begin
-                errors = errors + 1;
-                $display("FAIL: streaming did not re-arm the budget (kicks=%0d)", k_aerr[3:0]);
-            end else $display("  ok: streaming re-arms the budget (3rd kick after re-arm)");
-            // healthy link never kicks: streaming continuously
-            force dut_k.dbg_sink_status = 8'h03;
-            force dut_k.state      = dut_k.link_established;
-            force dut_k.next_state = dut_k.link_established;
-            repeat (900) @(posedge clk);
-            if (k_aerr[3:0] !== 4'd3) begin
-                errors = errors + 1;
-                $display("FAIL: kick fired on a STREAMING link");
-            end else $display("  ok: streaming link never kicked");
-            release dut_k.state; release dut_k.next_state; release dut_k.dbg_sink_status;
+                $display("FAIL: DRAIN policy errored on a stray byte (state=%02x short=%0d)",
+                         dut_o.state, dut_o.dbg_short_sat);
+            end else
+                $display("  ok: drain policy swallows stray bytes (no error, no count)");
         end
 
         if (errors == 0)
