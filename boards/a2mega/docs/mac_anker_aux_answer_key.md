@@ -590,6 +590,19 @@ live-console-through-swap instrument fails SILENTLY (zombie TCP,
 radio browns out before the core) — use ping transitions + post-hoc
 ring reads (the boot banner is reliable ground truth).
 
+### Pairing fingerprint: Ugreen x Fangor = deterministic first-sync blink
+5/5 Ugreen->Fangor attaches: fast colorbars with a ~3 s blackout blip
+before stability, EVERY attach. Telemetry: Y:11 (DP video continuous),
+J:2 (Ugreen attach fingerprint, NO runtime IRQ), clean books — the
+DP-invisible downstream class, here deterministic. Contrast: Ugreen->
+Sceptre ~1-in-5 stochastic 6 s blinks; Anker->Fangor 5/5 with none.
+Reading: the Ugreen's HDMI output sequencing (TMDS re-clock/re-assert
+after the DP stream starts) x the Fangor's input sync = a first-sync
+blink; the Sceptre usually re-locks fast enough to hide it, the Anker
+sequences HDMI differently and avoids it. Downstream of DPCD, no
+vector raised, nothing serviceable source-side. Cosmetic; logged as a
+converter-x-monitor fingerprint, not a defect in our stack.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
