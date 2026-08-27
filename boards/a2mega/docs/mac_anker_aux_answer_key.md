@@ -427,6 +427,14 @@ more n — but it is the first credible field-rate answer for the class
 the source cannot prevent. Design constraints if built: budgeted,
 flap-tolerant (the sleeping-monitor storm lesson), screen-truth-gated.
 
+### Anker v3 n=5
+1 wedge (the swap-back first attach, above) + 4 FAST — every clean
+attach byte-identical (G:F0/Y:11/L:01/J:1/V:0002/U:08). V:0002 now
+consistent on Anker clean attaches (pending 0x2005 at attach, acked).
+U:08 = the Anker defers our EDID only ONCE per block, vs the 2-defer
+cadence it showed the Mac — defer depth is load/state dependent, not a
+fixed hub property.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
