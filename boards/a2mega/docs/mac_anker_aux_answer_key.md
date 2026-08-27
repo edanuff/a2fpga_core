@@ -290,6 +290,29 @@ block, write-1-clear of 0x2004/0x2005. Fold into the polite-attach
 build (sim-first) alongside the caps/EDID preamble, write-on-change
 0x103, and enhanced framing.
 
+### Grading rows for f0a48ae6 (polite-attach v2: per-iteration writes)
+Predecessor 7d6e205d (write-on-change skip) NEVER trained — hardware
+refutation documented at LANE_SET_WOC in aux_channel.v.
+1. Cycle: FAST. Cleanest signature of any build: G:F0 (ZERO ladder
+   fails — the preamble absorbed the not-ready window that cost
+   8acfe351 restarts on 2/5 cycles), T:0000, Y:11, L:01, C:0177, K:03.
+   J:000002 — the attach ESI ack ran twice: the free-running 0.5 s
+   watchdog likely bounced the preamble once (invisible to gate/timeout
+   counters pre-training). Benign; noted as a candidate refinement
+   (longer pre-establishment watchdog budget for polite builds).
+2. Cycle: DARK — NEW SUBCLASS: dark with FULLY healthy DP + status.
+   D:2E, C:0177, Y:11 (video streaming), and K:03 — the hub's
+   SINK_STATUS claims it IS receiving the stream on both ports. Not the
+   quiet-frozen wedge (that is C:8177/K:00). Failure is entirely
+   downstream of the DPCD (IT6563 HDMI output side / monitor sync);
+   no self-recovery after ~15 s wait; HDMI replug at the hub recovered
+   immediately. Replug re-attach: Y:22, L:02, G:F0 STILL zero restarts
+   (8acfe351's replug cost 2), J: 2->5 (re-attach acks + runtime
+   service). AUX conformance work cannot reach this class by
+   construction — the DPCD shows nothing wrong to service. If it
+   recurs at rate, the lever is HDMI-side (or the Mac's vendor
+   0x3050/51 per-poll writes, still unexplored).
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
