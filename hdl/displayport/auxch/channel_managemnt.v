@@ -89,6 +89,8 @@ module channel_management #(
         output [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
         output [23:0] debug_chstate, // raw DPCD {0x204, 0x203, 0x202}
         output [23:0] debug_aux_err, // {short, nack, other, obs, kicks, irq_services}
+        output [15:0] debug_esi,     // sticky OR {0x2003, 0x2005} vector reads
+        output [6:0]  debug_defer,   // {edid_giveup, defer_cnt}
         output [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
         // ATOMIC FIRST-FAILURE SNAPSHOT (second-opinion instrumentation,
         // 08-24): latched in the same clock as the FIRST failing check_wait
@@ -287,6 +289,8 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
         .debug_gate      (debug_gate),
         .debug_teardown  (debug_teardown),
         .debug_aux_err   (debug_aux_err),
+        .debug_esi       (debug_esi),
+        .debug_defer     (debug_defer),
         .debug_err_detail(debug_err_detail),
         .gate_fail_evt   (gate_fail_evt_w),
         .status_seq      (status_seq_w),

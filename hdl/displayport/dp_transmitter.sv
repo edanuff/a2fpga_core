@@ -153,6 +153,8 @@ module dp_transmitter #(
     output logic [15:0] debug_adjust, // raw sink ADJUST_REQUEST (0x206/0x207)
     output logic [23:0] debug_chstate, // raw DPCD {0x204, 0x203, 0x202}
     output logic [23:0] debug_aux_err,  // {short, nack, other, obs, kicks, irq_services}
+    output logic [15:0] debug_esi,      // sticky OR {0x2003, 0x2005} vector reads
+    output logic [6:0]  debug_defer,    // {edid_giveup, defer_cnt}
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
@@ -615,6 +617,8 @@ module dp_transmitter #(
         .debug_adjust         (debug_adjust),
         .debug_chstate        (debug_chstate),
         .debug_aux_err        (debug_aux_err),
+        .debug_esi            (debug_esi),
+        .debug_defer          (debug_defer),
         .debug_err_detail     (debug_err_detail),
         .debug_snapshot       (debug_snapshot),
         .debug_caps           (debug_caps),

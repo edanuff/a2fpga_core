@@ -181,6 +181,7 @@ module tb_polite_attach;
     reg [7:0] r205 = 8'h00;
     reg [7:0] r206 = 8'hBB;            // ADJUST_REQUEST: VS3/PE2 both lanes
     reg [7:0] m_esi_2005 = 8'h00;      // LINK_SERVICE_IRQ_VECTOR_ESI0
+    reg [7:0] m_esi_2003 = 8'h00;      // DEVICE_SERVICE_IRQ_VECTOR_ESI0
     reg       cr_armed   = 1'b0;       // hub ready to grant CR — but only
                                        // ON a lane-set write (IT6563
                                        // write-cued evaluation, hw-proven)
@@ -218,6 +219,9 @@ module tb_polite_attach;
     integer   esi_writes = 0;
     reg [7:0] esi_write_val = 8'h00;
     integer   esi_writes_post = 0;     // after link_established
+    integer   esi3_writes = 0;         // 0x2003 clears pre-establish
+    integer   esi3_writes_post = 0;    // 0x2003 clears post-establish
+    reg [7:0] esi3_write_val_post = 8'h00;
     reg [7:0] esi_write_val_post = 8'h00;
     reg       established_phase = 1'b0;
     real      t_first_tps1 = -1;
@@ -339,6 +343,7 @@ module tb_polite_attach;
                         rbuf[0] = 8'h00;
                         for (j = 0; j < dlen; j = j + 1)
                             rbuf[j+1] = 8'h00;
+                        rbuf[1] = m_esi_2003;           // 0x2003 = byte idx 0
                         rbuf[3] = m_esi_2005;           // 0x2005 = byte idx 2
                         rlen = dlen + 1;
                         send_reply;
@@ -351,6 +356,15 @@ module tb_polite_attach;
                     end
                 end
                 4'h8: begin                             // native write
+                    if (req_addr == 20'h02003) begin
+                        if (!established_phase)
+                            esi3_writes = esi3_writes + 1;
+                        else begin
+                            esi3_writes_post    = esi3_writes_post + 1;
+                            esi3_write_val_post = req[4];
+                        end
+                        m_esi_2003 = m_esi_2003 & ~req[4];
+                    end
                     if (req_addr == 20'h02005) begin
                         if (!established_phase) begin
                             esi_writes    = esi_writes + 1;
@@ -518,8 +532,11 @@ module tb_polite_attach;
             end else if (esi_write_val !== 8'h02) begin
                 errors = errors + 1;
                 $display("FAIL: attach ESI ack value %02x (want 02)", esi_write_val);
+            end else if (esi3_writes != 0) begin
+                errors = errors + 1;
+                $display("FAIL: %0d attach-time 0x2003 clears (vector was 0 — none expected)", esi3_writes);
             end else
-                $display("  ok: attach ESI ack — RD 0x2003 + WR 0x2005=02");
+                $display("  ok: attach ESI ack — RD 0x2003 + WR 0x2005=02, no spurious 0x2003 clear");
             if (t_first_tps1 < 0 ||
                 t_first_tps1 < t_sink_ready ||
                 t_first_tps1 < t_edid_done ||
@@ -554,14 +571,18 @@ module tb_polite_attach;
             $display("  ok: per-iteration lane-set writes (%0d: %0d x 0x02, %0d x 0x27) across %0d CR polls; CR granted on a write",
                      ls_cnt, saw02, saw27, cr_status_polls);
 
-        // 6. runtime ESI service
+        // 6. runtime ESI service — BOTH vectors pending: 0x2005 (link)
+        // and 0x2003 (device-service, the register the first ESI build
+        // read and left SET — the second-clear path under test)
+        m_esi_2003 = 8'h40;
         m_esi_2005 = 8'h02;
         force dut.i_aux_channel.hpd_irq = 1'b1;
         repeat (3) @(posedge clk100);
         release dut.i_aux_channel.hpd_irq;
         begin : wait_rt_service
             integer t0; t0 = $time;
-            while (esi_writes_post == 0 && ($time - t0) < 10_000_000)
+            while ((esi_writes_post == 0 || esi3_writes_post == 0) &&
+                   ($time - t0) < 10_000_000)
                 #10_000;
         end
         if (esi_writes_post != 1) begin
@@ -573,8 +594,13 @@ module tb_polite_attach;
         end else if (m_esi_2005 !== 8'h00) begin
             errors = errors + 1;
             $display("FAIL: ESI vector not cleared at the sink (%02x)", m_esi_2005);
+        end else if (esi3_writes_post != 1 || esi3_write_val_post !== 8'h40 ||
+                     m_esi_2003 !== 8'h00) begin
+            errors = errors + 1;
+            $display("FAIL: 0x2003 second clear bad (writes=%0d val=%02x residual=%02x)",
+                     esi3_writes_post, esi3_write_val_post, m_esi_2003);
         end else
-            $display("  ok: runtime ESI service — hpd_irq -> RD 0x2003 -> W1C 0x2005=02, vector clear");
+            $display("  ok: runtime ESI service — both vectors: W1C 0x2005=02 AND W1C 0x2003=40, both clear");
 
         #1_000_000;                     // one more ms: no extra acks, no drop
         if (esi_writes_post > 1) begin

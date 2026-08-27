@@ -199,6 +199,11 @@ module aux_channel #(
         // {short_reply, non_ACK, other/unattributed, observe_suppressed,
         //  dark_kicks}
         output [23:0] debug_aux_err,  // + [3:0] = IRQ services performed
+        // sticky OR of every ESI vector byte read ({0x2003, 0x2005}) and
+        // the EDID defer bookkeeping ({giveup, defer_cnt}) — the two
+        // observability gaps from the f0a48ae6 grading sessions
+        output [15:0] debug_esi,
+        output [6:0]  debug_defer,
         // CENTRALIZED first-teardown detail latch (latched at the first
         // transition to `error` from the established set since config):
         // {reason[3:0], from_state[7:0], expected[7:0], rx_byte_count[7:0]}
@@ -288,6 +293,12 @@ module aux_channel #(
     // tx_link_established (the stream is live), the attach pair must not.
     localparam [7:0] esi_read      = 8'h37, esi_clear    = 8'h38;
     localparam [7:0] esi_read_rt   = 8'h39, esi_clear_rt = 8'h3A;
+    // Second ESI clear: DEVICE_SERVICE_IRQ_VECTOR_ESI0 (0x2003) W1C when
+    // the block read showed it nonzero — before this, a vector raised in
+    // 0x2003 was read and left SET (the unserviced pathology one register
+    // over from the one we fixed; candidate for the Anker's IRQ-silent
+    // dark class if its events land there).
+    localparam [7:0] esi_clear2    = 8'h3B, esi_clear2_rt = 8'h3C;
 
     // Checking the state of the link
     localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
@@ -374,6 +385,9 @@ module aux_channel #(
     reg        lane_set_sent    = 1'b0;   // a lane-set write went out this training
     reg [15:0] lane_set_last    = 16'd0;  // the value it carried
     reg [7:0]  esi_2005_r       = 8'd0;   // latched LINK_SERVICE_IRQ_VECTOR_ESI0
+    reg [7:0]  esi_2003_r       = 8'd0;   // latched DEVICE_SERVICE_IRQ_VECTOR_ESI0
+    reg [7:0]  dbg_esi2003      = 8'd0;   // sticky OR of every 0x2003 read
+    reg [7:0]  dbg_esi2005      = 8'd0;   // sticky OR of every 0x2005 read
     reg        irq_service_due  = 1'b0;   // hpd_irq consumed; ESI service owed
     reg        err_evt          = 1'b0;   // tagged error-entry event
     reg [3:0]  err_reason       = 4'd0;
@@ -388,7 +402,8 @@ module aux_channel #(
     wire in_established_set = (state == link_established) ||
                               (state == check_link) || (state == check_wait) ||
                               (state == irq_clear) ||
-                              (state == esi_read_rt) || (state == esi_clear_rt);
+                              (state == esi_read_rt) || (state == esi_clear_rt) ||
+                              (state == esi_clear2_rt);
     wire obs_active = (GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS);
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
@@ -396,6 +411,8 @@ module aux_channel #(
     assign debug_aux_err  = {dbg_short_sat, dbg_nack_sat, dbg_other_sat,
                              dbg_obs_sat, dbg_kick_sat, dbg_irq_sat};
     assign debug_err_detail = err_detail;
+    assign debug_esi   = {dbg_esi2003, dbg_esi2005};
+    assign debug_defer = {edid_giveup, defer_cnt};
     assign debug_sink = dbg_sink_status;
     // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
     // read): bit0/1 = RECEIVE_PORT_0/1 "sink is receiving a valid main
@@ -567,9 +584,13 @@ always @(posedge clk) begin
             edid_addr:          state_on_success <= edid_block0;
             defer_wait:         state_on_success <= defer_pend_state;
             esi_read:           state_on_success <= esi_clear;
-            esi_clear:          state_on_success <= set_power_d0;
+            esi_clear:          state_on_success <= (esi_2003_r != 8'h00)
+                                                    ? esi_clear2 : set_power_d0;
+            esi_clear2:         state_on_success <= set_power_d0;
             esi_read_rt:        state_on_success <= esi_clear_rt;
-            esi_clear_rt:       state_on_success <= link_established;
+            esi_clear_rt:       state_on_success <= (esi_2003_r != 8'h00)
+                                                    ? esi_clear2_rt : link_established;
+            esi_clear2_rt:      state_on_success <= link_established;
             edid_block0:        state_on_success <= edid_block1;
             edid_block1:        state_on_success <= edid_block2;
             edid_block2:        state_on_success <= edid_block3;
@@ -758,6 +779,10 @@ always @(posedge clk) begin
             if (dbg_irq_sat != 4'hF)
                 dbg_irq_sat <= dbg_irq_sat + 4'd1;
         end
+        if (next_state == esi_clear2 || next_state == esi_clear2_rt) begin
+            irq_clear_byte_r <= esi_2003_r;
+            esi_2003_r       <= 8'h00;
+        end
         if (next_state == esi_read_rt)
             irq_service_due <= 1'b0;
         // lane-set write tracking (POLITE write-on-change)
@@ -800,6 +825,8 @@ always @(posedge clk) begin
             esi_clear:            begin msg <= 8'h1C; expected <= 8'h01; end
             esi_read_rt:          begin msg <= 8'h1B; expected <= 8'h0E; end
             esi_clear_rt:         begin msg <= 8'h1C; expected <= 8'h01; end
+            esi_clear2:           begin msg <= 8'h1D; expected <= 8'h01; end
+            esi_clear2_rt:        begin msg <= 8'h1D; expected <= 8'h01; end
 
             edid_block0:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
             edid_block1:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
@@ -917,6 +944,7 @@ always @(posedge clk) begin
             // runtime ESI service: the stream is live — hold the TX up
             esi_read_rt:          begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             esi_clear_rt:         begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            esi_clear2_rt:        begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
         endcase
     end
 
@@ -1096,8 +1124,15 @@ always @(posedge clk) begin
                     sink_count_r <= aux_rx_data;
                 // ESI block read: data byte 3 = 0x2005 (0x2003 is byte 1)
                 if((state == esi_read || state == esi_read_rt) &&
-                   rx_byte_count == 8'h03)
-                    esi_2005_r <= aux_rx_data;
+                   rx_byte_count == 8'h01) begin
+                    esi_2003_r  <= aux_rx_data;
+                    dbg_esi2003 <= dbg_esi2003 | aux_rx_data;
+                end
+                if((state == esi_read || state == esi_read_rt) &&
+                   rx_byte_count == 8'h03) begin
+                    esi_2005_r  <= aux_rx_data;
+                    dbg_esi2005 <= dbg_esi2005 | aux_rx_data;
+                end
                         
                 if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
                     next_state <= state_on_success;
@@ -1127,6 +1162,7 @@ always @(posedge clk) begin
                                    state != check_link && state != check_wait       &&
                                    state != irq_clear  &&
                                    state != esi_read_rt && state != esi_clear_rt &&
+                                   state != esi_clear2_rt &&
                                    retry_now == 1'b1)) begin
         next_state <= reset;
         state      <= error;

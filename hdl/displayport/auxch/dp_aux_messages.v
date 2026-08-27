@@ -246,6 +246,14 @@ always @(posedge clk) begin
        12'h1C3: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
        12'h1C4: begin aux_tx_data <= irq_clear_byte; aux_tx_wr_en <= 1'b1; end
 
+       // msg 0x1D: W1C DEVICE_SERVICE_IRQ_VECTOR_ESI0 (0x2003) — second
+       // clear write, sent only when the block read showed it nonzero
+       12'h1D0: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end
+       12'h1D1: begin aux_tx_data <= 8'h20; aux_tx_wr_en <= 1'b1; end
+       12'h1D2: begin aux_tx_data <= 8'h03; aux_tx_wr_en <= 1'b1; end
+       12'h1D3: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
+       12'h1D4: begin aux_tx_data <= irq_clear_byte; aux_tx_wr_en <= 1'b1; end
+
        // Resd lane align status for all four lanes
        12'h100: begin aux_tx_data <= 8'h90; aux_tx_wr_en <= 1'b1; end
        12'h101: begin aux_tx_data <= 8'h02; aux_tx_wr_en <= 1'b1; end

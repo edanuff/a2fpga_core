@@ -193,6 +193,8 @@ module a2mega_dp_test_top (
     logic [3:0]  aux_dbg_wdog;   // {cold-restart forcing, attempts[2:0]} (telemetry W:)
     logic [15:0] aux_dbg_tear;   // {first_mask, fail_mask, gate_sat, timeout_sat}
     logic [23:0] aux_dbg_auxerr; // {short, nack, other, obs, kicks, irq} (J:)
+    logic [15:0] aux_dbg_esi;    // sticky OR {0x2003, 0x2005} ESI reads (V:)
+    logic [6:0]  aux_dbg_defer;  // {edid_giveup, defer_cnt} (U:)
     logic [27:0] aux_dbg_errdet; // first teardown {reason, state, exp, rxc} (B:)
     logic [31:0] aux_dbg_snap;   // first-failure snapshot (Z:)
     logic [7:0]  aux_dbg_sink;
@@ -298,6 +300,8 @@ module a2mega_dp_test_top (
         .debug_wdog        (aux_dbg_wdog),
         .debug_teardown    (aux_dbg_tear),
         .debug_aux_err     (aux_dbg_auxerr),
+        .debug_esi         (aux_dbg_esi),
+        .debug_defer       (aux_dbg_defer),
         .debug_err_detail  (aux_dbg_errdet),
         .debug_snapshot    (aux_dbg_snap),
         .debug_sink        (aux_dbg_sink),
@@ -400,6 +404,8 @@ module a2mega_dp_test_top (
     logic [3:0]  wdog_s0, wdog_s;      // watchdog {forcing, attempts}
     logic [15:0] tear_s0, tear_s;      // {first,sticky,gate,timeout}
     logic [23:0] aerr_s0, aerr_s;      // {short, nack, other, obs, kicks, irq}
+    logic [15:0] esi_s0, esi_s;        // sticky {0x2003, 0x2005}
+    logic [7:0]  defr_s0, defr_s;      // {0, giveup, defer_cnt}
     logic [27:0] edet_s0, edet_s;      // first teardown detail
     logic [31:0] snap_s0, snap_s;      // first-failure snapshot
     // driven by the acquisition-counter block further down; declared here
@@ -428,6 +434,8 @@ module a2mega_dp_test_top (
         wdog_s0 <= aux_dbg_wdog;    wdog_s <= wdog_s0;
         tear_s0 <= aux_dbg_tear;    tear_s <= tear_s0;
         aerr_s0 <= aux_dbg_auxerr;  aerr_s <= aerr_s0;
+        esi_s0  <= aux_dbg_esi;     esi_s  <= esi_s0;
+        defr_s0 <= {1'b0, aux_dbg_defer}; defr_s <= defr_s0;
         edet_s0 <= aux_dbg_errdet;  edet_s <= edet_s0;
         snap_s0 <= aux_dbg_snap;    snap_s <= snap_s0;
     end
@@ -450,7 +458,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 159;  // five lines; msg_idx is [7:0]
+    localparam int MSG_LEN = 171;  // five lines; msg_idx is [7:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -502,15 +510,18 @@ module a2mega_dp_test_top (
             msg[112]=" "; msg[113]=" "; msg[114]=" "; msg[115]=" ";
             msg[116]=" "; msg[117]=" "; msg[118]=" "; msg[119]=" ";
             msg[120]=" "; msg[121]=" "; msg[122]=" "; msg[123]=" ";
-            msg[124]=" "; msg[125]=8'h0A; msg[126]=" "; msg[127]=" ";
+            msg[124]=" "; msg[125]=" "; msg[126]=" "; msg[127]=" ";
             msg[128]=" "; msg[129]=" "; msg[130]=" "; msg[131]=" ";
             msg[132]=" "; msg[133]=" "; msg[134]=" "; msg[135]=" ";
-            msg[136]=" "; msg[137]=" "; msg[138]=" "; msg[139]=" ";
+            msg[136]=" "; msg[137]=8'h0A; msg[138]=" "; msg[139]=" ";
             msg[140]=" "; msg[141]=" "; msg[142]=" "; msg[143]=" ";
             msg[144]=" "; msg[145]=" "; msg[146]=" "; msg[147]=" ";
             msg[148]=" "; msg[149]=" "; msg[150]=" "; msg[151]=" ";
             msg[152]=" "; msg[153]=" "; msg[154]=" "; msg[155]=" ";
-            msg[156]=" "; msg[157]=" "; msg[158]=8'h0A;
+            msg[156]=" "; msg[157]=" "; msg[158]=" "; msg[159]=" ";
+            msg[160]=" "; msg[161]=" "; msg[162]=" "; msg[163]=" ";
+            msg[164]=" "; msg[165]=" "; msg[166]=" "; msg[167]=" ";
+            msg[168]=" "; msg[169]=" "; msg[170]=8'h0A;
         end else begin
         // ---------------------------------------------------------------
         // FIVE SHORT LINES, each <= 39 printable chars (39-col console
@@ -555,16 +566,22 @@ module a2mega_dp_test_top (
         msg[110]="M"; msg[111]="1"; msg[112]=":"; msg[113]=hexch(afe1_s);
         msg[114]=" "; msg[115]="N"; msg[116]=":"; msg[117]=hexch(evt_s[11:8]);
         msg[118]=hexch(evt_s[7:4]); msg[119]=hexch(evt_s[3:0]); msg[120]=" "; msg[121]="L";
-        msg[122]=":"; msg[123]=hexch(d4_cnt_s[7:4]); msg[124]=hexch(d4_cnt_s[3:0]); msg[125]=8'h0A;
-        msg[126]="D"; msg[127]="5"; msg[128]=" "; msg[129]="Z";
-        msg[130]=":"; msg[131]=hexch(snap_s[31:28]); msg[132]=hexch(snap_s[27:24]); msg[133]=hexch(snap_s[23:20]);
-        msg[134]=hexch(snap_s[19:16]); msg[135]=hexch(snap_s[15:12]); msg[136]=hexch(snap_s[11:8]); msg[137]=hexch(snap_s[7:4]);
-        msg[138]=hexch(snap_s[3:0]); msg[139]=" "; msg[140]="J"; msg[141]=":";
-        msg[142]=hexch(aerr_s[23:20]); msg[143]=hexch(aerr_s[19:16]); msg[144]=hexch(aerr_s[15:12]); msg[145]=hexch(aerr_s[11:8]);
-        msg[146]=hexch(aerr_s[7:4]); msg[147]=hexch(aerr_s[3:0]); msg[148]=" "; msg[149]="B";
-        msg[150]=":"; msg[151]=hexch(edet_s[27:24]); msg[152]=hexch(edet_s[23:20]); msg[153]=hexch(edet_s[19:16]);
-        msg[154]=hexch(edet_s[15:12]); msg[155]=hexch(edet_s[11:8]); msg[156]=hexch(edet_s[7:4]); msg[157]=hexch(edet_s[3:0]);
-        msg[158]=8'h0A;
+        msg[122]=":"; msg[123]=hexch(d4_cnt_s[7:4]); msg[124]=hexch(d4_cnt_s[3:0]);
+        // V: sticky ESI vector bytes {0x2003, 0x2005}; U: {giveup, defer_cnt}
+        msg[125]=" "; msg[126]="V"; msg[127]=":";
+        msg[128]=hexch(esi_s[15:12]); msg[129]=hexch(esi_s[11:8]);
+        msg[130]=hexch(esi_s[7:4]);  msg[131]=hexch(esi_s[3:0]);
+        msg[132]=" "; msg[133]="U"; msg[134]=":";
+        msg[135]=hexch(defr_s[7:4]); msg[136]=hexch(defr_s[3:0]); msg[137]=8'h0A;
+        msg[138]="D"; msg[139]="5"; msg[140]=" "; msg[141]="Z";
+        msg[142]=":"; msg[143]=hexch(snap_s[31:28]); msg[144]=hexch(snap_s[27:24]); msg[145]=hexch(snap_s[23:20]);
+        msg[146]=hexch(snap_s[19:16]); msg[147]=hexch(snap_s[15:12]); msg[148]=hexch(snap_s[11:8]); msg[149]=hexch(snap_s[7:4]);
+        msg[150]=hexch(snap_s[3:0]); msg[151]=" "; msg[152]="J"; msg[153]=":";
+        msg[154]=hexch(aerr_s[23:20]); msg[155]=hexch(aerr_s[19:16]); msg[156]=hexch(aerr_s[15:12]); msg[157]=hexch(aerr_s[11:8]);
+        msg[158]=hexch(aerr_s[7:4]); msg[159]=hexch(aerr_s[3:0]); msg[160]=" "; msg[161]="B";
+        msg[162]=":"; msg[163]=hexch(edet_s[27:24]); msg[164]=hexch(edet_s[23:20]); msg[165]=hexch(edet_s[19:16]);
+        msg[166]=hexch(edet_s[15:12]); msg[167]=hexch(edet_s[11:8]); msg[168]=hexch(edet_s[7:4]); msg[169]=hexch(edet_s[3:0]);
+        msg[170]=8'h0A;
         end
     end
 
