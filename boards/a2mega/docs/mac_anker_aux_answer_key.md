@@ -403,6 +403,30 @@ yet (~17% historical rate; within odds).
 Standing watch items: V: after a serviced blink (runtime vector
 contents), and V:/U: on the Anker — especially at a dark event.
 
+### QUIET-FROZEN WEDGE ON v3 (Anker, first swap-back attach) — INSTRUMENTED
+Light-up then dark, stayed dark. Telemetry: the ORIGINAL wedge signature
+C:8177/K:00 (LINK_STATUS_UPDATED latched, lanes trained, hub claims
+not-receiving), Y:17/L:07 (seven video flaps then dark), G:00/T:0/B:0
+(no gate fails, no teardowns — the polite FSM polling politely into a
+wedged hub), W:6. **J:000001 — NO runtime IRQ ever arrived** through
+the whole event: the VL103 delivered no attention. The polite stack
+does NOT prevent this class (as suspected: it is hub-internal).
+INSTRUMENT LIMITATION EXPOSED: V: showed only the attach read because
+the ESI block is read ONLY on hpd_irq — a standing vector the hub set
+without delivering an attention would be invisible. NEXT BUILD: fold an
+ESI block read into the 1 s check so V: records standing vectors.
+
+**RECOVERY: PD-level virtual replug ('v') CLEARED the wedge (n=1).**
+Board drained/rebooted/re-attached clean (fresh counters, Y:11, C:0177,
+K:03; V:0000 — no pending vector at this Anker attach, unlike the
+Ugreen's every-attach 02). Implication: 'v' is ESP32-initiated, so an
+AUTOMATED self-heal path exists — FPGA detects sustained C:8177/K:00,
+signals ESP32, ESP32 executes virtual replug. Historically manual power
+cycles did NOT reliably clear this wedge (it recurred), so this needs
+more n — but it is the first credible field-rate answer for the class
+the source cannot prevent. Design constraints if built: budgeted,
+flap-tolerant (the sleeping-monitor storm lesson), screen-truth-gated.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
