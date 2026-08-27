@@ -484,6 +484,38 @@ cut 10.7s -> 8.05s (two-bit AND, guards the ~7s settling-storm ghost)
 + consec 3->2: recovery ~30s -> ~18-20s bench / ~12s production
 (ed: 30s is too long).
 
+### WEDGE ROOT CAUSE FOUND: ESP32 SURVIVES THE SWAP GAP (ping-instrumented)
+Generator refined then root-caused in one instrumented run (continuous
+1 Hz ping watch + screen truth), timeline:
+- 12:05:59 down: unplug from hub -> Mac dwell (~30 s suffices; the 5-min
+  idle test was CLEAN — sourceless idle is NOT the generator).
+- 12:07:00 down / **12:07:09 up: a 9-SECOND hole including cable
+  handling — the ESP32 NEVER REBOOTED across the Mac->hub swap** (a real
+  reboot costs 30-60 s of WiFi rejoin, measured all day). Bulk caps
+  float the chip through the 1-3 s unpowered gap (ed's call).
+- Screen: lit then WEDGED (generator now 5/5 for Mac-dwell+quick-swap;
+  0/7 plain cycles; 0/1 five-minute drain).
+- 12:07:39 down / 12:07:42 up: **a 3-second hole = the virtual replug's
+  VBUS-off hold — the ESP32 rides through its OWN replug too** (which is
+  why telnet always answered quickly post-recovery while FPGA counters
+  zeroed: the FPGA's POR trips on the sag, the ESP32's does not).
+- Colorbars ~32 s after attach: THIRD live self-heal, exact budget.
+
+MECHANISM: the swap-attach happens with NO fresh boot — no
+fusb302_init (the chip software reset lives there), the PD stack
+running on Mac-session RAM state, and plausibly phantom-VBUS (the
+measured backfeed) hiding the detach from the stack entirely, so the
+hub arrives mid-stale-session. Mixed-survival hazard: the FUSB302 may
+brown out to POR defaults while the ESP32 does not — a blind, desynced
+stack attaching. WHY 'v' CURES IT: usbc_port_virtual_replug is a
+CONTROLLED teardown — fusb302_disable + reset_protocol + from-scratch
+attach ceremony. The cure is not the power cycle; it is the PD-layer
+clean slate. Cure == prevention: run the same teardown-reinit ceremony
+whenever a source transition is detected with prior-session state
+(field-proven 5+ times tonight as the recovery path).
+NEXT BUILD (ESP32): detach-detection hardening + ceremony-on-
+reattach — the wedge class should stop occurring at attach entirely.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
