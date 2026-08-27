@@ -329,6 +329,28 @@ Before production-candidate status: (a) a Ugreen smoke test — the EDID
 give-up budget is the strict-converter fallback and is sim-proven but
 not hardware-proven; (b) optional round-2 for session-swing.
 
+### Ugreen smoke test (f0a48ae6, 3 cycles)
+3/3 FAST colorbars, identical clean signatures every row: G:F0 (zero
+ladder restarts), Y:11, L:01, C:0177, K:03, T:0000, books empty. The
+historically strict converter (0-for-everything at 900 mV; EDID-hostile)
+takes the polite build cleanly at 804 mV. Fingerprint: J:000002 on ALL
+THREE rows (vs J:1 on Anker rows 3-5) — a DETERMINISTIC single
+pre-training restart on this converter (invisible to gate/timeout
+counters), benign. Caveat recorded honestly: telemetry cannot
+distinguish EDID-served from EDID-given-up (no counter exposes
+edid_giveup); the load-bearing property — EDID handling never blocks
+video on a strict converter — held 3/3. Definitive answer = one
+breakout capture, or expose defer_cnt in a spare telemetry nibble.
+
+### Bar for production (user directive, 08-26)
+80% bench success is NOT acceptable — field rates degrade from bench
+rates. The dark-with-K:03 downstream class is an OPEN INVESTIGATION,
+not an accepted loss. Candidate levers: (a) more n to establish its
+true rate (it may be the self-recovering benign class caught in a
+non-recovering instance); (b) the Mac's vendor 0x3050/0x3051 per-poll
+handshake (controlled experiment); (c) IT6563 HDMI-side behavior
+(datasheet review of output-side hot-plug/timeout machinery).
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
