@@ -100,8 +100,11 @@ module dp_transmitter #(
     // react to HPD IRQ with an immediate status read and acknowledge
     // DEVICE_SERVICE_IRQ_VECTOR by write-back. The dangling-input /
     // discarded-0x201 gap is the leading induced-wedge suspect.
-    parameter bit    IRQ_SERVICE = 0,
+    // NOT `bit`: mode 2 = ESI servicing (a 1-bit type would truncate it)
+    parameter int    IRQ_SERVICE = 0,
     parameter bit    LATE_REPLY_DRAIN = 0,
+    parameter bit    POLITE_ATTACH = 0,
+    parameter [5:0]  EDID_DEFER_CAP = 6'd40,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -596,7 +599,9 @@ module dp_transmitter #(
                          .GATE_KICK(GATE_KICK),
                          .KICK_CLKS(KICK_CLKS),
                          .IRQ_SERVICE(IRQ_SERVICE),
-                         .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN)) i_channel_management(
+                         .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN),
+                         .POLITE_ATTACH(POLITE_ATTACH),
+                         .EDID_DEFER_CAP(EDID_DEFER_CAP)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
         .afe_busy             (afe_busy_w),

@@ -125,10 +125,35 @@ module aux_channel #(
     // works end-to-end through the VL103/PD/ESP32 and died at this input).
     // Conformant sources (Macs) service IRQs within 100 ms and never drive
     // this hub into its wedge states. Default 0 = legacy for other builds.
+    // IRQ_SERVICE values: 0 = off (legacy), 1 = legacy-0x201 write-back,
+    // 2 = ESI (08-26, wire-proven): the Anker NEVER raises 0x201 — the
+    // Mac answer-key services exclusively via the ESI space (RD 0x2003
+    // len13, W1C 0x2005), including an UNCONDITIONAL 0x02 ack during
+    // every attach. Mode 2 mirrors that: attach-time ack after
+    // read_registers, and hpd_irq-triggered service from the established
+    // set (status check first, then ESI read + clear).
     parameter IRQ_SERVICE = 0,
     // Late-reply drain (08-24) is now parameterized so a build can carry
     // the LEGACY error behavior exactly (round-1 comparison baseline).
-    parameter LATE_REPLY_DRAIN = 0
+    parameter LATE_REPLY_DRAIN = 0,
+    // POLITE ATTACH (08-26, from the Mac<->Anker answer key): the hub
+    // raises HPD ~257-435 ms before it can train (SINK_COUNT=0, CR
+    // impossible) and our legacy ladder hammered ~1150 transactions into
+    // that window (383 CR polls, each REWRITING an unchanged 0x103) —
+    // the strongest induced-wedge candidate on record; the hub visibly
+    // DEFERred under the load. The Mac never hits the window: ~200 ms of
+    // caps/EDID traffic first, lane writes once per phase. This
+    // parameter adds, together: (a) a sink-present gate — after the
+    // presence read, if the SINK_COUNT count field is 0, wait ~21 ms and
+    // re-read instead of training into a sinkless branch; (b) the EDID
+    // preamble — segment write + 8 block reads with paced DEFER retries
+    // (the Anker answers on the 3rd try; a defer budget abandons EDID
+    // for strict converters without blocking video); (c) lane-set
+    // write-on-change — TRAINING_LANEx_SET is rewritten only when the
+    // value changes, not every poll; (d) a slower CR poll cadence
+    // (~330 us extra dwell per wait state). Default 0 = legacy.
+    parameter POLITE_ATTACH = 0,
+    parameter [5:0] EDID_DEFER_CAP = 6'd40
 )(
         input        clk,
         // ready-to-send TRAINING_LANEx_SET values from afe_adjust_seq,
@@ -244,6 +269,17 @@ module aux_channel #(
     localparam [7:0] set_power_d0 = 8'h31;
     localparam [7:0] irq_clear    = 8'h32;
 
+    // POLITE_ATTACH states (unreachable when the parameter is 0)
+    localparam [7:0] presence_eval = 8'h33;  // branch on the sink-count byte
+    localparam [7:0] presence_wait = 8'h34;  // ~21 ms, then re-read presence
+    localparam [7:0] edid_addr     = 8'h35;  // I2C segment/offset write (msg 0x01)
+    localparam [7:0] defer_wait    = 8'h36;  // ~650 us pacing before a DEFER retry
+    // ESI service states. Attach-time and runtime variants are separate
+    // states because their TX flags differ: the runtime pair must HOLD
+    // tx_link_established (the stream is live), the attach pair must not.
+    localparam [7:0] esi_read      = 8'h37, esi_clear    = 8'h38;
+    localparam [7:0] esi_read_rt   = 8'h39, esi_clear_rt = 8'h3A;
+
     // Checking the state of the link
     localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
                     
@@ -321,6 +357,15 @@ module aux_channel #(
     reg [7:0]  irq_clear_byte_r = 8'd0;   // value being written back
     reg        irq_pending      = 1'b0;   // hpd_irq seen; service due
     reg [3:0]  dbg_irq_sat      = 4'd0;   // IRQ services performed
+    // POLITE_ATTACH / ESI state (all inert at legacy defaults)
+    reg [7:0]  sink_count_r     = 8'd0;   // presence-read count byte
+    reg [7:0]  defer_pend_state = 8'd0;   // state to re-enter after defer_wait
+    reg [5:0]  defer_cnt        = 6'd0;   // DEFERs taken this attach
+    reg        edid_giveup      = 1'b0;   // defer budget exhausted: skip EDID
+    reg        lane_set_sent    = 1'b0;   // a lane-set write went out this training
+    reg [15:0] lane_set_last    = 16'd0;  // the value it carried
+    reg [7:0]  esi_2005_r       = 8'd0;   // latched LINK_SERVICE_IRQ_VECTOR_ESI0
+    reg        irq_service_due  = 1'b0;   // hpd_irq consumed; ESI service owed
     reg        err_evt          = 1'b0;   // tagged error-entry event
     reg [3:0]  err_reason       = 4'd0;
     reg [7:0]  err_from         = 8'd0;
@@ -333,7 +378,8 @@ module aux_channel #(
     reg        inest_d          = 1'b0;
     wire in_established_set = (state == link_established) ||
                               (state == check_link) || (state == check_wait) ||
-                              (state == irq_clear);
+                              (state == irq_clear) ||
+                              (state == esi_read_rt) || (state == esi_clear_rt);
     wire obs_active = (GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS);
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
@@ -498,7 +544,23 @@ always @(posedge clk) begin
         //-------------------------------------------------
         case(next_state)
             reset:              state_on_success <= check_presence;
-            check_presence:     state_on_success <= read_sink_count;  // EDID skipped (DDC-class, converters DEFER it)                        
+            // Legacy: EDID skipped (DDC-class, converters DEFER it).
+            // POLITE: evaluate the count byte first — presence_eval
+            // routes to the paced re-read (count 0), the EDID preamble,
+            // or straight on (EDID given up).
+            check_presence:     state_on_success <= (POLITE_ATTACH != 0)
+                                                    ? presence_eval : read_sink_count;
+            presence_eval:      state_on_success <= (sink_count_r[5:0] == 6'd0)
+                                                    ? presence_wait
+                                                    : (edid_giveup ? read_sink_count
+                                                                   : edid_addr);
+            presence_wait:      state_on_success <= check_presence;
+            edid_addr:          state_on_success <= edid_block0;
+            defer_wait:         state_on_success <= defer_pend_state;
+            esi_read:           state_on_success <= esi_clear;
+            esi_clear:          state_on_success <= set_power_d0;
+            esi_read_rt:        state_on_success <= esi_clear_rt;
+            esi_clear_rt:       state_on_success <= link_established;
             edid_block0:        state_on_success <= edid_block1;
             edid_block1:        state_on_success <= edid_block2;
             edid_block2:        state_on_success <= edid_block3;
@@ -507,8 +569,11 @@ always @(posedge clk) begin
             edid_block5:        state_on_success <= edid_block6;
             edid_block6:        state_on_success <= edid_block7;
             edid_block7:        state_on_success <= read_sink_count;
-            read_sink_count:    state_on_success <= read_registers;        
-            read_registers:     state_on_success <= set_power_d0;
+            read_sink_count:    state_on_success <= read_registers;
+            // ESI mode: the Mac's unconditional attach-time ESI ack goes
+            // here — between the caps read and the D0 wake.
+            read_registers:     state_on_success <= (IRQ_SERVICE == 2)
+                                                    ? esi_read : set_power_d0;
             set_power_d0:       state_on_success <= set_channel_coding;
             set_channel_coding: state_on_success <= set_speed_270;                        
             set_speed_270:      state_on_success <= set_downspread;                        
@@ -531,6 +596,14 @@ always @(posedge clk) begin
             clock_adjust:       state_on_success <= clock_wait_after;
             clock_wait_after:   if(clock_locked_i == 1'b1) begin
                                     state_on_success <= align_training;
+                                // POLITE: write-on-change — the wire showed
+                                // 383 rewrites of an UNCHANGED 0x103 per
+                                // attach; skip the write and just poll again
+                                // when the value we'd send is what the sink
+                                // already has.
+                                end else if(POLITE_ATTACH != 0 && lane_set_sent &&
+                                            lane_set_last == train_set_byte) begin
+                                    state_on_success <= clock_wait;
                                 end else if(swing_0p8 == 1'b1) begin
                                     state_on_success <= clock_voltage_0p8;
                                 end else if(swing_0p6 == 1'b1) begin
@@ -539,7 +612,10 @@ always @(posedge clk) begin
                                     state_on_success <= clock_voltage_0p4;
                                 end
             //----- Display Port Alignment traning ------------                        
-            align_training:     if(swing_0p8 == 1'b1) begin
+            align_training:     if(POLITE_ATTACH != 0 && lane_set_sent &&
+                                   lane_set_last == train_set_byte) begin
+                                     state_on_success <= align_wait0;
+                                end else if(swing_0p8 == 1'b1) begin
                                      state_on_success <= align_p0_V0p8;
                                 end else if(swing_0p6 == 1'b1) begin
                                      state_on_success <= align_p0_V0p6;
@@ -563,6 +639,9 @@ always @(posedge clk) begin
             align_adjust:       state_on_success <= align_wait_after;
             align_wait_after:   if(symbol_locked_i == 1'b1) begin
                                            state_on_success <= switch_to_normal;
+                                end else if(POLITE_ATTACH != 0 && lane_set_sent &&
+                                            lane_set_last == train_set_byte) begin
+                                    state_on_success <= align_wait0;
                                 end else if(swing_0p8 == 1'b1) begin
                                     if(preemp_6p0 == 1'b1) begin
                                         state_on_success <= align_p2_V0p8;
@@ -599,7 +678,9 @@ always @(posedge clk) begin
                                 // then BLOCKED the Anker path's recovery-by-retrain on
                                 // marginal instances. Teardown/retrain is load-bearing.)
                                 if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
-                                    state_on_success <= (IRQ_SERVICE != 0 && irq_vec_r != 8'h00)
+                                    state_on_success <= (IRQ_SERVICE == 2 && irq_service_due)
+                                                        ? esi_read_rt :
+                                                        (IRQ_SERVICE == 1 && irq_vec_r != 8'h00)
                                                         ? irq_clear : link_established;
                                 end else if (obs_active) begin
                                     // GRACE PERIOD: record, do NOT tear
@@ -655,6 +736,41 @@ always @(posedge clk) begin
             if (dbg_irq_sat != 4'hF)
                 dbg_irq_sat <= dbg_irq_sat + 4'd1;
         end
+        // ESI clears: attach-time = the Mac's unconditional 0x02 ack;
+        // runtime = the latched vector (0x02 fallback if it read zero)
+        if (next_state == esi_clear) begin
+            irq_clear_byte_r <= 8'h02;
+            if (dbg_irq_sat != 4'hF)
+                dbg_irq_sat <= dbg_irq_sat + 4'd1;
+        end
+        if (next_state == esi_clear_rt) begin
+            irq_clear_byte_r <= (esi_2005_r != 8'h00) ? esi_2005_r : 8'h02;
+            esi_2005_r       <= 8'h00;
+            if (dbg_irq_sat != 4'hF)
+                dbg_irq_sat <= dbg_irq_sat + 4'd1;
+        end
+        if (next_state == esi_read_rt)
+            irq_service_due <= 1'b0;
+        // lane-set write tracking (POLITE write-on-change)
+        if (next_state == clock_voltage_0p4 || next_state == clock_voltage_0p6 ||
+            next_state == clock_voltage_0p8 ||
+            next_state == align_p0_V0p4 || next_state == align_p0_V0p6 ||
+            next_state == align_p0_V0p8 ||
+            next_state == align_p1_V0p4 || next_state == align_p1_V0p6 ||
+            next_state == align_p1_V0p8 ||
+            next_state == align_p2_V0p4 || next_state == align_p2_V0p6 ||
+            next_state == align_p2_V0p8) begin
+            lane_set_sent <= 1'b1;
+            lane_set_last <= train_set_byte;
+        end
+        if (next_state == reset || next_state == clock_training) begin
+            lane_set_sent <= 1'b0;
+        end
+        if (next_state == reset) begin
+            defer_cnt       <= 6'd0;
+            edid_giveup     <= 1'b0;
+            irq_service_due <= 1'b0;
+        end
         status_de_active     <= 1'b0;
         adjust_de_active     <= 1'b0;
         dp_reg_de_active     <= 1'b0;
@@ -667,6 +783,14 @@ always @(posedge clk) begin
             // converters DEFER all DDC-class traffic indefinitely while
             // their HDMI side settles, pinning the ladder at step one.
             check_presence:       begin msg <= 8'h03; expected <= 8'h02; reset_addr_on_change <= 1'b1; end
+            presence_eval:        begin msg <= 8'h00; expected <= 8'h00; end
+            presence_wait:        begin msg <= 8'h00; expected <= 8'h00; end
+            edid_addr:            begin msg <= 8'h01; expected <= 8'h01; end
+            defer_wait:           begin msg <= 8'h00; expected <= 8'h00; end
+            esi_read:             begin msg <= 8'h1B; expected <= 8'h0E; end
+            esi_clear:            begin msg <= 8'h1C; expected <= 8'h01; end
+            esi_read_rt:          begin msg <= 8'h1B; expected <= 8'h0E; end
+            esi_clear_rt:         begin msg <= 8'h1C; expected <= 8'h01; end
 
             edid_block0:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
             edid_block1:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
@@ -781,6 +905,9 @@ always @(posedge clk) begin
             check_link:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             check_wait:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             irq_clear:            begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            // runtime ESI service: the stream is live — hold the TX up
+            esi_read_rt:          begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            esi_clear_rt:         begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
         endcase
     end
 
@@ -815,7 +942,25 @@ always @(posedge clk) begin
     // back out before the status read ran — periodic link checks silently
     // skipped on a coin flip. This is the mechanism behind the dark-state
     // G:00/N:000 anomaly (checks "not running" for minutes).
-    if(state == next_state && expected == 8'h00 && count_100us[14] == 1'b1) begin
+    // The paced wait states advance on their own (longer) dwells below —
+    // exclude them here. POLITE also stretches the two CR wait states by
+    // ~330 us each (blind_dwell[15]) so the CR poll loop runs at ~1 ms
+    // instead of ~650 us.
+    if(state == next_state && expected == 8'h00 && count_100us[14] == 1'b1 &&
+       state != presence_wait && state != defer_wait &&
+       (POLITE_ATTACH == 0 ||
+        !(state == clock_wait || state == clock_wait_after) ||
+        blind_dwell[15] == 1'b1)) begin
+        next_state <= state_on_success;
+    end
+    // presence_wait: ~21 ms between sink-count re-reads while the branch
+    // reports no sink (blind_dwell counts cycles-in-state unconditionally)
+    if(state == next_state && state == presence_wait && blind_dwell[21] == 1'b1) begin
+        next_state <= state_on_success;
+    end
+    // defer_wait: ~650 us before re-sending a DEFERred request (the hub
+    // ACKs the Mac's EDID reads on the 3rd try at this pacing)
+    if(state == next_state && state == defer_wait && blind_dwell[16] == 1'b1) begin
         next_state <= state_on_success;
     end
 
@@ -897,9 +1042,28 @@ always @(posedge clk) begin
                 // transactions that aeert "AUX DEFER"
                 //--------------------------------------------
                 if(aux_rx_data == 8'h20) begin
-                   // just flip states to force a retry.
-                    state      <= state_on_success;
-                    next_state <= state;  
+                    if (POLITE_ATTACH != 0) begin
+                        // Paced retry (~650 us, the Mac's cadence) instead
+                        // of an immediate resend. EDID retries draw from a
+                        // per-attach budget; exhausting it abandons EDID
+                        // (strict-converter fallback) rather than blocking
+                        // the attach.
+                        if (defer_cnt != 6'h3F)
+                            defer_cnt <= defer_cnt + 6'd1;
+                        if ((state == edid_addr ||
+                             (state >= edid_block0 && state <= edid_block7)) &&
+                            defer_cnt >= EDID_DEFER_CAP) begin
+                            edid_giveup <= 1'b1;
+                            next_state  <= read_sink_count;
+                        end else begin
+                            defer_pend_state <= state;
+                            next_state       <= defer_wait;
+                        end
+                    end else begin
+                        // legacy: just flip states to force a retry.
+                        state      <= state_on_success;
+                        next_state <= state;
+                    end
                 end
             end else begin
                 //-----------------------------------------------------------------
@@ -917,7 +1081,14 @@ always @(posedge clk) begin
                     dbg_sink_status <= aux_rx_data;
                 // DEVICE_SERVICE_IRQ_VECTOR: previously read and DISCARDED
                 if(status_de_active == 1'b1 && aux_addr_i == 8'd1 && aux_rx_data != 8'h00)
-                    irq_vec_r <= aux_rx_data;                        
+                    irq_vec_r <= aux_rx_data;
+                // POLITE: the presence read's count byte (data byte 1)
+                if(state == check_presence && rx_byte_count == 8'h01)
+                    sink_count_r <= aux_rx_data;
+                // ESI block read: data byte 3 = 0x2005 (0x2003 is byte 1)
+                if((state == esi_read || state == esi_read_rt) &&
+                   rx_byte_count == 8'h03)
+                    esi_2005_r <= aux_rx_data;
                         
                 if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
                     next_state <= state_on_success;
@@ -945,7 +1116,9 @@ always @(posedge clk) begin
     if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
                                   (state != reset      && state != link_established &&
                                    state != check_link && state != check_wait       &&
-                                   state != irq_clear  && retry_now == 1'b1)) begin
+                                   state != irq_clear  &&
+                                   state != esi_read_rt && state != esi_clear_rt &&
+                                   retry_now == 1'b1)) begin
         next_state <= reset;
         state      <= error;
         if (in_established_set) begin
@@ -964,6 +1137,11 @@ always @(posedge clk) begin
     if(state == link_established &&
        (link_check_now == 1'b1 || (IRQ_SERVICE != 0 && irq_pending))) begin
         next_state  <= check_link;
+        // ESI mode: remember an hpd_irq-triggered check owes an ESI
+        // service pass after the status gate (0x201 is never raised by
+        // ESI-only branches, so the legacy vector latch cannot trigger it)
+        if (IRQ_SERVICE == 2 && irq_pending)
+            irq_service_due <= 1'b1;
         irq_pending <= 1'b0;
     end
 

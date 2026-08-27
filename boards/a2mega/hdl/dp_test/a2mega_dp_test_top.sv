@@ -244,9 +244,19 @@ module a2mega_dp_test_top (
         .GATE_GRACE(0),
         .GATE_KICK(0),
         .LATE_REPLY_DRAIN(0),
-        // THE conformance fix under test (08-26): sink-IRQ servicing.
-        // This build = legacy ladder policy + THIS ONE CHANGE.
-        .IRQ_SERVICE(1),
+        // POLITE-ATTACH BUILD (08-26, from the Mac<->Anker answer key):
+        // legacy ladder policy + Mac-parity attach behavior. IRQ_SERVICE=2
+        // = ESI servicing (the hub NEVER raises legacy 0x201 — wire-proven;
+        // attach-time unconditional 0x2005=02 ack + hpd_irq-triggered
+        // ESI block read/clear). POLITE_ATTACH=1 = sink-present gate
+        // (paced ~21 ms re-reads while count=0), EDID preamble with paced
+        // DEFER retries + give-up budget, lane-set write-on-change (legacy
+        // rewrote an unchanged 0x103 383x/attach into the hub's not-ready
+        // window), ~1 ms CR poll cadence. Sim: tb_polite_attach (both
+        // modes) + full ladder regression PASS. Predecessor 8acfe351
+        // (IRQ_SERVICE=1) graded 5/0/0 n=5; its 0x201 path was inert.
+        .IRQ_SERVICE(2),
+        .POLITE_ATTACH(1),
         .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.

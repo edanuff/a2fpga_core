@@ -67,8 +67,10 @@ module channel_management #(
     parameter GATE_GRACE_CLKS = 30'd800_000_000,
     parameter GATE_KICK = 0,       // dark-state kick (aux_channel.v)
     parameter KICK_CLKS = 30'd250_000_000,
-    parameter IRQ_SERVICE = 0,     // sink-IRQ servicing (aux_channel.v)
-    parameter LATE_REPLY_DRAIN = 0 // 0 = legacy error behavior
+    parameter IRQ_SERVICE = 0,     // sink-IRQ servicing: 0/1=0x201/2=ESI (aux_channel.v)
+    parameter LATE_REPLY_DRAIN = 0, // 0 = legacy error behavior
+    parameter POLITE_ATTACH = 0,   // Mac-parity attach pacing (aux_channel.v)
+    parameter [5:0] EDID_DEFER_CAP = 6'd40
 )(
         input  clk100,
         // M5 runtime AFE adjust: applied-level declaration in, one pulse
@@ -275,7 +277,9 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .AFE_ADJUST(AFE_ADJUST), .GATE_GRACE(GATE_GRACE),
               .GATE_GRACE_CLKS(GATE_GRACE_CLKS), .GATE_KICK(GATE_KICK),
               .KICK_CLKS(KICK_CLKS), .IRQ_SERVICE(IRQ_SERVICE),
-              .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN)) i_aux_channel(
+              .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN),
+              .POLITE_ATTACH(POLITE_ATTACH),
+              .EDID_DEFER_CAP(EDID_DEFER_CAP)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
