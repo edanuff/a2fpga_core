@@ -437,10 +437,13 @@ module aux_channel #(
                               (state == esi_read_rt) || (state == esi_clear_rt) ||
                               (state == esi_clear2_rt) || (state == esi_eval_rt);
     wire obs_active = (GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS);
-    wire esi_attach_st = (state == esi_read) || (state == esi_clear) ||
-                         (state == esi_clear2);
-    wire esi_rt_st     = (state == esi_read_rt) || (state == esi_clear_rt) ||
-                         (state == esi_clear2_rt);
+    // Registered at the state transition (not combinational off `state`):
+    // the six 8-bit compares fed the short-read/non-ACK/DEFER/timeout
+    // branches of the next_state mux and tipped the knife-edge (23
+    // violations). Replies arrive many cycles after entry, so a decode
+    // registered at the transition is settled long before it is used.
+    reg esi_attach_st = 1'b0;
+    reg esi_rt_st     = 1'b0;
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
     assign debug_teardown = {dbg_first_mask, dbg_fail_mask, dbg_gate_fail_sat, dbg_timeout_sat};
@@ -828,6 +831,10 @@ always @(posedge clk) begin
             irq_clear_byte_r <= esi_2003_r;
             esi_2003_r       <= 8'h00;
         end
+        esi_attach_st <= (next_state == esi_read) || (next_state == esi_clear) ||
+                         (next_state == esi_clear2);
+        esi_rt_st     <= (next_state == esi_read_rt) || (next_state == esi_clear_rt) ||
+                         (next_state == esi_clear2_rt);
         if (next_state == esi_read_rt) begin
             esi_ack_owed    <= irq_service_due;
             irq_service_due <= 1'b0;
