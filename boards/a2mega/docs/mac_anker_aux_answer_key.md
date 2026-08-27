@@ -553,7 +553,10 @@ Built while the bench was idle; NOTHING flashed yet.
    ~30 s -> ~21 s bench / ~13 s slot-powered.
 
 NEXT BENCH SESSION — flash list + acceptance:
-- FPGA 138B (8.05 s detector build; sha in the archive commit).
+- FPGA 138B **67c40cc5** (8.05 s detector via timer PRELOAD — the >=
+  comparator and two-bit AND forms both re-rolled the vendor cm_life
+  placement into violations across three Place_Options; the preload
+  keeps fire logic gate-identical to v5 and closed clean at 100.156).
 - ESP32 firmware (Trigger C + trims).
 - Acceptance: fast-swap generator n>=3. Expect: guard ceremony
   handles it in ~5 s (console: "CC orientation moved — ceremony n/3"
