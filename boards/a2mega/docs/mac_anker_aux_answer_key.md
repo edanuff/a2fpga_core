@@ -516,6 +516,26 @@ whenever a source transition is detected with prior-session state
 NEXT BUILD (ESP32): detach-detection hardening + ceremony-on-
 reattach — the wedge class should stop occurring at attach entirely.
 
+### Stale-session guard: first acceptance runs (honest ledger)
+Guard flashed. Run 1 (normal-speed swap): NO WEDGE — but the 45 s WiFi
+outage + empty console backlog show the ESP32 actually REBOOTED (gap ran
+long): clean-by-fresh-boot, guard not exercised. Run 2 (FAST swap):
+lit-and-wedged — the guard MISSED, and the miss identifies its blind
+spot: if the surviving FUSB302 is configured for the MAC session's CC
+orientation/measure path, the hub's Source_Caps never physically arrive
+(no RX -> Trigger B can never fire) and the chip is intact (Trigger A
+silent). THE NO-RX HOLE. The wedge_watch backstop fired and recovered
+(~30 s) — backstop now 4/4 lifetime. Every swap outcome converges on
+colorbars: fresh boot / guard / backstop.
+
+TRIGGER C (designed, next firmware build): 1 Hz CC-orientation
+re-qualification while attached — reuse fusb302_detect_source_
+orientation; if Rp moved to the other CC (new cable orientation) or Rp
+absent on both (missed detach, phantom-VBUS-proof) -> ceremony. Run
+only on idle bus (no recent RX) so the measure-block flip cannot clip a
+PD message; restore configure_sink(polarity) after. This also replaces
+VBUS-based detach detection as the primary — CC is the ground truth.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
