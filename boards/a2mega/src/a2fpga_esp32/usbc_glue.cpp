@@ -273,6 +273,17 @@ extern "C" void usbc_virtual_replug(void)
         osd_log("VIRTUAL REPLUG: port not running");
 }
 
+/* Auto-recovery variant (wedge_watch): 1.5 s hold — ample past
+ * tCCDebounce for the hub to register a true detach, and half the
+ * manual 'v' latency (recovery-time trim, ed 08-26). The manual path
+ * keeps its field-proven 3 s. */
+extern "C" void usbc_virtual_replug_fast(void)
+{
+    osd_log("VIRTUAL REPLUG (auto): detaching 1.5 s (CC open)");
+    if (usbc_port_virtual_replug(&s_port, 1500u) != 0)
+        osd_log("VIRTUAL REPLUG: port not running");
+}
+
 extern "C" void usbc_hpd_retrain(void)
 {
     if (!s_hpd_level) {

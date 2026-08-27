@@ -71,7 +71,7 @@ module channel_management #(
     parameter LATE_REPLY_DRAIN = 0, // 0 = legacy error behavior
     parameter POLITE_ATTACH = 0,   // Mac-parity attach pacing (aux_channel.v)
     parameter [5:0] EDID_DEFER_CAP = 6'd40,
-    parameter WEDGE_BIT = 30
+    parameter WEDGE_BIT = 29
 )(
         input  clk100,
         // M5 runtime AFE adjust: applied-level declaration in, one pulse

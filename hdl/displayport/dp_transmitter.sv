@@ -105,7 +105,7 @@ module dp_transmitter #(
     parameter bit    LATE_REPLY_DRAIN = 0,
     parameter bit    POLITE_ATTACH = 0,
     parameter [5:0]  EDID_DEFER_CAP = 6'd40,
-    parameter        WEDGE_BIT = 30,
+    parameter        WEDGE_BIT = 29,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(

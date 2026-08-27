@@ -165,10 +165,14 @@ module aux_channel #(
     // change resets the timer (sleeping-monitor storms cannot
     // accumulate). UNPROVEN discriminator vs the kick-era
     // K:00-with-good-picture state — hence advisory-only.
-    // Bit-index form (not a comparator — the 30-bit >= compare cost
-    // 21 setup violations at the cm_life knife-edge): fires when
-    // wedge_timer[WEDGE_BIT] sets. 30 -> 2^30 clocks = ~10.7 s @ 100 MHz.
-    parameter WEDGE_BIT = 30,
+    // Bit form (not a comparator — the 30-bit >= compare cost 21 setup
+    // violations at the knife-edge): fires when wedge_timer[WEDGE_BIT]
+    // AND [WEDGE_BIT-1] are both set = 1.5 * 2^WEDGE_BIT clocks.
+    // 29 -> 8.05 s @ 100 MHz: the cut from 10.7 s (ed: 30 s recovery too
+    // long) while staying above the ~7 s settling-storm ghost — the
+    // historical converter status-regression window with a GOOD picture
+    // that a shorter fuse would false-fire on.
+    parameter WEDGE_BIT = 29,
     // Lane-set write-on-change: HARDWARE-REFUTED as a default (7d6e205d,
     // 08-26 bench): the DP CR/EQ loops MANDATE a TRAINING_LANEx_SET write
     // every iteration even when unchanged, and the IT6563 uses that write
@@ -1361,7 +1365,7 @@ always @(posedge clk) begin
         wedge_timer <= 32'd0;
         if (dbg_sink_status[1:0] != 2'b00)
             wedge_suspect <= 1'b0;         // streaming again: stand down
-    end else if (wedge_timer[WEDGE_BIT]) begin
+    end else if (wedge_timer[WEDGE_BIT] && wedge_timer[WEDGE_BIT-1]) begin
         wedge_suspect <= 1'b1;
     end else begin
         wedge_timer <= wedge_timer + 32'd1;

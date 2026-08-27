@@ -18,7 +18,8 @@ void osd_log(const char *fmt, ...);
 #define WW_NVS_KEY_ENABLE  "ww_enable"   /* u8: 0 = disabled (default on) */
 
 #define WEDGE_MAX_ATTEMPTS   3   /* total until streaming re-arms */
-#define WEDGE_CONSEC_LINES   3   /* consecutive flagged D4 lines to fire */
+#define WEDGE_CONSEC_LINES   2   /* consecutive flagged D4 lines to fire
+                                  * (latency trim; FPGA already sustains 8 s) */
 #define WEDGE_MIN_UPTIME_MS  30000u  /* never fire in the first 30 s */
 #define WEDGE_COOLDOWN_MS    60000u  /* between attempts (slot-powered case) */
 #define REARM_STREAM_LINES   20  /* consecutive K:!=0 D3 lines to re-arm */
@@ -96,7 +97,7 @@ static void fire_replug(void)
     s_last_fire_ms = uptime_ms();
     osd_log("AUTOREC: wedge sustained - virtual replug (attempt %u/%u)",
             (unsigned)s_budget, WEDGE_MAX_ATTEMPTS);
-    usbc_virtual_replug();
+    usbc_virtual_replug_fast();
 }
 
 void wedge_watch_line(const char *line)
