@@ -564,7 +564,11 @@ NEXT BENCH SESSION — flash list + acceptance:
   backstop lands at ~21 s. Plain cycles + Ugreen smoke unchanged.
 
 ### SESSION CLOSE: scope determination + unified wedge theory
-Final baseline: 5/5 fast-colorbars plain cycles on the full v6 stack
+Final baseline (extended): 15 plain cycles on the full v6 stack —
+Anker->Sceptre 10 (9 fast + 1 six-second self-recovered downstream
+blink, the known benign class), Anker->FANGOR 5/5 fast (first Fangor
+data on the new stack: the historically cable-flaky monitor runs
+clean). Original close-out run: 5/5 fast-colorbars plain cycles
 (FPGA 67c40cc5 + ESP32 w/ Trigger C @4Hz + trims). The remaining wedge
 generator is BENCH-ONLY: Mac-dwell -> fast cross-bench swap into a
 continuously-powered hub. Same-session fast replug (warm hub): CLEAN.
