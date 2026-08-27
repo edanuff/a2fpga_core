@@ -412,8 +412,11 @@ module aux_channel #(
     reg [3:0]  esi_defer_cnt    = 4'd0;
     reg        esi_ack_owed     = 1'b0;   // this rt pass was IRQ-triggered:
                                           // unconditional ack (Mac parity)
-    // wedge-suspect detector (advisory)
-    reg        ever_streamed    = 1'b0;
+    // wedge-suspect detector (advisory). NO ever-streamed gate: it
+    // false-negatived on the first real wedge (K:00 held all session,
+    // the brief flaps never landed on a 1 s poll) and the bad-cable
+    // case it guarded is already blocked upstream by the presence gate
+    // (no sink -> never establishes -> detector unreachable).
     reg [7:0]  r204_q           = 8'd0;   // last 0x204 byte from a status read
     reg [31:0] wedge_timer      = 32'd0;
     reg        wedge_suspect    = 1'b0;
@@ -856,7 +859,6 @@ always @(posedge clk) begin
             esi_off         <= 1'b0;
             esi_defer_cnt   <= 4'd0;
             esi_ack_owed    <= 1'b0;
-            ever_streamed   <= 1'b0;
             wedge_suspect   <= 1'b0;
         end
         status_de_active     <= 1'b0;
@@ -1202,11 +1204,8 @@ always @(posedge clk) begin
                 aux_addr_i <= aux_addr_i+1;
                 if(status_de_active == 1'b1 && aux_addr_i == 8'd4)
                     r204_q <= aux_rx_data;
-                if(status_de_active == 1'b1 && aux_addr_i == 8'd5) begin
+                if(status_de_active == 1'b1 && aux_addr_i == 8'd5)
                     dbg_sink_status <= aux_rx_data;
-                    if (aux_rx_data[1:0] != 2'b00)
-                        ever_streamed <= 1'b1;
-                end
                 // DEVICE_SERVICE_IRQ_VECTOR: previously read and DISCARDED
                 if(status_de_active == 1'b1 && aux_addr_i == 8'd1 && aux_rx_data != 8'h00)
                     irq_vec_r <= aux_rx_data;
@@ -1219,6 +1218,9 @@ always @(posedge clk) begin
                     esi_2003_r  <= aux_rx_data;
                     dbg_esi2003 <= dbg_esi2003 | aux_rx_data;
                 end
+                if((state == esi_read || state == esi_read_rt) &&
+                   rx_byte_count == 8'h02)
+                    dbg_esi2003 <= dbg_esi2003 | aux_rx_data;
                 if((state == esi_read || state == esi_read_rt) &&
                    rx_byte_count == 8'h03) begin
                     esi_2005_r  <= aux_rx_data;
@@ -1347,7 +1349,7 @@ always @(posedge clk) begin
     // sink now reporting not-streaming, AND 0x204 bit7 reading stuck
     // set (a healthy hub clears it on read). Everything else resets it.
     //-----------------------------------------------------------
-    if (!in_established_set || !ever_streamed ||
+    if (!in_established_set ||
         dbg_sink_status[1:0] != 2'b00 || !r204_q[7]) begin
         wedge_timer <= 32'd0;
         if (dbg_sink_status[1:0] != 2'b00)

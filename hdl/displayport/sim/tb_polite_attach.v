@@ -470,7 +470,9 @@ module tb_polite_attach;
         wait (tps2_seen);
         r202 = 8'h77;
         r204 = 8'h01;
-        r205 = 8'h01;
+        // r205 left 00: the detector phases below reproduce the REAL
+        // first-wedge profile (sink NEVER reported streaming) — the
+        // ever_streamed gate false-negatived exactly here
         $display("  [script] EQ granted after TPS2 (t=%0t)", $time);
     end
 
@@ -671,10 +673,12 @@ module tb_polite_attach;
             $display("  ok: one NACK self-disables ESI — no retry hammer, link never torn down");
         esi_nack_mode = 1'b0;
 
-        // 9. WEDGE DETECTOR discrimination (WEDGE_CLKS = 4 ms in sim).
+        // 9. WEDGE DETECTOR discrimination (~5 ms fire time in sim).
+        // r205 has been 00 the WHOLE session — phase (b) firing proves
+        // the never-streamed false negative is fixed.
         // (a) K:00 with 0x204 bit7 CLEAR (healthy hub clearing on read):
         //     sustained -> must NOT fire.
-        r205 = 8'h00; r204 = 8'h01;
+        r204 = 8'h01;
         repeat (4) begin force_check; #2_500_000; end
         if (dut.i_aux_channel.wedge_suspect_o !== 1'b0) begin
             errors = errors + 1;
