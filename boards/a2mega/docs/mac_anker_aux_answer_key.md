@@ -267,6 +267,29 @@ fired during clean attaches); the scenario that generates one is an
 HDMI unplug/replug while the board session is live, which is also the
 quiet-frozen wedge trigger. That is the next bench test.
 
+### Live HDMI unplug->replug on 8acfe351 (n=1, wire + telemetry)
+Screen: video dropped and came back. Y:22/L:02 (one clean re-rise),
+G:F3 (+2 ladder restarts), B: first-teardown latched, C:0177 healthy
+after. Wire anatomy: unplug -> one poll catches 40-count with link
+still 77 -> board falls into its polite 20 ms len1 sink-wait loop (no
+hammering; good existing behavior); replug -> count 41 -> ladder
+attempt 1 spins CR ~270 ms against the not-ready hub and tears down ->
+attempt 2 locks; replug-to-lock ~550 ms; healthy 1 s polls after.
+(History note: the 2/2 dark-storm stat belongs to the SLEEPING-MONITOR
+flap scenario, not this live-monitor replug — powered replug was
+historically the recovery operation. This row says the live-monitor
+unplug/replug cycle is handled cleanly, nothing more.)
+
+**DEFINITIVE: the hub NEVER sets legacy 0x201.** Zero nonzero reads
+across ~5000 frames spanning attach, unplug, and replug (and the Mac
+never touched 0x201 either — ESI only). The 0x201-based IRQ_SERVICE
+path is therefore INERT on this hub (J:000000 in every test, hpd_irq
+never coincided with a pending vector). Conformance parity requires
+the ESI form: periodic + IRQ-triggered read of 0x2002-0x200F as one
+block, write-1-clear of 0x2004/0x2005. Fold into the polite-attach
+build (sim-first) alongside the caps/EDID preamble, write-on-change
+0x103, and enhanced framing.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
