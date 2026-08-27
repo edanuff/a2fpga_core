@@ -253,6 +253,19 @@ load-bearing, flagged only.
    polls, all healthy (77/01/03), no retrain, no IRQ — the dark blip
    had NO DP-link or AUX signature at all (Y:11): it was downstream
    (IT6563 HDMI side or monitor re-sync). CSV deleted after analysis.
+4. Cycle: FAST. Clean telemetry (Y:11, L:01, G fails 0, T:0000).
+5. Cycle: FAST. One silent ladder restart (G:F1, T:0001, same
+   not-ready-window signature as row 3) that never reached the screen.
+
+**8acfe351 n=5 result: 5 fast / 0 delayed / 0 dark** (block-2 legacy
+baseline: 5/3/0). The delayed class did not appear — consistent with
+the FSM-race fix (periodic-check advance no longer coin-flips), though
+the session-swing caveat stands (same build+procedure has swung between
+sessions before; cross-session comparisons are weak). The IRQ_SERVICE
+path has NOT yet been exercised (J:000000 every cycle — no HPD IRQ
+fired during clean attaches); the scenario that generates one is an
+HDMI unplug/replug while the board session is live, which is also the
+quiet-frozen wedge trigger. That is the next bench test.
 
 ## Still wanted
 
