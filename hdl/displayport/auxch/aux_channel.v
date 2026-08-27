@@ -154,6 +154,18 @@ module aux_channel #(
     // (~330 us extra dwell per wait state). Default 0 = legacy.
     parameter POLITE_ATTACH = 0,
     parameter [5:0] EDID_DEFER_CAP = 6'd40,
+    // WEDGE-SUSPECT DETECTOR (advisory ONLY — no autonomous action in
+    // this build; the ESP32 auto-replug policy arms separately after
+    // bench validation). Fires when, within one established session:
+    // the sink HAS streamed (ever_streamed — a link that never worked
+    // can never trigger: bad-cable safe), then SINK_STATUS[1:0]==0 AND
+    // 0x204 bit7 (LINK_STATUS_UPDATED) reads STUCK SET across polls
+    // (healthy hubs clear it on read; the quiet-frozen hub's dead MCU
+    // cannot) sustained for WEDGE_CLKS. Any teardown, flap, or status
+    // change resets the timer (sleeping-monitor storms cannot
+    // accumulate). UNPROVEN discriminator vs the kick-era
+    // K:00-with-good-picture state — hence advisory-only.
+    parameter WEDGE_CLKS = 30'd1_000_000_000,   // 10 s @ 100 MHz
     // Lane-set write-on-change: HARDWARE-REFUTED as a default (7d6e205d,
     // 08-26 bench): the DP CR/EQ loops MANDATE a TRAINING_LANEx_SET write
     // every iteration even when unchanged, and the IT6563 uses that write
@@ -204,6 +216,7 @@ module aux_channel #(
         // observability gaps from the f0a48ae6 grading sessions
         output [15:0] debug_esi,
         output [6:0]  debug_defer,
+        output        wedge_suspect_o,  // advisory wedge-suspect flag
         // CENTRALIZED first-teardown detail latch (latched at the first
         // transition to `error` from the established set since config):
         // {reason[3:0], from_state[7:0], expected[7:0], rx_byte_count[7:0]}
@@ -299,6 +312,7 @@ module aux_channel #(
     // over from the one we fixed; candidate for the Anker's IRQ-silent
     // dark class if its events land there).
     localparam [7:0] esi_clear2    = 8'h3B, esi_clear2_rt = 8'h3C;
+    localparam [7:0] esi_eval_rt   = 8'h3D;  // decide: clear or back to established
 
     // Checking the state of the link
     localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
@@ -388,6 +402,18 @@ module aux_channel #(
     reg [7:0]  esi_2003_r       = 8'd0;   // latched DEVICE_SERVICE_IRQ_VECTOR_ESI0
     reg [7:0]  dbg_esi2003      = 8'd0;   // sticky OR of every 0x2003 read
     reg [7:0]  dbg_esi2005      = 8'd0;   // sticky OR of every 0x2005 read
+    // ESI self-disable: ONE failed ESI transaction (NACK/short/timeout/
+    // defer-budget) turns all ESI traffic off for the rest of the attach
+    // — a non-ESI sink costs exactly one failed read, never a retry loop
+    reg        esi_off          = 1'b0;
+    reg [3:0]  esi_defer_cnt    = 4'd0;
+    reg        esi_ack_owed     = 1'b0;   // this rt pass was IRQ-triggered:
+                                          // unconditional ack (Mac parity)
+    // wedge-suspect detector (advisory)
+    reg        ever_streamed    = 1'b0;
+    reg [7:0]  r204_q           = 8'd0;   // last 0x204 byte from a status read
+    reg [29:0] wedge_timer      = 30'd0;
+    reg        wedge_suspect    = 1'b0;
     reg        irq_service_due  = 1'b0;   // hpd_irq consumed; ESI service owed
     reg        err_evt          = 1'b0;   // tagged error-entry event
     reg [3:0]  err_reason       = 4'd0;
@@ -403,8 +429,12 @@ module aux_channel #(
                               (state == check_link) || (state == check_wait) ||
                               (state == irq_clear) ||
                               (state == esi_read_rt) || (state == esi_clear_rt) ||
-                              (state == esi_clear2_rt);
+                              (state == esi_clear2_rt) || (state == esi_eval_rt);
     wire obs_active = (GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS);
+    wire esi_attach_st = (state == esi_read) || (state == esi_clear) ||
+                         (state == esi_clear2);
+    wire esi_rt_st     = (state == esi_read_rt) || (state == esi_clear_rt) ||
+                         (state == esi_clear2_rt);
     reg [1:0] dbg_timeouts   = 2'd0;
     assign debug_gate     = {dbg_gate_locks, dbg_gate_fail, dbg_timeouts};
     assign debug_teardown = {dbg_first_mask, dbg_fail_mask, dbg_gate_fail_sat, dbg_timeout_sat};
@@ -413,6 +443,7 @@ module aux_channel #(
     assign debug_err_detail = err_detail;
     assign debug_esi   = {dbg_esi2003, dbg_esi2005};
     assign debug_defer = {edid_giveup, defer_cnt};
+    assign wedge_suspect_o = wedge_suspect;
     assign debug_sink = dbg_sink_status;
     // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
     // read): bit0/1 = RECEIVE_PORT_0/1 "sink is receiving a valid main
@@ -587,7 +618,15 @@ always @(posedge clk) begin
             esi_clear:          state_on_success <= (esi_2003_r != 8'h00)
                                                     ? esi_clear2 : set_power_d0;
             esi_clear2:         state_on_success <= set_power_d0;
-            esi_read_rt:        state_on_success <= esi_clear_rt;
+            esi_read_rt:        state_on_success <= esi_eval_rt;
+            // evaluated on entry, with the latches fresh from the read:
+            // clear only when something is pending, or when this pass was
+            // IRQ-triggered (unconditional ack, Mac parity). The 1 Hz
+            // poll with nothing pending costs ZERO writes.
+            esi_eval_rt:        state_on_success <= (esi_2005_r != 8'h00 ||
+                                                     esi_2003_r != 8'h00 ||
+                                                     esi_ack_owed)
+                                                    ? esi_clear_rt : link_established;
             esi_clear_rt:       state_on_success <= (esi_2003_r != 8'h00)
                                                     ? esi_clear2_rt : link_established;
             esi_clear2_rt:      state_on_success <= link_established;
@@ -602,7 +641,7 @@ always @(posedge clk) begin
             read_sink_count:    state_on_success <= read_registers;
             // ESI mode: the Mac's unconditional attach-time ESI ack goes
             // here — between the caps read and the D0 wake.
-            read_registers:     state_on_success <= (IRQ_SERVICE == 2)
+            read_registers:     state_on_success <= (IRQ_SERVICE == 2 && !esi_off)
                                                     ? esi_read : set_power_d0;
             set_power_d0:       state_on_success <= set_channel_coding;
             set_channel_coding: state_on_success <= set_speed_270;                        
@@ -708,7 +747,7 @@ always @(posedge clk) begin
                                 // then BLOCKED the Anker path's recovery-by-retrain on
                                 // marginal instances. Teardown/retrain is load-bearing.)
                                 if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
-                                    state_on_success <= (IRQ_SERVICE == 2 && irq_service_due)
+                                    state_on_success <= (IRQ_SERVICE == 2 && !esi_off)
                                                         ? esi_read_rt :
                                                         (IRQ_SERVICE == 1 && irq_vec_r != 8'h00)
                                                         ? irq_clear : link_established;
@@ -783,8 +822,15 @@ always @(posedge clk) begin
             irq_clear_byte_r <= esi_2003_r;
             esi_2003_r       <= 8'h00;
         end
-        if (next_state == esi_read_rt)
+        if (next_state == esi_read_rt) begin
+            esi_ack_owed    <= irq_service_due;
             irq_service_due <= 1'b0;
+        end
+        if (next_state == link_established)
+            esi_ack_owed <= 1'b0;
+        // any completed ESI read re-arms the defer budget
+        if (next_state == esi_eval_rt || next_state == esi_clear)
+            esi_defer_cnt <= 4'd0;
         // lane-set write tracking (POLITE write-on-change)
         if (next_state == clock_voltage_0p4 || next_state == clock_voltage_0p6 ||
             next_state == clock_voltage_0p8 ||
@@ -804,6 +850,11 @@ always @(posedge clk) begin
             defer_cnt       <= 6'd0;
             edid_giveup     <= 1'b0;
             irq_service_due <= 1'b0;
+            esi_off         <= 1'b0;
+            esi_defer_cnt   <= 4'd0;
+            esi_ack_owed    <= 1'b0;
+            ever_streamed   <= 1'b0;
+            wedge_suspect   <= 1'b0;
         end
         status_de_active     <= 1'b0;
         adjust_de_active     <= 1'b0;
@@ -827,6 +878,7 @@ always @(posedge clk) begin
             esi_clear_rt:         begin msg <= 8'h1C; expected <= 8'h01; end
             esi_clear2:           begin msg <= 8'h1D; expected <= 8'h01; end
             esi_clear2_rt:        begin msg <= 8'h1D; expected <= 8'h01; end
+            esi_eval_rt:          begin msg <= 8'h00; expected <= 8'h00; end
 
             edid_block0:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
             edid_block1:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
@@ -945,6 +997,7 @@ always @(posedge clk) begin
             esi_read_rt:          begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             esi_clear_rt:         begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             esi_clear2_rt:        begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            esi_eval_rt:          begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
         endcase
     end
 
@@ -1040,11 +1093,19 @@ always @(posedge clk) begin
             // bytes are simply DRAINED (aux_rx_rd_en already empties the
             // FIFO) and ignored.
             if((LATE_REPLY_DRAIN == 0 || expected != 8'h00) && rx_byte_count != expected-1 && aux_rx_empty == 1'b1) begin
-                next_state <= error;
-                if (in_established_set) begin
-                    err_evt <= 1'b1; err_reason <= 4'd1;
-                    err_from <= state; err_exp <= expected;
-                    err_rxc <= rx_byte_count;
+                if (esi_attach_st) begin
+                    esi_off    <= 1'b1;      // sink rejects ESI: one try, then off
+                    next_state <= set_power_d0;
+                end else if (esi_rt_st) begin
+                    esi_off    <= 1'b1;
+                    next_state <= link_established;
+                end else begin
+                    next_state <= error;
+                    if (in_established_set) begin
+                        err_evt <= 1'b1; err_reason <= 4'd1;
+                        err_from <= state; err_exp <= expected;
+                        err_rxc <= rx_byte_count;
+                    end
                 end
             end
                                 
@@ -1059,11 +1120,19 @@ always @(posedge clk) begin
                 // retry the current operation.
                 //---------------------------------------------------- 
                 if((LATE_REPLY_DRAIN == 0 || expected != 8'h00) && aux_rx_data != 8'h00) begin
-                    next_state <= error;
-                    if (in_established_set) begin
-                        err_evt <= 1'b1; err_reason <= 4'd2;
-                        err_from <= state; err_exp <= expected;
-                        err_rxc <= rx_byte_count;
+                    if (esi_attach_st && aux_rx_data != 8'h20) begin
+                        esi_off    <= 1'b1;
+                        next_state <= set_power_d0;
+                    end else if (esi_rt_st && aux_rx_data != 8'h20) begin
+                        esi_off    <= 1'b1;
+                        next_state <= link_established;
+                    end else begin
+                        next_state <= error;
+                        if (in_established_set) begin
+                            err_evt <= 1'b1; err_reason <= 4'd2;
+                            err_from <= state; err_exp <= expected;
+                            err_rxc <= rx_byte_count;
+                        end
                     end
                 end
                 if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
@@ -1079,7 +1148,21 @@ always @(posedge clk) begin
                 // transactions that aeert "AUX DEFER"
                 //--------------------------------------------
                 if(aux_rx_data == 8'h20) begin
-                    if (POLITE_ATTACH != 0) begin
+                    if ((esi_attach_st || esi_rt_st) && IRQ_SERVICE == 2) begin
+                        // ESI defer: paced retry from a small budget; the
+                        // rt states are watchdog-excluded, so WITHOUT the
+                        // budget a forever-deferring hub would spin here
+                        // unbounded with the link held
+                        if (esi_defer_cnt >= 4'd8) begin
+                            esi_off    <= 1'b1;
+                            next_state <= esi_attach_st ? set_power_d0
+                                                        : link_established;
+                        end else begin
+                            esi_defer_cnt    <= esi_defer_cnt + 4'd1;
+                            defer_pend_state <= state;
+                            next_state       <= defer_wait;
+                        end
+                    end else if (POLITE_ATTACH != 0) begin
                         // Paced retry (~650 us, the Mac's cadence) instead
                         // of an immediate resend. EDID retries draw from a
                         // per-attach budget; exhausting it abandons EDID
@@ -1114,8 +1197,13 @@ always @(posedge clk) begin
                 aux_data   <= aux_rx_data;
                 aux_addr   <= aux_addr_i;
                 aux_addr_i <= aux_addr_i+1;
-                if(status_de_active == 1'b1 && aux_addr_i == 8'd5)
+                if(status_de_active == 1'b1 && aux_addr_i == 8'd4)
+                    r204_q <= aux_rx_data;
+                if(status_de_active == 1'b1 && aux_addr_i == 8'd5) begin
                     dbg_sink_status <= aux_rx_data;
+                    if (aux_rx_data[1:0] != 2'b00)
+                        ever_streamed <= 1'b1;
+                end
                 // DEVICE_SERVICE_IRQ_VECTOR: previously read and DISCARDED
                 if(status_de_active == 1'b1 && aux_addr_i == 8'd1 && aux_rx_data != 8'h00)
                     irq_vec_r <= aux_rx_data;
@@ -1157,12 +1245,19 @@ always @(posedge clk) begin
         if (dbg_timeout_sat != 4'hF)
             dbg_timeout_sat <= dbg_timeout_sat + 4'd1;
     end
+    if (BLIND_SINK == 0 && channel_timeout == 1'b1 &&
+        (esi_attach_st || esi_rt_st)) begin
+        // sink ignores ESI entirely: same self-disable, no FSM reset
+        esi_off    <= 1'b1;
+        next_state <= esi_attach_st ? set_power_d0 : link_established;
+        state      <= error;   // force the transition machinery
+    end else
     if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
                                   (state != reset      && state != link_established &&
                                    state != check_link && state != check_wait       &&
                                    state != irq_clear  &&
                                    state != esi_read_rt && state != esi_clear_rt &&
-                                   state != esi_clear2_rt &&
+                                   state != esi_clear2_rt && state != esi_eval_rt &&
                                    retry_now == 1'b1)) begin
         next_state <= reset;
         state      <= error;
@@ -1241,6 +1336,23 @@ always @(posedge clk) begin
     end else begin
         link_check_now   <= 1'b0;
         link_check_count <= link_check_count - 1;
+    end
+
+    //-----------------------------------------------------------
+    // WEDGE-SUSPECT DETECTOR (advisory only — see parameter comment).
+    // Timer accumulates ONLY while: established, previously streamed,
+    // sink now reporting not-streaming, AND 0x204 bit7 reading stuck
+    // set (a healthy hub clears it on read). Everything else resets it.
+    //-----------------------------------------------------------
+    if (!in_established_set || !ever_streamed ||
+        dbg_sink_status[1:0] != 2'b00 || !r204_q[7]) begin
+        wedge_timer <= 30'd0;
+        if (dbg_sink_status[1:0] != 2'b00)
+            wedge_suspect <= 1'b0;         // streaming again: stand down
+    end else if (wedge_timer >= WEDGE_CLKS) begin
+        wedge_suspect <= 1'b1;
+    end else begin
+        wedge_timer <= wedge_timer + 30'd1;
     end
 
     //-----------------------------------------------------------

@@ -105,6 +105,7 @@ module dp_transmitter #(
     parameter bit    LATE_REPLY_DRAIN = 0,
     parameter bit    POLITE_ATTACH = 0,
     parameter [5:0]  EDID_DEFER_CAP = 6'd40,
+    parameter        WEDGE_CLKS = 30'd1_000_000_000,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -155,6 +156,7 @@ module dp_transmitter #(
     output logic [23:0] debug_aux_err,  // {short, nack, other, obs, kicks, irq_services}
     output logic [15:0] debug_esi,      // sticky OR {0x2003, 0x2005} vector reads
     output logic [6:0]  debug_defer,    // {edid_giveup, defer_cnt}
+    output logic        wedge_suspect,  // advisory quiet-frozen detector
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
@@ -603,7 +605,8 @@ module dp_transmitter #(
                          .IRQ_SERVICE(IRQ_SERVICE),
                          .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN),
                          .POLITE_ATTACH(POLITE_ATTACH),
-                         .EDID_DEFER_CAP(EDID_DEFER_CAP)) i_channel_management(
+                         .EDID_DEFER_CAP(EDID_DEFER_CAP),
+                         .WEDGE_CLKS(WEDGE_CLKS)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
         .afe_busy             (afe_busy_w),
@@ -619,6 +622,7 @@ module dp_transmitter #(
         .debug_aux_err        (debug_aux_err),
         .debug_esi            (debug_esi),
         .debug_defer          (debug_defer),
+        .wedge_suspect        (wedge_suspect),
         .debug_err_detail     (debug_err_detail),
         .debug_snapshot       (debug_snapshot),
         .debug_caps           (debug_caps),

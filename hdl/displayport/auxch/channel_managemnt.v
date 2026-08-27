@@ -70,7 +70,8 @@ module channel_management #(
     parameter IRQ_SERVICE = 0,     // sink-IRQ servicing: 0/1=0x201/2=ESI (aux_channel.v)
     parameter LATE_REPLY_DRAIN = 0, // 0 = legacy error behavior
     parameter POLITE_ATTACH = 0,   // Mac-parity attach pacing (aux_channel.v)
-    parameter [5:0] EDID_DEFER_CAP = 6'd40
+    parameter [5:0] EDID_DEFER_CAP = 6'd40,
+    parameter WEDGE_CLKS = 30'd1_000_000_000
 )(
         input  clk100,
         // M5 runtime AFE adjust: applied-level declaration in, one pulse
@@ -91,6 +92,7 @@ module channel_management #(
         output [23:0] debug_aux_err, // {short, nack, other, obs, kicks, irq_services}
         output [15:0] debug_esi,     // sticky OR {0x2003, 0x2005} vector reads
         output [6:0]  debug_defer,   // {edid_giveup, defer_cnt}
+        output        wedge_suspect, // advisory quiet-frozen detector
         output [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
         // ATOMIC FIRST-FAILURE SNAPSHOT (second-opinion instrumentation,
         // 08-24): latched in the same clock as the FIRST failing check_wait
@@ -281,7 +283,8 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .KICK_CLKS(KICK_CLKS), .IRQ_SERVICE(IRQ_SERVICE),
               .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN),
               .POLITE_ATTACH(POLITE_ATTACH),
-              .EDID_DEFER_CAP(EDID_DEFER_CAP)) i_aux_channel(
+              .EDID_DEFER_CAP(EDID_DEFER_CAP),
+              .WEDGE_CLKS(WEDGE_CLKS)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
@@ -291,6 +294,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
         .debug_aux_err   (debug_aux_err),
         .debug_esi       (debug_esi),
         .debug_defer     (debug_defer),
+        .wedge_suspect_o (wedge_suspect),
         .debug_err_detail(debug_err_detail),
         .gate_fail_evt   (gate_fail_evt_w),
         .status_seq      (status_seq_w),

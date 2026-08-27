@@ -194,7 +194,8 @@ module a2mega_dp_test_top (
     logic [15:0] aux_dbg_tear;   // {first_mask, fail_mask, gate_sat, timeout_sat}
     logic [23:0] aux_dbg_auxerr; // {short, nack, other, obs, kicks, irq} (J:)
     logic [15:0] aux_dbg_esi;    // sticky OR {0x2003, 0x2005} ESI reads (V:)
-    logic [6:0]  aux_dbg_defer;  // {edid_giveup, defer_cnt} (U:)
+    logic [6:0]  aux_dbg_defer;  // {edid_giveup, defer_cnt} (U: low 7)
+    logic        aux_wedge;      // advisory wedge-suspect (U: bit 7)
     logic [27:0] aux_dbg_errdet; // first teardown {reason, state, exp, rxc} (B:)
     logic [31:0] aux_dbg_snap;   // first-failure snapshot (Z:)
     logic [7:0]  aux_dbg_sink;
@@ -302,6 +303,7 @@ module a2mega_dp_test_top (
         .debug_aux_err     (aux_dbg_auxerr),
         .debug_esi         (aux_dbg_esi),
         .debug_defer       (aux_dbg_defer),
+        .wedge_suspect     (aux_wedge),
         .debug_err_detail  (aux_dbg_errdet),
         .debug_snapshot    (aux_dbg_snap),
         .debug_sink        (aux_dbg_sink),
@@ -435,7 +437,7 @@ module a2mega_dp_test_top (
         tear_s0 <= aux_dbg_tear;    tear_s <= tear_s0;
         aerr_s0 <= aux_dbg_auxerr;  aerr_s <= aerr_s0;
         esi_s0  <= aux_dbg_esi;     esi_s  <= esi_s0;
-        defr_s0 <= {1'b0, aux_dbg_defer}; defr_s <= defr_s0;
+        defr_s0 <= {aux_wedge, aux_dbg_defer}; defr_s <= defr_s0;
         edet_s0 <= aux_dbg_errdet;  edet_s <= edet_s0;
         snap_s0 <= aux_dbg_snap;    snap_s <= snap_s0;
     end

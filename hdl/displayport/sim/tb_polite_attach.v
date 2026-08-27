@@ -80,6 +80,7 @@ module tb_polite_attach;
         .BLIND_SINK     (0),
         .IRQ_SERVICE    (2),
         .POLITE_ATTACH  (1),
+        .WEDGE_CLKS     (30'd400_000),   // 4 ms for sim
         .AFE_ADJUST     (1)
     ) dut (
         .clk100               (clk100),
@@ -182,7 +183,8 @@ module tb_polite_attach;
     reg [7:0] r206 = 8'hBB;            // ADJUST_REQUEST: VS3/PE2 both lanes
     reg [7:0] m_esi_2005 = 8'h00;      // LINK_SERVICE_IRQ_VECTOR_ESI0
     reg [7:0] m_esi_2003 = 8'h00;      // DEVICE_SERVICE_IRQ_VECTOR_ESI0
-    reg       cr_armed   = 1'b0;       // hub ready to grant CR — but only
+    reg       cr_armed   = 1'b0;
+    reg       esi_nack_mode = 1'b0;      // sink NACKs ESI reads (failure-tolerance test)       // hub ready to grant CR — but only
                                        // ON a lane-set write (IT6563
                                        // write-cued evaluation, hw-proven)
 
@@ -338,7 +340,12 @@ module tb_polite_attach;
                     if (req_addr == 20'h00200 && dlen == 8 &&
                         tps1_seen && !tps2_seen)
                         cr_status_polls = cr_status_polls + 1;
-                    if (req_addr == 20'h02003) begin
+                    if (req_addr == 20'h02003 && esi_nack_mode) begin
+                        esi_reads = esi_reads + 1;
+                        rbuf[0] = 8'h10;            // AUX_NACK
+                        rlen = 1;
+                        send_reply;
+                    end else if (req_addr == 20'h02003) begin
                         esi_reads = esi_reads + 1;
                         rbuf[0] = 8'h00;
                         for (j = 0; j < dlen; j = j + 1)
@@ -467,10 +474,20 @@ module tb_polite_attach;
         $display("  [script] EQ granted after TPS2 (t=%0t)", $time);
     end
 
+    // trigger an on-demand periodic check (the real timer is 1 s)
+    task force_check;
+        begin
+            force dut.i_aux_channel.link_check_now = 1'b1;
+            repeat (2) @(posedge clk100);
+            release dut.i_aux_channel.link_check_now;
+        end
+    endtask
+
     // ------------------------------------------------------------------
     // Main check sequence
     // ------------------------------------------------------------------
     integer m, saw02, saw27, sawother;
+    integer er0, ew0;
     initial begin
         wait (tx_link_established);
         #300_000;
@@ -607,6 +624,80 @@ module tb_polite_attach;
             errors = errors + 1;
             $display("FAIL: %0d runtime ESI writes (want exactly 1)", esi_writes_post);
         end
+
+        // 7. PERIODIC ESI POLL: a standing vector with NO hpd_irq (the
+        // attention-lost scenario) must be found and cleared by the next
+        // 1 Hz check; a poll with nothing pending must WRITE nothing.
+        m_esi_2005 = 8'h08;             // standing vector, no attention
+        er0 = esi_reads; ew0 = esi_writes_post;
+        force_check;
+        #3_000_000;
+        if (esi_reads <= er0 || esi_writes_post != ew0 + 1 ||
+            m_esi_2005 !== 8'h00) begin
+            errors = errors + 1;
+            $display("FAIL: standing vector not found/cleared by poll (reads %0d->%0d writes %0d->%0d resid=%02x)",
+                     er0, esi_reads, ew0, esi_writes_post, m_esi_2005);
+        end else
+            $display("  ok: 1 Hz poll found and cleared a standing vector (no attention needed)");
+        er0 = esi_reads; ew0 = esi_writes_post;
+        force_check;                    // nothing pending now
+        #3_000_000;
+        if (esi_reads <= er0 || esi_writes_post != ew0) begin
+            errors = errors + 1;
+            $display("FAIL: idle poll behavior (reads %0d->%0d writes %0d->%0d; want read+, writes unchanged)",
+                     er0, esi_reads, ew0, esi_writes_post);
+        end else
+            $display("  ok: idle poll reads the block, writes NOTHING");
+
+        // 8. ESI FAILURE TOLERANCE: sink starts NACKing ESI — one failed
+        // read must self-disable ESI (no teardown, no retry hammer)
+        esi_nack_mode = 1'b1;
+        er0 = esi_reads;
+        force_check;
+        #3_000_000;
+        if (esi_reads != er0 + 1) begin
+            errors = errors + 1;
+            $display("FAIL: NACK'd ESI read count %0d->%0d (want exactly one attempt)", er0, esi_reads);
+        end
+        er0 = esi_reads;
+        force_check;                    // ESI now off: no read at all
+        #3_000_000;
+        force_check;
+        #3_000_000;
+        if (esi_reads != er0) begin
+            errors = errors + 1;
+            $display("FAIL: ESI traffic continued after failure (%0d->%0d)", er0, esi_reads);
+        end else
+            $display("  ok: one NACK self-disables ESI — no retry hammer, link never torn down");
+        esi_nack_mode = 1'b0;
+
+        // 9. WEDGE DETECTOR discrimination (WEDGE_CLKS = 4 ms in sim).
+        // (a) K:00 with 0x204 bit7 CLEAR (healthy hub clearing on read):
+        //     sustained -> must NOT fire.
+        r205 = 8'h00; r204 = 8'h01;
+        repeat (4) begin force_check; #2_500_000; end
+        if (dut.i_aux_channel.wedge_suspect_o !== 1'b0) begin
+            errors = errors + 1;
+            $display("FAIL: detector fired on K:00 with bit7 clear (kick-era false positive)");
+        end else
+            $display("  ok: K:00 alone (bit7 clear) does NOT fire the detector");
+        // (b) the wedge signature: bit7 STUCK set + K:00 sustained -> fires
+        r204 = 8'h81;
+        repeat (4) begin force_check; #2_500_000; end
+        if (dut.i_aux_channel.wedge_suspect_o !== 1'b1) begin
+            errors = errors + 1;
+            $display("FAIL: detector did not fire on the wedge signature");
+        end else
+            $display("  ok: sustained bit7-stuck + K:00 fires wedge_suspect");
+        // (c) streaming resumes -> stands down
+        r205 = 8'h01; r204 = 8'h01;
+        force_check;
+        #3_000_000;
+        if (dut.i_aux_channel.wedge_suspect_o !== 1'b0) begin
+            errors = errors + 1;
+            $display("FAIL: detector did not stand down on streaming resume");
+        end else
+            $display("  ok: detector stands down when streaming resumes");
 
         if (le_drops != 0) begin
             errors = errors + 1;
