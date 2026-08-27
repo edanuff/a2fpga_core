@@ -237,6 +237,23 @@ Minor/unverified: a few stray frames (3x `I2C_WR I2C[00]`,
 states and may be decode artifacts of record-loss gaps — not
 load-bearing, flagged only.
 
+
+### Grading rows for 8acfe351 (same session, AD3 rigged)
+1. Pass C attach: FAST colorbars. Hub ready-lag 257 ms (count 0
+   throughout), one-shot train at ready-flip.
+2. Cycle: FAST. Telemetry clean (Y:11, L:01, G fails 0, T:0000,
+   Z/B/J all zero). Capture deleted (clean).
+3. Cycle: FAST with one post-lock dark blip, self-recovered. Captured
+   and decoded: TWO TPS1 writes (first ladder attempt tore down against
+   the not-ready hub — the G:+1 fail / T:0001 tick), hub ready-lag
+   ~435 ms this time with SINK_COUNT flipping to 1 a full ~277 ms
+   BEFORE CR became achievable — so a sink-count gate alone is NOT a
+   sufficient readiness test (fix 1 revised: the Mac-style polite
+   caps/EDID preamble is the robust form). Post-lock: metronomic 1 s
+   polls, all healthy (77/01/03), no retrain, no IRQ — the dark blip
+   had NO DP-link or AUX signature at all (Y:11): it was downstream
+   (IT6563 HDMI side or monitor re-sync). CSV deleted after analysis.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
