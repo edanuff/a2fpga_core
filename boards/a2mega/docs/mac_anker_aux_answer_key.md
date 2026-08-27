@@ -366,9 +366,24 @@ on hardware for the first time (every prior build left this IRQ
 dangling). Instances 2 and 3 followed at the same fingerprint (J:3,
 Y:11, zero teardowns, self-recovered every time) — the serviced-blink
 class is a stable, reproducible mechanism: exactly one IRQ, one
-service, full recovery, 3/3. Ugreen running total: 10 fast + 3
-self-recovered serviced blinks over 13 cycles (blink incidence ~23%;
-recovery 3/3; 0 dark, 0 delayed).
+service, full recovery, 3/3. Five further cycles all fast (no blinks).
+Ugreen running total: 15 fast + 3 self-recovered serviced blinks over
+18 cycles (blink incidence ~17%; recovery 3/3; 0 dark, 0 delayed —
+100% screen success on the historically 0-for-everything converter).
+
+Anker IRQ-silence hypothesis space (ed, 08-26): the dark-with-K:03
+non-recovery could be (a) the hub never SENDS an attention/IRQ, or
+(b) it sends one we fail to see or act on. Candidate gap found on
+review for (b): our runtime ESI service reads the 0x2003 len13 block
+but latches/clears ONLY 0x2005 — if the Anker's dark event raises
+bits in 0x2003 (DEVICE_SERVICE_IRQ_VECTOR_ESI0) we read them and
+leave them SET, exactly the unserviced-vector pathology in miniature.
+(The Mac capture never showed 0x2003 nonzero, so this is untested
+territory, but W1C of 0x2003 is cheap conformance completeness.)
+Discrimination plan for (a)-vs-(b): ESP32-side attention/hpd-pulse
+counter readable over telnet (did the chain deliver?), a spare-nibble
+telemetry build exposing the latched ESI bytes + defer_cnt/giveup,
+and — definitive — an AUX capture during an Anker dark event.
 
 ## Still wanted
 
