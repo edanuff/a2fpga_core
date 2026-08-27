@@ -363,11 +363,12 @@ Contrast the Anker dark-with-K:03 row: no IRQ offered (J unchanged),
 no recovery until manual HDMI replug. n=1, correlation not proof — but
 this is the conformance fix executing its designed scenario end-to-end
 on hardware for the first time (every prior build left this IRQ
-dangling). SECOND instance two cycles later: identical fingerprint
-(J:3, Y:11, zero teardowns, self-recovered) — the serviced-blink class
-is REPRODUCIBLE at n=2. Ugreen running total: 6 fast + 2
-self-recovered serviced blinks, 0 dark, 0 delayed (blink incidence
-~25% on this converter; recovery 2/2).
+dangling). Instances 2 and 3 followed at the same fingerprint (J:3,
+Y:11, zero teardowns, self-recovered every time) — the serviced-blink
+class is a stable, reproducible mechanism: exactly one IRQ, one
+service, full recovery, 3/3. Ugreen running total: 10 fast + 3
+self-recovered serviced blinks over 13 cycles (blink incidence ~23%;
+recovery 3/3; 0 dark, 0 delayed).
 
 ## Still wanted
 
