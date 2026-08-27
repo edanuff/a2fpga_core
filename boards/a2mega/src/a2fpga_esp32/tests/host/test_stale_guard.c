@@ -181,8 +181,72 @@ int main(void)
         usbc_port_task(&port);
     }
 
+    /* T8: CC orientation moved (fast-swap no-RX hole) -> ceremony after
+     * 2 consecutive re-quals */
+    fresh_port(USBC_STATE_DP_ACTIVE);
+    mock_fusb.cc_moved = true;
+    for (int i = 0; i < 3 && port.state != USBC_STATE_VIRTUAL_DETACH; i++) {
+        g_now_ms += 1100;
+        port.deadline_ms = g_now_ms + 1000000u;
+        usbc_port_task(&port);
+    }
+    CHECK(port.state == USBC_STATE_VIRTUAL_DETACH && port.guard_fires == 1 &&
+          mock_fusb.requalify_calls >= 2,
+          "T8  CC orientation moved -> ceremony (debounced 2 re-quals)");
+
+    /* T9: healthy orientation, re-qual runs ~1 Hz, never fires */
+    fresh_port(USBC_STATE_DP_ACTIVE);
+    for (int i = 0; i < 10; i++) {
+        g_now_ms += 1000;
+        port.deadline_ms = g_now_ms + 1000000u;
+        usbc_port_task(&port);
+    }
+    CHECK(port.state == USBC_STATE_DP_ACTIVE && port.guard_fires == 0 &&
+          mock_fusb.requalify_calls >= 8,
+          "T9  healthy CC: re-qualified ~1 Hz, zero fires");
+
+    /* T10: Rp absent (missed detach, phantom VBUS) -> proper unattach,
+     * NOT a ceremony, budget untouched */
+    fresh_port(USBC_STATE_DP_ACTIVE);
+    mock_fusb.cc_present = false;
+    for (int i = 0; i < 3 && port.state != USBC_STATE_UNATTACHED; i++) {
+        g_now_ms += 1100;
+        port.deadline_ms = g_now_ms + 1000000u;
+        usbc_port_task(&port);
+    }
+    CHECK(port.state == USBC_STATE_UNATTACHED && port.guard_fires == 0,
+          "T10 Rp absent -> clean unattach (no ceremony, no budget)");
+
+    /* T11: single bad sample (BMC alias) does NOT trigger */
+    fresh_port(USBC_STATE_DP_ACTIVE);
+    mock_fusb.cc_moved = true;
+    g_now_ms += 1100;
+    port.deadline_ms = g_now_ms + 1000000u;
+    usbc_port_task(&port);                 /* one moved sample */
+    mock_fusb.cc_moved = false;
+    for (int i = 0; i < 3; i++) {
+        g_now_ms += 1100;
+        port.deadline_ms = g_now_ms + 1000000u;
+        usbc_port_task(&port);
+    }
+    CHECK(port.state == USBC_STATE_DP_ACTIVE && port.guard_fires == 0,
+          "T11 single aliased sample debounced (no fire)");
+
+    /* T12: recent RX suppresses the re-qual (idle-bus gate) */
+    fresh_port(USBC_STATE_DP_ACTIVE);
+    mock_fusb.cc_moved = true;
+    for (int i = 0; i < 3; i++) {
+        g_now_ms += 1100;
+        port.deadline_ms = g_now_ms + 1000000u;
+        port.guard_last_rx_ms = g_now_ms - 10u;   /* bus busy 10 ms ago */
+        usbc_port_task(&port);
+    }
+    CHECK(port.state == USBC_STATE_DP_ACTIVE &&
+          mock_fusb.requalify_calls == 0,
+          "T12 busy bus suppresses the CC re-qual entirely");
+
     if (failures == 0)
-        printf("PASS: stale-session guard — all %d scenarios\n", 9);
+        printf("PASS: stale-session guard — all %d scenarios\n", 14);
     else
         printf("FAIL: %d scenario(s)\n", failures);
     return failures != 0;

@@ -92,6 +92,8 @@ static int enter_unattached(usbc_port_t *port)
     set_vbus(port, false);
     reset_protocol(port);
     port->state = USBC_STATE_UNATTACHED;
+    port->guard_cc_moved  = 0u;
+    port->guard_cc_absent = 0u;
     log_message(port, USBC_LOG_INFO, "USB-C unattached; DRP toggle enabled");
     return fusb302_start_drp_toggle(&port->fusb302);
 }
@@ -978,6 +980,7 @@ int usbc_port_task(usbc_port_t *port)
             return rc;
     }
     if ((events.bits & FUSB302_EVENT_RX_MESSAGE) != 0u) {
+        port->guard_last_rx_ms = now_ms(port);
         rc = drain_receive_fifo(port);
         if (rc != 0)
             return rc;
@@ -1009,6 +1012,39 @@ int usbc_port_task(usbc_port_t *port)
                 !intact)
                 return stale_session_guard(port,
                                            "FUSB302 reset under stack");
+            /* trigger C: CC ground truth (sink role, idle bus only —
+             * the measure flips could clip an inbound message; PD
+             * retries absorb the rare collision). Debounced 2
+             * consecutive re-quals (~2 s): BMC activity on CC can
+             * alias a single sample. */
+            if (!port->fusb302.source_role &&
+                (uint32_t)(now - port->guard_last_rx_ms) > 100u) {
+                bool cc_present, cc_moved;
+                if (fusb302_requalify_cc(&port->fusb302,
+                                         &cc_present, &cc_moved) == 0) {
+                    if (!cc_present) {
+                        port->guard_cc_moved = 0u;
+                        if (++port->guard_cc_absent >= 2u) {
+                            /* partner GONE (phantom VBUS was hiding it):
+                             * a proper detach, not a ceremony — free,
+                             * unbudgeted, and the fresh attach ladder
+                             * handles whatever arrives next */
+                            log_message(port, USBC_LOG_WARNING,
+                                        "stale-session guard: no Rp on "
+                                        "either CC — missed detach");
+                            return enter_unattached(port);
+                        }
+                    } else if (cc_moved) {
+                        port->guard_cc_absent = 0u;
+                        if (++port->guard_cc_moved >= 2u)
+                            return stale_session_guard(port,
+                                                       "CC orientation moved");
+                    } else {
+                        port->guard_cc_moved  = 0u;
+                        port->guard_cc_absent = 0u;
+                    }
+                }
+            }
         }
     }
 

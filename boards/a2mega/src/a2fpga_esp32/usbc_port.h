@@ -123,7 +123,10 @@ typedef struct {
     uint8_t sink_attempts;   /* contract retries before USB-only fallback */
     /* stale-session guard (see stale_session_guard in usbc_port.c) */
     uint32_t guard_verify_deadline_ms;
+    uint32_t guard_last_rx_ms;   /* idle-bus gate for the CC re-qual */
     uint8_t  guard_fires;    /* ceremonies fired this boot (budgeted) */
+    uint8_t  guard_cc_moved;     /* consecutive re-quals: Rp on other CC */
+    uint8_t  guard_cc_absent;    /* consecutive re-quals: no Rp anywhere */
 } usbc_port_t;
 
 void usbc_port_default_config(usbc_port_config_t *config);

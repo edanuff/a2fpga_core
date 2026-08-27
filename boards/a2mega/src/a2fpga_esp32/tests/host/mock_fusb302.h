@@ -12,6 +12,9 @@ typedef struct {
     bool     vbus_present;
     bool     source_detached;
     bool     verify_intact;            /* fusb302_verify_powered result */
+    bool     cc_present;               /* fusb302_requalify_cc results */
+    bool     cc_moved;
+    int      requalify_calls;
     bool     rx_pending;
     usb_pd_message_t rx_message;
     usb_pd_message_t last_tx;

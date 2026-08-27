@@ -511,6 +511,57 @@ int fusb302_transmit(fusb302_t *device, const usb_pd_message_t *message)
     return write_bytes(device, REG_FIFOS, bytes, n);
 }
 
+int fusb302_requalify_cc(fusb302_t *device, bool *present, bool *moved)
+{
+    /* Trigger C of the stale-session guard: mid-session CC ground truth.
+     * A surviving stack can be measuring the MAC session's CC line while
+     * the hub attached on the other orientation — its PD traffic then
+     * never arrives (the no-RX hole: Trigger B unreachable) — or the
+     * partner can be GONE with phantom VBUS backfeed hiding the detach.
+     * Measures both CC pins (same flips as attach-time orientation
+     * detect) and then restores ONLY SWITCHES0 to the configured-sink
+     * value: configure_sink() is NOT a safe restore mid-session — it
+     * clears rx_enabled and the DR-swapped data role. Caller gates this
+     * to an idle bus; the two 300 us measure flips can clip an inbound
+     * message, which PD's retry machinery absorbs. Sink role only. */
+    int rc;
+    uint8_t status0;
+    uint8_t lvl_cc1, lvl_cc2;
+    fusb302_polarity_t detected;
+
+    if (device == NULL || present == NULL || moved == NULL ||
+        device->source_role)
+        return -1;
+
+    if ((rc = write_reg(device, REG_SWITCHES0,
+                        SW0_CC1_PD | SW0_CC2_PD | SW0_MEASURE_CC1)) != 0)
+        return rc;
+    device->io.delay_us(device->io.context, 300u);
+    if ((rc = read_reg(device, REG_STATUS0, &status0)) != 0)
+        return rc;
+    lvl_cc1 = status0 & 0x03u;
+
+    if ((rc = write_reg(device, REG_SWITCHES0,
+                        SW0_CC1_PD | SW0_CC2_PD | SW0_MEASURE_CC2)) != 0)
+        return rc;
+    device->io.delay_us(device->io.context, 300u);
+    if ((rc = read_reg(device, REG_STATUS0, &status0)) != 0)
+        return rc;
+    lvl_cc2 = status0 & 0x03u;
+
+    /* restore the configured sink measure path, nothing else */
+    rc = write_reg(device, REG_SWITCHES0,
+                   SW0_CC1_PD | SW0_CC2_PD | active_measure(device->polarity));
+    if (rc != 0)
+        return rc;
+
+    *present = (lvl_cc1 != 0u) != (lvl_cc2 != 0u);
+    detected = lvl_cc2 > lvl_cc1 ? FUSB302_POLARITY_CC2
+                                 : FUSB302_POLARITY_CC1;
+    *moved = *present && (detected != device->polarity);
+    return 0;
+}
+
 int fusb302_verify_powered(fusb302_t *device, bool *intact)
 {
     /* Stale-session guard signature: REG_POWER is written to POWER_ALL

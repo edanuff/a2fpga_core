@@ -101,5 +101,9 @@ int fusb302_send_hard_reset(fusb302_t *device);
 /* Stale-session guard: *intact=false when REG_POWER no longer reads the
  * configured value (chip reset underneath the stack). */
 int fusb302_verify_powered(fusb302_t *device, bool *intact);
+/* Trigger C: measure both CC pins mid-session (sink role, idle bus),
+ * restore the configured measure path. *present = exactly one Rp side;
+ * *moved = present on the OTHER orientation than configured. */
+int fusb302_requalify_cc(fusb302_t *device, bool *present, bool *moved);
 
 #endif

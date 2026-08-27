@@ -15,6 +15,8 @@ void mock_fusb302_reset(void)
     memset(&mock_fusb, 0, sizeof(mock_fusb));
     mock_fusb.verify_intact = true;
     mock_fusb.vbus_present  = true;
+    mock_fusb.cc_present    = true;
+    mock_fusb.cc_moved      = false;
 }
 
 int fusb302_init(fusb302_t *device, const fusb302_io_t *io,
@@ -129,6 +131,16 @@ int fusb302_transmit(fusb302_t *device, const usb_pd_message_t *message)
 int fusb302_send_hard_reset(fusb302_t *device)
 {
     (void)device;
+    return 0;
+}
+
+int fusb302_requalify_cc(fusb302_t *device, bool *present, bool *moved)
+{
+    if (device->source_role)
+        return -1;
+    mock_fusb.requalify_calls++;
+    *present = mock_fusb.cc_present;
+    *moved   = mock_fusb.cc_moved;
     return 0;
 }
 
