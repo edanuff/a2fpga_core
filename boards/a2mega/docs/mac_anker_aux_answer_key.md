@@ -435,6 +435,20 @@ U:08 = the Anker defers our EDID only ONCE per block, vs the 2-defer
 cadence it showed the Mac — defer depth is load/state dependent, not a
 fixed hub property.
 
+### DETECTOR VALIDATED ON LIVE WEDGE (v5 7cb54bda, first attach)
+Quiet-frozen wedge on the first v5 attach (C:8177/K:00, Y:18/L:08 eight
+flaps, ESI silent again, J:1 no attention) — **U:88: wedge_suspect
+FIRED** (~11 s window; the ever_streamed-gate fix did its job — this
+same profile false-negatived on v4). Clean attaches read U:08 (bit7
+clear): live discrimination proven in BOTH directions, n=1 each.
+Recovery: 'v' again (n=3; fast). Remaining false-positive unknowns
+before arming auto-'v': the kick-era K:00-with-good-picture state (if
+it also freezes bit7) — unobserved so far; policy will be budgeted
+(<=3, cooldown, re-arm on streaming) so worst-case exposure is bounded
+screen blackouts, not a storm. NEXT: ESP32 policy patch — parse U: bit7
+from the relayed UART telemetry (or wire the wedge_suspect port), 
+trigger budgeted virtual replug.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
