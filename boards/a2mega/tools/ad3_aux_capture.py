@@ -71,44 +71,75 @@ def main():
 
     total = int(a.seconds * a.rate)
     bufs = [(ctypes.c_double * 8192)() for _ in range(nch)]
-    data = [[] for _ in range(nch)]
     lost = corrupted = 0
     sts = ctypes.c_ubyte()
     got = 0
+    dt = 1.0 / a.rate
     print(f"recording {a.seconds}s @ {a.rate/1e6:.1f} MS/s x{nch}ch ...",
           file=sys.stderr)
+    # Long captures (attach can take >10 s on some sources) would exhaust
+    # RAM if accumulated as Python floats, and formatting CSV text inline
+    # can't keep pace with the device — so the capture loop does raw
+    # memcpy-to-disk per channel, and CSV conversion happens afterwards.
+    tmp = [open(f"{a.out}.ch{ch+1}.tmp", "wb") for ch in range(nch)]
+    last_note = time.monotonic()
     while got < total:
         dwf.FDwfAnalogInStatus(hdwf, ctypes.c_int(1), ctypes.byref(sts))
         cAvail = ctypes.c_int(); cLost = ctypes.c_int(); cCorr = ctypes.c_int()
         dwf.FDwfAnalogInStatusRecord(hdwf, ctypes.byref(cAvail),
                                      ctypes.byref(cLost), ctypes.byref(cCorr))
         lost += cLost.value; corrupted += cCorr.value
-        got += cLost.value                # keep the timeline honest
+        if cLost.value:                   # keep the timeline honest
+            gap = b"\x00" * (cLost.value * 8)
+            for t in tmp:
+                t.write(gap)
+            got += cLost.value
         n = cAvail.value
         while n > 0:
             chunk = min(n, 8192)
             for ch in range(nch):
                 dwf.FDwfAnalogInStatusData(hdwf, ctypes.c_int(ch),
                                            bufs[ch], ctypes.c_int(chunk))
-                data[ch].extend(bufs[ch][:chunk])
+                tmp[ch].write(ctypes.string_at(bufs[ch], chunk * 8))
             got += chunk
             n -= chunk
+        now = time.monotonic()
+        if now - last_note >= 5.0:
+            print(f"  ... {got*dt:.1f}s / {a.seconds}s", file=sys.stderr)
+            last_note = now
         if sts.value == 2 and cAvail.value == 0:   # DwfStateDone
             break
     dwf.FDwfDeviceCloseAll()
+    for t in tmp:
+        t.close()
 
     if lost or corrupted:
         print(f"WARNING: lost={lost} corrupted={corrupted} samples "
               f"(reduce --rate if severe)", file=sys.stderr)
-    n = len(data[0])
-    print(f"writing {n} samples -> {a.out}", file=sys.stderr)
-    dt = 1.0 / a.rate
+    print(f"captured {got} samples; converting -> {a.out}", file=sys.stderr)
+    import array, os
+    rd = [open(f"{a.out}.ch{ch+1}.tmp", "rb") for ch in range(nch)]
+    written = 0
     with open(a.out, "w") as f:
-        for i in range(n):
-            row = [f"{i*dt:.9f}", f"{data[0][i]:.4f}"]
-            if nch == 2 and i < len(data[1]):
-                row.append(f"{data[1][i]:.4f}")
-            f.write(",".join(row) + "\n")
+        while True:
+            raw = [r.read(8192 * 8) for r in rd]
+            if not raw[0]:
+                break
+            cols = []
+            for blob in raw:
+                arr = array.array("d")
+                arr.frombytes(blob)
+                cols.append(arr)
+            for i in range(len(cols[0])):
+                row = [f"{(written+i)*dt:.9f}", f"{cols[0][i]:.4f}"]
+                if nch == 2 and i < len(cols[1]):
+                    row.append(f"{cols[1][i]:.4f}")
+                f.write(",".join(row) + "\n")
+            written += len(cols[0])
+    for ch in range(nch):
+        rd[ch].close()
+        os.unlink(f"{a.out}.ch{ch+1}.tmp")
+    print(f"wrote {written} samples -> {a.out}", file=sys.stderr)
     print("done. decode with: aux_decode.py", a.out, file=sys.stderr)
 
 if __name__ == "__main__":

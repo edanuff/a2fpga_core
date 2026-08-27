@@ -107,8 +107,8 @@ def frames_from_bits(bits):
             yield out
         i = j + 1
 
-def classify(bts):
-    """Return ('req', cmd, addr, length, data) or ('rep', code, data)."""
+def classify_req(bts):
+    """Parse as a REQUEST: ('req', cmd, addr, length, data) or None."""
     if not bts: return None
     c = bts[0] >> 4
     if c in CMD and len(bts) >= 3:
@@ -122,10 +122,25 @@ def classify(bts):
             return ("req", c, addr, ln, [])
         elif c in (0x2, 0x6):
             return ("req", c, addr, 0, [])
-    code = (bts[0] >> 4) & 0x3
-    i2c  = (bts[0] >> 6) & 0x3
-    key = code if i2c == 0 else (0x4 if code == 1 else (0x8 if code == 2 else code))
-    return ("rep", key, bts[1:])
+    return None
+
+def classify_rep(bts):
+    """Parse as a REPLY: ('rep', code_nibble, data)."""
+    return ("rep", bts[0] >> 4, bts[1:]) if bts else None
+
+def strongly_request(bts):
+    """True when the byte layout can ONLY be a request — used to recover
+    when an expected reply was lost (timeout / undecodable burst).
+    Request and reply headers overlap heavily (ACK=0x00 vs I2C_WR nibble
+    0, etc.), so direction normally comes from alternation state; this
+    is the escape hatch, restricted to native cmds with exact lengths."""
+    if not bts: return False
+    c = bts[0] >> 4
+    if c == 0x9:                          # native read: hdr(3)+len(1)
+        return len(bts) == 4
+    if c == 0x8:                          # native write: hdr+len+data exact
+        return len(bts) >= 5 and len(bts) == 4 + bts[3] + 1
+    return False
 
 # --------------------------------------------------------------------------
 def annotate(path, max_tx=0):
@@ -134,20 +149,23 @@ def annotate(path, max_tx=0):
     footprint = {}   # (rw, addr) -> count
     replies = {}     # (target, disposition) -> count
     n_frames = 0
+    expect_reply = False
     for burst in d2.group_bursts(d2.stream_edges(path)):
         h = d2.halfcells(burst)
-        best = None
-        for pol in (0, 1):
-            for phase in (0, 1):
-                bits = d2.bits_from_halfcells(h, phase, pol)
-                fr = list(frames_from_bits(bits))
-                score = sum(len(f) for f in fr)
-                if best is None or score > best[0]:
-                    best = (score, fr)
+        frames = d2.frames_from_halfcells(h)
         t0 = burst[0][0]
-        for f in best[1]:
+        for f in frames:
             n_frames += 1
-            c = classify(f)
+            if expect_reply and not strongly_request(f):
+                c = classify_rep(f)
+                expect_reply = False
+            else:
+                c = classify_req(f)
+                if c is None:
+                    c = classify_rep(f)
+                    expect_reply = False
+                else:
+                    expect_reply = True
             if c is None: continue
             txlog.append((t0, c, f))
             if max_tx and len(txlog) >= max_tx * 2:
@@ -207,10 +225,10 @@ def _selftest():
         # pattern approximated as two constant cells; payload Manchester
         wave = []
         for b in ([0]*bits_pre):
-            wave += [0.3, -0.3] if b == 0 else [-0.3, 0.3]
+            wave += [-0.3, 0.3] if b == 0 else [0.3, -0.3]
         wave += [0.3, 0.3, -0.3, -0.3]           # sync-end (2 const cells)
         for b in man_bits(payload_bytes):
-            wave += [0.3, -0.3] if b == 0 else [-0.3, 0.3]
+            wave += [-0.3, 0.3] if b == 0 else [0.3, -0.3]
         wave += [0.3, 0.3, 0.3, 0.3]             # stop-ish
         for i, v in enumerate(wave):
             n = int((BIT/2) * RATE)
