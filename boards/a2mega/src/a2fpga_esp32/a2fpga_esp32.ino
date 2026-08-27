@@ -41,6 +41,7 @@
 #include "fpga_screen.h"
 #include "osd_console.h"
 #include "settings.h"
+#include "wedge_watch.h"
 #include "disk.h"
 #include "menu.h"
 #include "w5100.h"
@@ -878,6 +879,7 @@ static void start_network() {
     network_up = true;
 
     settings_init();
+    wedge_watch_init();   /* auto-recovery policy (needs NVS up) */
     sd_mounted = mount_sd();
 
     osd_log("A2MEGA ESP32 %s %s", __DATE__, __TIME__);
@@ -1112,6 +1114,7 @@ void loop() {
                 if (flen > 0) {
                     fline[flen] = '\0';
                     telnetd_console_tee(fline);
+                    wedge_watch_line(fline);
                     flen = 0;
                 }
             } else if (c1 != '\r') {

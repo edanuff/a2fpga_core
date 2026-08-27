@@ -45,6 +45,7 @@
 #endif
 #include "a2fpga_regs.h"
 #include "telnetd.h"
+#include "wedge_watch.h"
 
 #define TELNET_PORT     23
 #define TEE_LINES       32
@@ -281,6 +282,11 @@ static void session(int fd)
 #else
                 tn_puts(fd, "replug: not built for this board rev\r\n");
 #endif
+                continue;
+            }
+            if (esc_st == 0 && ch == 'w' && !menu_mode) {
+                /* auto-recovery watch: toggle + status (wedge_watch.c) */
+                wedge_watch_toggle_cmd();
                 continue;
             }
             if (esc_st == 0 && ch == 'l' && !menu_mode) {
