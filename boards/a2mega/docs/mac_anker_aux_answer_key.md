@@ -396,6 +396,10 @@ First Ugreen attach answered BOTH observability questions:
   load-bearing, not ritual. 0x2003 carried nothing (second-clear
   correctly silent). Row otherwise ideal: fast, G:F0, Y:11, L:01, J:2
   Ugreen fingerprint.
+Rows 2-8: all FAST, byte-identical signatures (V:0002 / U:08 / J:2 /
+G:F0 every row — the Ugreen attach is deterministic down to the vector
+contents and defer count). **v3 Ugreen: 8/8 fast**, no blinks offered
+yet (~17% historical rate; within odds).
 Standing watch items: V: after a serviced blink (runtime vector
 contents), and V:/U: on the Anker — especially at a dark event.
 
