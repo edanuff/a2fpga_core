@@ -351,6 +351,21 @@ non-recovering instance); (b) the Mac's vendor 0x3050/0x3051 per-poll
 handshake (controlled experiment); (c) IT6563 HDMI-side behavior
 (datasheet review of output-side hot-plug/timeout machinery).
 
+### FIRST IN-THE-WILD RUNTIME ESI SERVICE (Ugreen, continued testing)
+User's 5th Ugreen cycle: colorbars -> dark blink -> colorbars,
+self-recovered. Telemetry: Y:11 (link NEVER dropped through the blink),
+G:F0/T:0000/B:0 (zero teardowns), and **J:000003 vs the deterministic
+J:2 Ugreen baseline — the +1 is the runtime ESI service firing**: the
+converter raised an HPD IRQ during the blink, the ESP32 chain delivered
+it, and the build serviced it Mac-style (status check -> RD 0x2003 ->
+W1C 0x2005) with the link held. Video recovered WITHOUT intervention.
+Contrast the Anker dark-with-K:03 row: no IRQ offered (J unchanged),
+no recovery until manual HDMI replug. n=1, correlation not proof — but
+this is the conformance fix executing its designed scenario end-to-end
+on hardware for the first time (every prior build left this IRQ
+dangling). Ugreen running total: 4 fast + 1 fast-with-self-recovered
+blink, 0 dark, 0 delayed.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
