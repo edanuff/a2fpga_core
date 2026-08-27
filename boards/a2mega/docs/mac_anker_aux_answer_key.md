@@ -449,6 +449,20 @@ screen blackouts, not a storm. NEXT: ESP32 policy patch — parse U: bit7
 from the relayed UART telemetry (or wire the wedge_suspect port), 
 trigger budgeted virtual replug.
 
+### SELF-HEALING VALIDATED END-TO-END (first live opportunity)
+ESP32 wedge_watch flashed; board swapped Mac->hub; the attach WEDGED
+(light-up then dark) and ~30 s later the monitor CAME BACK with zero
+human action. Receipts: fresh counters (the replug rebooted the board),
+clean healthy session (C:0177/K:03/G:F0), and the console line
+"AUTOREC: STREAMING STABLE - BUDGET RE-ARMED" — the budget was consumed
+(fire persisted to NVS pre-replug), survived the reboot, and was
+re-armed to 0/3 by 20 consecutive K:03 lines. Every policy element
+(detect -> fire -> persist -> recover -> verify-streaming -> re-arm)
+demonstrated in one pass. Telnet 'w' toggle verified (DISABLED/ENABLED
+with budget readout). The quiet-frozen wedge — the class the source
+cannot prevent and the hub signals nothing about — is now a ~30 s
+self-recovering blink instead of a dead display.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
