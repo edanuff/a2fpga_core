@@ -165,14 +165,16 @@ module aux_channel #(
     // change resets the timer (sleeping-monitor storms cannot
     // accumulate). UNPROVEN discriminator vs the kick-era
     // K:00-with-good-picture state — hence advisory-only.
-    // Bit form (not a comparator — the 30-bit >= compare cost 21 setup
-    // violations at the knife-edge): fires when wedge_timer[WEDGE_BIT]
-    // AND [WEDGE_BIT-1] are both set = 1.5 * 2^WEDGE_BIT clocks.
-    // 29 -> 8.05 s @ 100 MHz: the cut from 10.7 s (ed: 30 s recovery too
-    // long) while staying above the ~7 s settling-storm ghost — the
-    // historical converter status-regression window with a GOOD picture
-    // that a shorter fuse would false-fire on.
-    parameter WEDGE_BIT = 29,
+    // Single-bit fire at [WEDGE_BIT] with a PRELOAD: the timer clears to
+    // WEDGE_PRELOAD instead of 0, so it trips after 2^WEDGE_BIT - PRELOAD
+    // clocks. 2^30 - 2^28 = 8.05 s @ 100 MHz — the cut from 10.7 s (ed:
+    // 30 s recovery too long) while staying above the ~7 s settling-storm
+    // ghost. Preload-not-AND because BOTH richer fire conditions (a >=
+    // comparator, then a two-bit AND) re-rolled the cm_life placement
+    // into violations (21 and 67/42 across seeds); the preload keeps the
+    // fire logic bit-identical to the build that closed at 100.952.
+    parameter WEDGE_BIT = 30,
+    parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000,
     // Lane-set write-on-change: HARDWARE-REFUTED as a default (7d6e205d,
     // 08-26 bench): the DP CR/EQ loops MANDATE a TRAINING_LANEx_SET write
     // every iteration even when unchanged, and the IT6563 uses that write
@@ -1362,10 +1364,10 @@ always @(posedge clk) begin
     //-----------------------------------------------------------
     if (!in_established_set ||
         dbg_sink_status[1:0] != 2'b00 || !r204_q[7]) begin
-        wedge_timer <= 32'd0;
+        wedge_timer <= WEDGE_PRELOAD;
         if (dbg_sink_status[1:0] != 2'b00)
             wedge_suspect <= 1'b0;         // streaming again: stand down
-    end else if (wedge_timer[WEDGE_BIT] && wedge_timer[WEDGE_BIT-1]) begin
+    end else if (wedge_timer[WEDGE_BIT]) begin
         wedge_suspect <= 1'b1;
     end else begin
         wedge_timer <= wedge_timer + 32'd1;

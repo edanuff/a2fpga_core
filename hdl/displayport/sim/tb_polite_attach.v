@@ -80,7 +80,8 @@ module tb_polite_attach;
         .BLIND_SINK     (0),
         .IRQ_SERVICE    (2),
         .POLITE_ATTACH  (1),
-        .WEDGE_BIT      (19),            // 2^19 clks = ~5.2 ms for sim
+        .WEDGE_BIT      (19),
+        .WEDGE_PRELOAD  (32'h0002_0000), // 2^19-2^17 clks = ~3.9 ms sim fire
         .AFE_ADJUST     (1)
     ) dut (
         .clk100               (clk100),

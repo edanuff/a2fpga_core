@@ -105,7 +105,8 @@ module dp_transmitter #(
     parameter bit    LATE_REPLY_DRAIN = 0,
     parameter bit    POLITE_ATTACH = 0,
     parameter [5:0]  EDID_DEFER_CAP = 6'd40,
-    parameter        WEDGE_BIT = 29,
+    parameter        WEDGE_BIT = 30,
+    parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
     parameter int BIT_HEIGHT = $clog2(V_TOTAL)
 )(
@@ -606,7 +607,7 @@ module dp_transmitter #(
                          .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN),
                          .POLITE_ATTACH(POLITE_ATTACH),
                          .EDID_DEFER_CAP(EDID_DEFER_CAP),
-                         .WEDGE_BIT(WEDGE_BIT)) i_channel_management(
+                         .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
         .afe_busy             (afe_busy_w),
