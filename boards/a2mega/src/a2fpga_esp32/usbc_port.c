@@ -901,7 +901,14 @@ int usbc_port_virtual_replug(usbc_port_t *port, uint32_t hold_ms)
 #define GUARD_MAX_FIRES    3u
 #define GUARD_HOLD_MS      1500u   /* >> tCCDebounce; shorter than the
                                     * manual 'v' 3 s to cut latency */
-#define GUARD_VERIFY_MS    1000u
+/* 250 ms: the CC re-qual must catch the swap GAP itself — a fast
+ * cable swap's unpowered window is ~1-1.5 s while the chips ride
+ * through on bulk caps; at 1 Hz the 2-sample absent debounce needed a
+ * >2 s gap and a real fast swap sailed through still "attached", DP
+ * lanes blasting into the freshly-attaching hub (evaded all three
+ * triggers, bench 08-26). At 4 Hz a >=500 ms gap fires the clean
+ * unattach MID-GAP, so the hub attaches against a quiet board. */
+#define GUARD_VERIFY_MS    250u
 
 static int stale_session_guard(usbc_port_t *port, const char *why)
 {
