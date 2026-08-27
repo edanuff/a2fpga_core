@@ -131,11 +131,44 @@ Polling cluster roughly every 0.3-1 s (relaxing to ~2.8 s):
    controlled experiment only after 1-4 are graded.
 6. Enhanced framing (`0x101 = 0x82`) — verify what we set.
 
+## Pass A2: HDMI unplug → replug (captured same session)
+
+`mac_aux_hdmireplug.csv` → `mac_anker_hdmireplug_annotated.txt`. HDMI
+was pulled before/at record start (AUX silent 0-5 s — the Mac had
+already torn down on the virtualized HPD drop); replug at ~5.03 s.
+
+- **HDMI replug = a full fresh hot-plug to the source.** The hub
+  virtualizes the IT6563's DP-HPD re-assert into a complete HPD cycle,
+  and the Mac re-runs its ENTIRE bring-up script from `RD 0x0000` —
+  byte-identical caps phase, EDID with the same 2-DEFER cadence,
+  training first-try. No incremental retrain path, no IRQ-driven
+  recovery: attach handling IS the recovery mechanism.
+- **Warm re-attach is fast**: first AUX → training complete in ~230 ms;
+  HDCP done ~2.2 s. The 10+ s cold-plug delay is macOS display-stack
+  latency, confirmed.
+- **The `WR 0x2005 = 02` is UNCONDITIONAL.** Here the ESI block read
+  showed 0x2005 = 00 (no IRQ pending) and the Mac wrote the clear
+  anyway. It's a scripted ack in the attach sequence, not a
+  conditional response to a pending vector.
+- **Branch DPCD state survives the HDMI cycle**: LANE_COUNT_SET read
+  back 0x82 (previous session's value) before being rewritten; 0x3051
+  already 06. The hub does not reset its DPCD on HDMI unplug — matches
+  the stale-but-served physiology (autonomous AUX hardware, MCU-owned
+  state).
+
+### Correction to §2 (both captures agree)
+The 0x204 bit7 LINK_STATUS_UPDATED latch does NOT clear at the ESI ack:
+it still reads 0x80 during training (re-set by every status change:
+00→11→77) and only reads clear in steady state after training completes
+— consistent with clear-on-read re-armed by changes. So the latch in
+our wedge snapshots is a *status engine frozen mid-change* signature,
+not directly an unserviced-IRQ flag. The ESI ack write remains part of
+the reference attach script and IRQ servicing remains conformance-
+required (capture 1's 0x2005=02 pending bit was real), but "clearing
+0x204 bit7" is not the observable to grade IRQ servicing by.
+
 ## Still wanted
 
-- Pass A2: same capture with an HDMI unplug/replug mid-window → shows
-  how the Mac handles the IT6563 standby cycle + which IRQ vector bits
-  fire (the differential for our wedge class).
-- Pass C: identical capture of OUR board's bring-up for a line-by-line
-  diff against this transcript.
+- Pass C: identical capture of OUR board's bring-up (breakout inline
+  board↔hub) for a line-by-line diff against this transcript.
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
