@@ -98,5 +98,8 @@ int fusb302_source_detached(fusb302_t *device, bool *detached);
 int fusb302_receive(fusb302_t *device, usb_pd_message_t *message);
 int fusb302_transmit(fusb302_t *device, const usb_pd_message_t *message);
 int fusb302_send_hard_reset(fusb302_t *device);
+/* Stale-session guard: *intact=false when REG_POWER no longer reads the
+ * configured value (chip reset underneath the stack). */
+int fusb302_verify_powered(fusb302_t *device, bool *intact);
 
 #endif

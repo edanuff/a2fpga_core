@@ -511,6 +511,26 @@ int fusb302_transmit(fusb302_t *device, const usb_pd_message_t *message)
     return write_bytes(device, REG_FIFOS, bytes, n);
 }
 
+int fusb302_verify_powered(fusb302_t *device, bool *intact)
+{
+    /* Stale-session guard signature: REG_POWER is written to POWER_ALL
+     * (0x0F) at init/configure and never lowered while the port runs;
+     * its POR default is 0x01. Reading anything else means the chip
+     * reset (rail sag) underneath a live stack — the swap-gap
+     * mixed-survival case (root-caused 08-26: the ESP32 rides through
+     * a 1-3 s unpowered gap on bulk caps; a browned-out FUSB302 makes
+     * the stack deaf while it believes it is attached). */
+    uint8_t v;
+    int rc;
+    if (device == NULL || intact == NULL)
+        return -1;
+    rc = read_reg(device, REG_POWER, &v);
+    if (rc != 0)
+        return rc;
+    *intact = (v == POWER_ALL);
+    return 0;
+}
+
 int fusb302_send_hard_reset(fusb302_t *device)
 {
     return update_reg(device, REG_CONTROL3, 0u, CONTROL3_SEND_HARD_RESET);

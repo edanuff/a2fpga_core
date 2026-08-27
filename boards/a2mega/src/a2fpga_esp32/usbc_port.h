@@ -121,6 +121,9 @@ typedef struct {
     bool power_sink;         /* true = partner sources VBUS (monitor) */
     bool data_dfp;           /* current data role for TX headers */
     uint8_t sink_attempts;   /* contract retries before USB-only fallback */
+    /* stale-session guard (see stale_session_guard in usbc_port.c) */
+    uint32_t guard_verify_deadline_ms;
+    uint8_t  guard_fires;    /* ceremonies fired this boot (budgeted) */
 } usbc_port_t;
 
 void usbc_port_default_config(usbc_port_config_t *config);

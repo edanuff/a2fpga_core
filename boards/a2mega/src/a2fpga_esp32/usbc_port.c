@@ -26,6 +26,8 @@ static bool time_reached(uint32_t now, uint32_t deadline)
     return (int32_t)(now - deadline) >= 0;
 }
 
+static int stale_session_guard(usbc_port_t *port, const char *why);
+
 static uint32_t now_ms(const usbc_port_t *port)
 {
     return port->hal.millis(port->hal.context);
@@ -424,7 +426,21 @@ static int handle_received_message(usbc_port_t *port,
     if (count >= 1u && type == USB_PD_DATA_SOURCE_CAP && port->power_sink) {
         /* PDO 1 is vSafe5V fixed by spec; request it, bounded by the
          * offer. Accept caps (re)broadcasts from the wait state or after
-         * a fallback to plain-device — some sources are slow starters. */
+         * a fallback to plain-device — some sources are slow starters.
+         * Mid-negotiation rebroadcasts stay tolerated (retry machinery).
+         * Source_Caps in a POST-negotiation state means the partner
+         * believes this is a FRESH attach — we missed a detach (the
+         * swap-gap survival case): previously this was SILENTLY DROPPED
+         * (`return 0`), leaving the freshly-attached hub broadcasting
+         * caps at a deaf, already-negotiated stack until its VL103
+         * wedged. Run the ceremony instead. */
+        if (port->state == USBC_STATE_SINK_REQUEST_SENT ||
+            port->state == USBC_STATE_SINK_WAIT_PS_RDY)
+            return 0;
+        if (port->state >= USBC_STATE_SINK_READY &&
+            port->state <= USBC_STATE_USB_ONLY)
+            return stale_session_guard(port,
+                                       "Source_Caps while negotiated");
         if (port->state != USBC_STATE_SINK_WAIT_SRC_CAPS &&
             port->state != USBC_STATE_DEVICE)
             return 0;
@@ -870,6 +886,39 @@ int usbc_port_virtual_replug(usbc_port_t *port, uint32_t hold_ms)
     return 0;
 }
 
+/* STALE-SESSION GUARD (08-26 root cause): the ESP32 rides through the
+ * 1-3 s cable-swap gap on bulk caps, so a new source can attach against
+ * Mac-session PD state — no fusb302 re-init, phantom-VBUS hiding the
+ * detach. The cure was proven as the recovery all night: the controlled
+ * teardown-reinit ceremony inside the virtual replug. Two triggers
+ * funnel here (Source_Caps-in-negotiated-state = live-chip missed
+ * detach; REG_POWER signature mismatch = chip reset under a live
+ * stack). Budgeted per boot: the ESP32 survives its own replug, so the
+ * RAM counter is meaningful — a genuinely broken chip costs
+ * GUARD_MAX_FIRES short detaches, then holds for manual recovery. */
+#define GUARD_MAX_FIRES    3u
+#define GUARD_HOLD_MS      1500u   /* >> tCCDebounce; shorter than the
+                                    * manual 'v' 3 s to cut latency */
+#define GUARD_VERIFY_MS    1000u
+
+static int stale_session_guard(usbc_port_t *port, const char *why)
+{
+    char msg[96];
+    if (port->guard_fires >= GUARD_MAX_FIRES) {
+        snprintf(msg, sizeof msg,
+                 "stale-session guard: %s — budget exhausted (%u), holding",
+                 why, (unsigned)port->guard_fires);
+        log_message(port, USBC_LOG_ERROR, msg);
+        return 0;
+    }
+    port->guard_fires++;
+    snprintf(msg, sizeof msg,
+             "stale-session guard: %s — ceremony %u/%u",
+             why, (unsigned)port->guard_fires, GUARD_MAX_FIRES);
+    log_message(port, USBC_LOG_WARNING, msg);
+    return usbc_port_virtual_replug(port, GUARD_HOLD_MS);
+}
+
 static int begin_hard_reset_recovery(usbc_port_t *port)
 {
     int rc;
@@ -943,6 +992,25 @@ int usbc_port_task(usbc_port_t *port)
         fusb302_vbus_present(&port->fusb302, &vbus_present) == 0 &&
         !vbus_present)
         return enter_unattached(port);
+
+    /* stale-session guard, trigger A: 1 Hz REG_POWER signature verify
+     * while in the attached family — catches the FUSB302 having reset
+     * to POR defaults underneath a live stack (rail-sag mixed
+     * survival), which loses every interrupt latch and leaves the
+     * event-driven detach detection above permanently blind. */
+    if (port->state >= USBC_STATE_DEVICE_WAIT_VBUS &&
+        port->state <= USBC_STATE_USB_ONLY) {
+        const uint32_t now = now_ms(port);
+        if (port->guard_verify_deadline_ms == 0u ||
+            time_reached(now, port->guard_verify_deadline_ms)) {
+            bool intact;
+            port->guard_verify_deadline_ms = now + GUARD_VERIFY_MS;
+            if (fusb302_verify_powered(&port->fusb302, &intact) == 0 &&
+                !intact)
+                return stale_session_guard(port,
+                                           "FUSB302 reset under stack");
+        }
+    }
 
     return service_state_timer(port);
 }
