@@ -165,7 +165,10 @@ module aux_channel #(
     // change resets the timer (sleeping-monitor storms cannot
     // accumulate). UNPROVEN discriminator vs the kick-era
     // K:00-with-good-picture state — hence advisory-only.
-    parameter WEDGE_CLKS = 30'd1_000_000_000,   // 10 s @ 100 MHz
+    // Bit-index form (not a comparator — the 30-bit >= compare cost
+    // 21 setup violations at the cm_life knife-edge): fires when
+    // wedge_timer[WEDGE_BIT] sets. 30 -> 2^30 clocks = ~10.7 s @ 100 MHz.
+    parameter WEDGE_BIT = 30,
     // Lane-set write-on-change: HARDWARE-REFUTED as a default (7d6e205d,
     // 08-26 bench): the DP CR/EQ loops MANDATE a TRAINING_LANEx_SET write
     // every iteration even when unchanged, and the IT6563 uses that write
@@ -412,7 +415,7 @@ module aux_channel #(
     // wedge-suspect detector (advisory)
     reg        ever_streamed    = 1'b0;
     reg [7:0]  r204_q           = 8'd0;   // last 0x204 byte from a status read
-    reg [29:0] wedge_timer      = 30'd0;
+    reg [31:0] wedge_timer      = 32'd0;
     reg        wedge_suspect    = 1'b0;
     reg        irq_service_due  = 1'b0;   // hpd_irq consumed; ESI service owed
     reg        err_evt          = 1'b0;   // tagged error-entry event
@@ -1346,13 +1349,13 @@ always @(posedge clk) begin
     //-----------------------------------------------------------
     if (!in_established_set || !ever_streamed ||
         dbg_sink_status[1:0] != 2'b00 || !r204_q[7]) begin
-        wedge_timer <= 30'd0;
+        wedge_timer <= 32'd0;
         if (dbg_sink_status[1:0] != 2'b00)
             wedge_suspect <= 1'b0;         // streaming again: stand down
-    end else if (wedge_timer >= WEDGE_CLKS) begin
+    end else if (wedge_timer[WEDGE_BIT]) begin
         wedge_suspect <= 1'b1;
     end else begin
-        wedge_timer <= wedge_timer + 30'd1;
+        wedge_timer <= wedge_timer + 32'd1;
     end
 
     //-----------------------------------------------------------

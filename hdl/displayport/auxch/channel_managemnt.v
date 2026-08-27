@@ -71,7 +71,7 @@ module channel_management #(
     parameter LATE_REPLY_DRAIN = 0, // 0 = legacy error behavior
     parameter POLITE_ATTACH = 0,   // Mac-parity attach pacing (aux_channel.v)
     parameter [5:0] EDID_DEFER_CAP = 6'd40,
-    parameter WEDGE_CLKS = 30'd1_000_000_000
+    parameter WEDGE_BIT = 30
 )(
         input  clk100,
         // M5 runtime AFE adjust: applied-level declaration in, one pulse
@@ -284,7 +284,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN),
               .POLITE_ATTACH(POLITE_ATTACH),
               .EDID_DEFER_CAP(EDID_DEFER_CAP),
-              .WEDGE_CLKS(WEDGE_CLKS)) i_aux_channel(
+              .WEDGE_BIT(WEDGE_BIT)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),
         .afe_busy        (afe_busy),
