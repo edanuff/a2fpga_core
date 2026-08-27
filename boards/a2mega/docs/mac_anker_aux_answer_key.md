@@ -536,6 +536,30 @@ only on idle bus (no recent RX) so the measure-block flip cannot clip a
 PD message; restore configure_sink(polarity) after. This also replaces
 VBUS-based detach detection as the primary — CC is the ground truth.
 
+### Autonomous work block (ed away): Trigger C + latency trims, sim-proven
+Built while the bench was idle; NOTHING flashed yet.
+1. **Trigger C shipped in firmware source** (host-sim 14/14):
+   fusb302_requalify_cc measures both CC pins mid-session and restores
+   ONLY SWITCHES0 (design review caught that configure_sink would have
+   silently killed rx_enable + the DR-swapped role). 1 Hz on the guard
+   tick, sink-role + idle-bus (>100 ms since RX) gated, 2-sample
+   debounce. Rp-moved -> ceremony (budgeted); Rp-absent-on-both ->
+   clean enter_unattached (unbudgeted; CC ground truth replaces the
+   phantom-VBUS-blind detach detection for this case).
+2. **Recovery-latency trims**: FPGA detector 10.7 s -> 8.05 s
+   (two-bit AND, comparator-free; floor set by the ~7 s settling-storm
+   ghost); wedge_watch 3->2 consecutive lines; auto-fire hold 3 s ->
+   1.5 s (usbc_virtual_replug_fast; manual 'v' keeps 3 s). Recovery
+   ~30 s -> ~21 s bench / ~13 s slot-powered.
+
+NEXT BENCH SESSION — flash list + acceptance:
+- FPGA 138B (8.05 s detector build; sha in the archive commit).
+- ESP32 firmware (Trigger C + trims).
+- Acceptance: fast-swap generator n>=3. Expect: guard ceremony
+  handles it in ~5 s (console: "CC orientation moved — ceremony n/3"
+  or Source_Caps line), no wedge; if the guard is somehow evaded, the
+  backstop lands at ~21 s. Plain cycles + Ugreen smoke unchanged.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
