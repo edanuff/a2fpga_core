@@ -153,7 +153,16 @@ module aux_channel #(
     // value changes, not every poll; (d) a slower CR poll cadence
     // (~330 us extra dwell per wait state). Default 0 = legacy.
     parameter POLITE_ATTACH = 0,
-    parameter [5:0] EDID_DEFER_CAP = 6'd40
+    parameter [5:0] EDID_DEFER_CAP = 6'd40,
+    // Lane-set write-on-change: HARDWARE-REFUTED as a default (7d6e205d,
+    // 08-26 bench): the DP CR/EQ loops MANDATE a TRAINING_LANEx_SET write
+    // every iteration even when unchanged, and the IT6563 uses that write
+    // as its cue to evaluate CR — with the skip enabled the hub never
+    // granted CR (C:0000 forever, watchdog loops). The Mac only looked
+    // like write-once because its CR passed on the first poll. Kept as an
+    // opt-in experiment knob ONLY. Default 0 = spec-faithful per-iteration
+    // writes.
+    parameter LANE_SET_WOC = 0
 )(
         input        clk,
         // ready-to-send TRAINING_LANEx_SET values from afe_adjust_seq,
@@ -601,7 +610,7 @@ always @(posedge clk) begin
                                 // attach; skip the write and just poll again
                                 // when the value we'd send is what the sink
                                 // already has.
-                                end else if(POLITE_ATTACH != 0 && lane_set_sent &&
+                                end else if(POLITE_ATTACH != 0 && LANE_SET_WOC != 0 && lane_set_sent &&
                                             lane_set_last == train_set_byte) begin
                                     state_on_success <= clock_wait;
                                 end else if(swing_0p8 == 1'b1) begin
@@ -612,7 +621,7 @@ always @(posedge clk) begin
                                     state_on_success <= clock_voltage_0p4;
                                 end
             //----- Display Port Alignment traning ------------                        
-            align_training:     if(POLITE_ATTACH != 0 && lane_set_sent &&
+            align_training:     if(POLITE_ATTACH != 0 && LANE_SET_WOC != 0 && lane_set_sent &&
                                    lane_set_last == train_set_byte) begin
                                      state_on_success <= align_wait0;
                                 end else if(swing_0p8 == 1'b1) begin
@@ -639,7 +648,7 @@ always @(posedge clk) begin
             align_adjust:       state_on_success <= align_wait_after;
             align_wait_after:   if(symbol_locked_i == 1'b1) begin
                                            state_on_success <= switch_to_normal;
-                                end else if(POLITE_ATTACH != 0 && lane_set_sent &&
+                                end else if(POLITE_ATTACH != 0 && LANE_SET_WOC != 0 && lane_set_sent &&
                                             lane_set_last == train_set_byte) begin
                                     state_on_success <= align_wait0;
                                 end else if(swing_0p8 == 1'b1) begin

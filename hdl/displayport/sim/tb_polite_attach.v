@@ -19,10 +19,12 @@
 //      twice with retries spaced >=0.6 ms; 24 read requests total.
 //   3. Attach-time ESI ack: RD 0x2003 + WR 0x2005=0x02, before training.
 //   4. TPS1 is written only after: count>=1, EDID complete, ESI acked.
-//   5. Write-on-change: exactly TWO lane-set writes total — the INIT
-//      declare (0x02) and the one change to 0x27 after the sink's
-//      ADJUST_REQUEST is applied — while >=3 CR status polls run
-//      (polling continues without rewrites; legacy wrote 383).
+//   5. Lane-set writes are PER-ITERATION (spec-faithful): the hub model
+//      grants CR only when a TRAINING_LANE_SET write arrives while it is
+//      ready — modeling the IT6563's write-cued CR evaluation that
+//      HARDWARE-REFUTED the write-on-change skip (7d6e205d: skip enabled
+//      -> CR never granted, watchdog loops). Values stay 0x02 (INIT)
+//      then 0x27 (applied change), nothing else, no 0x02 after 0x27.
 //   6. Runtime ESI service: hpd_irq with 0x2005=0x02 pending -> status
 //      read, RD 0x2003, W1C 0x2005 with the read value; exactly one ack;
 //      tx_link_established never drops.
@@ -179,6 +181,9 @@ module tb_polite_attach;
     reg [7:0] r205 = 8'h00;
     reg [7:0] r206 = 8'hBB;            // ADJUST_REQUEST: VS3/PE2 both lanes
     reg [7:0] m_esi_2005 = 8'h00;      // LINK_SERVICE_IRQ_VECTOR_ESI0
+    reg       cr_armed   = 1'b0;       // hub ready to grant CR — but only
+                                       // ON a lane-set write (IT6563
+                                       // write-cued evaluation, hw-proven)
 
     function [7:0] dpcd_read(input [19:0] a);
         case (a)
@@ -360,7 +365,12 @@ module tb_polite_attach;
                     if (req_addr == 20'h00103 && ls_cnt < 64) begin
                         lane_set_log[ls_cnt] = req[4];
                         ls_cnt = ls_cnt + 1;
-                        $display("  [sink] TRAINING_LANE_SET = %02x (t=%0t)", req[4], $time);
+                        if (cr_armed && r202 == 8'h00) begin
+                            r202 = 8'h11;
+                            $display("  [sink] CR granted ON lane-set write (t=%0t)", $time);
+                        end
+                        if (ls_cnt < 6 || (ls_cnt % 32) == 0)
+                            $display("  [sink] TRAINING_LANE_SET = %02x (t=%0t)", req[4], $time);
                     end
                     if (req_addr == 20'h00102) begin
                         last_pattern = req[4];
@@ -433,8 +443,8 @@ module tb_polite_attach;
             $display("  [script] hub ready: SINK_COUNT 0x40 -> 0x41 (t=%0t)", $time);
         end
         wait (wr_cnt == 16 && cr_status_polls >= 3);
-        r202 = 8'h11;
-        $display("  [script] CR granted (16 DRP writes, %0d polls) (t=%0t)",
+        cr_armed = 1'b1;
+        $display("  [script] CR ARMED (16 DRP writes, %0d polls) — grant on next lane-set write (t=%0t)",
                  cr_status_polls, $time);
         wait (tps2_seen);
         r202 = 8'h77;
@@ -522,20 +532,27 @@ module tb_polite_attach;
                          t_first_tps1/1e6);
         end
 
-        // 5. write-on-change: exactly 0x02 then 0x27, nothing repeated
+        // 5. per-iteration lane-set writes (spec-faithful), values
+        // ordered 0x02 (INIT) then 0x27, never 0x02 again, nothing else
         saw02 = 0; saw27 = 0; sawother = 0;
         for (m = 0; m < ls_cnt; m = m + 1) begin
-            if      (lane_set_log[m] === 8'h02) saw02 = saw02 + 1;
+            if (lane_set_log[m] === 8'h02) begin
+                saw02 = saw02 + 1;
+                if (saw27 > 0) begin
+                    errors = errors + 1;
+                    $display("FAIL: 0x02 lane-set after 0x27 (idx %0d)", m);
+                end
+            end
             else if (lane_set_log[m] === 8'h27) saw27 = saw27 + 1;
             else    sawother = sawother + 1;
         end
-        if (ls_cnt != 2 || saw02 != 1 || saw27 != 1 || sawother != 0) begin
+        if (ls_cnt < 3 || saw02 < 1 || saw27 < 1 || sawother != 0) begin
             errors = errors + 1;
-            $display("FAIL: lane-set writes n=%0d (02s=%0d 27s=%0d other=%0d) want exactly [02,27]",
+            $display("FAIL: lane-set writes n=%0d (02s=%0d 27s=%0d other=%0d) want per-iteration 02s then 27s",
                      ls_cnt, saw02, saw27, sawother);
         end else
-            $display("  ok: write-on-change — exactly 2 lane-set writes (INIT 0x02, change 0x27) across %0d CR polls",
-                     cr_status_polls);
+            $display("  ok: per-iteration lane-set writes (%0d: %0d x 0x02, %0d x 0x27) across %0d CR polls; CR granted on a write",
+                     ls_cnt, saw02, saw27, cr_status_polls);
 
         // 6. runtime ESI service
         m_esi_2005 = 8'h02;
@@ -570,7 +587,7 @@ module tb_polite_attach;
             $display("FAIL: tx_link_established sampled low %0d time(s) while established", le_drops);
         end
         if (errors == 0)
-            $display("PASS: polite attach%0s — paced presence, DEFER-tolerant EDID, ESI ack, gated training start, write-on-change CR, runtime ESI service, link stable",
+            $display("PASS: polite attach%0s — paced presence, DEFER-tolerant EDID, ESI ack, gated training start, per-iteration CR writes, runtime ESI service, link stable",
                      giveup_mode ? " (giveup fallback)" : "");
         else
             $display("FAIL: %0d error(s)", errors);
