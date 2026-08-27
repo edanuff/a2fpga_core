@@ -463,6 +463,27 @@ with budget readout). The quiet-frozen wedge — the class the source
 cannot prevent and the hub signals nothing about — is now a ~30 s
 self-recovering blink instead of a dead display.
 
+### Post-self-heal plain-cycle block (v5 + wedge_watch, Anker) + taxonomy
+6 plain power cycles: 4 clean + 2 six-second dark blinks, ZERO
+quiet-frozen wedges. Both blinks: Y:11/L:01 (our video NEVER dropped),
+C:0177/K:03 healthy throughout, no IRQ, no flag — the benign DOWNSTREAM
+BLINK class (IT6563 HDMI side / monitor resync), self-recovering, and
+the detector's K:00 gate correctly ignored both (no spurious replug —
+the false-positive discipline working live). Anker blink rate tonight
+~1/3, resembling the Ugreen's ~1/5: plausibly the same converter habit.
+
+IDLE-GAP HYPOTHESIS (ed's observation, refined): all THREE true
+quiet-frozen wedges today were the FIRST attach after the hub sat
+SOURCE-LESS (post-flash / post-swap); plain cycles have produced none.
+The Mac's capture-1 attach into an idle hub worked — so the idle-hub
+state is survivable with the right attach, moving the OUI/vendor-
+handshake experiment up to PRIME SUSPECT for wedge prevention.
+Pending experiments: (a) 5-minute source-less idle then attach =
+on-demand wedge generator if the hypothesis holds; (b) detection-time
+cut 10.7s -> 8.05s (two-bit AND, guards the ~7s settling-storm ghost)
++ consec 3->2: recovery ~30s -> ~18-20s bench / ~12s production
+(ed: 30s is too long).
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
