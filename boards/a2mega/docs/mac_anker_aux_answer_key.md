@@ -385,6 +385,20 @@ counter readable over telnet (did the chain deliver?), a spare-nibble
 telemetry build exposing the latched ESI bytes + defer_cnt/giveup,
 and — definitive — an AUX capture during an Anker dark event.
 
+### Polite v3 (a03b7e73: + W1C 0x2003, + V:/U: telemetry) — first read
+First Ugreen attach answered BOTH observability questions:
+- **U:08 — the Ugreen SERVES EDID**: one DEFER per 16-byte block then
+  ACK (8 defers / 8 blocks; give-up budget untouched). "Converters
+  defer DDC forever" now refuted on BOTH bench converters — the Anker
+  defers 2x/block, the Ugreen 1x/block.
+- **V:0002 — a REAL pending link-service IRQ (0x2005=0x02) at attach**,
+  cleared by our unconditional Mac-parity ack: that behavior is
+  load-bearing, not ritual. 0x2003 carried nothing (second-clear
+  correctly silent). Row otherwise ideal: fast, G:F0, Y:11, L:01, J:2
+  Ugreen fingerprint.
+Standing watch items: V: after a serviced blink (runtime vector
+contents), and V:/U: on the Anker — especially at a dark event.
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
