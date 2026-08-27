@@ -3,7 +3,11 @@
 2026-08-26. AD3 on a USB-C breakout inline between a MacBook Pro and the
 Anker hub (Sceptre on the hub's HDMI). CH1 = SBU1 (A8), CH2 = SBU2 (B8;
 turned out flat — decode is effectively single-ended on SBU1, which is
-sufficient). 30 s window, 4 MS/s, plug-in inside the window. Raw CSV =
+sufficient). 30 s window, 4 MS/s, plug-in inside the window. The hub was
+externally POWERED throughout both captures — i.e. every capture is a
+hot-attach to a running hub, the same condition our hub-backfed board
+sees on every power cycle, so the Pass C diff is apples-to-apples
+including hub MCU state. Raw CSV =
 `mac_aux_bringup.csv` (~3 GB, not committed); full annotated transcript =
 `mac_anker_bringup_annotated.txt` (committed alongside this doc).
 
@@ -167,8 +171,75 @@ the reference attach script and IRQ servicing remains conformance-
 required (capture 1's 0x2005=02 pending bit was real), but "clearing
 0x204 bit7" is not the observable to grade IRQ servicing by.
 
+## Pass C: OUR board's bring-up (build 8acfe351, same session)
+
+`our_board_bringup.csv` → `our_board_bringup_annotated.txt`. Breakout
+inline board↔hub, board hot-attached by seating the connector (hub
+backfeed powers it). Screen truth: **fast colorbars, first attach**.
+2389 frames.
+
+Timeline (attach at t=4598.6 ms):
+- t+0: `RD 0x000 len12`, `WR 0x600=01`, `WR 0x108=01`, `WR 0x100=0A`
+  (HBR), `WR 0x107=00`, `WR 0x101=02`, `WR 0x102=21` (TPS1),
+  `WR 0x103 = 06 06 06 06` — **training starts in the same
+  millisecond as the first AUX transaction**.
+- t+0 → t+257 ms: CR poll storm. **383 iterations** of
+  {`RD 0x200 len8` → `40 00 00 00 80 00 22 00`, `RD 0x206 len2`,
+  `WR 0x103 = 06 06 06 06`} at ~650 µs per loop — ~1150 transactions.
+  Note the block: **SINK_COUNT = 0x40 (count 0, no sink!)**, CR bits
+  0x00 the whole time, adjust request steady 0x22 (VS2, honored).
+- t+232 ms (4830.7): hub **DEFERs** a read — its MCU is busy.
+- t+257 ms (4856.1): status flips in ONE poll: CR `11`, then
+  `WR 0x102=22` (TPS2), one poll later EQ+align done (`77`/`81`),
+  `WR 0x102=00`. Training completes in ~1.1 ms once the hub is ready.
+  SINK_COUNT flips 0x40→0x41 at the same moment.
+- Steady state: `41 00 77 00 01 03 00 00` (0x204=01, 0x205=03), one
+  `81` blip when the stream started. 0x201 read every poll (the len8
+  block covers it): 0x00 throughout — no IRQ fired this attach, so the
+  IRQ_SERVICE path stayed idle (J: would show 0), as expected.
+
+### The diff that matters
+
+The hub was NOT ready at HPD: it raised hot-plug, then spent ~257 ms
+finishing its own downstream attach (IT6563 HDMI hot-plug + EDID from
+the monitor) while reporting SINK_COUNT=0 and CR=0. In that window:
+
+- **The Mac** spends ~200 ms on capabilities, OUI, vendor reads, and
+  EDID (~40 polite transactions), and by the time it writes its first
+  training register the hub is ready — training passes on the first
+  poll. It never trains against a 0-sink branch.
+- **We** start training at t+0 and hammer ~1150 transactions into the
+  busy hub MCU, rewriting TRAINING_LANE0_SET 383 times with an
+  unchanged value (the Mac writes lane settings ONCE per phase).
+
+It worked this time (fast colorbars), but this is the strongest
+induced-wedge candidate yet: our peak-rate AUX hammering lands exactly
+in the window where the VL103/IT6563 firmware is doing its attach
+housekeeping — and the hub visibly DEFERred under it. The round-1
+result (interruption-heavy legacy policy wedging least) is consistent:
+teardowns break up the hammering.
+
+### Fix list from the diff (priority order)
+1. **Wait for the branch to be ready before training**: after HPD,
+   poll 0x200 gently (≈10 ms period) until SINK_COUNT count-field ≥ 1,
+   THEN start the ladder. Cheap, spec-aligned, directly detunes the
+   hammer from the vulnerable window.
+2. **Write 0x103 only when the adjust request changes** (or once per
+   pattern phase) instead of every poll; slow the CR poll loop toward
+   ~1 ms.
+3. Enhanced framing: `0x101 = 0x82` (branch advertises the cap; the
+   Mac sets it).
+4. Source OUI write + tolerant EDID read (per §1/§3), giving the hub
+   the same grace period the Mac gives it as a side effect.
+
+Minor/unverified: a few stray frames (3x `I2C_WR I2C[00]`,
+`RD 0x1000 len5`, a mid-training `RD 0x000 len1`) don't match ladder
+states and may be decode artifacts of record-loss gaps — not
+load-bearing, flagged only.
+
 ## Still wanted
 
-- Pass C: identical capture of OUR board's bring-up (breakout inline
-  board↔hub) for a line-by-line diff against this transcript.
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
+- Wedge-window capture: leave the AD3 rigged and capture an attach that
+  goes delayed/dark — the transcript will show exactly what the hub
+  serves during a failed window.
