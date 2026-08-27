@@ -312,6 +312,22 @@ refutation documented at LANE_SET_WOC in aux_channel.v.
    construction — the DPCD shows nothing wrong to service. If it
    recurs at rate, the lever is HDMI-side (or the Mac's vendor
    0x3050/51 per-poll writes, still unexplored).
+3. Cycle: FAST, ideal signature — J:000001 (single-pass preamble; row
+   1's J:2 confirmed as the watchdog-bounce case, not a bug).
+4. Cycle: FAST, ideal signature (identical).
+5. Cycle: FAST, ideal signature (identical).
+
+**f0a48ae6 n=5: 4 fast / 0 delayed / 1 dark-downstream.** The headline
+is G:F0 on EVERY row including the HDMI-replug recovery: ZERO ladder
+restarts across the whole series (8acfe351: 2 restarts in 5 cycles;
+legacy block-2: a visible delayed class). The polite preamble fully
+absorbs the hub's not-ready window on this bench. The one failure was
+the dark-with-K:03 downstream class that the DPCD interface cannot see
+by construction. Bench run WITHOUT the AD3 breakout inline (captures
+possible in a later pass if an anomaly needs the wire).
+Before production-candidate status: (a) a Ugreen smoke test — the EDID
+give-up budget is the strict-converter fallback and is sim-proven but
+not hardware-proven; (b) optional round-2 for session-swing.
 
 ## Still wanted
 
