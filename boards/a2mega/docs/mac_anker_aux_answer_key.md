@@ -563,6 +563,29 @@ NEXT BENCH SESSION — flash list + acceptance:
   or Source_Caps line), no wedge; if the guard is somehow evaded, the
   backstop lands at ~21 s. Plain cycles + Ugreen smoke unchanged.
 
+### SESSION CLOSE: scope determination + unified wedge theory
+Final baseline: 5/5 fast-colorbars plain cycles on the full v6 stack
+(FPGA 67c40cc5 + ESP32 w/ Trigger C @4Hz + trims). The remaining wedge
+generator is BENCH-ONLY: Mac-dwell -> fast cross-bench swap into a
+continuously-powered hub. Same-session fast replug (warm hub): CLEAN.
+Cold-hub attaches: CLEAN (large n). Field boards live in a slot with a
+permanent USB-C run — the generator's circumstance does not occur in
+the field; field exposure = the rare organic quiet-frozen, covered by
+the layered self-heal (prevent -> detect+recover <=30s -> manual).
+
+UNIFIED THEORY (best fit, capture-unverified): wedge = a ride-through
+attach carrying MAC-SESSION state into the warm hub. Same-session
+stale = coherent -> hub treats as bounce; fresh boot = clean ceremony;
+cold hub = fresh both sides; Mac-flavored stale = incoherent -> VL103
+wedges pre-PD. The one apparent counterexample (boot banner in the
+wedge run) is timing-ambiguous: the reboot may have occurred at the
+BACKSTOP replug, not the swap. DEFINITIVE INSTRUMENT when curiosity
+wins an evening: AD3 breakout capture of a wedging Mac-swap attach
+(where does the hub's DP conversation die). Lesson logged: the
+live-console-through-swap instrument fails SILENTLY (zombie TCP,
+radio browns out before the core) — use ping transitions + post-hoc
+ring reads (the boot banner is reliable ground truth).
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
