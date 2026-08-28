@@ -633,6 +633,142 @@ converter-x-monitor fingerprint, not a defect in our stack.
    datetime.svh makes bit-identity impossible (sha differs, logically
    identical).
 
+## 60K TX-regression bisect (Anker-controlled, one variable per step)
+
+Protocol: scratch-worktree checkout per commit + overlay of the PURE
+e81682ba-vintage shared ROM (357 entries, txlev E000) so the CSR config is
+constant at the golden setup; AFE off on every step (60B die pkg); same
+board, same CONFIRMED Anker hub, same monitor; patience window honored.
+The rebuild pipeline is DETERMINISTIC (step-4 rebuild reproduced bin sha
+977eab4a bit-identically — datetime is not in this bitstream), so bin
+sha = commit identity.
+
+- Step 1  e81682ba (vintage anchor, rebuilt 2b0aadd9): GOOD — CR passes,
+  eventual colorbars. Golden reference re-proven on this board.
+- Step 2  c403e98f (bin fe6b2e82): GOOD — CR passes, D:2A/2E cycling.
+- Step 3  05f24edd (bin e43882fb): GOOD — CR passes. NOTE: this build
+  already contains the disabled M5 machinery (afe_adjust_seq g_off
+  tie-offs + 60B die pkg) => M5-present-but-off is hardware-exonerated.
+- BAD     5474dee2 (bin 1bc3b709) and HEAD-era f754114d: A:0000, hub
+  never sees signal (f754114d re-confirmed 4.5 min on the controlled
+  Anker after the hub-identity confound was caught).
+- Step 4  eaffc583 (bin 977eab4a, last pre-polite: IRQ-service v1 +
+  FSM-race fix, legacy ladder): GOOD — FAST colorbars first cycle.
+  Archived as impl/archive/a2mega_dp_test_60b_bisect4_eaffc583_977eab4a.bin.
+
+- Step 5  798b7472 (bin 080af10c, polite v1 AS COMMITTED): BAD — no
+  colorbars, A:0000/K:00, ladder cycling D:35/36 (EDID preamble states),
+  E: aux errors, W:5. VERDICT: NOT a bisect data point for the die
+  regression — polite v1 shipped with lane-set write-on-change ON, the
+  defect hardware-refuted on the 138K the very next commit (7d6e205d
+  "preamble ran, never trained"; IT6563 evaluates CR on the write). The
+  60K reproduces the known WOC failure identically (a die-INsensitive
+  confirmation). Step chosen in error; the first shipping-form polite
+  commit is 5eba67f3 (WOC demoted to default 0) = step 6.
+
+Boundary after step 4: eaffc583..5474dee2. Every commit between eaffc583
+and 798b7472 is docs/tooling only (verified: git diff --stat on hdl/ is
+empty), so 798b7472 (POLITE-ATTACH + ESI) is the FIRST RTL change in the
+bad range. Step 5 = 798b7472 itself (SUPERSEDED — see step-5 row: WOC known-bad): GOOD
+moves suspicion to the later ESI/detector/timing commits (5eba67f3,
+dfa455ca, 2c28451e, 01a79ed7, 916ac191, c98cbbdf, 5474dee2).
+- Step 6  5eba67f3 (bin f9802e2b, polite SHIPPING FORM: WOC=0,
+  per-iteration lane-set, IRQ_SERVICE=2, POLITE_ATTACH=1): BAD —
+  repeatable across multiple cycles. D3 lit/blinking, D4 dark, telemetry
+  parked in EDID preamble states (D:35/36) with cycling aux errors,
+  A:0000, K:00. This config graded 4/5-fast on the 138K.
+  ==> POLITE-ATTACH CONVICTED as the die-sensitive regression boundary:
+  eaffc583 (IRQ v1, no polite) = fast colorbars; 5eba67f3 (polite) = dead.
+
+MECHANISM EVIDENCE (retro-decoded from the HEAD-era f754114d reads on
+this board): V:0002 every row = ESI attach ack SUCCEEDS (AUX phy fine);
+U: climbs 0x1D -> 0x28 (=40 = EDID_DEFER_CAP exactly) -> 0x69 (bit6
+edid_giveup SET + defers past cap). The Anker DEFERS EDID TO THE CAP on
+every attach on this board, vs ~2 defers/block on the 138K bench. After
+give-up, training runs, CR never granted, teardown, re-attach, forever.
+The old ladder never touches EDID (skips straight to patient CR retry) —
+which is why every pre-polite step trains. Open question: EDID preamble
+as poison (give-up abandoning I2C-over-AUX mid-MOT sours the hub) vs
+symptom (hub not-ready the whole window; August-era ESP32 HPD timing on
+this board is a suspect).
+
+- Step 6b (queued): 5eba67f3 + EDID_DEFER_CAP=1 (one defer then clean
+  give-up; presence gate + ESI + pacing kept). Trains => EDID preamble
+  convicted specifically. Fails => presence/ESI timing implicated.
+
+- Step 6b  5eba67f3 + EDID_DEFER_CAP=1 (bin 88855d3f): telemetry flips
+  from A:0000 to A:0022/C:8000/D:15 — hub ENGAGES for the first time on
+  any polite build — but 5-min patience = stable stall, K:00 throughout.
+
+AD3 CAPTURE OF THE STEP-6b STALL (our60k_anker_attach.csv, 30 s, hub
+power-up caught at t=24.36 s; 6799 frames annotated):
+- The ladder runs a COMPLETE attach ceremony every ~25 ms, 225 times in
+  the window: presence read (hub answers 0x41 READY instantly), EDID rd
+  -> genuine hub DEFER -> cap-1 give-up, then the full config burst all
+  ACKed (DPCD_REV read 12 14 C2 81..., ESI 0x2003 rd / 0x2005=02 W1C,
+  SET_POWER=01, coding, BW=0A, lanes=2, TPS1 0x21, LANE_SET 06 06 06 06).
+- Then EXACTLY 1.952 ms after lane-set: ONE status-read exchange whose
+  reply is SHORT/GARBLED on the wire (parses as lone "ACK 07" / 1-byte /
+  59-edge no-frame across rounds; clock_test expects a 9-byte reply),
+  followed by 20.16 ms of silence (presence pacing) and ceremony restart.
+- ZERO reads of 00202-region beyond that single attempt, ZERO 00206
+  adjust reads, ZERO TPS2, zero NACKs, 783 EDID DEFERs, Y:00/L:00 (no
+  teardowns, no HPD flaps — this is the ladder's own error-restart).
+- 138K reference capture (our_board_bringup, pre-polite): ONE ceremony,
+  then 400x 00200-region polls + 389x 00206 + 392 lane-set rewrites +
+  3 pattern-set writes = a real training loop to lock.
+
+MECHANISM (wire-proven at the round level): the first status read after
+TPS1 gets a short/garbled reply; the reply fails the expected-length
+check; the ladder ERROR path restarts the ENTIRE polite ceremony
+(presence pacing + EDID + config, 25 ms) instead of retrying the read or
+restarting cheaply at training. The hub never receives sustained TPS1.
+Legacy ladder hit errors too but restarts AT TRAINING with TX up, so it
+retried CR "constantly" and eventually locked (the historical minutes-
+to-colorbars). The 138K never hits the path because its status replies
+come back clean. Open sub-question (analog, still die/board-sensitive):
+whether the short reply is the hub DEFER-ing/churning because die lane 3
+gives it nothing to lock (the one parse that looked like status data
+read lane0=CR+EQ+SYMLOCK, lane1=nothing), or our AUX RX clipping the
+reply only when TX lanes are running (RX-squelch TODO interaction) —
+config replies parse clean every round, so plain RX marginality is out.
+
+FIX DIRECTIONS (sim-first, in order):
+1. Status-read resilience in the CR/EQ loop: tolerate DEFER/short reply
+   with a paced retry budget instead of ceremony-restart-on-error.
+2. Cheap restart policy: CR-phase failures restart at clock_training
+   (TX stays up), not at presence/EDID; the full ceremony is reserved
+   for HPD/presence loss. (This alone restores legacy-grade persistence
+   while keeping every polite conformance win.)
+3. EDID session policy: on this board the hub defers EDID indefinitely
+   — one EDID attempt budget per HPD session, skip on ladder restarts
+   (cap=40 burning 26 ms x 8 blocks per ceremony was the original
+   never-signal killer; cap=1 proved causality).
+4. Separately: the analog question of die lane 3 signal quality vs the
+   hub churn (Ugreen/804 mV matrix once training persists).
+
+Suspects cleared by static/sim audit before step 5 flew:
+- SERDES/PHY wiring: transceiver bank, 60B IP dir, die pkg, CST, SDC all
+  byte-unchanged across the GOOD->BAD boundary; the only TX-path file
+  change (dp_transmitter.sv +54/-2) is parameter/debug threading, no
+  datapath logic.
+- Sidecar provenance (ed's 138-contamination question): 60B .csr is NOT
+  a 138 copy — lane-block histogram is die-correct (60B heavy on
+  0x8084xx/0x8085xx = die lanes 2+3; 138B heavy on 0x8083xx/0x8084xx =
+  lanes 1+2); 60B IP last touched by the WS4 1.1-emission restore
+  (39bfea7e, 08-18), pre-dating the anchor. The one real contamination
+  (shared replay ROM regenerated from the 138B csr at 6c4de392) is the
+  already-fixed miswire, and the bisect overlay controls it out.
+- Polite ladder logic with AFE off: tb_polite_attach_60b (POLITE=1,
+  IRQ_SERVICE=2, AFE_ADJUST=0 — a combination never previously
+  simulated or run on any die) PASSES all phases. If polite is the
+  culprit it is a hardware-timing interaction (e.g. the PHY-powered-down
+  preamble rhythm), not a logic bug.
+- The prior "symbol/bit-order layer" top-suspect note above is
+  SUPERSEDED by the bisect: steps 1-3 prove the current IP + bank +
+  ROM train fine with the old ladder.
+
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.

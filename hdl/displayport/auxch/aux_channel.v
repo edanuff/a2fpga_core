@@ -154,6 +154,24 @@ module aux_channel #(
     // (~330 us extra dwell per wait state). Default 0 = legacy.
     parameter POLITE_ATTACH = 0,
     parameter [5:0] EDID_DEFER_CAP = 6'd40,
+    // TRAINING RECOVERY (08-28, from the 60K bisect + AD3 capture of the
+    // step-6b stall): a garbled/short/lost reply to a TRAINING-phase read
+    // used to route to `error`/reset — a FULL ceremony restart (presence
+    // pacing + EDID + config, ~25 ms) that also POWER-CYCLES the TX
+    // lanes, so the next status read again lands ~2 ms into a fresh TX
+    // power-up transient and the attach loops forever (225 ceremonies,
+    // ZERO second status polls on the wire; the 20.16 ms round gap = the
+    // AUX reply timeout). The legacy ladder survived the same marginality
+    // only because its restart was cheap and its TX stayed up. This
+    // parameter (with POLITE_ATTACH) makes training-phase failures:
+    //   1) retry the SAME read after a ~650 us pace (train_wait), TX
+    //      flags HELD, from a per-pass budget (TRAIN_RETRY_CAP);
+    //   2) on budget exhaustion, restart at clock_training (TX stays
+    //      powered) instead of the full ceremony;
+    // the 4 s retry watchdog remains the full-ceremony backstop, and
+    // HPD loss still resets everything. Default 1 (inert when
+    // POLITE_ATTACH=0).
+    parameter TRAIN_RECOVER = 1,
     // WEDGE-SUSPECT DETECTOR (advisory ONLY — no autonomous action in
     // this build; the ESP32 auto-replug policy arms separately after
     // bench validation). Fires when, within one established session:
@@ -322,6 +340,12 @@ module aux_channel #(
     // dark class if its events land there).
     localparam [7:0] esi_clear2    = 8'h3B, esi_clear2_rt = 8'h3C;
     localparam [7:0] esi_eval_rt   = 8'h3D;  // decide: clear or back to established
+    // TRAIN_RECOVER: paced retry of a failed training-phase read. Unlike
+    // defer_wait this state HOLDS the TX flags of the pending state —
+    // dropping tx_powerup mid-CR is exactly the round-trip transient the
+    // recovery exists to avoid.
+    localparam [7:0] train_wait    = 8'h3E;
+    localparam [3:0] TRAIN_RETRY_CAP = 4'd8;
 
     // Checking the state of the link
     localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
@@ -403,8 +427,19 @@ module aux_channel #(
     // POLITE_ATTACH / ESI state (all inert at legacy defaults)
     reg [7:0]  sink_count_r     = 8'd0;   // presence-read count byte
     reg [7:0]  defer_pend_state = 8'd0;   // state to re-enter after defer_wait
-    reg [5:0]  defer_cnt        = 6'd0;   // DEFERs taken this attach
+    reg [5:0]  defer_cnt        = 6'd0;   // DEFERs taken this HPD session
     reg        edid_giveup      = 1'b0;   // defer budget exhausted: skip EDID
+    // EDID SESSION POLICY (08-28): EDID runs ONCE per HPD session — done
+    // or given-up, ladder restarts within the session skip it (the 60K
+    // capture showed the hub deferring EDID to the cap on EVERY ceremony,
+    // 783 DEFERs burned re-asking a question it had already answered).
+    // Both latches clear only on HPD loss (session boundary), not on
+    // ladder reset.
+    reg        edid_done        = 1'b0;   // EDID preamble completed this session
+    // TRAIN_RECOVER state (see parameter comment)
+    reg [7:0]  train_pend       = 8'd0;   // training state to retry after train_wait
+    reg [3:0]  train_retry_cnt  = 4'd0;   // retries taken this training pass
+    reg        train_st         = 1'b0;   // registered: state is in 0x14..0x2C
     reg        lane_set_sent    = 1'b0;   // a lane-set write went out this training
     reg [15:0] lane_set_last    = 16'd0;  // the value it carried
     reg [7:0]  esi_2005_r       = 8'd0;   // latched LINK_SERVICE_IRQ_VECTOR_ESI0
@@ -624,11 +659,13 @@ always @(posedge clk) begin
                                                     ? presence_eval : read_sink_count;
             presence_eval:      state_on_success <= (sink_count_r[5:0] == 6'd0)
                                                     ? presence_wait
-                                                    : (edid_giveup ? read_sink_count
+                                                    : ((edid_giveup || edid_done)
+                                                                   ? read_sink_count
                                                                    : edid_addr);
             presence_wait:      state_on_success <= check_presence;
             edid_addr:          state_on_success <= edid_block0;
             defer_wait:         state_on_success <= defer_pend_state;
+            train_wait:         state_on_success <= train_pend;
             esi_read:           state_on_success <= esi_clear;
             esi_clear:          state_on_success <= (esi_2003_r != 8'h00)
                                                     ? esi_clear2 : set_power_d0;
@@ -841,6 +878,14 @@ always @(posedge clk) begin
                          (next_state == esi_clear2);
         esi_rt_st     <= (next_state == esi_read_rt) || (next_state == esi_clear_rt) ||
                          (next_state == esi_clear2_rt);
+        // registered like the ESI decodes (combinational state-range
+        // compares in the error paths cost setup at the knife-edge)
+        train_st      <= (next_state >= clock_training) &&
+                         (next_state <= align_wait_after);
+        // EDID completed this session (giveup exits set edid_giveup in
+        // the same cycle; a redundant edid_done alongside it is harmless)
+        if (state == edid_block7 && next_state == read_sink_count)
+            edid_done <= 1'b1;
         if (next_state == esi_read_rt) begin
             esi_ack_owed    <= irq_service_due;
             irq_service_due <= 1'b0;
@@ -863,11 +908,13 @@ always @(posedge clk) begin
             lane_set_last <= train_set_byte;
         end
         if (next_state == reset || next_state == clock_training) begin
-            lane_set_sent <= 1'b0;
+            lane_set_sent   <= 1'b0;
+            train_retry_cnt <= 4'd0;   // fresh budget per training pass
         end
         if (next_state == reset) begin
-            defer_cnt       <= 6'd0;
-            edid_giveup     <= 1'b0;
+            // NOTE: defer_cnt / edid_giveup / edid_done deliberately NOT
+            // reset here — EDID policy is per HPD SESSION (cleared on HPD
+            // loss below), not per ladder ceremony.
             irq_service_due <= 1'b0;
             esi_off         <= 1'b0;
             esi_defer_cnt   <= 4'd0;
@@ -890,6 +937,7 @@ always @(posedge clk) begin
             presence_wait:        begin msg <= 8'h00; expected <= 8'h00; end
             edid_addr:            begin msg <= 8'h01; expected <= 8'h01; end
             defer_wait:           begin msg <= 8'h00; expected <= 8'h00; end
+            train_wait:           begin msg <= 8'h00; expected <= 8'h00; end
             esi_read:             begin msg <= 8'h1B; expected <= 8'h0E; end
             esi_clear:            begin msg <= 8'h1C; expected <= 8'h01; end
             esi_read_rt:          begin msg <= 8'h1B; expected <= 8'h0E; end
@@ -1011,6 +1059,11 @@ always @(posedge clk) begin
             check_link:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             check_wait:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             irq_clear:            begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            // TRAIN_RECOVER: hold the pending training state's TX flags
+            // through the paced retry — the whole point is no TX bounce
+            train_wait:           begin tx_powerup <= 1'b1;
+                                        tx_clock_train <= (train_pend <= clock_wait_after);
+                                        tx_align_train <= (train_pend >= align_training); end
             // runtime ESI service: the stream is live — hold the TX up
             esi_read_rt:          begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             esi_clear_rt:         begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
@@ -1055,7 +1108,7 @@ always @(posedge clk) begin
     // ~330 us each (blind_dwell[15]) so the CR poll loop runs at ~1 ms
     // instead of ~650 us.
     if(state == next_state && expected == 8'h00 && count_100us[14] == 1'b1 &&
-       state != presence_wait && state != defer_wait &&
+       state != presence_wait && state != defer_wait && state != train_wait &&
        (POLITE_ATTACH == 0 ||
         !(state == clock_wait || state == clock_wait_after) ||
         blind_dwell[15] == 1'b1)) begin
@@ -1069,6 +1122,10 @@ always @(posedge clk) begin
     // defer_wait: ~650 us before re-sending a DEFERred request (the hub
     // ACKs the Mac's EDID reads on the 3rd try at this pacing)
     if(state == next_state && state == defer_wait && blind_dwell[16] == 1'b1) begin
+        next_state <= state_on_success;
+    end
+    // train_wait: same ~650 us pace before retrying a failed training read
+    if(state == next_state && state == train_wait && blind_dwell[16] == 1'b1) begin
         next_state <= state_on_success;
     end
 
@@ -1117,6 +1174,16 @@ always @(posedge clk) begin
                 end else if (esi_rt_st) begin
                     esi_off    <= 1'b1;
                     next_state <= link_established;
+                end else if (POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 && train_st) begin
+                    // short/garbled training-read reply: paced retry with
+                    // TX held, cheap retrain on budget exhaustion
+                    if (train_retry_cnt != TRAIN_RETRY_CAP) begin
+                        train_retry_cnt <= train_retry_cnt + 4'd1;
+                        train_pend      <= state;
+                        next_state      <= train_wait;
+                    end else begin
+                        next_state      <= clock_training;
+                    end
                 end else begin
                     next_state <= error;
                     if (in_established_set) begin
@@ -1144,6 +1211,17 @@ always @(posedge clk) begin
                     end else if (esi_rt_st && aux_rx_data != 8'h20) begin
                         esi_off    <= 1'b1;
                         next_state <= link_established;
+                    end else if (POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 &&
+                                 train_st && aux_rx_data != 8'h20) begin
+                        // non-ACK header on a training read (a clean DEFER
+                        // falls through to the paced defer path below)
+                        if (train_retry_cnt != TRAIN_RETRY_CAP) begin
+                            train_retry_cnt <= train_retry_cnt + 4'd1;
+                            train_pend      <= state;
+                            next_state      <= train_wait;
+                        end else begin
+                            next_state      <= clock_training;
+                        end
                     end else begin
                         next_state <= error;
                         if (in_established_set) begin
@@ -1270,6 +1348,20 @@ always @(posedge clk) begin
         next_state <= esi_attach_st ? set_power_d0 : link_established;
         state      <= error;   // force the transition machinery
     end else
+    if (BLIND_SINK == 0 && channel_timeout == 1'b1 &&
+        POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 && train_st) begin
+        // training-read reply never arrived (the 60K capture's 20.16 ms
+        // round gap): paced retry with TX held instead of the full
+        // ceremony teardown; cheap retrain when the budget runs out
+        if (train_retry_cnt != TRAIN_RETRY_CAP) begin
+            train_retry_cnt <= train_retry_cnt + 4'd1;
+            train_pend      <= state;
+            next_state      <= train_wait;
+        end else begin
+            next_state      <= clock_training;
+        end
+        state      <= error;   // force the transition machinery
+    end else
     if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
                                   (state != reset      && state != link_established &&
                                    state != check_link && state != check_wait       &&
@@ -1317,6 +1409,16 @@ always @(posedge clk) begin
        hpd_present == 1'b0) begin
         next_state <= reset;
         state      <= error;
+    end
+    // HPD SESSION BOUNDARY: the per-session EDID policy re-arms on
+    // presence loss regardless of the teardown policy above (which
+    // production keeps OFF — sleeping-monitor flap storms). Flap-storm
+    // pulses are sub-2 ms and never drop hpd_present, so this only fires
+    // on a genuine unplug — a fresh hot-plug is a fresh sink.
+    if (hpd_present == 1'b0) begin
+        defer_cnt   <= 6'd0;
+        edid_giveup <= 1'b0;
+        edid_done   <= 1'b0;
     end
 
     //-----------------------------------------------

@@ -71,6 +71,7 @@ module channel_management #(
     parameter LATE_REPLY_DRAIN = 0, // 0 = legacy error behavior
     parameter POLITE_ATTACH = 0,   // Mac-parity attach pacing (aux_channel.v)
     parameter [5:0] EDID_DEFER_CAP = 6'd40,
+    parameter TRAIN_RECOVER = 1,
     parameter WEDGE_BIT = 30,
     parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000
 )(
@@ -285,6 +286,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN),
               .POLITE_ATTACH(POLITE_ATTACH),
               .EDID_DEFER_CAP(EDID_DEFER_CAP),
+              .TRAIN_RECOVER(TRAIN_RECOVER),
               .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),
