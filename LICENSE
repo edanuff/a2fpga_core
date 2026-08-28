@@ -27,8 +27,8 @@ Public License (full texts in the LICENSES/ directory):
     GPL-3.0-or-later
   - hdl/support/iir_filter.v (and board-local copies) — audio IIR
     filter, Sorgelig (MiSTer project), GPL-2.0-or-later
-  - boards/a2mega/hdl/twgs/65C816/ — 65C816 CPU core, conversion of
-    srg320's SNES_MiSTer core, GPL-3.0
+  - boards/a2mega/hdl/twgs/65C816/ — 65C816 CPU core by srg320
+    (SNES_MiSTer project), GPL-3.0
   - hdl/disk/hdd_rom.a65 — ProDOS HDD controller firmware, adapted from
     AppleWin, GPL-2.0-or-later
   - gcr_dsk.c in the BL616 and ESP32 firmware trees — 6-and-2 GCR
