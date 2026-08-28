@@ -603,6 +603,31 @@ sequences HDMI differently and avoids it. Downstream of DPCD, no
 vector raised, nothing serviceable source-side. Cosmetic; logged as a
 converter-x-monitor fingerprint, not a defect in our stack.
 
+### 60K CAMPAIGN (late session): two real defects fixed, one regression scoped
+1. **CSR-ROM miswire FOUND+FIXED** (bfb118ca): the shared include had
+   become 138B-flavored; 60B builds replayed 138B CSR into the 60K quad
+   (S:04 no-PLL). Now per-project modules; stale includes fail loudly.
+   Every 60K bitstream since the 138B CSR fork had this defect — the
+   condemned "bad" SOM deserves a retrial.
+2. **AFE-less drive gap FOUND+FIXED** (f754114d): both dies' CSR bakes
+   txlev 14 (~850 mV); the 138K's proven 804 mV comes from the runtime
+   AFE rewriting txlev 13 every training start — the AFE-less 60B never
+   got the cure. 804 now baked into the 60B ROM (808434/808534).
+3. **REMAINING: a die-sensitive TX-datapath regression** in shared code
+   between e81682ba and HEAD: old-vintage 60B build achieves CR (and
+   EVENTUALLY colorbars after minutes of EQ retries at ~850 mV — good
+   SOM PROVEN FUNCTIONAL); current builds never CR (A:0000 = hub sees
+   nothing) at 850 OR 804 mV. S: telemetry cannot discriminate
+   (lane_ready bits read 00 even on the working 138K). TOP SUSPECT:
+   symbol/bit-order layer — the 138B's regenerated SERDES IP may pack
+   raw-mode bits differently, and a shared serializer/8b10b change from
+   138B bring-up would garbage the 60B's symbols (PLL locked, hub
+   deaf). NEXT SESSION: focused diff of the encoder/serializer path,
+   else 4-5-step hardware bisect over e81682ba..HEAD (build+flash+cycle
+   per step). Note: e81682ba-vintage rebuild = scratch worktree recipe;
+   datetime.svh makes bit-identity impossible (sha differs, logically
+   identical).
+
 ## Still wanted
 
 - Pass B: CC1/CC2 (A5/B5) PD capture; needs a BMC decoder.
