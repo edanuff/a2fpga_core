@@ -5,7 +5,9 @@
 ;   acme hdd_rom.a65            (produces hdd_rom.bin, 256 bytes)
 ;
 ; Adapted from AppleWin's HDD controller firmware (firmware/HDD/hddrvr.a65,
-; GPL v2, Copyright (c) 2005 Robert Hoem, mods Tom Charlesworth), consistent
+; GPL v2 or later, Copyright (c) 2005 Robert Hoem, mods Tom Charlesworth).
+; As a derivative work this file is likewise GPL-2.0-or-later (see LICENSES/
+; at the repository root), and it is consistent
 ; with this repo's other MiSTer/AppleWin-derived disk modules. Changes for
 ; real-bus operation (the A2FPGA card cannot DMA into Apple II RAM and cannot
 ; halt the 6502):
