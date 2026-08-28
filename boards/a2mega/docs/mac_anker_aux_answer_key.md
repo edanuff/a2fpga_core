@@ -614,10 +614,15 @@ converter-x-monitor fingerprint, not a defect in our stack.
    AFE rewriting txlev 13 every training start — the AFE-less 60B never
    got the cure. 804 now baked into the 60B ROM (808434/808534).
 3. **REMAINING: a die-sensitive TX-datapath regression** in shared code
-   between e81682ba and HEAD: old-vintage 60B build achieves CR (and
-   EVENTUALLY colorbars after minutes of EQ retries at ~850 mV — good
-   SOM PROVEN FUNCTIONAL); current builds never CR (A:0000 = hub sees
-   nothing) at 850 OR 804 mV. S: telemetry cannot discriminate
+   between e81682ba and HEAD — now PROPERLY evidenced by a timed
+   patience test (ed's catch: the first no-CR verdict used an
+   observation window known to be too short for the polite ladder's
+   retry cadence): f754114d (804 mV) given 4.5+ minutes of continuous
+   30 s telemetry polls — ZERO CR, ZERO adjust requests across every
+   attempt, where the old vintage at the same age was passing CR
+   constantly and EQ-looping. Old-vintage 60B: CR + eventual colorbars
+   (minutes, ~850 mV) — good SOM PROVEN FUNCTIONAL; current builds:
+   hub never sees signal at 850 OR 804 mV. S: telemetry cannot discriminate
    (lane_ready bits read 00 even on the working 138K). TOP SUSPECT:
    symbol/bit-order layer — the 138B's regenerated SERDES IP may pack
    raw-mode bits differently, and a shared serializer/8b10b change from
