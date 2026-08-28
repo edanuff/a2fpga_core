@@ -257,8 +257,15 @@ function automatic [55:0] csr_replay_rom(input [9:0] i);
         10'd251: csr_replay_rom = {24'h808538, 32'h00000b00};
         10'd252: csr_replay_rom = {24'h808234, 32'h0000e000};
         10'd253: csr_replay_rom = {24'h808334, 32'h0000e000};
-        10'd254: csr_replay_rom = {24'h808434, 32'h0000e000};
-        10'd255: csr_replay_rom = {24'h808534, 32'h0000e000};
+        // HAND-EDIT (08-27, survives regen only if re-applied): txlev
+        // 14 (0xE000, ~850 mV) -> 13 (0xD000, 804 mV) on the 60B's
+        // ACTIVE TX lanes (die lanes 2+3). 804 mV is the 138K's
+        // hardware-proven production drive (the strict-converter
+        // overdrive verdict); the 60B has no runtime AFE to apply it,
+        // so it bakes in here. Old vintage at this level EQ-looped for
+        // minutes against the Anker before landing.
+        10'd254: csr_replay_rom = {24'h808434, 32'h0000d000};
+        10'd255: csr_replay_rom = {24'h808534, 32'h0000d000};
         10'd256: csr_replay_rom = {24'h808884, 32'h00000000};
         10'd257: csr_replay_rom = {24'h809000, 32'h00000011};
         10'd258: csr_replay_rom = {24'h809200, 32'h00000011};
