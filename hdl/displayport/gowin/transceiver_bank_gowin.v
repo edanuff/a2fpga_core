@@ -636,8 +636,6 @@ module transceiver_bank_gowin #(
     // (quasi-static, changes every ~0.7 s) is synchronized into the DRP
     // domain and that single address is re-read continuously. One result
     // register instead of a full dump RAM — negligible fabric footprint.
-    // CSR replay ROM: the generator-emitted config write sequence
-    `include "csr_replay_rom.svh"
 
     reg [4:0]  idx_meta = 5'd0, idx_sync = 5'd0;
     reg [31:0] res_data = 32'd0;
@@ -651,6 +649,18 @@ module transceiver_bank_gowin #(
     reg        req_m = 1'b0, req_s = 1'b0;
     reg        replay_done_r = 1'b0;
     reg [9:0]  replay_idx = 10'd0;
+    // CSR replay ROM: the generator-emitted config write sequence.
+    // PER-DIE MODULE (csr_replay_rom_lut_60b.v / _138b.v — the gprj
+    // lists one): a shared `include here silently served 138B CSR
+    // writes to the 60B build (08-27, S:04 no-PLL-lock on a good SOM).
+    wire [55:0] csr_rom_data;
+    wire [9:0]  csr_rom_len;
+    csr_replay_rom_lut u_csr_rom (
+        .idx  (replay_idx),
+        .data (csr_rom_data),
+        .len  (csr_rom_len)
+    );
+
     wire       replay_pend = req_s && !replay_done_r;
     assign replay_ack = replay_done_r;
 
@@ -684,7 +694,7 @@ module transceiver_bank_gowin #(
                         rd_tmo <= 16'd0;
                         if (replay_pend) begin
                             rd_state <= 3'd3;
-                            {drp_addr_r, drp_wrdata_r} <= csr_replay_rom(replay_idx);
+                            {drp_addr_r, drp_wrdata_r} <= csr_rom_data;
                         end else begin
                             rd_state <= 3'd1;
                             drp_addr_r <= dump_addr_rom(idx_sync);
@@ -711,7 +721,7 @@ module transceiver_bank_gowin #(
                 drp_wren_r <= 1'b1;
                 rd_tmo <= rd_tmo + 16'd1;
                 if (drp_ready_w || (&rd_tmo)) begin
-                    if (replay_idx == CSR_REPLAY_LEN - 1)
+                    if (replay_idx == csr_rom_len - 10'd1)
                         replay_done_r <= 1'b1;
                     else
                         replay_idx <= replay_idx + 10'd1;

@@ -37,6 +37,7 @@
         <File path="../../hdl/displayport/gowin/benz_encode.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/enc_8b10b.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/lane_encoder_8b10b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/csr_replay_rom_lut_138b.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/transceiver_bank_gowin.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/afe_adjust_seq.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/video/dp_video_timing.v" type="file.verilog" enable="1"/>
