@@ -1,0 +1,81 @@
+A2FPGA Multicard Core — Licensing
+=================================
+
+A2FPGA combines code written for this project with open-source cores from
+other authors. Its licensing is therefore layered. The license header in
+each file is authoritative for that file; this document explains how the
+pieces fit together.
+
+1. Code written for this project
+--------------------------------
+
+Files authored for A2FPGA that do not state a different license in their
+header are made available under the MIT License (full text below). These
+files may be reused in other projects under MIT terms on their own.
+
+2. Third-party code
+-------------------
+
+Files from other authors retain their original authors' licenses, as
+stated in their headers. Most are under permissive (MIT/BSD-style)
+licenses. The following components are licensed under the GNU General
+Public License (full texts in the LICENSES/ directory):
+
+  - hdl/support/via6522.vhd — VIA 6522 core, Gideon Zweijtzer
+    (1541ultimate project), GPL-3.0
+  - hdl/support/TMS5220.vhd — TMS5220 speech chip core, d18c7db,
+    GPL-3.0-or-later
+  - hdl/support/iir_filter.v (and board-local copies) — audio IIR
+    filter, Sorgelig (MiSTer project), GPL-2.0-or-later
+  - boards/a2mega/hdl/twgs/65C816/ — 65C816 CPU core by srg320
+    (SNES_MiSTer project), GPL-3.0
+  - hdl/disk/hdd_rom.a65 — ProDOS HDD controller firmware, adapted from
+    AppleWin, GPL-2.0-or-later
+  - gcr_dsk.c in the BL616 and ESP32 firmware trees — 6-and-2 GCR
+    codec ported from AppleWin, GPL-2.0-or-later
+
+3. Combined works
+-----------------
+
+Each board's complete logic design incorporates one or more of the GPL
+components above, so every A2FPGA bitstream — and any MCU firmware image
+built with the AppleWin-derived GCR codec — is a combined work that is
+conveyed, as a whole, under the GNU General Public License version 3
+(see LICENSES/GPL-3.0.txt). The corresponding source is this repository,
+including the build scripts needed to rebuild and reflash each board.
+
+The MIT license on A2FPGA-authored files is GPL-compatible: you may
+still take those individual files into other projects under MIT terms.
+If you build a design from this repository that includes any of the GPL
+components, your combined design is subject to the GPL.
+
+Board schematics and PCB design work created for this project are
+independent works and are not derived from the GPL components above.
+
+If you reuse any code from this project, check the header of each file
+you take to confirm that your intended use is covered.
+
+---------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) the A2FPGA contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
