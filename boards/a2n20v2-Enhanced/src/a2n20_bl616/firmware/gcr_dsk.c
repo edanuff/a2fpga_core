@@ -2,6 +2,12 @@
  * gcr_dsk.c — Apple II 6-and-2 GCR codec for DOS 3.3 order .dsk/.do images.
  * See gcr_dsk.h. Algorithm/tables/gap sizes ported from AppleWin
  * CImageBase::Code62 / Decode62 / NibblizeTrack (source/DiskImageHelper.cpp).
+ *
+ * AppleWin (https://github.com/AppleWin/AppleWin) is distributed under the
+ * GNU General Public License, version 2 or (at your option) any later
+ * version. As a derivative work, this file is likewise GPL-2.0-or-later,
+ * notwithstanding the MIT license of this project's original code; see
+ * LICENSES/ at the repository root for the license text.
  */
 
 #include "gcr_dsk.h"

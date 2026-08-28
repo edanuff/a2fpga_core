@@ -45,5 +45,10 @@ Author:   srg320 — https://github.com/srg320
 
 ## License
 
-GPL-3.0-or-later, inherited from SNES_MiSTer. See `LICENSE` in this
-directory for the full text.
+GPL-3.0, inherited from SNES_MiSTer. See `LICENSE` in this directory for
+the full text.
+
+SNES_MiSTer's repository carries the GPL-3.0 license text without an
+"or any later version" grant, so this conversion is labeled GPL-3.0 only
+rather than GPL-3.0-or-later; only the upstream author (srg320) could
+extend that.

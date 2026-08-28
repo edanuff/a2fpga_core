@@ -270,13 +270,23 @@ the emulation of which was the original impetus for this project.
 
 ## License(s)
 
-A2FPGA an open source hardware project and the A2FPGA Multicard Core gratefully leverages the work
-of other open source authors.  New code that was created specifically for this project
-is made available under the MIT License but many files may have different licenses in their headers 
-from the original authors.  All open source code from other authors that is reused
-in this project is believed to be used consistently with the licenses such code is provided
-under.  If reusing any code from this project, please be sure to check that your intended
-usage is covered by the stated licenses.
+A2FPGA is an open source hardware project, and the A2FPGA Multicard Core
+gratefully leverages the work of other open source authors. Licensing is
+layered — see [LICENSE](LICENSE) for the details:
+
+- Code written for this project is made available under the **MIT License**,
+  and those individual files may be reused elsewhere under MIT terms.
+- Code from other authors retains its original license, stated in each
+  file's header. Several cores (the VIA 6522, TMS5220, audio IIR filter,
+  the 65C816 CPU core, and the AppleWin-derived disk code) are licensed
+  under the **GNU General Public License** (see [LICENSES/](LICENSES/)).
+- Because every board's logic design incorporates GPL-licensed cores, each
+  complete bitstream (and the MCU firmware images that include the
+  AppleWin-derived GCR codec) is a combined work conveyed under the
+  **GPL v3**. This repository is the corresponding source.
+
+If reusing any code from this project, please check the header of each file
+you take to confirm that your intended usage is covered by its license.
 
 ## Contact
 
