@@ -972,6 +972,20 @@ the standing margin instrument, soak rows, and n>=5 on the 138K per
 combo under the POR fix (Ugreen 5/5 done).
 
 
+## Symbol-error counters LIVE (69d43a13/97442d1d, 08-29)
+
+Instrument: errcnt_read state reads DPCD 0x210-0x213 every periodic
+check; D6 line = "SE0:xxxx SE1:xxxx" raw (bit15 = valid); the read is
+failure-tolerant by construction (can never tear down the link;
+sim-proven incl. NACK'd-read phase). FIRST BASELINE, good 60K board at
+true 804/auto on the hub: SE0:8000 SE1:8000 = VALID + ZERO errors both
+lanes while locked/streaming. The margin question now has a number.
+Next: accumulation over a soak (counters reset at training per spec, so
+growth rate while established = the margin metric), per-hub baselines,
+138K twin (97442d1d), and the Guernok-recorded soak for blink/error
+correlation.
+
+
 Suspects cleared by static/sim audit before step 5 flew:
 - SERDES/PHY wiring: transceiver bank, 60B IP dir, die pkg, CST, SDC all
   byte-unchanged across the GOOD->BAD boundary; the only TX-path file
