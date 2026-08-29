@@ -747,6 +747,48 @@ FIX DIRECTIONS (sim-first, in order):
 4. Separately: the analog question of die lane 3 signal quality vs the
    hub churn (Ugreen/804 mV matrix once training persists).
 
+FIX SHIPPED + FIRST HARDWARE PASS: commit 212f810c (TRAIN_RECOVER +
+EDID session policy, sim-proven incl. NEW tb_train_recover modeling the
+capture's garbled/silent status replies), 60B build f80cf7f3 (timing 0/0,
+clk100 slack +0.072). First Anker cycle on the 60K board: COLORBARS
+FIRST TRY — D:2E, K:03 streaming, C:0177 (CR+EQ+symlock BOTH lanes),
+HLVC:1111, W:0, V:0002, U:00 (no EDID giveup/defers burned), G:F3/Y:11.
+Same 804 mV drive that was A:0000-dead on f754114d. VALIDATED n=7 on Anker x Sceptre: 7/7 colorbars — 4 clean-fast, 1
+slow-lock (a few seconds of in-training retries, T:0003, no drop), 2
+blink-then-stable (one post-lock dropout, immediate retrain, T:0004,
+J unchanged = not ESI-serviced, W:0 throughout). Zero darks, zero
+wedges, zero interventions. The mixed presentation = fixed-drive EQ
+marginality with WORKING recovery (the accepted 138K Ugreen-class
+profile). NOTE: all 7 cycles ran WITH the AD3 breakout header inline on AUX —
+the validation includes the probe stub's loading (production path
+should be equal or better), and the rig stays available to capture a
+blink incident on the wire. UGREEN x Sceptre n=5: 5/5 colorbars (3 clean-fast, 2 blink-recover) —
+the strict converter that was 0-for-everything on this die at 850/900
+all August. 60K matrix total: 12/12 screen success (f80cf7f3).
+138K NO-REGRESSION ROW (82ca4062 = fix + CSR-module conversion +
+cm_life multicycle, timing 0/0): cycle 1 = the KNOWN first-attach-after-
+flash wedge, wedge_watch auto-replug healed it at its 30 s gate
+(post-recovery signature textbook: G:F0, C:0177, M:12/M1:2 AFE active);
+then 3 fast + 1 blink-recover — matches the pre-fix validated profile
+(August row: 4 fast / 1 six-second recovery on the same hub+monitor).
+Fix cleared on BOTH dies. FLASH-PATH LESSON: openFPGALoader passthrough
+'block protection is set' + 'flash chip unknown' = PHANTOM from a failed
+JEDEC ID read — the rescue core read J:EF4017 (W25Q64) with status
+1:00/2:00 (no protection). Recovery that worked: flash_rescue built for
+the 138 die (device-switch in flash_rescue.gprj; 138B rescue .fs now on
+the shelf as impl/pnr/flash_rescue_138b_built.fs), SRAM-load, E:D,
+replug, flash clean. CONDEMNED-SOM RETRIAL: FULL ACQUITTAL. The 'bad' 60K board on
+f80cf7f3 (byte-identical to the good board's 12/12 build; its own
+August-era ESP32 kept deliberately as the matched control): Anker x
+Sceptre n=5 — 5/5 FAST colorbars, zero blinks, the cleanest row of the
+night. Its flash path also behaved first-try. Every historical verdict
+against this SOM was rendered on defective gateware (the 138B-flavored
+shared ROM and/or the pre-TRAIN_RECOVER ladder). BOTH 60K SOMs are
+good. Remaining: 138K rebuild ladder DONE (82ca4062 cleared)
++ CSR-module conversion, condemned-SOM retrial; analog follow-ups on
+the books: drive A/B on this die, 60B AFE lane bases.
+
+
 Suspects cleared by static/sim audit before step 5 flew:
 - SERDES/PHY wiring: transceiver bank, 60B IP dir, die pkg, CST, SDC all
   byte-unchanged across the GOOD->BAD boundary; the only TX-path file
