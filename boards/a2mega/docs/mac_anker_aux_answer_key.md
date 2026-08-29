@@ -789,6 +789,41 @@ good. Remaining: 138K rebuild ladder DONE (82ca4062 cleared)
 the books: drive A/B on this die, 60B AFE lane bases.
 
 
+## 60B runtime AFE (2a16481c) + the blink class RESOLVED (08-28 late)
+
+AFE-enabled 60B (commit 48326346, bin 2a16481c, timing 0/0 first roll)
+on the ACQUITTED board, Anker x Sceptre: locks fast every cycle with
+M:12/M1:2 (VS2+PE1 applied — identical signature to the 138K), N:020
+adjust events; first closed-loop adjust in a 60K die's history. Row:
+5-6 clean + 4 blinks in ~10.
+
+BLINK CLASS = DOWNSTREAM, wire-proven + instrumented:
+- AD3 capture of a blink cycle (afe_blink_capture.csv): attach at 25.9s
+  is textbook — the hub even SERVES the full Sceptre F22 EDID to this
+  board now — TPS1 -> ADJUST 22 00 answered -> TPS2 -> pattern clear in
+  ~70 ms; then NOTHING but healthy 1 Hz checks (0x202=0x77) through the
+  entire blink: no retrain, no teardown, no second TPS1. One
+  off-cadence IRQ-triggered check at t=34.66s (hub pinged, status
+  healthy, serviced, link held) marks the moment.
+- Instrumented blink (T-watcher): zero teardown-counter movement
+  through a screen blink; link locked and streaming throughout.
+=> the blink is the hub's HDMI side / monitor re-syncing, not a DP
+event. Same class exists on the 138K at similar low rate. NOT a
+gateware item; bench factors (HDMI cable / Sceptre input re-sync)
+if it ever needs chasing.
+
+Telemetry decode correction: T: is NOT an attach counter — it is four
+packed teardown-REASON nibbles {first, sticky, gate, timeout} since
+FPGA boot. Also observed: this board rides through short hub power
+cycles without an FPGA reboot (counters persist), and with hpd-reset
+OFF the ladder re-establishes across hub cycles with ZERO counted
+teardowns. The AFE-clean attach baseline capture is afe_clean_attach.csv.
+
+Remaining for the AFE build: Ugreen row (the strict-converter payoff
+test), good-board AFE row, then AFE-60B becomes the 60K production
+candidate.
+
+
 Suspects cleared by static/sim audit before step 5 flew:
 - SERDES/PHY wiring: transceiver bank, 60B IP dir, die pkg, CST, SDC all
   byte-unchanged across the GOOD->BAD boundary; the only TX-path file
