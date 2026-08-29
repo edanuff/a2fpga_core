@@ -775,7 +775,11 @@ module dp_transmitter #(
     assign debug_wrusewd = 10'd0;
     assign afe_drp_clk = clk100; assign afe_drp_gnt = afe_drp_req; assign afe_drp_ready = 1'b1;
 `elsif DP_VENDOR_GOWIN
-    transceiver_bank_gowin #(.TX_PROBE(TX_PROBE)) i_transceiver_bank(
+    transceiver_bank_gowin #(.TX_PROBE(TX_PROBE),
+                             // dump idx 24-29 read the die's own AFE
+                             // registers, logical lane order
+                             .AFE_DUMP_BASE0(AFE_LANE_BASE0),
+                             .AFE_DUMP_BASE1(AFE_LANE_BASE1)) i_transceiver_bank(
         .mgmt_clk        (clk100),
         .powerup_channel (bank_powerup),
         .preemp_0p0      (preemp_0p0),
