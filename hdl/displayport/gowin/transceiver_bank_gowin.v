@@ -281,11 +281,35 @@ module transceiver_bank_gowin #(
     wire [23:0] drp_addr_mux   = afe_gnt_r ? afe_drp_addr   : drp_addr_r;
     wire [31:0] drp_wrdata_mux = afe_gnt_r ? afe_drp_wrdata : drp_wrdata_r;
 
-    // por_n: release after power-up request (refclk must be stable; the
-    // board's clock generator is programmed before the FPGA runs)
-    reg por_n = 1'b0;
-    always @(posedge mgmt_clk)
-        por_n <= (powerup_eff != 2'b00);
+    // por_n (08-28 review fix, mandatory for the Serdes 1.2 emission):
+    // 1.2 connects fabric POR (por_toggle_by_fabric=true — under 1.1 this
+    // input was never wired, so the old behavior was inert). Two fixes:
+    //   1. QUALIFIED RELEASE: deassert only after the first power-up
+    //      request has stood for ~1.3 ms (2^17 mgmt_clk) — a refclk/QPLL
+    //      stability guard for hot-replug/backfeed edges (the board's
+    //      clock generator runs before the FPGA, but "programmed before
+    //      the FPGA runs" is not a per-attach guarantee).
+    //   2. ONE-WAY LATCH: never re-assert on powerup_eff drops. POR is
+    //      power-ON reset; with 1.2 it is a REAL quad POR, and the old
+    //      por_n <= (powerup_eff != 0) tracking would have POR'd the
+    //      quad (config-time CSR state included) on every TX power gap —
+    //      a candidate mechanism for the WS4 1.2-emission degradation.
+    //      Lane power gating is handled by pd/lane resets, not POR.
+    // Release is a BOOT timer, not a powerup_eff follower: refclk has
+    // been stable for the whole (~100 ms) bitstream load by the time
+    // fabric runs, and gating on the ladder's power request would hold
+    // the quad (and the cm_life DRP domain) dead until first attach,
+    // killing boot-time CSR readback. ~2.6 ms after fabric start,
+    // released once, for good.
+    reg        por_n      = 1'b0;
+    reg [18:0] por_settle = 19'd0;
+    always @(posedge mgmt_clk) begin
+        if (!por_n) begin
+            por_settle <= por_settle + 19'd1;
+            if (por_settle[18])
+                por_n <= 1'b1;                  // released for good
+        end
+    end
 
 `ifdef DP_SERDES_LANES_4
     // ------------------------------------------------------------------
