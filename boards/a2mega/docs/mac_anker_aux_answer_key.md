@@ -932,9 +932,17 @@ this baseline — consistent with its mechanism having been the
 por_n-follows-powerup bug (fixed: one-way boot-settle release), which
 under live 1.2 POR would have quad-POR'd on every TX power gap.
 
-Caveats: n=5; pending to confirm: Ugreen row at true 804/auto, larger
-Anker n, good-board parity flash, 138B readback build (its own live
-verification), symbol-error counters for margin measurement.
+UGREEN ROW at true baseline: 5/5 CLEAN, zero blinks (the strict
+converter, historically the overdrive victim). COMBINED: 10/10
+zero-blink across both hubs vs 40-60% blink at the hidden 900/manual
+config on the same bench same day. OVERDRIVE HYPOTHESIS CONFIRMED as
+the blink-rate mechanism. New benign observation at this baseline:
+~1s of white screen before colorbars on Ugreen attach (hub rendering
+post-training idle before video start; no dropout — cosmetic, visible
+now that blinks are gone). Remaining for sign-off: good-board parity
+flash + row, 138B readback build (its own silicon verification),
+symbol-error counters (0x210-0x213) as the standing margin instrument,
+larger-n soak. 806edae9 = the new 60K production candidate.
 
 
 Suspects cleared by static/sim audit before step 5 flew:
