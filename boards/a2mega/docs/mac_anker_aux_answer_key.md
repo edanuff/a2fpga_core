@@ -948,6 +948,21 @@ counters (0x210-0x213) as the standing margin instrument, larger-n
 soak. 806edae9 = the 60K production candidate.
 
 
+## 138K under the POR fix (e7d6362b): Ugreen 5/5 ZERO BLINKS
+
+The 138K's historical Ugreen x Sceptre blink rate was ~17% (3-in-18,
+accepted as shipping class). Under the one-way POR fix: 0-in-5. The
+138K has run the 1.2 emission (fabric POR live) since its first
+emission — the por_n-follows-powerup bug quad-POR'd it on every TX
+power gap all campaign. Working conclusion: the residual 138K blink
+class may have been OURS all along (POR-induced), not hub personality;
+the fleet may be zero-blink under the fix. Readback on this die: active
+lane ln2/ML1 = E000/0B00/0000 (die's own 804/auto confirmed); first
+readback build's dump-base threading missed dp_transmitter (ran 60B
+defaults — read ln2+inert ln3, never ln1/ML0); fixed build 9de12e16
+(0/0) flashing next for the complete lane pair.
+
+
 Suspects cleared by static/sim audit before step 5 flew:
 - SERDES/PHY wiring: transceiver bank, 60B IP dir, die pkg, CST, SDC all
   byte-unchanged across the GOOD->BAD boundary; the only TX-path file
