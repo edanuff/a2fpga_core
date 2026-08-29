@@ -846,12 +846,25 @@ BLINK-RATE QUESTION CLOSED (discriminators run to ground):
   Anker x Sceptre n=5 = 3 clean / 2 blink — rate unchanged.
 - POOLED Anker x Sceptre rates: 60K boards ~23% (all rows tonight)
   vs 138K ~20%. NO die-level anomaly; the 3/5 stretch was small-n.
-VERDICT: the blink is the hub's downstream HDMI re-sync personality
-(~1-in-5 on Anker x Sceptre, ~always on Fangor/Ugreen combos), proven
-DP-uninvolved, self-recovering, uniform across dies/boards/firmware.
-Characterized shipping behavior; any further chase targets the hub's
-HDMI side, not our stack. Good-board AFE row remains a formality;
-2a16481c stands as the 60K production candidate.
+VERDICT (CORRECTED after ed's head-to-head control): the blink CLASS
+is proven downstream (DP link locked throughout — capture + counters),
+but the RATE is genuinely ELEVATED on the 60K: honest pooling gives
+Anker x Sceptre ~28% (60K) vs ~10-20% (138K), Ugreen x Sceptre ~50%
+vs ~17%, and the decisive same-bench-same-night control: 138K swapped
+back in = 5/5 fast ZERO blinks, minutes after the 60K blinked ~40%.
+An earlier 'rates match / no anomaly' claim in this log was WRONG
+(over-pooled small n) — retracted. Working hypothesis: the hub's
+HDMI-side re-sync is triggered by marginal DP-RX moments too brief to
+drop DPCD lock; the 60K die's weaker eye crosses that threshold more
+often (the campaign's recurring analog theme). NEXT-SESSION QUEUE:
+1. Symbol-error-counter instrumentation: poll DPCD 0x210-0x215 in
+   check_link telemetry — measure link quality, correlate with blinks,
+   referee all drive experiments.
+2. 900 mV (txlev 15) Anker A/B on the 60K ('B1/60K runs 900 — retest'
+   is a standing memory item; current builds cap at 804-class).
+3. Consider raising the 60K AFE VS clamp once counters can judge.
+2a16481c remains the 60K functional baseline; production sign-off
+waits on the blink-rate work.
 
 
 Suspects cleared by static/sim audit before step 5 flew:
