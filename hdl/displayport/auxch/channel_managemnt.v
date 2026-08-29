@@ -72,6 +72,7 @@ module channel_management #(
     parameter POLITE_ATTACH = 0,   // Mac-parity attach pacing (aux_channel.v)
     parameter [5:0] EDID_DEFER_CAP = 6'd40,
     parameter TRAIN_RECOVER = 1,
+    parameter ERRCNT_READ = 0,
     parameter WEDGE_BIT = 30,
     parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000
 )(
@@ -95,6 +96,8 @@ module channel_management #(
         output [15:0] debug_esi,     // sticky OR {0x2003, 0x2005} vector reads
         output [6:0]  debug_defer,   // {edid_giveup, defer_cnt}
         output        wedge_suspect, // advisory quiet-frozen detector
+        output [15:0] errcnt0,       // SYMBOL_ERROR_COUNT lane0 (raw, bit15=valid)
+        output [15:0] errcnt1,       // SYMBOL_ERROR_COUNT lane1
         output [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
         // ATOMIC FIRST-FAILURE SNAPSHOT (second-opinion instrumentation,
         // 08-24): latched in the same clock as the FIRST failing check_wait
@@ -287,6 +290,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .POLITE_ATTACH(POLITE_ATTACH),
               .EDID_DEFER_CAP(EDID_DEFER_CAP),
               .TRAIN_RECOVER(TRAIN_RECOVER),
+              .ERRCNT_READ(ERRCNT_READ),
               .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),
@@ -298,6 +302,8 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
         .debug_esi       (debug_esi),
         .debug_defer     (debug_defer),
         .wedge_suspect_o (wedge_suspect),
+        .errcnt0_o       (errcnt0),
+        .errcnt1_o       (errcnt1),
         .debug_err_detail(debug_err_detail),
         .gate_fail_evt   (gate_fail_evt_w),
         .status_seq      (status_seq_w),

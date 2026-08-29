@@ -172,6 +172,12 @@ module aux_channel #(
     // HPD loss still resets everything. Default 1 (inert when
     // POLITE_ATTACH=0).
     parameter TRAIN_RECOVER = 1,
+    // SYMBOL-ERROR COUNTERS (08-29, review item): read DPCD 0x210-0x213
+    // on every periodic link check and latch per-lane raw 16-bit values
+    // (bit15 = validity, preserved). Failures of this instrumentation
+    // read NEVER tear down the link — every error path skips to
+    // check_wait. Default 0 = legacy byte-identical.
+    parameter ERRCNT_READ = 0,
     // WEDGE-SUSPECT DETECTOR (advisory ONLY — no autonomous action in
     // this build; the ESP32 auto-replug policy arms separately after
     // bench validation). Fires when, within one established session:
@@ -244,6 +250,8 @@ module aux_channel #(
         output [15:0] debug_esi,
         output [6:0]  debug_defer,
         output        wedge_suspect_o,  // advisory wedge-suspect flag
+        output [15:0] errcnt0_o,  // SYMBOL_ERROR_COUNT lane0 (raw, bit15=valid)
+        output [15:0] errcnt1_o,  // SYMBOL_ERROR_COUNT lane1
         // CENTRALIZED first-teardown detail latch (latched at the first
         // transition to `error` from the established set since config):
         // {reason[3:0], from_state[7:0], expected[7:0], rx_byte_count[7:0]}
@@ -345,6 +353,7 @@ module aux_channel #(
     // dropping tx_powerup mid-CR is exactly the round-trip transient the
     // recovery exists to avoid.
     localparam [7:0] train_wait    = 8'h3E;
+    localparam [7:0] errcnt_read   = 8'h3F;  // 0x210-0x213 read (in-established)
     localparam [3:0] TRAIN_RETRY_CAP = 4'd8;
 
     // Checking the state of the link
@@ -440,6 +449,9 @@ module aux_channel #(
     reg [7:0]  train_pend       = 8'd0;   // training state to retry after train_wait
     reg [3:0]  train_retry_cnt  = 4'd0;   // retries taken this training pass
     reg        train_st         = 1'b0;   // registered: state is in 0x14..0x2C
+    reg        errcnt_st        = 1'b0;   // registered: state == errcnt_read
+    reg [15:0] err0_r           = 16'd0;  // SYMBOL_ERROR_COUNT lane0 {0x211,0x210}
+    reg [15:0] err1_r           = 16'd0;  // SYMBOL_ERROR_COUNT lane1 {0x213,0x212}
     reg        lane_set_sent    = 1'b0;   // a lane-set write went out this training
     reg [15:0] lane_set_last    = 16'd0;  // the value it carried
     reg [7:0]  esi_2005_r       = 8'd0;   // latched LINK_SERVICE_IRQ_VECTOR_ESI0
@@ -474,6 +486,7 @@ module aux_channel #(
     reg        inest_d          = 1'b0;
     wire in_established_set = (state == link_established) ||
                               (state == check_link) || (state == check_wait) ||
+                              (state == errcnt_read) ||
                               (state == irq_clear) ||
                               (state == esi_read_rt) || (state == esi_clear_rt) ||
                               (state == esi_clear2_rt) || (state == esi_eval_rt);
@@ -494,6 +507,8 @@ module aux_channel #(
     assign debug_esi   = {dbg_esi2003, dbg_esi2005};
     assign debug_defer = {edid_giveup, defer_cnt};
     assign wedge_suspect_o = wedge_suspect;
+    assign errcnt0_o = err0_r;
+    assign errcnt1_o = err1_r;
     assign debug_sink = dbg_sink_status;
     // DPCD 0x205 SINK_STATUS (byte index 5 of the 0x200-0x207 status
     // read): bit0/1 = RECEIVE_PORT_0/1 "sink is receiving a valid main
@@ -790,7 +805,8 @@ always @(posedge clk) begin
                                 end                        
             switch_to_normal:   state_on_success <= link_established;  
             link_established:   state_on_success <= link_established;
-            check_link:         state_on_success <= check_wait;
+            check_link:         state_on_success <= (ERRCNT_READ != 0) ? errcnt_read : check_wait;
+            errcnt_read:        state_on_success <= check_wait;
             irq_clear:          state_on_success <= link_established;
             check_wait:         begin
                                 dbg_gate_locks <= {clock_locked_i, equ_locked_i, symbol_locked_i, align_locked_i};
@@ -882,6 +898,7 @@ always @(posedge clk) begin
         // compares in the error paths cost setup at the knife-edge)
         train_st      <= (next_state >= clock_training) &&
                          (next_state <= align_wait_after);
+        errcnt_st     <= (next_state == errcnt_read);
         // EDID completed this session (giveup exits set edid_giveup in
         // the same cycle; a redundant edid_done alongside it is harmless)
         if (state == edid_block7 && next_state == read_sink_count)
@@ -1018,6 +1035,7 @@ always @(posedge clk) begin
             link_established:     begin msg <= 8'h00; expected <= 8'h00; reset_addr_on_change <= 1'b1; end
             check_link:           begin msg <= 8'h0D; expected <= 8'h09; status_de_active <= 1'b1;  end
             check_wait:           begin msg <= 8'h00; expected <= 8'h00; end
+            errcnt_read:          begin msg <= 8'h1E; expected <= 8'h05; end
             // write the latched vector back to 0x201 (ACK reply = 1 byte)
             irq_clear:            begin msg <= 8'h1A; expected <= 8'h01; end
             error:                begin msg <= 8'h00; end
@@ -1063,6 +1081,7 @@ always @(posedge clk) begin
             link_established:     begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             check_link:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             check_wait:           begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
+            errcnt_read:          begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             irq_clear:            begin tx_powerup <= 1'b1; tx_link_established <= 1'b1; end
             // TRAIN_RECOVER: hold the pending training state's TX flags
             // through the paced retry — the whole point is no TX bounce
@@ -1179,6 +1198,9 @@ always @(posedge clk) begin
                 end else if (esi_rt_st) begin
                     esi_off    <= 1'b1;
                     next_state <= link_established;
+                end else if (errcnt_st) begin
+                    // instrumentation read failed: never tear down for it
+                    next_state <= check_wait;
                 end else if (POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 && train_st) begin
                     // short/garbled training-read reply: paced retry with
                     // TX held, cheap retrain on budget exhaustion (the
@@ -1217,6 +1239,8 @@ always @(posedge clk) begin
                     end else if (esi_rt_st && aux_rx_data != 8'h20) begin
                         esi_off    <= 1'b1;
                         next_state <= link_established;
+                    end else if (errcnt_st && aux_rx_data != 8'h20) begin
+                        next_state <= check_wait;   // instrumentation: skip
                     end else if (POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 &&
                                  train_st && aux_rx_data != 8'h20) begin
                         // non-ACK header on a training read (a clean DEFER
@@ -1249,7 +1273,11 @@ always @(posedge clk) begin
                 // transactions that aeert "AUX DEFER"
                 //--------------------------------------------
                 if(aux_rx_data == 8'h20) begin
-                    if ((esi_attach_st || esi_rt_st) && IRQ_SERVICE == 2) begin
+                    if (errcnt_st) begin
+                        // deferred instrumentation read: skip (defer_wait
+                        // would drop tx_link_established mid-stream)
+                        next_state <= check_wait;
+                    end else if ((esi_attach_st || esi_rt_st) && IRQ_SERVICE == 2) begin
                         // ESI defer: paced retry from a small budget; the
                         // rt states are watchdog-excluded, so WITHOUT the
                         // budget a forever-deferring hub would spin here
@@ -1322,6 +1350,15 @@ always @(posedge clk) begin
                     esi_2005_r  <= aux_rx_data;
                     dbg_esi2005 <= dbg_esi2005 | aux_rx_data;
                 end
+                // SYMBOL_ERROR_COUNT: bytes 1-4 = 0x210..0x213
+                if(state == errcnt_read && rx_byte_count == 8'h01)
+                    err0_r[7:0]  <= aux_rx_data;
+                if(state == errcnt_read && rx_byte_count == 8'h02)
+                    err0_r[15:8] <= aux_rx_data;
+                if(state == errcnt_read && rx_byte_count == 8'h03)
+                    err1_r[7:0]  <= aux_rx_data;
+                if(state == errcnt_read && rx_byte_count == 8'h04)
+                    err1_r[15:8] <= aux_rx_data;
                         
                 if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
                     next_state <= state_on_success;
@@ -1353,6 +1390,10 @@ always @(posedge clk) begin
         next_state <= esi_attach_st ? set_power_d0 : link_established;
         state      <= error;   // force the transition machinery
     end else
+    if (BLIND_SINK == 0 && channel_timeout == 1'b1 && errcnt_st) begin
+        next_state <= check_wait;   // instrumentation timeout: skip
+        state      <= error;        // force the transition machinery
+    end else
     if (BLIND_SINK == 0 && channel_timeout == 1'b1 &&
         POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 && train_st) begin
         // training-read reply never arrived (the 60K capture's 20.16 ms
@@ -1369,7 +1410,7 @@ always @(posedge clk) begin
     if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
                                   (state != reset      && state != link_established &&
                                    state != check_link && state != check_wait       &&
-                                   state != irq_clear  &&
+                                   state != errcnt_read && state != irq_clear  &&
                                    state != esi_read_rt && state != esi_clear_rt &&
                                    state != esi_clear2_rt && state != esi_eval_rt &&
                                    retry_now == 1'b1)) begin

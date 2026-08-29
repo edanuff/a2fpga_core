@@ -106,6 +106,7 @@ module dp_transmitter #(
     parameter bit    POLITE_ATTACH = 0,
     parameter [5:0]  EDID_DEFER_CAP = 6'd40,
     parameter        TRAIN_RECOVER = 1,
+    parameter        ERRCNT_READ = 0,
     parameter        WEDGE_BIT = 30,
     parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
@@ -159,6 +160,8 @@ module dp_transmitter #(
     output logic [15:0] debug_esi,      // sticky OR {0x2003, 0x2005} vector reads
     output logic [6:0]  debug_defer,    // {edid_giveup, defer_cnt}
     output logic        wedge_suspect,  // advisory quiet-frozen detector
+    output logic [15:0] debug_errcnt0,  // SYMBOL_ERROR_COUNT lane0 (raw, bit15=valid)
+    output logic [15:0] debug_errcnt1,  // SYMBOL_ERROR_COUNT lane1
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
@@ -609,6 +612,7 @@ module dp_transmitter #(
                          .POLITE_ATTACH(POLITE_ATTACH),
                          .EDID_DEFER_CAP(EDID_DEFER_CAP),
                          .TRAIN_RECOVER(TRAIN_RECOVER),
+                         .ERRCNT_READ(ERRCNT_READ),
                          .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
@@ -626,6 +630,8 @@ module dp_transmitter #(
         .debug_esi            (debug_esi),
         .debug_defer          (debug_defer),
         .wedge_suspect        (wedge_suspect),
+        .errcnt0              (debug_errcnt0),
+        .errcnt1              (debug_errcnt1),
         .debug_err_detail     (debug_err_detail),
         .debug_snapshot       (debug_snapshot),
         .debug_caps           (debug_caps),

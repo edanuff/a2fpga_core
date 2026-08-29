@@ -80,6 +80,7 @@ module tb_polite_attach;
         .BLIND_SINK     (0),
         .IRQ_SERVICE    (2),
         .POLITE_ATTACH  (1),
+        .ERRCNT_READ    (1),
         .WEDGE_BIT      (19),
         .WEDGE_PRELOAD  (32'h0002_0000), // 2^19-2^17 clks = ~3.9 ms sim fire
         .AFE_ADJUST     (1)
@@ -185,7 +186,10 @@ module tb_polite_attach;
     reg [7:0] m_esi_2005 = 8'h00;      // LINK_SERVICE_IRQ_VECTOR_ESI0
     reg [7:0] m_esi_2003 = 8'h00;      // DEVICE_SERVICE_IRQ_VECTOR_ESI0
     reg       cr_armed   = 1'b0;
-    reg       esi_nack_mode = 1'b0;      // sink NACKs ESI reads (failure-tolerance test)       // hub ready to grant CR — but only
+    reg       esi_nack_mode = 1'b0;
+    reg       errcnt_nack_mode = 1'b0;   // sink NACKs 0x210 reads
+    reg [7:0] r210 = 8'h00, r211 = 8'h80, r212 = 8'h00, r213 = 8'h80;
+    integer   errcnt_reads = 0;      // sink NACKs ESI reads (failure-tolerance test)       // hub ready to grant CR — but only
                                        // ON a lane-set write (IT6563
                                        // write-cued evaluation, hw-proven)
 
@@ -200,6 +204,10 @@ module tb_polite_attach;
             20'h00204: dpcd_read = r204;
             20'h00205: dpcd_read = r205;
             20'h00206: dpcd_read = r206;
+            20'h00210: dpcd_read = r210;
+            20'h00211: dpcd_read = r211;
+            20'h00212: dpcd_read = r212;
+            20'h00213: dpcd_read = r213;
             20'h02005: dpcd_read = m_esi_2005;
             default:   dpcd_read = 8'h00;
         endcase
@@ -341,7 +349,20 @@ module tb_polite_attach;
                     if (req_addr == 20'h00200 && dlen == 8 &&
                         tps1_seen && !tps2_seen)
                         cr_status_polls = cr_status_polls + 1;
-                    if (req_addr == 20'h02003 && esi_nack_mode) begin
+                    if (req_addr == 20'h00210 && dlen == 4) begin
+                        errcnt_reads = errcnt_reads + 1;
+                        if (errcnt_nack_mode) begin
+                            rbuf[0] = 8'h10;        // AUX_NACK
+                            rlen = 1;
+                            send_reply;
+                        end else begin
+                            rbuf[0] = 8'h00;
+                            for (j = 0; j < dlen; j = j + 1)
+                                rbuf[j+1] = dpcd_read(req_addr + j);
+                            rlen = dlen + 1;
+                            send_reply;
+                        end
+                    end else if (req_addr == 20'h02003 && esi_nack_mode) begin
                         esi_reads = esi_reads + 1;
                         rbuf[0] = 8'h10;            // AUX_NACK
                         rlen = 1;
@@ -673,6 +694,51 @@ module tb_polite_attach;
         end else
             $display("  ok: one NACK self-disables ESI — no retry hammer, link never torn down");
         esi_nack_mode = 1'b0;
+
+        // 8b. SYMBOL-ERROR COUNTERS: read on every check, values latch,
+        // and a NACK'd instrumentation read must NEVER tear the link down.
+        r210 = 8'h34; r211 = 8'h80; r212 = 8'h07; r213 = 8'h81;
+        er0 = errcnt_reads;
+        force_check;
+        #3_000_000;
+        if (errcnt_reads <= er0) begin
+            errors = errors + 1;
+            $display("FAIL: no 0x210 read on the periodic check");
+        end else if (dut.i_aux_channel.err0_r !== 16'h8034 ||
+                     dut.i_aux_channel.err1_r !== 16'h8107) begin
+            errors = errors + 1;
+            $display("FAIL: errcnt latch 0=%04x 1=%04x (want 8034/8107)",
+                     dut.i_aux_channel.err0_r, dut.i_aux_channel.err1_r);
+        end else
+            $display("  ok: symbol-error counters read + latched (SE0=8034 SE1=8107, valid bits kept)");
+        r210 = 8'h55; r213 = 8'h82;
+        force_check;
+        #3_000_000;
+        if (dut.i_aux_channel.err0_r !== 16'h8055 ||
+            dut.i_aux_channel.err1_r !== 16'h8207) begin
+            errors = errors + 1;
+            $display("FAIL: errcnt update (0=%04x 1=%04x want 8055/8207)",
+                     dut.i_aux_channel.err0_r, dut.i_aux_channel.err1_r);
+        end else
+            $display("  ok: counters track fresh reads");
+        errcnt_nack_mode = 1'b1;
+        er0 = errcnt_reads; ew0 = le_drops;
+        force_check;
+        #3_000_000;
+        force_check;
+        #3_000_000;
+        if (errcnt_reads <= er0) begin
+            errors = errors + 1;
+            $display("FAIL: NACK mode stopped the errcnt attempts");
+        end else if (le_drops != ew0) begin
+            errors = errors + 1;
+            $display("FAIL: NACK'd instrumentation read tore the link down");
+        end else if (dut.i_aux_channel.err0_r !== 16'h8055) begin
+            errors = errors + 1;
+            $display("FAIL: NACK'd read corrupted the latched value");
+        end else
+            $display("  ok: NACK'd errcnt reads: link HELD, last values retained");
+        errcnt_nack_mode = 1'b0;
 
         // 9. WEDGE DETECTOR discrimination (~5 ms fire time in sim).
         // r205 has been 00 the WHOLE session — phase (b) firing proves

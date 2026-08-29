@@ -248,6 +248,13 @@ always @(posedge clk) begin
 
        // msg 0x1D: W1C DEVICE_SERVICE_IRQ_VECTOR_ESI0 (0x2003) — second
        // clear write, sent only when the block read showed it nonzero
+       // Read SYMBOL_ERROR_COUNT lanes 0-1 (0x210-0x213; per-lane 15-bit
+       // count + bit15 validity) — the link-margin instrument (08-29)
+       12'h1E0: begin aux_tx_data <= 8'h90; aux_tx_wr_en <= 1'b1; end
+       12'h1E1: begin aux_tx_data <= 8'h02; aux_tx_wr_en <= 1'b1; end
+       12'h1E2: begin aux_tx_data <= 8'h10; aux_tx_wr_en <= 1'b1; end
+       12'h1E3: begin aux_tx_data <= 8'h03; aux_tx_wr_en <= 1'b1; end
+
        12'h1D0: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end
        12'h1D1: begin aux_tx_data <= 8'h20; aux_tx_wr_en <= 1'b1; end
        12'h1D2: begin aux_tx_data <= 8'h03; aux_tx_wr_en <= 1'b1; end

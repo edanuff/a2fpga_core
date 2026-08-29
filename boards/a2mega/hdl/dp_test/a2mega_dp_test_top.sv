@@ -196,6 +196,8 @@ module a2mega_dp_test_top (
     logic [15:0] aux_dbg_esi;    // sticky OR {0x2003, 0x2005} ESI reads (V:)
     logic [6:0]  aux_dbg_defer;  // {edid_giveup, defer_cnt} (U: low 7)
     logic        aux_wedge;      // advisory wedge-suspect (U: bit 7)
+    logic [15:0] aux_errcnt0;    // SYMBOL_ERROR_COUNT lane0 (raw, bit15=valid)
+    logic [15:0] aux_errcnt1;    // SYMBOL_ERROR_COUNT lane1
     logic [27:0] aux_dbg_errdet; // first teardown {reason, state, exp, rxc} (B:)
     logic [31:0] aux_dbg_snap;   // first-failure snapshot (Z:)
     logic [7:0]  aux_dbg_sink;
@@ -261,6 +263,7 @@ module a2mega_dp_test_top (
         // (IRQ_SERVICE=1) graded 5/0/0 n=5; its 0x201 path was inert.
         .IRQ_SERVICE(2),
         .POLITE_ATTACH(1),
+        .ERRCNT_READ(1),   // symbol-error counters each link check (08-29)
         .TX_PROBE       (0),  // 1 = lane-probe build: raw 4.2 MHz square on
                               // both lanes for AD2 breakout measurement.
                               // Set back to 0 for the real colorbars.
@@ -305,6 +308,8 @@ module a2mega_dp_test_top (
         .debug_esi         (aux_dbg_esi),
         .debug_defer       (aux_dbg_defer),
         .wedge_suspect     (aux_wedge),
+        .debug_errcnt0     (aux_errcnt0),
+        .debug_errcnt1     (aux_errcnt1),
         .debug_err_detail  (aux_dbg_errdet),
         .debug_snapshot    (aux_dbg_snap),
         .debug_sink        (aux_dbg_sink),
@@ -401,6 +406,7 @@ module a2mega_dp_test_top (
     logic [27:0] symd_s0, symd_s;
     logic [7:0] snk_s0, snk_s, cap_s0, cap_s;
     logic [5:0] afe_s0, afe_s;
+    logic [15:0] ec0_s0, ec0_s, ec1_s0, ec1_s;  // symbol-error counters
     logic [3:0] afe1_s0, afe1_s;   // lane 1 {pe, vs}
     logic [11:0] evt_s0, evt_s;    // {zero_seen, gate_drops, applies}
     logic [7:0]  d4_cnt_s0, d4_cnt_s;  // FREE-RUNNING D4 assertion count
@@ -432,6 +438,8 @@ module a2mega_dp_test_top (
         cap_s0 <= aux_dbg_caps;     cap_s <= cap_s0;
         afe_s0 <= aux_dbg_afe;      afe_s <= afe_s0;
         afe1_s0 <= aux_dbg_afe1;    afe1_s <= afe1_s0;
+        ec0_s0  <= aux_errcnt0;     ec0_s  <= ec0_s0;
+        ec1_s0  <= aux_errcnt1;     ec1_s  <= ec1_s0;
         evt_s0 <= aux_dbg_evt;      evt_s <= evt_s0;
         d4_cnt_s0 <= d4_cnt;        d4_cnt_s <= d4_cnt_s0;
         wdog_s0 <= aux_dbg_wdog;    wdog_s <= wdog_s0;
@@ -461,7 +469,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 171;  // five lines; msg_idx is [7:0]
+    localparam int MSG_LEN = 192;  // six lines; msg_idx is [7:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -525,6 +533,12 @@ module a2mega_dp_test_top (
             msg[160]=" "; msg[161]=" "; msg[162]=" "; msg[163]=" ";
             msg[164]=" "; msg[165]=" "; msg[166]=" "; msg[167]=" ";
             msg[168]=" "; msg[169]=" "; msg[170]=8'h0A;
+            msg[171]=" "; msg[172]=" "; msg[173]=" "; msg[174]=" ";
+            msg[175]=" "; msg[176]=" "; msg[177]=" "; msg[178]=" ";
+            msg[179]=" "; msg[180]=" "; msg[181]=" "; msg[182]=" ";
+            msg[183]=" "; msg[184]=" "; msg[185]=" "; msg[186]=" ";
+            msg[187]=" "; msg[188]=" "; msg[189]=" "; msg[190]=" ";
+            msg[191]=8'h0A;
         end else begin
         // ---------------------------------------------------------------
         // FIVE SHORT LINES, each <= 39 printable chars (39-col console
@@ -585,6 +599,16 @@ module a2mega_dp_test_top (
         msg[162]=":"; msg[163]=hexch(edet_s[27:24]); msg[164]=hexch(edet_s[23:20]); msg[165]=hexch(edet_s[19:16]);
         msg[166]=hexch(edet_s[15:12]); msg[167]=hexch(edet_s[11:8]); msg[168]=hexch(edet_s[7:4]); msg[169]=hexch(edet_s[3:0]);
         msg[170]=8'h0A;
+        // D6: SYMBOL_ERROR_COUNT lanes 0/1 (raw DPCD 0x210-0x213; bit15
+        // of each = validity — read every periodic link check)
+        msg[171]="D"; msg[172]="6"; msg[173]=" ";
+        msg[174]="S"; msg[175]="E"; msg[176]="0"; msg[177]=":";
+        msg[178]=hexch(ec0_s[15:12]); msg[179]=hexch(ec0_s[11:8]);
+        msg[180]=hexch(ec0_s[7:4]);   msg[181]=hexch(ec0_s[3:0]);
+        msg[182]=" "; msg[183]="S"; msg[184]="E"; msg[185]="1"; msg[186]=":";
+        msg[187]=hexch(ec1_s[15:12]); msg[188]=hexch(ec1_s[11:8]);
+        msg[189]=hexch(ec1_s[7:4]);   msg[190]=hexch(ec1_s[3:0]);
+        msg[191]=8'h0A;
         end
     end
 
