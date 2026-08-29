@@ -45,7 +45,12 @@
 // "are the lanes electrically alive, on which pins, with which
 // polarity" without any DP protocol in the loop.
 module transceiver_bank_gowin #(
-    parameter TX_PROBE = 0
+    parameter TX_PROBE = 0,
+    // AFE dump-readback bases (idx 24-29): per-die, LOGICAL lane order
+    // (BASE0 = ML0's die-lane block) — threaded from the die pkg via
+    // dp_transmitter so both dies read their own lanes
+    parameter [23:0] AFE_DUMP_BASE0 = 24'h808500,
+    parameter [23:0] AFE_DUMP_BASE1 = 24'h808400
 )(
     input             mgmt_clk,
     // Master control
@@ -659,12 +664,12 @@ module transceiver_bank_gowin #(
             // what the PHY is REALLY running (the telemetry M:/M1: fields
             // are the sequencer's declared model, which with
             // APPLY_ON_START=0 is an ASSUMPTION until an adjust fires).
-            5'd24: dump_addr_rom = 24'h808434;
-            5'd25: dump_addr_rom = 24'h808438;
-            5'd26: dump_addr_rom = 24'h8084d8;
-            5'd27: dump_addr_rom = 24'h808534;
-            5'd28: dump_addr_rom = 24'h808538;
-            5'd29: dump_addr_rom = 24'h8085d8;
+            5'd24: dump_addr_rom = AFE_DUMP_BASE0 + 24'h34;
+            5'd25: dump_addr_rom = AFE_DUMP_BASE0 + 24'h38;
+            5'd26: dump_addr_rom = AFE_DUMP_BASE0 + 24'hd8;
+            5'd27: dump_addr_rom = AFE_DUMP_BASE1 + 24'h34;
+            5'd28: dump_addr_rom = AFE_DUMP_BASE1 + 24'h38;
+            5'd29: dump_addr_rom = AFE_DUMP_BASE1 + 24'hd8;
             default: dump_addr_rom = 24'h000000;
         endcase
     endfunction
