@@ -30,6 +30,10 @@ void osd_console_hide(void);          /* return the screen to the Apple II */
  * threads are ignored and osd_log() only buffers — the menu is never stomped. */
 void osd_console_set_lockout(bool lockout);
 
+/* Copy up to max buffered lines (oldest first) into snap for the telnet
+ * backlog replay; returns the number of lines copied. */
+int osd_console_snapshot(char snap[][40], int max);
+
 #ifdef __cplusplus
 }
 #endif

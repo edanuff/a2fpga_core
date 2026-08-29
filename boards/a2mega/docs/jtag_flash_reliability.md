@@ -602,3 +602,225 @@ post-flash `--reset` (M2) and a corrected operator note (M3).
 Top experiments: **E0** (fresh power window, then switch the Apple II on, then flash),
 **E2** (`--detect` at 10 MHz vs 500 kHz right after a failure), **E4** (does `--reset` alone
 un-wedge the chain?).
+
+---
+
+## 2026-08-14 night session: fake-success bug + flash-boot failure forensics
+
+**openFPGALoader FAKE-SUCCESS BUG (critical operational finding):** when the
+JTAG chain scans `empty` (first line of output), flash operations DO NOT
+ABORT — the tool parses the file, prints `Done`/`DONE`, runs the exit
+sequence (status-register dump, "Erase SRAM DONE", reload attempt) and
+looks success-shaped while having written NOTHING. A 7-18 MB write at
+500 kHz takes minutes and emits thousands of `Writing:` progress lines;
+a fake completes in ~1.4 s with zero. **Judge every op by elapsed time +
+progress lines, never by `Done`.** (The "2-second bulk-erase" tonight was
+a fake; so was every "verified write" whose log began with `empty`.)
+
+**Boot-failure timeline (reconstructed):** flash held a known-good image
+(booted from the slot minutes earlier). The first wedged flash session
+wrote nothing (all attempts died at chain scan). Yet flash-boot never
+succeeded again on the bench afterward — the failure PREDATES any real
+write. The one live-chain probe that reached real flash logic read an
+unrecognized JEDEC ID + block-protection bits set — either the chip is in
+a corrupted persistent state, or the bridge garbles SPI-over-JTAG and the
+readings are noise.
+
+**Confirmed healthy:** FPGA + bitstream (SRAM load at 500 kHz ran to
+100%, heartbeat up). Compressed bitstream now 7.2 MB (was 18.3 MB):
+`set_option -bit_compress 1` — keep this on all a2mega builds regardless
+(3x faster flash, dodges any >16 MB addressing questions).
+
+**Discriminator queued (user):** direct JTAG programmer on the SOM's JTAG
+header, bypassing ESP32 bridge + USB-C entirely. Programs fine -> bridge/
+USB-C path at fault; fails identically -> SOM flash chip. **Do first
+(zero cost): slot power-on test** — last confirmed flash-boot was IN THE
+SLOT; if heartbeat appears there but not on the bench, flash is fine and
+it's bench-environment interference on the shared config pins.
+
+**Slot-boot test result (2026-08-14, late): NO heartbeat in the powered
+GS either.** Bench-interference theory eliminated — the flash CONTENT is
+corrupt (not merely unreadable-on-bench). Tomorrow's direct-JTAG
+programmer session is now a clean two-way discriminator: writes+boots →
+chip fine, bridge corrupted content (fix/work around the bridge);
+fails → chip damaged → plan C (ESP32 SRAM-load at power-up) or SOM swap.
+
+## ROOT CAUSE FOUND (2026-08-15 early AM): gowin.cpp hardcoded 10 MHz
+
+`Gowin::prepare_flash_access()` (openFPGALoader src/gowin.cpp) ends with
+`_jtag->setClkFreq(10000000);` — the GW5A SPI-over-JTAG external-flash
+phase ALWAYS runs at 10 MHz, ignoring --freq. Through the esp_usb_jtag
+bridge this is marginal: it held all week, tipped over tonight. A flash op
+that dies mid-10 MHz-sequence WEDGES THE TAP for every tool (OpenOCD
+included, "all ones") until USB cold boot. Wedged-state runs then
+fake-success in ~1.4 s (chain scans empty, tool proceeds anyway).
+Full causal chain: 10 MHz SPI phase crash → TAP wedge → fake-success
+cascade → corrupt flash content → autoboot fail.
+
+Why the layers confused us: SRAM loads never enter the flash-access phase
+(stay at --freq) → always worked. Status-register reads happen BEFORE the
+10 MHz switch → looked healthy. "flash chip unknown"/BP-bits/JEDEC garbage
+were all 10 MHz misreads, not chip state.
+
+**Fix (local build, scratchpad ofl/):** two patches —
+1. jtag.cpp: detectChain retry x5 in constructor; empty chain after
+   retries now surfaces "no device found" instead of fake-succeeding.
+2. gowin.cpp: removed the setClkFreq(10000000) hardcode; SPI-over-JTAG
+   flash access now honors the user's --freq.
+Upstream issue/PR worth filing (also relates to trabucayre/openFPGALoader
+issue #578 — esp_usb_jtag fragility).
+
+Validation pending: fresh cold boot + patched flash at 2 MHz → expect
+real multi-minute write with progress lines → power cycle → heartbeat.
+
+## FINAL POST-MORTEM (2026-08-15): board #1 SOM flash retired
+
+Direct-JTAG discriminator (user, Sipeed RV Debugger, SOM UNSEATED from
+carrier): identical "Read ID failed" + wedge-until-power-cycle, JEDEC ID
+reads 0x000000 (zeros, not FF — MISO flat, chip answers nothing). SRAM
+config works perfectly through both transports. Revival sequence
+(0xAB release-DPD + 0x66/0x99 software reset, patched into our
+openFPGALoader build) changed nothing. FPGA's own boot master also gets
+nothing (auto_boot_1st_fail at POR). Chip or its SOM-local connection is
+dead; FPGA healthy.
+
+REVISED root-cause ranking (user insight): flash trouble was CHRONIC —
+replug rituals, ~50%/attempt failures, flash-phase-specific wedges
+persisting after the toggleClk fix — consistent with a MARGINAL,
+PROGRESSIVELY DEGRADING flash element all along, now fully failed. The
+software bugs found tonight (10 MHz hardcode, fake-success on empty
+chain, no chain-scan retry) are real and fixed in our local build, but
+they were layered ON TOP of the failing hardware, not the cause of it.
+Named mechanisms eliminated: SR-write brick (can't disable ID reads),
+stuck DPD/QPI/continuous-read (reset didn't revive), transport layers
+(two independent cables). Unresolved: defective part vs chronic
+electrical stress. NOTE our master pin table is USE-FILTERED — "MSPI
+unreachable from carrier" is NOT yet verified against the full BTB;
+GW5A datasheet ball table vs BTB sheets check is on the board #2
+pre-slot checklist.
+
+Board #1: retired from flash-boot service (bench mule for ESP32/PD work;
+SRAM-load still works when Mac-attached). Board #2 protections:
+1. Patched openFPGALoader only (freq honored, honest empty-chain errors,
+   flash revival preamble); judge every op by elapsed time + progress.
+2. Machine-off flashing rule stays absolute (D05 transceiver-enable
+   window).
+3. Routine 5-second flash health check (--detect -f) after slot
+   sessions; log results — degradation must show as a trend, not a
+   surprise.
+4. Pre-slot: verify MSPI balls vs BTB (datasheet cross-check).
+5. 1.0a4 rev list: hard gate on bus-transceiver enable during config
+   windows + AUX bias resistors.
+
+**MSPI-vs-BTB check CLOSED (2026-08-15, user, Tang Mega 60K SOM
+schematics):** no connections between the MSPI (config flash) signals and
+the BTB connectors. The flash SPI bus is entirely SOM-local — the carrier,
+Apple bus, and all system-level activity are exonerated for the flash
+death. Failure contained to the SOM (chip defect / solder / SOM-local
+stress). Only carrier-mediated path remaining is power quality into the
+SOM (speculative; hot-plug churn + VBUS backfeed topology noted). Board
+#2 slot use carries no flash-specific risk beyond standing rules.
+
+---
+
+## 2026-08-15: TRUE ROOT CAUSE — SecurityBit + auto-boot race (supersedes all prior verdicts)
+
+The full mechanism, proven end-to-end on SOM #2:
+
+1. **Gowin bitstreams default `SecurityBit: ON`** (never chosen by us; visible
+   in the .fs header). A security-on image auto-booted from flash latches
+   "Security Final" in the config controller.
+2. Every openFPGALoader GW5A flash op erases SRAM first, which RE-ARMS the
+   MSPI auto-boot mid-session; the boot master + re-latching security state
+   then CONTEND with the tool's JTAG->SPI passthrough. Win the race = flash
+   works; lose = "Read ID failed" + TAP WEDGED until cold boot. This race —
+   not hardware — was the weeks-long flash ritual.
+3. Post-wedge runs fake-success on the empty chain (tool bug), presenting
+   interrupted sequences as complete — the source of corrupt-flash states.
+4. Independent second gate: the hardcoded 10 MHz SPI phase deterministically
+   misreads the JEDEC tail through the ESP32 bridge (EF4017 -> "EF4010",
+   rejected). Confirmed by identical wrong values across boots.
+
+**Proof:** flash_rescue core (MSPI-as-user-IO via "MSPI": true, SRAM-loaded,
+autonomous UART/telnet reporting) read the W25Q64 directly: pristine
+factory state (J:EF4017 1:00 2:02 3:60). Its erase variant blanked the
+chip (no auto-boot possible), after which a security-OFF image flashed
+100% clean, first try, 1:50 (erase+write+verify), zero contention.
+
+**RETRACTIONS:** (a) "chronic hardware degradation" — wrong; the chip was
+never marginal. (b) SOM #1 "flash chip dead" — NOW DOUBTFUL: its signature
+(Security Final latch, auto-boot on corrupt content, blocked passthrough,
+zeros on ID reads, both transports) matches the latch mechanism, and its
+corrupt content likely came from the fake-success cascade. SOM #1 revival
+via flash_rescue erase is QUEUED and would confirm.
+
+**Standing rules going forward:**
+- `set_option -bit_security 0` on ALL a2mega bitstreams (dp_test done;
+  full core + 138B pending — do before their next flash).
+- flash_rescue (probe + ERASE_OP variants) is the recovery/diagnosis path;
+  it bypasses the passthrough entirely.
+- Patched openFPGALoader (tools/bin/) remains preferred; judge ops by
+  elapsed time + progress lines regardless.
+- Blinking power/done LEDs = supply brownout (cable/port), a separate
+  failure layer — fix power before touching JTAG theories.
+
+## NEVER run a flash on a caller-side timeout (08-22)
+
+**Incident.** A flash of `50c4fc2c` was launched in the foreground under a
+5-minute cap. It ran long, the cap killed `openFPGALoader` mid-operation,
+and that left the ESP32's USB-JTAG endpoint wedged: the next attempt could
+not even probe the chain —
+
+```
+xfer: usb bulk write failed with error -8 LIBUSB_ERROR_OVERFLOW Overflow
+writeTDI: read failed
+JTAG init failed with: Unknown device with IDCODE: 0x555555aa
+```
+
+`flash.sh` behaved correctly: it detected the unhealthy chain and REFUSED
+the retry instead of writing blind into a wedge.
+
+**Recovery (worked first try, no rescue core needed):** unplug/replug the
+USB-C cable at the Mac to reset the JTAG endpoint, then re-run the flash.
+The retry read `JEDEC ID: 0xef4017` (Winbond W25Q64), wrote, and passed
+`--verify` — which also proves the interrupted write left nothing corrupt,
+since the image is fully overwritten and read back.
+
+Note: `auto_boot_1st_fail` / `auto_boot_2nd_fail` appearing in the status
+dump after such an event is the EXPECTED artifact of a chip with no valid
+image to auto-boot — a symptom of the earlier interruption, not a new
+failure, and it clears with the successful write.
+
+**Rule.** Flash operations must never be interruptible by the caller's own
+clock. Run them detached (`nohup ... &`) and poll the log for
+`=== FLASH EXIT`, or give any wrapper a timeout far beyond the worst-case
+write. A killed write costs a wedge and a physical replug at best, and can
+leave a partially-written chip at worst. Same family of lesson as
+"archive every benched bin": operations that touch hardware state must be
+allowed to finish.
+
+## Timing margin note: cm_life is the pressure point (08-22)
+
+The 138B dp_test design closes 0/0 with TNS 0.000, but the Fmax summary
+shows how little room is left on one domain:
+
+| clock   | constraint | actual Fmax | margin |
+|---------|-----------|-------------|--------|
+| clk50   | 50.000    | 94.406      | huge   |
+| clk100  | 100.000   | 103.603     | 3.6%   |
+| clk_sym | 135.007   | 137.675     | 2.0%   |
+| clk_pix | 148.500   | 150.900     | 1.6%   |
+| **cm_life** | **100.000** | **100.216** | **0.2%** |
+
+`cm_life` carries the vendor `upar_arbiter` and the bank's DRP/replay
+engine. It is why an 8-bit comparator added to the M5 capture-enable path
+tipped the whole design into 7 setup violations (deterministic across three
+re-rolls), and why the same logic moved one pipeline stage later closes
+cleanly again. Consequences to keep in mind:
+
+- treat ANY logic added near the DRP/mgmt path as timing-relevant, however
+  trivial it looks;
+- a build that closes is not evidence of margin — check the Fmax table;
+- ARCHIVE every bitstream that reaches hardware. PnR here is deterministic
+  for a given source, but a source that no longer exists cannot be rebuilt
+  (48576c12), and placement is fragile enough that small edits move it.

@@ -1,0 +1,742 @@
+///////////////////////////////////////////////////////////////////////////////
+// video_stream_packer.v : Generic pixel-to-main-link symbol stream packer
+//
+// Part of the DisplayPort_Verilog project - an open implementation of the
+// DisplayPort protocol for FPGA boards.
+//
+// Symbol-domain timing master. Consumes packed pixel words from the CDC
+// FIFO (LANE_COUNT pixels per word, lane 0 in the low 24 bits) and emits
+// the 73-bit main-link word stream (4 lanes x 2 symbols, bit 72 = safe
+// switch point), replicating the line structure of the proven hand-coded
+// test sources:
+//
+//   symbol 0 .. TU_SIZE-2   : dummy (start-of-line blank TU)
+//   symbol TU_SIZE-1        : BE (active lines only)
+//   symbol TU_SIZE ..       : transfer units - 'valid' data symbols then
+//                             FS <fill> FE padding to TU_SIZE, valid count
+//                             per TU from a Bresenham accumulator
+//   symbol BS_POS           : BS  (same fixed position every line)
+//   BS_POS+1 .. +3*sets     : VB-ID / Mvid / Maud, repeated 4/LANE_COUNT x
+//   remainder               : dummy; on vblank lines the region before
+//                             BS_POS allows idle-pattern switchover, the
+//                             region after BS is flagged for SDP insertion
+//
+// Lane data is pixel-interleaved: lane N carries pixels N, N+LANE_COUNT, ..
+// each as three symbols R, G, B (rgb[23:16] first).
+//
+// The FIFO pop (fifo_rd) is combinational: pops can occur on consecutive
+// cycles, and the show-ahead head must advance between them.
+//
+// MIT License - part of work derived from Copyright (c) 2019 Mike Field
+///////////////////////////////////////////////////////////////////////////////
+`timescale 1ns / 1ps
+
+module video_stream_packer #(
+    parameter LANE_COUNT    = 2,     // 1, 2 or 4
+    parameter H_VISIBLE     = 1280,
+    parameter V_VISIBLE     = 720,
+    parameter V_TOTAL       = 750,
+    parameter TU_SIZE       = 64,    // symbols per transfer unit (even)
+    parameter SYMS_PER_LINE = 3600,  // link symbols per lane per video line (even)
+    parameter VALID_NUM     = 2112,  // Bresenham: valid syms/TU = VALID_NUM/VALID_DEN
+    parameter VALID_DEN     = 48,    //   = TU_SIZE*3*PIXEL_CLK_MULT / (2*PIXEL_CLK_DIV*LANE_COUNT)
+    parameter PREFILL       = 640    // FIFO words buffered before starting a frame
+)(
+    input             clk,           // tx_symbol_clk
+    input             reset,
+    // Per-line M values (Mvid low byte constant in sync-clock mode)
+    input       [7:0] mvid_byte,     // = M_value[7:0]
+    input       [7:0] maud_byte,     // audio M value low byte (Phase 3, else 0)
+    input             audio_mute,    // VB-ID bit 4 (Phase 3, else 0)
+    // Pixel FIFO read side (show-ahead)
+    input [24*LANE_COUNT-1:0] fifo_rdata,
+    input             fifo_rsof,     // head word is first of a frame
+    input             fifo_rvalid,
+    output            fifo_rd,
+    input      [15:0] fifo_rlevel,
+    output reg        capture_arm,   // tell pixel domain to start at next frame
+    // Main link stream out
+    output reg        ready,         // source_ready to the idle inserter
+    output reg [72:0] data,
+    // Sidebands for the SDP inserter (Phase 3)
+    output reg        sdp_gap,       // safe hblank/tail region for secondary packets
+    output reg        frame_pulse,   // one-cycle pulse entering the vertical blank
+    output reg        underrun       // sticky error flag (FIFO ran dry mid-line)
+);
+
+    // ------------------------------------------------------------------
+    // Symbols (9-bit: bit 8 = K-code flag)
+    // ------------------------------------------------------------------
+    localparam [8:0] DUMMY = 9'b000000011;  // 0x03
+    localparam [8:0] BE    = 9'b111111011;  // K27.7 Blank End
+    localparam [8:0] BS    = 9'b110111100;  // K28.5 Blank Start
+    localparam [8:0] FS    = 9'b111111110;  // K30.7 Fill Start
+    localparam [8:0] FE    = 9'b111110111;  // K23.7 Fill End
+
+    // ------------------------------------------------------------------
+    // Derived layout constants
+    // ------------------------------------------------------------------
+    localparam integer BYTES_PER_LANE  = H_VISIBLE * 3 / LANE_COUNT;  // per line
+    localparam integer DATA_START      = TU_SIZE;                    // BE at DATA_START-1
+    localparam integer VBID_SETS       = 4 / LANE_COUNT;             // VB-ID/Mvid/Maud repeats
+    localparam integer CYCLES_PER_LINE = SYMS_PER_LINE / 2;
+
+    // BS position: end of the (possibly partial) final TU - fixed per line
+    function integer calc_bs_pos;
+        input integer unused;
+        integer bl, er, v, pos;
+        begin
+            bl = BYTES_PER_LANE; er = 0; pos = DATA_START;
+            while (bl > 0) begin
+                er = er + VALID_NUM;
+                v  = er / VALID_DEN;
+                er = er % VALID_DEN;
+                if (v >= bl) begin
+                    pos = pos + bl;      // partial final TU: BS follows last byte
+                    bl  = 0;
+                end else begin
+                    pos = pos + TU_SIZE; // full TU incl. fill
+                    bl  = bl - v;
+                end
+            end
+            calc_bs_pos = pos;
+        end
+    endfunction
+
+    localparam integer BS_POS    = calc_bs_pos(0);
+    localparam integer VBID_END  = BS_POS + 3*VBID_SETS;             // last VB-ID seq symbol
+    localparam integer GAP_START = BS_POS + 30;                      // clear of MSA window
+    localparam integer GAP_END   = SYMS_PER_LINE - 2;
+
+    // Bresenham strength reduction: valid/TU = VQUOT or VQUOT+1, chosen by
+    // the error accumulator - no runtime divider needed
+    localparam integer VQUOT = VALID_NUM / VALID_DEN;
+    localparam integer VREM  = VALID_NUM % VALID_DEN;
+
+    // ------------------------------------------------------------------
+    // Registered state
+    // ------------------------------------------------------------------
+    reg [$clog2(CYCLES_PER_LINE)-1:0] line_cycle;
+    reg [$clog2(V_TOTAL)-1:0]         line_num;
+    reg                               running;
+
+    reg [$clog2(TU_SIZE)-1:0]   tu_pos;
+    reg [$clog2(TU_SIZE+1)-1:0] tu_valid;
+    reg [$clog2(VALID_DEN)-1:0] bres_err;
+    reg [1:0]                   phase;      // 0=R,1=G,2=B of current pixel word
+    reg [24*LANE_COUNT-1:0]     cur_word;
+
+    wire vb_flag        = (line_num >= V_VISIBLE-1);
+    wire is_active_line = (line_num < V_VISIBLE);
+    wire [7:0] vbid_byte = {3'b000, audio_mute, 3'b000, vb_flag};
+
+    // ------------------------------------------------------------------
+    // Region decode, precomputed one cycle early and registered so the
+    // per-slot logic muxes on single flag bits instead of chaining wide
+    // line_cycle comparisons (timing: the slot chain is the critical
+    // path at HBR rates)
+    // ------------------------------------------------------------------
+    wire at_eol = (line_cycle == CYCLES_PER_LINE-1);
+    wire [$clog2(CYCLES_PER_LINE)-1:0] nc =
+        at_eol ? {$clog2(CYCLES_PER_LINE){1'b0}} : line_cycle + 1'b1;
+    wire nl_active = at_eol ? ((line_num == V_TOTAL-1) || (line_num < V_VISIBLE-1))
+                            : is_active_line;
+    wire [13:0] s0n = {nc, 1'b0};
+    wire [13:0] s1n = s0n + 1'b1;
+
+    // VB-ID sequence position for a symbol index (registered, so the
+    // constant-compare depth here is off the critical path)
+    function [1:0] vsel(input [13:0] s);
+        begin
+            if (s > BS_POS && s <= VBID_END) begin
+                if      (s == BS_POS+1 || s == BS_POS+4 ||
+                         s == BS_POS+7 || s == BS_POS+10) vsel = 2'd1; // VB-ID
+                else if (s == BS_POS+2 || s == BS_POS+5 ||
+                         s == BS_POS+8 || s == BS_POS+11) vsel = 2'd2; // Mvid
+                else                                      vsel = 2'd3; // Maud
+            end else
+                vsel = 2'd0;
+        end
+    endfunction
+
+    reg [1:0] f_be, f_tu, f_bs;   // bit k = slot k
+    reg [1:0] f_nl;               // slot is NOT the line's last data byte
+    reg [1:0] f_vb [0:1];
+    reg       f_prime;
+    reg       start_ok;   // registered start decision (BSRAM sof output
+                          // -> wide level compare is the slowest path in
+                          // the device; it only matters once, at startup)
+
+    // ------------------------------------------------------------------
+    // Combinational slot logic: two symbols per lane per cycle
+    // ------------------------------------------------------------------
+    integer l, k;
+    reg [13:0] s;
+    reg [8:0]  sym [0:3];
+    reg [8:0]  slot_syms [0:1][0:3];
+    reg        c_fetch;
+    reg        c_underrun;
+    reg [1:0]  c_phase;
+    reg [$clog2(TU_SIZE)-1:0]   c_tu_pos;
+    reg [$clog2(TU_SIZE+1)-1:0] c_tu_valid;
+    reg [$clog2(VALID_DEN)-1:0] c_err;
+    reg [24*LANE_COUNT-1:0] c_word;
+    reg [23:0] lane_pix;
+    reg [$clog2(VALID_DEN)+1:0] err_sum;
+
+    // synthesis translate_off
+    // SHADOW MODEL: the original single-cycle walk, kept in simulation only
+    // as the reference the registered early-walk below is checked against.
+    always @* begin
+        c_fetch      = 1'b0;
+        c_underrun   = 1'b0;
+        c_phase      = phase;
+        c_tu_pos     = tu_pos;
+        c_tu_valid   = tu_valid;
+        c_err        = bres_err;
+        c_word       = cur_word;
+        for (k = 0; k < 2; k = k + 1) begin
+            slot_syms[k][0] = DUMMY; slot_syms[k][1] = DUMMY;
+            slot_syms[k][2] = DUMMY; slot_syms[k][3] = DUMMY;
+        end
+
+        if (running) begin
+            // Prime the first pixel word of each active line from the FIFO
+            // head one cycle before the data region (slot 1 carries BE).
+            if (f_prime) begin
+                c_word  = fifo_rdata;
+                c_fetch = 1'b1;
+                if (!fifo_rvalid)
+                    c_underrun = 1'b1;
+            end
+
+            for (k = 0; k < 2; k = k + 1) begin
+                for (l = 0; l < 4; l = l + 1)
+                    sym[l] = DUMMY;
+
+                if (f_be[k]) begin
+                    for (l = 0; l < LANE_COUNT; l = l + 1)
+                        sym[l] = BE;
+                end else if (f_tu[k]) begin
+                    // ---- transfer-unit region ----
+                    if (c_tu_pos == 0) begin
+                        // acc += NUM; valid = acc/DEN; acc %= DEN, with
+                        // NUM = VQUOT*DEN + VREM and acc < DEN, reduces to:
+                        err_sum = c_err + VREM;
+                        if (err_sum >= VALID_DEN) begin
+                            c_err      = err_sum - VALID_DEN;
+                            c_tu_valid = (VQUOT+1 > TU_SIZE) ? TU_SIZE[$clog2(TU_SIZE+1)-1:0]
+                                                             : (VQUOT+1);
+                        end else begin
+                            c_err      = err_sum[$clog2(VALID_DEN)-1:0];
+                            c_tu_valid = VQUOT[$clog2(TU_SIZE+1)-1:0];
+                        end
+                    end
+                    if (c_tu_pos < c_tu_valid) begin
+                        for (l = 0; l < LANE_COUNT; l = l + 1) begin
+                            lane_pix = c_word[24*l +: 24];
+                            case (c_phase)
+                                2'd0:    sym[l] = {1'b0, lane_pix[23:16]};
+                                2'd1:    sym[l] = {1'b0, lane_pix[15:8]};
+                                default: sym[l] = {1'b0, lane_pix[7:0]};
+                            endcase
+                        end
+                        if (c_phase == 2'd2) begin
+                            c_phase = 2'd0;
+                            if (f_nl[k]) begin
+                                c_word  = fifo_rdata;
+                                c_fetch = 1'b1;
+                                if (!fifo_rvalid)
+                                    c_underrun = 1'b1;
+                            end
+                        end else begin
+                            c_phase = c_phase + 1'b1;
+                        end
+                    end else if (c_tu_pos == c_tu_valid && c_tu_valid != TU_SIZE) begin
+                        for (l = 0; l < LANE_COUNT; l = l + 1)
+                            sym[l] = FS;
+                    end else if (c_tu_pos == TU_SIZE-1 && c_tu_valid != TU_SIZE) begin
+                        for (l = 0; l < LANE_COUNT; l = l + 1)
+                            sym[l] = FE;
+                    end
+                    // else: dummy fill inside the TU
+                    c_tu_pos = (c_tu_pos == TU_SIZE-1) ? {$clog2(TU_SIZE){1'b0}}
+                                                       : c_tu_pos + 1'b1;
+                end else if (f_bs[k]) begin
+                    for (l = 0; l < LANE_COUNT; l = l + 1)
+                        sym[l] = BS;
+                end else if (f_vb[k] == 2'd1) begin
+                    for (l = 0; l < LANE_COUNT; l = l + 1) sym[l] = {1'b0, vbid_byte};
+                end else if (f_vb[k] == 2'd2) begin
+                    for (l = 0; l < LANE_COUNT; l = l + 1) sym[l] = {1'b0, mvid_byte};
+                end else if (f_vb[k] == 2'd3) begin
+                    for (l = 0; l < LANE_COUNT; l = l + 1) sym[l] = {1'b0, maud_byte};
+                end
+                // else: dummy (line-start blank TU, post-VBID tail)
+
+                slot_syms[k][0] = sym[0];
+                slot_syms[k][1] = sym[1];
+                slot_syms[k][2] = sym[2];
+                slot_syms[k][3] = sym[3];
+            end
+        end
+    end
+
+    // shadow walk-state registers (the live path no longer holds TU state)
+    always @(posedge clk) begin
+        if (!reset) begin
+            if (!running) begin
+                if (start_ok) begin
+                    tu_pos   <= 0;
+                    tu_valid <= 0;
+                    bres_err <= 0;
+                    phase    <= 2'd0;
+                end
+            end else begin
+                phase    <= c_phase;
+                tu_pos   <= c_tu_pos;
+                tu_valid <= c_tu_valid;
+                bres_err <= c_err;
+                if (line_cycle == CYCLES_PER_LINE-1) begin
+                    tu_pos   <= 0;
+                    tu_valid <= 0;
+                    bres_err <= 0;
+                    phase    <= 2'd0;
+                end
+            end
+        end
+    end
+    // synthesis translate_on
+
+    // ------------------------------------------------------------------
+    // Registered early walk (timing). The per-slot TU decisions are a
+    // deterministic function of packer state alone, so the ENTIRE walk
+    // for the next cycle - pixel-valid, byte phase, FS/FE, word loads -
+    // is computed one cycle ahead from a self-contained state copy and
+    // REGISTERED. The live datapath below then muxes on flag bits only:
+    // without this the f_tu -> Bresenham -> phase chain fanning into the
+    // 73-bit data mux, the cur_word CEs and the FIFO read-enable is the
+    // design's critical path and misses 135 MHz once the device fills up
+    // (it met by only +0.02 ns even standalone).
+    // The simulation-only checks below prove the registered decisions
+    // reproduce the shadow walk cycle for cycle.
+    // ------------------------------------------------------------------
+    // Flag pre-registration: the early walk consumes flags "for cycle
+    // N+1" while running in cycle N; computing their line-counter
+    // compares in series with the walk left line_cycle/line_num ->
+    // decision-register paths on the clk_sym critical list. Advance the
+    // counters TWO steps combinationally (exact, incl. line/frame wraps)
+    // and register the flag bits one cycle earlier, so the walk starts
+    // from flops. Around frame start the two-step basis briefly uses the
+    // frozen pre-start counters — in that window every variant computes
+    // the same all-zero flags (slots are deep in the leading dummy
+    // region), and the shadow-model assertions would catch any residue.
+    wire at_eol_n = (nc == CYCLES_PER_LINE-1);
+    wire [$clog2(CYCLES_PER_LINE)-1:0] nc2 =
+        at_eol_n ? {$clog2(CYCLES_PER_LINE){1'b0}} : nc + 1'b1;
+    wire [$clog2(V_TOTAL)-1:0] ln1 =
+        at_eol ? ((line_num == V_TOTAL-1) ? {$clog2(V_TOTAL){1'b0}}
+                                          : line_num + 1'b1)
+               : line_num;
+    wire nl2 = at_eol_n ? ((ln1 == V_TOTAL-1) || (ln1 < V_VISIBLE-1))
+                        : (ln1 < V_VISIBLE);
+    wire [13:0] s0n2 = {nc2, 1'b0};
+    wire [13:0] s1n2 = s0n2 + 1'b1;
+
+    reg [1:0] pf_ftu, pf_fnl;
+    reg       pf_prime;
+    reg [1:0] pf_vb0, pf_vb1;   // vsel() range compares, precomputed like pf_ftu
+    initial begin
+        pf_ftu = 2'b00; pf_fnl = 2'b00; pf_prime = 1'b0;
+        pf_vb0 = 2'd0; pf_vb1 = 2'd0;
+    end
+    always @(posedge clk) begin
+        if (reset) begin
+            pf_ftu   <= 2'b00;
+            pf_fnl   <= 2'b00;
+            pf_prime <= 1'b0;
+            pf_vb0   <= 2'd0;
+            pf_vb1   <= 2'd0;
+        end else begin
+            pf_ftu[0] <= nl2 && (s0n2 >= DATA_START) && (s0n2 < BS_POS);
+            pf_ftu[1] <= nl2 && (s1n2 >= DATA_START) && (s1n2 < BS_POS);
+            pf_fnl[0] <= (s0n2 != BS_POS-1);
+            pf_fnl[1] <= (s1n2 != BS_POS-1);
+            pf_prime  <= (running || start_ok) && nl2 &&
+                         (nc2 == (DATA_START/2)-1);
+            pf_vb0    <= vsel(s0n2);
+            pf_vb1    <= vsel(s1n2);
+        end
+    end
+
+    reg        p_fetch, p_prime, p_load0;
+    reg [1:0]  p_ftu, p_fnl;
+    reg [1:0]  p_px, p_fs, p_fe;
+    reg [1:0]  p_ph [0:1];
+    // registered walk state applying to the NEXT cycle
+    reg [1:0]                   e_phase;
+    reg [$clog2(TU_SIZE)-1:0]   e_tu_pos;
+    reg [$clog2(TU_SIZE+1)-1:0] e_tu_valid;
+    reg [$clog2(VALID_DEN)-1:0] e_err;
+    // combinational walk temporaries
+    reg [1:0]                   w_phase;
+    reg [$clog2(TU_SIZE)-1:0]   w_tu_pos;
+    reg [$clog2(TU_SIZE+1)-1:0] w_tu_valid;
+    reg [$clog2(VALID_DEN)-1:0] w_err;
+    reg [$clog2(VALID_DEN)+1:0] p_err_sum;
+    integer pk;
+
+    always @* begin
+        // next-cycle region flags, from the pre-registered copies
+        p_ftu    = pf_ftu;
+        p_fnl    = pf_fnl;
+        p_prime  = pf_prime;
+        p_fetch  = p_prime;
+        p_load0  = 1'b0;
+        p_px     = 2'b00;
+        p_fs     = 2'b00;
+        p_fe     = 2'b00;
+        p_ph[0]  = 2'd0;
+        p_ph[1]  = 2'd0;
+
+        // walk state for the next cycle: zeroed at start-of-frame (the
+        // sequential start branch) - while !running the registered copy
+        // is stale, so substitute zeros explicitly
+        if (!running) begin
+            w_phase    = 2'd0;
+            w_tu_pos   = {$clog2(TU_SIZE){1'b0}};
+            w_tu_valid = {$clog2(TU_SIZE+1){1'b0}};
+            w_err      = {$clog2(VALID_DEN){1'b0}};
+        end else begin
+            w_phase    = e_phase;
+            w_tu_pos   = e_tu_pos;
+            w_tu_valid = e_tu_valid;
+            w_err      = e_err;
+        end
+
+        // two-slot walk for the NEXT cycle, decisions extracted
+        for (pk = 0; pk < 2; pk = pk + 1) begin
+            if (p_ftu[pk]) begin
+                if (w_tu_pos == 0) begin
+                    p_err_sum = w_err + VREM;
+                    if (p_err_sum >= VALID_DEN) begin
+                        w_err      = p_err_sum - VALID_DEN;
+                        w_tu_valid = (VQUOT+1 > TU_SIZE) ? TU_SIZE[$clog2(TU_SIZE+1)-1:0]
+                                                         : (VQUOT+1);
+                    end else begin
+                        w_err      = p_err_sum[$clog2(VALID_DEN)-1:0];
+                        w_tu_valid = VQUOT[$clog2(TU_SIZE+1)-1:0];
+                    end
+                end
+                if (w_tu_pos < w_tu_valid) begin
+                    p_px[pk] = 1'b1;
+                    p_ph[pk] = w_phase;
+                    if (w_phase == 2'd2) begin
+                        w_phase = 2'd0;
+                        if (p_fnl[pk]) begin
+                            p_fetch = 1'b1;
+                            if (pk == 0)
+                                p_load0 = 1'b1;
+                        end
+                    end else begin
+                        w_phase = w_phase + 1'b1;
+                    end
+                end else if (w_tu_pos == w_tu_valid && w_tu_valid != TU_SIZE) begin
+                    p_fs[pk] = 1'b1;
+                end else if (w_tu_pos == TU_SIZE-1 && w_tu_valid != TU_SIZE) begin
+                    p_fe[pk] = 1'b1;
+                end
+                w_tu_pos = (w_tu_pos == TU_SIZE-1) ? {$clog2(TU_SIZE){1'b0}}
+                                                   : w_tu_pos + 1'b1;
+            end
+        end
+
+        // gate by next-cycle running (start transition mirrors the
+        // sequential block's `if (start_ok) running <= 1`)
+        // Only the side-effect decisions need the running gate: the sym
+        // path muxes on dec_* strictly under `if (running)` in stage B, so
+        // zeroing p_px/p_fs/p_fe here only added RESET arcs to the end of
+        // the walk cone (they were the worst clk_sym paths at 1080p).
+        if (!(running || start_ok)) begin
+            p_fetch = 1'b0;
+            p_prime = 1'b0;
+            p_load0 = 1'b0;
+        end
+    end
+
+    reg fetch_r, prime_r, load0_r;
+    // ------------------------------------------------------------------
+    // OFFSET-WRAP FIX (proposed): frame-boundary SOF verification.
+    // The FIFO's start-of-frame marker must arrive exactly at the
+    // frame's first prime fetch. Any word slip (overflow drop or
+    // underrun miss during a retrain battle) breaks the invariant; on
+    // detection fall back to the !running re-alignment sequence
+    // (discard to SOF, PREFILL, restart at a frame boundary) instead of
+    // rendering a permanently rotated image. Presents downstream as a
+    // normal source_ready-drop video restart.
+    // ------------------------------------------------------------------
+    wire frame_first_fetch = prime_r && (line_num == {$clog2(V_TOTAL){1'b0}});
+    wire sof_mismatch = fifo_rvalid &&
+                        ((frame_first_fetch && !fifo_rsof) ||
+                         (fetch_r && !frame_first_fetch && fifo_rsof));
+    // A starved fetch (underrun) is itself a slip event: the walk
+    // advances without consuming. A frame-phase disturbance can settle
+    // into a frame-aligned net-zero drop/miss limit cycle that the SOF
+    // check alone cannot see (offset 0 but per-line wobble) — every
+    // such state exhibits starved fetches, so restarting on the first
+    // one heals it too.
+    wire fetch_starved = fetch_r && !fifo_rvalid;
+    reg [1:0] dec_px_r, dec_fs_r, dec_fe_r;
+    reg [1:0] dec_ph_r [0:1];
+    initial begin
+        fetch_r = 1'b0; prime_r = 1'b0; load0_r = 1'b0;
+        dec_px_r = 2'b00; dec_fs_r = 2'b00; dec_fe_r = 2'b00;
+        dec_ph_r[0] = 2'd0; dec_ph_r[1] = 2'd0;
+        e_phase = 2'd0; e_tu_pos = 0; e_tu_valid = 0; e_err = 0;
+    end
+    always @(posedge clk) begin
+        if (reset) begin
+            fetch_r  <= 1'b0;
+            prime_r  <= 1'b0;
+            load0_r  <= 1'b0;
+            dec_px_r <= 2'b00;
+            dec_fs_r <= 2'b00;
+            dec_fe_r <= 2'b00;
+            e_phase  <= 2'd0;
+            e_tu_pos <= 0;
+            e_tu_valid <= 0;
+            e_err    <= 0;
+        end else begin
+            fetch_r  <= p_fetch;
+            prime_r  <= p_prime;
+            load0_r  <= p_load0;
+            dec_px_r <= p_px;
+            dec_fs_r <= p_fs;
+            dec_fe_r <= p_fe;
+            dec_ph_r[0] <= p_ph[0];
+            dec_ph_r[1] <= p_ph[1];
+            // state applying to the cycle after next: zero when the next
+            // cycle is a line end (mirrors the sequential eol override)
+            if (nc == CYCLES_PER_LINE-1) begin
+                e_phase    <= 2'd0;
+                e_tu_pos   <= 0;
+                e_tu_valid <= 0;
+                e_err      <= 0;
+            end else begin
+                e_phase    <= w_phase;
+                e_tu_pos   <= w_tu_pos;
+                e_tu_valid <= w_tu_valid;
+                e_err      <= w_err;
+            end
+        end
+    end
+
+    // ------------------------------------------------------------------
+    // Live datapath: pure muxing on registered flags/decisions. The word
+    // for slot 1 switches to the freshly-popped FIFO head when slot 0
+    // consumed the previous word (load0_r), mirroring the shadow walk's
+    // intra-cycle c_word update; a prime load (prime_r) applies to both.
+    // ------------------------------------------------------------------
+    reg [8:0]  d_slot_syms [0:1][0:3];
+    reg [8:0]  d_sym [0:3];
+    reg [24*LANE_COUNT-1:0] d_word;
+    reg [23:0] d_lane_pix;
+    integer dk, dl;
+
+    always @* begin
+        for (dk = 0; dk < 2; dk = dk + 1) begin
+            d_word = (prime_r || (dk == 1 && load0_r)) ? fifo_rdata : cur_word;
+            for (dl = 0; dl < 4; dl = dl + 1)
+                d_sym[dl] = DUMMY;
+            if (running) begin
+                if (f_be[dk]) begin
+                    for (dl = 0; dl < LANE_COUNT; dl = dl + 1)
+                        d_sym[dl] = BE;
+                end else if (f_tu[dk]) begin
+                    if (dec_px_r[dk]) begin
+                        for (dl = 0; dl < LANE_COUNT; dl = dl + 1) begin
+                            d_lane_pix = d_word[24*dl +: 24];
+                            case (dec_ph_r[dk])
+                                2'd0:    d_sym[dl] = {1'b0, d_lane_pix[23:16]};
+                                2'd1:    d_sym[dl] = {1'b0, d_lane_pix[15:8]};
+                                default: d_sym[dl] = {1'b0, d_lane_pix[7:0]};
+                            endcase
+                        end
+                    end else if (dec_fs_r[dk]) begin
+                        for (dl = 0; dl < LANE_COUNT; dl = dl + 1)
+                            d_sym[dl] = FS;
+                    end else if (dec_fe_r[dk]) begin
+                        for (dl = 0; dl < LANE_COUNT; dl = dl + 1)
+                            d_sym[dl] = FE;
+                    end
+                end else if (f_bs[dk]) begin
+                    for (dl = 0; dl < LANE_COUNT; dl = dl + 1)
+                        d_sym[dl] = BS;
+                end else if (f_vb[dk] == 2'd1) begin
+                    for (dl = 0; dl < LANE_COUNT; dl = dl + 1) d_sym[dl] = {1'b0, vbid_byte};
+                end else if (f_vb[dk] == 2'd2) begin
+                    for (dl = 0; dl < LANE_COUNT; dl = dl + 1) d_sym[dl] = {1'b0, mvid_byte};
+                end else if (f_vb[dk] == 2'd3) begin
+                    for (dl = 0; dl < LANE_COUNT; dl = dl + 1) d_sym[dl] = {1'b0, maud_byte};
+                end
+            end
+            d_slot_syms[dk][0] = d_sym[0];
+            d_slot_syms[dk][1] = d_sym[1];
+            d_slot_syms[dk][2] = d_sym[2];
+            d_slot_syms[dk][3] = d_sym[3];
+        end
+    end
+
+    // synthesis translate_off
+    reg [24*LANE_COUNT-1:0] cur_word_shadow;
+    always @(posedge clk) begin
+        if (!reset && running && (fetch_r !== c_fetch)) begin
+            $display("FATAL: video_stream_packer fetch prediction diverged: fetch_r=%b c_fetch=%b line=%0d cycle=%0d",
+                     fetch_r, c_fetch, line_num, line_cycle);
+            $fatal(1);
+        end
+        // shadow of the original `cur_word <= c_word` update: proves the
+        // fetch_r-gated load is behaviourally identical
+        if (!reset && running)
+            cur_word_shadow <= c_word;
+        if (!reset && running &&
+                ({d_slot_syms[1][3], d_slot_syms[1][2], d_slot_syms[1][1], d_slot_syms[1][0],
+                  d_slot_syms[0][3], d_slot_syms[0][2], d_slot_syms[0][1], d_slot_syms[0][0]} !==
+                 {slot_syms[1][3], slot_syms[1][2], slot_syms[1][1], slot_syms[1][0],
+                  slot_syms[0][3], slot_syms[0][2], slot_syms[0][1], slot_syms[0][0]})) begin
+            $display("FATAL: video_stream_packer decision datapath diverged from shadow walk at line=%0d cycle=%0d",
+                     line_num, line_cycle);
+            $fatal(1);
+        end
+        if (!reset && running && (cur_word_shadow !== cur_word)) begin
+            $display("FATAL: video_stream_packer cur_word diverged from shadow at line=%0d cycle=%0d",
+                     line_num, line_cycle);
+            $fatal(1);
+        end
+    end
+    // synthesis translate_on
+
+    // Pop from a registered decision (fetch_r == c_fetch by construction)
+    assign fifo_rd = !reset && (running ? fetch_r
+                     : (fifo_rvalid && !fifo_rsof));  // pre-start: discard non-SOF words
+
+    // ------------------------------------------------------------------
+    // Sequential state
+    // ------------------------------------------------------------------
+    initial begin
+        ready       = 1'b0;
+        data        = 73'b0;
+        capture_arm = 1'b0;
+        sdp_gap     = 1'b0;
+        underrun    = 1'b0;
+        running     = 1'b0;
+        line_cycle  = 0;
+        line_num    = 0;
+        phase       = 2'd0;
+        tu_pos      = 0;
+        tu_valid    = 0;
+        bres_err    = 0;
+    end
+
+    always @(posedge clk) begin
+        if (reset) begin
+            running     <= 1'b0;
+            ready       <= 1'b0;
+            capture_arm <= 1'b0;
+            underrun    <= 1'b0;
+            data        <= 73'b0;
+            sdp_gap     <= 1'b0;
+            frame_pulse <= 1'b0;
+            line_cycle  <= 0;
+            line_num    <= 0;
+            start_ok    <= 1'b0;
+            f_be        <= 2'b00;
+            f_tu        <= 2'b00;
+            f_bs        <= 2'b00;
+            f_nl        <= 2'b00;
+            f_vb[0]     <= 2'd0;
+            f_vb[1]     <= 2'd0;
+            f_prime     <= 1'b0;
+        end else begin
+            capture_arm <= 1'b1;   // pixel domain may start at its next frame
+            frame_pulse <= running && (line_cycle == CYCLES_PER_LINE-1) &&
+                           (line_num == V_VISIBLE-1);
+
+            // region flags for the NEXT cycle's two symbol slots
+            f_be[0] <= nl_active && ((DATA_START-1) % 2 == 0) &&
+                       (s0n == DATA_START-1);
+            f_be[1] <= nl_active && ((DATA_START-1) % 2 == 1) &&
+                       (s1n == DATA_START-1);
+            f_tu[0] <= nl_active && (s0n >= DATA_START) && (s0n < BS_POS);
+            f_tu[1] <= nl_active && (s1n >= DATA_START) && (s1n < BS_POS);
+            f_bs[0] <= (s0n == BS_POS);
+            f_bs[1] <= (s1n == BS_POS);
+            f_nl[0] <= (s0n != BS_POS-1);
+            f_nl[1] <= (s1n != BS_POS-1);
+            f_vb[0] <= pf_vb0;   // = vsel(s0n): registered a cycle early
+            f_vb[1] <= pf_vb1;   //   from the exact two-step-ahead counters
+            f_prime <= running && nl_active && (nc == (DATA_START/2)-1);
+
+            if (!running) begin
+                data    <= {1'b0, {4{DUMMY, DUMMY}}};
+                ready   <= 1'b0;
+                sdp_gap <= 1'b0;
+                // conditions are stable until the head word is popped, so
+                // acting one cycle late keeps frame alignment intact
+                start_ok <= fifo_rvalid && fifo_rsof && (fifo_rlevel >= PREFILL);
+                if (start_ok) begin
+                    running    <= 1'b1;
+                    line_cycle <= 0;
+                    line_num   <= 0;
+                end
+            end else begin
+                for (l = 0; l < 4; l = l + 1)
+                    data[18*l +: 18] <= {d_slot_syms[1][l], d_slot_syms[0][l]};
+
+                // switch point: vblank lines, in the dummy region before BS
+                data[72] <= (!is_active_line) &&
+                            ({line_cycle, 1'b0} > 8) &&
+                            ({line_cycle, 1'b0} < BS_POS - 4);
+
+                // SDP-safe gap (Phase 3 hook)
+                sdp_gap <= ({line_cycle, 1'b0} >= GAP_START) &&
+                           ({line_cycle, 1'b0} <  GAP_END);
+
+                ready <= 1'b1;
+                if (fetch_r && !fifo_rvalid)
+                    underrun <= 1'b1;
+                // c_word ends the cycle as (c_fetch ? fifo_rdata : cur_word)
+                // and fetch_r == c_fetch (predictor invariant, checked in
+                // sim below) — loading from fetch_r keeps the wide CE off
+                // the deep TU-walk cone (it was the next critical path).
+                if (fetch_r)
+                    cur_word <= fifo_rdata;
+
+                if (line_cycle == CYCLES_PER_LINE-1) begin
+                    line_cycle <= 0;
+                    line_num   <= (line_num == V_TOTAL-1) ? {$clog2(V_TOTAL){1'b0}}
+                                                          : line_num + 1'b1;
+                end else begin
+                    line_cycle <= line_cycle + 1'b1;
+                end
+
+                // OFFSET-WRAP FIX: pixel-vs-framing slip detected — stop
+                // streaming and re-align at the next frame start. The
+                // counters are zeroed so the pre-start flag pipeline
+                // recomputes from the same state as after a reset (they
+                // freeze while !running; leaving them at mid-frame
+                // values would leak stale prime/fetch decisions into
+                // the first cycles of the restart). Placed after the
+                // counter increment so the zeroing wins.
+                if (sof_mismatch || fetch_starved) begin
+                    running    <= 1'b0;
+                    ready      <= 1'b0;
+                    start_ok   <= 1'b0;
+                    line_cycle <= 0;
+                    line_num   <= 0;
+                end
+            end
+        end
+    end
+
+endmodule

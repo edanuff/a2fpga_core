@@ -48,6 +48,7 @@ static bool     s_keepsram = false;
 static char     s_path[160];
 static char     s_msg[41];
 static uint32_t s_size;
+static uint32_t s_want_id;   /* IDCODE the checked image was built for */
 static bool     s_dirty = true;
 static uint8_t  s_page[FPU_PAGE];
 static uint8_t  s_back[FPU_PAGE];
@@ -136,6 +137,69 @@ void fpgaupdate_set_keepsram(bool on)
     s_keepsram = on;
 }
 
+/* Erase the bitstream region of the config flash WITHOUT touching the
+ * running fabric. Recovery for a corrupt flash image: the GW5A's MSPI
+ * auto-boot retry loop owns the bus and wedges every external flash tool
+ * (openFPGALoader's flash entry resets the fabric, re-arming the loop —
+ * live-hit on board #1, 2026-08-11). Precondition: a good bitstream has
+ * been SRAM-loaded over JTAG, so the boot engine is satisfied and the
+ * IDCODE reads back. keepsram entry + erase + leave; the fabric (and its
+ * heartbeat) keeps running throughout. */
+bool fpgaupdate_erase_bitstream_region(void)
+{
+    fpga_jtag_init_pins();
+
+    uint32_t id = fpga_jtag_idcode();
+    if (id != FPGA_JTAG_IDCODE_GW5AT60 && id != FPGA_JTAG_IDCODE_GW5AST138) {
+        ESP_LOGE(TAG, "erase: IDCODE %08lx not a known SOM — fabric not "
+                      "alive; SRAM-load a bitstream first", (unsigned long)id);
+        osd_log("FPGA ERASE: NO LIVE FABRIC");
+        fpga_jtag_release_pins();
+        return false;
+    }
+    if (!fpga_jtag_flash_enter_keepsram()) {
+        fpga_jtag_flash_leave();
+        fpga_jtag_release_pins();
+        osd_log("FPGA ERASE: SPI ENTRY FAILED");
+        return false;
+    }
+
+    /* Erase the FULL image region (4 MB), not just the header: after an
+     * INTERRUPTED external write the image tail is garbage, and the GW5A
+     * boot engine hunting for a sync word in it poisons JTAG access even
+     * with a configured fabric (board #1, 2026-08-11 late session).
+     *
+     * Empirical (same session): only the FIRST block erase after each
+     * SPI-mode entry completes; the second's status polls read garbage.
+     * So: re-enter SPI mode per block — one WREN+erase+poll per entry —
+     * skip blocks that fail, report the count, and let the caller re-run
+     * until zero failures. Slow (~2-3 min) but it converges. */
+    const uint32_t region = 64u * FPU_BLOCK;
+    uint32_t failed = 0;
+    fpga_jtag_flash_leave();             /* redo entry per block below */
+    for (uint32_t a = 0; a < region; a += FPU_BLOCK) {
+        fpga_jtag_reset();
+        if (!fpga_jtag_flash_enter_keepsram()) { failed++; continue; }
+        if (!flash_erase_block(a))
+            failed++;
+        fpga_jtag_flash_leave();
+        if ((a % (FPU_BLOCK * 16u)) == 0)
+            osd_log("FPGA ERASE: %luK/%luK (%lu bad)",
+                    (unsigned long)(a >> 10), (unsigned long)(region >> 10),
+                    (unsigned long)failed);
+        vTaskDelay(1);                   /* feed the watchdog */
+    }
+
+    bool ok = (failed == 0u);
+    fpga_jtag_release_pins();
+    if (ok)
+        osd_log("FPGA ERASE: DONE, ALL 64 BLOCKS BLANK");
+    else
+        osd_log("FPGA ERASE: %lu/64 BLOCKS FAILED - RERUN",
+                (unsigned long)failed);
+    return ok;
+}
+
 void fpgaupdate_cancel(void)
 {
     if (s_state == FPU_READY || s_state == FPU_ERROR) {
@@ -183,9 +247,11 @@ static bool check_file(void)
         fail("BAD FILE SIZE");
         return false;
     }
-    /* Gowin sync word, then the embedded GW5AT-60 IDCODE somewhere in the
-     * header window (GW5A .fs header layout differs from GW2A, so scan
-     * rather than assume a fixed offset from the sync word). */
+    /* Gowin sync word, then the embedded SOM IDCODE (GW5AT-60 or
+     * GW5AST-138) somewhere in the header window (GW5A .fs header layout
+     * differs from GW2A, so scan rather than assume a fixed offset from
+     * the sync word). The matched IDCODE is kept in s_want_id and the live
+     * chip must equal it at install time. */
     int sync = -1;
     for (int i = 0; i + 2 <= (int)br; i++) {
         if (hdr[i] == 0xA5 && hdr[i + 1] == 0xC3) {
@@ -197,15 +263,15 @@ static bool check_file(void)
         fail("NOT A GOWIN BITSTREAM");
         return false;
     }
-    bool id_found = false;
-    for (int i = 0; i + 4 <= (int)br; i++) {
-        if (hdr[i] == 0x00 && hdr[i + 1] == 0x01 &&
-            hdr[i + 2] == 0x48 && hdr[i + 3] == 0x1B) {
-            id_found = true;
-            break;
-        }
+    s_want_id = 0;
+    for (int i = 0; i + 4 <= (int)br && !s_want_id; i++) {
+        if (hdr[i] != 0x00 || hdr[i + 1] != 0x01 || hdr[i + 3] != 0x1B)
+            continue;
+        uint32_t w = 0x00010000u | ((uint32_t)hdr[i + 2] << 8) | 0x1Bu;
+        if (w == FPGA_JTAG_IDCODE_GW5AT60 || w == FPGA_JTAG_IDCODE_GW5AST138)
+            s_want_id = w;
     }
-    if (!id_found) {
+    if (!s_want_id) {
         fail("BITSTREAM IS FOR ANOTHER FPGA");
         return false;
     }
@@ -230,9 +296,10 @@ static void install(void)
 
     /* Probe the live FPGA before killing it. */
     uint32_t id = fpga_jtag_idcode();
-    if (id != FPGA_JTAG_IDCODE_GW5AT60) {
+    if (id != s_want_id) {
         fclose(f);
-        ESP_LOGE(TAG, "live IDCODE %08lx != GW5AT-60", (unsigned long)id);
+        ESP_LOGE(TAG, "live IDCODE %08lx != image's %08lx",
+                 (unsigned long)id, (unsigned long)s_want_id);
         fail("JTAG IDCODE MISMATCH");
         return;
     }

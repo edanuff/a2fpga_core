@@ -128,3 +128,17 @@ window). Related: the ESP32's bit-bang GW5A SPI-flash path (fpgaupdate /
 fpgaflash CLI) is NOT yet silicon-validated — its status reads returned
 busy/0xFF in both entry modes; do not rely on it until debugged against
 openFPGALoader's working 500 kHz sequence.
+
+## GW5AT: GROUP/GRP_LOC region constraints can make the placer thrash for HOURS
+
+Attempting to close `clk_sym` (135 MHz DP symbol domain) timing on the
+a2mega by pinning the DP logic into a placement region
+(`GROUP`/`GRP_LOC R[26:46]C[38:70]`) sent Gowin PnR (V1.9.12) into
+pathological legalization: ~50 minutes with the CDC FIFO's 13 BSRAMs in
+the group, and **9+ hours** (killed) with a logic-only group of ~2k
+LUT/FF. A healthy full a2mega build is ~15 min. Do not use region
+constraints on this device/toolchain; close timing in RTL instead
+(registered decision pipelining — see `hdl/displayport/video/
+video_stream_packer.v`). `tools/build.sh` now enforces
+`BUILD_TIMEOUT` (default 30 min) so a thrashing PnR fails loudly instead
+of eating a workday.

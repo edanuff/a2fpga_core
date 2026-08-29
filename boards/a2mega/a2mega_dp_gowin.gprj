@@ -1,0 +1,28 @@
+<?xml version="1" encoding="UTF-8"?>
+<!DOCTYPE gowin-fpga-project>
+<Project>
+    <Template>FPGA</Template>
+    <Version>5</Version>
+    <Device name="GW5AT-60B" pn="GW5AT-LV60PG484AC1/I0">gw5at60b-002</Device>
+    <FileList>
+        <File path="hdl/dp_gowin/serdes_edp/dp_serdes.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_gowin/serdes_edp/edp_phy/edp_phy.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_gowin/serdes_edp/upar_arbiter/upar_arbiter.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_gowin/edp_encoder/edp_encoder_top.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_gowin/edp_encoder/edp_encoder_wrapper.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_gowin/edp_phy_bank.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_gowin/dp_gowin_transmitter.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_gowin/a2mega_dp_gowin_top.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/aux_channel.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/aux_interface.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/channel_managemnt.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/dp_aux_messages.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/dp_register_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/edid_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/hotplug_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/link_signal_mgmt.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/gowin_plls.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_gowin/a2mega_dp_gowin.cst" type="file.cst" enable="1"/>
+        <File path="hdl/dp_gowin/a2mega_dp_gowin.sdc" type="file.sdc" enable="1"/>
+    </FileList>
+</Project>

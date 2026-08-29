@@ -1,7 +1,9 @@
 # ESP32-S3 Arduino CLI Makefile
 # A2FPGA ESP32 co-processor firmware (a2mega board)
 
-# Configuration - ESP32-S3-MINI-1-N8 module on the a2mega (8M flash, no PSRAM)
+# Module varies by board revision (BOARD_REV below):
+#   1.0a3   ESP32-S3-MINI-1-N4R2 — 4 MB flash + 2 MB quad PSRAM
+#   1.0a2x  ESP32-S3-MINI-1-N8   — 8 MB flash, no PSRAM
 BOARD = esp32s3
 PORT ?= /dev/cu.usbmodem*
 BAUD = 115200
@@ -10,19 +12,38 @@ PROJECT_NAME = a2fpga_esp32
 # Arduino CLI executable (assumes it's in PATH)
 ARDUINO_CLI = arduino-cli
 
-# Board FQBN with specific settings
+# Board revision (see board_pins.h): 103 = 1.0a3 (USB-C DP, N4R2 module),
+# 102 = 1.0a2/1.0a2a (N8 module). Set BOARD_REV=102 to build for old boards.
+BOARD_REV ?= 103
+ifeq ($(BOARD_REV),102)
 FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=8M,PSRAM=disabled,PartitionScheme=default_8MB
+REV_FLAGS = --build-property compiler.c.extra_flags=-DA2MEGA_BOARD_REV=102 \
+            --build-property compiler.cpp.extra_flags=-DA2MEGA_BOARD_REV=102
+else
+# no_ota partitions: 2 MB app + 1.875 MB "spiffs" (LittleFS) — the largest
+# FS a 4 MB part allows with app headroom. No OTA pair: the ESP32 reflashes
+# over its own USB-C. FPGA update-from-file streams the bitstream to JTAG
+# (staging a ~2.6 MB image in MCU flash is wasteful and doesn't fit here);
+# PC-driven JTAG via the bridge is unaffected. The board footprint accepts
+# either MINI variant — an N8-fitted 1.0a3 builds with BOARD_REV=103 plus
+# the 102 flash settings if that ever comes up.
+FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=4M,PSRAM=enabled,PartitionScheme=no_ota
+REV_FLAGS =
+endif
 
 # Source files
 SKETCH = a2fpga_esp32.ino
-CPP_FILES = a2fpga_jtag.cpp
-C_FILES = a2fpga_ospi_link.c a2fpga_spi_service.c fpga_link.c fpga_screen.c \
+CPP_FILES = a2fpga_jtag.cpp usbc_glue.cpp
+C_FILES = a2fpga_ospi_link.c a2fpga_spi_service.c fpga_link.c fpga_screen.c wedge_watch.c \
           osd_console.c menu.c settings.c disk.c gcr_dsk.c w5100.c \
-          wifi_bridge.c fpga_jtag.c fpgaupdate.c ftpd.c
-HEADER_FILES = a2fpga_jtag.h a2fpga_ospi_link.h a2fpga_spi_service.h \
+          wifi_bridge.c fpga_jtag.c fpgaupdate.c fpgastream.c ftpd.c telnetd.c \
+          fusb302.c usbc_port.c esp32s3_integration.c
+HEADER_FILES = a2fpga_jtag.h a2fpga_ospi_link.h a2fpga_spi_service.h wedge_watch.h \
                a2fpga_regs.h fpga_link.h fpga_screen.h osd_console.h menu.h \
                net_status.h settings.h disk.h gcr_dsk.h w5100.h \
-               wifi_bridge.h fpga_jtag.h fpgaupdate.h ftpd.h
+               wifi_bridge.h fpga_jtag.h fpgaupdate.h fpgastream.h ftpd.h telnetd.h \
+               board_pins.h fusb302.h usb_pd.h usbc_port.h usbc_glue.h \
+               esp32s3_integration.h
 ALL_SOURCES = $(SKETCH) $(CPP_FILES) $(C_FILES) $(HEADER_FILES)
 
 # Default target
@@ -39,7 +60,7 @@ init:
 .PHONY: compile
 compile:
 	@echo "Compiling $(PROJECT_NAME) with files: $(ALL_SOURCES)"
-	$(ARDUINO_CLI) compile --fqbn $(FQBN) --build-path ./build $(SKETCH)
+	$(ARDUINO_CLI) compile --fqbn $(FQBN) $(REV_FLAGS) --build-path ./build $(SKETCH)
 
 # Upload to ESP32
 .PHONY: upload

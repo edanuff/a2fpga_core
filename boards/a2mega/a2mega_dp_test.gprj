@@ -1,0 +1,48 @@
+<?xml version="1" encoding="UTF-8"?>
+<!DOCTYPE gowin-fpga-project>
+<Project>
+    <Template>FPGA</Template>
+    <Version>5</Version>
+    <Device name="GW5AT-60B" pn="GW5AT-LV60PG484AC1/I0">gw5at60b-002</Device>
+    <FileList>
+        <File path="hdl/dp_test/dp_test_die_pkg_60b.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_gowin_defines.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/dp_serdes/dp_phy/dp_phy.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/dp_serdes/dp_serdes.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/60B/dp_serdes/upar_arbiter/upar_arbiter.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_test/a2mega_dp_test_top.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/audio/audio_sample_buffer.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/audio/maud_measure.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/audio/sdp_engine.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/aux_channel.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/aux_interface.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/channel_managemnt.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/dp_aux_messages.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/dp_register_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/edid_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/hotplug_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/link_signal_mgmt.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/idle_pattern_inserter.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/insert_training_pattern.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/main_stream_processing.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/scrambler_all_channels.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/scrambler_reset_inserter.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/skew_channels.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/dp_transmitter.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/afe_adjust_seq.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/benz_encode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/enc_8b10b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/lane_encoder_8b10b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/csr_replay_rom_lut_60b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/transceiver_bank_gowin.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/gowin_plls.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/dp_video_timing.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/msa_inserter_1ch.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/msa_inserter_2ch.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/msa_inserter_4ch.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/pixel_cdc_fifo.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/video_stream_packer.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_test/a2mega_dp_test.cst" type="file.cst" enable="1"/>
+        <File path="hdl/dp_test/a2mega_dp_test.sdc" type="file.sdc" enable="1"/>
+    </FileList>
+</Project>

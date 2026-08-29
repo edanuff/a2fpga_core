@@ -11,10 +11,21 @@ extern "C" {
 #endif
 
 // GW5AT-60 JTAG IDCODE (openFPGALoader fpga_list)
-#define FPGA_JTAG_IDCODE_GW5AT60 0x0001481Bu
+#define FPGA_JTAG_IDCODE_GW5AT60   0x0001481Bu
+// GW5AST-138 JTAG IDCODE (read from the IDE-emitted 138B bitstream header;
+// the carrier accepts either SOM). Image checks derive the expected IDCODE
+// from the bitstream itself and require the live chip to match it, so the
+// wrong-die combination is refused in both directions.
+#define FPGA_JTAG_IDCODE_GW5AST138 0x0001081Bu
 
 void     fpga_jtag_init_pins(void);
 void     fpga_jtag_release_pins(void);
+
+// Provided by a2fpga_jtag.cpp: hand the JTAG pads between the USB-JTAG
+// peripheral (PC bridge) and plain GPIO (bit-bang). init_pins/release_pins
+// call these — bit-banging while the bridge owns the matrix reaches nothing.
+void     fpga_usb_jtag_bridge_release(void);
+void     fpga_usb_jtag_bridge_restore(void);
 void     fpga_jtag_reset(void);
 uint32_t fpga_jtag_idcode(void);
 uint32_t fpga_jtag_status(void);
@@ -35,6 +46,9 @@ void fpga_jtag_flash_read(uint32_t addr, uint8_t *dst, uint32_t n);
 
 // Leave SPI mode and reconfigure the FPGA from the external flash.
 void fpga_jtag_reload(void);
+
+// Leave SPI mode WITHOUT reloading: the running SRAM fabric survives.
+void fpga_jtag_flash_leave(void);
 
 #ifdef __cplusplus
 }
