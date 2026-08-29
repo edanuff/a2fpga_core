@@ -819,9 +819,24 @@ cycles without an FPGA reboot (counters persist), and with hpd-reset
 OFF the ladder re-establishes across hub cycles with ZERO counted
 teardowns. The AFE-clean attach baseline capture is afe_clean_attach.csv.
 
-Remaining for the AFE build: Ugreen row (the strict-converter payoff
-test), good-board AFE row, then AFE-60B becomes the 60K production
-candidate.
+UGREEN ROW on the AFE build (acquitted board): 5/5 screen success —
+2 clean, 3 blink-recover. Both hubs now validated on the AFE build.
+
+OPEN ITEM (top of queue): 60K BLINK RATE. 60K boards blink on ~40-60%
+of cycles vs ~20% on the 138K — same downstream class (DP link proven
+solid through it), same hubs/monitor, but a real rate difference.
+Discriminator queue for next session, cheapest first:
+1. Fangor row (monitor swap): blinks gone => Sceptre HDMI-resync
+   sensitivity, not ours.
+2. ESP32 firmware parity (60K boards run August fw; HPD-via-ESP32
+   pulse handling differs from the 138K board's current fw).
+3. HDMI cable swap.
+4. Jitter angle: DP link can be bit-perfect while the hub's HDMI-side
+   recovered clock chokes — 60K die PLL/jitter vs 138K; downspread is
+   currently OFF (DOWNSPREAD_CTRL=00); a downspread-ON A/B is one
+   build away.
+Good-board AFE confirmation row also pending; then 2a16481c is the
+60K production candidate.
 
 
 Suspects cleared by static/sim audit before step 5 flew:
