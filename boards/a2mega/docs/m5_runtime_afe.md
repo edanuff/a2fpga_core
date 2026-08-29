@@ -101,9 +101,13 @@ csr_replay_rom_60b.svh).
 2. Bench validation before automation: gateware hook to fire a stored
    sequence on command (telnet-triggered via ESP32/OSPI register) —
    apply swing changes on a live link, watch C:/Y:/A: telemetry.
-3. 60K equivalence: repeat the dialog exports from a 60K project
-   session; verify the same register family/stride (per-die check —
-   do NOT assume).
+3. ~~60K equivalence~~ — **DONE 08-28, dual-source**: (a) the 60B boot
+   csr's generational diff (F000/0800/0110 block at 8084xx/8085xx);
+   (b) dialog exports `hdl/gowin/60B/dp_serdes/txafe_q0l23_*.csr`
+   (incl. empty-auto negative evidence). Both agree exactly; the
+   txlev-13 E000/D000 boot-vs-dialog off-by-one reproduces on the 60B.
+   Lane bases = 0x808400 (die lane 2) / 0x808500 (die lane 3);
+   ENABLE_AFE_ADJUST=1 in dp_test_die_pkg_60b.
 
 ## Provenance
 

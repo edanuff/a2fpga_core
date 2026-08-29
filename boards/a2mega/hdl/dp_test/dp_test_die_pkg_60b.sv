@@ -13,10 +13,15 @@
 // registers on the 60B die (user review item 1, 08-21).
 ///////////////////////////////////////////////////////////////////////////////
 package dp_test_die_pkg;
-    // GW5AT-60B (SOM2 / board B1): M5 AFE adjust OFF — DRP lane bases for
-    // this die are unverified. Bases below are placeholders (unused while
-    // ENABLE_AFE_ADJUST = 0); fill from a verified 60B .csr before enabling.
-    localparam int          ENABLE_AFE_ADJUST = 0;
-    localparam logic [23:0] AFE_LANE_BASE0    = 24'h000000;
-    localparam logic [23:0] AFE_LANE_BASE1    = 24'h000000;
+    // GW5AT-60B: M5 AFE adjust ON (08-28) — lane bases DUAL-SOURCE
+    // VERIFIED to the 138B standard: (1) boot-emission generational diff
+    // in dp_serdes.csr (F000/0800/0110 block at 8084xx/8085xx), and
+    // (2) IDE Reconfiguration-dialog exports txafe_q0l23_*.csr — both
+    // agree exactly (incl. the known boot-vs-dialog txlev-13 E000/D000
+    // off-by-one reproducing on this die). Bases = die lanes 2 (ML0)
+    // and 3 (ML1), stride 0x100, offsets +0x34/+0x38/+0xd8 identical
+    // to the 138B M5 model (m5_runtime_afe.md).
+    localparam int          ENABLE_AFE_ADJUST = 1;
+    localparam logic [23:0] AFE_LANE_BASE0    = 24'h808400;
+    localparam logic [23:0] AFE_LANE_BASE1    = 24'h808500;
 endpackage
