@@ -835,8 +835,23 @@ Discriminator queue for next session, cheapest first:
    recovered clock chokes — 60K die PLL/jitter vs 138K; downspread is
    currently OFF (DOWNSPREAD_CTRL=00); a downspread-ON A/B is one
    build away.
-Good-board AFE confirmation row also pending; then 2a16481c is the
-60K production candidate.
+BLINK-RATE QUESTION CLOSED (discriminators run to ground):
+- Fangor row (Ugreen hub): ALL blinks — identical to the 138K's own
+  validated Ugreen x Fangor behavior (Aug: 5/5 momentary blackouts).
+  Monitor exonerated; class is combo-determined.
+- Downspread A/B: INVALID BY HARDWARE — GTR12 QPLL does no SSC
+  (measured +7.5 ppm fixed); declaring spread that isn't real is the
+  Aug-refuted strict-CDR bug. Not a knob we have.
+- ESP32 firmware parity (bad board now runs CURRENT fw on both chips):
+  Anker x Sceptre n=5 = 3 clean / 2 blink — rate unchanged.
+- POOLED Anker x Sceptre rates: 60K boards ~23% (all rows tonight)
+  vs 138K ~20%. NO die-level anomaly; the 3/5 stretch was small-n.
+VERDICT: the blink is the hub's downstream HDMI re-sync personality
+(~1-in-5 on Anker x Sceptre, ~always on Fangor/Ugreen combos), proven
+DP-uninvolved, self-recovering, uniform across dies/boards/firmware.
+Characterized shipping behavior; any further chase targets the hub's
+HDMI side, not our stack. Good-board AFE row remains a formality;
+2a16481c stands as the 60K production candidate.
 
 
 Suspects cleared by static/sim audit before step 5 flew:
