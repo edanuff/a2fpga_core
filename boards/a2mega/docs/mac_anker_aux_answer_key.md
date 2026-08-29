@@ -960,7 +960,14 @@ the fleet may be zero-blink under the fix. Readback on this die: active
 lane ln2/ML1 = E000/0B00/0000 (die's own 804/auto confirmed); first
 readback build's dump-base threading missed dp_transmitter (ran 60B
 defaults — read ln2+inert ln3, never ln1/ML0); fixed build 9de12e16
-(0/0) flashing next for the complete lane pair.
+(0/0) FLASHED + VERIFIED: complete lane pair reads 808334/338/3D8 (ML0)
+and 808434/438/4D8 (ML1) all E000/0B00/0000 — the 138K's config, CSR,
+telemetry, and silicon all agree, both active lanes. BOTH DIES are now
+fully silicon-verified at the identical true baseline (804/auto, 1.2
+emission, one-way POR). Production candidates: 60K 806edae9, 138K
+9de12e16. Sign-off remainder: symbol-error counters (0x210-0x213) as
+the standing margin instrument, soak rows, and n>=5 on the 138K per
+combo under the POR fix (Ugreen 5/5 done).
 
 
 Suspects cleared by static/sim audit before step 5 flew:
