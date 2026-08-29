@@ -980,6 +980,10 @@ failure-tolerant by construction (can never tear down the link;
 sim-proven incl. NACK'd-read phase). FIRST BASELINE, good 60K board at
 true 804/auto on the hub: SE0:8000 SE1:8000 = VALID + ZERO errors both
 lanes while locked/streaming. The margin question now has a number.
+14-MINUTE SOAK: still SE0:8000 SE1:8000 — zero errors over ~4.5e11
+symbols (HBR x2) => measured symbol-error rate < ~1e-11, beating the
+DP 1e-9 BER compliance target by >2 orders of magnitude. The good 60K
+at the true baseline is compliance-grade, not marginal.
 Next: accumulation over a soak (counters reset at training per spec, so
 growth rate while established = the margin metric), per-hub baselines,
 138K twin (97442d1d), and the Guernok-recorded soak for blink/error
