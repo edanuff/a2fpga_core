@@ -629,6 +629,18 @@ module transceiver_bank_gowin #(
             // QPLL/refclk-adjacent lane blocks
             5'd22: dump_addr_rom = 24'h800658;
             5'd23: dump_addr_rom = 24'h800832;
+            // LIVE AFE-STATE READBACK (08-28 review): the actual TX AFE
+            // registers on the active lanes — swing (+0x34), FFE C1|CM
+            // (+0x38), control/manual/strobe (+0xd8). Ground truth for
+            // what the PHY is REALLY running (the telemetry M:/M1: fields
+            // are the sequencer's declared model, which with
+            // APPLY_ON_START=0 is an ASSUMPTION until an adjust fires).
+            5'd24: dump_addr_rom = 24'h808434;
+            5'd25: dump_addr_rom = 24'h808438;
+            5'd26: dump_addr_rom = 24'h8084d8;
+            5'd27: dump_addr_rom = 24'h808534;
+            5'd28: dump_addr_rom = 24'h808538;
+            5'd29: dump_addr_rom = 24'h8085d8;
             default: dump_addr_rom = 24'h000000;
         endcase
     endfunction

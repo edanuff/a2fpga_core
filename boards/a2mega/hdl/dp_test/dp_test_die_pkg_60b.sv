@@ -21,7 +21,14 @@ package dp_test_die_pkg;
     // off-by-one reproducing on this die). Bases = die lanes 2 (ML0)
     // and 3 (ML1), stride 0x100, offsets +0x34/+0x38/+0xd8 identical
     // to the 138B M5 model (m5_runtime_afe.md).
+    // LANE ORDERING (08-28 review correction): the bank's LANES_23 shim
+    // maps fabric word lane 0 (ML0) -> die lane 3 and ML1 -> die lane 2
+    // (transceiver_bank_gowin.v, board routing: DP0=ln3, DP1=ln2). The
+    // AFE bases are LOGICAL-lane-indexed, so BASE0 = die lane 3's block.
+    // (First cut had them reversed — harmless for symmetric requests
+    // like A:0022, wrong lane for asymmetric ones. Board-level
+    // asymmetric-request verification still pending.)
     localparam int          ENABLE_AFE_ADJUST = 1;
-    localparam logic [23:0] AFE_LANE_BASE0    = 24'h808400;
-    localparam logic [23:0] AFE_LANE_BASE1    = 24'h808500;
+    localparam logic [23:0] AFE_LANE_BASE0    = 24'h808500;  // ML0 -> die lane 3
+    localparam logic [23:0] AFE_LANE_BASE1    = 24'h808400;  // ML1 -> die lane 2
 endpackage

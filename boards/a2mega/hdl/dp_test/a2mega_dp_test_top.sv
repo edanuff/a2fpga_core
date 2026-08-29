@@ -605,7 +605,7 @@ module a2mega_dp_test_top (
             bit_idx <= 4'd10;              // force reload on next tick
             line_is_reg <= ~line_is_reg;   // alternate status / register
             if (line_is_reg)               // last line was a reg: advance
-                drp_idx_q <= (drp_idx_q == 5'd23) ? 5'd0 : drp_idx_q + 5'd1;
+                drp_idx_q <= (drp_idx_q == 5'd29) ? 5'd0 : drp_idx_q + 5'd1;  // 24-29 = live AFE regs
             reg_data_l <= drp_data;        // latch (quasi-static source)
             reg_addr_l <= drp_addr;
             reg_done_l <= drp_done;

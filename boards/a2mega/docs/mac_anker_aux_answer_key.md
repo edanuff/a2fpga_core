@@ -867,6 +867,38 @@ often (the campaign's recurring analog theme). NEXT-SESSION QUEUE:
 waits on the blink-rate work.
 
 
+## 08-28 late REVIEW CORRECTIONS (ed's independent assessment — both
+claims source-verified CORRECT):
+
+1. THE DIES WERE NEVER IN EQUIVALENT PHY CONFIGS. 60B .ipc bakes
+   900 mV + FFE-MANUAL C1=8; 138B .ipc bakes 804 mV + FFE-auto. With
+   AFE_APPLY_ON_START=0 the sequencer never writes at boot — M:/M1:
+   report the ASSUMED INIT values (M:12 = assumed VS2/PE0, not applied;
+   N:020 = 2 phase-done drops, ZERO DRP applications). So every "804 mV"
+   claim tonight for normal 60K boots was wrong: normal boots run the
+   vendor config (900/manual/C1=8) while declaring VS2/PE0 — a
+   declared-vs-actual mismatch of exactly the class the truthful-
+   declarations work targets. The ROM's 804 hand-edit applies ONLY on a
+   watchdog CSR replay (fabric replay is on-demand). The blink-rate
+   story must be re-read in this light; the 804-vs-900 A/B is ON HOLD
+   until config equivalence + observability exist.
+2. 60B AFE LANE BASES WERE REVERSED: ML0 -> die lane 3 (0x808500),
+   ML1 -> die lane 2 (0x808400) per the bank's LANES_23 shim. Fixed in
+   dp_test_die_pkg_60b (harmless for symmetric requests; wrong lane for
+   asymmetric). 138B ordering checked and was CORRECT (ML0 -> ln1).
+
+Actions landed tonight: lane-base fix; LIVE AFE READBACK instrumentation
+(dump_addr_rom idx 24-29 = both lanes' +0x34/+0x38/+0xd8, display cycle
+widened to 30 — CR telnet lines now show PHY ground truth); sims pass.
+QUEUED (ed's order): 60B PHY regen to the intended baseline (804/auto,
+IDE session) so config/CSR/telemetry/readback agree; board-level
+asymmetric-request lane test; DPCD 0x210-0x213 symbol-error counters
+(per-lane, validity-preserved) correlated with blinks; THEN the drive
+A/B with everything held constant. POR refclk qualification cleanup
+also still open (not the leading blink explanation). Policy: NO further
+AUX/recovery changes for the blink symptom.
+
+
 Suspects cleared by static/sim audit before step 5 flew:
 - SERDES/PHY wiring: transceiver bank, 60B IP dir, die pkg, CST, SDC all
   byte-unchanged across the GOOD->BAD boundary; the only TX-path file
