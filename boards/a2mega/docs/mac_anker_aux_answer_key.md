@@ -915,6 +915,28 @@ readback finally agree. Post-regen expected readback: +0x34=0xE000
 +0x38=0x0B00 (auto-inert), +0xd8 without the manual bit.
 
 
+## TRUE-BASELINE ROW (806edae9: 804/auto, 1.2 emission, POR fix)
+
+Readback verified E000/0B00/0000 both lanes (config = CSR = telemetry =
+silicon, first time ever on the 60K). Anker x Sceptre n=5: 5/5 FAST,
+ZERO BLINKS, C:0177 held (no WS4 C:8001 degradation), M:12 (now a
+truthful assumption), W:0. Same board/hub/monitor that blinked 40-60%
+at the hidden 900mV/manual config hours earlier.
+
+REVISED BLINK HYPOTHESIS (leading): the elevated 60K blink rate was
+OVERDRIVE — 900mV + 4.4dB FFE stressing the hub's DP RX into periodic
+HDMI-side re-syncs — masked by telemetry asserting 804. Matches the
+138K's low rate (it truly ran 804) and the August strict-converter
+overdrive theme. WS4's 1.2-emission failure also NOT reproducing at
+this baseline — consistent with its mechanism having been the
+por_n-follows-powerup bug (fixed: one-way boot-settle release), which
+under live 1.2 POR would have quad-POR'd on every TX power gap.
+
+Caveats: n=5; pending to confirm: Ugreen row at true 804/auto, larger
+Anker n, good-board parity flash, 138B readback build (its own live
+verification), symbol-error counters for margin measurement.
+
+
 Suspects cleared by static/sim audit before step 5 flew:
 - SERDES/PHY wiring: transceiver bank, 60B IP dir, die pkg, CST, SDC all
   byte-unchanged across the GOOD->BAD boundary; the only TX-path file
