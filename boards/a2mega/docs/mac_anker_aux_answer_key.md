@@ -939,10 +939,13 @@ config on the same bench same day. OVERDRIVE HYPOTHESIS CONFIRMED as
 the blink-rate mechanism. New benign observation at this baseline:
 ~1s of white screen before colorbars on Ugreen attach (hub rendering
 post-training idle before video start; no dropout — cosmetic, visible
-now that blinks are gone). Remaining for sign-off: good-board parity
-flash + row, 138B readback build (its own silicon verification),
-symbol-error counters (0x210-0x213) as the standing margin instrument,
-larger-n soak. 806edae9 = the new 60K production candidate.
+now that blinks are gone). GOOD-BOARD PARITY: 806edae9 readback-verified identical
+(E000/0B00/0000) and 5/5 fast on Anker x Sceptre (its hidden-config
+record was 2 blink + 1 slow in 12). TRUE-BASELINE TOTAL: 15/15
+zero-blink across BOTH boards x BOTH hubs. Remaining for sign-off:
+138B readback build (its own silicon verification), symbol-error
+counters (0x210-0x213) as the standing margin instrument, larger-n
+soak. 806edae9 = the 60K production candidate.
 
 
 Suspects cleared by static/sim audit before step 5 flew:
