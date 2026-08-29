@@ -527,9 +527,10 @@ optionally surface `dbg_afe` in a UART field for live telemetry.
    loop on marginal sinks, fire stored sequences on a live link via the
    telnet hook and watch C:/Y:/A: telemetry; the per-level A/B is also
    the empirical check of the C0=40−C1 FFE model.
-4. **60K equivalence**: LANE_BASE values are 138B-verified only. Repeat
-   the dialog export from a 60K project before enabling there (per-die
-   check — do NOT assume the register family/stride).
+4. ~~**60K equivalence**~~ — **DONE 08-28, dual-source** (boot-emission
+   generational diff + dialog exports txafe_q0l23_*.csr agree exactly;
+   same family/stride/encodings). 60B enabled with bases in LOGICAL
+   order: ML0 -> die ln3 (0x808500), ML1 -> die ln2 (0x808400).
 5. **INIT choice**: default INIT_VS=2 (804 mV) matches the proven
    baseline; the 900 mV cold-golden point is INIT_VS=3 (declares
    0x07 = vs3+MAX_SWING). The 804/900 cold A/B (test_log row 65) should

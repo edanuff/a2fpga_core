@@ -7,7 +7,7 @@ flashed** — the 138B bin built tonight is a review candidate.
 
 | # | Item | Disposition |
 |---|------|-------------|
-| 1 | 60K projects broken/unsafe (shared top enables AFE with 138K addresses; `afe_adjust_seq.v` missing from two gprjs) | **FIXED** (`2e6013f9`): per-project `dp_test_die_pkg` (60B = OFF + zero bases, 138B = ON + verified bases); shared top reads the package; file added to `a2mega_dp_test.gprj` and `a2mega.gprj`. Build verification: see §Builds. |
+| 1 | 60K projects broken/unsafe (shared top enables AFE with 138K addresses; `afe_adjust_seq.v` missing from two gprjs) | **FIXED** (`2e6013f9`): per-project `dp_test_die_pkg` (60B = OFF + zero bases, 138B = ON + verified bases) [SUPERSEDED 08-28: 60B now ON with dual-source-verified bases, ML0->ln3=0x808500 / ML1->ln2=0x808400]; shared top reads the package; file added to `a2mega_dp_test.gprj` and `a2mega.gprj`. Build verification: see §Builds. |
 | 2 | Per-lane requests ignored (lane 0's nibble applied to both lanes; one byte for every lane) | **PROPOSED, not applied** — propose-only diffs + sims in `hdl/displayport/sim/m5_proposed/` and `m5_perlane_proposal.md` (agent). Diffs are against `df553c79`; must be rebased onto the commit-on-ack sequencer (§2 below). Needs your review (shared `hdl/displayport/**`). |
 | 3 | Declares a setting before DRP applied it; `afe_busy` ignored | **FIXED** (`2e6013f9`): commit on successful completion only; timeout never commits; `afe_busy` holds the ladder's next lane-set message. |
 | 4 | No-INIT policy forgets state at every training end; assumes POR | **FIXED** (`2e6013f9`): state retained across training transitions; forgotten only on `phy_reinit` = PLL unlock \| PCS TX reset \| watchdog CSR replay. |

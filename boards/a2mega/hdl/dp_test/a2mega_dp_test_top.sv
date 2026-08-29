@@ -225,8 +225,9 @@ module a2mega_dp_test_top (
         // M5 (user-approved 08-21): honor ADJUST_REQUEST via DRP —
         // per-sink swing/pre-emphasis instead of a fixed goldilocks drive.
         // Die-specific: the enable and the DRP lane bases come from the
-        // per-project dp_test_die_pkg (138B = ON + verified bases; 60B =
-        // OFF until its DRP export is verified) — this top is shared.
+        // per-project dp_test_die_pkg — this top is shared. BOTH dies are
+        // ON with dual-source-verified bases since 08-28 (the earlier
+        // 60B-off rule is superseded; see the pkg headers).
         .ENABLE_AFE_ADJUST(dp_test_die_pkg::ENABLE_AFE_ADJUST),
         .AFE_LANE_BASE0   (dp_test_die_pkg::AFE_LANE_BASE0),
         .AFE_LANE_BASE1   (dp_test_die_pkg::AFE_LANE_BASE1),

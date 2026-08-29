@@ -6,11 +6,12 @@
 // Same package name, die-specific contents; the top reads
 // dp_test_die_pkg::* so it never hardcodes one die's feature set.
 //
-// Why: the M5 AFE sequencer writes die-specific SERDES DRP addresses. The
-// 138B lane bases are verified (m5_runtime_afe.md); the 60B's are NOT, so
-// the feature must be OFF on the 60B until its DRP export is verified —
-// a shared top enabling it with 138B addresses would write unverified
-// registers on the 60B die (user review item 1, 08-21).
+// Why: the M5 AFE sequencer writes die-specific SERDES DRP addresses, in
+// LOGICAL lane order. BOTH dies are dual-source verified (boot-emission
+// diff + IDE dialog exports; m5_runtime_afe.md): 60B ML0 -> die lane 3
+// (0x8085xx), ML1 -> die lane 2 (0x8084xx); 138B ML0 -> die lane 1
+// (0x8083xx), ML1 -> die lane 2 (0x8084xx). The 08-21 "60B unverified,
+// keep OFF" rule is SUPERSEDED (08-28 verification + review).
 ///////////////////////////////////////////////////////////////////////////////
 package dp_test_die_pkg;
     // GW5AST-138B (SOM / board B3): M5 AFE adjust ON (rows 75-78); lane

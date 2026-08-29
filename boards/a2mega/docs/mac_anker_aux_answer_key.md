@@ -793,8 +793,10 @@ the books: drive A/B on this die, 60B AFE lane bases.
 
 AFE-enabled 60B (commit 48326346, bin 2a16481c, timing 0/0 first roll)
 on the ACQUITTED board, Anker x Sceptre: locks fast every cycle with
-M:12/M1:2 (VS2+PE1 applied — identical signature to the 138K), N:020
-adjust events; first closed-loop adjust in a 60K die's history. Row:
+M:12/M1:2 [CORRECTED 08-29: = baseline-valid + VS2/PE0 ASSUMED — with
+AFE_APPLY_ON_START=0 nothing was applied; N:020 = two phase-done drops
+and ZERO DRP applications, not adjust activity. The "first closed-loop
+adjust" claim here is RETRACTED — see the review-corrections section.] Row:
 5-6 clean + 4 blinks in ~10.
 
 BLINK CLASS = DOWNSTREAM, wire-proven + instrumented:
