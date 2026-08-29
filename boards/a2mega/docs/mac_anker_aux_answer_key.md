@@ -899,6 +899,22 @@ also still open (not the leading blink explanation). Policy: NO further
 AUX/recovery changes for the blink symptom.
 
 
+## Live AFE readback — SILICON CONFIRMATION (74c67009 on the 60K)
+
+CR dump idx 24-29 (hex 18-1D), ordinary boot, colorbars up:
+  808434=0000F000  808438=00000800  8084D8=00000110
+  808534=0000F000  808538=00000800  8085D8=00000110
+= 900 mV (txlev 15) + FFE MANUAL C1=8 + manual/strobe latched, BOTH
+lanes — the vendor .ipc config, exactly per the 08-28 review. The
+declared VS2/PE0 and the assumed M:12 telemetry were both wrong about
+the physical state. Review item 1 (observability) COMPLETE. Next:
+item 2, 60B PHY regen to the intended 804/auto baseline (IDE session)
+so generated config, CSR sequence, telemetry assumptions, and this
+readback finally agree. Post-regen expected readback: +0x34=0xE000
+(boot-path encoding for 804 — the known E000/D000 generator quirk),
++0x38=0x0B00 (auto-inert), +0xd8 without the manual bit.
+
+
 Suspects cleared by static/sim audit before step 5 flew:
 - SERDES/PHY wiring: transceiver bank, 60B IP dir, die pkg, CST, SDC all
   byte-unchanged across the GOOD->BAD boundary; the only TX-path file
