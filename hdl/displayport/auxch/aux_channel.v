@@ -907,6 +907,11 @@ always @(posedge clk) begin
             lane_set_sent <= 1'b1;
             lane_set_last <= train_set_byte;
         end
+        // one increment per paced-retry entry (moved out of the AUX
+        // completion cone for timing: tx_rd_ptr->CE was the knife-edge)
+        if (state != train_wait && next_state == train_wait &&
+            train_retry_cnt != TRAIN_RETRY_CAP)
+            train_retry_cnt <= train_retry_cnt + 4'd1;
         if (next_state == reset || next_state == clock_training) begin
             lane_set_sent   <= 1'b0;
             train_retry_cnt <= 4'd0;   // fresh budget per training pass
@@ -1176,9 +1181,10 @@ always @(posedge clk) begin
                     next_state <= link_established;
                 end else if (POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 && train_st) begin
                     // short/garbled training-read reply: paced retry with
-                    // TX held, cheap retrain on budget exhaustion
+                    // TX held, cheap retrain on budget exhaustion (the
+                    // counter increments on train_wait ENTRY — see the
+                    // transition tracker — keeping this cone shallow)
                     if (train_retry_cnt != TRAIN_RETRY_CAP) begin
-                        train_retry_cnt <= train_retry_cnt + 4'd1;
                         train_pend      <= state;
                         next_state      <= train_wait;
                     end else begin
@@ -1216,7 +1222,6 @@ always @(posedge clk) begin
                         // non-ACK header on a training read (a clean DEFER
                         // falls through to the paced defer path below)
                         if (train_retry_cnt != TRAIN_RETRY_CAP) begin
-                            train_retry_cnt <= train_retry_cnt + 4'd1;
                             train_pend      <= state;
                             next_state      <= train_wait;
                         end else begin
@@ -1354,7 +1359,6 @@ always @(posedge clk) begin
         // round gap): paced retry with TX held instead of the full
         // ceremony teardown; cheap retrain when the budget runs out
         if (train_retry_cnt != TRAIN_RETRY_CAP) begin
-            train_retry_cnt <= train_retry_cnt + 4'd1;
             train_pend      <= state;
             next_state      <= train_wait;
         end else begin
