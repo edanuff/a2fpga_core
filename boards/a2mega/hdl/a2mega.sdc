@@ -59,3 +59,10 @@ set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks 
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk1x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk_pixel}]
 
+
+// CSR replay ROM lookup (same-clock multicycle; the replay FSM holds
+// replay_idx >=16 cycles before the capture — see the dp_test_138b SDC
+// for the full rationale; added to the 60K full core 08-30 when its
+// tighter placement started violating the same path family)
+set_multicycle_path 2 -setup -from [get_regs {i_dp/i_transceiver_bank/replay_idx*}] -to [get_regs {i_dp/i_transceiver_bank/drp_addr_r* i_dp/i_transceiver_bank/drp_wrdata_r*}]
+set_multicycle_path 1 -hold  -from [get_regs {i_dp/i_transceiver_bank/replay_idx*}] -to [get_regs {i_dp/i_transceiver_bank/drp_addr_r* i_dp/i_transceiver_bank/drp_wrdata_r*}]
