@@ -984,6 +984,10 @@ lanes while locked/streaming. The margin question now has a number.
 symbols (HBR x2) => measured symbol-error rate < ~1e-11, beating the
 DP 1e-9 BER compliance target by >2 orders of magnitude. The good 60K
 at the true baseline is compliance-grade, not marginal.
+EXTENDED TO 30 MIN: still zero errors (~1e12 symbols, SER < ~3e-12).
+Smoke test PASSED — ed's call, 08-29. The 60K DP link is signed off
+at the smoke level; remaining validation is fleet routine (138K twin
+97442d1d, per-hub baselines, Guernok-recorded long soak).
 Next: accumulation over a soak (counters reset at training per spec, so
 growth rate while established = the margin metric), per-hub baselines,
 138K twin (97442d1d), and the Guernok-recorded soak for blink/error
