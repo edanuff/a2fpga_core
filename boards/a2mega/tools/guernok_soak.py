@@ -99,8 +99,12 @@ def telnet_thread(ip, f):
                         lines[tag.strip()] = ln
         except OSError as e:
             log(f, f"TEL  poll failed: {e}", echo=False)
+        import re as _re
+        def _norm(ln):
+            # mask free-running fields so only real changes register
+            return _re.sub(r"Q:[0-9A-F]+", "Q:-", ln)
         for tag in ("D2", "D3", "D6"):
-            if tag in lines and lines[tag] != last.get(tag):
+            if tag in lines and _norm(lines[tag]) != _norm(last.get(tag, "")):
                 loud = tag == "D6" or "T:" in lines[tag]
                 log(f, f"TEL  {lines[tag]}" + ("   <-- CHANGED" if tag in last else ""),
                     echo=loud or tag not in last)
