@@ -132,8 +132,10 @@ def main():
            "-i", a.device,
            "-vf", f"scale={W}:{H}", "-pix_fmt", "rgb24",
            "-f", "rawvideo", "-"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, bufsize=W*H*3*4)
+    def start_capture():
+        return subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, bufsize=W*H*3*4)
+    proc = start_capture()
     tt = threading.Thread(target=telnet_thread, args=(a.ip, logf), daemon=True)
     tt.start()
 
@@ -141,13 +143,31 @@ def main():
     state, state_t0 = None, time.time()
     frames = transitions = anomalies = 0
     last_beat = time.time()
+    # CAPTURE-STALL WATCHDOG (08-30: overnight run lost its eyes at +5min
+    # — a wedged avfoundation read blocks forever). A sibling thread kills
+    # ffmpeg if no frame lands for 30 s; the main loop then restarts it.
+    last_frame_t = [time.time()]
+    def stall_watch():
+        while not stop_flag:
+            if time.time() - last_frame_t[0] > 30 and proc_box[0]:
+                log(logf, "CAPTURE stalled >30s — restarting ffmpeg")
+                try: proc_box[0].kill()
+                except OSError: pass
+            time.sleep(5)
+    proc_box = [proc]
+    threading.Thread(target=stall_watch, daemon=True).start()
     try:
         while True:
-            frame = proc.stdout.read(fsz)
+            frame = proc_box[0].stdout.read(fsz)
             if len(frame) < fsz:
-                err = proc.stderr.read(2000).decode("utf-8", "replace")
-                log(logf, f"CAPTURE ended/failed: {err.strip()[:300]}")
-                break
+                err = proc_box[0].stderr.read(2000).decode("utf-8", "replace")
+                log(logf, f"CAPTURE ended/failed: {err.strip()[:300]} — relaunching in 5s")
+                if stop_flag: break
+                time.sleep(5)
+                proc_box[0] = start_capture()
+                last_frame_t[0] = time.time()
+                continue
+            last_frame_t[0] = time.time()
             frames += 1
             cls, means = classify(frame)
             if cls != state:
@@ -171,7 +191,8 @@ def main():
         pass
     finally:
         stop_flag = True
-        proc.kill()
+        try: proc_box[0].kill()
+        except OSError: pass
         log(logf, f"SOAK end: frames={frames} transitions={transitions} "
                   f"anomalies={anomalies} final={state}")
         logf.close()

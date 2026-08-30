@@ -998,6 +998,19 @@ growth rate while established = the margin metric), per-hub baselines,
 correlation.
 
 
+## OVERNIGHT SOAK (138K, 08-29 18:36 -> 08-30 09:32, guernok_soak)
+
+LINK: FLAWLESS 15 HOURS — SE0:8000 SE1:8000 unchanged all night (zero
+symbol errors over ~3e13 symbols => SER < ~1e-13), T:0000 every poll
+(zero teardowns), C:0177 lock never changed, K:03 streaming at every
+30 s poll. Four orders of magnitude inside DP compliance, measured
+overnight.
+CAPTURE LEG: stalled at +5 min (wedged avfoundation read; contention
+from stale permission-blocked ffmpegs) — visual coverage first 5 min
+only (0 transitions/anomalies). Script hardened with a capture-stall
+watchdog + auto-relaunch for future runs.
+
+
 Suspects cleared by static/sim audit before step 5 flew:
 - SERDES/PHY wiring: transceiver bank, 60B IP dir, die pkg, CST, SDC all
   byte-unchanged across the GOOD->BAD boundary; the only TX-path file
