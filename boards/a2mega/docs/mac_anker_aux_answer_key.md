@@ -985,9 +985,13 @@ symbols (HBR x2) => measured symbol-error rate < ~1e-11, beating the
 DP 1e-9 BER compliance target by >2 orders of magnitude. The good 60K
 at the true baseline is compliance-grade, not marginal.
 EXTENDED TO 30 MIN: still zero errors (~1e12 symbols, SER < ~3e-12).
-Smoke test PASSED — ed's call, 08-29. The 60K DP link is signed off
-at the smoke level; remaining validation is fleet routine (138K twin
-97442d1d, per-hub baselines, Guernok-recorded long soak).
+Smoke test PASSED — ed's call, 08-29. 138K TWIN (97442d1d, flashed
+via the routine rescue drill): SE0:8000 SE1:8000 after a ONE-HOUR soak
+— zero errors over ~2e12 symbols (SER < ~1.5e-12) and T:0000, not a
+single teardown event all hour. FLEET STATUS: both dies at the
+identical honest baseline, silicon-verified configs, measured
+compliance-grade links, zero blinks, zero errors. Remaining: per-hub
+baselines and the Guernok-recorded long soak, both routine.
 Next: accumulation over a soak (counters reset at training per spec, so
 growth rate while established = the margin metric), per-hub baselines,
 138K twin (97442d1d), and the Guernok-recorded soak for blink/error
