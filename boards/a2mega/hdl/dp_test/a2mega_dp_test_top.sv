@@ -68,64 +68,18 @@ module a2mega_dp_test_top (
     localparam AUX_BLIND = (AUX_TLVDS != 0) ? 0 : 1;
 
     logic auxch_in, auxch_out, auxch_tri;
-    generate if (AUX_TLVDS != 0) begin : g_aux_tlvds
-        // Round 6: pad back to the PROVEN round-3 config (ELVDS_IOBUF:
-        // voltage-mode complementary TX — monitor demonstrably replies on
-        // the wire — plus the LVCMOS33D differential RX). Independent-leg
-        // park is unreachable (MIPI needs a 1.8 V bank; hand-composition
-        // rejected by PnR), so this round is INSTRUMENTATION: a
-        // listen-window edge counter (below) tells us whether the sink's
-        // replies produce ANY transitions at the receiver output.
-        logic auxch_in_raw;
-        // Round 10: inverter REMOVED. Round-9 counters showed coherent
-        // 64-edge reply bursts with ZERO sync-pattern hits — the exact
-        // signature of inverted RX sense (Manchester edges are polarity-
-        // blind; the SYNC-END pattern is not). The inversion was derived
-        // for the ELVDS receiver; TLVDS evidently has the opposite
-        // convention.
-        assign auxch_in = auxch_in_raw;
-        // Round 7 (user-sparked): TRUE LVDS TX/RX + both-leg pull-DOWNs.
-        // Stored offset after a burst is only ~0.35 V (driver swing), and
-        // same-rail pulls decay the differential toward ZERO while the CM
-        // (1.25 V -> ground) stays inside the receiver's range through
-        // the whole reply window. Round 1 paired this receiver with
-        // pull-UPS (CM at rail = blind) so this combination was never
-        // actually tested.
-        // Round 8: COUNTER-PARK. The reply's early section (precharge +
-        // SYNC-END) clips against the residual stored offset while the
-        // later body comes through clean (round-7b E:40 = body-only runs
-        // -> decoder never sees sync). While DRIVING, the line re-biases
-        // with tau ~= 5 us through the far-side termination — so after
-        // the STOP we hold the OPPOSITE polarity ~2.5 us (~0.5 tau),
-        // charging the caps partway back so the stored differential
-        // lands near zero at release. Complementary-driver-compatible
-        // park: no independent legs needed.
-        logic       tri_d = 1'b1;
-        logic       out_last = 1'b0;
-        logic [8:0] park_cnt = 9'd0;
-        always_ff @(posedge clk100) begin
-            tri_d <= auxch_tri;
-            if (!auxch_tri)
-                out_last <= auxch_out;
-            if (auxch_tri && !tri_d)
-                park_cnt <= 9'd250;          // 2.5 us @ 100 MHz
-            else if (park_cnt != 9'd0)
-                park_cnt <= park_cnt - 9'd1;
-        end
-        wire parking = (park_cnt != 9'd0);
-
-        TLVDS_IOBUF i_aux_diff (
-            .O   (auxch_in_raw),
-            .IO  (dp_aux_p),
-            .IOB (dp_aux_n),
-            .I   (parking ? ~out_last : auxch_out),
-            .OEN (auxch_tri && !parking)
-        );
-    end else begin : g_aux_pseudo
-        assign dp_aux_p = auxch_tri ? 1'bz : auxch_out;
-        assign dp_aux_n = auxch_tri ? 1'bz : ~auxch_out;
-        assign auxch_in = dp_aux_p;
-    end endgenerate
+    // AUX pad cell EXTRACTED to the shared dp_aux_pad module (08-30) —
+    // one source of truth for dp_test AND the full core. The round-by-
+    // round battle history (rounds 6-10: ELVDS->TLVDS, pulldowns,
+    // counter-park, RX sense) lives in dp_aux_pad.sv.
+    dp_aux_pad #(.AUX_TLVDS(AUX_TLVDS)) i_aux_pad (
+        .clk100    (clk100),
+        .dp_aux_p  (dp_aux_p),
+        .dp_aux_n  (dp_aux_n),
+        .auxch_in  (auxch_in),
+        .auxch_out (auxch_out),
+        .auxch_tri (auxch_tri)
+    );
 
     // ------------------------------------------------------------------
     // Colorbars: eight 240-px vertical bars (white, yellow, cyan, green,

@@ -36,11 +36,12 @@ IO_PORT "uart_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 // HPD level/IRQ comes from the ESP32 (ESP32_GPIO0); pull-down so HPD
 // idles deasserted while the ESP32 is unprogrammed or booting.
 
-IO_LOC  "dp_aux_p" G15;
-IO_PORT "dp_aux_p" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
-
-IO_LOC  "dp_aux_n" G16;
-IO_PORT "dp_aux_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+// CLOSED-LOOP AUX (08-30 port from dp_test, campaign-proven): true
+// LVDS pair with both-leg pulldowns (decays the AC-coupled stored
+// offset; see dp_aux_pad.sv rounds 6-10). Old pseudo-diff entries:
+//   IO_PORT "dp_aux_p"/"dp_aux_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "dp_aux_p" G15,G16;
+IO_PORT "dp_aux_p" IO_TYPE=LVDS25 PULL_MODE=DOWN;
 
 IO_LOC  "dp_hpd" A19;
 IO_PORT "dp_hpd" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;

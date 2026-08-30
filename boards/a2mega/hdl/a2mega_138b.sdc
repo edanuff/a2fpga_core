@@ -1,73 +1,70 @@
-// Timing constraints — Tang Mega 138K SOM variant (GW5AST-138B)
-//
-// Differences vs a2mega.sdc (60B):
-//  - clk_pll / pll_ddr3 use the GW5AST PLL primitive (instance path
-//    .../u_pll/PLL_inst), not PLLA.
-//  - The clk_pll wrapper cross-wires ports to keep top.sv's semantics:
-//    physical CLKOUT2 = 27 MHz pixel, CLKOUT1 = 135 MHz TMDS,
-//    CLKOUT0 = 54 MHz logic via the FRACTIONAL divider (675 MHz VCO /
-//    12.5, alternating /12 and /13). The short cycle is 17.78 ns, so
-//    clk_logic is constrained as an independent 56.25 MHz clock (it is
-//    async-grouped from every other domain, so losing the generated-clock
-//    relationship to clk is harmless).
+// Timing constraints — a2mega FULL CORE, GW5AST-138B variant.
+// REGENERATED 08-30 from a2mega.sdc: PLL pin paths (u_pll/PLL_inst),
+// serdes shim path (i_dp_serdes_138b), + the cm_life CSR-ROM multicycle.
+// a2mega (1.0a3) timing constraints — DisplayPort output build.
+// History: the HDMI-era file constrained clk_pixel_x5 (TMDS) and clk_usb;
+// both domains are gone on 1.0a3 (DP over USB-C, no USB-A host).
 
-// Board crystal -- 50 MHz (used by clk_pll and DDR3 controller)
+// Board crystal -- 50 MHz (used by clk_pll, DDR3 controller, DP mgmt PLL)
 create_clock -name clk -period 20 -waveform {0 10} [get_ports {clk}]
 
-// PLL-generated clocks from clk_pll (50 MHz -> 27/135/54 MHz, VCO 675 MHz)
-create_generated_clock -name clk_pixel -source [get_ports {clk}] -master_clock clk -divide_by 50 -multiply_by 27 [get_pins {u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT2}]
-create_generated_clock -name clk_pixel_x5 -source [get_ports {clk}] -master_clock clk -divide_by 50 -multiply_by 135 [get_pins {u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT1}]
-// 54 MHz nominal, fractional /12.5: constrain at the short /12 cycle
-// (675 MHz / 12 = 56.25 MHz, 17.777 ns) so logic closes on the worst case.
-create_clock -name clk_logic -period 17.777 -waveform {0 8.888} [get_pins {u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT0}]
+// PLL-generated clocks from clk_pll (50 MHz -> 27/54 MHz).
+// clk_pixel here is the BOARD PLL 27 MHz tap: on 1.0a3 it only sources
+// pll_ddr3 (video runs on the DP core's own pixel clock, clk_pix below).
+create_generated_clock -name clk_pixel -source [get_ports {clk}] -master_clock clk -divide_by 50 -multiply_by 27 [get_pins {u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT0}]
+create_generated_clock -name clk_logic -source [get_ports {clk}] -master_clock clk -divide_by 25 -multiply_by 27 [get_pins {u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT2}]
 
 // DDR3 internal clocks -- 324 MHz memory, 81 MHz app clock
 create_clock -name clk4x -period 3.086 -waveform {0 1.543} [get_pins {u_board_plls/pll_ddr3_inst/u_pll/PLL_inst/CLKOUT2}]
 create_clock -name clk1x -period 12.346 -waveform {0 6.173} [get_pins {u_ddr3/gw3_top/u_ddr_phy_top/fclkdiv/CLKOUT}]
 
-// DDR3 IP internal clocks: clk1x (app) and clk4x (PHY) are managed by the
-// IP's calibration mechanism. STA cannot verify these internal paths.
-set_clock_groups -asynchronous -group [get_clocks {clk4x}] -group [get_clocks {clk1x}]
+// ---------------------------------------------------------------------
+// DisplayPort clocks (see boards/a2mega/hdl/dp_test/a2mega_dp_test.sdc
+// for the standalone bring-up variant of the same set)
+// ---------------------------------------------------------------------
 
-// Async groups: clk (50 MHz board crystal) vs DDR3 domain
+// 100 MHz management/AUX clock: 50 MHz osc -> gowin_mgmt_pll
+create_clock -name clk100 -period 10.000 -waveform {0 5.000} [get_pins {i_mgmt_pll/u_pll/PLL_inst/CLKOUT0}]
+
+// 135 MHz TX word clock from the GTR12 quad (2.7 Gbps / 20), anchored on
+// LANE2 -- the bonding master for the a2mega lane pair
+create_clock -name clk_sym -period 7.407 -waveform {0 3.703} [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/gtr12_quad_inst0/LANE2_PCS_TX_O_FABRIC_CLK}]
+
+// 148.5 MHz video pixel clock: gowin_pixel_pll = 135 MHz * 11/10 (1080p)
+create_clock -name clk_pix -period 6.734 -waveform {0 3.367} [get_pins {i_dp/i_pixel_pll/u_pll/PLL_inst/CLKOUT0}]
+
+// GTR12 housekeeping clock (unused in fabric; constrain to silence TA1132)
+create_clock -name cm_life -period 10.000 [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/gtr12_quad_inst0/FABRIC_CM_LIFE_CLK_O}]
+
+// ---------------------------------------------------------------------
+// Clock groups. Every cross-domain exchange goes through async FIFOs or
+// 2FF synchronizers (framebuffer write clk_logic -> read clk_pix; DP
+// pixel CDC clk_pix -> clk_sym; quasi-static debug/OSD CDC). Board and
+// DDR3 groups are unchanged from the hardware-proven HDMI-era file.
+// ---------------------------------------------------------------------
+set_clock_groups -asynchronous -group [get_clocks {clk4x}] -group [get_clocks {clk1x}]
 set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk4x}]
 set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk1x}]
-
-// clk_pixel (27 MHz) vs DDR3 domain -- truly async (different PLL sources)
 set_clock_groups -asynchronous -group [get_clocks {clk_pixel}] -group [get_clocks {clk4x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_pixel}] -group [get_clocks {clk1x}]
-
-// clk_logic (54 MHz) vs DDR3 domain -- fully async (independent PLLs)
 set_clock_groups -asynchronous -group [get_clocks {clk_logic}] -group [get_clocks {clk4x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_logic}] -group [get_clocks {clk1x}]
-
-// clk_pixel_x5 (135 MHz TMDS) -- async to all other domains
-set_clock_groups -asynchronous -group [get_clocks {clk_pixel_x5}] -group [get_clocks {clk4x}]
-set_clock_groups -asynchronous -group [get_clocks {clk_pixel_x5}] -group [get_clocks {clk1x}]
-set_clock_groups -asynchronous -group [get_clocks {clk_pixel_x5}] -group [get_clocks {clk_logic}]
-
-// clk <-> clk_pixel / clk_pixel_x5 / clk_logic
 set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk_pixel}]
-set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk_pixel_x5}]
 set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk_logic}]
-
-// clk_pixel_x5 is related to clk_pixel (same PLL) but runs at 5x for TMDS
-// Keep them in separate async groups since they drive different logic
-set_clock_groups -asynchronous -group [get_clocks {clk_pixel_x5}] -group [get_clocks {clk_pixel}]
-
-// clk_logic and clk_pixel are from the same PLL but at different frequencies.
-// CDC between them uses double-flop synchronizers; mark async for STA.
 set_clock_groups -asynchronous -group [get_clocks {clk_pixel}] -group [get_clocks {clk_logic}]
 
-// USB host clock -- 60 MHz from dedicated pll_usb (GW5AST PLL + PLL_INIT,
-// VCO 900 MHz = 50 x 18, /15 = 60 MHz integer)
-create_generated_clock -name clk_usb -source [get_ports {clk}] -master_clock clk -divide_by 5 -multiply_by 6 [get_pins {u_board_plls/pll_usb_inst/u_pll/PLL_inst/CLKOUT0}]
+// DP domains vs everything else (and each other)
+set_clock_groups -asynchronous -group [get_clocks {clk100}] -group [get_clocks {clk}] -group [get_clocks {clk_logic}] -group [get_clocks {clk_pix}] -group [get_clocks {clk_sym}] -group [get_clocks {cm_life}]
+set_clock_groups -asynchronous -group [get_clocks {clk_pix}] -group [get_clocks {clk4x}]
+set_clock_groups -asynchronous -group [get_clocks {clk_pix}] -group [get_clocks {clk1x}]
+set_clock_groups -asynchronous -group [get_clocks {clk_pix}] -group [get_clocks {clk_pixel}]
+set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk4x}]
+set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk1x}]
+set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk_pixel}]
 
-// clk_usb -- own PLL, self-contained USB domain; async to everything.
-// HID outputs must cross into consumer domains via double-flop synchronizers.
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk_logic}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk_pixel}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk_pixel_x5}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk4x}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk1x}]
+
+// CSR replay ROM lookup (138B: 399-entry case, deep since the per-die
+// MODULE conversion) — same-clock multicycle, FSM holds idx >=16 cycles
+// (see the dp_test_138b SDC for the full rationale).
+set_multicycle_path 2 -setup -from [get_regs {i_dp/i_transceiver_bank/replay_idx*}] -to [get_regs {i_dp/i_transceiver_bank/drp_addr_r* i_dp/i_transceiver_bank/drp_wrdata_r*}]
+set_multicycle_path 1 -hold  -from [get_regs {i_dp/i_transceiver_bank/replay_idx*}] -to [get_regs {i_dp/i_transceiver_bank/drp_addr_r* i_dp/i_transceiver_bank/drp_wrdata_r*}]

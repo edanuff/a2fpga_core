@@ -1455,26 +1455,47 @@ module top #(
     // AUX channel analog interface: pseudo-diff pair, tri-stated by the
     // in-fabric AUX engine; carrier provides bias + AC coupling.
     wire dp_auxch_in_w, dp_auxch_out_w, dp_auxch_tri_w;
-    assign dp_aux_p = dp_auxch_tri_w ? 1'bz : dp_auxch_out_w;
-    assign dp_aux_n = dp_auxch_tri_w ? 1'bz : ~dp_auxch_out_w;
-    assign dp_auxch_in_w = dp_aux_p;
 
     // 100 MHz management/AUX-bit-timing clock
     wire clk100_w;
     gowin_mgmt_pll i_mgmt_pll (.lock(), .clkout(clk100_w), .clkin(clk));
 
+    // CLOSED-LOOP AUX (08-30 port from dp_test): the campaign-proven
+    // TLVDS pad cell (see dp_aux_pad.sv for the round 6-10 history).
+    // CST changed in lockstep: dp_aux_p = LVDS25 pair G15,G16 with
+    // PULL_MODE=DOWN; the old two-pin LVCMOS33 pseudo-diff entries and
+    // the "AUX receive electrically dead" era are over.
+    dp_aux_pad #(.AUX_TLVDS(1)) i_aux_pad (
+        .clk100    (clk100_w),
+        .dp_aux_p  (dp_aux_p),
+        .dp_aux_n  (dp_aux_n),
+        .auxch_in  (dp_auxch_in_w),
+        .auxch_out (dp_auxch_out_w),
+        .auxch_tri (dp_auxch_tri_w)
+    );
+
     wire dp_link_established_w, dp_video_live_w;
+    wire        dp_wedge_w;
+    wire [15:0] dp_errcnt0_w, dp_errcnt1_w;
+    wire [7:0]  dp_serdes_status_w;
 
     dp_transmitter #(
         .LANE_COUNT     (2),
         .LINK_RATE_MBPS (2700),
-        // 1.0a3: AUX receive electrically dead — open-loop link policy
-        // (see a2mega_dp_test_top.sv / aux_channel.v for the full story)
-        // NOTE (08-29): the M5 runtime AFE stays DISABLED here (parameter
-        // default ENABLE_AFE_ADJUST=0), unlike BOTH dp_test builds which
-        // run it with verified per-die bases — port when the full core
-        // adopts the closed-loop DP stack.
-        .BLIND_SINK     (1),
+        // CLOSED-LOOP DP STACK (08-30 port): the exact policy set the
+        // campaign validated on dp_test — soak-proven on BOTH dies
+        // (SER < 1e-12/1e-13, zero blinks). See the answer-key doc.
+        .BLIND_SINK       (0),
+        .POLITE_ATTACH    (1),
+        .IRQ_SERVICE      (2),          // ESI servicing (wire-proven)
+        .TRAIN_RECOVER    (1),          // paced retries, TX held
+        .ERRCNT_READ      (1),          // 0x210-0x213 every check
+        .HPD_DISCONNECT_RESETS(0),      // flap storms: no HPD teardown
+        // M5 runtime AFE: per-die verified bases from the die pkg
+        .ENABLE_AFE_ADJUST(dp_test_die_pkg::ENABLE_AFE_ADJUST),
+        .AFE_LANE_BASE0   (dp_test_die_pkg::AFE_LANE_BASE0),
+        .AFE_LANE_BASE1   (dp_test_die_pkg::AFE_LANE_BASE1),
+        .AFE_APPLY_ON_START(0),         // trust boot csr (804/auto both dies)
         .H_VISIBLE (1920), .H_TOTAL (2200), .H_SYNC_WIDTH (44), .H_START (192),
         .V_VISIBLE (1080), .V_TOTAL (1125), .V_SYNC_WIDTH (5),  .V_START (41),
         .PIXEL_CLK_MULT (11),
@@ -1503,9 +1524,12 @@ module top #(
         .link_established  (dp_link_established_w),
         .video_live        (dp_video_live_w),
         .clk_symbol_out    (),
-        .serdes_status     (),
+        .serdes_status     (dp_serdes_status_w),
         .hpd_present_out   (),
         .debug             (),
+        .wedge_suspect     (dp_wedge_w),
+        .debug_errcnt0     (dp_errcnt0_w),
+        .debug_errcnt1     (dp_errcnt1_w),
         // DRP register-readback debug bridge (used interactively by the
         // dp_test bitstream; idle here — index parked, outputs unread)
         .drp_dbg_idx       (5'd0),
