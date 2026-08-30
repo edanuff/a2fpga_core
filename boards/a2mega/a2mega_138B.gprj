@@ -7,7 +7,7 @@
     <FileList>
         <File path="hdl/dp_test_138b/dp_test_die_pkg_138b.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/csr_replay_rom_lut_138b.v" type="file.verilog" enable="1"/>
-        <File path="hdl/dp_gowin/dp_aux_pad.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_aux_pad.sv" type="file.verilog" enable="1"/>
         <File path="hdl/dp_gowin_defines.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/138B/dp_serdes/dp_phy/dp_phy.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/138B/dp_serdes/dp_serdes.v" type="file.verilog" enable="1"/>
