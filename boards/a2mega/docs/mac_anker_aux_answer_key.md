@@ -1009,6 +1009,12 @@ CAPTURE LEG: stalled at +5 min (wedged avfoundation read; contention
 from stale permission-blocked ffmpegs) — visual coverage first 5 min
 only (0 transitions/anomalies). Script hardened with a capture-stall
 watchdog + auto-relaunch for future runs.
+SOAK SIGNED OFF (ed, 08-30): 15-hour zero-error/zero-teardown link
+soak deemed sufficient. The DP campaign's validation ladder is
+COMPLETE: both dies at the silicon-verified true baseline, measured
+SER bounds 1e-12..1e-13, zero blinks, overnight-stable. Open items are
+maintenance-class only: 60K overnight twin (optional), 138K board's
+flash-passthrough quirk, full-core AFE port, per-hub baselines.
 
 
 Suspects cleared by static/sim audit before step 5 flew:
