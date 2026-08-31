@@ -26,14 +26,14 @@ module top #(
     parameter bit SCANLINES_ENABLE = 0,
     parameter bit APPLE_SPEAKER_ENABLE = 1,
 
-    parameter bit SUPERSPRITE_ENABLE = 1,
+    parameter bit SUPERSPRITE_ENABLE = dp_test_die_pkg::FEATURE_SUPERSPRITE,  // per-die (see die pkg)
     parameter bit [7:0] SUPERSPRITE_ID = 1,
     parameter bit SUPERSPRITE_FORCE_VDP_OVERLAY = 0,
 
-    parameter bit MOCKINGBOARD_ENABLE = 1,
+    parameter bit MOCKINGBOARD_ENABLE = dp_test_die_pkg::FEATURE_MOCKINGBOARD,  // per-die (see die pkg)
     parameter bit [7:0] MOCKINGBOARD_ID = 2,
 
-    parameter bit SUPERSERIAL_ENABLE = 1,
+    parameter bit SUPERSERIAL_ENABLE = dp_test_die_pkg::FEATURE_SUPERSERIAL,  // per-die (see die pkg)
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 

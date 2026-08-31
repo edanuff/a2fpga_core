@@ -19,4 +19,9 @@ package dp_test_die_pkg;
     localparam int          ENABLE_AFE_ADJUST = 1;
     localparam logic [23:0] AFE_LANE_BASE0    = 24'h808300;
     localparam logic [23:0] AFE_LANE_BASE1    = 24'h808400;
+
+    // FULL-CORE FEATURE SET: the 138K die has room (CLS 46%) — full set
+    localparam bit FEATURE_SUPERSPRITE  = 1'b1;
+    localparam bit FEATURE_MOCKINGBOARD = 1'b1;
+    localparam bit FEATURE_SUPERSERIAL  = 1'b1;
 endpackage

@@ -32,4 +32,13 @@ package dp_test_die_pkg;
     localparam int          ENABLE_AFE_ADJUST = 1;
     localparam logic [23:0] AFE_LANE_BASE0    = 24'h808500;  // ML0 -> die lane 3
     localparam logic [23:0] AFE_LANE_BASE1    = 24'h808400;  // ML1 -> die lane 2
+
+    // FULL-CORE FEATURE SET (ed, 08-30): the 60K die is capacity-bound
+    // (CLS 92%, BSRAM 92% with everything on — timing closure was a
+    // per-draw lottery). Supersprite/Mockingboard/SuperSerial are OFF on
+    // the 60K full core to buy placement freedom; the 138K carries the
+    // full feature set (CLS 46%).
+    localparam bit FEATURE_SUPERSPRITE  = 1'b0;
+    localparam bit FEATURE_MOCKINGBOARD = 1'b0;
+    localparam bit FEATURE_SUPERSERIAL  = 1'b0;
 endpackage
