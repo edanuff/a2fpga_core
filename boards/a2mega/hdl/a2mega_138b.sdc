@@ -11,8 +11,20 @@ create_clock -name clk -period 20 -waveform {0 10} [get_ports {clk}]
 // PLL-generated clocks from clk_pll (50 MHz -> 27/54 MHz).
 // clk_pixel here is the BOARD PLL 27 MHz tap: on 1.0a3 it only sources
 // pll_ddr3 (video runs on the DP core's own pixel clock, clk_pix below).
-create_generated_clock -name clk_pixel -source [get_ports {clk}] -master_clock clk -divide_by 50 -multiply_by 27 [get_pins {u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT0}]
-create_generated_clock -name clk_logic -source [get_ports {clk}] -master_clock clk -divide_by 25 -multiply_by 27 [get_pins {u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT2}]
+//
+// GW5AST PIN SWAP (differs from the 60B SDC!): the 138B PLL wrapper
+// cross-wires ports to physical outputs — exact 54 MHz needs the
+// FRACTIONAL divider, which only exists on ODIV0, so physical CLKOUT0
+// carries 54 MHz (675 MHz VCO / 12.5, alternating /12 and /13) and
+// physical CLKOUT2 carries 27 MHz (see gowin_pll/clk_pll.v and the
+// clocks_138b.sv header). The SDC targets PHYSICAL pins, so the pin
+// indices here are swapped vs a2mega.sdc. The fractional /12 phases make
+// the worst-case instantaneous clk_logic period 675MHz/12 = 17.777 ns
+// (56.25 MHz) — constrained as a primary clock at that rate, per the
+// clocks_138b.sv prescription (a generated-clock ratio cannot express
+// the /12/13 alternation).
+create_generated_clock -name clk_pixel -source [get_ports {clk}] -master_clock clk -divide_by 50 -multiply_by 27 [get_pins {u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT2}]
+create_clock -name clk_logic -period 17.777 -waveform {0 8.888} [get_pins {u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT0}]
 
 // DDR3 internal clocks -- 324 MHz memory, 81 MHz app clock
 create_clock -name clk4x -period 3.086 -waveform {0 1.543} [get_pins {u_board_plls/pll_ddr3_inst/u_pll/PLL_inst/CLKOUT2}]
