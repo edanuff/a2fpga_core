@@ -47,7 +47,8 @@
 // Display: 720x480 @ 59.94 Hz (VIDEO_ID_CODE=2)
 //   Apple II modes: [80 border][560 active][80 border] x [48 border][384=192x2][48 border]
 //   IIgs SHR modes: [40 border][640 active][40 border] x [40 border][400=200x2][40 border]
-//   2x integer vertical scaling, optional scanline dimming on odd lines.
+//   Integer vertical scaling; scanline dimming lives in scanline_dim.sv
+//   at the composite level (this module exports v_scale_o/v_border_o).
 //
 
 module framebuffer_1080p #(
@@ -100,7 +101,10 @@ module framebuffer_1080p #(
 
     // Configuration
     input  logic [COLOR_BITS-1:0] border_color,
-    input  logic        scanline_en,     // Enable CRT scanline dimming
+    // Scan-out geometry, exported for the composite-level scanline_dim
+    // stage (the effect itself no longer lives in this module)
+    output logic [2:0]  v_scale_o,       // raster lines per source line
+    output logic [10:0] v_border_o,      // active-window top raster line
     input  logic        sleep_i,         // Output black when high
 
     // Debug counters/flags (clk domain)
@@ -493,6 +497,16 @@ module framebuffer_1080p #(
         if (cy_changed_px_r)
             cy_toggle_px_r <= ~cy_toggle_px_r;
     end
+
+    // Isolated export copy: the raw tracker register feeds a marginal
+    // compare cone (cy0_r == v_border_px_r into the tracker CEs); letting
+    // top-level consumers fan out from it pulls its placement and broke
+    // that cone (-0.38 on the first try). The value is quasi-static
+    // (mode switches only), so a registered copy is free.
+    reg [10:0] v_border_q;
+    always @(posedge clk_pixel) v_border_q <= v_border_px_r;
+    assign v_scale_o  = 3'(V_SCALE);
+    assign v_border_o = v_border_q;
 
     // CDC of the position bundle: the hold values are stable a full
     // clk_pixel cycle before the toggle flips (same handshake as the 480p
@@ -1191,7 +1205,7 @@ module framebuffer_1080p #(
     // (line_buf[addr]) that implies async read. This mismatch causes:
     //   1) Ambiguous read-port clock selection by the synthesizer
     //   2) Unconstrained timing path from address to data
-    //   3) in_active_px_r / scanline_dim_r 1 cycle ahead of pixel data
+    //   3) in_active_px_r 1 cycle ahead of pixel data
     //
     // Fix: explicitly register the BSRAM read output on clk_pixel, and delay
     // the control signals to match.
@@ -1240,7 +1254,6 @@ module framebuffer_1080p #(
     // Pipeline stage 1: address register + control flags (posedge N)
     reg [12:0] lb_rd_addr;
     reg in_active_s1_r;
-    reg scanline_dim_s1_r;
 
     always @(posedge clk_pixel) begin
         h_act_r   <= h_act_n;
@@ -1252,9 +1265,6 @@ module framebuffer_1080p #(
         if (h_act_n && in_v_active_px_w)
             lb_rd_addr <= {rd_bank_w, fb_x_n};
         in_active_s1_r <= h_act_n && in_v_active_px_w;
-        // "scanlines" on a x5 grid: dim raster sub-lines 1 and 3 of each
-        // source line (2 of 5) for a CRT-adjacent look
-        scanline_dim_s1_r <= scanline_en && (v_phase_px_r == 3'd1 || v_phase_px_r == 3'd3);
     end
 
     // Pipeline stage 2: BSRAM read register + delayed control (posedge N+1)
@@ -1262,13 +1272,11 @@ module framebuffer_1080p #(
     // and ensures deterministic 1-cycle read latency.
     reg [COLOR_BITS-1:0] lb_rd_data_r;
     reg in_active_px_r;
-    reg scanline_dim_r;
 
     always @(posedge clk_pixel) begin
         lb_rd_data_r <= (TEST_PATTERN == 2) ?
             test_pixel(lb_rd_addr[9:0]) : line_buf[lb_rd_addr];
         in_active_px_r <= in_active_s1_r;
-        scanline_dim_r <= scanline_dim_s1_r;
     end
 
     // Pipeline stage 3 (08-30 structural timing): register the BSRAM
@@ -1280,11 +1288,9 @@ module framebuffer_1080p #(
     // pull contract (see dp_video_timing.v) — frame content unchanged.
     reg [COLOR_BITS-1:0] lb_rd_data_q;
     reg in_active_px_q;
-    reg scanline_dim_q;
     always @(posedge clk_pixel) begin
         lb_rd_data_q   <= lb_rd_data_r;
         in_active_px_q <= in_active_px_r;
-        scanline_dim_q <= scanline_dim_r;
     end
 
     // EXP 22: Binary threshold — non-zero pixel data → white, zero → black.
@@ -1296,12 +1302,8 @@ module framebuffer_1080p #(
 
     wire [23:0] pixel_rgb_w = in_active_px_q ? active_rgb_w : border_rgb_w;
 
-    wire [23:0] dimmed_rgb_w = {1'b0, pixel_rgb_w[23:17],
-                                 1'b0, pixel_rgb_w[15:9],
-                                 1'b0, pixel_rgb_w[7:1]};
-
-    wire [23:0] final_rgb_w = sleep_i ? 24'd0 :
-                               scanline_dim_q ? dimmed_rgb_w : pixel_rgb_w;
+    // Scanline dimming moved to the composite-level scanline_dim module.
+    wire [23:0] final_rgb_w = sleep_i ? 24'd0 : pixel_rgb_w;
 
     assign r_o = final_rgb_w[23:16];
     assign g_o = final_rgb_w[15:8];

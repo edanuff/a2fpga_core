@@ -100,6 +100,7 @@
         <File path="../../hdl/video/direct_display.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/f18a_gen.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/framebuffer_1080p.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/scanline_dim.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/framebuffer_writer.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/pixel_stream_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>

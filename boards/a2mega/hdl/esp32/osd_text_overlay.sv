@@ -212,6 +212,8 @@ module osd_text_overlay #(
     // Glyph bit 0 is the leftmost pixel
     wire pixel_w = in_text_w && row_byte_r[gpx_r];
 
+    // Scanline dimming is NOT done here — the composite-level scanline_dim
+    // stage stripes this layer along with the video and borders.
     always @(posedge clk_i) begin
         if (enable_i) begin
             r_o <= pixel_w ? 8'hFF : 8'h00;

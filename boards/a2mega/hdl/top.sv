@@ -1118,6 +1118,8 @@ module top #(
     wire [11:0] hdmi_cx_w;      // raster X (0–2199, 1080p)
     wire [10:0] hdmi_cy_w;      // raster Y (0–1124, 1080p)
     wire [23:0] fb_rgb_w;       // Current framebuffer RGB output
+    wire [2:0]  fb_v_scale_w;   // fb scan-out geometry, for scanline_dim
+    wire [10:0] fb_v_border_w;
     wire [23:0] overlay_rgb_w;  // DebugOverlay RGB output
     wire        overlay_en_w;   // DebugOverlay enable
 
@@ -1376,7 +1378,8 @@ module top #(
         .b_o              (fb_rgb_w[7:0]),
 
         .border_color     (border_rgb666_w),
-        .scanline_en      (1'b1),
+        .v_scale_o        (fb_v_scale_w),
+        .v_border_o       (fb_v_border_w),
         .sleep_i          (sleep_w),
 
         // Debug outputs
@@ -1648,6 +1651,23 @@ module top #(
     );
 
     // =========================================================================
+    // Scanline effect — ONE place, on the video+OSD composite, scale-aware
+    // via the fb's exported scan-out geometry. Combinational in the pixel
+    // path (no RGB_LATENCY change); the DebugOverlay stays undimmed.
+    // =========================================================================
+    wire [23:0] scanout_rgb_w;
+
+    scanline_dim u_scanline_dim (
+        .clk_i       (clk_pixel_w),
+        .enable_i    (1'b1),
+        .screen_y_i  (ovl_cy_q),
+        .v_scale_i   (fb_v_scale_w),
+        .v_border_i  (fb_v_border_w),
+        .rgb_i       (osd_rgb_w),
+        .rgb_o       (scanout_rgb_w)
+    );
+
+    // =========================================================================
     // Debug Overlay — runs in clk_pixel (27 MHz) domain
     // =========================================================================
     // The 480p framebuffer's overlay interface (hdmi_cx, hdmi_cy, fb_rgb_o,
@@ -1753,9 +1773,9 @@ module top #(
         .screen_x_i     (ovl_cx_q),
         .screen_y_i     (ovl_cy_q),
 
-        .r_i            (osd_rgb_w[23:16]),
-        .g_i            (osd_rgb_w[15:8]),
-        .b_i            (osd_rgb_w[7:0]),
+        .r_i            (scanout_rgb_w[23:16]),
+        .g_i            (scanout_rgb_w[15:8]),
+        .b_i            (scanout_rgb_w[7:0]),
 
         .r_o            (overlay_rgb_w[23:16]),
         .g_o            (overlay_rgb_w[15:8]),
