@@ -7,6 +7,7 @@
     <FileList>
         <File path="hdl/dp_test/dp_test_die_pkg_60b.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/csr_replay_rom_lut_60b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/csr_replay_rom_60b.hex" type="file.other" enable="1"/>
         <File path="hdl/dp_aux_pad.sv" type="file.verilog" enable="1"/>
         <File path="hdl/dp_gowin_defines.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/60B/dp_serdes/dp_phy/dp_phy.v" type="file.verilog" enable="1"/>

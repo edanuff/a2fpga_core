@@ -32,15 +32,10 @@ create_clock -name clk_pix -period 6.734 -waveform {0 3.367} [get_pins {i_dp/i_p
 // predated the replay machinery)
 create_clock -name cm_life -period 10.000 [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/gtr12_quad_inst0/FABRIC_CM_LIFE_CLK_O}]
 
-// CSR replay ROM lookup: replay_idx -> csr_replay_rom_lut (399-entry
-// combinational case, deep since the 08-27 per-die MODULE conversion
-// removed the cross-boundary optimization) -> drp_addr_r/drp_wrdata_r.
-// The FSM holds replay_idx stable >=16 cycles before the capture
-// (rd_gap[4] pacing + state walk), so a 2-cycle setup exception has
-// 8x real margin. SAME-clock multicycle (cm_life only) — not the
-// GW2AR cross-domain case that failed historically.
-set_multicycle_path 2 -setup -from [get_regs {i_dp/i_transceiver_bank/replay_idx*}] -to [get_regs {i_dp/i_transceiver_bank/drp_addr_r* i_dp/i_transceiver_bank/drp_wrdata_r*}]
-set_multicycle_path 1 -hold  -from [get_regs {i_dp/i_transceiver_bank/replay_idx*}] -to [get_regs {i_dp/i_transceiver_bank/drp_addr_r* i_dp/i_transceiver_bank/drp_wrdata_r*}]
+// CSR replay ROM: now a sync BSRAM pROM (csr_replay_rom_lut has a
+// registered read) — the historical multicycle crutch is gone; the +1
+// read latency is absorbed by the same >=16-cycle rd_gap pacing that
+// justified it.
 
 // Domains exchange data only through the gray-coded CDC FIFO and 2FF
 // synchronisers; no synchronous cross-domain paths exist.

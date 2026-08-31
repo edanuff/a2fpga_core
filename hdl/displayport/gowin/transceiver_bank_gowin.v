@@ -696,7 +696,12 @@ module transceiver_bank_gowin #(
     // writes to the 60B build (08-27, S:04 no-PLL-lock on a good SOM).
     wire [55:0] csr_rom_data;
     wire [9:0]  csr_rom_len;
+    // BSRAM sync-read ROM (+1 cycle): safe because replay_idx settles
+    // >=17 drp_clk cycles before csr_rom_data is consumed — the FSM
+    // passes through wdrop (1 cycle) and then waits rd_gap[4] (16
+    // cycles) in state 0 before latching {drp_addr_r, drp_wrdata_r}.
     csr_replay_rom_lut u_csr_rom (
+        .clk  (drp_clk_w),
         .idx  (replay_idx),
         .data (csr_rom_data),
         .len  (csr_rom_len)

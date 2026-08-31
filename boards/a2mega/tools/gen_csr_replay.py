@@ -44,3 +44,15 @@ lines.append("    endcase")
 lines.append("endfunction")
 out.write_text("\n".join(lines) + "\n")
 print(f"{out}: {len(writes)} writes")
+
+# BSRAM pROM image: 512-entry hex, same {addr,data} packing as the svh
+# function. mv this to the per-die _60b/_138b.hex alongside the svh.
+hexout = out.with_suffix(".hex")
+with hexout.open("w") as f:
+    for n in range(512):
+        if n < len(writes):
+            a, d = writes[n]
+            f.write(f"{(int(a,16) << 32) | int(d,16):014x}\n")
+        else:
+            f.write("0" * 14 + "\n")
+print(f"{hexout}: 512-entry pROM image")

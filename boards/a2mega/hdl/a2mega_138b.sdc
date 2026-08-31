@@ -1,6 +1,6 @@
 // Timing constraints — a2mega FULL CORE, GW5AST-138B variant.
 // REGENERATED 08-30 from a2mega.sdc: PLL pin paths (u_pll/PLL_inst),
-// serdes shim path (i_dp_serdes_138b), + the cm_life CSR-ROM multicycle.
+// serdes shim path (i_dp_serdes_138b).
 // a2mega (1.0a3) timing constraints — DisplayPort output build.
 // History: the HDMI-era file constrained clk_pixel_x5 (TMDS) and clk_usb;
 // both domains are gone on 1.0a3 (DP over USB-C, no USB-A host).
@@ -74,9 +74,4 @@ set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks 
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk1x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk_pixel}]
 
-
-// CSR replay ROM lookup (138B: 399-entry case, deep since the per-die
-// MODULE conversion) — same-clock multicycle, FSM holds idx >=16 cycles
-// (see the dp_test_138b SDC for the full rationale).
-set_multicycle_path 2 -setup -from [get_regs {i_dp/i_transceiver_bank/replay_idx*}] -to [get_regs {i_dp/i_transceiver_bank/drp_addr_r* i_dp/i_transceiver_bank/drp_wrdata_r*}]
-set_multicycle_path 1 -hold  -from [get_regs {i_dp/i_transceiver_bank/replay_idx*}] -to [get_regs {i_dp/i_transceiver_bank/drp_addr_r* i_dp/i_transceiver_bank/drp_wrdata_r*}]
+// CSR replay ROM: now a sync BSRAM pROM — no multicycle needed.
