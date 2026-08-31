@@ -1619,8 +1619,9 @@ module top #(
     always @(posedge clk_pixel_w) fb_rgb_osd_r <= fb_rgb_w;
 
     osd_text_overlay #(
-        .X_OFFSET(680),   // center the 560x384 OSD window in 1920x1080
-        .Y_OFFSET(348)    // (native-scale text for now; 3x scaling = later polish)
+        .X_OFFSET(400),   // center the 2x-scaled 1120x768 OSD window in 1920x1080
+        .Y_OFFSET(156),
+        .SCALE(2)
     ) osd_overlay (
         .clk_i      (clk_pixel_w),
         .reset_n    (device_reset_n_w),

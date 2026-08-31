@@ -26,6 +26,8 @@
 //
 // Characters are 7x8 Apple II glyphs from the shared video ROM (video.hex),
 // scaled 2x to 14x16 cells: 40*14 = 560 x 24*16 = 384, centered in 720x480.
+// SCALE=2 doubles that again (28x32 cells, 1120x768) so the page fills a
+// 1080p frame instead of rendering as a native-scale postage stamp.
 // Screen-code semantics (inverse $00-$3F, flash $40-$7F) match the Apple II.
 //
 // Each 14-pixel cell k prefetches the character for cell k+1: the text RAM
@@ -35,7 +37,8 @@
 //
 module osd_text_overlay #(
     parameter X_OFFSET = 80,   // (720 - 560) / 2
-    parameter Y_OFFSET = 48    // (480 - 384) / 2
+    parameter Y_OFFSET = 48,   // (480 - 384) / 2
+    parameter SCALE    = 1     // 1 = 560x384 window, 2 = 1120x768
 )(
     input  wire        clk_i,
     input  wire        reset_n,
@@ -59,7 +62,8 @@ module osd_text_overlay #(
     output reg  [7:0]  b_o
 );
 
-    localparam CELL_W = 14;               // 7 glyph pixels x 2
+    localparam CELL_W = 14 * SCALE;       // 7 glyph pixels x 2 x SCALE
+    localparam [4:0] SUB_LAST = 5'(CELL_W - 1);
     localparam [11:0] X_START = 12'(X_OFFSET - CELL_W);
 
     // ------------------------------------------------------------------------
@@ -99,9 +103,10 @@ module osd_text_overlay #(
     // Vertical position
     // ------------------------------------------------------------------------
     wire [9:0] rel_y = 10'(screen_y_i - Y_OFFSET);
-    wire y_active = (screen_y_i >= Y_OFFSET) && (rel_y < 10'd384);
-    wire [4:0] char_row = rel_y[8:4];     // 0-23
-    wire [2:0] glyph_line = rel_y[3:1];   // 2x vertical scale
+    wire y_active = (screen_y_i >= Y_OFFSET) && (rel_y < 10'(384 * SCALE));
+    // constant SCALE folds these muxes away
+    wire [4:0] char_row = (SCALE == 2) ? rel_y[9:5] : rel_y[8:4];    // 0-23
+    wire [2:0] glyph_line = (SCALE == 2) ? rel_y[4:2] : rel_y[3:1];  // 2x/4x vertical scale
 
     // row * 40 = (row << 5) + (row << 3)
     wire [10:0] row_base = ({6'b0, char_row} << 5) + ({6'b0, char_row} << 3);
@@ -109,7 +114,7 @@ module osd_text_overlay #(
     // ------------------------------------------------------------------------
     // Horizontal cell walker with one-cell prefetch
     // ------------------------------------------------------------------------
-    reg [3:0] subcnt_r;    // 0-13 within a cell
+    reg [4:0] subcnt_r;    // 0..CELL_W-1 within a cell
     reg [5:0] cell_r;      // 0 = prefetch cell (border), 1-40 = visible columns 0-39
     reg       running_r;
 
@@ -117,7 +122,7 @@ module osd_text_overlay #(
 
     always @(posedge clk_i or negedge reset_n) begin
         if (!reset_n) begin
-            subcnt_r <= 4'd0;
+            subcnt_r <= 5'd0;
             cell_r <= 6'd0;
             running_r <= 1'b0;
             vram_addr_o <= 11'd0;
@@ -125,18 +130,18 @@ module osd_text_overlay #(
             row_byte_r <= 8'd0;
         end else begin
             if (screen_x_i == X_START) begin
-                subcnt_r <= 4'd0;
+                subcnt_r <= 5'd0;
                 cell_r <= 6'd0;
                 running_r <= y_active;
             end else if (running_r) begin
-                if (subcnt_r == 4'd13) begin
-                    subcnt_r <= 4'd0;
+                if (subcnt_r == SUB_LAST) begin
+                    subcnt_r <= 5'd0;
                     if (cell_r == 6'd40)
                         running_r <= 1'b0;
                     else
                         cell_r <= cell_r + 6'd1;
                 end else begin
-                    subcnt_r <= subcnt_r + 4'd1;
+                    subcnt_r <= subcnt_r + 5'd1;
                 end
             end
 
@@ -146,12 +151,12 @@ module osd_text_overlay #(
             //   subcnt 4: registered glyph row valid (viderom_d_r)
             //   subcnt 13: latch it for display in the next cell
             if (running_r && cell_r < 6'd40) begin
-                if (subcnt_r == 4'd0)
+                if (subcnt_r == 5'd0)
                     vram_addr_o <= row_base + {5'b0, cell_r};
-                if (subcnt_r == 4'd2)
+                if (subcnt_r == 5'd2)
                     viderom_a_r <= charRomAddr(vram_data_i, glyph_line);
             end
-            if (running_r && subcnt_r == 4'd13)
+            if (running_r && subcnt_r == SUB_LAST)
                 row_byte_r <= (cell_r < 6'd40) ? ~viderom_d_r : 8'd0;
         end
     end
@@ -160,8 +165,9 @@ module osd_text_overlay #(
     // Pixel output — opaque when enabled
     // ------------------------------------------------------------------------
     wire in_text_w = running_r && (cell_r >= 6'd1);
-    // Glyph bit 0 is the leftmost pixel; 2x horizontal scale
-    wire pixel_w = in_text_w && row_byte_r[subcnt_r[3:1]];
+    // Glyph bit 0 is the leftmost pixel; 2x (or 4x at SCALE=2) horizontal scale
+    wire [2:0] glyph_px_w = (SCALE == 2) ? subcnt_r[4:2] : subcnt_r[3:1];
+    wire pixel_w = in_text_w && row_byte_r[glyph_px_w];
 
     always @(posedge clk_i) begin
         if (enable_i) begin
