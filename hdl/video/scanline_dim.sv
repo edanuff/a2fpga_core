@@ -21,8 +21,10 @@
 // top arrive as inputs from the framebuffer — the phase locks to the
 // SOURCE-line grid at the window top each frame and free-runs through the
 // borders, so the stripes are continuous across the whole screen and track
-// whatever scan-out scale the framebuffer is running. Odd sub-lines dim
-// 50% — the scale-generic rule (sub-lines 1,3 of 5 at x5; 1 of 2 at x2).
+// whatever scan-out scale the framebuffer is running. Each source-line
+// group splits into a bright band then a contiguous 50%-dim band of
+// roughly equal size (x5: 3+2, x2: 1+1 — the original 480p alternation),
+// so the banding matches the source vertical resolution (192 for Apple II).
 //
 // The dim path is purely combinational between the upstream output
 // registers and the downstream input registers (one mux level): no added
@@ -73,9 +75,16 @@ module scanline_dim #(
                 phase_r <= (phase_r >= v_scale_i - 3'd1) ? 3'd0
                                                          : phase_r + 3'd1;
         end
-        // odd sub-lines dim — scale-generic; registered a full blanking
-        // interval before the line's first pixel
-        dim_q <= enable_i && phase_r[0];
+        // Equal-ish bright/dark split per SOURCE line, dark lines
+        // CONTIGUOUS: dim when phase >= ceil(scale/2). x5 -> 3 bright +
+        // 2-line dark band; x2 -> plain alternation (the original 480p
+        // look); x4 -> 2+2. The bands ride the source-line pitch (192 for
+        // Apple II). (The earlier dim-odd-sub-lines rule put SCATTERED
+        // dark lines inside each source line — an every-other-raster
+        // texture that beat against monitor/capture scaling instead of
+        // reading as scanlines.) Registered a full blanking interval
+        // before the line's first pixel.
+        dim_q <= enable_i && (phase_r >= v_scale_i - (v_scale_i >> 1));
     end
 
     wire [23:0] dimmed_w = {1'b0, rgb_i[23:17],
