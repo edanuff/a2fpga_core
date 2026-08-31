@@ -89,6 +89,8 @@ wire q0_lane2_rx_if_fifo_rden;
 wire q0_fabric_ln1_tx_vld_in;
 wire q0_fabric_ln2_tx_vld_in;
 wire q0_fabric_cm_life_clk_o;
+// HAND-EDIT companion to the .drp_clk_o() disconnection below:
+assign dp_phy_drp_clk_o = q0_fabric_cm_life_clk_o;
 wire ahb_rstn_o;
 wire quad_cfg_test_dec_en;
 wire [91:0] q0_inet_q0_q1;
@@ -650,7 +652,17 @@ dp_phy dp_phy_inst (
     .drp_wrdata_o(upar_arbiter_wrap_dp_serdes_inst_drp_wrdata_i[63:32]),
     .drp_strb_o(upar_arbiter_wrap_dp_serdes_inst_drp_strb_i[15:8]),
     .drp_rden_o(upar_arbiter_wrap_dp_serdes_inst_drp_rden_i[1]),
-    .drp_clk_o(dp_phy_drp_clk_o),
+    // HAND-EDIT (08-31, PnR campaign — like the module rename, re-apply
+    // on IP regen): drp_clk_o is a pure pass-through of upar_clk_i inside
+    // the arbiter (assign drp_clk_o[x] = upar_clk_i), but the extra net
+    // boundary split the cm_life clock tree into two nets — the exported
+    // branch auto-promoted to a PRIMARY spine while the internal branch
+    // (arbiter/AHB/UPAR flops) rode general fabric, showing ~5 ns of
+    // clock skew as a 67-endpoint setup family. Exporting the SOURCE net
+    // directly makes the whole tree one net, so promotion covers it all.
+    // Identical waveform, zero functional change. CLOCK_LOC could not
+    // reach the internal net (CT1135 on every name form).
+    .drp_clk_o(),
     .drp_ready_o(dp_phy_drp_ready_o),
     .drp_rdvld_o(dp_phy_drp_rdvld_o),
     .drp_rddata_o(dp_phy_drp_rddata_o[31:0]),

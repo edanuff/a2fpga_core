@@ -5,6 +5,13 @@
 // 138K reference), and AB13 (button) sits in a 3.3 V bank on this die.
 // Keep in sync with a2mega.cst (this file = that file + these deltas).
 
+// cm_life spine note (08-31, PnR campaign): the GTR12's cm_life clock
+// tree was split by the upar_arbiter's pass-through port — fixed by a
+// hand-edit in dp_serdes.v (export the source net directly) so the
+// whole tree auto-promotes as one net. CLOCK_LOC could NOT reach the
+// vendor-internal net segment: BUFS = CT1154 (unsupported on GW5AST),
+// and every name form = CT1135 (object not found). Don't retry that.
+
 //CLOCK_LOC "clk_hdmi_w" BUFG[0] = CLK;
 //CLOCK_LOC "clk_pixel_w" BUFG[1] = CLK;
 //CLOCK_LOC "rstn_r" BUFG[0] = SR;
