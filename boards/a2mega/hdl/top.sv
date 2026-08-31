@@ -1619,9 +1619,10 @@ module top #(
     always @(posedge clk_pixel_w) fb_rgb_osd_r <= fb_rgb_w;
 
     osd_text_overlay #(
-        .X_OFFSET(400),   // center the 2x-scaled 1120x768 OSD window in 1920x1080
-        .Y_OFFSET(156),
-        .SCALE(2)
+        .X_OFFSET(120),   // Apple-display-matched: 1680x960, the same rectangle
+        .Y_OFFSET(60),    // as the framebuffer's x3/x5 scan-out window
+        .H_REP(6),        // 3x of the 2x-doubled source, like the Apple fb
+        .V_REP(5)
     ) osd_overlay (
         .clk_i      (clk_pixel_w),
         .reset_n    (device_reset_n_w),

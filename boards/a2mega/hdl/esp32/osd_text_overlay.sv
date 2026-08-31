@@ -20,25 +20,29 @@
 // text page in SDRAM and flipping the video path. On the a2mega the shadow
 // lives in DDR3 behind the port arbiter, so the ESP32 instead writes 40x24
 // Apple II screen codes into a dedicated BSRAM page (XFER SPACE 1, linear
-// y*40+x) and this module paints it directly over the 720x480 output —
+// y*40+x) and this module paints it directly over the framebuffer output —
 // opaque when enabled, so the menu is visible even when the Apple II video
 // path is dead.
 //
-// Characters are 7x8 Apple II glyphs from the shared video ROM (video.hex),
-// scaled 2x to 14x16 cells: 40*14 = 560 x 24*16 = 384, centered in 720x480.
-// SCALE=2 doubles that again (28x32 cells, 1120x768) so the page fills a
-// 1080p frame instead of rendering as a native-scale postage stamp.
+// Characters are 7x8 Apple II glyphs from the shared video ROM (video.hex).
+// H_REP/V_REP set how many screen pixels/lines each glyph pixel/line spans,
+// so the console matches the Apple II display scale exactly: the framebuffer
+// scan-out runs x3 horizontal / x5 vertical of the 2x-doubled source, i.e.
+// 6 screen px per glyph px and 5 lines per glyph line — 42x40 cells,
+// 1680x960 at (120,60), the SAME rectangle as the Apple video. The legacy
+// 480p geometry is H_REP=2/V_REP=2 (14x16 cells, 560x384).
 // Screen-code semantics (inverse $00-$3F, flash $40-$7F) match the Apple II.
 //
-// Each 14-pixel cell k prefetches the character for cell k+1: the text RAM
-// read (registered, external port) and the font ROM read each take a cycle,
-// and the assembled row byte is latched at the cell boundary. Cell 0 starts
-// one cell before X_OFFSET so column 0 is prefetched during the border.
+// Each cell k prefetches the character for cell k+1: the text RAM read
+// (registered, external port) and the font ROM read each take a cycle, and
+// the assembled row byte is latched at the cell boundary. Cell 0 starts one
+// cell before X_OFFSET so column 0 is prefetched during the border.
 //
 module osd_text_overlay #(
-    parameter X_OFFSET = 80,   // (720 - 560) / 2
-    parameter Y_OFFSET = 48,   // (480 - 384) / 2
-    parameter SCALE    = 1     // 1 = 560x384 window, 2 = 1120x768
+    parameter X_OFFSET = 80,   // left edge of the 40-column window
+    parameter Y_OFFSET = 48,   // top edge of the 24-row window
+    parameter H_REP    = 2,    // screen pixels per glyph pixel (cell = 7*H_REP)
+    parameter V_REP    = 2     // screen lines per glyph line (cell = 8*V_REP)
 )(
     input  wire        clk_i,
     input  wire        reset_n,
@@ -62,8 +66,7 @@ module osd_text_overlay #(
     output reg  [7:0]  b_o
 );
 
-    localparam CELL_W = 14 * SCALE;       // 7 glyph pixels x 2 x SCALE
-    localparam [4:0] SUB_LAST = 5'(CELL_W - 1);
+    localparam CELL_W = 7 * H_REP;
     localparam [11:0] X_START = 12'(X_OFFSET - CELL_W);
 
     // ------------------------------------------------------------------------
@@ -100,21 +103,23 @@ module osd_text_overlay #(
     endfunction
 
     // ------------------------------------------------------------------------
-    // Vertical position
+    // Vertical trackers — incremental off the once-per-line X_START pulse
+    // (same no-divider pattern as the framebuffer scan-out scaler; V_REP is
+    // not a power of two at Apple scale so rel_y bit-selects can't work)
     // ------------------------------------------------------------------------
-    wire [9:0] rel_y = 10'(screen_y_i - Y_OFFSET);
-    wire y_active = (screen_y_i >= Y_OFFSET) && (rel_y < 10'(384 * SCALE));
-    // constant SCALE folds these muxes away
-    wire [4:0] char_row = (SCALE == 2) ? rel_y[9:5] : rel_y[8:4];    // 0-23
-    wire [2:0] glyph_line = (SCALE == 2) ? rel_y[4:2] : rel_y[3:1];  // 2x/4x vertical scale
+    reg [2:0] vrep_r;       // 0..V_REP-1 within a glyph line
+    reg [2:0] glyph_line_r; // 0..7 within a character row
+    reg [4:0] char_row_r;   // 0..23
+    reg       vactive_r;
 
     // row * 40 = (row << 5) + (row << 3)
-    wire [10:0] row_base = ({6'b0, char_row} << 5) + ({6'b0, char_row} << 3);
+    wire [10:0] row_base = ({6'b0, char_row_r} << 5) + ({6'b0, char_row_r} << 3);
 
     // ------------------------------------------------------------------------
     // Horizontal cell walker with one-cell prefetch
     // ------------------------------------------------------------------------
-    reg [4:0] subcnt_r;    // 0..CELL_W-1 within a cell
+    reg [2:0] hrep_r;      // 0..H_REP-1 within a glyph pixel
+    reg [2:0] gpx_r;       // 0..6 glyph pixel within a cell
     reg [5:0] cell_r;      // 0 = prefetch cell (border), 1-40 = visible columns 0-39
     reg       running_r;
 
@@ -122,41 +127,80 @@ module osd_text_overlay #(
 
     always @(posedge clk_i or negedge reset_n) begin
         if (!reset_n) begin
-            subcnt_r <= 5'd0;
+            hrep_r <= 3'd0;
+            gpx_r <= 3'd0;
             cell_r <= 6'd0;
             running_r <= 1'b0;
+            vrep_r <= 3'd0;
+            glyph_line_r <= 3'd0;
+            char_row_r <= 5'd0;
+            vactive_r <= 1'b0;
             vram_addr_o <= 11'd0;
             viderom_a_r <= 12'd0;
             row_byte_r <= 8'd0;
         end else begin
             if (screen_x_i == X_START) begin
-                subcnt_r <= 5'd0;
+                hrep_r <= 3'd0;
+                gpx_r <= 3'd0;
                 cell_r <= 6'd0;
-                running_r <= y_active;
-            end else if (running_r) begin
-                if (subcnt_r == SUB_LAST) begin
-                    subcnt_r <= 5'd0;
-                    if (cell_r == 6'd40)
-                        running_r <= 1'b0;
-                    else
-                        cell_r <= cell_r + 6'd1;
+                // vertical advance happens once per line, here
+                if (screen_y_i == 11'(Y_OFFSET)) begin
+                    vrep_r <= 3'd0;
+                    glyph_line_r <= 3'd0;
+                    char_row_r <= 5'd0;
+                    vactive_r <= 1'b1;
+                    running_r <= 1'b1;
+                end else if (vactive_r) begin
+                    if (vrep_r == 3'(V_REP - 1)) begin
+                        vrep_r <= 3'd0;
+                        if (glyph_line_r == 3'd7) begin
+                            glyph_line_r <= 3'd0;
+                            if (char_row_r == 5'd23) begin
+                                vactive_r <= 1'b0;
+                                running_r <= 1'b0;
+                            end else begin
+                                char_row_r <= char_row_r + 5'd1;
+                                running_r <= 1'b1;
+                            end
+                        end else begin
+                            glyph_line_r <= glyph_line_r + 3'd1;
+                            running_r <= 1'b1;
+                        end
+                    end else begin
+                        vrep_r <= vrep_r + 3'd1;
+                        running_r <= 1'b1;
+                    end
                 end else begin
-                    subcnt_r <= subcnt_r + 5'd1;
+                    running_r <= 1'b0;
+                end
+            end else if (running_r) begin
+                if (hrep_r == 3'(H_REP - 1)) begin
+                    hrep_r <= 3'd0;
+                    if (gpx_r == 3'd6) begin
+                        gpx_r <= 3'd0;
+                        if (cell_r == 6'd40)
+                            running_r <= 1'b0;
+                        else
+                            cell_r <= cell_r + 6'd1;
+                    end else begin
+                        gpx_r <= gpx_r + 3'd1;
+                    end
+                end else begin
+                    hrep_r <= hrep_r + 3'd1;
                 end
             end
 
             // Prefetch pipeline for the character shown in the next cell:
-            //   subcnt 0: address the text RAM (this cell's index = next column)
-            //   subcnt 2: registered char code valid -> address the font ROM
-            //   subcnt 4: registered glyph row valid (viderom_d_r)
-            //   subcnt 13: latch it for display in the next cell
+            //   cell start (gpx 0, hrep 0): address the text RAM
+            //   gpx 1, hrep 0: registered char code valid -> address font ROM
+            //   cell end: latch the glyph row for display in the next cell
             if (running_r && cell_r < 6'd40) begin
-                if (subcnt_r == 5'd0)
+                if (gpx_r == 3'd0 && hrep_r == 3'd0)
                     vram_addr_o <= row_base + {5'b0, cell_r};
-                if (subcnt_r == 5'd2)
-                    viderom_a_r <= charRomAddr(vram_data_i, glyph_line);
+                if (gpx_r == 3'd1 && hrep_r == 3'd0)
+                    viderom_a_r <= charRomAddr(vram_data_i, glyph_line_r);
             end
-            if (running_r && subcnt_r == SUB_LAST)
+            if (running_r && gpx_r == 3'd6 && hrep_r == 3'(H_REP - 1))
                 row_byte_r <= (cell_r < 6'd40) ? ~viderom_d_r : 8'd0;
         end
     end
@@ -165,9 +209,8 @@ module osd_text_overlay #(
     // Pixel output — opaque when enabled
     // ------------------------------------------------------------------------
     wire in_text_w = running_r && (cell_r >= 6'd1);
-    // Glyph bit 0 is the leftmost pixel; 2x (or 4x at SCALE=2) horizontal scale
-    wire [2:0] glyph_px_w = (SCALE == 2) ? subcnt_r[4:2] : subcnt_r[3:1];
-    wire pixel_w = in_text_w && row_byte_r[glyph_px_w];
+    // Glyph bit 0 is the leftmost pixel
+    wire pixel_w = in_text_w && row_byte_r[gpx_r];
 
     always @(posedge clk_i) begin
         if (enable_i) begin
