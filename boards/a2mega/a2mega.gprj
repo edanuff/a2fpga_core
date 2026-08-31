@@ -127,5 +127,6 @@
         <File path="../../hdl/disk/hdd_rom.hex" type="file.other" enable="1"/>
         <File path="../../hdl/slots/slots.hex" type="file.other" enable="1"/>
         <File path="../../hdl/video/video.hex" type="file.other" enable="1"/>
+        <File path="../../hdl/displayport/video/video_sched_1080p_2l.hex" type="file.other" enable="1"/>
     </FileList>
 </Project>

@@ -37,6 +37,11 @@ module dp_transmitter #(
     parameter bit H_SYNC_ACTIVE_HIGH = 1'b1,
     parameter bit V_SYNC_ACTIVE_HIGH = 1'b1,
     parameter int TU_SIZE = 64,
+    // Packer schedule ROM (see video_stream_packer.v): 1 = the per-line
+    // walk decisions come from a BSRAM table; SCHED_HEX must match the
+    // geometry (gen_packer_sched.py)
+    parameter int SCHED_ROM = 0,
+    parameter SCHED_HEX = "video_sched_720p_2l.hex",
     // rgb pull-contract latency (see dp_video_timing.v): 1 = classic
     // next-cycle answer; 2 = consumer gets an extra pipeline cycle
     parameter int RGB_LATENCY = 1,
@@ -365,7 +370,9 @@ module dp_transmitter #(
         .SYMS_PER_LINE (SYMS_PER_LINE),
         .VALID_NUM     (VALID_NUM),
         .VALID_DEN     (VALID_DEN),
-        .PREFILL       (WORDS_PER_LINE)
+        .PREFILL       (WORDS_PER_LINE),
+        .SCHED_ROM     (SCHED_ROM),
+        .SCHED_HEX     (SCHED_HEX)
     ) i_video_stream_packer (
         .clk         (tx_symbol_clk),
         .reset       (reset),
