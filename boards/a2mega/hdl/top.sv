@@ -1451,6 +1451,18 @@ module top #(
 
     assign hdmi_cx_w = dp_cx_raw_w;
     assign hdmi_cy_w = dp_cy_raw_w;
+    // Registered coordinate feed for the OVERLAYS only (08-30 structural
+    // timing): the cx -> osd/debug-overlay compare cones into CE pins
+    // were the last clk_pix family (worst -0.34). The framebuffer keeps
+    // the raw coordinates (its pipeline is contract-matched); the
+    // overlays shift 1 px relative to the base video — imperceptible,
+    // same precedent as the registered fb feed below.
+    reg [11:0] ovl_cx_q;
+    reg [10:0] ovl_cy_q;
+    always @(posedge clk_pixel_w) begin
+        ovl_cx_q <= dp_cx_raw_w;
+        ovl_cy_q <= dp_cy_raw_w;
+    end
 
     // AUX channel analog interface: pseudo-diff pair, tri-stated by the
     // in-fabric AUX engine; carrier provides bias + AC coupling.
@@ -1614,8 +1626,8 @@ module top #(
         .reset_n    (device_reset_n_w),
         .enable_i   (osd_en_sync1),
 
-        .screen_x_i (hdmi_cx_w),
-        .screen_y_i (hdmi_cy_w),
+        .screen_x_i (ovl_cx_q),
+        .screen_y_i (ovl_cy_q),
 
         .vram_addr_o(osd_vram_addr_w),
         .vram_data_i(osd_vram_data_w),
@@ -1736,8 +1748,8 @@ module top #(
         .debug_bits_0_i (dbg_bits0_sync1),
         .debug_bits_1_i (dbg_bits1_sync1),
 
-        .screen_x_i     (hdmi_cx_w),
-        .screen_y_i     (hdmi_cy_w),
+        .screen_x_i     (ovl_cx_q),
+        .screen_y_i     (ovl_cy_q),
 
         .r_i            (osd_rgb_w[23:16]),
         .g_i            (osd_rgb_w[15:8]),
