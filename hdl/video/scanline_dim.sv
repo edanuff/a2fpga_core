@@ -26,8 +26,9 @@
 //
 // The dim path is purely combinational between the upstream output
 // registers and the downstream input registers (one mux level): no added
-// pixel latency, no RGB_LATENCY contract change. Phase bookkeeping updates
-// on raster-line changes, which happen in blanking.
+// pixel latency, no RGB_LATENCY contract change. Phase bookkeeping for a
+// line runs at H_TRIGGER in the PREVIOUS line's horizontal blanking, so
+// the dim flag is stable before pixel 0 of every line.
 //
 // Border continuity note: below the window the free-run is always seamless.
 // Above the window, the run-through from the previous frame lines up
@@ -35,10 +36,19 @@
 // future scale where it isn't, the top border re-locks at the window top —
 // in-window stripes are always source-aligned by construction.
 //
-module scanline_dim (
+module scanline_dim #(
+    // Phase bookkeeping runs at this x position — must sit in horizontal
+    // blanking (past the active width, below H_TOTAL) so the dim flag for
+    // a line is stable BEFORE its first pixel. Advancing on the cy change
+    // itself lands 2-3 clocks into the line and displaces the stripe
+    // boundary on the leftmost pixels (seen on hardware).
+    parameter [11:0] H_TRIGGER = 12'd1930,
+    parameter [10:0] V_TOTAL   = 11'd1125
+)(
     input  wire        clk_i,
     input  wire        enable_i,
 
+    input  wire [11:0] screen_x_i,   // registered raster column counter
     input  wire [10:0] screen_y_i,   // registered raster line counter
     input  wire [2:0]  v_scale_i,    // raster lines per source line (from fb)
     input  wire [10:0] v_border_i,   // active-window top raster line (from fb)
@@ -47,20 +57,24 @@ module scanline_dim (
     output wire [23:0] rgb_o
 );
 
-    reg [10:0] cy_prev_r;
-    reg [2:0]  phase_r;
-    reg        dim_q;
+    reg [2:0] phase_r;
+    reg       dim_q;
+
+    // The line the phase is being prepared FOR (trigger fires on line N,
+    // in its blanking, computing line N+1's phase)
+    wire [10:0] y_next_w = (screen_y_i == V_TOTAL - 11'd1) ? 11'd0
+                                                           : screen_y_i + 11'd1;
 
     always @(posedge clk_i) begin
-        cy_prev_r <= screen_y_i;
-        if (screen_y_i != cy_prev_r) begin
-            if (screen_y_i == v_border_i)
+        if (screen_x_i == H_TRIGGER) begin
+            if (y_next_w == v_border_i)
                 phase_r <= 3'd0;   // lock to the source-line grid
             else
                 phase_r <= (phase_r >= v_scale_i - 3'd1) ? 3'd0
                                                          : phase_r + 3'd1;
         end
-        // odd sub-lines dim — scale-generic
+        // odd sub-lines dim — scale-generic; registered a full blanking
+        // interval before the line's first pixel
         dim_q <= enable_i && phase_r[0];
     end
 

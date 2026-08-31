@@ -254,11 +254,23 @@ module framebuffer_1080p #(
     // Yield reads only as a safety valve when write FIFO is nearly full.
     localparam FIFO_YIELD_THRESHOLD = 48;
 
-    reg [148:0] wr_fifo [0:FIFO_DEPTH-1] /* synthesis syn_ramstyle="registers" */;
+    // BSRAM, not registers: as a register file this was 149x64 = ~9.5K FF
+    // plus a 64:1 read mux (~30% of ALL flops in the design, pointer nets
+    // at fanout ~3700 on saturated clock spines — see
+    // docs/pnr_structural_analysis.md). Sync read + FWFT staging below;
+    // the producer/consumer contract is unchanged except entries become
+    // consumer-visible 2 cycles after the push (a don't-care for a
+    // rate-smoothing FIFO into DDR3).
+    reg [148:0] wr_fifo [0:FIFO_DEPTH-1] /* synthesis syn_ramstyle="block_ram" */;
     reg [FIFO_ADDR_BITS:0] fifo_wr_ptr_r, fifo_rd_ptr_r;
+    // Consumer-side copy of the write pointer, one cycle behind: (a) the
+    // sync-read output register needs a cycle to present a just-written
+    // head entry, and (b) it guarantees the BSRAM never does a same-cycle
+    // same-address read-during-write (undefined on Gowin SDPB).
+    reg [FIFO_ADDR_BITS:0] fifo_wr_ptr_d1_r;
 
     wire [FIFO_ADDR_BITS:0] fifo_count_w = fifo_wr_ptr_r - fifo_rd_ptr_r;
-    wire fifo_empty_w = (fifo_wr_ptr_r == fifo_rd_ptr_r);
+    wire fifo_empty_w = (fifo_wr_ptr_d1_r == fifo_rd_ptr_r);
     wire fifo_full_w  = fifo_count_w[FIFO_ADDR_BITS];  // MSB set when count >= 64
     // Start yielding reads earlier so write FIFO never reaches drop-on-full behavior.
     wire fifo_busy_w  = (fifo_count_w >= FIFO_YIELD_THRESHOLD);
@@ -372,17 +384,12 @@ module framebuffer_1080p #(
                                     wr_accum_slot_r <= 2'd3;
                                 end
                                 2'd3: begin
-                                    // 4th pair completes the 128-bit word — push to FIFO
-                                    if (!fifo_full_w) begin
-                                        wr_fifo[fifo_wr_ptr_r[FIFO_ADDR_BITS-1:0]] <= {
-                                            wr_accum_addr_r,    // [148:128] = 21-bit addr
-                                            pair,               // [127:96]  = slot 3
-                                            wr_accum_r[2],      // [95:64]   = slot 2
-                                            wr_accum_r[1],      // [63:32]   = slot 1
-                                            wr_accum_r[0]       // [31:0]    = slot 0
-                                        };
+                                    // 4th pair completes the 128-bit word — push to
+                                    // FIFO (the BSRAM write itself is the dedicated
+                                    // always block below, gated by fifo_push_w which
+                                    // mirrors this exact condition)
+                                    if (!fifo_full_w)
                                         fifo_wr_ptr_r <= fifo_wr_ptr_r + 1;
-                                    end
                                     // Always reset slot (even on drop — 4 pairs lost together)
                                     wr_accum_slot_r <= 2'd0;
                                 end
@@ -403,17 +410,46 @@ module framebuffer_1080p #(
         end
     end
 
-    // FIFO drain to memory write port (128-bit wide write)
-    wire [148:0] fifo_head_w = wr_fifo[fifo_rd_ptr_r[FIFO_ADDR_BITS-1:0]];
-    wire [20:0]  fifo_addr_w = fifo_head_w[148:128];
-    wire [127:0] fifo_data_w = fifo_head_w[127:0];
+    // BSRAM write port — fifo_push_w mirrors the pointer-increment
+    // condition in the packer FSM above, bit for bit
+    wire fifo_push_w = fb_we_r && !frame_pending_r && !frame_start_w &&
+                       wr_x_r[0] && (wr_accum_slot_r == 2'd3) && !fifo_full_w;
+    wire [148:0] fifo_wdata_w = {
+        wr_accum_addr_r,                                    // [148:128] addr
+        rgb666_to_565(wr_pixel_data_w), wr_pixel_even_r,    // [127:96]  slot 3
+        wr_accum_r[2],                                      // [95:64]   slot 2
+        wr_accum_r[1],                                      // [63:32]   slot 1
+        wr_accum_r[0]                                       // [31:0]    slot 0
+    };
+    always @(posedge clk) begin
+        if (fifo_push_w)
+            wr_fifo[fifo_wr_ptr_r[FIFO_ADDR_BITS-1:0]] <= fifo_wdata_w;
+    end
+
+    // FIFO drain to memory write port (128-bit wide write). Sync-read FWFT:
+    // the BSRAM output register always holds mem[fifo_rd_ptr_r] — the read
+    // address muxes ahead on a pop so back-to-back drains sustain one word
+    // per cycle. fifo_empty_w (from the delayed write pointer) guarantees
+    // the head register is valid before a pop is allowed.
+    reg [148:0] fifo_head_r;
+    always @(posedge clk) begin
+        fifo_head_r <= wr_fifo[fifo_pop_w ? fifo_rd_ptr_r[FIFO_ADDR_BITS-1:0] + 6'd1
+                                          : fifo_rd_ptr_r[FIFO_ADDR_BITS-1:0]];
+    end
+
+    wire [20:0]  fifo_addr_w = fifo_head_r[148:128];
+    wire [127:0] fifo_data_w = fifo_head_r[127:0];
     wire fifo_pop_w = !fifo_empty_w && fb_write_port.available;
 
     always @(posedge clk or negedge rst_n_clk) begin
-        if (!rst_n_clk)
+        if (!rst_n_clk) begin
             fifo_rd_ptr_r <= '0;
-        else if (fifo_pop_w)
-            fifo_rd_ptr_r <= fifo_rd_ptr_r + 1;
+            fifo_wr_ptr_d1_r <= '0;
+        end else begin
+            fifo_wr_ptr_d1_r <= fifo_wr_ptr_r;
+            if (fifo_pop_w)
+                fifo_rd_ptr_r <= fifo_rd_ptr_r + 1;
+        end
     end
 
     // Lower 32 bits via port data; upper 96 bits via wide sideband
@@ -466,6 +502,25 @@ module framebuffer_1080p #(
         cy0_r <= hdmi_cy;
     end
 
+    // Pre-registered line-event flags (structural timing, 08-31): the raw
+    // compares (cy == v_border / v_border-LEAD, fb_line == height-1) fed the
+    // tracker CEs directly and were the persistent clk_pix violation family
+    // post-wr_fifo (-1.0/-1.2 across draws; synthesis also merged the
+    // mode-equivalent h_border[4]/v_border[4] bits, welding the h and v
+    // cones together). All three fire once per line against values stable
+    // for the whole line, and hdmi_cy is STRICTLY SEQUENTIAL — so each
+    // compare is evaluated against cy+1 during the previous line and
+    // consumed as a 1-bit flag at the change. At the frame wrap the next
+    // line is 0, and 0 never equals v_border (60/40) or v_border-LEAD
+    // (48/28), so the +1 form is exact there too. fb_line_last_r is
+    // consumed a full line after fb_line_px_r settles.
+    reg at_border_nxt_r, at_lead_nxt_r, fb_line_last_r;
+    always @(posedge clk_pixel) begin
+        at_border_nxt_r <= (cy0_r + 11'd1 == v_border_px_r);
+        at_lead_nxt_r   <= (cy0_r + 11'd1 == v_border_px_r - 11'(PREFETCH_LEAD_LINES));
+        fb_line_last_r  <= (fb_line_px_r == fb_height_px_r[8:0] - 9'd1);
+    end
+
     always @(posedge clk_pixel) begin
         cy_prev_px_r    <= cy0_r;
         cy_changed_px_r <= (cy0_r != cy_prev_px_r);
@@ -475,17 +530,17 @@ module framebuffer_1080p #(
                 v_approach_px_r <= 1'b0;
                 v_phase_px_r    <= 3'd0;
                 fb_line_px_r    <= 9'd0;
-            end else if (cy0_r == v_border_px_r) begin
+            end else if (at_border_nxt_r) begin
                 v_active_px_r   <= 1'b1;
                 v_approach_px_r <= 1'b0;
                 v_phase_px_r    <= 3'd0;
                 fb_line_px_r    <= 9'd0;
-            end else if (cy0_r == v_border_px_r - 11'(PREFETCH_LEAD_LINES)) begin
+            end else if (at_lead_nxt_r) begin
                 v_approach_px_r <= 1'b1;
             end else if (v_active_px_r) begin
                 if (v_phase_px_r == 3'(V_SCALE-1)) begin
                     v_phase_px_r <= 3'd0;
-                    if (fb_line_px_r == fb_height_px_r[8:0] - 9'd1)
+                    if (fb_line_last_r)
                         v_active_px_r <= 1'b0;
                     else
                         fb_line_px_r <= fb_line_px_r + 9'd1;

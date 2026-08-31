@@ -1660,6 +1660,7 @@ module top #(
     scanline_dim u_scanline_dim (
         .clk_i       (clk_pixel_w),
         .enable_i    (1'b1),
+        .screen_x_i  (ovl_cx_q),
         .screen_y_i  (ovl_cy_q),
         .v_scale_i   (fb_v_scale_w),
         .v_border_i  (fb_v_border_w),
