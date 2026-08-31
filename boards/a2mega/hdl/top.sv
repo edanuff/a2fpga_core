@@ -1482,6 +1482,9 @@ module top #(
     dp_transmitter #(
         .LANE_COUNT     (2),
         .LINK_RATE_MBPS (2700),
+        // The framebuffer answer path gets a full extra clk_pix cycle
+        // (matches the framebuffer's new pipeline stage 3)
+        .RGB_LATENCY    (2),
         // CLOSED-LOOP DP STACK (08-30 port): the exact policy set the
         // campaign validated on dp_test — soak-proven on BOTH dies
         // (SER < 1e-12/1e-13, zero blinks). See the answer-key doc.

@@ -37,6 +37,9 @@ module dp_transmitter #(
     parameter bit H_SYNC_ACTIVE_HIGH = 1'b1,
     parameter bit V_SYNC_ACTIVE_HIGH = 1'b1,
     parameter int TU_SIZE = 64,
+    // rgb pull-contract latency (see dp_video_timing.v): 1 = classic
+    // next-cycle answer; 2 = consumer gets an extra pipeline cycle
+    parameter int RGB_LATENCY = 1,
     parameter bit AUDIO_ENABLE = 1,  // 0: bypass SDP engine entirely (no
                                      // secondary packets on the wire) —
                                      // video-restart-bug discriminator
@@ -313,7 +316,8 @@ module dp_transmitter #(
         .V_VISIBLE  (V_VISIBLE),
         .V_TOTAL    (V_TOTAL),
         .BIT_WIDTH  (BIT_WIDTH),
-        .BIT_HEIGHT (BIT_HEIGHT)
+        .BIT_HEIGHT (BIT_HEIGHT),
+        .RGB_LATENCY (RGB_LATENCY)
     ) i_dp_video_timing (
         .clk_pixel   (clk_pixel),
         .reset       (reset),

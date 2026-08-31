@@ -345,15 +345,35 @@ module sdp_engine #(
     // avoiding a subtractor in series with the byte mux — the borrow chain
     // was the design's final failing path at 135 MHz.
     wire [5:0] wb_nxt_b = {ins_cyc[4:0], 1'b1};
+    // 08-30 structural timing: the index itself is REGISTERED before the
+    // deep wire_byte mux, so the inserting/ins_cyc -> 256-bit-mux cone
+    // (the residual clk_sym critical family in the full cores) starts
+    // from flops. wb_idx_* lag wb_nxt by one cycle, so they are computed
+    // from ins_cyc+2 lookahead: at insertion cycle k-2 the index for
+    // cycle k is registered, at k-1 the byte lands in wb_*_r, at k it is
+    // consumed — same consumption timing as before. Cycles 0 and 1 use
+    // the constant-index regs (wb0_r, wb1_r) exactly like wb0/wblast.
+    wire [5:0] wb_nxt2   = inserting ? ins_cyc + 6'd2 : 6'd2;
+    reg  [5:0] wb_idx_a_r = 6'd0, wb_idx_b_r = 6'd0;
+    always @(posedge clk) begin
+        wb_idx_a_r <= {wb_nxt2[4:0], 1'b0};
+        wb_idx_b_r <= {wb_nxt[4:0],  1'b1};   // 2*(k+2)-1 = {k+1, 1}
+    end
     reg [7:0] wb_a_r [0:1];      // byte index 2*ins_cyc   (slot 1)
     reg [7:0] wb_b_r [0:1];      // byte index 2*ins_cyc-1 (slot 0)
     reg [7:0] wb0_r  [0:1];      // byte index 0 (start cycle)
+    reg [7:0] wb1a_r [0:1];      // byte index 2 (cycle-1 slot 1)
+    reg [7:0] wb1b_r [0:1];      // byte index 1 (cycle-1 slot 0)
     reg [7:0] wblast_r [0:1];    // byte index WB_PER_LANE-1 (last cycle)
     always @(posedge clk) begin
-        wb_a_r[0]   <= wire_byte(2'd0, {wb_nxt[4:0],1'b0},  hbv, pbhv, pbdv, db);
-        wb_b_r[0]   <= wire_byte(2'd0, wb_nxt_b,            hbv, pbhv, pbdv, db);
-        wb_a_r[1]   <= wire_byte(2'd1, {wb_nxt[4:0],1'b0},  hbv, pbhv, pbdv, db);
-        wb_b_r[1]   <= wire_byte(2'd1, wb_nxt_b,            hbv, pbhv, pbdv, db);
+        wb_a_r[0]   <= wire_byte(2'd0, wb_idx_a_r,          hbv, pbhv, pbdv, db);
+        wb_b_r[0]   <= wire_byte(2'd0, wb_idx_b_r,          hbv, pbhv, pbdv, db);
+        wb_a_r[1]   <= wire_byte(2'd1, wb_idx_a_r,          hbv, pbhv, pbdv, db);
+        wb_b_r[1]   <= wire_byte(2'd1, wb_idx_b_r,          hbv, pbhv, pbdv, db);
+        wb1a_r[0]   <= wire_byte(2'd0, 6'd2,                hbv, pbhv, pbdv, db);
+        wb1a_r[1]   <= wire_byte(2'd1, 6'd2,                hbv, pbhv, pbdv, db);
+        wb1b_r[0]   <= wire_byte(2'd0, 6'd1,                hbv, pbhv, pbdv, db);
+        wb1b_r[1]   <= wire_byte(2'd1, 6'd1,                hbv, pbhv, pbdv, db);
         wb0_r[0]    <= wire_byte(2'd0, 6'd0,                     hbv, pbhv, pbdv, db);
         wb0_r[1]    <= wire_byte(2'd1, 6'd0,                     hbv, pbhv, pbdv, db);
         wblast_r[0] <= wire_byte(2'd0, WB_PER_LANE[5:0]-6'd1,    hbv, pbhv, pbdv, db);
@@ -454,9 +474,19 @@ module sdp_engine #(
                     pkt_pending <= 1'b0;
                     if (hbv[15:8] == 8'h01) ts_sent_once     <= 1'b1;
                     if (hbv[15:8] == 8'h02) stream_sent_once <= 1'b1;
+                end else if (ins_cyc == 6'd1) begin
+                    // cycle 1: constant-index regs (the 2-deep index
+                    // pipeline cannot serve it — its rolling regs first
+                    // become valid at cycle 2, seeded by the idle
+                    // default index)
+                    out_data[17:0] <= {1'b0, wb1a_r[0], 1'b0, wb1b_r[0]};
+                    if (LANE_COUNT == 2)
+                        out_data[35:18] <= {1'b0, wb1a_r[1], 1'b0, wb1b_r[1]};
+                    ins_cyc <= ins_cyc + 1'b1;
                 end else begin
                     // slot0 = wire byte 2c-1, slot1 = wire byte 2c
-                    // (registered a cycle early from wb_nxt)
+                    // (2-stage pipeline: index registered at c-2,
+                    // byte registered at c-1, consumed at c)
                     out_data[17:0] <= {1'b0, wb_a_r[0], 1'b0, wb_b_r[0]};
                     if (LANE_COUNT == 2)
                         out_data[35:18] <= {1'b0, wb_a_r[1], 1'b0, wb_b_r[1]};
@@ -466,7 +496,17 @@ module sdp_engine #(
 
             // synthesis translate_off
             // precomputed bytes must equal the direct lookups they replace
-            if (inserting && ins_cyc != INS_CYCLES[5:0]-1) begin
+            if (inserting && ins_cyc == 6'd1) begin
+                if ({wb1a_r[0], wb1b_r[0], wb1a_r[1], wb1b_r[1]} !==
+                    {wire_byte(2'd0, 6'd2, hbv, pbhv, pbdv, db),
+                     wire_byte(2'd0, 6'd1, hbv, pbhv, pbdv, db),
+                     wire_byte(2'd1, 6'd2, hbv, pbhv, pbdv, db),
+                     wire_byte(2'd1, 6'd1, hbv, pbhv, pbdv, db)}) begin
+                    $display("FATAL: sdp_engine cycle-1 precompute diverged");
+                    $fatal(1);
+                end
+            end
+            if (inserting && ins_cyc != INS_CYCLES[5:0]-1 && ins_cyc != 6'd1) begin
                 if ({wb_a_r[0], wb_b_r[0], wb_a_r[1], wb_b_r[1]} !==
                     {wire_byte(2'd0, {ins_cyc[4:0],1'b0},      hbv, pbhv, pbdv, db),
                      wire_byte(2'd0, {ins_cyc[4:0],1'b0}-6'd1, hbv, pbhv, pbdv, db),

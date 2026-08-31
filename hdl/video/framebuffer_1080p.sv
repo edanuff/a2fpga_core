@@ -1271,21 +1271,37 @@ module framebuffer_1080p #(
         scanline_dim_r <= scanline_dim_s1_r;
     end
 
+    // Pipeline stage 3 (08-30 structural timing): register the BSRAM
+    // read data and its aligned controls BEFORE the color-conversion
+    // combinational chain. The BSRAM-DO -> torgb/mux/dim -> output-reg
+    // path was the clk_pix critical family in both full cores (worst
+    // -1.1 ns); this splits it with a pure register. The +1 cycle of
+    // output latency is matched by the DP transmitter's RGB_LATENCY=2
+    // pull contract (see dp_video_timing.v) — frame content unchanged.
+    reg [COLOR_BITS-1:0] lb_rd_data_q;
+    reg in_active_px_q;
+    reg scanline_dim_q;
+    always @(posedge clk_pixel) begin
+        lb_rd_data_q   <= lb_rd_data_r;
+        in_active_px_q <= in_active_px_r;
+        scanline_dim_q <= scanline_dim_r;
+    end
+
     // EXP 22: Binary threshold — non-zero pixel data → white, zero → black.
     // This makes ghost pixels maximally visible by eliminating color ambiguity.
     wire [23:0] active_rgb_w = (THRESHOLD_DIAG != 0) ?
-        (lb_rd_data_r != {COLOR_BITS{1'b0}} ? 24'hFFFFFF : 24'h000000) :
-        torgb(lb_rd_data_r);
+        (lb_rd_data_q != {COLOR_BITS{1'b0}} ? 24'hFFFFFF : 24'h000000) :
+        torgb(lb_rd_data_q);
     wire [23:0] border_rgb_w = torgb(rgb565_to_666(rgb666_to_565(border_color)));
 
-    wire [23:0] pixel_rgb_w = in_active_px_r ? active_rgb_w : border_rgb_w;
+    wire [23:0] pixel_rgb_w = in_active_px_q ? active_rgb_w : border_rgb_w;
 
     wire [23:0] dimmed_rgb_w = {1'b0, pixel_rgb_w[23:17],
                                  1'b0, pixel_rgb_w[15:9],
                                  1'b0, pixel_rgb_w[7:1]};
 
     wire [23:0] final_rgb_w = sleep_i ? 24'd0 :
-                               scanline_dim_r ? dimmed_rgb_w : pixel_rgb_w;
+                               scanline_dim_q ? dimmed_rgb_w : pixel_rgb_w;
 
     assign r_o = final_rgb_w[23:16];
     assign g_o = final_rgb_w[15:8];

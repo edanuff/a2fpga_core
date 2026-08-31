@@ -25,7 +25,17 @@ module dp_video_timing #(
     parameter V_VISIBLE  = 720,
     parameter V_TOTAL    = 750,
     parameter BIT_WIDTH  = 11,
-    parameter BIT_HEIGHT = 10
+    parameter BIT_HEIGHT = 10,
+    // RGB answer latency in clk_pixel cycles (08-30 structural-timing
+    // fix): 1 = the original pull contract (rgb for (cx,cy) arrives the
+    // NEXT cycle); 2 = the consumer gets a full extra cycle — required
+    // by the full a2mega cores, whose answer path (framebuffer BSRAM
+    // read -> OSD composite -> overlay mux) cannot make 148.5 MHz in
+    // one cycle (the clk_pix critical family on both dies). The
+    // coordinate/rgb matching pipeline below compensates exactly, so
+    // frame content is pixel-identical — proven by the pixel-exact
+    // frame-reconstruction testbenches.
+    parameter RGB_LATENCY = 1
 )(
     input                       clk_pixel,
     input                       reset,
@@ -42,6 +52,10 @@ module dp_video_timing #(
     reg [BIT_WIDTH-1:0]  cx_d;                 // coordinate matching current rgb
     reg [BIT_HEIGHT-1:0] cy_d;
     reg                  active_d;
+    // RGB_LATENCY=2: one more matching stage
+    reg [BIT_WIDTH-1:0]  cx_d1;
+    reg [BIT_HEIGHT-1:0] cy_d1;
+    reg                  active_d1;
     reg                  capturing;
 
     initial begin
@@ -72,10 +86,21 @@ module dp_video_timing #(
                 cx <= cx + 1'b1;
             end
 
-            // rgb arriving now corresponds to last cycle's coordinates
-            cx_d     <= cx;
-            cy_d     <= cy;
-            active_d <= (cx < H_VISIBLE) && (cy < V_VISIBLE);
+            // rgb arriving now corresponds to the coordinates emitted
+            // RGB_LATENCY cycles ago: cx_d/cy_d/active_d always describe
+            // the pixel the CURRENT rgb answers
+            if (RGB_LATENCY == 1) begin
+                cx_d     <= cx;
+                cy_d     <= cy;
+                active_d <= (cx < H_VISIBLE) && (cy < V_VISIBLE);
+            end else begin
+                cx_d1     <= cx;
+                cy_d1     <= cy;
+                active_d1 <= (cx < H_VISIBLE) && (cy < V_VISIBLE);
+                cx_d      <= cx_d1;
+                cy_d      <= cy_d1;
+                active_d  <= active_d1;
+            end
 
             // ----------------------------------------------------------
             // Arm/launch capture only at a frame boundary so the FIFO
