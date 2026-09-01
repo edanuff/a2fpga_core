@@ -229,8 +229,11 @@ TX PLL takes `clkin` (19–800 MHz) from the fabric clock network:
 
 - **`clkin` = 54 MHz — RESOLVED (IP GUI Calculate verified 2026-09-01)**:
   rate=1620 with CLKIN=54 closes at **VCO=810** (×15). CLKIN=50 crystal-direct
-  does NOT close ("No eligible Fvco" — the ÷5×81 ratio exceeds the divider
-  architecture). Source: 54 MHz from fabric PLL (module 50 MHz osc ×27÷25, or
+  does NOT close ("No eligible Fvco"), while 50 @ rate 1500 DOES (VCO 750=50×15)
+  — confirming the divider rule: **VCO must be an integer multiple of CLKIN**
+  (810/50=16.2 impossible; no useful fractional path). Any integer divisor of
+  810 works as CLKIN (54/27/81/135…). Note 50@1500 is diagnostic-only — 1500 is
+  not a legal DP link rate; the link must be exactly 1620. Source: 54 MHz from fabric PLL (module 50 MHz osc ×27÷25, or
   tap the existing 54 MHz logic-clock tree). Cascade topology accepted pending
   interposer SER soak; break-glass crystal-direct upgrades if soak implicates
   reference jitter: 27 MHz ×30 or the a2mega's 135 MHz part ×6. The IP's
