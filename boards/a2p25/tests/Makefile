@@ -51,6 +51,15 @@ help:
 	@echo "  clean - Clean generated files"
 	@echo "  help  - Show this help"
 
+# DP-over-D-PHY main-link shim test (10->16 gearbox + enable sequencing)
+DP_DPHY_FILES = ../hdl/dp/dp_dphy_tx.sv test_dp_dphy_tx.sv
+dp_dphy: $(DP_DPHY_FILES)
+	@echo "=== Compiling DP D-PHY TX Shim Test ==="
+	iverilog -g2012 -o dp_dphy.out $(DP_DPHY_FILES)
+	@echo "=== Running DP D-PHY TX Shim Simulation ==="
+	./dp_dphy.out
+	@if [ -f dp_dphy_tx.vcd ]; then echo "=== VCD file generated: dp_dphy_tx.vcd ==="; echo "Open with: gtkwave dp_dphy_tx.vcd"; fi
+
 SPI_CONNECTOR_FILES = ../hdl/esp32/esp32_spi_proto_proc.sv ../hdl/esp32/esp32_spi_connector.sv test_esp32_spi_connector.sv
 spi_connector: $(SPI_CONNECTOR_FILES)
 	@echo "=== Compiling ESP32 SPI Connector Test ==="

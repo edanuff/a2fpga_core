@@ -211,6 +211,17 @@ DPEQ ladder.
 2. **Symbol regearing** — 10-bit 8b/10b symbols packed into the 16-bit gearbox
    words (LCM 80-bit rolling buffer per lane; standard gearbox, LSB-first per
    D-PHY byte ordering — verify bit order in sim against a captured RBR stream).
+   **IMPLEMENTED + SIM-VERIFIED** (`hdl/dp/dp_dphy_tx.sv`, TB
+   `tests/test_dp_dphy_tx.sv`, `make -C boards/a2p25/tests dp_dphy`): shared
+   lockstep gearbox (one bit-count, 4 lane buffers), pulls one 20-bit symbol
+   pair per lane in 4 of 5 clocks via a registered req→vld contract (⚠ req
+   pipeline is 2 cycles deep — the request rule must count the in-flight pull
+   or the gearbox starves every 7th cycle); enable FSM sequences txdpen →
+   settle → hstxen → settle → stream (settle timers because the generated
+   wrapper leaves PLL `lock` dangling — re-expose it at bring-up). TB
+   serializes words bit-0-first per TX_WORD_LITTLE_ENDIAN and reassembles
+   symbols: 40k symbols/lane bit-exact, continuous vld, 4/2/1-lane modes,
+   inactive lanes quiet.
 3. **Clocking/CDC** — `tx_clk_o` (101.25 MHz) is the link-layer clock domain;
    CDC to the 54 MHz video/logic domain via existing FIFO patterns. D-PHY TX PLL
    fed from 27 or 54 MHz refclk (CLKIN range 19–800 MHz).
