@@ -84,3 +84,24 @@ set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks 
 set_clock_groups -asynchronous -group [get_clocks {cm_life}] -group [get_clocks {clk_pixel}]
 
 // CSR replay ROM: now a sync BSRAM pROM — no multicycle needed.
+
+// UPAR arbiter multicycles — VENDOR-SANCTIONED: this exact exception set
+// (same register names) appears in Gowin's own PCIe reference project SDC
+// (via the gowin-serdes RE analysis, docs/gowin_serdes_re_findings.md
+// section 3.2). Semantics: addr/wrdata/strb are latched at the end of
+// JUDG_ADDR and held stable through the whole UPAR_EN handshake; wren/rden
+// are registered — the *_s1 capture registers see multi-cycle-stable data
+// by construction. This retires the cm_life wren->CE path family that
+// dominated the 138B timing reports.
+set_multicycle_path 2 -setup -from [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_wren_o_s1/Q}]
+set_multicycle_path 1 -hold  -from [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_wren_o_s1/Q}]
+set_multicycle_path 2 -setup -from [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_rden_o_s1/Q}]
+set_multicycle_path 1 -hold  -from [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_rden_o_s1/Q}]
+set_multicycle_path 2 -setup -from [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/gtr12_upar_inst/UPAR_READY_S}]
+set_multicycle_path 1 -hold  -from [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/gtr12_upar_inst/UPAR_READY_S}]
+set_multicycle_path 2 -setup -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_addr_o_*_s1/D}]
+set_multicycle_path 1 -hold  -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_addr_o_*_s1/D}]
+set_multicycle_path 2 -setup -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_strb_o_*_s1/D}]
+set_multicycle_path 1 -hold  -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_strb_o_*_s1/D}]
+set_multicycle_path 2 -setup -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_wrdata_o_*_s1/D}]
+set_multicycle_path 1 -hold  -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_wrdata_o_*_s1/D}]
