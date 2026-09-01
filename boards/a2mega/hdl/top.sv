@@ -1492,6 +1492,7 @@ module top #(
     wire dp_link_established_w, dp_video_live_w;
     wire        dp_wedge_w;
     wire [15:0] dp_errcnt0_w, dp_errcnt1_w;
+    wire        dp_drp_clk_w;   // cm_life/DRP clock tap (freq-meter diag)
     wire [7:0]  dp_serdes_status_w;
 
     dp_transmitter #(
@@ -1551,6 +1552,7 @@ module top #(
         .hpd_present_out   (),
         .debug             (),
         .wedge_suspect     (dp_wedge_w),
+        .debug_drp_clk     (dp_drp_clk_w),
         .debug_errcnt0     (dp_errcnt0_w),
         .debug_errcnt1     (dp_errcnt1_w),
         // DRP register-readback debug bridge (used interactively by the
@@ -1760,6 +1762,56 @@ module top #(
         dbg_bits1_sync1 <= dbg_bits1_sync0;
     end
 
+    // ------------------------------------------------------------------
+    // cm_life frequency meter (DIAGNOSTIC, CM_LIFE_METER=1 builds only):
+    // the 10 ns cm_life SDC constraint has no provenance — this measures
+    // the GTR12's actual FABRIC_CM_LIFE_CLK rate on hardware. dp_test
+    // freq-checker pattern: 1 s window from the 50 MHz crystal, counted
+    // in the drp/cm_life domain (post-unification the fabric tap IS the
+    // arbiter's clock net), delta = Hz. Readout: overlay hex slots 4-7
+    // show delta[27:0] big-endian (slot4=MSB), displacing the DOC/fb
+    // counters for the diag build only. delta is quasi-static (1/s), so
+    // the existing 2FF hex sync chain is the CDC.
+    // ------------------------------------------------------------------
+    localparam CM_LIFE_METER = 0;
+    wire [27:0] cml_delta_w;
+    generate if (CM_LIFE_METER != 0) begin : g_cmlife_meter
+        reg [25:0] cmw_cnt_r = '0;
+        reg        cmw_tgl_r = 1'b0;
+        always @(posedge clk) begin
+            if (cmw_cnt_r == 26'd49_999_999) begin
+                cmw_cnt_r <= '0;
+                cmw_tgl_r <= ~cmw_tgl_r;
+            end else
+                cmw_cnt_r <= cmw_cnt_r + 26'd1;
+        end
+        reg [27:0] cml_cnt_r = '0, cml_last_r = '0, cml_delta_r = '0;
+        reg [2:0]  cml_tgl_sync_r = '0;
+        always @(posedge dp_drp_clk_w) begin
+            cml_cnt_r      <= cml_cnt_r + 28'd1;
+            cml_tgl_sync_r <= {cml_tgl_sync_r[1:0], cmw_tgl_r};
+            if (cml_tgl_sync_r[2] != cml_tgl_sync_r[1]) begin
+                cml_delta_r <= cml_cnt_r - cml_last_r;
+                cml_last_r  <= cml_cnt_r;
+            end
+        end
+        assign cml_delta_w = cml_delta_r;
+    end else begin : g_no_cmlife_meter
+        assign cml_delta_w = 28'd0;
+    end endgenerate
+
+    reg [7:0] cml_hex_sync0 [4], cml_hex_sync1 [4];
+    always @(posedge clk_pixel_w) begin
+        cml_hex_sync0[0] <= {4'd0, cml_delta_w[27:24]};
+        cml_hex_sync0[1] <= cml_delta_w[23:16];
+        cml_hex_sync0[2] <= cml_delta_w[15:8];
+        cml_hex_sync0[3] <= cml_delta_w[7:0];
+        cml_hex_sync1[0] <= cml_hex_sync0[0];
+        cml_hex_sync1[1] <= cml_hex_sync0[1];
+        cml_hex_sync1[2] <= cml_hex_sync0[2];
+        cml_hex_sync1[3] <= cml_hex_sync0[3];
+    end
+
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),
         .ENABLE(1'b1),
@@ -1770,7 +1822,10 @@ module top #(
         .reset_n        (device_reset_n_w),
         .enable_i       (1'b1),
 
-        .hex_values     ('{dbg_hex_sync1[0], dbg_hex_sync1[1], dbg_hex_sync1[2], dbg_hex_sync1[3],
+        .hex_values     (CM_LIFE_METER != 0 ?
+                         '{dbg_hex_sync1[0], dbg_hex_sync1[1], dbg_hex_sync1[2], dbg_hex_sync1[3],
+                           cml_hex_sync1[0], cml_hex_sync1[1], cml_hex_sync1[2], cml_hex_sync1[3]} :
+                         '{dbg_hex_sync1[0], dbg_hex_sync1[1], dbg_hex_sync1[2], dbg_hex_sync1[3],
                            dbg_hex_sync1[4], dbg_hex_sync1[5], dbg_hex_sync1[6], dbg_hex_sync1[7]}),
 
         .debug_bits_0_i (dbg_bits0_sync1),

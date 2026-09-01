@@ -73,5 +73,7 @@ set_clock_groups -asynchronous -group [get_clocks {clk_pix}] -group [get_clocks 
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk4x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk1x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk_pixel}]
+// cm_life vs the 27 MHz board tap (freq-meter diag CDC; 2FF-synced quasi-static)
+set_clock_groups -asynchronous -group [get_clocks {cm_life}] -group [get_clocks {clk_pixel}]
 
 // CSR replay ROM: now a sync BSRAM pROM — no multicycle needed.

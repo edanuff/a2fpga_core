@@ -168,6 +168,7 @@ module dp_transmitter #(
     output logic [15:0] debug_esi,      // sticky OR {0x2003, 0x2005} vector reads
     output logic [6:0]  debug_defer,    // {edid_giveup, defer_cnt}
     output logic        wedge_suspect,  // advisory quiet-frozen detector
+    output logic        debug_drp_clk,  // cm_life/DRP clock (freq-meter diag tap)
     output logic [15:0] debug_errcnt0,  // SYMBOL_ERROR_COUNT lane0 (raw, bit15=valid)
     output logic [15:0] debug_errcnt1,  // SYMBOL_ERROR_COUNT lane1
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
@@ -551,6 +552,7 @@ module dp_transmitter #(
     logic        adjust_evt;
     logic        afe_busy_w, afe_phy_reinit;
     logic        afe_drp_clk, afe_drp_req, afe_drp_gnt;
+    assign debug_drp_clk = afe_drp_clk;
     logic        afe_drp_wren, afe_drp_ready;
     logic [23:0] afe_drp_addr;
     logic [31:0] afe_drp_wrdata;
