@@ -14,8 +14,15 @@ create_clock -name clk_sym -period 7.407 -waveform {0 3.703} [get_pins {i_dp/i_t
 // 148.5 MHz pixel clock: gowin_pixel_pll = 135 * 44/5 VCO / 8
 create_clock -name clk_pix -period 6.734 -waveform {0 3.367} [get_pins {i_dp/i_pixel_pll/PLLA_inst/CLKOUT0}]
 
-// GTR12 housekeeping clock (unused in fabric; constrain to silence TA1132)
-create_clock -name cm_life -period 10.000 [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/gtr12_quad_inst0/FABRIC_CM_LIFE_CLK_O}]
+// cm_life = the GTR12 CM block's internal oscillator-derived clock.
+// MEASURED on hardware 2026-08-31 (138K board, on-screen freq meter,
+// diag bin b0a9c746): 60.4 MHz at power-on cooling to 60.1 MHz warm —
+// a 60 MHz nominal RC-oscillator clock (210 MHz reference class, DS981
+// Table 3-41: +/-5% commercial, +/-10% extended temp). The old 10 ns
+// value had NO provenance ("silence TA1132") and over-constrained by
+// ~66%, manufacturing a -300 ns/68-endpoint phantom family on the 138B.
+// Constraint = 60 MHz * 1.10 fast-corner guard = 66 MHz -> 15.0 ns.
+create_clock -name cm_life -period 15.0 [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/gtr12_quad_inst0/FABRIC_CM_LIFE_CLK_O}]
 
 // Domains exchange data only through the gray-coded CDC FIFO and 2FF
 // synchronisers; no synchronous cross-domain paths exist.

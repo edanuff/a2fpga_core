@@ -30,7 +30,7 @@ create_clock -name clk_pix -period 6.734 -waveform {0 3.367} [get_pins {i_dp/i_p
 // GTR12 housekeeping clock — the CSR replay / DRP FSM in
 // transceiver_bank_gowin.v runs on it (the "unused in fabric" note
 // predated the replay machinery)
-create_clock -name cm_life -period 10.000 [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/gtr12_quad_inst0/FABRIC_CM_LIFE_CLK_O}]
+create_clock -name cm_life -period 15.0 [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/gtr12_quad_inst0/FABRIC_CM_LIFE_CLK_O}]
 
 // CSR replay ROM: now a sync BSRAM pROM (csr_replay_rom_lut has a
 // registered read) — the historical multicycle crutch is gone; the +1
