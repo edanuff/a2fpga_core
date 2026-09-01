@@ -28,7 +28,7 @@ wave: stream
 
 # Clean generated files
 clean:
-	rm -f sim.out qspi_sim.out qspi_serializer.out dump.vcd qspi_protocol_gen.vcd qspi_serializer.vcd
+	rm -f sim.out qspi_sim.out qspi_serializer.out dp_dphy.out dump.vcd qspi_protocol_gen.vcd qspi_serializer.vcd dp_dphy_tx.vcd
 
 # QSPI Serializer Test (new implementation)
 QSPI_SERIALIZER_FILES = qspi_serializer_fixed.sv test_qspi_serializer.sv
