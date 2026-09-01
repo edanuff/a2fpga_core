@@ -1775,6 +1775,7 @@ module top #(
     // ------------------------------------------------------------------
     localparam CM_LIFE_METER = 0;
     wire [27:0] cml_delta_w;
+    wire [3:0]  cml_chan_w;
     generate if (CM_LIFE_METER != 0) begin : g_cmlife_meter
         reg [25:0] cmw_cnt_r = '0;
         reg        cmw_tgl_r = 1'b0;
@@ -1795,14 +1796,39 @@ module top #(
                 cml_last_r  <= cml_cnt_r;
             end
         end
-        assign cml_delta_w = cml_delta_r;
+        // CONTROL CHANNEL: identical meter on the crystal-PLL-locked
+        // 100.000 MHz management clock. If the instrument+readout path
+        // is sound it must read 05F5E1xx here; any other value convicts
+        // the meter, not the measured clock.
+        reg [27:0] c1h_cnt_r = '0, c1h_last_r = '0, c1h_delta_r = '0;
+        reg [2:0]  c1h_tgl_sync_r = '0;
+        always @(posedge clk100_w) begin
+            c1h_cnt_r      <= c1h_cnt_r + 28'd1;
+            c1h_tgl_sync_r <= {c1h_tgl_sync_r[1:0], cmw_tgl_r};
+            if (c1h_tgl_sync_r[2] != c1h_tgl_sync_r[1]) begin
+                c1h_delta_r <= c1h_cnt_r - c1h_last_r;
+                c1h_last_r  <= c1h_cnt_r;
+            end
+        end
+        // Alternate displayed channel each window: slot4 top nibble =
+        // channel id (0 = cm_life, 1 = clk100 control), lower 28 bits =
+        // that channel's delta in Hz.
+        reg chan_r = 1'b0;
+        reg [31:0] disp_r = '0;
+        always @(posedge clk) begin
+            if (cmw_cnt_r == 26'd0) chan_r <= ~chan_r;
+            disp_r <= chan_r ? {4'd1, c1h_delta_r} : {4'd0, cml_delta_r};
+        end
+        assign cml_delta_w = disp_r[27:0];
+        assign cml_chan_w  = disp_r[31:28];
     end else begin : g_no_cmlife_meter
         assign cml_delta_w = 28'd0;
+        assign cml_chan_w  = 4'd0;
     end endgenerate
 
     reg [7:0] cml_hex_sync0 [4], cml_hex_sync1 [4];
     always @(posedge clk_pixel_w) begin
-        cml_hex_sync0[0] <= {4'd0, cml_delta_w[27:24]};
+        cml_hex_sync0[0] <= {cml_chan_w, cml_delta_w[27:24]};
         cml_hex_sync0[1] <= cml_delta_w[23:16];
         cml_hex_sync0[2] <= cml_delta_w[15:8];
         cml_hex_sync0[3] <= cml_delta_w[7:0];
