@@ -267,10 +267,15 @@ TX PLL takes `clkin` (19–800 MHz) from the fabric clock network:
 1. **BTB breakout** — route M0 quad (A5–A9/B5–B9) from the 2×60P BTB as 100 Ω
    differential pairs, intra-pair skew tight; keep total FPGA→DP130 route short
    (the segment running at SLVS swing is the fragile one).
-   **Length matching: intra-pair ONLY (≤0.1 mm, compensated at the mismatch
-   point). Do NOT lane-to-lane match** — e.g. a 12.5–20 mm spread ≈ 45–50 ps ≈
-   0.08 UI at RBR, vs multi-UI sink deskew (DP even permits 2 UI deliberate TX
-   lane skew); the module's internal ball→BTB routing is unmatched anyway.
+   **Length matching: intra-pair ONLY. Budget, not folklore: the DP130 input
+   intra-pair skew spec is 20 ps (at HBR2!) ≈ 3 mm — actual layout achieved
+   0.57–0.76 mm (≈3.7–5 ps, 0.008 UI at RBR), a 4× margin: ACCEPTED, route
+   as-is.** (The N legs ran systematically ~0.7 mm long — single geometric
+   cause at the BTB escape; a per-P bump there halves it if ever wanted.
+   Skew doesn't accumulate downstream — the DP130 re-drives clean.)
+   **Do NOT lane-to-lane match** — the 12.5–20 mm spread ≈ 45–50 ps ≈ 0.08 UI
+   at RBR, vs multi-UI sink deskew (DP even permits 2 UI deliberate TX lane
+   skew); the module's internal ball→BTB routing is unmatched anyway.
    Serpentines would add loss/discontinuities to the thinnest-margin segment
    for zero benefit. Applies to all three main-link segments.
 2. **Polarity and lane order are layout-owned.** No inversion or remap exists
