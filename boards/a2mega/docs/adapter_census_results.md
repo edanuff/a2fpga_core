@@ -24,6 +24,13 @@ DP port, so serial is unavailable during the test).
 |------|---------|--------|-------------------|---------|----------|-----------|----------------|
 | 2026-09-02 | Anker hub (IT6563 DP->HDMI) | 00000C05 | C+D / "4-LANE OK" | 14C2 | HBR2 | **2** (+ef +tps3) | **FAIL — 720p ceiling** (PD gate alone would have passed it) |
 | 2026-09-02 | Mindorlan USB-C hub/adapter | 00000C05 | C+D / "4-LANE OK" | 14C2 | HBR2 | **2** (+ef +tps3) | **FAIL — 720p ceiling** (identical caps to the Anker; EDID given up after 41 DEFERs, `U:69`) |
+| 2026-09-02 | Ugreen hub (the strict-converter/overdrive-class unit) | 00000C05 | C+D / "4-LANE OK" | 14C2 | HBR2 | **2** (+ef +tps3) | **FAIL — 720p ceiling** (third identical reading; trained clean at 804 mV, `G:F1 U:08`) |
+
+Emerging pattern (n=3): every hub-class adapter so far advertises C/D pin
+assignments (4-lane mux path) yet carries a 2-lane HBR2 DP->HDMI converter
+(IT6563 class). For an RBR-only source that is a 720p ceiling on hubs
+regardless of the mux; the open question is a DIRECT USB-C->DP path to a
+real DP monitor, where the monitor's own DPCD is the sink.
 
 Notes
 - Anker link health at capture: HBR x2 trained (`C:0177`), sink streaming
