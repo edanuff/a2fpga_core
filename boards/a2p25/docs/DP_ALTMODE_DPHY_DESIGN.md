@@ -283,19 +283,30 @@ TX PLL takes `clkin` (19–800 MHz) from the fabric clock network:
      double-couple; missing TX1/TX2 caps leave those lanes uncoupled.
    - Per-pair cap placement symmetric (same position along the route) in all
      segments to avoid P/N skew.
-   - **AUX passive placement** (three groups, three jobs):
-     ① a2mega FPGA-side network VERBATIM at the FPGA pins (before DP130
-     AUX_SRC): series 100 Ω on TX/RX + bias dividers 100k/47k on AUX_N
-     (~1.06 V) and 100k/43k on AUX_P (~0.99 V) — the ~65 mV N-over-P offset is
-     load-bearing (idle polarity + sink detect); keep which side gets 47k vs
-     43k. ② DP130 AUX_SRC→AUX_SNK is a DC switch — no parts at its pins.
-     ③ At the TUSB1046 AUX pins (its pin table): AC cap + **100 kΩ to GND on
-     AUXp**, AC cap + **100 kΩ to DP_PWR (3.3 V) on AUXn** — line-side DP
-     source signature (FPGA dividers bias the FPGA side of the caps; these
-     bias the line side). Option B (native jack): ①② identical; ③ becomes
-     discrete 100 k pulldown AUX+ / 100 k pullup-to-3.3 V AUX− at the
-     connector side of the caps. SBU1/2 → receptacle DC with 2 MΩ resistors,
-     no caps. HPD: DC logic, no extra passives.
+   - **AUX passive placement — CORRECTED per SN75DP130 DS Fig 22 ("DP Only
+     Configuration with AUX Pass Through"), which is exactly our topology:**
+     ① a2mega FPGA-side network VERBATIM at the FPGA pins: series 100 Ω on
+     TX/RX + bias dividers 100k/47k on AUX_N (~1.06 V) and 100k/43k on AUX_P
+     (~0.99 V) — the ~65 mV N-over-P offset is load-bearing (idle polarity +
+     sink detect); keep which side gets 47k vs 43k.
+     ② **AC caps (a2mega's C46/C47, 0.1 µF) MOVE UPSTREAM: between the FPGA
+     network and DP130 AUX_SRC.** Mandatory, not stylistic — DP130 AUX pins
+     have a DC-input spec in DP mode (p: −0.5..0.4 V, n: 2.0..3.6 V) that the
+     FPGA's ~1 V dividers would violate if DC-connected. No bias parts at
+     AUX_SRC (pass-FET carries SNK-side bias through).
+     ③ DP130 AUX_SNK → TUSB AUXp/n: **DC segment**, biased by a SINGLE 100 k
+     pair at the TUSB pins (a2mega's R31 100k→GND on AUXp / R32 100k→3V3 on
+     AUXn, unchanged) — this pair double-duties as the SNK-side bias TI
+     mandates ("100 kΩ shall be placed on the AUXSNK side", Fig 22 note).
+     ⚠ Do NOT add a second pair: parallel 100k pairs = 50k effective, shifts
+     the sink-detect divider (~1.65 V → ~1.1 V) and eats detect margin.
+     Net vs a2mega: same AUX BOM, caps relocated, nothing else new.
+     - DP130 straps/placeholders (DS §10.2.2): CAD_SNK strapped V_IL (DP-only)
+       with DNP 2 k pullup placeholder (mode override); DNP 2 k pullup
+       placeholder on HPD_SNK (force sink presence on bench); DDC_SRC open.
+     Option B (native jack): ①② identical; ③'s 100 k pair goes at the
+     connector (pulldown AUX+ / pullup-3.3 V AUX−). SBU1/2 → receptacle DC
+     with 2 MΩ (R33/R34), no caps. HPD: DC logic, no extra passives.
 4. **MIPI rails** — confirm on the Sipeed 52300 core-board schematic that VDDAM/
    VDDDM/VDD12M are powered on the module (advertised MIPI support implies yes;
    **verify before layout** — download is captcha-gated, grab manually).
