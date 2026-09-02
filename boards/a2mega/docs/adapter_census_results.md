@@ -23,6 +23,7 @@ DP port, so serial is unavailable during the test).
 | Date | Adapter | PD VDO | PD pins / verdict | DPCD O: | Rate max | Lanes max | RBR-x4 verdict |
 |------|---------|--------|-------------------|---------|----------|-----------|----------------|
 | 2026-09-02 | Anker hub (IT6563 DP->HDMI) | 00000C05 | C+D / "4-LANE OK" | 14C2 | HBR2 | **2** (+ef +tps3) | **FAIL — 720p ceiling** (PD gate alone would have passed it) |
+| 2026-09-02 | Mindorlan USB-C hub/adapter | 00000C05 | C+D / "4-LANE OK" | 14C2 | HBR2 | **2** (+ef +tps3) | **FAIL — 720p ceiling** (identical caps to the Anker; EDID given up after 41 DEFERs, `U:69`) |
 
 Notes
 - Anker link health at capture: HBR x2 trained (`C:0177`), sink streaming
