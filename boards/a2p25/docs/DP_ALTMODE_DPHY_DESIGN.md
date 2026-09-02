@@ -91,6 +91,17 @@ Fallbacks if 2-lane were forced: 1080p60 @6bpc/CVT-RB fits at ~96% utilization
 honestly; 720p60 fits at 69%. HBR ×2 (an 8% D-PHY overclock; the IP dialog
 accepts up to 3.2 G) is a bench curiosity for the interposer, not a design basis.
 
+**Pixel format note (framebuffer is RGB565):** DP has NO 16bpp wire format —
+the link carries RGB at 6/8/10/12/16 bpc, so 565 expands at MSA/packing time
+regardless. Plan of record: **8bpc/24bpp** (pad/bit-replicate LSBs) — the DP
+mandatory baseline every sink and converter accepts; all tables above assume
+it, so the 565 framebuffer changes nothing. **6bpc/18bpp carries RGB565
+losslessly** (G6 exact, R5/B5 pad 1 bit) and buys margin (720p60×2: 69%→52%)
+but does NOT rescue 2-lane 1080p60 (148.5M×18 = 2.67 G > 2.59 G payload;
+CVT-RB = 96%, still no-ship) — and HDMI has no 6bpc RGB, so converters must
+expand it with uneven support. 6bpc = per-sink optimization on known-good
+DP-native monitors only, never the compatibility plan.
+
 ## 4. Signal Chain
 
 ```
