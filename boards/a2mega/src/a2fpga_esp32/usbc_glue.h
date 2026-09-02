@@ -28,6 +28,10 @@ void usbc_virtual_replug_fast(void); /* auto-recovery: 1.5s hold (wedge_watch) *
 void usbc_mux_flip_toggle(void);/* toggle FLIPSEL convention live ('f') */
 void usbc_hpd_retrain(void);    /* pulse HPD low 250 ms: ladder restart ('r') */
 void usbc_fusb_dump_log(void);  /* raw FUSB302B status regs ('u') */
+void usbc_modes_census_log(void); /* adapter lane census: last Discover Modes
+                                   * VDOs, pin-assignment decode ('d').
+                                   * C/E = 4-lane (a2p25 RBR x4 OK);
+                                   * D/F = 2-lane + USB3 (720p fallback). */
 
 #ifdef __cplusplus
 }
