@@ -384,6 +384,14 @@ inverts the ranking: no second gate exists, the monitor's own DPCD applies
 — prime RBR×4 sinks, currently gated on our own monitor-direct AUX RX
 margin TODO, not on the hubs.
 
+**Adapter (dongle) class beats hub class**: video-only USB-C→HDMI adapters
+("unidirectional", no USB ports) are pin-assignment C/E by construction —
+no USB3 to preserve, so the mux gate can't fail. The 8K30/4K144-rated tier
+(HDMI 2.1 FRL converter silicon, RTD2173-class) is both DSC-capable (4K144
+≈ 28.7G exceeds even HBR3×4 uncompressed — DSC proven by the spec sheet)
+AND built on HBR3 ×4-lane front ends — strongest shelf candidates for
+RBR×4, but per the Anker lesson still census-then-DPCD before recommending.
+
 Shelf heuristics for HDMI docks (BOM/docs, not qualification):
 - **4K60 / HDMI 2.0 rated ⇒ safe** — 4K60 ≈ 14.3 Gbps needs HBR2×4, so the
   converter must be 4-lane and the mux C/E. RBR×4 through it → 1080p60 works.
