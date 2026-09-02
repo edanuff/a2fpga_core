@@ -270,7 +270,23 @@ TX PLL takes `clkin` (19–800 MHz) from the fabric clock network:
 2. **Polarity and lane order are layout-owned.** No inversion or remap exists
    anywhere in the chain (D-PHY TX has no invert; DP training does not fix
    polarity). Triple-check P/N against the module schematic before fab.
-3. **AC coupling** — 100 nF per leg between BTB and DP130 inputs (DP norm).
+3. **AC coupling — full main-link cap map** (one 75–265 nF cap per leg, 100 nF
+   X7R 0402 throughout; TUSB1046A-DCI DS Figure 27 is the authority for the
+   mux side):
+   - FPGA D-PHY → DP130 inputs: **8 caps** (blocks SLVS CM; DP130 input is
+     50 Ω self-biased — no external termination or bias anywhere on this
+     segment).
+   - DP130 outputs → TUSB1046 DP0–DP3 inputs: **8 caps** (TI "system side").
+   - TUSB1046 TX1/TX2 → receptacle: **4 caps**. TUSB1046 RX1/RX2 →
+     receptacle: **NONE** — USB-C rule: each pair coupled exactly once;
+     RX-role pins are coupled by the far-end device's TX caps. Caps on RX1/RX2
+     double-couple; missing TX1/TX2 caps leave those lanes uncoupled.
+   - Per-pair cap placement symmetric (same position along the route) in all
+     segments to avoid P/N skew.
+   - AUX at the mux (TUSB1046 pin table): AC cap + **100 kΩ to GND on AUXp**,
+     AC cap + **100 kΩ to DP_PWR (3.3 V) on AUXn** — the DP source bias
+     network (matches the a2mega front-end). SBU1/2 → receptacle DC with 2 MΩ
+     resistors, no caps. HPD: DC logic, no extra passives.
 4. **MIPI rails** — confirm on the Sipeed 52300 core-board schematic that VDDAM/
    VDDDM/VDD12M are powered on the module (advertised MIPI support implies yes;
    **verify before layout** — download is captcha-gated, grab manually).
