@@ -314,6 +314,41 @@ static uint8_t find_dp_mode(const usb_pd_message_t *message)
     return 0u;
 }
 
+/* Adapter census: stash and log every DP mode VDO the partner advertised.
+ * Runs before mode selection so the data survives a USB-only fallback.
+ * Motivated by the a2p25 RBR x4 plan: C/E = 4-lane capable mux path,
+ * D/F = 2-lane + USB3 (an RBR-only source cannot do 1080p60 through it). */
+static void capture_dp_modes(usbc_port_t *port, const usb_pd_message_t *message)
+{
+    char line[96];
+    port->dp_modes_count = 0u;
+    for (uint8_t i = 1u; i < message->data_count; ++i) {
+        const uint32_t mode = message->data[i];
+        const uint8_t pins = usb_pd_dp_partner_pin_assignments(mode);
+        char letters[7];
+        uint8_t n = 0u;
+        if (pins & USB_PD_DP_PIN_A) letters[n++] = 'A';
+        if (pins & USB_PD_DP_PIN_B) letters[n++] = 'B';
+        if (pins & USB_PD_DP_PIN_C) letters[n++] = 'C';
+        if (pins & USB_PD_DP_PIN_D) letters[n++] = 'D';
+        if (pins & USB_PD_DP_PIN_E) letters[n++] = 'E';
+        if (pins & USB_PD_DP_PIN_F) letters[n++] = 'F';
+        letters[n] = '\0';
+        port->dp_modes_vdo[port->dp_modes_count++] = mode;
+        snprintf(line, sizeof(line),
+                 "PD census: mode %u vdo=%08lx pins=%s %s%s -> %s",
+                 (unsigned)i, (unsigned long)mode,
+                 n != 0u ? letters : "none",
+                 usb_pd_dp_mode_is_sink(mode) ? "sink" : "src-only",
+                 usb_pd_dp_mode_is_receptacle(mode) ? " recept" : " plug",
+                 (pins & (USB_PD_DP_PIN_C | USB_PD_DP_PIN_E)) != 0u
+                     ? "4-LANE OK"
+                     : (pins & (USB_PD_DP_PIN_D | USB_PD_DP_PIN_F)) != 0u
+                           ? "2-LANE ONLY" : "no DP pins");
+        log_message(port, USBC_LOG_INFO, line);
+    }
+}
+
 static int handle_vdm_response(usbc_port_t *port,
                                const usb_pd_message_t *message)
 {
@@ -358,6 +393,7 @@ static int handle_vdm_response(usbc_port_t *port,
         }
         return send_discover_modes(port);
     case USBC_STATE_VDM_WAIT_MODES:
+        capture_dp_modes(port, message);
         port->dp_mode_position = find_dp_mode(message);
         if (port->dp_mode_position == 0u) {
             fall_back_to_usb_only(port, "Partner has no DP sink mode with pin C");

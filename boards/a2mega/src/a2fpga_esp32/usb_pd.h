@@ -55,7 +55,12 @@ enum usb_pd_svdm_command {
 #define USB_PD_SID             UINT16_C(0xff00)
 #define USB_PD_DISPLAYPORT_SID UINT16_C(0xff01)
 
+#define USB_PD_DP_PIN_A UINT8_C(0x01)
+#define USB_PD_DP_PIN_B UINT8_C(0x02)
 #define USB_PD_DP_PIN_C UINT8_C(0x04)
+#define USB_PD_DP_PIN_D UINT8_C(0x08)
+#define USB_PD_DP_PIN_E UINT8_C(0x10)
+#define USB_PD_DP_PIN_F UINT8_C(0x20)
 #define USB_PD_DP_SIGNAL_V13 UINT8_C(0x01)
 #define USB_PD_DP_MODE_SINK UINT8_C(0x01)
 
@@ -166,6 +171,11 @@ static inline bool usb_pd_dp_mode_is_sink(uint32_t mode_vdo)
 {
     return (mode_vdo & 0x3u) == USB_PD_DP_MODE_SINK ||
            (mode_vdo & 0x3u) == 0x3u;
+}
+
+static inline bool usb_pd_dp_mode_is_receptacle(uint32_t mode_vdo)
+{
+    return (mode_vdo & (UINT32_C(1) << 6)) != 0u;
 }
 
 static inline uint32_t usb_pd_dp_status_vdo(bool enabled)
