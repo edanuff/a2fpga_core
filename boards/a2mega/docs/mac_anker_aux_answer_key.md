@@ -1045,3 +1045,26 @@ Suspects cleared by static/sim audit before step 5 flew:
 - Wedge-window capture: leave the AD3 rigged and capture an attach that
   goes delayed/dark — the transcript will show exactly what the hub
   serves during a failed window.
+
+## 2026-09-01 — Adapter lane census, first run (a2p25 hub qualification)
+
+Instrument: ESP32 fw commit e3c41cbe (telnet 'd'; VDO capture at Discover
+Modes, pre-selection, survives detach). Board: 138K bench (.127), gateware
+021dcec6. Readout validated same-day (census + PD state cross-checked live).
+
+| Hub | Census VDO | Pins | PD ladder | Notes |
+|-----|-----------|------|-----------|-------|
+| Anker A8365 | 00000C05 | C,D | full ladder OK | Mux gate says 4-lane; DPCD MAX_LANE_COUNT reads 2 IN PIN-C MODE (campaign AUX read) — the converter, not the mux, is the cap. Teardown re-examined by ed: INCONCLUSIVE, some/all 4 pairs appear wired. |
+| Ugreen | 00000C05 | C,D | full ladder OK | Identical advertisement (same VIA-class design). DPCD gate untested pending readout register. |
+| Hub #3 (model TBD) | none | — | DR_SWAP UNANSWERED, stuck UFP | Historically never worked — ROOT CAUSE FOUND: dies at PD role negotiation, never reaches alt mode. Fix would be PD-flow-side (discovery without swap), not link-side. |
+| Hub #4 (model TBD, native DP port) | 00000405 | C only | alt-mode entry OK, HPD forwards correctly | DP PASS-THROUGH class (no converter chip). D3 dark with HPD=1 = our KNOWN monitor-direct AUX RX offset margin (blind-ladder-fallback/RX-squelch TODO), not the hub. PRIME a2p25 RBR x4 candidate once our RX margin is fixed: no second DPCD gate, monitor's own caps apply. |
+
+Findings of record:
+1. The C advertisement is near-universal in this box — the PD census alone
+   does NOT qualify a hub for x4. Three-rung ladder required: PD census ->
+   DPCD MAX_LANE_COUNT readout (in-flight, separate session) -> actual x4
+   training. The Anker is the documented advertise-C-but-DPCD-2 counterexample.
+2. Census-empty is a meaningful verdict (hub #3): distinguishes
+   PD-incompatible from lane-limited.
+3. The DP-pass-through class inverts the ranking for a2p25: best endgame
+   path, currently blocked on our side (monitor-direct AUX RX margin).
