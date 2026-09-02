@@ -369,6 +369,21 @@ the mux pin assignment (VDM) *and* the DP→HDMI converter chip's own
 **for our RBR-only source these are traps**: 2×RBR = 2.59 Gbps → no 1080p60,
 despite the dongle legitimately "supporting 1080p."
 
+**FIRST CENSUS RESULTS (2026-09-01, a2mega fw e3c41cbe, 4 hubs — answer key
+in boards/a2mega/docs/mac_anker_aux_answer_key.md @ 0eefc9c5):** the C
+advertisement is **near-universal** (Anker + Ugreen both advertise C,D), so
+**the PD census alone cannot qualify a hub for ×4** — the Anker is the
+documented advertise-C-but-DPCD-2 counterexample (mux passes 4 pairs, the
+converter trains 2). The converter DPCD gate is the BINDING gate;
+MAX_LANE_COUNT readout (gateware register, in flight) is REQUIRED for
+qualification. Three-rung ladder: PD census → DPCD readout → actual ×4
+training. Census-empty is itself a verdict (hub #3: PD-incompatible,
+DR_Swap unanswered — distinguishes PD-dead from lane-limited). And the
+**DP-pass-through class** (docks with a native DP port, no converter chip)
+inverts the ranking: no second gate exists, the monitor's own DPCD applies
+— prime RBR×4 sinks, currently gated on our own monitor-direct AUX RX
+margin TODO, not on the hubs.
+
 Shelf heuristics for HDMI docks (BOM/docs, not qualification):
 - **4K60 / HDMI 2.0 rated ⇒ safe** — 4K60 ≈ 14.3 Gbps needs HBR2×4, so the
   converter must be 4-lane and the mux C/E. RBR×4 through it → 1080p60 works.
