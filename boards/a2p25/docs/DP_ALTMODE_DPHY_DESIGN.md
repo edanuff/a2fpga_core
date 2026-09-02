@@ -282,7 +282,15 @@ TX PLL takes `clkin` (19–800 MHz) from the fabric clock network:
      RX-role pins are coupled by the far-end device's TX caps. Caps on RX1/RX2
      double-couple; missing TX1/TX2 caps leave those lanes uncoupled.
    - Per-pair cap placement symmetric (same position along the route) in all
-     segments to avoid P/N skew.
+     segments to avoid P/N skew. **Position along the route: place caps near
+     the RECEIVING device** (main-link caps near DP130 inputs; DP130→mux caps
+     near TUSB inputs). The FPGA end is the BTB — caps there would stack the
+     cap and connector discontinuities and crowd the fanout. Neither DS
+     mandates a position; symmetry matters more than location at 1.62 G.
+   - ⚠ **Amplitude budget on FPGA→DP130**: DP130 min input VID = 0.3 Vpp diff;
+     D-PHY worst-case swing ≈ 0.28 Vpp (0.4 nominal). Nominal clears, worst
+     case is thin — keep this segment as short/low-loss as the layout allows;
+     DP130 input EQ (to 9 dB) is the recovery knob if needed.
    - **AUX passive placement — CORRECTED per SN75DP130 DS Fig 22 ("DP Only
      Configuration with AUX Pass Through"), which is exactly our topology:**
      ① a2mega FPGA-side network VERBATIM at the FPGA pins: series 100 Ω on
