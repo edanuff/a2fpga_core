@@ -267,6 +267,12 @@ TX PLL takes `clkin` (19–800 MHz) from the fabric clock network:
 1. **BTB breakout** — route M0 quad (A5–A9/B5–B9) from the 2×60P BTB as 100 Ω
    differential pairs, intra-pair skew tight; keep total FPGA→DP130 route short
    (the segment running at SLVS swing is the fragile one).
+   **Length matching: intra-pair ONLY (≤0.1 mm, compensated at the mismatch
+   point). Do NOT lane-to-lane match** — e.g. a 12.5–20 mm spread ≈ 45–50 ps ≈
+   0.08 UI at RBR, vs multi-UI sink deskew (DP even permits 2 UI deliberate TX
+   lane skew); the module's internal ball→BTB routing is unmatched anyway.
+   Serpentines would add loss/discontinuities to the thinnest-margin segment
+   for zero benefit. Applies to all three main-link segments.
 2. **Polarity and lane order are layout-owned.** No inversion or remap exists
    anywhere in the chain (D-PHY TX has no invert; DP training does not fix
    polarity). Triple-check P/N against the module schematic before fab.
