@@ -156,6 +156,9 @@ module a2mega_dp_test_top (
     logic [31:0] aux_dbg_snap;   // first-failure snapshot (Z:)
     logic [7:0]  aux_dbg_sink;
     logic [7:0]  aux_dbg_caps;
+    // raw {DPCD 0x001 MAX_LINK_RATE, DPCD 0x002 MAX_LANE_COUNT byte} —
+    // the adapter census's second gate (X: above is the LOSSY decode)
+    logic [15:0] aux_sink_caps;
     logic       hpd_present_w;
     logic [4:0]  drp_idx;
     logic [31:0] drp_data;
@@ -268,6 +271,7 @@ module a2mega_dp_test_top (
         .debug_snapshot    (aux_dbg_snap),
         .debug_sink        (aux_dbg_sink),
         .debug_caps        (aux_dbg_caps),
+        .debug_sink_caps   (aux_sink_caps),
         .clk_symbol_out    (clk_sym_w),
         .serdes_status     (serdes_status),
         .hpd_present_out   (hpd_present_w),
@@ -359,6 +363,7 @@ module a2mega_dp_test_top (
     logic [23:0] chst_s0, chst_s;
     logic [27:0] symd_s0, symd_s;
     logic [7:0] snk_s0, snk_s, cap_s0, cap_s;
+    logic [15:0] scap_s0, scap_s;  // raw sink caps {0x001, 0x002}
     logic [5:0] afe_s0, afe_s;
     logic [15:0] ec0_s0, ec0_s, ec1_s0, ec1_s;  // symbol-error counters
     logic [3:0] afe1_s0, afe1_s;   // lane 1 {pe, vs}
@@ -390,6 +395,7 @@ module a2mega_dp_test_top (
         symd_s0 <= sym_delta;       symd_s <= symd_s0;
         snk_s0 <= aux_dbg_sink;     snk_s <= snk_s0;
         cap_s0 <= aux_dbg_caps;     cap_s <= cap_s0;
+        scap_s0 <= aux_sink_caps;   scap_s <= scap_s0;
         afe_s0 <= aux_dbg_afe;      afe_s <= afe_s0;
         afe1_s0 <= aux_dbg_afe1;    afe1_s <= afe1_s0;
         ec0_s0  <= aux_errcnt0;     ec0_s  <= ec0_s0;
@@ -423,7 +429,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 192;  // six lines; msg_idx is [7:0]
+    localparam int MSG_LEN = 200;  // six lines; msg_idx is [7:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -492,7 +498,9 @@ module a2mega_dp_test_top (
             msg[179]=" "; msg[180]=" "; msg[181]=" "; msg[182]=" ";
             msg[183]=" "; msg[184]=" "; msg[185]=" "; msg[186]=" ";
             msg[187]=" "; msg[188]=" "; msg[189]=" "; msg[190]=" ";
-            msg[191]=8'h0A;
+            msg[191]=" "; msg[192]=" "; msg[193]=" "; msg[194]=" ";
+            msg[195]=" "; msg[196]=" "; msg[197]=" "; msg[198]=" ";
+            msg[199]=8'h0A;
         end else begin
         // ---------------------------------------------------------------
         // FIVE SHORT LINES, each <= 39 printable chars (39-col console
@@ -562,7 +570,13 @@ module a2mega_dp_test_top (
         msg[182]=" "; msg[183]="S"; msg[184]="E"; msg[185]="1"; msg[186]=":";
         msg[187]=hexch(ec1_s[15:12]); msg[188]=hexch(ec1_s[11:8]);
         msg[189]=hexch(ec1_s[7:4]);   msg[190]=hexch(ec1_s[3:0]);
-        msg[191]=8'h0A;
+        // O: raw sink caps {DPCD 0x001 MAX_LINK_RATE, 0x002 lane byte} —
+        // the census second gate (0000 = no DPCD read this HPD session)
+        msg[191]=" "; msg[192]="O"; msg[193]=":";
+        msg[194]=hexch(scap_s[15:12]); msg[195]=hexch(scap_s[11:8]);
+        msg[196]=hexch(scap_s[7:4]);   msg[197]=hexch(scap_s[3:0]);
+        msg[198]=" ";
+        msg[199]=8'h0A;
         end
     end
 
