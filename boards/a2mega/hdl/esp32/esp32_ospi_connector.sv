@@ -81,6 +81,10 @@ module esp32_ospi_connector #(
     input  wire [7:0]  dbg_usb_cnt_rdy_i,   // received-data-packet counter (wraps)
     input  wire [7:0]  dbg_ddr3_retry_i,    // DDR3 calib watchdog retries (saturating)
     input  wire [7:0]  dbg_ddr3_seq_i,      // {3'b0,rst_n,pll_lock,calib,state[1:0]}
+    // DP link debug readback (regs 0x3C-0x3F; quasi-static, synced in top)
+    input  wire [15:0] dbg_dp_caps_i,       // raw {DPCD 0x001 rate, DPCD 0x002 lanes}
+    input  wire [7:0]  dbg_dp_status_i,     // {5'b0, wedge, video_live, link_est}
+    input  wire [7:0]  dbg_dp_serdes_i,     // SERDES bring-up status
     output reg         ddr3_reinit_tgl_o,   // toggles on REG_DDR3_REINIT write (CDC as toggle)
 
     // DDR3 debug read window (ddr3_debug_reader on idle port 4)
@@ -264,6 +268,14 @@ module esp32_ospi_connector #(
     localparam REG_DBG_DDR3_RETRY= 7'h23;   // calib watchdog retries (0 = clean first shot)
     localparam REG_DBG_DDR3_SEQ  = 7'h24;   // {3'b0,rst_n,pll_lock,calib,state[1:0]}
     localparam REG_DDR3_REINIT   = 7'h25;   // W: any value forces a DDR3 re-init (retry-path test)
+
+    // DP link debug readback (read-only). RATE/LANES = the sink's own DPCD
+    // capability bytes captured by the AUX engine each attach — the adapter
+    // census's second gate (telnet 'd'); 0x00 = no DPCD read this session.
+    localparam REG_DBG_DP_RATE   = 7'h3C;   // raw DPCD 0x001 MAX_LINK_RATE
+    localparam REG_DBG_DP_LANES  = 7'h3D;   // raw DPCD 0x002: [3:0] lanes, [7] enh framing
+    localparam REG_DBG_DP_STATUS = 7'h3E;   // {5'b0, wedge, video_live, link_established}
+    localparam REG_DBG_DP_SERDES = 7'h3F;   // SERDES bring-up status byte
 
     // Memory spaces (XFER via reg 0x7F)
     localparam SPACE_TEST  = 3'd0;
@@ -577,6 +589,12 @@ module esp32_ospi_connector #(
             REG_DBG_USB_DATA:   reg_rdata = dbg_usb_cnt_rdy_i;
             REG_DBG_DDR3_RETRY: reg_rdata = dbg_ddr3_retry_i;
             REG_DBG_DDR3_SEQ:   reg_rdata = dbg_ddr3_seq_i;
+
+            // DP link debug readback
+            REG_DBG_DP_RATE:    reg_rdata = dbg_dp_caps_i[15:8];
+            REG_DBG_DP_LANES:   reg_rdata = dbg_dp_caps_i[7:0];
+            REG_DBG_DP_STATUS:  reg_rdata = dbg_dp_status_i;
+            REG_DBG_DP_SERDES:  reg_rdata = dbg_dp_serdes_i;
 
             // ProDOS HDD compact bank
             REG_HDD0_REQ_CTL: reg_rdata = {6'b0, hdd_volumes[0].wr, hdd_volumes[0].rd};

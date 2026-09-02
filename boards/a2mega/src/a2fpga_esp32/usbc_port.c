@@ -77,6 +77,7 @@ static void reset_protocol(usbc_port_t *port)
     port->tx_kind = USBC_TX_NONE;
     port->tx_attempts = 0u;
     port->dp_mode_position = 0u;
+    port->dp_pin_assignment = 0u;
     port->vdm_retry_count = 0u;
     port->expected_vdm_command = 0u;
     port->power_sink = false;
@@ -258,7 +259,7 @@ static int send_dp_status(usbc_port_t *port)
 
 static int send_dp_configure(usbc_port_t *port)
 {
-    const uint32_t configure = usb_pd_dp_configure_vdo();
+    const uint32_t configure = usb_pd_dp_configure_vdo(port->dp_pin_assignment);
     return send_vdm(port, USB_PD_DISPLAYPORT_SID,
                     USB_PD_SVDM_DP_CONFIGURE, port->dp_mode_position,
                     &configure, 1u, USBC_STATE_VDM_WAIT_CONFIGURE);
@@ -303,15 +304,66 @@ static bool response_has_dp_svid(const usb_pd_message_t *message)
     return false;
 }
 
-static uint8_t find_dp_mode(const usb_pd_message_t *message)
+/* Pick the partner's DP sink mode and the pin assignment we will Configure.
+ * C and E are the SAME mux configuration (TUSB1046 CTLSEL=10, four DP
+ * lanes); E just omits USB 2.0 and is what a USB-C->DP cable/plug offers
+ * (found 2026-09-02 census: the cable was refused as "no pin C", so a2mega
+ * had never worked with a plain USB-C->DP cable). Prefer C when both are
+ * offered so every hub keeps its byte-identical negotiation. D/F (two
+ * lanes + USB3) need a different CTLSEL and stay unsupported here. */
+static uint8_t find_dp_mode(usbc_port_t *port, const usb_pd_message_t *message)
 {
     for (uint8_t i = 1u; i < message->data_count; ++i) {
         const uint32_t mode = message->data[i];
-        if (usb_pd_dp_mode_is_sink(mode) &&
-            (usb_pd_dp_partner_pin_assignments(mode) & USB_PD_DP_PIN_C) != 0u)
+        const uint8_t pins = usb_pd_dp_partner_pin_assignments(mode);
+        if (!usb_pd_dp_mode_is_sink(mode))
+            continue;
+        if (pins & USB_PD_DP_PIN_C) {
+            port->dp_pin_assignment = USB_PD_DP_PIN_C;
             return i;
+        }
+        if (pins & USB_PD_DP_PIN_E) {
+            port->dp_pin_assignment = USB_PD_DP_PIN_E;
+            return i;
+        }
     }
+    port->dp_pin_assignment = 0u;
     return 0u;
+}
+
+/* Adapter census: stash and log every DP mode VDO the partner advertised.
+ * Runs before mode selection so the data survives a USB-only fallback.
+ * Motivated by the a2p25 RBR x4 plan: C/E = 4-lane capable mux path,
+ * D/F = 2-lane + USB3 (an RBR-only source cannot do 1080p60 through it). */
+static void capture_dp_modes(usbc_port_t *port, const usb_pd_message_t *message)
+{
+    char line[96];
+    port->dp_modes_count = 0u;
+    for (uint8_t i = 1u; i < message->data_count; ++i) {
+        const uint32_t mode = message->data[i];
+        const uint8_t pins = usb_pd_dp_partner_pin_assignments(mode);
+        char letters[7];
+        uint8_t n = 0u;
+        if (pins & USB_PD_DP_PIN_A) letters[n++] = 'A';
+        if (pins & USB_PD_DP_PIN_B) letters[n++] = 'B';
+        if (pins & USB_PD_DP_PIN_C) letters[n++] = 'C';
+        if (pins & USB_PD_DP_PIN_D) letters[n++] = 'D';
+        if (pins & USB_PD_DP_PIN_E) letters[n++] = 'E';
+        if (pins & USB_PD_DP_PIN_F) letters[n++] = 'F';
+        letters[n] = '\0';
+        port->dp_modes_vdo[port->dp_modes_count++] = mode;
+        snprintf(line, sizeof(line),
+                 "PD census: mode %u vdo=%08lx pins=%s %s%s -> %s",
+                 (unsigned)i, (unsigned long)mode,
+                 n != 0u ? letters : "none",
+                 usb_pd_dp_mode_is_sink(mode) ? "sink" : "src-only",
+                 usb_pd_dp_mode_is_receptacle(mode) ? " recept" : " plug",
+                 (pins & (USB_PD_DP_PIN_C | USB_PD_DP_PIN_E)) != 0u
+                     ? "4-LANE OK"
+                     : (pins & (USB_PD_DP_PIN_D | USB_PD_DP_PIN_F)) != 0u
+                           ? "2-LANE ONLY" : "no DP pins");
+        log_message(port, USBC_LOG_INFO, line);
+    }
 }
 
 static int handle_vdm_response(usbc_port_t *port,
@@ -358,9 +410,10 @@ static int handle_vdm_response(usbc_port_t *port,
         }
         return send_discover_modes(port);
     case USBC_STATE_VDM_WAIT_MODES:
-        port->dp_mode_position = find_dp_mode(message);
+        capture_dp_modes(port, message);
+        port->dp_mode_position = find_dp_mode(port, message);
         if (port->dp_mode_position == 0u) {
-            fall_back_to_usb_only(port, "Partner has no DP sink mode with pin C");
+            fall_back_to_usb_only(port, "Partner has no DP sink mode with pin C/E");
             return 0;
         }
         return send_enter_mode(port);
@@ -399,6 +452,7 @@ static int handle_received_message(usbc_port_t *port,
         port->tx_busy = false;
         port->tx_kind = USBC_TX_NONE;
         port->dp_mode_position = 0u;
+        port->dp_pin_assignment = 0u;
         if (port->power_sink) {
             port->data_dfp = false;
             fusb302_set_data_role(&port->fusb302, false);
@@ -614,7 +668,7 @@ static int retry_vdm_for_state(usbc_port_t *port)
                         &extra, 1u, state);
     }
     if (state == USBC_STATE_VDM_WAIT_CONFIGURE) {
-        extra = usb_pd_dp_configure_vdo();
+        extra = usb_pd_dp_configure_vdo(port->dp_pin_assignment);
         return send_vdm(port, USB_PD_DISPLAYPORT_SID,
                         USB_PD_SVDM_DP_CONFIGURE, port->dp_mode_position,
                         &extra, 1u, state);
@@ -973,6 +1027,7 @@ int usbc_port_task(usbc_port_t *port)
         port->tx_busy = false;
         port->tx_kind = USBC_TX_NONE;
         port->dp_mode_position = 0u;
+        port->dp_pin_assignment = 0u;
         port->data_dfp = false;
         fusb302_set_data_role(&port->fusb302, false);
         port->state = USBC_STATE_DEVICE_WAIT_VBUS;

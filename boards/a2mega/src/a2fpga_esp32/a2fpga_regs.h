@@ -108,6 +108,24 @@
 #define A2CARD_HDD          6
 
 // ---------------------------------------------------------------------------
+// DP link debug readback (0x3C-0x3F, read-only)
+// RATE/LANES are the DP sink/converter's OWN DPCD capability bytes, captured
+// verbatim by the gateware AUX engine's caps read at every attach — the
+// adapter census's second gate (the PD/mux layer cannot see them). Both read
+// 0x00 until a DPCD read completes, and clear on HPD-presence loss.
+// ---------------------------------------------------------------------------
+#define A2REG_DBG_DP_RATE   0x3C  // raw DPCD 0x001 MAX_LINK_RATE
+                                  //   (0x06=RBR 0x0A=HBR 0x14=HBR2 0x1E=HBR3)
+#define A2REG_DBG_DP_LANES  0x3D  // raw DPCD 0x002: [3:0] MAX_LANE_COUNT,
+                                  //   [7] enhanced-framing capable
+#define A2REG_DBG_DP_STATUS 0x3E  // {5'b0, wedge_suspect, video_live, link_est}
+#define A2REG_DBG_DP_SERDES 0x3F  // SERDES bring-up status byte
+
+#define A2DP_STAT_LINK_EST  0x01
+#define A2DP_STAT_VIDEO     0x02
+#define A2DP_STAT_WEDGE     0x04
+
+// ---------------------------------------------------------------------------
 // Disk II drive volumes (0x40-0x4F drive 0, 0x50-0x5F drive 1)
 // ---------------------------------------------------------------------------
 #define A2REG_VOL_BASE(d)   ((d) ? 0x50 : 0x40)

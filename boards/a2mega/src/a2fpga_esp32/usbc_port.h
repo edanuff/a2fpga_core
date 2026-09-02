@@ -113,9 +113,18 @@ typedef struct {
     uint32_t vbus_seen_ms;         /* VBUS-while-unattached debounce */
 
     uint8_t dp_mode_position;
+    uint8_t dp_pin_assignment;     /* USB_PD_DP_PIN_C or _E chosen for Configure */
     uint8_t vdm_retry_count;
     uint8_t expected_vdm_command;
     bool dp_hpd_level;
+
+    /* Adapter census: raw DP mode VDOs from the last Discover Modes ACK,
+     * kept across mode selection (even when we fall back to USB-only) so
+     * the lane capability of hubs/adapters can be dumped on demand.
+     * Motivated by the a2p25 RBR x4 plan: pin assignment C/E = 4-lane,
+     * D/F = 2-lane + USB3 (no 1080p60 from an RBR-only source). */
+    uint32_t dp_modes_vdo[USB_PD_MAX_DATA_OBJECTS];
+    uint8_t dp_modes_count;
 
     /* Role tracking (power role fixed at attach; data role can DR_Swap). */
     bool power_sink;         /* true = partner sources VBUS (monitor) */

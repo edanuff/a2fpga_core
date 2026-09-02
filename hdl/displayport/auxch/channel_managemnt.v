@@ -115,6 +115,16 @@ module channel_management #(
         output [31:0] debug_snapshot, // {chstate24, status_seq4, tsl4}
         output [7:0]  debug_caps,    // sink caps: {ext_framing, rate270,
                                      //  rate162, dp_valid, max_downspread[3:0]}
+        // RAW sink capability bytes for the adapter census (a2p25 RBR-x4
+        // hub qualification, the second gate the PD layer cannot see):
+        // [15:8] = DPCD 0x00001 MAX_LINK_RATE verbatim (0x06=RBR 0x0A=HBR
+        // 0x14=HBR2 0x1E=HBR3), [7:0] = DPCD 0x00002 verbatim (low nibble
+        // = MAX_LANE_COUNT, bit7 = enhanced framing). debug_caps above is
+        // LOSSY here (its rate decode only recognizes 0x06/0x0A — an HBR2
+        // sink reads as "no rates"). 0x0000 = not read this HPD session:
+        // the latches clear on presence loss so a hot-swapped adapter can
+        // never inherit the previous sink's bytes.
+        output [15:0] debug_sink_caps,
 
         input   hpd,
         input   auxch_in,
@@ -279,6 +289,22 @@ hotplug_decode i_hotplug_decode(
     end
     assign debug_snapshot = snap_r;
 
+    // ---- raw sink-caps latch (census tap — see the port comment) ------
+    // Pure observer on the dp_reg_de byte stream the decode below already
+    // consumes; no FSM or decode path is touched. hpd_present is the same
+    // session boundary aux_channel uses for its EDID policy latches.
+    reg [7:0] sink_rate_r  = 8'd0;   // DPCD 0x00001 MAX_LINK_RATE
+    reg [7:0] sink_lanes_r = 8'd0;   // DPCD 0x00002 (lane count + framing)
+    always @(posedge clk100) begin
+        if (!hpd_present) begin
+            sink_rate_r  <= 8'd0;
+            sink_lanes_r <= 8'd0;
+        end else if (dp_reg_de) begin
+            if (aux_addr == 8'h01) sink_rate_r  <= aux_data;
+            if (aux_addr == 8'h02) sink_lanes_r <= aux_data;
+        end
+    end
+    assign debug_sink_caps = {sink_rate_r, sink_lanes_r};
 
 aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .BLIND_SINK(BLIND_SINK),

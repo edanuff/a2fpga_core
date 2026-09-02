@@ -36,6 +36,7 @@ extern "C" {
 #include "osd_console.h"
 }
 #include "usbc_glue.h"
+#include "fpga_link.h"   /* census second gate: DPCD caps regs 0x3C/0x3D */
 
 #define TUSB1046_I2C_ADDR   0x12
 #define TUSB1046_REG_GENERAL 0x0A
@@ -546,6 +547,78 @@ extern "C" void usbc_pd_status_log(void)
             s_port.polarity == FUSB302_POLARITY_CC2 ? 2 : 1,
             (int)s_hpd_level, (int)s_vbus_on, (int)s_dp_mux_on,
             (int)s_fpga_dp_en);
+}
+
+/* Census second gate: the DP sink/converter chip's OWN DPCD capabilities
+ * (MAX_LINK_RATE / MAX_LANE_COUNT), invisible to the PD layer. The gateware
+ * AUX engine reads DPCD 0x000-0x00B at every attach and latches bytes
+ * 0x001/0x002 verbatim into regs 0x3C/0x3D (0x00 = no DPCD read completed
+ * this HPD session — cleared on unplug, so unlike the PD-mode stash this
+ * does NOT survive detach: dump while the adapter is plugged). */
+static void census_log_sink_caps(void)
+{
+    if (!fpga_link_ok()) {
+        /* dp_test (colorbars) bitstreams have no OSPI connector: the same
+         * bytes stream on telemetry line D6 as 'O:rrll' instead. */
+        osd_log("  sink caps: no OSPI link (dp_test bin? read D6 O:rrll)");
+        return;
+    }
+    uint8_t rate  = fpga_reg_read(A2REG_DBG_DP_RATE);
+    uint8_t lanes = fpga_reg_read(A2REG_DBG_DP_LANES);
+    if (rate == 0u && lanes == 0u) {
+        osd_log("  sink caps: no DPCD read this session (attach + wait for AUX)");
+        return;
+    }
+    const char *rname = rate == 0x06u ? "RBR"
+                      : rate == 0x0Au ? "HBR"
+                      : rate == 0x14u ? "HBR2"
+                      : rate == 0x1Eu ? "HBR3" : "rate?";
+    osd_log("  sink caps: %sx%u%s (dpcd 01=%02x 02=%02x)",
+            rname, (unsigned)(lanes & 0x0Fu),
+            (lanes & 0x80u) ? " +ef" : "", rate, lanes);
+}
+
+/* Adapter lane census (telnet 'd'): decode the DP mode VDOs from the last
+ * Discover Modes ACK. Data survives detach on purpose — plug the adapter,
+ * unplug it, dump at leisure. Verdict semantics are the a2p25 RBR x4 plan's:
+ * pin assignment C/E means the mux path carries 4 lanes (1080p60 from an
+ * RBR-only source works); D/F means 2 lanes + USB3 (720p60 fallback). This
+ * covers the PD/MUX gate; the second gate — the DP sink/converter's own
+ * DPCD MAX_LANE_COUNT/MAX_LINK_RATE — is reported by the sink-caps line
+ * below, captured FPGA-side by the AUX engine (regs 0x3C/0x3D). */
+extern "C" void usbc_modes_census_log(void)
+{
+    if (!s_running) {
+        osd_log("census: PD STACK NOT RUNNING");
+        return;
+    }
+    if (s_port.dp_modes_count == 0u) {
+        osd_log("census: no Discover Modes seen yet");
+        osd_log("census: attach a DP alt-mode partner");
+        census_log_sink_caps();
+        return;
+    }
+    osd_log("census: %u DP mode(s), last partner:", s_port.dp_modes_count);
+    for (uint8_t i = 0u; i < s_port.dp_modes_count; ++i) {
+        const uint32_t mode = s_port.dp_modes_vdo[i];
+        const uint8_t pins = usb_pd_dp_partner_pin_assignments(mode);
+        char letters[7];
+        uint8_t n = 0;
+        if (pins & USB_PD_DP_PIN_A) letters[n++] = 'A';
+        if (pins & USB_PD_DP_PIN_B) letters[n++] = 'B';
+        if (pins & USB_PD_DP_PIN_C) letters[n++] = 'C';
+        if (pins & USB_PD_DP_PIN_D) letters[n++] = 'D';
+        if (pins & USB_PD_DP_PIN_E) letters[n++] = 'E';
+        if (pins & USB_PD_DP_PIN_F) letters[n++] = 'F';
+        letters[n] = '\0';
+        osd_log("  vdo=%08lx pins=%s %s", (unsigned long)mode,
+                n != 0 ? letters : "-",
+                (pins & (USB_PD_DP_PIN_C | USB_PD_DP_PIN_E)) != 0u
+                    ? "4-LANE OK"
+                    : (pins & (USB_PD_DP_PIN_D | USB_PD_DP_PIN_F)) != 0u
+                          ? "2-LANE ONLY" : "no DP pins");
+    }
+    census_log_sink_caps();
 }
 
 #endif /* A2MEGA_HAS_USBC_PD */

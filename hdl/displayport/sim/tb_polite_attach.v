@@ -74,6 +74,8 @@ module tb_polite_attach;
     wire [15:0] debug_adjust;
     wire [15:0] train_set_byte;
     wire        adjust_evt;
+    wire [15:0] dbg_sink_caps;
+    reg         hpd_r = 1'b1;   // droppable: sink-caps session-clear check
 
     channel_management #(
         .LINK_RATE_MBPS (2700),
@@ -97,7 +99,8 @@ module tb_polite_attach;
         .debug_adjust         (debug_adjust),
         .debug_chstate        (),
         .debug_caps           (),
-        .hpd                  (1'b1),
+        .debug_sink_caps      (dbg_sink_caps),
+        .hpd                  (hpd_r),
         .auxch_in             (auxch_in),
         .auxch_out            (auxch_out),
         .auxch_tri            (auxch_tri),
@@ -518,6 +521,18 @@ module tb_polite_attach;
         established_phase = 1'b1;
         $display("  ok: ladder trained to link_established (t=%0t)", $time);
 
+        // 0. RAW SINK-CAPS CENSUS TAP: the read_registers phase (DPCD
+        // 0x000-0x00B) must have latched MAX_LINK_RATE (0x001=0x0A) and
+        // the MAX_LANE_COUNT byte (0x002=0x82) verbatim — the census
+        // second gate. Runs in BOTH modes: the caps read is native DPCD,
+        // not the abandonable DDC/EDID preamble.
+        if (dbg_sink_caps !== 16'h0A82) begin
+            errors = errors + 1;
+            $display("FAIL: debug_sink_caps=%04x (want 0A82 = HBR, 2 lanes + enh framing)",
+                     dbg_sink_caps);
+        end else
+            $display("  ok: raw sink caps latched — rate=0A lanes=82");
+
         if (giveup_mode) begin
             // strict-converter fallback: EDID abandoned, link still up
             if (edid_acks != 0) begin
@@ -769,6 +784,22 @@ module tb_polite_attach;
             $display("FAIL: detector did not stand down on streaming resume");
         end else
             $display("  ok: detector stands down when streaming resumes");
+
+        // 10. SINK-CAPS SESSION CLEAR: a genuine unplug (>2 ms HPD low ->
+        // hpd_present drops) must zero the raw caps latches so a
+        // hot-swapped adapter never inherits the previous sink's bytes.
+        // Production keeps HPD_DISCONNECT_RESETS=0, so nothing else
+        // should react to the drop.
+        established_phase = 1'b0;   // stability window formally over
+        hpd_r = 1'b0;
+        #3_000_000;                 // 3 ms > the 2 ms disconnect threshold
+        if (dbg_sink_caps !== 16'h0000) begin
+            errors = errors + 1;
+            $display("FAIL: sink caps survived HPD loss (%04x, want 0000)",
+                     dbg_sink_caps);
+        end else
+            $display("  ok: sink caps cleared on HPD-presence loss");
+        hpd_r = 1'b1;
 
         if (le_drops != 0) begin
             errors = errors + 1;
