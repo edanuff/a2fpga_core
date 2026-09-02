@@ -31,7 +31,10 @@ void usbc_fusb_dump_log(void);  /* raw FUSB302B status regs ('u') */
 void usbc_modes_census_log(void); /* adapter lane census: last Discover Modes
                                    * VDOs, pin-assignment decode ('d').
                                    * C/E = 4-lane (a2p25 RBR x4 OK);
-                                   * D/F = 2-lane + USB3 (720p fallback). */
+                                   * D/F = 2-lane + USB3 (720p fallback).
+                                   * Also reports the SECOND gate: the sink's
+                                   * own DPCD MAX_LINK_RATE/MAX_LANE_COUNT,
+                                   * captured FPGA-side (regs 0x3C/0x3D). */
 
 #ifdef __cplusplus
 }

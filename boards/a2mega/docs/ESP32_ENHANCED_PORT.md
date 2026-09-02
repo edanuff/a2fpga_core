@@ -43,6 +43,10 @@ Existing a2mega layout is kept (device ID 0x00-0x07, video 0x10-0x15, slots
 | 0x29 | HDD0 ACK | W | Write-any strobe: request served |
 | 0x2A-0x2D | HDD1 * | R/W | Same layout as unit 0 |
 | 0x2E | A2_RST_RELEASE | R/W | Write 1: release Apple II from power-on reset hold |
+| 0x3C | DBG_DP_RATE | R | Raw DPCD 0x001 MAX_LINK_RATE from the sink's caps read (0x06=RBR 0x0A=HBR 0x14=HBR2 0x1E=HBR3; 0x00 = no DPCD read this HPD session). Adapter-census second gate (telnet 'd'). |
+| 0x3D | DBG_DP_LANES | R | Raw DPCD 0x002: [3:0]=MAX_LANE_COUNT, [7]=enhanced framing. Clears with 0x3C on HPD-presence loss. |
+| 0x3E | DBG_DP_STATUS | R | [0]=link_established [1]=video_live [2]=wedge_suspect |
+| 0x3F | DBG_DP_SERDES | R | SERDES bring-up status {fifo_afull, fifo_full, pll_lock, lane_ready[1:0], ~pcs_tx_rst, tx_running[1:0]} |
 | 0x7A | U2_CMD_DOORBELL | R/W | W5100 per-socket Sn_CR pending; write-1-to-clear |
 
 Same addresses as the Enhanced BL616 map for the HDD compact bank (0x26-0x2D),

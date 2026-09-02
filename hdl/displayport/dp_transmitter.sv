@@ -174,6 +174,9 @@ module dp_transmitter #(
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
+    // raw {DPCD 0x001 MAX_LINK_RATE, DPCD 0x002 MAX_LANE_COUNT byte};
+    // 0x0000 until the caps read completes, cleared on HPD-presence loss
+    output logic [15:0] debug_sink_caps,
     output logic [3:0]  debug_wdog,  // {cold-restart forcing, attempts[2:0]}
     // Teardown attribution (08-24): saturating 4-bit counts of the two
     // paths that tear down an ESTABLISHED link — the check_wait gate and
@@ -648,6 +651,7 @@ module dp_transmitter #(
         .debug_err_detail     (debug_err_detail),
         .debug_snapshot       (debug_snapshot),
         .debug_caps           (debug_caps),
+        .debug_sink_caps      (debug_sink_caps),
         .hpd                  (hpd),
         .auxch_in             (auxch_in),
         .auxch_out            (auxch_out),

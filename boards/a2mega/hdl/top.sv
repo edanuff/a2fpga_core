@@ -1494,6 +1494,9 @@ module top #(
     wire [15:0] dp_errcnt0_w, dp_errcnt1_w;
     wire        dp_drp_clk_w;   // cm_life/DRP clock tap (freq-meter diag)
     wire [7:0]  dp_serdes_status_w;
+    // raw {DPCD 0x001 MAX_LINK_RATE, DPCD 0x002 MAX_LANE_COUNT byte} from
+    // the AUX caps read — the adapter census's second gate (telnet 'd')
+    wire [15:0] dp_sink_caps_w;
 
     dp_transmitter #(
         .LANE_COUNT     (2),
@@ -1555,6 +1558,7 @@ module top #(
         .debug_drp_clk     (dp_drp_clk_w),
         .debug_errcnt0     (dp_errcnt0_w),
         .debug_errcnt1     (dp_errcnt1_w),
+        .debug_sink_caps   (dp_sink_caps_w),
         // DRP register-readback debug bridge (used interactively by the
         // dp_test bitstream; idle here — index parked, outputs unread)
         .drp_dbg_idx       (5'd0),
@@ -1601,6 +1605,19 @@ module top #(
         ddr3_retry_sync0 <= ddr3_retry_cnt_r;  ddr3_retry_sync1 <= ddr3_retry_sync0;
         ddr3_seq_sync0   <= {ddr3_rst_n_r, pll_lock_w, init_calib_complete_w, ddr3_seq_state_r};
         ddr3_seq_sync1   <= ddr3_seq_sync0;
+    end
+
+    // DP link telemetry for the ESP32 census/debug regs 0x3C-0x3F
+    // (clk100 -> clk_logic; all quasi-static — caps latch once per attach,
+    // status/serdes bits change on human timescales)
+    reg [15:0] dp_caps_sync0, dp_caps_sync1;
+    reg [7:0]  dp_serdes_sync0, dp_serdes_sync1;
+    reg [2:0]  dp_stat_sync0, dp_stat_sync1;
+    always @(posedge clk_logic_w) begin
+        dp_caps_sync0   <= dp_sink_caps_w;      dp_caps_sync1   <= dp_caps_sync0;
+        dp_serdes_sync0 <= dp_serdes_status_w;  dp_serdes_sync1 <= dp_serdes_sync0;
+        dp_stat_sync0   <= {dp_wedge_w, dp_video_live_w, dp_link_established_w};
+        dp_stat_sync1   <= dp_stat_sync0;
     end
 
     // =========================================================================
@@ -1981,6 +1998,9 @@ module top #(
         .dbg_usb_cnt_rdy_i(usb_cnt_rdy_sync1),
         .dbg_ddr3_retry_i(ddr3_retry_sync1),
         .dbg_ddr3_seq_i({3'b0, ddr3_seq_sync1}),
+        .dbg_dp_caps_i(dp_caps_sync1),
+        .dbg_dp_status_i({5'b0, dp_stat_sync1}),
+        .dbg_dp_serdes_i(dp_serdes_sync1),
         .ddr3_reinit_tgl_o(ddr3_reinit_tgl_w),
 
         .dbg_mem_addr_o(dbg_mem_addr_w),
