@@ -283,10 +283,19 @@ TX PLL takes `clkin` (19–800 MHz) from the fabric clock network:
      double-couple; missing TX1/TX2 caps leave those lanes uncoupled.
    - Per-pair cap placement symmetric (same position along the route) in all
      segments to avoid P/N skew.
-   - AUX at the mux (TUSB1046 pin table): AC cap + **100 kΩ to GND on AUXp**,
-     AC cap + **100 kΩ to DP_PWR (3.3 V) on AUXn** — the DP source bias
-     network (matches the a2mega front-end). SBU1/2 → receptacle DC with 2 MΩ
-     resistors, no caps. HPD: DC logic, no extra passives.
+   - **AUX passive placement** (three groups, three jobs):
+     ① a2mega FPGA-side network VERBATIM at the FPGA pins (before DP130
+     AUX_SRC): series 100 Ω on TX/RX + bias dividers 100k/47k on AUX_N
+     (~1.06 V) and 100k/43k on AUX_P (~0.99 V) — the ~65 mV N-over-P offset is
+     load-bearing (idle polarity + sink detect); keep which side gets 47k vs
+     43k. ② DP130 AUX_SRC→AUX_SNK is a DC switch — no parts at its pins.
+     ③ At the TUSB1046 AUX pins (its pin table): AC cap + **100 kΩ to GND on
+     AUXp**, AC cap + **100 kΩ to DP_PWR (3.3 V) on AUXn** — line-side DP
+     source signature (FPGA dividers bias the FPGA side of the caps; these
+     bias the line side). Option B (native jack): ①② identical; ③ becomes
+     discrete 100 k pulldown AUX+ / 100 k pullup-to-3.3 V AUX− at the
+     connector side of the caps. SBU1/2 → receptacle DC with 2 MΩ resistors,
+     no caps. HPD: DC logic, no extra passives.
 4. **MIPI rails** — confirm on the Sipeed 52300 core-board schematic that VDDAM/
    VDDDM/VDD12M are powered on the module (advertised MIPI support implies yes;
    **verify before layout** — download is captcha-gated, grab manually).
