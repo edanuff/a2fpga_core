@@ -439,6 +439,56 @@ chain for both options and defers the connector decision until bench data
 exists. Recommendation lean: Option B for the low-cost positioning; Option A
 remains the premium/a2mega-parity story.
 
+### Product-level connector options (2026-09-02 analysis)
+
+Three product shapes considered:
+1. **Single USB-C (video + data)** — one-cable mini-dock UX.
+2. **Dual USB-C (video + USB2 data)** — better variant: **video USB-C +
+   data USB-A** (unambiguous ports; gamepads are USB-A anyway).
+3. **DP jack + USB port** (= Option B above) — cheap, simple, honest.
+
+**Load-bearing fact for option 1: pin assignment C keeps USB 2.0** — D+/D−
+is separate from the four SS pairs, WE (the DFP) select the assignment, the
+firmware already selects C exclusively, and both census hubs offer C+D.
+Selecting C costs the user nothing: our USB host is the ESP32-S3's
+full-speed 12 Mbps port, so the hub's USB3 is unusable by us in ANY
+assignment. Keyboards/gamepads/USB2 ethernet ride D+/D−. Option 1's real
+limits: hub converter gate (VIA-class = 720p floor), the PD-dead tail
+(hub #3 class), and video-only DONGLES kill USB entirely (no D+/D−
+passthrough) — the accessory guaranteeing 1080p60 removes the gamepad.
+
+**The deciding question: is a 720p60 base experience acceptable** (Enhanced
+boards ship 720p today)? If "Enhanced-parity resolution, 1080p when the
+accessory allows" is an honest product line, option 1 works with the
+offer-driven fallback. If 1080p60 + USB accessories must be guaranteed
+simultaneously, one connector cannot do it → options 2b/3.
+
+| | 1: single USB-C | 2b: USB-C video + USB-A | 3: DP + USB |
+|---|---|---|---|
+| 1080p60 + gamepad guaranteed | ✗ hub-dependent (720p floor) | ✓ dongle class | ✓ |
+| One-cable dock UX | ✓ | ✗ | ✗ |
+| Worst trap | 2-lane hubs → 720p (benign); PD-dead hubs | minor port confusion | DP++ passive adapter (detectable, doc-able) |
+| BOM/firmware | full PD stack | full PD stack + 2nd conn | **neither** |
+| Support burden | qualified-hub treadmill | low | low |
+| USB-C monitors | ✓ | ✓ | ✗ |
+
+Leanings: option 2-as-specified (dual USB-C) is dominated — full PD cost +
+second connector + port confusion for a guarantee 3 delivers cheaper.
+For low-cost positioning: **option 3** (DP++ OSD detection + DP_PWR +
+recommended-adapter SKU). If the one-cable dock vision IS the product:
+option 1, boxed as 720p-minimum/1080p-capable. Census pass-through-class
+finding tilts slightly DP-ward (zero converter-gate exposure there).
+
+**720p floor status for the census hubs**: bandwidth-assured (RBR×2 =
+2.59 G vs 1.78 G needed, 69% util) and 2-lane-proven at length (the whole
+Stage-5 campaign is 2-lane through Anker/Ugreen) — but ALL history is at
+HBR (0x0A). RBR is spec-mandatory for every sink, but per project ethos:
+**pending one bench run forcing the a2mega ladder to 0x100=0x06 (RBR) ×2
+and confirming colorbars on Anker + Ugreen** — ten minutes that make the
+720p floor a measured fact at the only rate the a2p25 will ever speak.
+1080p60 remains pending a converter-gate-passing dock (or the pass-through
+class once the monitor-direct AUX RX margin work lands).
+
 ## 8. Validation Ladder
 
 0. **Adapter census** (a2mega, before hardware): VDM pin-assignment dump +
