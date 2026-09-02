@@ -558,7 +558,9 @@ extern "C" void usbc_pd_status_log(void)
 static void census_log_sink_caps(void)
 {
     if (!fpga_link_ok()) {
-        osd_log("  sink caps: FPGA link down");
+        /* dp_test (colorbars) bitstreams have no OSPI connector: the same
+         * bytes stream on telemetry line D6 as 'O:rrll' instead. */
+        osd_log("  sink caps: no OSPI link (dp_test bin? read D6 O:rrll)");
         return;
     }
     uint8_t rate  = fpga_reg_read(A2REG_DBG_DP_RATE);
