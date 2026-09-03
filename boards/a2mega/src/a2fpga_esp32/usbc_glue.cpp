@@ -296,6 +296,13 @@ extern "C" void usbc_hpd_retrain(void)
     digitalWrite(PIN_DP_HPD_OUT, HIGH);
 }
 
+/* Telnet 't': PD event trace (TX/RX/IRQ/state ring) — the PD-silent dig. */
+extern "C" void usbc_trace_dump_log(void)
+{
+    if (!s_running) { osd_log("trace: PD STACK NOT RUNNING"); return; }
+    usbc_port_trace_dump(&s_port);
+}
+
 /* Telnet 'u': raw FUSB302B status snapshot for in-slot attach debugging. */
 extern "C" void usbc_fusb_dump_log(void)
 {
