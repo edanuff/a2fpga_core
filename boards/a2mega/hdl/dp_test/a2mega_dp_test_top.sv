@@ -25,7 +25,14 @@
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
-module a2mega_dp_test_top (
+module a2mega_dp_test_top #(
+    // BLIND=1 builds the open-loop (BLIND_SINK) variant for sinks whose AUX
+    // replies the 1.0a3 receiver cannot decode (Fangor, generic dongles,
+    // VMM7100 header-only). Kept as a SEPARATE project
+    // (a2mega_dp_test_blind.gprj -> a2mega_dp_test_blind_top) per ed
+    // 2026-09-02 so the closed-loop test bin stays the default.
+    parameter int BLIND = 0
+) (
     input  logic clk50_in,          // 50 MHz SOM oscillator (V22)
     input  logic button,            // SOM pushbutton, active low (AB13)
 
@@ -65,7 +72,7 @@ module a2mega_dp_test_top (
     //   the AC-coupled DC point + defined idle polarity.
     // ------------------------------------------------------------------
     localparam AUX_TLVDS = 1;   // experiment ON; set 0 to restore proven path
-    localparam AUX_BLIND = (AUX_TLVDS != 0) ? 0 : 1;
+    localparam AUX_BLIND = (BLIND != 0) ? 1 : ((AUX_TLVDS != 0) ? 0 : 1);
 
     logic auxch_in, auxch_out, auxch_tri;
     // AUX pad cell EXTRACTED to the shared dp_aux_pad module (08-30) —

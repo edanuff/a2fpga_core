@@ -43,6 +43,11 @@ real DP monitor, where the monitor's own DPCD is the sink.
 
 Regression on fw be2ab629 (RDO rule + Configure-once/Attention promotion + Enter/Status patience): ANKER re-plugged — identical negotiation and telemetry to the pre-fix run (PINS=CD, Enter/Status/Configure ACKs at +12/+22/+28 ms, DP_ACTIVE at +30 ms, HBR x2, streaming, SE 0/0, O:14C2, Y:11, T:000C U:08). The fixes are invisible to a compliant adapter; they only change behavior where the old code failed. Re-run on the FINAL build 30fd4f47 (adds PD_RESET after Hard Reset, TX watchdog, ACK-before-TXOK race fix): Anker `PINS=CD O:14C2` HBR x2 streaming SE 0/0, Ugreen colorbars — PASS. SHIPPABILITY (ed, 2026-09-02): approved as default behavior — no breakage observed across the full pile.
 
+Blind-sink test build (ed, 2026-09-02: "keep a separate blind sink build around for testing")
+- Project `boards/a2mega/a2mega_dp_test_blind.gprj` -> `a2mega_dp_test_blind_top` (thin wrapper: `a2mega_dp_test_top #(.BLIND(1))`), same pins/CST; SDC is GENERATED (`hdl/dp_test/gen_blind_sdc.sh` prefixes `i_core/`) — re-run it whenever `a2mega_dp_test.sdc` changes.
+- Build: `GPRJ=a2mega_dp_test_blind.gprj tools/build.sh a2mega`; flash: `GPRJ=a2mega_dp_test_blind.gprj tools/flash.sh a2mega`. First build 39f0a8e5: 23 setup viols (clk100 in i_dp worst -0.649, freq_ok instrument -1.485) — the timing-stale dp_test netlist in a worse draw; needs the same dp_test timing pass. NOT flashed yet.
+- Use: lights sinks the 1.0a3 AUX receiver cannot decode (Fangor, generic 4K dongle, VMM7100) open-loop; cannot read DPCD caps (O: stays 0000 by construction).
+
 Notes
 - Anker link health at capture: HBR x2 trained (`C:0177`), sink streaming
   (`K:03`), symbol-error counters valid and zero (`SE0/SE1:8000`).
