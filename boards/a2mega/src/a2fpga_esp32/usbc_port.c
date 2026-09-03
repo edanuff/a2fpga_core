@@ -44,6 +44,7 @@ static void log_message(usbc_port_t *port, usbc_log_level_t level,
         port->hal.log(port->hal.context, level, message);
 }
 
+static void handle_tx_success(usbc_port_t *port);
 static void trace_ev(usbc_port_t *port, usbc_trace_kind_t kind,
                      uint8_t a, uint8_t b, uint8_t c)
 {
@@ -441,6 +442,18 @@ static int handle_vdm_response(usbc_port_t *port,
     header_vdo = message->data[0];
     command = usb_pd_svdm_command(header_vdo);
     command_type = usb_pd_svdm_command_type(header_vdo);
+    /* ACK-BEFORE-TXOK RACE (2026-09-02, Cable Matters HDMI 2.1 trace): a
+     * fast partner's response can reach us in the poll BEFORE our own
+     * TX_SUCCESS interrupt for the request it answers. With tx_busy still
+     * set, the next VDM send was refused, the ladder waited out its 45 ms
+     * timer and RE-SENT the previous Discover — and the retry's reply came
+     * back CRC-bad, ending in USB-only. The response itself proves our
+     * request was delivered: complete the pending transmit now (the later
+     * TX_SUCCESS is a no-op). */
+    if (port->tx_busy && port->tx_kind == USBC_TX_VDM &&
+        usb_pd_svdm_is_structured(header_vdo) &&
+        command == port->expected_vdm_command)
+        handle_tx_success(port);
     expected_svid = port->state <= USBC_STATE_VDM_WAIT_SVIDS
                         ? USB_PD_SID : USB_PD_DISPLAYPORT_SID;
 
@@ -694,6 +707,8 @@ static int drain_receive_fifo(usbc_port_t *port)
 static void handle_tx_success(usbc_port_t *port)
 {
     const usbc_tx_kind_t kind = port->tx_kind;
+    if (!port->tx_busy)
+        return;   /* already completed by a response (see handle_vdm_response) */
     trace_ev(port, USBC_TR_TXOK, (uint8_t)kind, port->tx_attempts, 0u);
     port->tx_busy = false;
     port->tx_kind = USBC_TX_NONE;
