@@ -167,7 +167,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2mega remote console\r\n"
-                "keys: c=console m=menu p=pd d=census x=regs e=eq +/-=eqstep l=lanes v=replug f=flip r=retrain g=fpgareload u=fusb q=quit\r\n"
+                "keys: c=console m=menu p=pd d=census x=regs e=eq +/-=eqstep l=lanes v=replug f=flip r=retrain g=fpgareload u=fusb t=trace q=quit\r\n"
                 "menu: up/down move, left/right change, enter/a=ok,\r\n"
                 "      esc/backspace/b=back, y=view, s/tab=select\r\n\r\n");
 
@@ -254,6 +254,16 @@ static void session(int fd)
                 usbc_hpd_retrain();
 #else
                 tn_puts(fd, "retrain: not built for this board rev\r\n");
+#endif
+                continue;
+            }
+            if (esc_st == 0 && ch == 't' && !menu_mode) {
+                /* PD event trace: did we stop transmitting, or did the
+                 * partner never answer? (PD-silent adapter dig.) */
+#if A2MEGA_HAS_USBC_PD
+                usbc_trace_dump_log();
+#else
+                tn_puts(fd, "trace: not built for this board rev\r\n");
 #endif
                 continue;
             }

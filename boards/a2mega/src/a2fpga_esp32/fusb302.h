@@ -53,6 +53,7 @@ enum fusb302_event_bits {
     FUSB302_EVENT_TX_FAILED     = 1u << 5,
     FUSB302_EVENT_HARD_RESET    = 1u << 6,
     FUSB302_EVENT_FAULT         = 1u << 7,
+    FUSB302_EVENT_RX_CRC_FAIL   = 1u << 8,   /* packet received, CRC bad (flushed) */
 };
 
 typedef struct {
@@ -97,6 +98,7 @@ int fusb302_vbus_present(fusb302_t *device, bool *present);
 int fusb302_source_detached(fusb302_t *device, bool *detached);
 int fusb302_receive(fusb302_t *device, usb_pd_message_t *message);
 int fusb302_transmit(fusb302_t *device, const usb_pd_message_t *message);
+int fusb302_pd_reset(fusb302_t *device);   /* PD engine reset + FIFO flush (after Hard Reset) */
 int fusb302_send_hard_reset(fusb302_t *device);
 /* Stale-session guard: *intact=false when REG_POWER no longer reads the
  * configured value (chip reset underneath the stack). */
