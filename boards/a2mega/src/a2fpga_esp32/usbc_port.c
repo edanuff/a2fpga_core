@@ -8,6 +8,8 @@ enum {
     PS_RDY_DELAY_MS = 25,
     DISCOVERY_START_DELAY_MS = 10,
     VDM_BUSY_DELAY_MS = 50,
+    ENTER_MODE_RESPONSE_MS = 500,      /* slow adapters: see send_vdm */
+    ENTER_MODE_RETRIES = 6,            /* ~3.5 s total before USB-only */
     /* Sink path (we are powered by the monitor). tTypeCSinkWaitCap is
      * 620 ms max per PD; sources rebroadcast caps, so wait generously. */
     SINK_WAIT_CAPS_MS = 3000,
@@ -56,7 +58,7 @@ void usbc_port_trace_dump(usbc_port_t *port)
     static const char *kn[] = {"--", "TX", "TXOK", "TXFL", "RX", "HRST",
                                "ST", "IRQ", "UNAT", "VBUS", "RDO"};
     char line[48];
-    uint8_t n = port->trace_n;
+    uint8_t n = port->trace_n > 40u ? 40u : port->trace_n;   /* tee-safe burst */
     uint8_t i0 = (uint8_t)((port->trace_wr + USBC_TRACE_LEN - n) % USBC_TRACE_LEN);
     uint32_t t0 = n ? port->trace[i0].t_ms : 0u;
     /* WARNING level: the glue routes only >= WARNING to the telnet/OSD
@@ -257,7 +259,14 @@ static int send_vdm(usbc_port_t *port, uint16_t svid, uint8_t command,
         return -1;
     port->expected_vdm_command = command;
     port->vdm_retry_count = 0u;
-    port->deadline_ms = now_ms(port) + port->config.vdm_response_timeout_ms;
+    /* ENTER_MODE PATIENCE (2026-09-02, BolAAzuL trace): Discover* ACKs
+     * arrive in 1-3 ms, but this adapter answers Enter Mode ~1.9 s later
+     * (it brings its DP path up first); our spec-paced ~45 ms x 3 gave
+     * up at 150 ms and the late reply was ignored in USB-only. Enter Mode
+     * alone gets a long per-try wait; total budget = (retries+1) x wait. */
+    port->deadline_ms = now_ms(port) +
+        (command == USB_PD_SVDM_ENTER_MODE ? ENTER_MODE_RESPONSE_MS
+                                           : port->config.vdm_response_timeout_ms);
     port->state = wait_state;
     return 0;
 }
@@ -481,7 +490,11 @@ static int handle_received_message(usbc_port_t *port,
     const uint8_t count = message->data_count;
     const uint8_t type = usb_pd_header_type(message->header);
     const uint8_t message_id = usb_pd_header_id(message->header);
-    trace_ev(port, USBC_TR_RX, type, message_id, message->data_count);
+    trace_ev(port, USBC_TR_RX, type, message_id,
+             (type == USB_PD_DATA_VENDOR && count != 0u)
+                 ? (uint8_t)(usb_pd_svdm_command(message->data[0]) |
+                             (usb_pd_svdm_command_type(message->data[0]) << 5))
+                 : message->data_count);
 
     if (count == 0u && type == USB_PD_CTRL_GOOD_CRC)
         return 0;
@@ -886,7 +899,9 @@ static int service_state_timer(usbc_port_t *port)
     case USBC_STATE_VDM_WAIT_STATUS:
     case USBC_STATE_VDM_WAIT_CONFIGURE:
         if (!port->tx_busy && time_reached(now, port->deadline_ms)) {
-            if (port->vdm_retry_count < port->config.vdm_retries) {
+            if (port->vdm_retry_count <
+                (port->state == USBC_STATE_VDM_WAIT_ENTER ? ENTER_MODE_RETRIES
+                                                          : port->config.vdm_retries)) {
                 const uint8_t next_retry = (uint8_t)(port->vdm_retry_count + 1u);
                 const int rc = retry_vdm_for_state(port);
                 port->vdm_retry_count = next_retry;
