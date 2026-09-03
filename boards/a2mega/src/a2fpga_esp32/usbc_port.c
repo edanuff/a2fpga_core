@@ -8,8 +8,8 @@ enum {
     PS_RDY_DELAY_MS = 25,
     DISCOVERY_START_DELAY_MS = 10,
     VDM_BUSY_DELAY_MS = 50,
-    ENTER_MODE_RESPONSE_MS = 500,      /* slow adapters: see send_vdm */
-    ENTER_MODE_RETRIES = 6,            /* ~3.5 s total before USB-only */
+    MODE_OP_RESPONSE_MS = 500,         /* Enter/Status/Configure: see send_vdm */
+    MODE_OP_RETRIES = 6,               /* ~3.5 s total before USB-only */
     /* Sink path (we are powered by the monitor). tTypeCSinkWaitCap is
      * 620 ms max per PD; sources rebroadcast caps, so wait generously. */
     SINK_WAIT_CAPS_MS = 3000,
@@ -259,14 +259,17 @@ static int send_vdm(usbc_port_t *port, uint16_t svid, uint8_t command,
         return -1;
     port->expected_vdm_command = command;
     port->vdm_retry_count = 0u;
-    /* ENTER_MODE PATIENCE (2026-09-02, BolAAzuL trace): Discover* ACKs
-     * arrive in 1-3 ms, but this adapter answers Enter Mode ~1.9 s later
-     * (it brings its DP path up first); our spec-paced ~45 ms x 3 gave
-     * up at 150 ms and the late reply was ignored in USB-only. Enter Mode
-     * alone gets a long per-try wait; total budget = (retries+1) x wait. */
+    /* MODE-OPERATION PATIENCE (2026-09-02, BolAAzuL trace with SVDM decode):
+     * Discover-x/Enter/Status ACK in 1-3 ms, but DP CONFIGURE draws no ACK
+     * inside our spec-paced 45 ms x 3 — the adapter brings its DP path up
+     * first and sends Attention ~1.9 s later, by which time we had fallen
+     * to USB-only. Enter/Status/Configure get a long per-try wait; total
+     * budget = (retries+1) x wait. Discover* keep the spec pace. */
     port->deadline_ms = now_ms(port) +
-        (command == USB_PD_SVDM_ENTER_MODE ? ENTER_MODE_RESPONSE_MS
-                                           : port->config.vdm_response_timeout_ms);
+        ((command == USB_PD_SVDM_ENTER_MODE ||
+          command == USB_PD_SVDM_DP_STATUS ||
+          command == USB_PD_SVDM_DP_CONFIGURE) ? MODE_OP_RESPONSE_MS
+                                               : port->config.vdm_response_timeout_ms);
     port->state = wait_state;
     return 0;
 }
@@ -641,6 +644,17 @@ static int handle_received_message(usbc_port_t *port,
             if (usb_pd_svdm_object_position(vdm) != port->dp_mode_position)
                 return 0;
             apply_hpd_status(port, message->data[1]);
+            if (port->state == USBC_STATE_VDM_WAIT_CONFIGURE) {
+                /* The partner is already reporting DP status for the
+                 * configured mode: the Configure took effect even though
+                 * its ACK is missing/late (BolAAzuL). Promote instead of
+                 * timing out into USB-only. */
+                set_dp_outputs(port, true, port->dp_hpd_level);
+                port->state = USBC_STATE_DP_ACTIVE;
+                port->expected_vdm_command = 0u;
+                log_message(port, USBC_LOG_WARNING,
+                            "DP Configure: Attention before ACK; active");
+            }
             return 0;
         }
         return handle_vdm_response(port, message);
@@ -900,8 +914,10 @@ static int service_state_timer(usbc_port_t *port)
     case USBC_STATE_VDM_WAIT_CONFIGURE:
         if (!port->tx_busy && time_reached(now, port->deadline_ms)) {
             if (port->vdm_retry_count <
-                (port->state == USBC_STATE_VDM_WAIT_ENTER ? ENTER_MODE_RETRIES
-                                                          : port->config.vdm_retries)) {
+                ((port->state == USBC_STATE_VDM_WAIT_ENTER ||
+                  port->state == USBC_STATE_VDM_WAIT_STATUS ||
+                  port->state == USBC_STATE_VDM_WAIT_CONFIGURE) ? MODE_OP_RETRIES
+                                                                : port->config.vdm_retries)) {
                 const uint8_t next_retry = (uint8_t)(port->vdm_retry_count + 1u);
                 const int rc = retry_vdm_for_state(port);
                 port->vdm_retry_count = next_retry;
