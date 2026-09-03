@@ -41,6 +41,8 @@ assignments (4-lane mux path) yet carries a 2-lane HBR2 DP->HDMI converter
 regardless of the mux; the open question is a DIRECT USB-C->DP path to a
 real DP monitor, where the monitor's own DPCD is the sink.
 
+Regression on fw be2ab629 (RDO rule + Configure-once/Attention promotion + Enter/Status patience): ANKER re-plugged — identical negotiation and telemetry to the pre-fix run (PINS=CD, Enter/Status/Configure ACKs at +12/+22/+28 ms, DP_ACTIVE at +30 ms, HBR x2, streaming, SE 0/0, O:14C2, Y:11, T:000C U:08). The fixes are invisible to a compliant adapter; they only change behavior where the old code failed.
+
 Notes
 - Anker link health at capture: HBR x2 trained (`C:0177`), sink streaming
   (`K:03`), symbol-error counters valid and zero (`SE0/SE1:8000`).
