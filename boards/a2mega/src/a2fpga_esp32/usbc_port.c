@@ -54,21 +54,25 @@ static void trace_ev(usbc_port_t *port, usbc_trace_kind_t kind,
 void usbc_port_trace_dump(usbc_port_t *port)
 {
     static const char *kn[] = {"--", "TX", "TXOK", "TXFL", "RX", "HRST",
-                               "ST", "IRQ", "UNAT", "VBUS"};
+                               "ST", "IRQ", "UNAT", "VBUS", "RDO"};
     char line[48];
     uint8_t n = port->trace_n;
     uint8_t i0 = (uint8_t)((port->trace_wr + USBC_TRACE_LEN - n) % USBC_TRACE_LEN);
     uint32_t t0 = n ? port->trace[i0].t_ms : 0u;
-    snprintf(line, sizeof line, "TRACE st=%u busy=%u kind=%u att=%u n=%u",
+    /* WARNING level: the glue routes only >= WARNING to the telnet/OSD
+     * console (INFO is USB-serial only, unreachable while the adapter
+     * owns USB-C). Lines stay <= 33 chars for the 39-col console after
+     * the "USBC: " prefix. */
+    snprintf(line, sizeof line, "TRC s%u b%u k%u a%u n%u",
              (unsigned)port->state, (unsigned)port->tx_busy,
              (unsigned)port->tx_kind, (unsigned)port->tx_attempts, (unsigned)n);
-    log_message(port, USBC_LOG_INFO, line);
+    log_message(port, USBC_LOG_WARNING, line);
     for (uint8_t k = 0; k < n; k++) {
         const usbc_trace_ev_t *e = &port->trace[(i0 + k) % USBC_TRACE_LEN];
         snprintf(line, sizeof line, "+%06lu %-4s %02X %02X %02X",
                  (unsigned long)(e->t_ms - t0),
-                 e->kind < 10u ? kn[e->kind] : "??", e->a, e->b, e->c);
-        log_message(port, USBC_LOG_INFO, line);
+                 e->kind < 11u ? kn[e->kind] : "??", e->a, e->b, e->c);
+        log_message(port, USBC_LOG_WARNING, line);
     }
 }
 
@@ -506,6 +510,12 @@ static int handle_received_message(usbc_port_t *port,
     port->have_last_rx_message_id = true;
 
     if (count == 1u && type == USB_PD_DATA_REQUEST) {
+        /* trace the RDO: a = objpos<<4 | mismatch, b = op mA/20, c = max mA/20 */
+        trace_ev(port, USBC_TR_RDO,
+                 (uint8_t)((((message->data[0] >> 28) & 0x7u) << 4) |
+                           (usb_pd_rdo_capability_mismatch(message->data[0]) ? 1u : 0u)),
+                 (uint8_t)(usb_pd_rdo_operating_ma(message->data[0]) / 20u),
+                 (uint8_t)(usb_pd_rdo_maximum_ma(message->data[0]) / 20u));
         if (usb_pd_fixed_rdo_is_acceptable(message->data[0],
                                            port->config.source_milliamps)) {
             port->state = USBC_STATE_SOURCE_ACCEPT_SENT;

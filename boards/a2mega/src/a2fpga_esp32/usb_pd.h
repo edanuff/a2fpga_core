@@ -115,11 +115,32 @@ static inline bool usb_pd_fixed_rdo_is_acceptable(uint32_t rdo,
     const uint16_t operating_ma = (uint16_t)(((rdo >> 10) & 0x3ffu) * 10u);
     const uint16_t maximum_ma = (uint16_t)((rdo & 0x3ffu) * 10u);
 
+    /* 2026-09-02 (BolAAzuL / Cable Matters census dig): the old rule also
+     * required maximum_ma <= max_milliamps, which rejected every sink that
+     * sets Capability Mismatch — per the PD spec such a sink keeps
+     * Operating Current within our PDO and reports what it WANTS in Max
+     * Operating Current; the source evaluates the operating current only.
+     * The rejected adapters answered our Reject with a Hard Reset and the
+     * attach looped forever. Max is now informational (traced, not
+     * enforced). */
+    (void)maximum_ma;
     return object_position == 1u &&
            operating_ma != 0u &&
-           maximum_ma >= operating_ma &&
-           operating_ma <= max_milliamps &&
-           maximum_ma <= max_milliamps;
+           operating_ma <= max_milliamps;
+}
+
+/* RDO field decode for the PD trace (Request handling). */
+static inline uint16_t usb_pd_rdo_operating_ma(uint32_t rdo)
+{
+    return (uint16_t)(((rdo >> 10) & 0x3ffu) * 10u);
+}
+static inline uint16_t usb_pd_rdo_maximum_ma(uint32_t rdo)
+{
+    return (uint16_t)((rdo & 0x3ffu) * 10u);
+}
+static inline bool usb_pd_rdo_capability_mismatch(uint32_t rdo)
+{
+    return (rdo & (UINT32_C(1) << 26)) != 0u;
 }
 
 static inline uint32_t usb_pd_svdm_header(uint16_t svid,
