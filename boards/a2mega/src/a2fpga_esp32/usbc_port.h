@@ -135,6 +135,7 @@ typedef struct {
     uint8_t trace_last_state;
     uint8_t dp_pin_assignment;     /* USB_PD_DP_PIN_C or _E chosen for Configure */
     bool    configure_sent;        /* a DP_CONFIGURE went out this attach (late-Attention gate) */
+    uint32_t tx_start_ms;          /* TX completion watchdog */
     uint8_t vdm_retry_count;
     uint8_t expected_vdm_command;
     bool dp_hpd_level;

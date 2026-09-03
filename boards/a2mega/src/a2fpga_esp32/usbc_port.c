@@ -10,6 +10,7 @@ enum {
     VDM_BUSY_DELAY_MS = 50,
     MODE_OP_RESPONSE_MS = 500,         /* Enter/Status: see send_vdm */
     MODE_OP_RETRIES = 6,               /* ~3.5 s total before USB-only */
+    TX_WEDGE_MS = 250,                 /* TX completion watchdog (see usbc_port_task) */
     CONFIGURE_QUIET_MS = 3000,         /* Configure: one send, quiet, ONE retry (see send_vdm) */
     /* Sink path (we are powered by the monitor). tTypeCSinkWaitCap is
      * 620 ms max per PD; sources rebroadcast caps, so wait generously. */
@@ -224,6 +225,7 @@ static int queue_message(usbc_port_t *port, uint8_t type,
     port->tx_message = message;
     port->tx_kind = kind;
     port->tx_busy = true;
+    port->tx_start_ms = now_ms(port);
     trace_ev(port, USBC_TR_TX, (uint8_t)kind, port->tx_attempts, type);
     port->tx_attempts = 0u;
     return 0;
@@ -1083,6 +1085,7 @@ static int begin_hard_reset_recovery(usbc_port_t *port)
     set_usb_role(port, USBC_USB_ROLE_OFF);
     set_vbus(port, false);
     rc = fusb302_set_pd_receiver(&port->fusb302, false);
+    (void)fusb302_pd_reset(&port->fusb302);   /* un-wedge the PD engine */
     reset_protocol(port);
     port->state = USBC_STATE_HARD_RESET_OFF;
     port->deadline_ms = now_ms(port) + port->config.hard_reset_off_ms;
@@ -1110,6 +1113,18 @@ int usbc_port_task(usbc_port_t *port)
     if (events.bits != 0u)
         trace_ev(port, USBC_TR_IRQ, (uint8_t)events.bits,
                  (uint8_t)(events.bits >> 8), (uint8_t)port->tx_busy);
+    /* TX completion watchdog: a transmit that yields neither TX_SUCCESS nor
+     * RETRY_FAIL within TX_WEDGE_MS (3 hw retries take ~25 ms) means the
+     * PD engine is wedged (seen after a partner Hard Reset). Reset it and
+     * fail the message so the state machine's timers can run again. */
+    if (port->tx_busy && (uint32_t)(now_ms(port) - port->tx_start_ms) > TX_WEDGE_MS) {
+        trace_ev(port, USBC_TR_TXFAIL, (uint8_t)port->tx_kind, 0xEEu, 1u);
+        (void)fusb302_pd_reset(&port->fusb302);
+        (void)fusb302_set_pd_receiver(&port->fusb302, true);
+        port->tx_busy = false;
+        port->tx_kind = USBC_TX_NONE;
+        port->deadline_ms = now_ms(port);      /* let the state timer act now */
+    }
 
     if ((events.bits & FUSB302_EVENT_FAULT) != 0u) {
         log_message(port, USBC_LOG_ERROR, "FUSB302 VCONN/thermal fault");
@@ -1123,6 +1138,7 @@ int usbc_port_task(usbc_port_t *port)
     if ((events.bits & FUSB302_EVENT_HARD_RESET) != 0u && port->power_sink) {
         /* Source will drop and restore VBUS; restart the sink ladder. */
         set_dp_outputs(port, false, false);
+        (void)fusb302_pd_reset(&port->fusb302);
         port->tx_message_id = 0u;
         port->have_last_rx_message_id = false;
         port->tx_busy = false;
