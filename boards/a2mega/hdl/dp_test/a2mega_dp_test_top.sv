@@ -175,6 +175,11 @@ module a2mega_dp_test_top #(
     dp_transmitter #(
         .LANE_COUNT     (2),
         .LINK_RATE_MBPS (2700),
+        // same packer schedule as the shipping a2mega core (top.sv sets
+        // SCHED_ROM=1); the default (0, legacy walk) meant this timing
+        // gate was building a packer path the core never uses
+        // (timing campaign round 2)
+        .SCHED_ROM      (1),
         // 1.0a3: AUX receive is electrically dead (AC caps, no FPGA-side
         // bias, LVCMOS thresholds unreachable by a <=1.38 Vpp reply; board
         // not field-modifiable). TX works — run the link policy open-loop.
