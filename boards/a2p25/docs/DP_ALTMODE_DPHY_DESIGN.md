@@ -520,7 +520,7 @@ class once the monitor-direct AUX RX margin work lands).
 | Part | Role | Notes |
 |---|---|---|
 | SN75DP130 | swing/PE regeneration, LT response | ~$1–2, VQFN-48, stocked |
-| TUSB1046-DCI | USB-C alt-mode mux + linear EQ | carryover from a2mega. **Cost-down candidate: TUSB546A-DCI** — pin-compatible sibling (same WQFN-40 4×6, same pinout/register structure/EQ class, DP 1.4 HBR3 identical); only difference is USB3 Gen1 vs Gen2 redriving, which this board never uses (assignment C, USB2 on D+/D−, FS host). Verify before swap: full pin diff, EQ step table vs fw DPEQ ladder, I2C address. |
+| **TUSB546A-DCI** (was TUSB1046) | USB-C alt-mode mux + linear EQ | **PLANNED PART (price/stock checked 2026-09-02)**: pin-compatible sibling of the a2mega's TUSB1046A (same WQFN-40 4×6, pinout, register structure, EQ class, DP 1.4 HBR3); only delta is USB3 Gen1-vs-Gen2, unused here (assignment C, USB2 on D+/D−, FS host). LCSC $3.39–3.60 in stock vs 1046A $5.61–5.97 **OOS at LCSC**; DK $6.72/738pc vs $7.58. Both TI-ACTIVE. 1046A = drop-in fallback if sourcing flips. Prefer the "A" rev (plain TUSB546 exists cheaper at DK — errata-check before considering). Verify before layout: full pin diff, EQ step table vs fw DPEQ ladder, I2C address. |
 | FUSB302B | CC/PD | carryover |
 | AC caps 100 nF ×(2×lanes) | DP coupling | passives |
 | — | | No bridge chip. No ANX7625. |
