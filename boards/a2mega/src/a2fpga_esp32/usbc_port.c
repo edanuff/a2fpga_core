@@ -59,7 +59,7 @@ static void trace_ev(usbc_port_t *port, usbc_trace_kind_t kind,
 void usbc_port_trace_dump(usbc_port_t *port)
 {
     static const char *kn[] = {"--", "TX", "TXOK", "TXFL", "RX", "HRST",
-                               "ST", "IRQ", "UNAT", "VBUS", "RDO"};
+                               "ST", "IRQ", "UNAT", "VBUS", "RDO", "CRCF"};
     char line[48];
     uint8_t n = port->trace_n > 40u ? 40u : port->trace_n;   /* tee-safe burst */
     uint8_t i0 = (uint8_t)((port->trace_wr + USBC_TRACE_LEN - n) % USBC_TRACE_LEN);
@@ -76,7 +76,7 @@ void usbc_port_trace_dump(usbc_port_t *port)
         const usbc_trace_ev_t *e = &port->trace[(i0 + k) % USBC_TRACE_LEN];
         snprintf(line, sizeof line, "+%06lu %-4s %02X %02X %02X",
                  (unsigned long)(e->t_ms - t0),
-                 e->kind < 11u ? kn[e->kind] : "??", e->a, e->b, e->c);
+                 e->kind < 12u ? kn[e->kind] : "??", e->a, e->b, e->c);
         log_message(port, USBC_LOG_WARNING, line);
     }
 }
@@ -1128,6 +1128,9 @@ int usbc_port_task(usbc_port_t *port)
     if (events.bits != 0u)
         trace_ev(port, USBC_TR_IRQ, (uint8_t)events.bits,
                  (uint8_t)(events.bits >> 8), (uint8_t)port->tx_busy);
+    if ((events.bits & FUSB302_EVENT_RX_CRC_FAIL) != 0u)
+        trace_ev(port, USBC_TR_CRCF, port->fusb302.bad_frame[0],
+                 port->fusb302.bad_frame[1], port->fusb302.bad_frame[2]);
     /* TX completion watchdog: a transmit that yields neither TX_SUCCESS nor
      * RETRY_FAIL within TX_WEDGE_MS (3 hw retries take ~25 ms) means the
      * PD engine is wedged (seen after a partner Hard Reset). Reset it and

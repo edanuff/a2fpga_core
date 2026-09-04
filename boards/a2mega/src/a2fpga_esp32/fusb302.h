@@ -67,6 +67,7 @@ typedef struct {
     fusb302_polarity_t polarity;
     bool source_role;
     bool data_role_dfp;      /* DATAROLE bit for GoodCRC/TX headers */
+    uint8_t bad_frame[3];    /* forensics: SOP token + header of the last CRC-failed RX frame */
     bool rx_enabled;
     uint16_t rp_milliamps;   /* advertised Type-C source current tier */
 } fusb302_t;

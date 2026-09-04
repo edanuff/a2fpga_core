@@ -103,7 +103,7 @@ typedef enum {
 typedef enum {
     USBC_TR_NONE = 0, USBC_TR_TX, USBC_TR_TXOK, USBC_TR_TXFAIL, USBC_TR_RX,
     USBC_TR_HRST, USBC_TR_STATE, USBC_TR_IRQ, USBC_TR_UNATT, USBC_TR_VBUS,
-    USBC_TR_RDO
+    USBC_TR_RDO, USBC_TR_CRCF
 } usbc_trace_kind_t;
 typedef struct {
     uint32_t t_ms;

@@ -400,6 +400,9 @@ int fusb302_poll_events(fusb302_t *device, fusb302_events_t *events)
             /* a packet arrived but failed CRC: flagged for the PD trace
              * (Cable Matters dig — was a silent flush) */
             events->bits |= FUSB302_EVENT_RX_CRC_FAIL;
+            /* forensics (2026-09-02, 8K HDMI adapter): what IS the bad
+             * frame? SOP token + 2 header bytes, before the flush */
+            (void)read_bytes(device, REG_FIFOS, device->bad_frame, 3u);
             (void)update_reg(device, REG_CONTROL1, 0u, CONTROL1_RX_FLUSH);
         }
     }
