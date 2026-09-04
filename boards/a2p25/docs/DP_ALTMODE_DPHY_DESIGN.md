@@ -514,17 +514,17 @@ converter gate; the bench removed that premise. Product shape:
   failures lesson); a shorted accessory must not crash the host machine.
   Electronic switches fold back in µs, control dongle inrush (video port
   must source VBUS by spec — FRL dongles pull 1 W+), and auto-recover.
-  Cost-down = substitution not deletion: LCSC-class current-limit high-side
-  switches (SY6280/MIC2005/AP2141-alikes, $0.05–0.15) replace the $0.50
-  TPS2553; video port ~1.5 A budget, data port ~0.5–1 A. Optional PTC
-  upstream as backstop; fuse-ONLY is the false economy.
-- **LM66100 (VBUS-in ideal diode): DROPPED** — it exists on a2mega for
-  USB-powered bench operation; the a2p25's Tang module has its own USB-C
-  for that, so both carrier ports are strictly source-only. Deleting it
-  also deletes the a2mega's measured-VBUS-backfeed failure class by
-  construction. ⚠ Inherited check: verify the chosen output switches block
-  reverse current when off (TPS2553 does; confirm the cheap substitute) so
-  externally-driven VBUS can't backfeed the 5 V rail of an unpowered board.
+  **Part: TPS2553, one per port** (video ~1.5 A budget, data ~0.5–1 A) —
+  a2mega-proven AND cheap via PCBWay ($0.18 sourced, 2026-09-02), so no
+  substitution needed. Optional PTC upstream as backstop; fuse-ONLY is the
+  false economy regardless of price.
+- **LM66100 (VBUS-in ideal diode): KEPT** ($0.21 via PCBWay) — preserves
+  USB-powered bench operation of the whole carrier (not just the Tang
+  module). ⚠ String attached: keeping the VBUS-in path keeps the a2mega's
+  measured-VBUS-backfeed failure class in scope (VBUSOK=1 on an empty
+  connector → attach fails looking like no-HPD; leaking element never
+  identified). Review that sub-circuit deliberately when drawing the a2p25
+  — do not clone it blind.
 
 **720p floor status for the census hubs**: bandwidth-assured (RBR×2 =
 2.59 G vs 1.78 G needed, 69% util) and 2-lane-proven at length (the whole
