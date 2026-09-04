@@ -541,6 +541,18 @@ converter gate; the bench removed that premise. Product shape:
   supply** (charger/powered hub/modern laptop port — most deliver 1–1.5 A+
   despite the 500 mA spec floor); a strictly spec-limited port may brown
   out rather than flash.
+- **CONSIDERED AND REJECTED: shared VBUS net across both connectors with a
+  single TPS2553+LM66100 pair.** Saves $0.18 (one TPS2553 — the LM66100
+  exists once either way) and costs: (1) re-imports the a2mega phantom-VBUS
+  class BY DESIGN — bench power on the data port would put 5 V on the video
+  port's VBUS pin, VBUSOK=1 empty, the exact no-HPD failure signature;
+  (2) hard-parallels the PC's hardwired A-to-C 5 V with the TPS2553 output
+  in the everyday bench-power-plus-display scenario (switches don't block
+  reverse when enabled, LM66100 loops it back); (3) violates vSafe0V on the
+  unattached receptacle and merges fault domains (gamepad short kills
+  display power). Per-port switches are the cheapest insurance on the board.
+  (Legit trim if wanted: the DATA port's switch could be an SY6280-class
+  $0.05 part; video port keeps the proven TPS2553.)
 
 **720p floor status for the census hubs**: bandwidth-assured (RBR×2 =
 2.59 G vs 1.78 G needed, 69% util) and 2-lane-proven at length (the whole
