@@ -797,9 +797,20 @@ module video_stream_packer #(
             f_vb[1] <= pf_vb1;   //   from the exact two-step-ahead counters
             f_prime <= running && nl_active && (nc == (DATA_START/2)-1);
 
+            // ready (source_ready to the idle inserter) is a one-cycle
+            // delayed copy of running — timing campaign round 2, cone (j'):
+            // the previous in-line assignments gave ready's D input the
+            // full sof_mismatch/fetch_starved cone (line_num compares +
+            // FIFO flags; -0.107 ns in a 60K roll) and the replicated
+            // ready flop sits mid-die on the way to the inserter. The rise
+            // is unchanged (ready always followed running by a cycle); the
+            // drop now trails running by a cycle instead of coinciding,
+            // which the inserter cannot distinguish (ready already leads
+            // the data by the sdp/msa pipeline depth). Verified with the
+            // full-chain harness (sim/run_full_chain.sh).
+            ready <= running;
             if (!running) begin
                 data    <= {1'b0, {4{DUMMY, DUMMY}}};
-                ready   <= 1'b0;
                 sdp_gap <= 1'b0;
                 // conditions are stable until the head word is popped, so
                 // acting one cycle late keeps frame alignment intact
@@ -822,7 +833,6 @@ module video_stream_packer #(
                 sdp_gap <= ({line_cycle, 1'b0} >= GAP_START) &&
                            ({line_cycle, 1'b0} <  GAP_END);
 
-                ready <= 1'b1;
                 if (fetch_r && !fifo_rvalid)
                     underrun <= 1'b1;
                 // c_word ends the cycle as (c_fetch ? fifo_rdata : cur_word)
@@ -850,7 +860,6 @@ module video_stream_packer #(
                 // counter increment so the zeroing wins.
                 if (sof_mismatch || fetch_starved) begin
                     running    <= 1'b0;
-                    ready      <= 1'b0;
                     start_ok   <= 1'b0;
                     line_cycle <= 0;
                     line_num   <= 0;

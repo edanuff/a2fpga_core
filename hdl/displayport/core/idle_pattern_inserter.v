@@ -67,6 +67,7 @@ module idle_pattern_inserter (
 
 
     reg [16:0] count_to_switch;
+    reg        source_ready_q;      // registered copy of source_ready (see below)
     reg        source_ready_last;
     reg        idle_switch_point;
     
@@ -89,7 +90,23 @@ initial begin
     idle_data          = 18'b0;
     count_to_switch    = 17'b0;
     idle_count         = 13'b0;
-end 
+    source_ready_q     = 1'b0;
+    source_ready_last  = 1'b0;
+end
+
+//-----------------------------------------------------------------------
+// source_ready is a level from the video packer that already leads the
+// data by the sdp/msa pipeline depth; the switch decision below only
+// needs it together with the data's own switch-point bit (in_data[72]),
+// and the drop detection only needs its falling edge. Sampling it once
+// here (timing campaign round 2, cone (j)) takes the long route from the
+// packer off the count_to_switch enable cone (+0.03 ns at 135 MHz on a
+// 60K roll) at the cost of one cycle on the arm/drop, which is invisible
+// against the 64k-cycle idle window.
+//-----------------------------------------------------------------------
+always @(posedge clk) begin
+    source_ready_q <= source_ready;
+end
 
 
 
@@ -110,7 +127,7 @@ always @(posedge clk) begin
             //-------------------------------------
             // Bit 72 is the switch point indicator
             //-------------------------------------
-            if(source_ready == 1'b1 && in_data[72] == 1'b1 && idle_switch_point == 1'b1) begin
+            if(source_ready_q == 1'b1 && in_data[72] == 1'b1 && idle_switch_point == 1'b1) begin
                count_to_switch <= count_to_switch + 1;
             end
         end else begin
@@ -125,10 +142,10 @@ always @(posedge clk) begin
     // If either the source drops or the channel is not ready, then reset
     // to emitting the idle pattern. 
     //-----------------------------------------------------------------------
-    if(channel_ready_i == 1'b0 || (source_ready == 1'b0 && source_ready_last == 1'b1)) begin
+    if(channel_ready_i == 1'b0 || (source_ready_q == 1'b0 && source_ready_last == 1'b1)) begin
         count_to_switch <= 17'b0;
     end
-    source_ready_last  <= source_ready;
+    source_ready_last  <= source_ready_q;
             
     //------------------------------------------------------
     // We can either be odd or even aligned, depending on
