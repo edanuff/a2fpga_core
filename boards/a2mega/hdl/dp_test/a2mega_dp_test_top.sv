@@ -646,6 +646,17 @@ module a2mega_dp_test_top #(
     logic [27:0] sym_cnt = '0, sym_last = '0, sym_delta = '0;
     logic [2:0]  tgl_sync = '0;
     logic        freq_ok = 1'b0;
+    // TIMING ROUND 2 CONE (b): the two 28-bit magnitude compares below
+    // were dp_test's last violating family (-0.52 .. -1.62 across draws).
+    // Each compare is split into registered 14-bit half results
+    // (A > B  <=>  Ah > Bh || (Ah == Bh && Al > Bl)) and combined a cycle
+    // later — three cycles of latency on a 1 Hz instrument, zero behavior
+    // change. 135 M ± ~2%: 132.3M .. 137.7M
+    localparam logic [27:0] FREQ_LO = 28'd132_300_000;
+    localparam logic [27:0] FREQ_HI = 28'd137_700_000;
+    logic fq_gt_hi = 1'b0, fq_eq_lo_hi = 1'b0, fq_gt_lo = 1'b0;
+    logic fq_lt_hi = 1'b0, fq_eq_hi_hi = 1'b0, fq_lt_lo = 1'b0;
+    logic fq_gt_r = 1'b0, fq_lt_r = 1'b0;
     logic        clk_sym_w;
     always_ff @(posedge clk_sym_w) begin
         sym_cnt  <= sym_cnt + 28'd1;
@@ -655,11 +666,17 @@ module a2mega_dp_test_top #(
             sym_last  <= sym_cnt;
         end
         // pipelined vs the snapshot: sym_delta is static for a full 1 s
-        // window, so comparing it a cycle later costs nothing and keeps
-        // the wide subtract-compare off the single-cycle 135 MHz path.
-        // 135 M ± ~2%: 132.3M .. 137.7M
-        freq_ok <= (sym_delta > 28'd132_300_000) &&
-                   (sym_delta < 28'd137_700_000);
+        // window, so comparing it later costs nothing (cone (b): see the
+        // declaration block above for the half-compare split).
+        fq_gt_hi    <= (sym_delta[27:14] >  FREQ_LO[27:14]);
+        fq_eq_lo_hi <= (sym_delta[27:14] == FREQ_LO[27:14]);
+        fq_gt_lo    <= (sym_delta[13:0]  >  FREQ_LO[13:0]);
+        fq_lt_hi    <= (sym_delta[27:14] <  FREQ_HI[27:14]);
+        fq_eq_hi_hi <= (sym_delta[27:14] == FREQ_HI[27:14]);
+        fq_lt_lo    <= (sym_delta[13:0]  <  FREQ_HI[13:0]);
+        fq_gt_r     <= fq_gt_hi || (fq_eq_lo_hi && fq_gt_lo);
+        fq_lt_r     <= fq_lt_hi || (fq_eq_hi_hi && fq_lt_lo);
+        freq_ok     <= fq_gt_r && fq_lt_r;
     end
 
     // ------------------------------------------------------------------
