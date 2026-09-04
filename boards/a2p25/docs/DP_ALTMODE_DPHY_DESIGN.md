@@ -545,9 +545,21 @@ converter gate; the bench removed that premise. Product shape:
   **(B) second FUSB302 on the data port** (~$0.60, I2C address variants
   B01/B10/B11 exist for multi-port): full spec DRP, C-to-C everything,
   reuses the a2mega's proven attach/DRP firmware minus alt-mode states.
-  **Lean: B** — CC-level analog cleverness is where this board family has
-  been bitten (SBU idle, phantom VBUS, orientation); $0.60 buys the
-  already-debugged circuit and identical bench behavior to the a2mega.
+  **(C) Sipeed-style** (pending EXPERIMENT, ed 09-02): fixed Rd 5.1 k both
+  pins + always-hot VBUS — C-to-C programming spec-clean (the port simply
+  IS a device port), hubs work via the hot-VBUS mechanism the Tang has
+  field-proven, CC silicon = two resistors. Off-spec as a source but
+  functional; the data port is USB2-only by definition.
+  **Experiment (Enhanced board = the test fixture, it IS this arrangement):**
+  per hub in the assortment — (1) power-up + enumeration through the
+  ship-guidance cable type (C-to-C, captive plugs as themselves); a dock
+  dead on an Rd port = the checks-for-Rp class; (2) BOTH plug orientations
+  (CC-reading docks can behave asymmetrically); (3) include hub #3
+  (PD-dead on the video stack — may work fine on a dumb Rd+VBUS port).
+  **Separability:** the experiment decides CC/role ONLY. VBUS path stands
+  regardless: TPS2553 (rail-sag/Apple-II-PSU argument, not a CC argument)
+  + LM66100 — a2p25 "Sipeed-style" = Sipeed's CC grafted onto our
+  protected VBUS node (hot but switched + diode-OR'd, not raw copper).
 - Port-confusion mitigation: label the video port; the FUSB302B sees every
   attach, so a partner with no DP sink mode → OSD hint ("display is the
   other port"). The census machinery doubles as the wrong-port detector.
