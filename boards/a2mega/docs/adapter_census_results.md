@@ -49,6 +49,10 @@ Blind-sink test build (ed, 2026-09-02: "keep a separate blind sink build around 
 - Build: `GPRJ=a2mega_dp_test_blind.gprj tools/build.sh a2mega`; flash: `GPRJ=a2mega_dp_test_blind.gprj tools/flash.sh a2mega`. First build 39f0a8e5: 23 setup viols (clk100 in i_dp worst -0.649, freq_ok instrument -1.485) — the timing-stale dp_test netlist in a worse draw; needs the same dp_test timing pass. NOT flashed yet.
 - Use: lights sinks the 1.0a3 AUX receiver cannot decode (Fangor, generic 4K dongle, VMM7100) open-loop; cannot read DPCD caps (O: stays 0000 by construction).
 
+Regression on fw 3aca7392 (RX-FIFO flush removed): Anker in BOTH personas — bus-powered sink (charger on the Anker's PD-in) and slot-powered source — colorbars; source-persona telemetry identical to every earlier pass (`PINS=CD`, HBR x2, `K:03`, SE 0/0, `O:14C2`, `Y:11 T:000C`). PASS.
+
+⚠ Bench trap (2026-09-02): an Anker WITHOUT its charger, with the IIgs off, back-drives enough VBUS to boot the card (bus-powered sink persona) while its own PD controller is not running: VBUS present, NO Rp on either CC, NO Source_Caps, zero PD frames -> `SINK_WAIT_SRC_CAPS` 3 s -> `DEVICE`, stale-session guard fires "no Rp". It looks like a dead PD stack and is not. Charger in (or slot power on) and it negotiates immediately. Check who is powering whom before suspecting firmware.
+
 Notes
 - Anker link health at capture: HBR x2 trained (`C:0177`), sink streaming
   (`K:03`), symbol-error counters valid and zero (`SE0/SE1:8000`).
