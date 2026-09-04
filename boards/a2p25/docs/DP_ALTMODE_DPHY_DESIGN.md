@@ -533,6 +533,21 @@ converter gate; the bench removed that premise. Product shape:
   back-powered, no uncontrolled paralleling. Documented exception, unlike
   the Tang Nano 20K's always-hot fused VBUS which is the uncontained
   version of the same trick.
+  **REOPENED (09-02): static Rp breaks C-to-C programming, and the bench is
+  Mac-based** (a2mega programs C-to-C because its FUSB302B does real DRP;
+  the Tang works C-to-C because it is pure Rd). Fork:
+  **(A) boot-role-by-power-provenance** (~$0.10): hard-wired Rd default +
+  ESP32-GPIO-FET flip to Rp after boot. Unpowered+Mac C-to-C → Rd → Mac
+  sources → fw sees port-powered boot → stays device → C-to-C programming
+  spec-clean. Slot-powered → flip to Rp, host. Corner: Mac attached to a
+  slot-powered Rp port would SINK 1.5 A from the Apple II — fw "programming
+  mode" menu action flips back to Rd. Novel policy code.
+  **(B) second FUSB302 on the data port** (~$0.60, I2C address variants
+  B01/B10/B11 exist for multi-port): full spec DRP, C-to-C everything,
+  reuses the a2mega's proven attach/DRP firmware minus alt-mode states.
+  **Lean: B** — CC-level analog cleverness is where this board family has
+  been bitten (SBU idle, phantom VBUS, orientation); $0.60 buys the
+  already-debugged circuit and identical bench behavior to the a2mega.
 - Port-confusion mitigation: label the video port; the FUSB302B sees every
   attach, so a partner with no DP sink mode → OSD hint ("display is the
   other port"). The census machinery doubles as the wrong-port detector.
