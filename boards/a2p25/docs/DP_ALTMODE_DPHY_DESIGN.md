@@ -519,9 +519,20 @@ converter gate; the bench removed that premise. Product shape:
   PTC→LM66100 (bench in). Programming still works with Rp fitted: A-to-C
   hardwires VBUS in, and PC↔ESP32 enumeration doesn't involve CC (ESP32-S3
   flips to device role, a2mega-proven); TPS2553 must stay disabled when
-  back-powered (a2mega enable policy). Optional zero-chip polish: CC
-  divider→ESP32 ADC = Rd-detect for spec-proper cold VBUS + free
-  attach/detach sensing.
+  back-powered (a2mega enable policy).
+  **Spec posture (settled 09-02):** CC divider→ESP32 ADC Rd-detect is
+  **REQUIRED, not optional** — it is the compliance line: a source must hold
+  VBUS at vSafe0V until Rd is detected (fw gates TPS2553 EN on it; detach →
+  disable). Add a ~10 k port-side bleed (spec wants VBUS discharged ≤650 ms
+  post-detach; TPS2553 has no output discharge). With those two: host role
+  fully in spec on both ports (video port's FUSB302B already runs the full
+  source machine). The A-to-C bench-power-in path is **off-spec by nature**
+  (Rp port sinking VBUS = host-to-host, undefined by spec; true DRP would
+  need GPIO-switched Rp/Rd with spec timing — complexity for a bench
+  convenience) but CONTAINED: LM66100 blocks reverse, TPS2553 off when
+  back-powered, no uncontrolled paralleling. Documented exception, unlike
+  the Tang Nano 20K's always-hot fused VBUS which is the uncontained
+  version of the same trick.
 - Port-confusion mitigation: label the video port; the FUSB302B sees every
   attach, so a partner with no DP sink mode → OSD hint ("display is the
   other port"). The census machinery doubles as the wrong-port detector.
