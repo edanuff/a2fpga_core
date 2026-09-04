@@ -521,11 +521,21 @@ module framebuffer_1080p #(
         fb_line_last_r  <= (fb_line_px_r == fb_height_px_r[8:0] - 9'd1);
     end
 
+    // TIMING ROUND 2 CONE (g): the tracker used the RAW 11-bit compares
+    // (cy0_r != cy_prev_px_r, cy0_r == 0) as its CE/reset cone — the
+    // clk_pix path "cy_prev_px_r -> v_approach_px_r/RESET" (-0.205 in a
+    // 60K roll). Both compares are registered (cy_changed_px_r already
+    // existed; cy_zero_px_r is new) and the tracker acts one cycle later.
+    // Exact: all tracker events fire in blanking with hundreds of cycles
+    // of slack, and the at_border/at_lead/fb_line_last flags are stable
+    // across the line, so they read the same value a cycle on.
+    reg cy_zero_px_r;
     always @(posedge clk_pixel) begin
         cy_prev_px_r    <= cy0_r;
         cy_changed_px_r <= (cy0_r != cy_prev_px_r);
-        if (cy0_r != cy_prev_px_r) begin
-            if (cy0_r == 11'd0) begin
+        cy_zero_px_r    <= (cy0_r == 11'd0);
+        if (cy_changed_px_r) begin
+            if (cy_zero_px_r) begin
                 v_active_px_r   <= 1'b0;
                 v_approach_px_r <= 1'b0;
                 v_phase_px_r    <= 3'd0;
