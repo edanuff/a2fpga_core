@@ -500,8 +500,20 @@ converter gate; the bench removed that premise. Product shape:
 - **Video USB-C**: alt-mode DP (DP130 + TUSB546A + FUSB302B chain as
   specified) — pairs with the dongle class (C/E by construction) and USB-C
   monitors for guaranteed 1080p60.
-- **Data USB-C**: plain USB2 host port — Rp pull-ups on CC1/CC2, VBUS out,
-  D+/D− to the ESP32-FS host. No PD controller, no mux.
+- **Data USB-C**: plain USB2 host port — NO PD controller, no mux; for
+  USB2-only ports the CC terminations ARE the protocol. ⚠ Role is declared
+  by resistor DIRECTION: Sipeed's module jack uses **5.1 k pulldowns (Rd) =
+  DEVICE port** (PC powers it / programming) — copying it verbatim would
+  kill the host function (Rd-meets-Rd = no attach, gamepads dead). Ours:
+  **Rp pull-UPS to 5 V on CC1+CC2** (56 k = default-USB advertisement, 22 k
+  = 1.5 A), D+/D− paralleled across the A/B rows at the connector (USB2
+  orientation handling), SBU1/2 NC, shield→GND. VBUS via TPS2553 (out) +
+  PTC→LM66100 (bench in). Programming still works with Rp fitted: A-to-C
+  hardwires VBUS in, and PC↔ESP32 enumeration doesn't involve CC (ESP32-S3
+  flips to device role, a2mega-proven); TPS2553 must stay disabled when
+  back-powered (a2mega enable policy). Optional zero-chip polish: CC
+  divider→ESP32 ADC = Rd-detect for spec-proper cold VBUS + free
+  attach/detach sensing.
 - Port-confusion mitigation: label the video port; the FUSB302B sees every
   attach, so a partner with no DP sink mode → OSD hint ("display is the
   other port"). The census machinery doubles as the wrong-port detector.
