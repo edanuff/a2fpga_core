@@ -490,6 +490,42 @@ recommended-adapter SKU). If the one-cable dock vision IS the product:
 option 1, boxed as 720p-minimum/1080p-capable. Census pass-through-class
 finding tilts slightly DP-ward (zero converter-gate exposure there).
 
+### DECISION (ed, 2026-09-02): dual USB-C — one video, one data
+
+DPCD gate tests came back: **every on-hand mini-dock reads MAX_LANE_COUNT=2**
+— hub makers solve for fast-enough-USB + good-enough-HDMI with 2-lane
+converters, so the single-port shape is quietly capped at 720p for most
+real accessories. The "dominated" verdict above assumed hubs might pass the
+converter gate; the bench removed that premise. Product shape:
+- **Video USB-C**: alt-mode DP (DP130 + TUSB546A + FUSB302B chain as
+  specified) — pairs with the dongle class (C/E by construction) and USB-C
+  monitors for guaranteed 1080p60.
+- **Data USB-C**: plain USB2 host port — Rp pull-ups on CC1/CC2, VBUS out,
+  D+/D− to the ESP32-FS host. No PD controller, no mux.
+- Port-confusion mitigation: label the video port; the FUSB302B sees every
+  attach, so a partner with no DP sink mode → OSD hint ("display is the
+  other port"). The census machinery doubles as the wrong-port detector.
+
+### Power architecture (vs a2mega's LM66100 + TPS2553)
+
+- **VBUS-out current limiting: REQUIRED, one switch per port — NOT a fuse.**
+  A polyfuse trips in seconds at 2× rating, and for those seconds the fault
+  drags the Apple II slot 5 V rail (the measured 4.75 V rail = Disk II
+  failures lesson); a shorted accessory must not crash the host machine.
+  Electronic switches fold back in µs, control dongle inrush (video port
+  must source VBUS by spec — FRL dongles pull 1 W+), and auto-recover.
+  Cost-down = substitution not deletion: LCSC-class current-limit high-side
+  switches (SY6280/MIC2005/AP2141-alikes, $0.05–0.15) replace the $0.50
+  TPS2553; video port ~1.5 A budget, data port ~0.5–1 A. Optional PTC
+  upstream as backstop; fuse-ONLY is the false economy.
+- **LM66100 (VBUS-in ideal diode): DROPPED** — it exists on a2mega for
+  USB-powered bench operation; the a2p25's Tang module has its own USB-C
+  for that, so both carrier ports are strictly source-only. Deleting it
+  also deletes the a2mega's measured-VBUS-backfeed failure class by
+  construction. ⚠ Inherited check: verify the chosen output switches block
+  reverse current when off (TPS2553 does; confirm the cheap substitute) so
+  externally-driven VBUS can't backfeed the 5 V rail of an unpowered board.
+
 **720p floor status for the census hubs**: bandwidth-assured (RBR×2 =
 2.59 G vs 1.78 G needed, 69% util) and 2-lane-proven at length (the whole
 Stage-5 campaign is 2-lane through Anker/Ugreen) — but ALL history is at
