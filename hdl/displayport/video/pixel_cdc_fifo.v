@@ -96,11 +96,34 @@ module pixel_cdc_fifo #(
     wire ram_empty = (wptr_gray_r2 == rptr_gray);
     reg [ADDR_BITS:0] wptr_bin_r = 0;
 
-    reg [WIDTH-1:0] rdata_r  = 0;
+    // ------------------------------------------------------------------
+    // TWO-STAGE OUTPUT SKID (timing campaign round 2, 2026-09-02).
+    // The old single output register was absorbed by synthesis into the
+    // BSRAM's own output register, so the packer consumed the block RAM's
+    // slow clock-to-out (~2.5-3 ns on GW5A) PLUS its ready/data muxes in
+    // one 7.4 ns clk_sym cycle: "pixel_cdc_fifo mem DO -> packer ready_s0"
+    // was the #1 knife-edge path in every dirty 60K roll (+0.097 .. -0.447
+    // across five rolls of identical source). Stage A below is that BSRAM
+    // read register; stage B is a FABRIC flop that presents the head word,
+    // so the BSRAM Tco path ends at a flop with no logic behind it and the
+    // packer gets a full cycle from a fabric register.
+    // External contract unchanged: show-ahead rdata/rvalid, rd_en consumes,
+    // back-to-back reads sustain one word per cycle (A refills from the RAM
+    // in the same cycle it drains into B). Only visible differences: one
+    // extra cycle of initial latency, and when the RAM itself runs dry the
+    // last word reaches B one cycle later — both inside the packer's
+    // PREFILL margin (full-chain harness: 3.04M cycles, no underrun,
+    // pixel-exact, audio clean — see sim/run_full_chain.sh).
+    // ------------------------------------------------------------------
+    reg [WIDTH-1:0] a_data   = 0;   // stage A: BSRAM read register
+    reg             a_valid  = 0;
+    reg [WIDTH-1:0] rdata_r  = 0;   // stage B: fabric head register
     reg             rvalid_r = 0;
 
-    // refill the output stage whenever it is empty or being consumed
-    wire fetch = !ram_empty && (!rvalid_r || rd_en);
+    // B accepts a word whenever it is empty or being consumed
+    wire b_take = a_valid && (!rvalid_r || rd_en);
+    // A fetches from the RAM whenever it is empty or draining into B
+    wire fetch  = !ram_empty && (!a_valid || b_take);
 
     assign rdata  = rdata_r;
     assign rvalid = rvalid_r;
@@ -109,16 +132,27 @@ module pixel_cdc_fifo #(
         wptr_gray_r1 <= wptr_gray;
         wptr_gray_r2 <= wptr_gray_r1;
         wptr_bin_r   <= gray2bin(wptr_gray_r2);
-        rlevel       <= (wptr_bin_r - rptr_bin) + {{ADDR_BITS{1'b0}}, rvalid_r};
+        rlevel       <= (wptr_bin_r - rptr_bin)
+                        + {{ADDR_BITS{1'b0}}, rvalid_r}
+                        + {{ADDR_BITS{1'b0}}, a_valid};
         if (rreset) begin
             rptr_bin  <= 0;
             rptr_gray <= 0;
+            a_valid   <= 1'b0;
             rvalid_r  <= 1'b0;
         end else begin
+            // stage A <- RAM
             if (fetch) begin
-                rdata_r   <= mem[rptr_bin[ADDR_BITS-1:0]];   // sync read
+                a_data    <= mem[rptr_bin[ADDR_BITS-1:0]];   // sync read (BSRAM outreg)
                 rptr_bin  <= rptr_bin + 1'b1;
                 rptr_gray <= bin2gray(rptr_bin + 1'b1);
+                a_valid   <= 1'b1;
+            end else if (b_take) begin
+                a_valid   <= 1'b0;
+            end
+            // stage B <- stage A
+            if (b_take) begin
+                rdata_r   <= a_data;
                 rvalid_r  <= 1'b1;
             end else if (rd_en && rvalid_r) begin
                 rvalid_r  <= 1'b0;
