@@ -260,7 +260,10 @@ hotplug_decode i_hotplug_decode(
 
     // M5: the ADJUST_REQUEST lane0/1 byte (DPCD 0x206) is the aux_addr==0
     // beat of the adjust read — one pulse per training iteration.
-    assign adjust_evt = adjust_de & (aux_addr == 8'h00);
+    // adjust_evt is registered inside aux_channel (same edge as adjust_de /
+    // aux_addr, identical value) — timing campaign round 2, cone (a): the
+    // combinational decode here fed afe_adjust_seq's live busy term and
+    // came straight back into aux_channel's afe_hold (+0.19 ns at 100 MHz).
 
     // ---- first-failure snapshot (see the port comment) ----------------
     wire       gate_fail_evt_w;
@@ -339,6 +342,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
         .edid_de         (edid_de),
         .dp_reg_de       (dp_reg_de),
         .adjust_de       (adjust_de),
+        .adjust_evt      (adjust_evt),
         .status_de       (status_de),
         .aux_addr        (aux_addr),
         .aux_data        (aux_data),
