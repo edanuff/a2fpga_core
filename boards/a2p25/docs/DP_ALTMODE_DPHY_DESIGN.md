@@ -505,9 +505,17 @@ converter gate; the bench removed that premise. Product shape:
   by resistor DIRECTION: Sipeed's module jack uses **5.1 k pulldowns (Rd) =
   DEVICE port** (PC powers it / programming) — copying it verbatim would
   kill the host function (Rd-meets-Rd = no attach, gamepads dead). Ours:
-  **Rp pull-UPS to 5 V on CC1+CC2** (56 k = default-USB advertisement, 22 k
-  = 1.5 A), D+/D− paralleled across the A/B rows at the connector (USB2
-  orientation handling), SBU1/2 NC, shield→GND. VBUS via TPS2553 (out) +
+  **Rp pull-UPS to 5 V on CC1+CC2: 22 k = 1.5 A advertisement** (NOT 56 k
+  default — the Enhanced boards power bus-powered hubs+devices off the host
+  port today; 500 mA would be a regression). Data-port TPS2553 set-point
+  ≈1.5 A to match. ⚠ Slot 5 V budget: board ~0.5–1 A + hub tree ≤1.5 A +
+  video dongle ~0.3 A stacks high — hub-off-slot is Enhanced-proven but the
+  Apple II PSU is the real limit (4.75 V-rail/Disk-II lesson: measure the
+  rail first when a loaded config misbehaves). D+/D− paralleled across the
+  A/B rows at the connector (USB2 orientation handling), SBU1/2 NC,
+  shield→GND. (Note: a2p25 host = ESP32-S3 FS 12 Mbps, more modest hub
+  support than the Enhanced's HS BL616 — power provisioning still sized
+  for hubs.) VBUS via TPS2553 (out) +
   PTC→LM66100 (bench in). Programming still works with Rp fitted: A-to-C
   hardwires VBUS in, and PC↔ESP32 enumeration doesn't involve CC (ESP32-S3
   flips to device role, a2mega-proven); TPS2553 must stay disabled when
