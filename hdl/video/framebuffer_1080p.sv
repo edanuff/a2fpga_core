@@ -530,27 +530,49 @@ module framebuffer_1080p #(
     // of slack, and the at_border/at_lead/fb_line_last flags are stable
     // across the line, so they read the same value a cycle on.
     reg cy_zero_px_r;
+    // Timing campaign round 2, cone (o): even with registered event flags
+    // the tracker's enables combined seven of them plus the phase compare
+    // in one cycle, and "v_active_px_r -> v_active_px_r/CE" (a flop
+    // clearing itself through that cone) landed at +0.00 ns in a 60K roll.
+    // One more stage: the decision (zero / border / lead / step, phase
+    // last, line last) is registered at the event cycle and applied the
+    // cycle after, so every tracker enable is a one-level function of
+    // flops. Exact by the same argument as above: every input is stable
+    // for the whole line, the tracker itself is the only writer of the
+    // state it reads, and events fire in blanking hundreds of cycles
+    // before any consumer. The export toggle keeps its original timing.
+    reg evt_q = 1'b0;
+    reg d_zero_q = 1'b0, d_border_q = 1'b0, d_lead_q = 1'b0, d_step_q = 1'b0;
+    reg d_phlast_q = 1'b0, d_linelast_q = 1'b0;
     always @(posedge clk_pixel) begin
         cy_prev_px_r    <= cy0_r;
         cy_changed_px_r <= (cy0_r != cy_prev_px_r);
         cy_zero_px_r    <= (cy0_r == 11'd0);
-        if (cy_changed_px_r) begin
-            if (cy_zero_px_r) begin
+        // decision stage (values as the tracker used to read them)
+        evt_q        <= cy_changed_px_r;
+        d_zero_q     <= cy_zero_px_r;
+        d_border_q   <= !cy_zero_px_r && at_border_nxt_r;
+        d_lead_q     <= !cy_zero_px_r && !at_border_nxt_r && at_lead_nxt_r;
+        d_step_q     <= !cy_zero_px_r && !at_border_nxt_r && !at_lead_nxt_r && v_active_px_r;
+        d_phlast_q   <= (v_phase_px_r == 3'(V_SCALE-1));
+        d_linelast_q <= fb_line_last_r;
+        if (evt_q) begin
+            if (d_zero_q) begin
                 v_active_px_r   <= 1'b0;
                 v_approach_px_r <= 1'b0;
                 v_phase_px_r    <= 3'd0;
                 fb_line_px_r    <= 9'd0;
-            end else if (at_border_nxt_r) begin
+            end else if (d_border_q) begin
                 v_active_px_r   <= 1'b1;
                 v_approach_px_r <= 1'b0;
                 v_phase_px_r    <= 3'd0;
                 fb_line_px_r    <= 9'd0;
-            end else if (at_lead_nxt_r) begin
+            end else if (d_lead_q) begin
                 v_approach_px_r <= 1'b1;
-            end else if (v_active_px_r) begin
-                if (v_phase_px_r == 3'(V_SCALE-1)) begin
+            end else if (d_step_q) begin
+                if (d_phlast_q) begin
                     v_phase_px_r <= 3'd0;
-                    if (fb_line_last_r)
+                    if (d_linelast_q)
                         v_active_px_r <= 1'b0;
                     else
                         fb_line_px_r <= fb_line_px_r + 9'd1;
