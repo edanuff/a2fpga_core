@@ -65,18 +65,30 @@ module pixel_cdc_fifo #(
     // pointer, which only underestimates free space (conservative-safe).
     // ------------------------------------------------------------------
     reg [ADDR_BITS:0] rptr_bin_w = 0;
+    // Timing campaign round 2, cone (l): the full test (subtract + compare)
+    // sat directly on the BSRAM write enable and the pointer CEs
+    // ("wptr_bin -> mem CEA" +0.15 ns at 148.5 MHz in the dp_test gate).
+    // wfull is now a register computed from the NEXT write pointer and the
+    // current registered read pointer — i.e. one cycle staler on the read
+    // side than before, which by the argument above only underestimates
+    // free space (conservative-safe); exact under wreset.
+    reg wfull_r = 1'b0;
+    assign wfull = wfull_r;
+    wire wpush = wen && !wfull_r;
+    wire [ADDR_BITS:0] wptr_bin_n = wreset ? {(ADDR_BITS+1){1'b0}} :
+                                    wpush  ? wptr_bin + 1'b1 : wptr_bin;
     // subtraction must stay at pointer width so the mod-2^(N+1) wrap works
-    wire [ADDR_BITS:0] w_used = wptr_bin - rptr_bin_w;
-    assign wfull = w_used >= DEPTH;
+    wire [ADDR_BITS:0] w_used_n = wptr_bin_n - rptr_bin_w;
 
     always @(posedge wclk) begin
         rptr_gray_w1 <= rptr_gray;
         rptr_gray_w2 <= rptr_gray_w1;
         rptr_bin_w   <= gray2bin(rptr_gray_w2);
+        wfull_r      <= (w_used_n >= DEPTH);
         if (wreset) begin
             wptr_bin  <= 0;
             wptr_gray <= 0;
-        end else if (wen && !wfull) begin
+        end else if (wpush) begin
             mem[wptr_bin[ADDR_BITS-1:0]] <= wdata;
             wptr_bin  <= wptr_bin + 1'b1;
             wptr_gray <= bin2gray(wptr_bin + 1'b1);
@@ -93,7 +105,13 @@ module pixel_cdc_fifo #(
     // equality holds iff the binary pointers are equal) - no XOR chain
     // in the fetch path. The binary conversion, needed only for the
     // level estimate, is registered.
-    wire ram_empty = (wptr_gray_r2 == rptr_gray);
+    // Timing campaign round 2, cone (n): the gray compare sat directly on
+    // the fetch term -> BSRAM read enable + pointer CEs ("wptr_gray_r2 ->
+    // mem CEB" +0.43 ns at 135 MHz in the dp_test gate). ram_empty is now
+    // a register computed from the synchroniser's FIRST stage (= next
+    // value of the second) and the read pointer's next value — exactly
+    // equal to the old combinational compare on every cycle.
+    reg ram_empty = 1'b1;
     reg [ADDR_BITS:0] wptr_bin_r = 0;
 
     // ------------------------------------------------------------------
@@ -116,14 +134,33 @@ module pixel_cdc_fifo #(
     // pixel-exact, audio clean — see sim/run_full_chain.sh).
     // ------------------------------------------------------------------
     reg [WIDTH-1:0] a_data   = 0;   // stage A: BSRAM read register
-    reg             a_valid  = 0;
+    // syn_keep/preserve: the valid flags must stay FABRIC flops — a 60K
+    // roll showed the fetch term starting from a BSRAM data output, i.e.
+    // synthesis had folded stage-A valid logic behind the block RAM's
+    // clock-to-out (cone n).
+    (* syn_keep = 1, syn_preserve = 1 *) reg a_valid  = 0;
     reg [WIDTH-1:0] rdata_r  = 0;   // stage B: fabric head register
-    reg             rvalid_r = 0;
+    (* syn_keep = 1, syn_preserve = 1 *) reg rvalid_r = 0;
 
     // B accepts a word whenever it is empty or being consumed
     wire b_take = a_valid && (!rvalid_r || rd_en);
     // A fetches from the RAM whenever it is empty or draining into B
     wire fetch  = !ram_empty && (!a_valid || b_take);
+    // next read gray pointer (mirrors the sequential block below; cone n).
+    // rptr_gray_p1_r always holds bin2gray(rptr_bin + 1) (a registered
+    // lookahead, refreshed to +2 on a fetch), so the empty flag's input is
+    // a mux and a compare of flops instead of increment + gray + compare
+    // ("rptr_bin -> ram_empty/D" +0.36 ns in a 60K roll).
+    reg  [ADDR_BITS:0] rptr_gray_p1_r = {{ADDR_BITS{1'b0}}, 1'b1};   // bin2gray(1)
+    // The two candidate compares are evaluated in parallel from flops and
+    // selected by fetch — the (ADDR_BITS+1)-bit equality maps to a carry
+    // chain on GW5A, and in series behind fetch (which itself starts from
+    // the BSRAM's clock-to-out via the stage-A valid logic) it reached
+    // +0.00 ns in a 60K roll.
+    wire eq_cur_w = (wptr_gray_r1 == rptr_gray);
+    wire eq_p1_w  = (wptr_gray_r1 == rptr_gray_p1_r);
+    wire eq_rst_w = (wptr_gray_r1 == {(ADDR_BITS+1){1'b0}});
+    wire ram_empty_n = rreset ? eq_rst_w : (fetch ? eq_p1_w : eq_cur_w);
 
     assign rdata  = rdata_r;
     assign rvalid = rvalid_r;
@@ -132,6 +169,9 @@ module pixel_cdc_fifo #(
         wptr_gray_r1 <= wptr_gray;
         wptr_gray_r2 <= wptr_gray_r1;
         wptr_bin_r   <= gray2bin(wptr_gray_r2);
+        ram_empty    <= ram_empty_n;                      // cone (n)
+        rptr_gray_p1_r <= rreset ? {{ADDR_BITS{1'b0}}, 1'b1} :
+                          fetch  ? bin2gray(rptr_bin + 2'd2) : bin2gray(rptr_bin + 1'b1);
         rlevel       <= (wptr_bin_r - rptr_bin)
                         + {{ADDR_BITS{1'b0}}, rvalid_r}
                         + {{ADDR_BITS{1'b0}}, a_valid};
@@ -145,7 +185,7 @@ module pixel_cdc_fifo #(
             if (fetch) begin
                 a_data    <= mem[rptr_bin[ADDR_BITS-1:0]];   // sync read (BSRAM outreg)
                 rptr_bin  <= rptr_bin + 1'b1;
-                rptr_gray <= bin2gray(rptr_bin + 1'b1);
+                rptr_gray <= rptr_gray_p1_r;                  // == bin2gray(rptr_bin + 1)
                 a_valid   <= 1'b1;
             end else if (b_take) begin
                 a_valid   <= 1'b0;
