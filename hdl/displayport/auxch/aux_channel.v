@@ -268,6 +268,10 @@ module aux_channel #(
         output reg   edid_de,
         output reg   dp_reg_de,
         output reg   adjust_de,
+        output reg   adjust_evt,   // adjust_de for data byte 0 (0x206), registered at the same
+                                   // edge as adjust_de/aux_addr — replaces the combinational
+                                   // "adjust_de & (aux_addr == 0)" decode that fed the AFE
+                                   // sequencer's busy term and came back into afe_hold (round 2, cone a)
         output reg   status_de,
         output reg   [7:0] aux_addr,
         output reg   [7:0] aux_data,
@@ -549,6 +553,7 @@ initial begin
     edid_de             = 1'b0;
     dp_reg_de           = 1'b0;
     adjust_de           = 1'b0;
+    adjust_evt          = 1'b0;
     status_de           = 1'b0;
     aux_addr            = 8'b0;
     aux_data            = 8'b0;
@@ -1179,6 +1184,7 @@ always @(posedge clk) begin
     //------------------------------------------------------------
     edid_de    <= 1'b0;
     adjust_de  <= 1'b0;
+    adjust_evt <= 1'b0;
     dp_reg_de  <= 1'b0;                                
     status_de  <= 1'b0;
     if(channel_busy == 1'b0) begin
@@ -1320,6 +1326,7 @@ always @(posedge clk) begin
                 //-----------------------------------------------------------------
                 edid_de    <= edid_de_active;
                 adjust_de  <= adjust_de_active;
+                adjust_evt <= adjust_de_active && (aux_addr_i == 8'h00);
                 dp_reg_de  <= dp_reg_de_active;                                
                 status_de  <= status_de_active;                                
 
