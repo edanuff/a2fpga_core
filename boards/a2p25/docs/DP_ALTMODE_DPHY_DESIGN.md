@@ -533,16 +533,14 @@ converter gate; the bench removed that premise. Product shape:
   own USB-C is the C-to-C-only fallback). (2) Copy the a2mega's TPS2553
   enable policy along with the parts — source and sink paths share the
   connector and the anti-fight logic is part of the proven design.
-  **OPEN SUB-QUESTION — bench-power scope (load budget):** programming
-  needs <500 mA, but the whole carrier through a whole-rail LM66100 is
-  ~0.8–1.5 A (Tang module 300–500 + ESP32 100–240 + DP130 130–230 + mux) —
-  a PC port can't run it. Fork: **(a) scoped feed** — VBUS → diode/switch →
-  ESP32 regulator input ONLY (programming works on any PC port, rest of
-  board stays dark, smallest backfeed surface; whole-board bench = add the
-  Tang module's own USB) — best fit if programming is the requirement;
-  **(b) whole-rail LM66100** (a2mega precedent) — one-cable full-board
-  bench but REQUIRES a 5 V/2 A supply, PC-port flashing only marginally
-  works. Leaning (a).
+  **RESOLVED (ed, 09-02): whole-rail LM66100** — the carrier has a single
+  5 V rail (no separable ESP32 domain), so a scoped ESP32-only feed would
+  require inventing rail-splitting hardware; not worth it on a low-cost
+  board. Whole-carrier bench draw ~0.8–1.5 A (Tang module 300–500 + ESP32
+  100–240 + DP130 130–230 + mux). **Documentation line: bench power = 5 V/2 A
+  supply** (charger/powered hub/modern laptop port — most deliver 1–1.5 A+
+  despite the 500 mA spec floor); a strictly spec-limited port may brown
+  out rather than flash.
 
 **720p floor status for the census hubs**: bandwidth-assured (RBR×2 =
 2.59 G vs 1.78 G needed, 69% util) and 2-lane-proven at length (the whole
