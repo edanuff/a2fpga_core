@@ -32,8 +32,10 @@ both packer configs.
 |---|---|---|
 | dp_test gate | 5 viols; FIFO-DO path present | **FIFO-DO path gone**; 20 viols, now all instrument/debug-latch/sdp class: `sym_delta→freq_ok` −1.620 (clk_sym), AUX `tx_rd_ptr→dbg_esi2003/esi_2005 CE` −0.480 ×16 (clk100), `sdp wb_idx→wb_b` −0.266 |
 | 60K roll 1 | 1–9 viols, FIFO-DO worst | **FIFO-DO path gone**; 2 viols: `line_cycle→sched_rom AD[13]` −0.060 (clk_sym), `debug_overlay s2_x_bit→r_o/SET` −0.045 (clk_pix); next: `wr_accum→wr_fifo DI` +0.044 (clk_logic) |
-| 60K roll 2 | — | (pending) |
-| 60K roll 3 | — | (pending) |
+| 60K roll 2 | — | **0/0**; worst +0.016 clk_sym `line_cycle→pf_vb1/RESET`, +0.085 clk_pix `ovl_cy_q→phase_r/RESET` |
+| 60K roll 3 | — | **0/0**; worst +0.004 clk_pix `ovl_cx_q→glyph_line_r/CE`, +0.074 clk_sym |
+
+Verdict on #1: the −0.45 ns cone is gone from every report (FIFO-DO startpoints 0/0/0); the count distribution moved from 1–9 to 0–2 — but worst margins of −0.060 / +0.016 / +0.004 are still inside the ±0.5 roll spread, so the build is NOT yet durable. The remaining knife-edge is now split across the packer's `line_cycle` fanout (sched-ROM address + `pf_vb` resets, clk_sym) and the DebugOverlay/`ovl_c*` decode paths (clk_pix), plus the dp_test-only instrument/AUX-latch/sdp families.
 
 ## Remaining cones (candidates for #2..#7, each ≤ a day, most an hour)
 
