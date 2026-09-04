@@ -73,5 +73,7 @@ verified by the deterministic gate above (0 `freq_ok` endpoints).
 - **(e) overlays** (clk_pix): OSD `screen_x==X_START` / `screen_y==Y_OFFSET` tracker gates → pre-registered `x+1` flags (exact, no offset shift); DebugOverlay stage-2 output mux → extra stage with offset compensation. Visual check on the 60K.
 - **(g) framebuffer trackers** (clk_pix): `cy_changed && cy==0` reset cone on `v_approach_px_r` → register the flags and act a cycle later (events are in blanking).
 - **(h) pipelined DOC** (clk_logic): `curr_rts_r → ram_wds_din_r` consume path → pipeline; proven by `sim/doc5503/tb_doc5503_diff.sv`, then a listening pass.
-- **(i) framebuffer line-buffer read address** (clk_pix): `lb_rd_addr → line_buf ADB` — register (pending ed's approval).
+- **(i) framebuffer line-buffer read address** (clk_pix): `lb_rd_addr → line_buf ADB` — register (approved).
+- Vendor DDR3 PHY `cmd_oserdes` (clk1x, +0.07–0.14): left alone by decision.
+- Verification standard (ed): framebuffer/overlay cones (e)(f)(g)(i) = visual on the IIgs after clean rolls, one bench flash after the clk_pix set lands.
 - **framebuffer wr_fifo DI** (clk_logic): `wr_accum → BSRAM DI` — register the write data before the FIFO.
