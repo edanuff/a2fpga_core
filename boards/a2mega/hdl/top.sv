@@ -1858,12 +1858,14 @@ module top #(
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),
         .ENABLE(1'b1),
-        // timing round 2 cones (e)+(k): two extra pipeline stages (font ROM
-        // read split into glyph/row selects; font-row bit select registered
-        // before the output muxes); X_OFFSET 16 -> 14 compensates their two
-        // pixels of shift so the overlay stays where it was
+        // timing round 2 cones (e)+(k)+(k2): three extra pipeline stages
+        // (offset subtracts registered ahead of the region compares; font
+        // ROM read split into glyph/row selects; font-row bit select
+        // registered before the output muxes); X_OFFSET 16 -> 13
+        // compensates their three pixels of shift so the overlay stays
+        // where it was
         .OUT_PIPE(1),
-        .X_OFFSET(14),
+        .X_OFFSET(13),
         .Y_OFFSET(24)
     ) debug_overlay (
         .clk_i          (clk_pixel_w),

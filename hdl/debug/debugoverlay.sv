@@ -4,13 +4,14 @@ module DebugOverlay #(
     parameter NUM_HEX_BYTES = 8,        // Number of hex bytes to display
     parameter X_OFFSET = 16,
     parameter Y_OFFSET = 24,
-    // OUT_PIPE=1 deepens the pipeline by two stages for the a2mega's
-    // 148.5 MHz clk_pix (timing campaign round 2): the font ROM read is
-    // split into a glyph select and a row select (cone (k)), and a stage
-    // is added between the font-row bit select and the output muxes
-    // (cone (e)). It shifts the overlay two more pixels right; the
-    // instantiation compensates with X_OFFSET-2. Default 0 keeps every
-    // other board byte-identical.
+    // OUT_PIPE=1 deepens the pipeline by three stages for the a2mega's
+    // 148.5 MHz clk_pix (timing campaign round 2): the X/Y offset
+    // subtracts are registered ahead of the region compares (cone (k2)),
+    // the font ROM read is split into a glyph select and a row select
+    // (cone (k)), and a stage is added between the font-row bit select
+    // and the output muxes (cone (e)). It shifts the overlay three more
+    // pixels right; the instantiation compensates with X_OFFSET-3.
+    // Default 0 keeps every other board byte-identical.
     parameter OUT_PIPE = 0
 )(
     input  wire        clk_i,
@@ -137,14 +138,54 @@ module DebugOverlay #(
     //=========================================================================
 
     // --- Combinational: Stage 1 inputs ---
-    wire [11:0] rel_x = 12'(s0_x_r - X_OFFSET);
-    wire [10:0] rel_y = 11'(s0_y_r - Y_OFFSET);
+    // Stage-1 inputs. With OUT_PIPE=1 (timing campaign round 2, cone (k2))
+    // the X/Y offset subtracts are registered in an extra stage 0b so the
+    // region-compare tree in stage 1 starts from flops: "s0_x_r ->
+    // sA_in_space / sA_is_hex" (subtract + compares) was the clk_pix floor
+    // at +0.46 ns after the other overlay stages moved. One more pixel of
+    // overlay shift, compensated at the instantiation.
+    wire [11:0] sx_w;
+    wire [10:0] sy_w;
+    wire [7:0]  sr_w, sg_w, sb_w;
+    wire [11:0] rel_x;
+    wire [10:0] rel_y;
+    generate if (OUT_PIPE != 0) begin : g_s0b
+        reg [11:0] s0b_x_r;
+        reg [10:0] s0b_y_r;
+        reg [7:0]  s0b_r_r, s0b_g_r, s0b_b_r;
+        reg [11:0] relx_r;
+        reg [10:0] rely_r;
+        always @(posedge clk_i) begin
+            s0b_x_r <= s0_x_r;
+            s0b_y_r <= s0_y_r;
+            s0b_r_r <= s0_r_r;
+            s0b_g_r <= s0_g_r;
+            s0b_b_r <= s0_b_r;
+            relx_r  <= 12'(s0_x_r - X_OFFSET);
+            rely_r  <= 11'(s0_y_r - Y_OFFSET);
+        end
+        assign sx_w = s0b_x_r;
+        assign sy_w = s0b_y_r;
+        assign sr_w = s0b_r_r;
+        assign sg_w = s0b_g_r;
+        assign sb_w = s0b_b_r;
+        assign rel_x = relx_r;
+        assign rel_y = rely_r;
+    end else begin : g_s0b_direct
+        assign sx_w = s0_x_r;
+        assign sy_w = s0_y_r;
+        assign sr_w = s0_r_r;
+        assign sg_w = s0_g_r;
+        assign sb_w = s0_b_r;
+        assign rel_x = 12'(s0_x_r - X_OFFSET);
+        assign rel_y = 11'(s0_y_r - Y_OFFSET);
+    end endgenerate
     wire [3:0]  char_pos = rel_x[6:3];
     wire [2:0]  y_bit = rel_y[2:0];
 
     // Version string region
     localparam [10:0] VERSION_END = 11'(NUM_CHARS * CHAR_WIDTH);
-    wire x_version_in_range = (s0_x_r >= X_OFFSET) && (rel_x < VERSION_END);
+    wire x_version_in_range = (sx_w >= X_OFFSET) && (rel_x < VERSION_END);
 
     // Debug region start
     localparam [10:0] DEBUG_START = 11'(VERSION_END + DEBUG_SPACE);
@@ -178,7 +219,7 @@ module DebugOverlay #(
     localparam [10:0] DEBUG_END = 11'(BITS_START + NUM_BITS_FIELDS * BITS_REGION_WIDTH);
 
     wire debug_region = (rel_x >= DEBUG_START);
-    wire y_in_range = (s0_y_r >= Y_OFFSET) && (rel_y < CHAR_HEIGHT);
+    wire y_in_range = (sy_w >= Y_OFFSET) && (rel_y < CHAR_HEIGHT);
 
     // Region detection (combinational)
     reg signed [4:0] comb_hex_byte;
@@ -250,9 +291,9 @@ module DebugOverlay #(
         sA_y_in_range   <= y_in_range;
         sA_y_bit        <= y_bit;
         sA_char_pos     <= char_pos;
-        sA_r <= s0_r_r;
-        sA_g <= s0_g_r;
-        sA_b <= s0_b_r;
+        sA_r <= sr_w;
+        sA_g <= sg_w;
+        sA_b <= sb_w;
     end
 
     // Pre-compute intermediate values to avoid local reg inside always_comb
@@ -441,9 +482,9 @@ module DebugOverlay #(
     // clk_pix path "s2_x_bit -> r_o/SET" (-0.045 in a 60K roll). Register
     // the pixel decision and the pass-through color first; the output muxes
     // then select on a single flop bit. One more pixel of overlay shift —
-    // compensated at the instantiation (X_OFFSET 16 -> 14 in the a2mega
-    // top, together with the cone (k) glyph/row split above) so the
-    // overlay stays where it was.
+    // compensated at the instantiation (X_OFFSET 16 -> 13 in the a2mega
+    // top, together with the cone (k) glyph/row split and the cone (k2)
+    // input stage above) so the overlay stays where it was.
     //=========================================================================
     generate if (OUT_PIPE != 0) begin : g_out_pipe
         reg       s3_on;
