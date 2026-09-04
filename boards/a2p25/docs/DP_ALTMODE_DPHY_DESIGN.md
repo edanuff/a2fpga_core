@@ -518,13 +518,31 @@ converter gate; the bench removed that premise. Product shape:
   a2mega-proven AND cheap via PCBWay ($0.18 sourced, 2026-09-02), so no
   substitution needed. Optional PTC upstream as backstop; fuse-ONLY is the
   false economy regardless of price.
-- **LM66100 (VBUS-in ideal diode): KEPT** ($0.21 via PCBWay) — preserves
-  USB-powered bench operation of the whole carrier (not just the Tang
-  module). ⚠ String attached: keeping the VBUS-in path keeps the a2mega's
-  measured-VBUS-backfeed failure class in scope (VBUSOK=1 on an empty
-  connector → attach fails looking like no-HPD; leaking element never
-  identified). Review that sub-circuit deliberately when drawing the a2p25
-  — do not clone it blind.
+- **LM66100 (VBUS-in ideal diode): KEPT, on the DATA port** ($0.21 via
+  PCBWay). The data port is the programming path (its D+/D− are the ESP32's
+  USB pins), so bench power belongs there: VBUS-in → PTC → LM66100 → rail,
+  a2mega model minus video. **This placement de-fangs the backfeed class**:
+  the a2mega's phantom-VBUS pain was the leak confusing the PD stack
+  (VBUSOK=1 empty → attach fails as no-HPD); the data port has NO PD
+  controller to confuse, and the VIDEO port (where the FUSB302B decides off
+  VBUS state) becomes strictly source-only with no power-in path at all —
+  the failure class is architecturally separated from the function it broke.
+  Strings: (1) **C-to-C cables won't bench-power an Rp host port** — the
+  data port presents Rp for gamepads, so a laptop on C-to-C won't drive
+  VBUS; A-to-C cables hard-wire VBUS and work (document it; Tang module's
+  own USB-C is the C-to-C-only fallback). (2) Copy the a2mega's TPS2553
+  enable policy along with the parts — source and sink paths share the
+  connector and the anti-fight logic is part of the proven design.
+  **OPEN SUB-QUESTION — bench-power scope (load budget):** programming
+  needs <500 mA, but the whole carrier through a whole-rail LM66100 is
+  ~0.8–1.5 A (Tang module 300–500 + ESP32 100–240 + DP130 130–230 + mux) —
+  a PC port can't run it. Fork: **(a) scoped feed** — VBUS → diode/switch →
+  ESP32 regulator input ONLY (programming works on any PC port, rest of
+  board stays dark, smallest backfeed surface; whole-board bench = add the
+  Tang module's own USB) — best fit if programming is the requirement;
+  **(b) whole-rail LM66100** (a2mega precedent) — one-cable full-board
+  bench but REQUIRES a 5 V/2 A supply, PC-port flashing only marginally
+  works. Leaning (a).
 
 **720p floor status for the census hubs**: bandwidth-assured (RBR×2 =
 2.59 G vs 1.78 G needed, 69% util) and 2-lane-proven at length (the whole
