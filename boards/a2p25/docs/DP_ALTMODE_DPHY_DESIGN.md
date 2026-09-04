@@ -520,7 +520,7 @@ class once the monitor-direct AUX RX margin work lands).
 | Part | Role | Notes |
 |---|---|---|
 | SN75DP130 | swing/PE regeneration, LT response | ~$1–2, VQFN-48, stocked |
-| TUSB1046-DCI | USB-C alt-mode mux + linear EQ | carryover from a2mega |
+| TUSB1046-DCI | USB-C alt-mode mux + linear EQ | carryover from a2mega. **Cost-down candidate: TUSB546A-DCI** — pin-compatible sibling (same WQFN-40 4×6, same pinout/register structure/EQ class, DP 1.4 HBR3 identical); only difference is USB3 Gen1 vs Gen2 redriving, which this board never uses (assignment C, USB2 on D+/D−, FS host). Verify before swap: full pin diff, EQ step table vs fw DPEQ ladder, I2C address. |
 | FUSB302B | CC/PD | carryover |
 | AC caps 100 nF ×(2×lanes) | DP coupling | passives |
 | — | | No bridge chip. No ANX7625. |
