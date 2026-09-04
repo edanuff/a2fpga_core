@@ -98,24 +98,35 @@ module a2mega_dp_test_top #(
     logic [11:0] cx;
     logic [10:0] cy;
     logic [23:0] rgb;
-    logic [23:0] bar;
 
-    always_comb begin
-        if      (cx < 12'd240)  bar = 24'hFFFFFF;   // white
-        else if (cx < 12'd480)  bar = 24'hFFFF00;   // yellow
-        else if (cx < 12'd720)  bar = 24'h00FFFF;   // cyan
-        else if (cx < 12'd960)  bar = 24'h00FF00;   // green
-        else if (cx < 12'd1200) bar = 24'hFF00FF;   // magenta
-        else if (cx < 12'd1440) bar = 24'hFF0000;   // red
-        else if (cx < 12'd1680) bar = 24'h0000FF;   // blue
-        else                    bar = 24'h000000;   // black
-    end
+    // Timing campaign round 2, cone (b3): the bar/border compares on the
+    // transmitter's cx fed the rgb flops (SET arcs) straight across the
+    // die — the gate's clk_pix floor (+0.34) once the core cones were
+    // gone. Exact restructure: cx is registered locally (cx_q = cx one
+    // cycle ago; syn_keep so it is not merged with the transmitter's
+    // own copy), the bar and x-border decisions are registered from
+    // cx_q with a TWO-pixel lookahead (constants - 2, wrap folded in:
+    // cx_q >= 2198 -> cx+2 wraps to 0/1), and rgb is a 2:1 mux of flops.
+    // rgb(t) = f(cx(t-1)) exactly as before. The y-border flag lags two
+    // cycles, which is invisible: the first two pixels of every line are
+    // x-border white regardless of cy.
+    (* syn_keep = 1, syn_preserve = 1 *) logic [11:0] cx_q = '0;
+    logic [23:0] bar_r = '0;
+    logic        bx_r = 1'b0, by_r = 1'b0;
 
     always_ff @(posedge clk_pixel) begin
-        if (cx < 12'd2 || cx >= 12'd1918 || cy < 11'd2 || cy >= 11'd1078)
-            rgb <= 24'hFFFFFF;                      // frame border
-        else
-            rgb <= bar;
+        cx_q <= cx;
+        if      (cx_q < 12'd238 || cx_q >= 12'd2198) bar_r <= 24'hFFFFFF;   // white
+        else if (cx_q < 12'd478)  bar_r <= 24'hFFFF00;   // yellow
+        else if (cx_q < 12'd718)  bar_r <= 24'h00FFFF;   // cyan
+        else if (cx_q < 12'd958)  bar_r <= 24'h00FF00;   // green
+        else if (cx_q < 12'd1198) bar_r <= 24'hFF00FF;   // magenta
+        else if (cx_q < 12'd1438) bar_r <= 24'hFF0000;   // red
+        else if (cx_q < 12'd1678) bar_r <= 24'h0000FF;   // blue
+        else                      bar_r <= 24'h000000;   // black
+        bx_r <= (cx_q >= 12'd1916);                      // cx+2 < 2 or >= 1918
+        by_r <= (cy < 11'd2 || cy >= 11'd1078);
+        rgb  <= (bx_r || by_r) ? 24'hFFFFFF : bar_r;     // frame border / bars
     end
 
     // ------------------------------------------------------------------
