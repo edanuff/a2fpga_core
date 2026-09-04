@@ -654,6 +654,16 @@ module a2mega_dp_test_top #(
     // change. 135 M ± ~2%: 132.3M .. 137.7M
     localparam logic [27:0] FREQ_LO = 28'd132_300_000;
     localparam logic [27:0] FREQ_HI = 28'd137_700_000;
+    // 7-bit slices of the four 14-bit compares (round 2 cone (b), second
+    // cut: the 14-bit slice compare still landed on the fq_gt_lo flop's
+    // reset pin at +0.07 ns; sym_delta is static for a full second so one
+    // more stage costs nothing)
+    logic fq_gt_hi_h = 1'b0, fq_gt_hi_l = 1'b0;         // [27:21] > / [20:14] >  FREQ_LO
+    logic fq_eq_lo_h = 1'b0, fq_eq_lo_l = 1'b0;         // [27:21] == / [20:14] == FREQ_LO
+    logic fq_gt_lo_h = 1'b0, fq_gt_lo_e = 1'b0, fq_gt_lo_l = 1'b0;   // [13:7] > / == , [6:0] > FREQ_LO
+    logic fq_lt_hi_h = 1'b0, fq_lt_hi_l = 1'b0;         // [27:21] < / [20:14] <  FREQ_HI
+    logic fq_eq_hi_h = 1'b0, fq_eq_hi_l = 1'b0;         // [27:21] == / [20:14] == FREQ_HI
+    logic fq_lt_lo_h = 1'b0, fq_lt_lo_e = 1'b0, fq_lt_lo_l = 1'b0;   // [13:7] < / == , [6:0] < FREQ_HI
     logic fq_gt_hi = 1'b0, fq_eq_lo_hi = 1'b0, fq_gt_lo = 1'b0;
     logic fq_lt_hi = 1'b0, fq_eq_hi_hi = 1'b0, fq_lt_lo = 1'b0;
     logic fq_gt_r = 1'b0, fq_lt_r = 1'b0;
@@ -668,12 +678,29 @@ module a2mega_dp_test_top #(
         // pipelined vs the snapshot: sym_delta is static for a full 1 s
         // window, so comparing it later costs nothing (cone (b): see the
         // declaration block above for the half-compare split).
-        fq_gt_hi    <= (sym_delta[27:14] >  FREQ_LO[27:14]);
-        fq_eq_lo_hi <= (sym_delta[27:14] == FREQ_LO[27:14]);
-        fq_gt_lo    <= (sym_delta[13:0]  >  FREQ_LO[13:0]);
-        fq_lt_hi    <= (sym_delta[27:14] <  FREQ_HI[27:14]);
-        fq_eq_hi_hi <= (sym_delta[27:14] == FREQ_HI[27:14]);
-        fq_lt_lo    <= (sym_delta[13:0]  <  FREQ_HI[13:0]);
+        // stage 1: 7-bit slice compares
+        fq_gt_hi_h  <= (sym_delta[27:21] >  FREQ_LO[27:21]);
+        fq_gt_hi_l  <= (sym_delta[20:14] >  FREQ_LO[20:14]);
+        fq_eq_lo_h  <= (sym_delta[27:21] == FREQ_LO[27:21]);
+        fq_eq_lo_l  <= (sym_delta[20:14] == FREQ_LO[20:14]);
+        fq_gt_lo_h  <= (sym_delta[13:7]  >  FREQ_LO[13:7]);
+        fq_gt_lo_e  <= (sym_delta[13:7]  == FREQ_LO[13:7]);
+        fq_gt_lo_l  <= (sym_delta[6:0]   >  FREQ_LO[6:0]);
+        fq_lt_hi_h  <= (sym_delta[27:21] <  FREQ_HI[27:21]);
+        fq_lt_hi_l  <= (sym_delta[20:14] <  FREQ_HI[20:14]);
+        fq_eq_hi_h  <= (sym_delta[27:21] == FREQ_HI[27:21]);
+        fq_eq_hi_l  <= (sym_delta[20:14] == FREQ_HI[20:14]);
+        fq_lt_lo_h  <= (sym_delta[13:7]  <  FREQ_HI[13:7]);
+        fq_lt_lo_e  <= (sym_delta[13:7]  == FREQ_HI[13:7]);
+        fq_lt_lo_l  <= (sym_delta[6:0]   <  FREQ_HI[6:0]);
+        // stage 2: 14-bit results
+        fq_gt_hi    <= fq_gt_hi_h || (fq_eq_lo_h && fq_gt_hi_l);
+        fq_eq_lo_hi <= fq_eq_lo_h && fq_eq_lo_l;
+        fq_gt_lo    <= fq_gt_lo_h || (fq_gt_lo_e && fq_gt_lo_l);
+        fq_lt_hi    <= fq_lt_hi_h || (fq_eq_hi_h && fq_lt_hi_l);
+        fq_eq_hi_hi <= fq_eq_hi_h && fq_eq_hi_l;
+        fq_lt_lo    <= fq_lt_lo_h || (fq_lt_lo_e && fq_lt_lo_l);
+        // stage 3/4: 28-bit results, window
         fq_gt_r     <= fq_gt_hi || (fq_eq_lo_hi && fq_gt_lo);
         fq_lt_r     <= fq_lt_hi || (fq_eq_hi_hi && fq_lt_lo);
         freq_ok     <= fq_gt_r && fq_lt_r;
