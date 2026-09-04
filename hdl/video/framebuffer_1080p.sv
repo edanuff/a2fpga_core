@@ -1296,6 +1296,14 @@ module framebuffer_1080p #(
     reg [1:0]  h_phase_n;
     reg [9:0]  fb_x_n;
 
+    // Timing round 2 cone (i2): the end-of-line test "fb_x_r ==
+    // fb_width - 1" (subtract + 10-bit compare) sat inside lb_rd_addr's
+    // CE cone (fb_width_px_r -> lb_rd_addr CE, +0.45 ns at 148.5 MHz).
+    // fb_x_r takes fb_x_n every cycle, so the flag is registered from the
+    // next value and is exact; fb_width is quasi-static (mode change).
+    reg [9:0]  fb_width_m1_px_r = 10'd0;
+    reg        x_last_r = 1'b0;
+
     always @* begin
         h_act_n   = h_act_r;
         h_phase_n = h_phase_r;
@@ -1307,7 +1315,7 @@ module framebuffer_1080p #(
         end else if (h_act_r) begin
             if (h_phase_r == 2'(H_SCALE-1)) begin
                 h_phase_n = 2'd0;
-                if (fb_x_r == fb_width_px_r[9:0] - 10'd1)
+                if (x_last_r)
                     h_act_n = 1'b0;
                 else
                     fb_x_n = fb_x_r + 10'd1;
@@ -1325,6 +1333,8 @@ module framebuffer_1080p #(
         h_act_r   <= h_act_n;
         h_phase_r <= h_phase_n;
         fb_x_r    <= fb_x_n;
+        fb_width_m1_px_r <= fb_width_px_r[9:0] - 10'd1;
+        x_last_r         <= (fb_x_n == fb_width_m1_px_r);
         // No else-zero: the address is a don't-care outside the active
         // window (output muxes on in_active_px_r), and the zeroing put a
         // RESET arc on 13 flops at the end of the trigger cone.
