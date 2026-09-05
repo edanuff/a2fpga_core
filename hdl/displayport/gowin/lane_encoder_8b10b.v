@@ -42,10 +42,22 @@ module lane_encoder_8b10b (
         .din(sym_q[8:0]),   .disp_in(disp), .force_neg(sym_q[9]),
         .dout(c0), .disp_out(d0)
     );
-    enc_8b10b e1 (
-        .din(sym_q[18:10]), .disp_in(d0),   .force_neg(sym_q[19]),
-        .dout(c1), .disp_out(d1)
+    // Second symbol in carry-select form (138B durability): both running
+    // disparity cases are encoded in parallel and the first symbol's
+    // disparity output picks one — the two lookups no longer sit in
+    // series (+0.33 ns at 135 MHz on the 138B with them chained). Exact.
+    wire [9:0] c1n, c1p;
+    wire       d1n, d1p;
+    enc_8b10b e1n (
+        .din(sym_q[18:10]), .disp_in(1'b0), .force_neg(sym_q[19]),
+        .dout(c1n), .disp_out(d1n)
     );
+    enc_8b10b e1p (
+        .din(sym_q[18:10]), .disp_in(1'b1), .force_neg(sym_q[19]),
+        .dout(c1p), .disp_out(d1p)
+    );
+    assign c1 = d0 ? c1p : c1n;
+    assign d1 = d0 ? d1p : d1n;
 
     always @(posedge clk) begin
         sym_q <= tx_symbol;

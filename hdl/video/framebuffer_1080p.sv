@@ -1324,6 +1324,7 @@ module framebuffer_1080p #(
     // fb_x_r takes fb_x_n every cycle, so the flag is registered from the
     // next value and is exact; fb_width is quasi-static (mode change).
     reg [9:0]  fb_width_m1_px_r = 10'd0;
+    reg [9:0]  fb_width_m2_px_r = 10'd0;
     reg        x_last_r = 1'b0;
 
     always @* begin
@@ -1356,7 +1357,17 @@ module framebuffer_1080p #(
         h_phase_r <= h_phase_n;
         fb_x_r    <= fb_x_n;
         fb_width_m1_px_r <= fb_width_px_r[9:0] - 10'd1;
-        x_last_r         <= (fb_x_n == fb_width_m1_px_r);
+        fb_width_m2_px_r <= fb_width_px_r[9:0] - 10'd2;
+        // 138B durability: the same next-value test written on the flag's
+        // own algebra instead of on the fb_x_n mux — trigger: x becomes 0
+        // (last iff width == 1); advance: x becomes x+1 (last iff x ==
+        // width-2); otherwise x holds and so does the flag. Identical to
+        // (fb_x_n == width-1) except during the one line in which the
+        // width itself changes (mode switch), which the next trigger
+        // reloads. Removes the mux from the compare cone (+0.07 on 138B).
+        x_last_r <= h_trigger_w ? (fb_width_m1_px_r == 10'd0) :
+                    (h_act_r && (h_phase_r == 2'(H_SCALE-1)) && !x_last_r)
+                        ? (fb_x_r == fb_width_m2_px_r) : x_last_r;
         // No else-zero: the address is a don't-care outside the active
         // window (output muxes on in_active_px_r), and the zeroing put a
         // RESET arc on 13 flops at the end of the trigger cone.
