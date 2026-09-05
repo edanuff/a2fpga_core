@@ -321,9 +321,12 @@ a 216 MHz clock (≤ 4.6 ns after the edge). 1.0a4: §6, finding F1.
 
 ## 6. Findings for `board_1_0a4_requirements.md`
 
-- **F1 — move `FPGA_GS_PH2` to a clock-capable ball** (carrier routing
-  only; the SOM is untouched). AB17 is a plain I/O on both dies. Options,
-  checked against the Gowin pin tables for both dies:
+- **F1 (optional) — move `FPGA_GS_PH2` to a clock-capable ball** (carrier
+  routing only; the SOM is untouched). **Not required** (ed, 09-05): the
+  socket never runs faster than the FPI's 2.86 MHz PHI2, so the fabric-
+  routed clock on 1.0a3 is adequate; do this only if 1.0a4 is reshuffling
+  GS nets anyway. AB17 is a plain I/O on both dies. Options, checked
+  against the Gowin pin tables for both dies:
   - swap nets with `FPGA_GS_RDY_OUT` (J3-46 → V15): SGCLKC_7 on the 138B
     but plain I/O on the 60K — helps one die only;
   - swap nets with `FPGA_GS_A6` or `A7` (J3-21/19 → W19/W20): a global
