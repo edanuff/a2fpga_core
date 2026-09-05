@@ -73,3 +73,18 @@ set_clock_groups -asynchronous -group [get_clocks {cm_life}] -group [get_clocks 
 // replay_idx >=16 cycles before the capture — see the dp_test_138b SDC
 // for the full rationale; added to the 60K full core 08-30 when its
 // tighter placement started violating the same path family)
+
+// ---------------------------------------------------------------------
+// Durability margin (timing campaign round 2, 2026-09-05). Setup
+// uncertainty of 0.5 ns on the fabric clocks makes the durability bar a
+// property of the build: "0 setup violations" now means every path has
+// at least 0.5 ns of real margin, and the timing-driven placer optimises
+// against that target (diagnostic builds with a clock tightened by 1 ns
+// closed clean on the 138B, so the margin is there to be found). This is
+// a STRICTER requirement, not an exception; reported slack is after the
+// uncertainty. Do not remove to "fix" a violation.
+// ---------------------------------------------------------------------
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk100}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_sym}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_pix}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_logic}]
