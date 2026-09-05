@@ -329,10 +329,10 @@ a 216 MHz clock (≤ 4.6 ns after the edge). 1.0a4: §6, finding F1.
 - `hdl/twgs/iigs_65816_wrapper.sv` — draft, never built, superseded by §4
   (keep the port shape; replace the state machine). Its bank-byte-on-D0–7
   idea and RDY wait state are right; its clocking is not.
-- License note for ed: the core is GPL-3.0-only. The MiSTer IIgs build is
-  already GPL-3 for the same reason; the a2mega bitstream containing it
-  becomes a GPL-3 combined work (issue-#54 hygiene: the per-directory
-  LICENSE is already in place).
+- License: the core is GPL-3.0-only. Already accounted for — the root
+  README lists the 65C816 core among the GPL cores and states that every
+  board's bitstream is a combined work conveyed under GPL v3 (issue #54);
+  the per-directory LICENSE is in place. No change.
 
 ## 6. Findings for `board_1_0a4_requirements.md`
 
@@ -411,8 +411,10 @@ Every hardware result gets a `test_log.md` row; builds carry provenance.
 3. **Core clock:** agree on a new ~108 MHz PLL output (recommended; it
    doubles as the future HyperRAM spine) versus reusing 135 MHz clk_sym
    with a wider CE spacing.
-4. **GPL-3** consequence for the a2mega bitstream (§5) — acceptable?
-5. **1.0a4:** put F1 (PH2 ball swap) on the requirements list now?
+4. ~~**GPL-3** consequence~~ — **closed 09-05:** already the project's
+   stated position (README licensing section); nothing new.
+5. ~~**1.0a4:** put F1 on the list now?~~ — **closed 09-05:** optional,
+   only if 1.0a4 reshuffles GS nets anyway.
 
 ## 9. Proposed work plan
 
