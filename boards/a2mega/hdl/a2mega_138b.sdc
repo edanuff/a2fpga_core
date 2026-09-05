@@ -105,3 +105,18 @@ set_multicycle_path 2 -setup -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/
 set_multicycle_path 1 -hold  -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_strb_o_*_s1/D}]
 set_multicycle_path 2 -setup -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_wrdata_o_*_s1/D}]
 set_multicycle_path 1 -hold  -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_wrdata_o_*_s1/D}]
+
+// ---------------------------------------------------------------------
+// Durability margin (timing campaign round 2, 2026-09-05). Setup
+// uncertainty of 0.5 ns on the fabric clocks makes the durability bar a
+// property of the build: "0 setup violations" now means every path has
+// at least 0.5 ns of real margin, and the timing-driven placer optimises
+// against that target (diagnostic builds with a clock tightened by 1 ns
+// closed clean on the 138B, so the margin is there to be found). This is
+// a STRICTER requirement, not an exception; reported slack is after the
+// uncertainty. Do not remove to "fix" a violation.
+// ---------------------------------------------------------------------
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk100}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_sym}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_pix}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_logic}]
