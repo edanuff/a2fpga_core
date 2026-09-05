@@ -155,7 +155,7 @@ pins), reusing the a2mega stack verbatim:
   PD Status/Attention VDMs; TUSB HPDIN stays NC/overridden as on a2mega):**
   - **HPD_SNK (11): NEVER NC** — DS §9.3.2: HPD_SNK low for tT(HPD)=400 ms
     → DP130 enters STANDBY (internal 130 k pulldown ⇒ NC = parked forever,
-    main link dead). **Option A DECISION (09-05): STUFF a 10 k pullup (existing BOM value; TI's 2 k is app-note convenience — the constraint is the divider vs HPD_SNK's internal 100–160 k pulldown: 10 k → ≥3.0 V vs the ~1.4 V threshold, and gentler on the FPGA-GPIO fallback than 1 k) —
+    main link dead). **Option A DECISION (09-05): STUFF a 10 k pullup (existing BOM value; TI's 2 k is app-note convenience — the constraint is the divider vs HPD_SNK's internal 100–160 k pulldown: 10 k → ≥3.0 V worst-case vs VIH(HPD) spec 1.9 V min — 58% margin, and gentler on the FPGA-GPIO fallback than 1 k) —
     zero traces.** DP130 always-awake (standby loss ≈ tens of mW,
     irrelevant slot-powered); its other functions key off AUX/link
     activity, not HPD edges (bring-up checklist: verify no edge-keyed
@@ -172,8 +172,8 @@ pins), reusing the a2mega stack verbatim:
     via ESP32 register, a2mega model). If FPGA-GPIO drive is adopted,
     route HPD_SRC → FPGA HPD input instead (3.3 V logic, 150 Ω internal
     series). Option B: HPD_SRC → FPGA HPD input.
-  - **CAD_SNK (10): 100 kΩ to GND (existing AUX BOM value)** = DP mode. TI's 1 M recommendation is sized to keep DP++ detection alive (5 V through ≥90 k must read HIGH) — a function we must never trigger; 100 k holds low 10× harder vs leakage, deliberately deadens DP++ detect, and the 10 k debug placeholder still wins (3.0 V). Do NOT use the 2 M strap value — weakest leakage margin on a pin whose failure mode (TMDS 600 mVpp, training off) masquerades as a broken link. Pin is
-    sampled while HPD high; DNP 10 k pullup placeholder (§10.2.2.2; beats the 1 M strap trivially). High
+  - **CAD_SNK (10): 100 kΩ to GND (existing AUX BOM value)** = DP mode. TI's 1 M recommendation is sized to keep DP++ detection alive (5 V through ≥90 k must read HIGH) — a function we must never trigger; 100 k holds low 10× harder vs leakage, deliberately deadens DP++ detect, (no debug placeholder — I2C override instead). Do NOT use the 2 M strap value — weakest leakage margin on a pin whose failure mode (TMDS 600 mVpp, training off) masquerades as a broken link. Pin is
+    sampled while HPD high; No DNP placeholder (I2C override covers debug). High
     would select TMDS mode (fixed 600 mVpp, training disabled) — wrong strap
     changes the whole link discipline.
   - **CAD_SRC (8): NC** — the only true NC (drives a GPU CAD input we don't
