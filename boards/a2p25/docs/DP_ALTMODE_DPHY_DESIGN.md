@@ -176,8 +176,20 @@ pins), reusing the a2mega stack verbatim:
     sampled while HPD high; No DNP placeholder (I2C override covers debug). High
     would select TMDS mode (fixed 600 mVpp, training disabled) — wrong strap
     changes the whole link discipline.
-  - **CAD_SRC (8): NC** — the only true NC (drives a GPU CAD input we don't
-    have; DP++ impossible anyway).
+  - **CAD_SRC (8): NC** — the only true NC among the sideband pins (drives a
+    GPU CAD input we don't have; DP++ impossible anyway).
+  - **EN (26): NC acceptable** — internal 200 k pullup (pin table verbatim);
+    tie to 3.3 V if preferred. **RSTN (35): internal 150 k pullup to VDDD +
+    DS-recommended external cap to GND** (power-up delay) — don't skip the
+    cap; optional ESP32 GPIO alongside = DP130 power-cycle recovery lever
+    (virtual-replug family pattern), decide before pin commit.
+  - **ADDR_EQ: GND — correct on BOTH functions** (3-level dual-purpose pin):
+    I2C addr 7-bit 0x2C (no clash: FUSB302B 0x22, TUSB546A ~0x12) AND
+    low-range auto input EQ (8/6/3.5/0 dB by training level — right for the
+    12.5–20 mm segment; VIH high-range to 15 dB is for long lossy routes).
+    EQ_I2C_ENABLE (reg 05.7) gives ESP32 full per-lane override regardless.
+    ⚠ TI DS self-contradicts on the pin NUMBER (pin table: 3; §10.2.2.1
+    text: 4) — wire by pin NAME against the package drawing.
   Flap-tolerant handling still required — sleeping-monitor flap storms
   reproduce identically; IRQ_HPD (0.5–1 ms) vs disconnect (>2 ms)
   discrimination lives in firmware.
