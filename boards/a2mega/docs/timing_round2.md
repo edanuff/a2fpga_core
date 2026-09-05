@@ -154,3 +154,9 @@ Verification standard for the bench (ed): one flash + visual on the IIgs
 after the clk_pix set lands (DebugOverlay / OSD position, border, first
 active pixel, 80-column text); no further bench checks needed for (a),
 (c), (j) beyond the benches and the gate.
+
+**Bench check 2026-09-04 (ed, 60K, bitstream 7576d91b = final roll 3):** IIgs hi-res
+test pattern with all four corner markers, colours, even scanline bands, DebugOverlay
+and OSD in place — clk_pix set PASS; Ensoniq PASS on the 4soniq demo disk (larger
+games not yet runnable on this bench) — DOC cone (h) merged. PRs #8–#23 merged to
+epic-merge-prep in order; the two exclusions stand as documented above.
