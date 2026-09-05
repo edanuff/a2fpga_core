@@ -424,14 +424,30 @@ test) and `+noturbo` 1 MHz throughout — with the socket timing in §4.1.
 Run: `boards/a2mega/hdl/twgs/sim/run_gs_socket_sim.sh [+noturbo]
 [+trace] [+vcd]`.
 
-**Sim 2 — execution.** Same bench with a ROM 01 or ROM 03 image (the
-MiSTer `roms/Makefile` builds `boot.rom`/`boot1.rom` from a MAME
-`apple2gs.zip` that we must supply; Apple ROM content stays out of git)
-and a minimal memory map: reset-vector fetch at `$00FFFC`, then the first
-N thousand cycles compared against the CPU log of the MiSTer Verilator
-build of the same core (logging is on by default there; `--no-cpu-log`
-disables it). Same core → the traces must be cycle-identical, which
-isolates our PHY from CPU questions.
+**Sim 2 — execution (S3) — DONE 2026-09-05, as a mode of the same bench
+(`ROM=<boot1.rom> run_gs_socket_sim.sh`).** The plan was a trace match
+against the MiSTer Verilator build; that cannot work past the first I/O
+read, because MiSTer models the whole machine and this bench does not. The
+bench instead carries a **lockstep reference**: a second instance of the
+same core, same clock/reset/RDY/interrupts, fed from an ideal copy of the
+memory model directly. Every cycle it compares address, RWB, VPB, write
+data and the read byte the socket-side core actually sampled against the
+reference, so any byte or address the PHY gets wrong is a divergence
+within one cycle — over real ROM code with its real instruction mix, bank
+FF/E1 accesses and sync cycles interleaved with fast ones. The ROM 01
+image (built locally by the MiSTer `roms/Makefile` from a MAME
+`apple2gs.zip`; Apple ROM content is never committed) sits in banks FE/FF
+behind the FPI's reset-state map (banks 00/01/E0/E1 $C100–$FFFF read the
+bank-FF image; $C0xx is a write-back register file with a minimal
+handshake so the ROM's init code progresses). Periodic RDY stalls and one
+DMA-style BE+RDY pause are applied during the run. Result: **2 000 000 socket cycles, zero divergences** (2 006 RDY
+stalls, 220 951 sync cycles, 1 047 distinct opcode addresses, 1 156
+text-page writes — the ROM initialised the screen — before parking in a
+hardware wait loop at FF:A5A0 — `LDA $C019 / BPL`, the vertical-blank poll, which needs the VGC); socket timing identical to §4.1.
+The ROM eventually parks in a hardware wait (no Mega II / ADB / VGC
+behind it); how far it gets is reported as distinct opcode addresses and
+text-page writes, which is also a preview of what C4 will show before the
+real hardware answers.
 
 **Bench (Phase C ladder, unchanged from the plan):**
 - C3 listen-only bitstream: enables inactive, telemetry of PH2 frequency
@@ -476,7 +492,7 @@ Every hardware result gets a `test_log.md` row; builds carry provenance.
 |---|---|---|
 | S1 | This document reviewed; answers to §8 — **closed 2026-09-05** (interposer exists, ROM 01 machine, 108 MHz PLL core clock, GPL already covered, PH2 swap optional) | ed ✔ |
 | S2 | Socket PHY (`gs_socket_phy.sv`, core clocked by PHI2) + socket SDC + Sim 1 — **DONE 2026-09-05**, both configurations pass; 138B PnR probe on the real GS balls 0/0 (§4.3) | assertions clean ✔ |
-| S3 | Sim 2: vector fetch + trace match vs MiSTer | N cycles identical |
+| S3 | Sim 2: ROM 01 through the socket path with a lockstep reference core — **DONE 2026-09-05** (see §7) | zero divergences ✔ |
 | S4 | Integration into the 138B full core behind `armed`; telemetry (trace ring, sweeps); 138B build under the margin policy (≥ +0.5 ns real on every clock incl. PH2-relative I/O) | dp_test gate + 3 rolls |
 | S5 | Bench C3 listen-only | test-log rows |
 | S6 | Bench C4 (sweeps → vector fetch → boot) | boot chime |

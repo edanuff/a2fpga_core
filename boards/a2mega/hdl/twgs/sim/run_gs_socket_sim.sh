@@ -4,10 +4,16 @@
 # See boards/a2mega/docs/gs_socket_65816_scoping.md §7.
 #
 # Usage: boards/a2mega/hdl/twgs/sim/run_gs_socket_sim.sh [extra +plusargs]
-#   +cycles=N       bus cycles to run (default 6000)
-#   +trace=1        print every bus cycle
-#   +vcd=1          write gs_socket.vcd in OUT
+#   +cycles=N       bus cycles to run (default 6000; 200000 in ROM mode)
+#   +noturbo        ignore the $C036 speed write: 1 MHz throughout
+#   +trace          print every bus cycle
+#   +vcd            write gs_socket.vcd in OUT
+#   +rom=<file>     ROM mode: run a ROM 01 image (128 KB, banks FE/FF) with a
+#                   lockstep reference core instead of the built-in program
 # Env: OUT (work dir, default ${TMPDIR:-/tmp}/gs_socket_sim)
+#      ROM (path to boot1.rom; same as +rom=, e.g. the MiSTer vsim/boot1.rom
+#           built by Apple-IIgs_MiSTer/roms/Makefile from a MAME apple2gs.zip;
+#           Apple ROM content is never committed)
 # Requires Verilator >= 5 (timing support).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -28,5 +34,7 @@ rc=$?
 if [[ $rc -ne 0 ]]; then
     echo "verilator FAILED (rc=$rc) — see $OUT/verilate.log"; grep -E "%Error" "$OUT/verilate.log" | head -20; exit $rc
 fi
-( cd "$OUT" && ./obj/Vtb_gs_socket "$@" ) | tee "$OUT/sim.log"
+ROMARG=()
+[[ -n "${ROM:-}" ]] && ROMARG=( "+rom=$ROM" )
+( cd "$OUT" && ./obj/Vtb_gs_socket ${ROMARG[@]+"${ROMARG[@]}"} "$@" ) | tee "$OUT/sim.log"
 exit "${PIPESTATUS[0]}"
