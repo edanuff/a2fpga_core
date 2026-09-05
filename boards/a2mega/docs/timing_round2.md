@@ -160,3 +160,27 @@ test pattern with all four corner markers, colours, even scanline bands, DebugOv
 and OSD in place — clk_pix set PASS; Ensoniq PASS on the 4soniq demo disk (larger
 games not yet runnable on this bench) — DOC cone (h) merged. PRs #8–#23 merged to
 epic-merge-prep in order; the two exclusions stand as documented above.
+
+## 138B follow-up (2026-09-04, branch claude/timing-r2-138b)
+
+The 138B core built 0/0 on the final 60K source but not durably (clk_sym +0.02 on the 8b/10b encoder input,
+clk_pix +0.08 on the scanline lock; its gate +0.06 on the watchdog counter, +0.03 on the dp_test tone accumulator).
+The 138B routes run roughly 0.5 ns longer than the 60K for the same cones and its DP lanes sit on other die lanes.
+Six exact fixes followed (encoder input register, watchdog 1 ms prescaler + ms counter with identical trip cycles,
+scanline lock via v_border-1 + wrap term, FIFO write-full input as a registered pointer difference + carry bits,
+tone accumulator in the reduced fraction 4/12375, AUX error-detail captured centrally from delayed copies).
+Proofs: tb_gowin_lane (encoder + main stream processing + idle inserter vs the independent decoder, reference
+delayed two cycles for the new latency) PASS; polite_attach x2, train_recover x3, gate_fail_counters PASS;
+full-chain harness both configs; both gates 0/0; 60K roll 0/0 with clk100 +1.01 / clk_sym +1.19 / clk_pix +1.67 /
+clk_logic +4.40 (its best roll); 138B roll 0/0 with clk100 +0.08 / clk_sym +0.10 / clk_pix +0.07 / clk_logic +1.95.
+
+Verdict for the 138B: the fixed cones are gone but the next ones land at the same +0.1 level on every clock
+(ladder self-loop, pixel-PLL init enable into the SDP group RAM resets, packer line_cycle -> nc2_r reset,
+fb_x_r -> x_last_r). That is a die-level routing margin for this design at these clocks, not a cone list;
+per-cone fixing does not converge on it. Options: (A) treat the 138B as builds-clean-not-durable while the 60K
+ships; (B) a physical floorplan/placement study for the 138B (DP core near the GTR bank); (C) a broader 138B
+pipelining pass across the DP core (parallel-LFSR scrambler, packer schedule, SDP), each with DisplayPort_Verilog
+benches; (D) the AUX ladder one-hot re-encode, which now bounds clk100 on both dies.
+
+Correction to the session log above: the full-chain harness compiles only the packer/FIFO/MSA/SDP files, so
+cone (j)'s idle-inserter half was bench-proven on the IIgs, not harness-proven; tb_gowin_lane now covers it.
