@@ -1858,7 +1858,11 @@ module top #(
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),
         .ENABLE(1'b1),
-        .X_OFFSET(16),
+        // timing round 2 cone (e): fourth output stage (font-row bit select
+        // registered before the output muxes); X_OFFSET 16 -> 15 compensates
+        // its one pixel of shift so the overlay stays where it was
+        .OUT_PIPE(1),
+        .X_OFFSET(15),
         .Y_OFFSET(24)
     ) debug_overlay (
         .clk_i          (clk_pixel_w),

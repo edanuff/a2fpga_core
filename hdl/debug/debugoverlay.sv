@@ -3,7 +3,13 @@ module DebugOverlay #(
     parameter bit ENABLE = 1'b1,
     parameter NUM_HEX_BYTES = 8,        // Number of hex bytes to display
     parameter X_OFFSET = 16,
-    parameter Y_OFFSET = 24
+    parameter Y_OFFSET = 24,
+    // OUT_PIPE=1 adds a fourth pipeline stage between the font-row bit
+    // select and the output muxes (timing campaign round 2, cone (e), for
+    // the a2mega's 148.5 MHz clk_pix). It shifts the overlay one more
+    // pixel right; the instantiation compensates with X_OFFSET-1. Default
+    // 0 keeps every other board byte-identical.
+    parameter OUT_PIPE = 0
 )(
     input  wire        clk_i,
     input  wire        reset_n,
@@ -384,10 +390,36 @@ module DebugOverlay #(
 
     wire pixel_on = s2_in_bounds && !s2_is_space && (s2_is_solid || s2_font_row[s2_x_bit]);
 
-    always @(posedge clk_i) begin
-        r_o <= pixel_on ? 8'hFF : s2_r;
-        g_o <= pixel_on ? 8'hFF : s2_g;
-        b_o <= pixel_on ? 8'hFF : s2_b;
-    end
+    //=========================================================================
+    // PIPELINE STAGE 3 (timing campaign round 2, cone (e)): the 8:1 font-row
+    // bit select + gating ANDs feeding the output muxes directly was the
+    // clk_pix path "s2_x_bit -> r_o/SET" (-0.045 in a 60K roll). Register
+    // the pixel decision and the pass-through color first; the output muxes
+    // then select on a single flop bit. One more pixel of overlay shift —
+    // compensated at the instantiation (X_OFFSET 16 -> 15 in the a2mega
+    // top) so the overlay stays where it was.
+    //=========================================================================
+    generate if (OUT_PIPE != 0) begin : g_out_pipe
+        reg       s3_on;
+        reg [7:0] s3_r, s3_g, s3_b;
+        always @(posedge clk_i) begin
+            s3_on <= pixel_on;
+            s3_r  <= s2_r;
+            s3_g  <= s2_g;
+            s3_b  <= s2_b;
+        end
+        always @(posedge clk_i) begin
+            r_o <= s3_on ? 8'hFF : s3_r;
+            g_o <= s3_on ? 8'hFF : s3_g;
+            b_o <= s3_on ? 8'hFF : s3_b;
+        end
+    end else begin : g_out_direct
+        // legacy three-stage output (all boards except a2mega)
+        always @(posedge clk_i) begin
+            r_o <= pixel_on ? 8'hFF : s2_r;
+            g_o <= pixel_on ? 8'hFF : s2_g;
+            b_o <= pixel_on ? 8'hFF : s2_b;
+        end
+    end endgenerate
 
 endmodule
