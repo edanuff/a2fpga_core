@@ -77,3 +77,86 @@ verified by the deterministic gate above (0 `freq_ok` endpoints).
 - Vendor DDR3 PHY `cmd_oserdes` (clk1x, +0.07–0.14): left alone by decision.
 - Verification standard (ed): framebuffer/overlay cones (e)(f)(g)(i) = visual on the IIgs after clean rolls, one bench flash after the clk_pix set lands.
 - **framebuffer wr_fifo DI** (clk_logic): `wr_accum → BSRAM DI` — register the write data before the FIFO.
+
+## Session 2026-09-03 (evening) — clk_pix / clk_sym / clk100 cone set
+
+Method unchanged: one structural fix per cone, dp_test gate + full-chain
+harness / AUX benches as the proof, full-core rolls only to read the next
+floor. Per-clock "floor" below = worst setup slack from the report's
+Max Frequency Summary (`1/f_constraint - 1/f_actual`).
+
+### Baseline spread this session (nine prior rolls)
+
+| clock | worst … best |
+|---|---|
+| clk100 | +0.07 … +1.12 |
+| clk_sym | -0.06 … +0.41 |
+| clk_pix | -0.21 … +0.30 |
+| clk_logic | -0.07 … +2.22 |
+
+### Cones fixed (in order of discovery)
+
+- **(e) overlays** (794028a8): DebugOverlay `OUT_PIPE` output stage (a2mega only, X_OFFSET compensates); OSD tracker `screen_x+1` / `screen_y` pre-registered flags (exact).
+- **(g) framebuffer vertical tracker** (67c4c65c): `cy_zero_px_r` registered alongside `cy_changed_px_r`; trackers act register-to-register.
+- **(i) line-buffer read address** (f3a3f098): CE-free `syn_keep` copy `lb_rd_addr_q` before the BSRAM, lookahead cx+4 / trigger +6.
+- **(j) packer `ready` / idle inserter** (10a7dc9f): the persistent clk_sym knife-edge was ONE register — `video_stream_packer.ready` (D: the `sof_mismatch`/`fetch_starved` cone, `line_num_1 → ready/D` -0.107; Q: replicated fanout into `idle_pattern_inserter.count_to_switch` CEs, 17 paths at +0.03..+0.08, dd 7.5 ns of a 7.407 ns period). `ready <= running` (rise identical, drop one cycle later) and the inserter samples `source_ready` once. Invisible downstream (ready already leads the data by the sdp/msa depth). Proof: `run_full_chain.sh` both packer configs — 720 rows pixel-exact, ALL AUDIO CHECKS PASSED, no underrun over 3,037,500 cycles.
+- **(k) DebugOverlay font ROM** (430bbffa): the 128-entry LUT-ROM read `s1_rom_addr → s2_font_row` (-0.007, dd 6.68) split into glyph select (16:1) + row select (8:1) under `OUT_PIPE`.
+- **(b) second cut** (0e4d9241): dp_test `freq_ok` 14-bit slices → 7-bit slices (the 14-bit compare landed on a flop RESET at +0.074).
+- **(i2) end-of-line test** (70c63afc): `fb_x_r == fb_width-1` (subtract + compare inside `lb_rd_addr`'s CE) → exact one-cycle lookahead `x_last_r` from `fb_x_n`.
+- **(c)+(c2) sdp_engine** (d74ca22c): (c) wire-byte lookahead three deep — index at k-3, four 16-entry groups registered at k-2, 4:1 at k-1; insertion cycle 2 joins 0/1 on constant-index regs; sim self-check extended. (c2) the 256-bit packet load shared one fanout-256 enable (`pkt_pending → db CE`, +0.04 in counted roll 2) → load staged one cycle behind replicated per-quarter `syn_keep` strobes, side effects moved with it, arming chain +1 (same parity margin). Proof: full-chain harness (both configs, audio ECC+PCM), dp_test gate.
+- **(b3) dp_test colorbar generator** (72aafc9a): the gate's own `cx → rgb/SET` compares (+0.34 once the core cones were gone) → local `syn_keep` cx copy, bar/x-border decisions registered with a two-pixel lookahead (constants−2, wrap folded), rgb a 2:1 mux of flops; y-border lag masked by the x border. Gate: clk_pix +0.34 → +1.16.
+- **(a) AUX clk100 cone** (200b4c82): two legs, ladder `next_state` untouched. (1) `aux_interface` tx/rx empty flags were combinational pointer compares (5-stage carry chain off `tx_rd_ptr`, fanout 131) heading every reply-byte latch CE → registered flags from the same push/pop strobes (bit-identical). (2) `channel_managemnt`'s `adjust_evt = adjust_de & (aux_addr==0)` fed `afe_adjust_seq`'s live busy term and came straight back into `afe_hold` (fanout 40) → registered in `aux_channel` at the same edge (same cycle, same value). Proof: 13 AUX benches PASS (train_recover ×3, hpd_disconnect, afe_adjust, polite_attach ×2, afe_perlane/closedloop/zeroreq/commit/clamp/noinit, gate_fail_counters); gate 0/0, clk100 +0.19 → +0.42.
+- **(k2) DebugOverlay offset subtracts** (ff3060c4): stage 0b registers `x-X_OFFSET`/`y-Y_OFFSET` ahead of the region-compare tree (`s0_x_r → sA_in_space/sA_is_hex`, +0.46 = the clk_pix floor after the rest). X_OFFSET 16 → 13 total for the three `OUT_PIPE` stages.
+- **dp_test gate configuration** (339fc032): the gate built the packer's legacy walk (`SCHED_ROM` default 0) while the core builds `SCHED_ROM=1`; its walk-only knife-edge (`pf_ftu → dec_fe_r/RESET`, +0.11..+0.57 across gate builds) was in a path the core never uses. Aligned to `SCHED_ROM=1`.
+
+- **(c3) sdp_engine insertion selects** (in the sdp commit): `ins_cyc` compares (==1/==2/==last) fanning into all 73 `out_data` bits (+0.15 in the diagnostic) → one-cycle-ahead flags from the counter's own next-value rule, sim-mirrored.
+- **(h) pipelined DOC** (1c22215c): the clk_logic floor (diagnostic: `curr_rts_r → ram_wds_din_r` at 17 ns of 18.5; +0.29 in counted roll 2) was OSC_CONSUME recomputing `wave_addr_f(curr_acc_r)` in series with the lane mux / tag compare / consume rules → registered at OSC_LOAD_NEXT_CONTROL (`exp_addr_r`, exact, sim-mirrored). Proof: `sim/doc5503/run.sh` (rev-2 repro + two rev-3 differential suites, bit-identical). **Listening pass on the IIgs before merge.**
+
+- **(l) pixel_cdc_fifo write full flag** (db8e1afb): the gate's clk_pix floor after (b3) was `wptr_bin → mem CEA` (+0.15): the full test (subtract + compare) on the BSRAM write enable → `wfull_r` registered from the next write pointer and the registered read pointer (one cycle staler, conservative-safe by the module's own argument). Proof: full-chain harness, gate.
+
+- **(n) pixel_cdc_fifo read empty flag** (db8e1afb, with (l)): `wptr_gray_r2 → mem CEB` (+0.43 in the gate, +0.37..+0.73 in rolls) → `ram_empty` registered from the synchroniser's first stage and the read pointer's next value (exact); refined twice from the rolls that followed: a registered `bin2gray(rptr_bin+1)` lookahead, and the two candidate compares evaluated in parallel and selected by fetch (on GW5A the 11-bit equality is a carry chain; behind fetch it reached +0.00). Residual: the fetch LUT still reads a BSRAM data output (block 12 = the sof bit) even with the valid flags `syn_preserve`d — +0.62..+1.17 in the final builds, above the bar, noted.
+- **(m) scanline_dim trigger/lock** (dcfb0d1f): `ovl_cy_q → u_scanline_dim/phase_r RESET` (+0.51) → x-trigger and window-top compares pre-registered (exact: x sequential, y constant across the line at the trigger column).
+- **(o) framebuffer vertical tracker, second stage** (009e2c98): `v_active_px_r → v_active_px_r/CE` at +0.00 in the first counted roll of the final source (seven flags + the phase compare in one enable) → decision flags registered at the event and applied a cycle later; every tracker enable is a one-level function of flops; export toggle timing unchanged. Visual with the clk_pix set.
+
+Retired: **(f) framebuffer `wr_fifo` DI** — the "+0.048 clk_logic floor" in the earlier log was the HOLD slack of `wr_accum_r → wr_fifo DI` (dd 0.28 ns), not a setup path; setup floors on clk_logic were +0.85..+2.22 until (h) surfaced. Vendor DDR3 PHY `cmd_oserdes` (clk1x setup +0.41, hold −0.010/−0.014 in two rolls) left alone by decision.
+
+**Ladder finding:** with every other cone gone, clk100's floor in the diagnostic placement is the AUX ladder's own `next_state` cone (+0.20; +0.26..+1.9 across rolls) — excluded from the campaign by rule; clk100 is reported as ladder-limited, positive on every roll.
+
+### Results
+
+| Build | viols | clk100 | clk_sym | clk_pix | clk_logic | note |
+|---|---|---|---|---|---|---|
+| roll (e,g,i) #1 | 0/0 | +0.67 | +0.03 | +0.68 | +2.22 | clk_sym = cone (j) whole top-17 |
+| roll (e,g,i) #2 | 2/0 | +0.40 | -0.11 | -0.01 | +1.43 | (j) D-side; (k) font ROM |
+| roll (e,g,i,j,k) | 0/0 | +0.26 | +0.21 | +0.45 | +0.85 | (c) and (i2) next |
+| roll (+c,i2) | 0/0 | +1.00 | +0.73 | +0.46 | +1.30 | (k2) next; sources before (a) |
+| gate (b2,c,j) | 0/0 | +0.19 | +0.51 | +0.70 | — | (a) next |
+| gate (+a) | 0/0 | +0.42 | +0.11 | +0.61 | — | walk-only packer path → cfg fix |
+| gate (+cfg) | 0/0 | +0.52 | +0.61 | +0.34 | — | (b3) next |
+| roll (+cfg,+b3,+c2..) | 0/0 | +0.51 | +1.57 | +0.73 | +1.96 | first pass of the whole set; (c3),(h),(l),(m),(n),(o) followed |
+| **final roll 1** | 0 setup, 1 hold (vendor DDR3 −0.010) | +1.51 | +1.17 | +1.06 | +4.18 | clk1x +2.10 |
+| **final roll 2** | 0/0 | +1.57 | +0.67 | +0.98 | +2.87 | clk1x +1.29 |
+| **final roll 3** | 0/0 | +0.43 (ladder) | +1.74 | +1.05 | +4.91 | clk1x +2.03 |
+| **final gate** | 0/0 | +1.34 | +0.62 | +1.18 | — | SCHED_ROM=1, all instruments fixed |
+
+**Verdict.** Three consecutive full-core rolls of the final source and the
+deterministic gate are clean on setup; every clock the campaign was
+allowed to touch sits above +0.5 ns on all three rolls (minima: clk_sym
++0.67, clk_pix +0.98, clk_logic +2.87, clk1x +1.29). The two exclusions
+are explicit: clk100 is bounded by the AUX ladder's own `next_state` cone
+(+0.43 … +1.57 across the three rolls; +1.34 in the gate), and the vendor
+DDR3 PHY command serializer shows −0.010 ns hold in one of the three
+rolls. The (b)/(b3) instrument fixes and the SCHED_ROM alignment make the
+gate a faithful, deterministic proxy for the core's DP path for the first
+time.
+
+Verification standard for the bench (ed): one flash + visual on the IIgs
+after the clk_pix set lands (DebugOverlay / OSD position, border, first
+active pixel, 80-column text); no further bench checks needed for (a),
+(c), (j) beyond the benches and the gate.
+
+**Bench check 2026-09-04 (ed, 60K, bitstream 7576d91b = final roll 3):** IIgs hi-res
+test pattern with all four corner markers, colours, even scanline bands, DebugOverlay
+and OSD in place — clk_pix set PASS; Ensoniq PASS on the 4soniq demo disk (larger
+games not yet runnable on this bench) — DOC cone (h) merged. PRs #8–#23 merged to
+epic-merge-prep in order; the two exclusions stand as documented above.
