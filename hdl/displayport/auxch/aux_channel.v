@@ -363,8 +363,15 @@ module aux_channel #(
     // Checking the state of the link
     localparam [7:0] check_link = 8'h2F, check_wait = 8'h30;
                     
-    reg  [7:0]  state            = error;
-    reg  [7:0]  next_state       = error;
+    // syn_maxfan (timing campaign round 2, 138B durability): the encoded
+    // state registers fan out to ~60 loads each (28 equality decodes,
+    // three case blocks, the transition-pending compare). GowinSynthesis
+    // duplicates the register to honour the limit — pure replication, no
+    // logic change; the ladder's next_state cone was the clk100 floor on
+    // both dies (+0.00 on the 138B gate, dominated by 2.3 ns of route off
+    // the fanout-61 replica).
+    reg  [7:0]  state            = error /* synthesis syn_maxfan = 12 */;
+    reg  [7:0]  next_state       = error /* synthesis syn_maxfan = 12 */;
     reg  [7:0]  state_on_success = error;
     reg         retry_now;
     initial begin gate_fail_evt = 1'b0; status_seq = 4'd0; end

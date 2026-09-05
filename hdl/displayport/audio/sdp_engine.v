@@ -392,16 +392,23 @@ module sdp_engine #(
         wb_idx_b_r <= {wb_nxt2[4:0], 1'b1};   // 2*(k+3)-1 = {k+2, 1}
     end
     // stage A: group lookups, flattened [lane*4 + group]
-    reg [7:0] wb_ga_r [0:7];
-    reg [7:0] wb_gb_r [0:7];
+    // Flat vectors, not arrays (138B durability): indexed with a variable,
+    // the 8x8 arrays were inferred as distributed RAM with a registered
+    // output ("RAMREG") whose RESET pin the tool tied to the pixel PLL's
+    // PLL_INIT enable net (fanout 163, 4.6 ns of route on the 138B:
+    // "u_pll_init/enable_r -> wb_gb_r RAMREG RESET" +0.10 ns). As flat
+    // vectors with an explicit part-select they are plain flops with no
+    // reset pin. Same values, same timing.
+    reg [63:0] wb_ga_r = 64'd0;   // byte g of lane l at [8*(4*l+g) +: 8]
+    reg [63:0] wb_gb_r = 64'd0;
     reg [1:0] wb_sa_r = 2'd0, wb_sb_r = 2'd0;
     integer wgi;
     always @(posedge clk) begin
         for (wgi = 0; wgi < 4; wgi = wgi + 1) begin
-            wb_ga_r[wgi]   <= wire_byte(2'd0, {wgi[1:0], wb_idx_a_r[3:0]}, hbv, pbhv, pbdv, db);
-            wb_ga_r[4+wgi] <= wire_byte(2'd1, {wgi[1:0], wb_idx_a_r[3:0]}, hbv, pbhv, pbdv, db);
-            wb_gb_r[wgi]   <= wire_byte(2'd0, {wgi[1:0], wb_idx_b_r[3:0]}, hbv, pbhv, pbdv, db);
-            wb_gb_r[4+wgi] <= wire_byte(2'd1, {wgi[1:0], wb_idx_b_r[3:0]}, hbv, pbhv, pbdv, db);
+            wb_ga_r[8*wgi      +: 8] <= wire_byte(2'd0, {wgi[1:0], wb_idx_a_r[3:0]}, hbv, pbhv, pbdv, db);
+            wb_ga_r[8*(4+wgi)  +: 8] <= wire_byte(2'd1, {wgi[1:0], wb_idx_a_r[3:0]}, hbv, pbhv, pbdv, db);
+            wb_gb_r[8*wgi      +: 8] <= wire_byte(2'd0, {wgi[1:0], wb_idx_b_r[3:0]}, hbv, pbhv, pbdv, db);
+            wb_gb_r[8*(4+wgi)  +: 8] <= wire_byte(2'd1, {wgi[1:0], wb_idx_b_r[3:0]}, hbv, pbhv, pbdv, db);
         end
         wb_sa_r <= wb_idx_a_r[5:4];
         wb_sb_r <= wb_idx_b_r[5:4];
@@ -416,10 +423,10 @@ module sdp_engine #(
     reg [7:0] wblast_r [0:1];    // byte index WB_PER_LANE-1 (last cycle)
     always @(posedge clk) begin
         // stage B: group select
-        wb_a_r[0]   <= wb_ga_r[{1'b0, wb_sa_r}];
-        wb_a_r[1]   <= wb_ga_r[{1'b1, wb_sa_r}];
-        wb_b_r[0]   <= wb_gb_r[{1'b0, wb_sb_r}];
-        wb_b_r[1]   <= wb_gb_r[{1'b1, wb_sb_r}];
+        wb_a_r[0]   <= wb_ga_r[8*{1'b0, wb_sa_r} +: 8];
+        wb_a_r[1]   <= wb_ga_r[8*{1'b1, wb_sa_r} +: 8];
+        wb_b_r[0]   <= wb_gb_r[8*{1'b0, wb_sb_r} +: 8];
+        wb_b_r[1]   <= wb_gb_r[8*{1'b1, wb_sb_r} +: 8];
         wb2a_r[0]   <= wire_byte(2'd0, 6'd4,                hbv, pbhv, pbdv, db);
         wb2a_r[1]   <= wire_byte(2'd1, 6'd4,                hbv, pbhv, pbdv, db);
         wb2b_r[0]   <= wire_byte(2'd0, 6'd3,                hbv, pbhv, pbdv, db);

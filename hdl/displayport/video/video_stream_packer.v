@@ -146,7 +146,15 @@ module video_stream_packer #(
     // line_cycle comparisons (timing: the slot chain is the critical
     // path at HBR rates)
     // ------------------------------------------------------------------
-    wire at_eol = (line_cycle == CYCLES_PER_LINE-1);
+    // at_eol is a REGISTERED one-cycle lookahead (timing campaign round 2,
+    // 138B durability): the live 13-bit compare headed lc_zero -> the
+    // line_cycle / nc2_r RESET arcs (+0.11 ns at 135 MHz on the 138B).
+    // Its next value follows line_cycle's own next-value control exactly:
+    // zero on lc_zero, (line_cycle == CYCLES_PER_LINE-2) on lc_inc, hold
+    // otherwise — the same shared terms the nc2_r lookahead is built on,
+    // with the same style of sim mirror check below.
+    reg at_eol = 1'b0;
+    wire at_eol_live = (line_cycle == CYCLES_PER_LINE-1);   // sim mirror only
     wire [$clog2(CYCLES_PER_LINE)-1:0] nc =
         at_eol ? {$clog2(CYCLES_PER_LINE){1'b0}} : line_cycle + 1'b1;
     wire nl_active = at_eol ? ((line_num == V_TOTAL-1) || (line_num < V_VISIBLE-1))
@@ -524,7 +532,13 @@ module video_stream_packer #(
     // rendering a permanently rotated image. Presents downstream as a
     // normal source_ready-drop video restart.
     // ------------------------------------------------------------------
-    wire frame_first_fetch = prime_r && (line_num == {$clog2(V_TOTAL){1'b0}});
+    // line_num == 0 as a registered lookahead (138B durability): the live
+    // zero-detect sat in sof_mismatch -> lc_zero -> the nc2_r SET arcs
+    // (+0.09 ns at 135 MHz on the 138B). Follows line_num's own writes:
+    // zero on reset / start / slip, wrap test on an eol advance, hold
+    // otherwise (mirror-checked below).
+    reg ln0_r = 1'b1;
+    wire frame_first_fetch = prime_r && ln0_r;
     wire sof_mismatch = fifo_rvalid &&
                         ((frame_first_fetch && !fifo_rsof) ||
                          (fetch_r && !frame_first_fetch && fifo_rsof));
@@ -536,6 +550,26 @@ module video_stream_packer #(
     // one heals it too.
     wire fetch_starved = fetch_r && !fifo_rvalid;
 
+    // ln0_r next value: the slip branch zeroes line_num and wins over the
+    // eol increment (same ordering as the sequential block)
+    always @(posedge clk) begin
+        if (reset || (!running && start_ok) ||
+            (running && (sof_mismatch || fetch_starved)))
+            ln0_r <= 1'b1;
+        else if (running && at_eol)
+            ln0_r <= (line_num == V_TOTAL-1);
+    end
+    // synthesis translate_off
+    reg [1:0] ln0_chk_en = 2'b00;
+    always @(posedge clk) begin
+        ln0_chk_en <= {ln0_chk_en[0], !reset};
+        if (ln0_chk_en[1] && (ln0_r !== (line_num == {$clog2(V_TOTAL){1'b0}}))) begin
+            $display("FATAL: packer ln0_r lookahead diverged (reg=%b line_num=%0d)", ln0_r, line_num);
+            $fatal(1);
+        end
+    end
+    // synthesis translate_on
+
     // line_cycle's own next-value control, shared with the nc2_r counter:
     // zero on reset / start_ok (while !running) / slip / eol; increment
     // while running otherwise; hold while !running. These are exactly the
@@ -543,6 +577,22 @@ module video_stream_packer #(
     assign lc_zero = reset || (!running && start_ok) ||
                      (running && (sof_mismatch || fetch_starved || at_eol));
     assign lc_inc  = running && !lc_zero;
+
+    always @(posedge clk) begin
+        if (lc_zero)      at_eol <= 1'b0;
+        else if (lc_inc)  at_eol <= (line_cycle == CYCLES_PER_LINE-2);
+    end
+    // synthesis translate_off
+    reg [1:0] eol_chk_en = 2'b00;
+    always @(posedge clk) begin
+        eol_chk_en <= {eol_chk_en[0], !reset};
+        if (eol_chk_en[1] && (at_eol !== at_eol_live)) begin
+            $display("FATAL: packer at_eol lookahead diverged (reg=%b live=%b line_cycle=%0d)",
+                     at_eol, at_eol_live, line_cycle);
+            $fatal(1);
+        end
+    end
+    // synthesis translate_on
 
     // synthesis translate_off
     // Equivalence proof for the registered lookahead (cone #2): nc2_r (and
