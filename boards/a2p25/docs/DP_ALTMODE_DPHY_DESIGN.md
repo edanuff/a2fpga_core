@@ -358,9 +358,10 @@ TX PLL takes `clkin` (19–800 MHz) from the fabric clock network:
      ⚠ Do NOT add a second pair: parallel 100k pairs = 50k effective, shifts
      the sink-detect divider (~1.65 V → ~1.1 V) and eats detect margin.
      Net vs a2mega: same AUX BOM, caps relocated, nothing else new.
-     - DP130 straps/placeholders (DS §10.2.2): CAD_SNK strapped V_IL (DP-only)
-       with DNP 10 k pullup placeholder (mode override); DNP 10 k pullup
-       placeholder on HPD_SNK (force sink presence on bench); DDC_SRC open.
+     - DP130 straps (FINAL, no DNPs — see HPD/CAD pin plan in §4): HPD_SNK
+       10 k→3.3 V populated; CAD_SNK 100 k→GND populated; HPD_SRC/CAD_SRC NC;
+       DDC_SRC open. Debug overrides (force-HPD/force-TMDS) via the DP130
+       I2C compliance interface, not board features.
      Option B (native jack): ①② identical; ③'s 100 k pair goes at the
      connector (pulldown AUX+ / pullup-3.3 V AUX−). SBU1/2 → receptacle DC
      with 2 MΩ (R33/R34), no caps. HPD: DC logic, no extra passives.
