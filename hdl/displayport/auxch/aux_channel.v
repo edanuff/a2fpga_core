@@ -480,9 +480,15 @@ module aux_channel #(
     reg        irq_service_due  = 1'b0;   // hpd_irq consumed; ESI service owed
     reg        err_evt          = 1'b0;   // tagged error-entry event
     reg [3:0]  err_reason       = 4'd0;
-    reg [7:0]  err_from         = 8'd0;
-    reg [7:0]  err_exp          = 8'd0;
-    reg [7:0]  err_rxc          = 8'd0;
+    // (138B follow-up, timing campaign round 2) the failing state /
+    // expected / byte count used to be captured at each error site into
+    // err_from/err_exp/err_rxc — three registers whose enables were the
+    // sites' full decode cones (next_state -> err_from CE -0.10 ns at
+    // 100 MHz on the 138B die). The central err_evt block runs one cycle
+    // after any site, so it now reads the same values from one-cycle
+    // delayed copies (state_d already existed): identical err_detail.
+    reg [7:0]  expected_d       = 8'd0;
+    reg [7:0]  rxc_d            = 8'd0;
     reg [27:0] err_detail       = 28'd0;
     reg        err_detail_v     = 1'b0;
     reg [29:0] obs_timer        = 30'd0;  // time in the established set
@@ -636,7 +642,7 @@ always @(posedge clk) begin
     if (err_evt) begin
         if (!err_detail_v) begin
             err_detail_v <= 1'b1;
-            err_detail   <= {err_reason, err_from, err_exp, err_rxc};
+            err_detail   <= {err_reason, state_d, expected_d, rxc_d};
         end
         if (err_reason == 4'd1 && dbg_short_sat != 4'hF)
             dbg_short_sat <= dbg_short_sat + 4'd1;
@@ -646,7 +652,9 @@ always @(posedge clk) begin
     // OTHER: an entry into `error` from the established set that no site
     // tagged — the safety net that catches teardown paths the reason
     // sites miss (the reason this latch is centralized at all)
-    state_d  <= state;
+    state_d    <= state;
+    expected_d <= expected;
+    rxc_d      <= rx_byte_count;
     inest_d  <= in_established_set;
     if (state == error && state_d != error && inest_d && !err_evt) begin
         if (dbg_other_sat != 4'hF)
@@ -846,8 +854,6 @@ always @(posedge clk) begin
                                     if (dbg_gate_fail_sat != 4'hF)
                                         dbg_gate_fail_sat <= dbg_gate_fail_sat + 4'd1;
                                     err_evt <= 1'b1; err_reason <= 4'd3;
-                                    err_from <= state; err_exp <= expected;
-                                    err_rxc <= rx_byte_count;
                                     // remember WHICH bits were clear (sticky OR)
                                     dbg_fail_mask <= dbg_fail_mask |
                                         ~{clock_locked_i, equ_locked_i,
@@ -1222,8 +1228,6 @@ always @(posedge clk) begin
                     next_state <= error;
                     if (in_established_set) begin
                         err_evt <= 1'b1; err_reason <= 4'd1;
-                        err_from <= state; err_exp <= expected;
-                        err_rxc <= rx_byte_count;
                     end
                 end
             end
@@ -1261,8 +1265,6 @@ always @(posedge clk) begin
                         next_state <= error;
                         if (in_established_set) begin
                             err_evt <= 1'b1; err_reason <= 4'd2;
-                            err_from <= state; err_exp <= expected;
-                            err_rxc <= rx_byte_count;
                         end
                     end
                 end
@@ -1426,7 +1428,7 @@ always @(posedge clk) begin
         if (in_established_set) begin
             err_evt <= 1'b1;
             err_reason <= (BLIND_SINK == 0 && channel_timeout == 1'b1) ? 4'd4 : 4'd5;
-            err_from <= state; err_exp <= expected; err_rxc <= rx_byte_count;
+           
         end
     end
     
@@ -1548,8 +1550,6 @@ always @(posedge clk) begin
             next_state <= reset;
             state      <= error;
             err_evt    <= 1'b1; err_reason <= 4'd6;
-            err_from   <= state; err_exp <= expected;
-            err_rxc    <= rx_byte_count;
         end else
             kick_timer <= kick_timer + 30'd1;
     end

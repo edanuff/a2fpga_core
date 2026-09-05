@@ -75,16 +75,29 @@ module pixel_cdc_fifo #(
     reg wfull_r = 1'b0;
     assign wfull = wfull_r;
     wire wpush = wen && !wfull_r;
-    wire [ADDR_BITS:0] wptr_bin_n = wreset ? {(ADDR_BITS+1){1'b0}} :
-                                    wpush  ? wptr_bin + 1'b1 : wptr_bin;
+    // 138B follow-up: the flag's own input cone (reset mux, increment,
+    // subtract, compare) was that die's clk_pix floor (+0.02 ns). The
+    // pointer difference is now itself a register, one cycle staler on
+    // BOTH pointers, and the two writes that may have happened since are
+    // added back as carry bits: W(t+1) - R(t-1) = diff_r + wpush_q + wpush.
+    // The read pointer is thereby one more cycle stale than before, the
+    // same conservative-safe class (free space underestimated by at most
+    // one cycle of reads); the write pointer term is exact. The bounded
+    // occupancy (<= DEPTH by construction) makes ">= DEPTH" the top bit.
+    reg [ADDR_BITS:0] diff_r  = 0;   // wptr_bin - rptr_bin_w, registered
+    reg               wpush_q = 1'b0;
     // subtraction must stay at pointer width so the mod-2^(N+1) wrap works
-    wire [ADDR_BITS:0] w_used_n = wptr_bin_n - rptr_bin_w;
+    wire [ADDR_BITS:0] w_used_n = diff_r + {{ADDR_BITS{1'b0}}, wpush_q}
+                                         + {{ADDR_BITS{1'b0}}, wpush};
+    wire [ADDR_BITS:0] w_used_rst = {(ADDR_BITS+1){1'b0}} - rptr_bin_w;
 
     always @(posedge wclk) begin
         rptr_gray_w1 <= rptr_gray;
         rptr_gray_w2 <= rptr_gray_w1;
         rptr_bin_w   <= gray2bin(rptr_gray_w2);
-        wfull_r      <= (w_used_n >= DEPTH);
+        diff_r       <= wreset ? {(ADDR_BITS+1){1'b0}} : (wptr_bin - rptr_bin_w);
+        wpush_q      <= wreset ? 1'b0 : wpush;
+        wfull_r      <= wreset ? (w_used_rst >= DEPTH) : w_used_n[ADDR_BITS];
         if (wreset) begin
             wptr_bin  <= 0;
             wptr_gray <= 0;

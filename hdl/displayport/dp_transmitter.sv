@@ -706,8 +706,29 @@ module dp_transmitter #(
     logic        wdog_replay_ack;
     logic        wdog_ack_m = 1'b0, wdog_ack_s = 1'b0;
     logic [2:0]  wdog_count = 3'd0;
-    logic [30:0] wdog_timer = 31'd0;
+    // Timer = 1 ms prescaler + millisecond counter (timing campaign round
+    // 2, 138B follow-up). The single 31-bit counter put a 31-bit
+    // magnitude compare in series with its own increment/reset mux
+    // (+0.06 ns at 100 MHz on the 138B die). All three thresholds are
+    // exact multiples of 100 000 cycles, so "ms >= K/100000" trips on
+    // precisely the same cycle "timer >= K" did; the ms counter saturates
+    // (the old counter wrapped after 21 s, only reachable with the retry
+    // budget exhausted, where nothing fires either way).
+    localparam int WDOG_MS_CYCLES = 100_000;
+    localparam int WDOG_GRACE_MS  = WDOG_GRACE / WDOG_MS_CYCLES;   // 8000
+    localparam int WDOG_PULSE_MS  = WDOG_PULSE / WDOG_MS_CYCLES;   // 2
+    localparam int WDOG_RTIME_MS  = WDOG_RTIME / WDOG_MS_CYCLES;   // 50
+    logic [16:0] wdog_pre = 17'd0;
+    logic [13:0] wdog_ms  = 14'd0;
     logic [1:0]  wdog_st = 2'd0;  // 0 idle, 1 pulse1, 2 replay, 3 pulse2
+    task automatic wdog_tick();
+        if (wdog_pre == 17'(WDOG_MS_CYCLES - 1)) begin
+            wdog_pre <= 17'd0;
+            if (wdog_ms != 14'h3FFF) wdog_ms <= wdog_ms + 14'd1;
+        end else begin
+            wdog_pre <= wdog_pre + 17'd1;
+        end
+    endtask
     // Blind sinks (monitor path) never yield a readable SINK_STATUS, so
     // "streaming" can never be observed - without this gate the watchdog
     // would tear down a healthy blind link every WDOG_GRACE forever
@@ -723,14 +744,14 @@ module dp_transmitter #(
                 wdog_force      <= 1'b0;
                 wdog_replay_req <= 1'b0;
                 if (wdog_streaming) begin
-                    wdog_timer <= 31'd0;
+                    begin wdog_pre <= 17'd0; wdog_ms <= 14'd0; end
                     wdog_count <= 3'd0;      // streaming - re-arm budget
                 end else if (tx_powerup_channel != 4'b0000) begin
-                    wdog_timer <= wdog_timer + 31'd1;
-                    if (wdog_timer >= 31'(WDOG_GRACE)
+                    wdog_tick();
+                    if (wdog_ms >= 14'(WDOG_GRACE_MS)
                         && wdog_count != 3'(WDOG_CAP)) begin
                         wdog_st    <= 2'd1;
-                        wdog_timer <= 31'd0;
+                        begin wdog_pre <= 17'd0; wdog_ms <= 14'd0; end
                         wdog_count <= wdog_count + 3'd1;
                     end
                 end
@@ -738,28 +759,28 @@ module dp_transmitter #(
             end
             2'd1: begin                      // reset pulse 1
                 wdog_force <= 1'b1;
-                wdog_timer <= wdog_timer + 31'd1;
-                if (wdog_timer >= 31'(WDOG_PULSE)) begin
+                wdog_tick();
+                if (wdog_ms >= 14'(WDOG_PULSE_MS)) begin
                     wdog_st    <= 2'd2;
-                    wdog_timer <= 31'd0;
+                    begin wdog_pre <= 17'd0; wdog_ms <= 14'd0; end
                 end
             end
             2'd2: begin                      // PHY back up; CSR replay
                 wdog_force      <= 1'b0;
                 wdog_replay_req <= 1'b1;
-                wdog_timer <= wdog_timer + 31'd1;
-                if (wdog_ack_s || wdog_timer >= 31'(WDOG_RTIME)) begin
+                wdog_tick();
+                if (wdog_ack_s || wdog_ms >= 14'(WDOG_RTIME_MS)) begin
                     wdog_st    <= 2'd3;
-                    wdog_timer <= 31'd0;
+                    begin wdog_pre <= 17'd0; wdog_ms <= 14'd0; end
                 end
             end
             default: begin                   // reset pulse 2, then re-arm
                 wdog_replay_req <= 1'b0;
                 wdog_force      <= 1'b1;
-                wdog_timer <= wdog_timer + 31'd1;
-                if (wdog_timer >= 31'(WDOG_PULSE)) begin
+                wdog_tick();
+                if (wdog_ms >= 14'(WDOG_PULSE_MS)) begin
                     wdog_st    <= 2'd0;
-                    wdog_timer <= 31'd0;
+                    begin wdog_pre <= 17'd0; wdog_ms <= 14'd0; end
                 end
             end
         endcase

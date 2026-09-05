@@ -28,16 +28,27 @@ module lane_encoder_8b10b (
     wire [9:0] c0, c1;
     wire d0, d1;
 
+    // Input register (timing campaign round 2, 138B follow-up): on the
+    // 138B die the DP lanes sit on other die lanes than the 60K's, and the
+    // route from the core's skew/training-pattern registers into the two
+    // chained 8b/10b lookups landed at +0.02 ns of the 7.407 ns symbol
+    // period. Registering the symbol here puts the whole encoder (both
+    // lookups and the running-disparity chain) behind a local flop. One
+    // symbol clock of extra latency, identical on every lane; the link
+    // is a stream, so nothing downstream or upstream observes it.
+    reg [19:0] sym_q = 20'b0;
+
     enc_8b10b e0 (
-        .din(tx_symbol[8:0]),   .disp_in(disp), .force_neg(tx_symbol[9]),
+        .din(sym_q[8:0]),   .disp_in(disp), .force_neg(sym_q[9]),
         .dout(c0), .disp_out(d0)
     );
     enc_8b10b e1 (
-        .din(tx_symbol[18:10]), .disp_in(d0),   .force_neg(tx_symbol[19]),
+        .din(sym_q[18:10]), .disp_in(d0),   .force_neg(sym_q[19]),
         .dout(c1), .disp_out(d1)
     );
 
     always @(posedge clk) begin
+        sym_q <= tx_symbol;
         if (reset) begin
             disp    <= 1'b0;
             tx_code <= 20'b0;

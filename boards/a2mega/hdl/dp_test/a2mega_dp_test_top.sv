@@ -133,17 +133,22 @@ module a2mega_dp_test_top #(
     // Audio: 48 kHz strobe with a quiet ~1 kHz sawtooth so the DP audio
     // path is verifiable on the monitor without being obnoxious
     // ------------------------------------------------------------------
+    // Phase accumulator in the exact reduced fraction: 48 000 / 148 500 000
+    // = 4 / 12 375, so a 15-bit signed accumulator produces the identical
+    // strobe sequence the old 29-bit one did (same arithmetic, divided by
+    // the common factor 12 000). The 29-bit adder was the 138B gate's
+    // clk_pix floor (+0.03 ns, timing campaign round 2).
     logic        clk_audio;
-    logic signed [28:0] aud_acc = -29'sd148_500_000;
+    logic signed [14:0] aud_acc = -15'sd12_375;
     logic [15:0] tone;
     always_ff @(posedge clk_pixel) begin
         clk_audio <= 1'b0;
-        if (!aud_acc[28]) begin
-            aud_acc   <= aud_acc + 29'sd48_000 - 29'sd148_500_000;
+        if (!aud_acc[14]) begin
+            aud_acc   <= aud_acc + 15'sd4 - 15'sd12_375;
             clk_audio <= 1'b1;
             tone      <= tone + 16'd1365;
         end else
-            aud_acc <= aud_acc + 29'sd48_000;
+            aud_acc <= aud_acc + 15'sd4;
     end
     logic [15:0] audio_sample_word [1:0];
     assign audio_sample_word[0] = {{3{tone[15]}}, tone[15:3]};  // -18 dB
