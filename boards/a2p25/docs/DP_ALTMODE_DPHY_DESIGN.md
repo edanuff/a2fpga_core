@@ -172,7 +172,7 @@ pins), reusing the a2mega stack verbatim:
     via ESP32 register, a2mega model). If FPGA-GPIO drive is adopted,
     route HPD_SRC → FPGA HPD input instead (3.3 V logic, 150 Ω internal
     series). Option B: HPD_SRC → FPGA HPD input.
-  - **CAD_SNK (10): 1 MΩ to GND** (DS-recommended strap form) = DP mode,
+  - **CAD_SNK (10): 100 kΩ to GND (existing AUX BOM value)** = DP mode. TI's 1 M recommendation is sized to keep DP++ detection alive (5 V through ≥90 k must read HIGH) — a function we must never trigger; 100 k holds low 10× harder vs leakage, deliberately deadens DP++ detect, and the 10 k debug placeholder still wins (3.0 V). Do NOT use the 2 M strap value — weakest leakage margin on a pin whose failure mode (TMDS 600 mVpp, training off) masquerades as a broken link. Pin is
     sampled while HPD high; DNP 10 k pullup placeholder (§10.2.2.2; beats the 1 M strap trivially). High
     would select TMDS mode (fixed 600 mVpp, training disabled) — wrong strap
     changes the whole link discipline.
