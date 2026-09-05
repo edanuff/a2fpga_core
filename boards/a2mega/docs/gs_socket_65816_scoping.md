@@ -404,13 +404,15 @@ Every hardware result gets a `test_log.md` row; builds carry provenance.
 
 1. ~~**Interposer hardware**~~ — **answered 09-05:** exists, plain 1:1
    IDC→DIP ribbon; mapping verified in §2.1.
-2. **Test machine:** the GS used for the a2mega work has a TransWarp GS
-   in it (the TWGS is in the same socket). The drop-in test needs the TWGS
-   out and the machine at stock — is that the ROM 01 or the ROM 03 unit,
-   and is a second GS available so the TWGS setup stays intact?
-3. **Core clock:** agree on a new ~108 MHz PLL output (recommended; it
-   doubles as the future HyperRAM spine) versus reusing 135 MHz clk_sym
-   with a wider CE spacing.
+2. ~~**Test machine**~~ — **decided 09-05: plan with the ROM 01 machine.**
+   Sim 2 therefore uses the ROM 01 image (MiSTer `boot1.rom`, 128 KB);
+   the bench ladder runs on the ROM 01 GS at stock (any TWGS out of the
+   socket).
+3. ~~**Core clock**~~ — **decided 09-05: a new ~108 MHz PLL output** (also
+   the future HyperRAM spine). The CE generator asserts CE at most every
+   other clock so the core's ~52 MHz single-cycle paths are 2-clock paths
+   by construction; that is stated as a multicycle constraint on the
+   CE-gated registers.
 4. ~~**GPL-3** consequence~~ — **closed 09-05:** already the project's
    stated position (README licensing section); nothing new.
 5. ~~**1.0a4:** put F1 on the list now?~~ — **closed 09-05:** optional,
@@ -420,7 +422,7 @@ Every hardware result gets a `test_log.md` row; builds carry provenance.
 
 | Step | Deliverable | Gate |
 |---|---|---|
-| S1 | This document reviewed; answers to §8 | ed |
+| S1 | This document reviewed; answers to §8 — **closed 2026-09-05** (interposer exists, ROM 01 machine, 108 MHz PLL core clock, GPL already covered, PH2 swap optional) | ed ✔ |
 | S2 | Socket PHY + CE generator + SDC; Sim 1 passing | assertions clean |
 | S3 | Sim 2: vector fetch + trace match vs MiSTer | N cycles identical |
 | S4 | Integration into the 138B full core behind `armed`; telemetry (trace ring, sweeps); 138B build under the margin policy (≥ +0.5 ns real on every clock incl. PH2-relative I/O) | dp_test gate + 3 rolls |
@@ -428,4 +430,5 @@ Every hardware result gets a `test_log.md` row; builds carry provenance.
 | S6 | Bench C4 (sweeps → vector fetch → boot) | boot chime |
 | S7 | Bench C5 soak | board-turn bar |
 
-Not started: no HDL until S1 closes.
+S1 closed 2026-09-05; S2 (socket PHY + CE generator + SDC + Sim 1) is
+the next step.
