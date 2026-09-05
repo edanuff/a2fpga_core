@@ -155,14 +155,23 @@ pins), reusing the a2mega stack verbatim:
   PD Status/Attention VDMs; TUSB HPDIN stays NC/overridden as on a2mega):**
   - **HPD_SNK (11): NEVER NC** — DS §9.3.2: HPD_SNK low for tT(HPD)=400 ms
     → DP130 enters STANDBY (internal 130 k pulldown ⇒ NC = parked forever,
-    main link dead). Option A: **ESP32 GPIO drives it** from the PD-virtual
-    HPD (existing set_tusb_hpd-style callback retargets here). Option B:
-    DP jack HPD pin → HPD_SNK directly (5 V-tolerant, internal pulldown =
-    correct termination, Fig 22 verbatim). DNP 2 k pullup placeholder kept.
-    IRQ_HPD pulses (0.5–1 ms) pass through with semantics intact.
-  - **HPD_SRC (9): route to the FPGA's HPD input** (3.3 V logic, 150 Ω
-    internal series) — hardware now does the ESP32→fabric HPD forwarding the
-    a2mega did in firmware; ESP32 may optionally snoop the same node.
+    main link dead). **Option A DECISION (09-05): STUFF the 2 k pullup —
+    zero traces.** DP130 always-awake (standby loss ≈ tens of mW,
+    irrelevant slot-powered); its other functions key off AUX/link
+    activity, not HPD edges (bring-up checklist: verify no edge-keyed
+    housekeeping). HPD distribution stays the proven a2mega-virtual path
+    (PD VDM → ESP32 → FPGA register); the DP130's HPD pass-through simply
+    goes unused. Alternatives kept in pocket: FPGA-GPIO drive (DP130 is
+    adjacent to the FPGA — short trace, cycle-accurate IRQ pulses; run a
+    spare ball to the pad region if handy at layout), long ESP32 trace
+    (electrically trivial, routing nuisance), I2C software HPD control
+    (test-mode mechanism, pulse timing marginal — fallback only).
+    Option B (DP jack): jack HPD pin → HPD_SNK directly (5 V-tolerant,
+    internal pulldown = termination, Fig 22 verbatim).
+  - **HPD_SRC (9): NC under the Option-A tie-high plan** (FPGA gets HPD
+    via ESP32 register, a2mega model). If FPGA-GPIO drive is adopted,
+    route HPD_SRC → FPGA HPD input instead (3.3 V logic, 150 Ω internal
+    series). Option B: HPD_SRC → FPGA HPD input.
   - **CAD_SNK (10): 1 MΩ to GND** (DS-recommended strap form) = DP mode,
     sampled while HPD high; DNP 2 k pullup placeholder (§10.2.2.2). High
     would select TMDS mode (fixed 600 mVpp, training disabled) — wrong strap
