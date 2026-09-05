@@ -8,6 +8,10 @@ enum {
     PS_RDY_DELAY_MS = 25,
     DISCOVERY_START_DELAY_MS = 10,
     VDM_BUSY_DELAY_MS = 50,
+    MODE_OP_RESPONSE_MS = 500,         /* Enter/Status: see send_vdm */
+    MODE_OP_RETRIES = 6,               /* ~3.5 s total before USB-only */
+    TX_WEDGE_MS = 250,                 /* TX completion watchdog (see usbc_port_task) */
+    CONFIGURE_QUIET_MS = 3000,         /* Configure: one send, quiet, ONE retry (see send_vdm) */
     /* Sink path (we are powered by the monitor). tTypeCSinkWaitCap is
      * 620 ms max per PD; sources rebroadcast caps, so wait generously. */
     SINK_WAIT_CAPS_MS = 3000,
@@ -40,6 +44,43 @@ static void log_message(usbc_port_t *port, usbc_log_level_t level,
         port->hal.log(port->hal.context, level, message);
 }
 
+static void handle_tx_success(usbc_port_t *port);
+static void trace_ev(usbc_port_t *port, usbc_trace_kind_t kind,
+                     uint8_t a, uint8_t b, uint8_t c)
+{
+    usbc_trace_ev_t *e = &port->trace[port->trace_wr];
+    e->t_ms = now_ms(port);
+    e->kind = (uint8_t)kind; e->a = a; e->b = b; e->c = c;
+    port->trace_wr = (uint8_t)((port->trace_wr + 1u) % USBC_TRACE_LEN);
+    if (port->trace_n < USBC_TRACE_LEN)
+        port->trace_n++;
+}
+
+void usbc_port_trace_dump(usbc_port_t *port)
+{
+    static const char *kn[] = {"--", "TX", "TXOK", "TXFL", "RX", "HRST",
+                               "ST", "IRQ", "UNAT", "VBUS", "RDO", "CRCF"};
+    char line[48];
+    uint8_t n = port->trace_n > 40u ? 40u : port->trace_n;   /* tee-safe burst */
+    uint8_t i0 = (uint8_t)((port->trace_wr + USBC_TRACE_LEN - n) % USBC_TRACE_LEN);
+    uint32_t t0 = n ? port->trace[i0].t_ms : 0u;
+    /* WARNING level: the glue routes only >= WARNING to the telnet/OSD
+     * console (INFO is USB-serial only, unreachable while the adapter
+     * owns USB-C). Lines stay <= 33 chars for the 39-col console after
+     * the "USBC: " prefix. */
+    snprintf(line, sizeof line, "TRC s%u b%u k%u a%u n%u",
+             (unsigned)port->state, (unsigned)port->tx_busy,
+             (unsigned)port->tx_kind, (unsigned)port->tx_attempts, (unsigned)n);
+    log_message(port, USBC_LOG_WARNING, line);
+    for (uint8_t k = 0; k < n; k++) {
+        const usbc_trace_ev_t *e = &port->trace[(i0 + k) % USBC_TRACE_LEN];
+        snprintf(line, sizeof line, "+%06lu %-4s %02X %02X %02X",
+                 (unsigned long)(e->t_ms - t0),
+                 e->kind < 12u ? kn[e->kind] : "??", e->a, e->b, e->c);
+        log_message(port, USBC_LOG_WARNING, line);
+    }
+}
+
 static void set_dp_outputs(usbc_port_t *port, bool enable, bool hpd)
 {
     if (!enable)
@@ -64,6 +105,7 @@ static void set_usb_role(usbc_port_t *port, usbc_usb_role_t role)
 
 static void set_vbus(usbc_port_t *port, bool enable)
 {
+    trace_ev(port, USBC_TR_VBUS, (uint8_t)enable, 0u, 0u);
     if (port->hal.set_vbus_source != NULL)
         port->hal.set_vbus_source(port->hal.context, enable);
 }
@@ -77,6 +119,8 @@ static void reset_protocol(usbc_port_t *port)
     port->tx_kind = USBC_TX_NONE;
     port->tx_attempts = 0u;
     port->dp_mode_position = 0u;
+    port->dp_pin_assignment = 0u;
+    port->configure_sent = false;
     port->vdm_retry_count = 0u;
     port->expected_vdm_command = 0u;
     port->power_sink = false;
@@ -87,6 +131,7 @@ static void reset_protocol(usbc_port_t *port)
 
 static int enter_unattached(usbc_port_t *port)
 {
+    trace_ev(port, USBC_TR_UNATT, (uint8_t)port->state, 0u, 0u);
     set_dp_outputs(port, false, false);
     set_usb_role(port, USBC_USB_ROLE_OFF);
     set_vbus(port, false);
@@ -181,6 +226,8 @@ static int queue_message(usbc_port_t *port, uint8_t type,
     port->tx_message = message;
     port->tx_kind = kind;
     port->tx_busy = true;
+    port->tx_start_ms = now_ms(port);
+    trace_ev(port, USBC_TR_TX, (uint8_t)kind, port->tx_attempts, type);
     port->tx_attempts = 0u;
     return 0;
 }
@@ -216,8 +263,25 @@ static int send_vdm(usbc_port_t *port, uint16_t svid, uint8_t command,
                       (uint8_t)(extra_count + 1u), USBC_TX_VDM) != 0)
         return -1;
     port->expected_vdm_command = command;
+    if (command == USB_PD_SVDM_DP_CONFIGURE)
+        port->configure_sent = true;
     port->vdm_retry_count = 0u;
-    port->deadline_ms = now_ms(port) + port->config.vdm_response_timeout_ms;
+    /* MODE-OPERATION PATIENCE (2026-09-02, BolAAzuL trace with SVDM decode):
+     * Discover-x/Enter/Status ACK in 1-3 ms, but DP CONFIGURE draws no ACK
+     * inside our spec-paced 45 ms x 3 — the adapter brings its DP path up
+     * first and sends Attention ~1.9 s later, by which time we had fallen
+     * to USB-only. Enter/Status/Configure get a long per-try wait; total
+     * budget = (retries+1) x wait. Discover* keep the spec pace. */
+    /* CONFIGURE: the BolAAzuL never ACKs it, and its Attention (the real
+     * "configured" signal) comes ~1.8 s after the LAST Configure it saw —
+     * every resend restarted its bring-up, so retries defeated themselves
+     * (7 x 500 ms trace). Send once, then stay quiet; the Attention
+     * handler promotes to DP_ACTIVE. */
+    port->deadline_ms = now_ms(port) +
+        (command == USB_PD_SVDM_DP_CONFIGURE ? CONFIGURE_QUIET_MS :
+         (command == USB_PD_SVDM_ENTER_MODE ||
+          command == USB_PD_SVDM_DP_STATUS) ? MODE_OP_RESPONSE_MS
+                                            : port->config.vdm_response_timeout_ms);
     port->state = wait_state;
     return 0;
 }
@@ -258,7 +322,7 @@ static int send_dp_status(usbc_port_t *port)
 
 static int send_dp_configure(usbc_port_t *port)
 {
-    const uint32_t configure = usb_pd_dp_configure_vdo();
+    const uint32_t configure = usb_pd_dp_configure_vdo(port->dp_pin_assignment);
     return send_vdm(port, USB_PD_DISPLAYPORT_SID,
                     USB_PD_SVDM_DP_CONFIGURE, port->dp_mode_position,
                     &configure, 1u, USBC_STATE_VDM_WAIT_CONFIGURE);
@@ -303,15 +367,66 @@ static bool response_has_dp_svid(const usb_pd_message_t *message)
     return false;
 }
 
-static uint8_t find_dp_mode(const usb_pd_message_t *message)
+/* Pick the partner's DP sink mode and the pin assignment we will Configure.
+ * C and E are the SAME mux configuration (TUSB1046 CTLSEL=10, four DP
+ * lanes); E just omits USB 2.0 and is what a USB-C->DP cable/plug offers
+ * (found 2026-09-02 census: the cable was refused as "no pin C", so a2mega
+ * had never worked with a plain USB-C->DP cable). Prefer C when both are
+ * offered so every hub keeps its byte-identical negotiation. D/F (two
+ * lanes + USB3) need a different CTLSEL and stay unsupported here. */
+static uint8_t find_dp_mode(usbc_port_t *port, const usb_pd_message_t *message)
 {
     for (uint8_t i = 1u; i < message->data_count; ++i) {
         const uint32_t mode = message->data[i];
-        if (usb_pd_dp_mode_is_sink(mode) &&
-            (usb_pd_dp_partner_pin_assignments(mode) & USB_PD_DP_PIN_C) != 0u)
+        const uint8_t pins = usb_pd_dp_partner_pin_assignments(mode);
+        if (!usb_pd_dp_mode_is_sink(mode))
+            continue;
+        if (pins & USB_PD_DP_PIN_C) {
+            port->dp_pin_assignment = USB_PD_DP_PIN_C;
             return i;
+        }
+        if (pins & USB_PD_DP_PIN_E) {
+            port->dp_pin_assignment = USB_PD_DP_PIN_E;
+            return i;
+        }
     }
+    port->dp_pin_assignment = 0u;
     return 0u;
+}
+
+/* Adapter census: stash and log every DP mode VDO the partner advertised.
+ * Runs before mode selection so the data survives a USB-only fallback.
+ * Motivated by the a2p25 RBR x4 plan: C/E = 4-lane capable mux path,
+ * D/F = 2-lane + USB3 (an RBR-only source cannot do 1080p60 through it). */
+static void capture_dp_modes(usbc_port_t *port, const usb_pd_message_t *message)
+{
+    char line[96];
+    port->dp_modes_count = 0u;
+    for (uint8_t i = 1u; i < message->data_count; ++i) {
+        const uint32_t mode = message->data[i];
+        const uint8_t pins = usb_pd_dp_partner_pin_assignments(mode);
+        char letters[7];
+        uint8_t n = 0u;
+        if (pins & USB_PD_DP_PIN_A) letters[n++] = 'A';
+        if (pins & USB_PD_DP_PIN_B) letters[n++] = 'B';
+        if (pins & USB_PD_DP_PIN_C) letters[n++] = 'C';
+        if (pins & USB_PD_DP_PIN_D) letters[n++] = 'D';
+        if (pins & USB_PD_DP_PIN_E) letters[n++] = 'E';
+        if (pins & USB_PD_DP_PIN_F) letters[n++] = 'F';
+        letters[n] = '\0';
+        port->dp_modes_vdo[port->dp_modes_count++] = mode;
+        snprintf(line, sizeof(line),
+                 "PD census: mode %u vdo=%08lx pins=%s %s%s -> %s",
+                 (unsigned)i, (unsigned long)mode,
+                 n != 0u ? letters : "none",
+                 usb_pd_dp_mode_is_sink(mode) ? "sink" : "src-only",
+                 usb_pd_dp_mode_is_receptacle(mode) ? " recept" : " plug",
+                 (pins & (USB_PD_DP_PIN_C | USB_PD_DP_PIN_E)) != 0u
+                     ? "4-LANE OK"
+                     : (pins & (USB_PD_DP_PIN_D | USB_PD_DP_PIN_F)) != 0u
+                           ? "2-LANE ONLY" : "no DP pins");
+        log_message(port, USBC_LOG_INFO, line);
+    }
 }
 
 static int handle_vdm_response(usbc_port_t *port,
@@ -327,6 +442,18 @@ static int handle_vdm_response(usbc_port_t *port,
     header_vdo = message->data[0];
     command = usb_pd_svdm_command(header_vdo);
     command_type = usb_pd_svdm_command_type(header_vdo);
+    /* ACK-BEFORE-TXOK RACE (2026-09-02, Cable Matters HDMI 2.1 trace): a
+     * fast partner's response can reach us in the poll BEFORE our own
+     * TX_SUCCESS interrupt for the request it answers. With tx_busy still
+     * set, the next VDM send was refused, the ladder waited out its 45 ms
+     * timer and RE-SENT the previous Discover — and the retry's reply came
+     * back CRC-bad, ending in USB-only. The response itself proves our
+     * request was delivered: complete the pending transmit now (the later
+     * TX_SUCCESS is a no-op). */
+    if (port->tx_busy && port->tx_kind == USBC_TX_VDM &&
+        usb_pd_svdm_is_structured(header_vdo) &&
+        command == port->expected_vdm_command)
+        handle_tx_success(port);
     expected_svid = port->state <= USBC_STATE_VDM_WAIT_SVIDS
                         ? USB_PD_SID : USB_PD_DISPLAYPORT_SID;
 
@@ -358,9 +485,10 @@ static int handle_vdm_response(usbc_port_t *port,
         }
         return send_discover_modes(port);
     case USBC_STATE_VDM_WAIT_MODES:
-        port->dp_mode_position = find_dp_mode(message);
+        capture_dp_modes(port, message);
+        port->dp_mode_position = find_dp_mode(port, message);
         if (port->dp_mode_position == 0u) {
-            fall_back_to_usb_only(port, "Partner has no DP sink mode with pin C");
+            fall_back_to_usb_only(port, "Partner has no DP sink mode with pin C/E");
             return 0;
         }
         return send_enter_mode(port);
@@ -389,6 +517,11 @@ static int handle_received_message(usbc_port_t *port,
     const uint8_t count = message->data_count;
     const uint8_t type = usb_pd_header_type(message->header);
     const uint8_t message_id = usb_pd_header_id(message->header);
+    trace_ev(port, USBC_TR_RX, type, message_id,
+             (type == USB_PD_DATA_VENDOR && count != 0u)
+                 ? (uint8_t)(usb_pd_svdm_command(message->data[0]) |
+                             (usb_pd_svdm_command_type(message->data[0]) << 5))
+                 : message->data_count);
 
     if (count == 0u && type == USB_PD_CTRL_GOOD_CRC)
         return 0;
@@ -399,6 +532,7 @@ static int handle_received_message(usbc_port_t *port,
         port->tx_busy = false;
         port->tx_kind = USBC_TX_NONE;
         port->dp_mode_position = 0u;
+        port->dp_pin_assignment = 0u;
         if (port->power_sink) {
             port->data_dfp = false;
             fusb302_set_data_role(&port->fusb302, false);
@@ -416,6 +550,12 @@ static int handle_received_message(usbc_port_t *port,
     port->have_last_rx_message_id = true;
 
     if (count == 1u && type == USB_PD_DATA_REQUEST) {
+        /* trace the RDO: a = objpos<<4 | mismatch, b = op mA/20, c = max mA/20 */
+        trace_ev(port, USBC_TR_RDO,
+                 (uint8_t)((((message->data[0] >> 28) & 0x7u) << 4) |
+                           (usb_pd_rdo_capability_mismatch(message->data[0]) ? 1u : 0u)),
+                 (uint8_t)(usb_pd_rdo_operating_ma(message->data[0]) / 20u),
+                 (uint8_t)(usb_pd_rdo_maximum_ma(message->data[0]) / 20u));
         if (usb_pd_fixed_rdo_is_acceptable(message->data[0],
                                            port->config.source_milliamps)) {
             port->state = USBC_STATE_SOURCE_ACCEPT_SENT;
@@ -521,13 +661,26 @@ static int handle_received_message(usbc_port_t *port,
         const bool mode_entered =
             port->state == USBC_STATE_VDM_WAIT_STATUS ||
             port->state == USBC_STATE_VDM_WAIT_CONFIGURE ||
-            port->state == USBC_STATE_DP_ACTIVE;
+            port->state == USBC_STATE_DP_ACTIVE ||
+            (port->state == USBC_STATE_USB_ONLY && port->configure_sent);
         if (mode_entered && usb_pd_svdm_is_structured(vdm) &&
             usb_pd_svdm_svid(vdm) == USB_PD_DISPLAYPORT_SID &&
             command == USB_PD_SVDM_ATTENTION && count >= 2u) {
             if (usb_pd_svdm_object_position(vdm) != port->dp_mode_position)
                 return 0;
             apply_hpd_status(port, message->data[1]);
+            if (port->state == USBC_STATE_VDM_WAIT_CONFIGURE ||
+                port->state == USBC_STATE_USB_ONLY) {
+                /* The partner is already reporting DP status for the
+                 * configured mode: the Configure took effect even though
+                 * its ACK is missing/late (BolAAzuL). Promote instead of
+                 * timing out into USB-only. */
+                set_dp_outputs(port, true, port->dp_hpd_level);
+                port->state = USBC_STATE_DP_ACTIVE;
+                port->expected_vdm_command = 0u;
+                log_message(port, USBC_LOG_WARNING,
+                            "DP Configure: Attention before ACK; active");
+            }
             return 0;
         }
         return handle_vdm_response(port, message);
@@ -554,6 +707,9 @@ static int drain_receive_fifo(usbc_port_t *port)
 static void handle_tx_success(usbc_port_t *port)
 {
     const usbc_tx_kind_t kind = port->tx_kind;
+    if (!port->tx_busy)
+        return;   /* already completed by a response (see handle_vdm_response) */
+    trace_ev(port, USBC_TR_TXOK, (uint8_t)kind, port->tx_attempts, 0u);
     port->tx_busy = false;
     port->tx_kind = USBC_TX_NONE;
     port->tx_message_id = (uint8_t)((port->tx_message_id + 1u) & 0x7u);
@@ -579,6 +735,8 @@ static void handle_tx_success(usbc_port_t *port)
 
 static int handle_tx_failure(usbc_port_t *port)
 {
+    trace_ev(port, USBC_TR_TXFAIL, (uint8_t)port->tx_kind, port->tx_attempts,
+             (uint8_t)port->tx_busy);
     if (!port->tx_busy)
         return 0;
     if (++port->tx_attempts <= 2u)
@@ -614,7 +772,7 @@ static int retry_vdm_for_state(usbc_port_t *port)
                         &extra, 1u, state);
     }
     if (state == USBC_STATE_VDM_WAIT_CONFIGURE) {
-        extra = usb_pd_dp_configure_vdo();
+        extra = usb_pd_dp_configure_vdo(port->dp_pin_assignment);
         return send_vdm(port, USB_PD_DISPLAYPORT_SID,
                         USB_PD_SVDM_DP_CONFIGURE, port->dp_mode_position,
                         &extra, 1u, state);
@@ -783,7 +941,11 @@ static int service_state_timer(usbc_port_t *port)
     case USBC_STATE_VDM_WAIT_STATUS:
     case USBC_STATE_VDM_WAIT_CONFIGURE:
         if (!port->tx_busy && time_reached(now, port->deadline_ms)) {
-            if (port->vdm_retry_count < port->config.vdm_retries) {
+            if (port->vdm_retry_count <
+                (port->state == USBC_STATE_VDM_WAIT_CONFIGURE ? 1u :   /* one retry at 3 s: lost-ACK recovery for good adapters */
+                 (port->state == USBC_STATE_VDM_WAIT_ENTER ||
+                  port->state == USBC_STATE_VDM_WAIT_STATUS) ? MODE_OP_RETRIES
+                                                             : port->config.vdm_retries)) {
                 const uint8_t next_retry = (uint8_t)(port->vdm_retry_count + 1u);
                 const int rc = retry_vdm_for_state(port);
                 port->vdm_retry_count = next_retry;
@@ -931,11 +1093,14 @@ static int stale_session_guard(usbc_port_t *port, const char *why)
 static int begin_hard_reset_recovery(usbc_port_t *port)
 {
     int rc;
+    trace_ev(port, USBC_TR_HRST, (uint8_t)port->state, (uint8_t)port->tx_busy,
+             (uint8_t)port->tx_kind);
 
     set_dp_outputs(port, false, false);
     set_usb_role(port, USBC_USB_ROLE_OFF);
     set_vbus(port, false);
     rc = fusb302_set_pd_receiver(&port->fusb302, false);
+    (void)fusb302_pd_reset(&port->fusb302);   /* un-wedge the PD engine */
     reset_protocol(port);
     port->state = USBC_STATE_HARD_RESET_OFF;
     port->deadline_ms = now_ms(port) + port->config.hard_reset_off_ms;
@@ -955,6 +1120,29 @@ int usbc_port_task(usbc_port_t *port)
     rc = fusb302_poll_events(&port->fusb302, &events);
     if (rc != 0)
         return rc;
+    if ((uint8_t)port->state != port->trace_last_state) {
+        trace_ev(port, USBC_TR_STATE, port->trace_last_state,
+                 (uint8_t)port->state, (uint8_t)port->tx_busy);
+        port->trace_last_state = (uint8_t)port->state;
+    }
+    if (events.bits != 0u)
+        trace_ev(port, USBC_TR_IRQ, (uint8_t)events.bits,
+                 (uint8_t)(events.bits >> 8), (uint8_t)port->tx_busy);
+    if ((events.bits & FUSB302_EVENT_RX_CRC_FAIL) != 0u)
+        trace_ev(port, USBC_TR_CRCF, port->fusb302.bad_frame[0],
+                 port->fusb302.bad_frame[1], port->fusb302.bad_frame[2]);
+    /* TX completion watchdog: a transmit that yields neither TX_SUCCESS nor
+     * RETRY_FAIL within TX_WEDGE_MS (3 hw retries take ~25 ms) means the
+     * PD engine is wedged (seen after a partner Hard Reset). Reset it and
+     * fail the message so the state machine's timers can run again. */
+    if (port->tx_busy && (uint32_t)(now_ms(port) - port->tx_start_ms) > TX_WEDGE_MS) {
+        trace_ev(port, USBC_TR_TXFAIL, (uint8_t)port->tx_kind, 0xEEu, 1u);
+        (void)fusb302_pd_reset(&port->fusb302);
+        (void)fusb302_set_pd_receiver(&port->fusb302, true);
+        port->tx_busy = false;
+        port->tx_kind = USBC_TX_NONE;
+        port->deadline_ms = now_ms(port);      /* let the state timer act now */
+    }
 
     if ((events.bits & FUSB302_EVENT_FAULT) != 0u) {
         log_message(port, USBC_LOG_ERROR, "FUSB302 VCONN/thermal fault");
@@ -968,11 +1156,13 @@ int usbc_port_task(usbc_port_t *port)
     if ((events.bits & FUSB302_EVENT_HARD_RESET) != 0u && port->power_sink) {
         /* Source will drop and restore VBUS; restart the sink ladder. */
         set_dp_outputs(port, false, false);
+        (void)fusb302_pd_reset(&port->fusb302);
         port->tx_message_id = 0u;
         port->have_last_rx_message_id = false;
         port->tx_busy = false;
         port->tx_kind = USBC_TX_NONE;
         port->dp_mode_position = 0u;
+        port->dp_pin_assignment = 0u;
         port->data_dfp = false;
         fusb302_set_data_role(&port->fusb302, false);
         port->state = USBC_STATE_DEVICE_WAIT_VBUS;

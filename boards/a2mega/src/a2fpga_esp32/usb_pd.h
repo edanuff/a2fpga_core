@@ -55,7 +55,12 @@ enum usb_pd_svdm_command {
 #define USB_PD_SID             UINT16_C(0xff00)
 #define USB_PD_DISPLAYPORT_SID UINT16_C(0xff01)
 
+#define USB_PD_DP_PIN_A UINT8_C(0x01)
+#define USB_PD_DP_PIN_B UINT8_C(0x02)
 #define USB_PD_DP_PIN_C UINT8_C(0x04)
+#define USB_PD_DP_PIN_D UINT8_C(0x08)
+#define USB_PD_DP_PIN_E UINT8_C(0x10)
+#define USB_PD_DP_PIN_F UINT8_C(0x20)
 #define USB_PD_DP_SIGNAL_V13 UINT8_C(0x01)
 #define USB_PD_DP_MODE_SINK UINT8_C(0x01)
 
@@ -110,11 +115,32 @@ static inline bool usb_pd_fixed_rdo_is_acceptable(uint32_t rdo,
     const uint16_t operating_ma = (uint16_t)(((rdo >> 10) & 0x3ffu) * 10u);
     const uint16_t maximum_ma = (uint16_t)((rdo & 0x3ffu) * 10u);
 
+    /* 2026-09-02 (BolAAzuL / Cable Matters census dig): the old rule also
+     * required maximum_ma <= max_milliamps, which rejected every sink that
+     * sets Capability Mismatch — per the PD spec such a sink keeps
+     * Operating Current within our PDO and reports what it WANTS in Max
+     * Operating Current; the source evaluates the operating current only.
+     * The rejected adapters answered our Reject with a Hard Reset and the
+     * attach looped forever. Max is now informational (traced, not
+     * enforced). */
+    (void)maximum_ma;
     return object_position == 1u &&
            operating_ma != 0u &&
-           maximum_ma >= operating_ma &&
-           operating_ma <= max_milliamps &&
-           maximum_ma <= max_milliamps;
+           operating_ma <= max_milliamps;
+}
+
+/* RDO field decode for the PD trace (Request handling). */
+static inline uint16_t usb_pd_rdo_operating_ma(uint32_t rdo)
+{
+    return (uint16_t)(((rdo >> 10) & 0x3ffu) * 10u);
+}
+static inline uint16_t usb_pd_rdo_maximum_ma(uint32_t rdo)
+{
+    return (uint16_t)((rdo & 0x3ffu) * 10u);
+}
+static inline bool usb_pd_rdo_capability_mismatch(uint32_t rdo)
+{
+    return (rdo & (UINT32_C(1) << 26)) != 0u;
 }
 
 static inline uint32_t usb_pd_svdm_header(uint16_t svid,
@@ -168,16 +194,23 @@ static inline bool usb_pd_dp_mode_is_sink(uint32_t mode_vdo)
            (mode_vdo & 0x3u) == 0x3u;
 }
 
+static inline bool usb_pd_dp_mode_is_receptacle(uint32_t mode_vdo)
+{
+    return (mode_vdo & (UINT32_C(1) << 6)) != 0u;
+}
+
 static inline uint32_t usb_pd_dp_status_vdo(bool enabled)
 {
     /* We are connected as DFP_D; no multifunction preference. */
     return ((uint32_t)(enabled ? 1u : 0u) << 3) | UINT32_C(1);
 }
 
-static inline uint32_t usb_pd_dp_configure_vdo(void)
+static inline uint32_t usb_pd_dp_configure_vdo(uint8_t pin_assignment)
 {
-    /* Pin C, DP v1.3 signaling, configure the partner as UFP_D. */
-    return ((uint32_t)USB_PD_DP_PIN_C << 8) |
+    /* Selected pin assignment (one bit: C or E — both are the four-lane
+     * mux configuration; E is what a USB-C->DP cable/plug offers, since
+     * it carries no USB 2.0), DP v1.3 signaling, partner as UFP_D. */
+    return ((uint32_t)pin_assignment << 8) |
            ((uint32_t)USB_PD_DP_SIGNAL_V13 << 2) |
            UINT32_C(2);
 }

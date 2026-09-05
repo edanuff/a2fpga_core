@@ -296,6 +296,13 @@ extern "C" void usbc_hpd_retrain(void)
     digitalWrite(PIN_DP_HPD_OUT, HIGH);
 }
 
+/* Telnet 't': PD event trace (TX/RX/IRQ/state ring) — the PD-silent dig. */
+extern "C" void usbc_trace_dump_log(void)
+{
+    if (!s_running) { osd_log("trace: PD STACK NOT RUNNING"); return; }
+    usbc_port_trace_dump(&s_port);
+}
+
 /* Telnet 'u': raw FUSB302B status snapshot for in-slot attach debugging. */
 extern "C" void usbc_fusb_dump_log(void)
 {
@@ -546,6 +553,46 @@ extern "C" void usbc_pd_status_log(void)
             s_port.polarity == FUSB302_POLARITY_CC2 ? 2 : 1,
             (int)s_hpd_level, (int)s_vbus_on, (int)s_dp_mux_on,
             (int)s_fpga_dp_en);
+}
+
+/* Adapter lane census (telnet 'd'): decode the DP mode VDOs from the last
+ * Discover Modes ACK. Data survives detach on purpose — plug the adapter,
+ * unplug it, dump at leisure. Verdict semantics are the a2p25 RBR x4 plan's:
+ * pin assignment C/E means the mux path carries 4 lanes (1080p60 from an
+ * RBR-only source works); D/F means 2 lanes + USB3 (720p60 fallback). Note
+ * this reads the MUX gate only — a DP->HDMI converter's own DPCD
+ * MAX_LANE_COUNT (the second gate) is not visible from the PD layer. */
+extern "C" void usbc_modes_census_log(void)
+{
+    if (!s_running) {
+        osd_log("census: PD STACK NOT RUNNING");
+        return;
+    }
+    if (s_port.dp_modes_count == 0u) {
+        osd_log("census: no Discover Modes seen yet");
+        osd_log("census: attach a DP alt-mode partner");
+        return;
+    }
+    osd_log("census: %u DP mode(s), last partner:", s_port.dp_modes_count);
+    for (uint8_t i = 0u; i < s_port.dp_modes_count; ++i) {
+        const uint32_t mode = s_port.dp_modes_vdo[i];
+        const uint8_t pins = usb_pd_dp_partner_pin_assignments(mode);
+        char letters[7];
+        uint8_t n = 0;
+        if (pins & USB_PD_DP_PIN_A) letters[n++] = 'A';
+        if (pins & USB_PD_DP_PIN_B) letters[n++] = 'B';
+        if (pins & USB_PD_DP_PIN_C) letters[n++] = 'C';
+        if (pins & USB_PD_DP_PIN_D) letters[n++] = 'D';
+        if (pins & USB_PD_DP_PIN_E) letters[n++] = 'E';
+        if (pins & USB_PD_DP_PIN_F) letters[n++] = 'F';
+        letters[n] = '\0';
+        osd_log("  vdo=%08lx pins=%s %s", (unsigned long)mode,
+                n != 0 ? letters : "-",
+                (pins & (USB_PD_DP_PIN_C | USB_PD_DP_PIN_E)) != 0u
+                    ? "4-LANE OK"
+                    : (pins & (USB_PD_DP_PIN_D | USB_PD_DP_PIN_F)) != 0u
+                          ? "2-LANE ONLY" : "no DP pins");
+    }
 }
 
 #endif /* A2MEGA_HAS_USBC_PD */

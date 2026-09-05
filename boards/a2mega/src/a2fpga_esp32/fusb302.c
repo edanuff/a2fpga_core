@@ -58,6 +58,7 @@ enum {
     CONTROL3_RETRY_COUNT_3   = 3u << 1,
 
     RESET_SOFTWARE = 1u << 0,
+    RESET_PD       = 1u << 1,   /* PD_RESET: restart the BMC/PD engine only */
     POWER_ALL      = 0x0f,
 
     STATUS0_VBUS_OK = 1u << 7,
@@ -393,10 +394,25 @@ int fusb302_poll_events(fusb302_t *device, fusb302_events_t *events)
     if ((interrupt_main & INTERRUPT_CRC) != 0u) {
         if ((rc = read_reg(device, REG_STATUS0, &status0)) != 0)
             return rc;
-        if ((status0 & STATUS0_CRC_OK) != 0u)
-            events->bits |= FUSB302_EVENT_RX_MESSAGE;
-        else
-            (void)update_reg(device, REG_CONTROL1, 0u, CONTROL1_RX_FLUSH);
+        /* ROOT CAUSE (2026-09-02, Cable Matters 8K HDMI / PD3.1-class
+         * controller): the old code FLUSHED the RX FIFO whenever CRC_CHK
+         * read 0 here. But CRC_CHK is a snapshot of the LAST packet's
+         * check, and a fast partner sends its response within ~1 ms of
+         * its GoodCRC — our poll read STATUS0 while that second frame was
+         * still arriving, saw CRC_CHK=0 ("not yet valid"), and flushed the
+         * FIFO: the valid GoodCRC (forensics: token E0, header 0x0841 with
+         * our message IDs) AND the response behind it were discarded, 3/3
+         * Discover SVIDs -> USB-only. Slow hub MCUs never hit it; the
+         * BolAAzuL/VMM7100 hit it only on retries. The FUSB302 does not
+         * deposit bad-CRC packets in the FIFO, and fusb302_receive()
+         * rejects/flushes any frame whose SOP token is invalid, so: a
+         * non-empty FIFO is simply a receive event. CRC_CHK=0 is now
+         * trace-only (CRCF event with the frame head, for the record). */
+        events->bits |= FUSB302_EVENT_RX_MESSAGE;
+        if ((status0 & STATUS0_CRC_OK) == 0u) {
+            events->bits |= FUSB302_EVENT_RX_CRC_FAIL;
+            device->bad_frame[0] = 0u; device->bad_frame[1] = 0u; device->bad_frame[2] = 0u;
+        }
     }
     if ((interrupt_b & INTERRUPTB_GOOD_CRC_SENT) != 0u)
         events->bits |= FUSB302_EVENT_RX_MESSAGE;
@@ -477,6 +493,22 @@ int fusb302_receive(fusb302_t *device, usb_pd_message_t *message)
                            ((uint32_t)tail[n + 3u] << 24);
     }
     return 0;
+}
+
+/* PD engine reset after a Hard Reset (sent or received): the FUSB302's
+ * BMC/PD block otherwise wedges — observed 2026-09-02 (Cable Matters):
+ * the next transmit after a partner Hard Reset produced neither TX_SUCCESS
+ * nor RETRY_FAIL, ever, parking the stack with tx_busy set. PD_RESET
+ * restarts the engine; both FIFOs are flushed. */
+int fusb302_pd_reset(fusb302_t *device)
+{
+    int rc = write_reg(device, REG_RESET, RESET_PD);
+    if (rc != 0)
+        return rc;
+    rc = update_reg(device, REG_CONTROL0, 0u, CONTROL0_TX_FLUSH);
+    if (rc != 0)
+        return rc;
+    return update_reg(device, REG_CONTROL1, 0u, CONTROL1_RX_FLUSH);
 }
 
 int fusb302_transmit(fusb302_t *device, const usb_pd_message_t *message)

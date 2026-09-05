@@ -94,6 +94,22 @@ typedef enum {
     USBC_TX_ACCEPT_DR_SWAP,  /* sink: Accept of the partner's DR_Swap */
 } usbc_tx_kind_t;
 
+/* PD event trace (2026-09-02, PD-silent adapter dig): a fixed ring of the
+ * last USBC_TRACE_LEN protocol events — TX/TXOK/TXFAIL, RX message types,
+ * FUSB302 interrupt bits, hard resets, VBUS toggles, state transitions —
+ * dumped on demand (telnet 't'). Exists to answer "did WE stop talking or
+ * did the partner never answer" without a PD analyzer on the SBU lines. */
+#define USBC_TRACE_LEN 96u
+typedef enum {
+    USBC_TR_NONE = 0, USBC_TR_TX, USBC_TR_TXOK, USBC_TR_TXFAIL, USBC_TR_RX,
+    USBC_TR_HRST, USBC_TR_STATE, USBC_TR_IRQ, USBC_TR_UNATT, USBC_TR_VBUS,
+    USBC_TR_RDO, USBC_TR_CRCF
+} usbc_trace_kind_t;
+typedef struct {
+    uint32_t t_ms;
+    uint8_t kind, a, b, c;
+} usbc_trace_ev_t;
+
 typedef struct {
     fusb302_t fusb302;
     usbc_port_hal_t hal;
@@ -113,9 +129,24 @@ typedef struct {
     uint32_t vbus_seen_ms;         /* VBUS-while-unattached debounce */
 
     uint8_t dp_mode_position;
+    /* PD event trace ring (see usbc_trace_ev_t) */
+    usbc_trace_ev_t trace[USBC_TRACE_LEN];
+    uint8_t trace_wr, trace_n;
+    uint8_t trace_last_state;
+    uint8_t dp_pin_assignment;     /* USB_PD_DP_PIN_C or _E chosen for Configure */
+    bool    configure_sent;        /* a DP_CONFIGURE went out this attach (late-Attention gate) */
+    uint32_t tx_start_ms;          /* TX completion watchdog */
     uint8_t vdm_retry_count;
     uint8_t expected_vdm_command;
     bool dp_hpd_level;
+
+    /* Adapter census: raw DP mode VDOs from the last Discover Modes ACK,
+     * kept across mode selection (even when we fall back to USB-only) so
+     * the lane capability of hubs/adapters can be dumped on demand.
+     * Motivated by the a2p25 RBR x4 plan: pin assignment C/E = 4-lane,
+     * D/F = 2-lane + USB3 (no 1080p60 from an RBR-only source). */
+    uint32_t dp_modes_vdo[USB_PD_MAX_DATA_OBJECTS];
+    uint8_t dp_modes_count;
 
     /* Role tracking (power role fixed at attach; data role can DR_Swap). */
     bool power_sink;         /* true = partner sources VBUS (monitor) */
@@ -151,6 +182,8 @@ int usbc_port_task(usbc_port_t *port);
  * drain-only hub wedge class (test log row 57), which needs its caps
  * drained — this clears everything a detach clears. */
 int usbc_port_virtual_replug(usbc_port_t *port, uint32_t hold_ms);
+/* Dump the PD event trace (oldest first) through the HAL log callback. */
+void usbc_port_trace_dump(usbc_port_t *port);
 
 const char *usbc_port_state_name(usbc_state_t state);
 
