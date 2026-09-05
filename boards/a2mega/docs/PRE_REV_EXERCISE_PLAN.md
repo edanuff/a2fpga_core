@@ -124,7 +124,8 @@ regardless of CPU presence).
   hardware status (ribbon cable + socket plug — exists? needs
   fabrication?). Deliverable: `GS_SOCKET_INTERFACE.md` — **delivered
   2026-09-05 as `gs_socket_65816_scoping.md`** (C0 review + C1 inventory +
-  timing budget + sim/bench plan; two 1.0a4 findings).
+  timing budget + sim/bench plan; ribbon interposer exists, 1:1 mapping
+  verified; one optional 1.0a4 note).
   signal-by-signal.
 - C1. **RTL inventory:** P65C816 core provenance/completeness;
   wrapper review against real 65816 bus timing — bank byte multiplexed

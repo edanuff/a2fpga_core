@@ -19,7 +19,8 @@ are the TransWarp endgame in `hyperram_scenarios.md`).
   138B design does not use, behind proper dual-supply level shifters
   (74ALVC164245, 3.3 V ↔ 5 V) with the correct directions and with every
   enable pulled to "disabled" while the FPGA is unconfigured. Signal-by-
-  signal review in §2. Two findings for the 1.0a4 requirements list (§6).
+  signal review in §2. The ribbon interposer exists and its 1:1 mapping
+  checks out pin for pin (§2.1). One optional note for 1.0a4 (§6).
 - **The CPU core exists and is verified elsewhere.** `hdl/twgs/65C816/` is
   the P65C816 from Apple-IIgs_MiSTer (srg320's SNES core, IIgs-adapted by
   Alan Steremberg), byte-identical to the MiSTer tree apart from the license
@@ -85,27 +86,41 @@ Source of truth: the a2-mega KiCad netlist (sheet "GS 65816 Connector",
 2026-07-26 order). Refdes below are the schematic's (U13/U14/U15/U16; the
 older PDF export shows U8/U10/U11 for the same parts).
 
-### 2.1 Header J5 (40-pin, 2.54 mm) — what the ribbon carries
+### 2.1 Header J5 (40-pin IDC, 2.54 mm) — what the ribbon carries
 
-| J5 pin | Net | Card side | Notes |
-|---|---|---|---|
-| 1 | GS_VP | U15 open-drain out + 549 Ω to +5 V | output to motherboard |
-| 2 | GS_RESET | U13 port-1 input | motherboard /RES, input to us |
-| 3 | GS_RDY | U13 port-1 input **and** U15 open-drain out | bidirectional per 65816 |
-| 5 | GS_ABORT | U13 port-1 input | |
-| 7 | GS_IRQ | U13 port-1 input | |
-| 8 | GS_PH2 | 27 Ω → U13 port-1 → 27 Ω → FPGA | the bus clock |
-| 10 | GS_BE | U13 port-1 input | |
-| 11 | GS_NMI | U13 port-1 input | |
-| 14 | GS_RW | U16 SN74LV1T125 output | 3.3→5 V buffer, OE = ADDR_~OE |
-| 15 | BUS_5V | slot +5 V rail, upstream of the LM74700 ideal diode | see finding F2 |
-| 16,18,…,30 | GS_D0–D7 | 47 Ω series → U13 port-2 | bidirectional |
-| 17,19,…,39 + 32–38 even | GS_A0–A15 | 75 Ω series → U14 | output only |
-| 40 | GND | | |
-| **4, 6, 9, 12, 13** | **VDA, MX, MLB, E, VPA** | **not connected** | labels only |
+**Interposer (ed, 09-05): exists.** It is an off-the-shelf 40-way ribbon
+with a crimp IDC header on the card end and a crimp DIP-40 plug on the
+motherboard end, deliberately a plain 1:1 cable. A standard IDC→DIP ribbon
+maps header odd pins down one side of the DIP and even pins up the other
+(IDC 2k−1 → DIP k, IDC 2k → DIP 41−k). Applied to J5 that lands every net
+on its W65C816 pin — J5 was laid out for exactly this cable:
 
-The interposer mapping from J5 to the 40-pin DIP socket is not in this
-repo (ribbon/plug hardware status is an open question, §8).
+| J5 pin | DIP-40 pin | 65C816 signal | Net | Card side | Notes |
+|---|---|---|---|---|---|
+| 1 | 1 | VPB | GS_VP | U15 open-drain out + 549 Ω to +5 V | output to motherboard |
+| 2 | 40 | RESB | GS_RESET | U13 port-1 input | motherboard /RES, input to us |
+| 3 | 2 | RDY | GS_RDY | U13 port-1 input **and** U15 open-drain out | bidirectional per 65816 |
+| 4 | 39 | VDA | — | **not connected** | |
+| 5 | 3 | ABORTB | GS_ABORT | U13 port-1 input | |
+| 6 | 38 | M/X | — | **not connected** | |
+| 7 | 4 | IRQB | GS_IRQ | U13 port-1 input | |
+| 8 | 37 | PHI2 | GS_PH2 | 27 Ω → U13 port-1 → 27 Ω → FPGA | the bus clock |
+| 9 | 5 | MLB | — | **not connected** | |
+| 10 | 36 | BE | GS_BE | U13 port-1 input | |
+| 11 | 6 | NMIB | GS_NMI | U13 port-1 input | |
+| 12 | 35 | E | — | **not connected** | |
+| 13 | 7 | VPA | — | **not connected** | |
+| 14 | 34 | RWB | GS_RW | U16 SN74LV1T125 output | 3.3→5 V buffer, OE = ADDR_~OE |
+| 15 | 8 | VDD | BUS_5V | slot +5 V rail, upstream of the LM74700 | socket VDD = the motherboard's own 5 V rail; see F2 |
+| 16,18,…,30 | 33,32,…,26 | D0–D7 | GS_D0–D7 | 47 Ω series → U13 port-2 | bidirectional |
+| 17,19,…,39 | 9,10,…,20 | A0–A11 | GS_A0–A11 | 75 Ω series → U14 | output only |
+| 32,34,36,38 | 25,24,23,22 | A15,A14,A13,A12 | GS_A15–A12 | 75 Ω series → U14 | output only |
+| 40 | 21 | VSS | GND | | the ribbon's only ground return |
+
+Signal-integrity note: one ground conductor for 39 signals is the classic
+ribbon crosstalk case, but it is also exactly what the TransWarp GS cable
+was, the edges are series-terminated (75/47/27 Ω), and the bus is
+2.86 MHz. Keep the cable short; C3/C4 look at PH2 and D0 with a scope.
 
 ### 2.2 Level shifters and enables
 
@@ -337,12 +352,11 @@ a 216 MHz clock (≤ 4.6 ns after the edge). 1.0a4: §6, finding F1.
   RDY_OUT is a slow open-drain output and A6/A7 are plain outputs, so
   neither swap costs anything. Decide at the 1.0a4 pin shuffle ("1.0a4
   moves GS nets again", btb pinout notes).
-- **F2 — J5 pin 15 = BUS_5V.** Confirm intent: it is the slot +5 V rail
-  upstream of the LM74700, so with the port powered from USB-C VBUS the
-  socket header does **not** get 5 V (the ideal diode blocks backfeed) —
-  fine for a socket that only needs the motherboard's own VDD, but if the
-  ribbon ever supplies socket VDD from the card this is the wrong node.
-  Ties into the item-4b power-path DMM plan.
+- **F2 — resolved, no change.** J5 pin 15 is DIP pin 8 = VDD, i.e. the
+  motherboard's own 5 V at the socket, tied to BUS_5V which is that same
+  rail arriving via the slot fingers, upstream of the LM74700. No current
+  flows in normal use; with the card USB-powered and the machine off the
+  ideal diode still blocks any backfeed into the socket. Correct as built.
 - **F3 (optional)** — bring VDA/VPA to the FPGA if C3 shows the motherboard
   actually loads them; today they are header-only.
 
@@ -388,9 +402,8 @@ Every hardware result gets a `test_log.md` row; builds carry provenance.
 
 ## 8. Open questions for ed (before RTL)
 
-1. **Interposer hardware:** does the J5 ribbon + DIP-40 plug exist, and
-   what is its pin mapping? If it needs fabrication, that is on the
-   critical path ahead of C3.
+1. ~~**Interposer hardware**~~ — **answered 09-05:** exists, plain 1:1
+   IDC→DIP ribbon; mapping verified in §2.1.
 2. **Test machine:** the GS used for the a2mega work has a TransWarp GS
    in it (the TWGS is in the same socket). The drop-in test needs the TWGS
    out and the machine at stock — is that the ROM 01 or the ROM 03 unit,
