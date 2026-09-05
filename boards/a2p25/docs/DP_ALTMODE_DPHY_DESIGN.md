@@ -129,7 +129,7 @@ GW5A-25 fabric                         (carrier board)
 
 AUX  : FPGA LVDS25 + pulldown front-end (a2mega circuit) → routed THROUGH
        DP130 AUX pass-through (keeps auto-snoop option) → TUSB1046 → connector
-HPD  : connector → TUSB1046 → DP130 HPD pass → ESP32 GPIO (a2mega model)
+HPD  : PD-virtual (no wire in alt mode): ESP32 GPIO → DP130 HPD_SNK → HPD_SRC → FPGA
 ```
 
 ### AUX and HPD
@@ -150,10 +150,28 @@ pins), reusing the a2mega stack verbatim:
   VOD/PE. Routing around it would forfeit auto mode; through keeps both.
   Config note: DP130 AUX pins double as DDC in its DP++/TMDS mode (CAD_SNK
   pin) — strap for DP mode permanently, we can never do DP++.
-- **HPD**: connector → (TUSB1046, Option A) → DP130 HPD pass (~50 ns, handles
-  termination) → ESP32 GPIO → fabric (a2mega model). Flap-tolerant handling
-  required — sleeping-monitor flap storms reproduce identically here; IRQ_HPD
-  (0.5–1 ms) vs disconnect (>2 ms) discrimination lives in firmware.
+- **HPD/CAD pin plan — CORRECTED (09-05; earlier "connector→TUSB→DP130 HPD
+  pass" was wrong: USB-C alt mode has NO physical HPD wire — HPD arrives in
+  PD Status/Attention VDMs; TUSB HPDIN stays NC/overridden as on a2mega):**
+  - **HPD_SNK (11): NEVER NC** — DS §9.3.2: HPD_SNK low for tT(HPD)=400 ms
+    → DP130 enters STANDBY (internal 130 k pulldown ⇒ NC = parked forever,
+    main link dead). Option A: **ESP32 GPIO drives it** from the PD-virtual
+    HPD (existing set_tusb_hpd-style callback retargets here). Option B:
+    DP jack HPD pin → HPD_SNK directly (5 V-tolerant, internal pulldown =
+    correct termination, Fig 22 verbatim). DNP 2 k pullup placeholder kept.
+    IRQ_HPD pulses (0.5–1 ms) pass through with semantics intact.
+  - **HPD_SRC (9): route to the FPGA's HPD input** (3.3 V logic, 150 Ω
+    internal series) — hardware now does the ESP32→fabric HPD forwarding the
+    a2mega did in firmware; ESP32 may optionally snoop the same node.
+  - **CAD_SNK (10): 1 MΩ to GND** (DS-recommended strap form) = DP mode,
+    sampled while HPD high; DNP 2 k pullup placeholder (§10.2.2.2). High
+    would select TMDS mode (fixed 600 mVpp, training disabled) — wrong strap
+    changes the whole link discipline.
+  - **CAD_SRC (8): NC** — the only true NC (drives a GPU CAD input we don't
+    have; DP++ impossible anyway).
+  Flap-tolerant handling still required — sleeping-monitor flap storms
+  reproduce identically; IRQ_HPD (0.5–1 ms) vs disconnect (>2 ms)
+  discrimination lives in firmware.
 - **Per option**: A — AUX rides USB-C SBU1/SBU2, TUSB1046 flips SBU with
   orientation; PD layer never carries AUX. B — DP130 pass straight to jack
   pins 15/17. Passive-DP++ detection = AUX transactions time out (no DPCD
