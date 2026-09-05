@@ -184,3 +184,67 @@ benches; (D) the AUX ladder one-hot re-encode, which now bounds clk100 on both d
 
 Correction to the session log above: the full-chain harness compiles only the packer/FIFO/MSA/SDP files, so
 cone (j)'s idle-inserter half was bench-proven on the IIgs, not harness-proven; tb_gowin_lane now covers it.
+
+## 138B durability (2026-09-05, branch claude/timing-r2-138b-durable)
+
+ed: the 65816 work will likely be 138B-only, so the 138B build must be
+durable, not just clean. Per-cone fixing had stopped converging on that
+die (every fix exposed the next cone at the same +0.1 level), so this
+pass changed method.
+
+### Diagnostic: what the placer can do when asked
+
+One clock tightened by 1.0 ns per build, 138B full core:
+
+| Build | tightened | setup viols | meaning |
+|---|---|---|---|
+| D1 | clk_sym 7.407 → 6.407 | 0 | every clk_sym path ≥ +1.0 ns real |
+| D2 | clk_pix 6.734 → 5.734 | 0 | every clk_pix path ≥ +1.0 ns real |
+| D3 | clk100 10.0 → 9.0 | 0 | every clk100 path ≥ +1.0 ns real (ladder self-loop +1.54 real) |
+
+Conclusion: the 138B's marginality at the nominal constraints is placer
+effort, not intrinsic logic depth — timing-driven PnR stops as soon as
+slack is barely positive. The near-critical populations the diagnostics
+listed (packer `line_cycle`/`line_num` decodes into the `nc2_r` set/reset
+arcs, SDP parity stage 1, the PLL_INIT enable net into inferred-RAM output
+registers, the chained 8b/10b lookups, the framebuffer end-of-line flag,
+two 29-bit audio-strobe accumulators) were removed structurally anyway.
+
+### Structural set (all exact unless stated)
+
+- **AUX ladder fanout** — `syn_maxfan = 12` on `state`/`next_state`; GowinSynthesis replicates the registers (netlist shows several copies per bit). No logic change. 138B clk100 at nominal: +0.00/+0.08 → +1.00.
+- **8b/10b encoder carry-select** — second symbol encoded for both running disparities, selected by the first's output; the lookups no longer chain. `tb_gowin_lane` (2-cycle ref) PASS.
+- **Packer `at_eol` and `line_num == 0` lookaheads** — registered from the same `lc_zero`/`lc_inc` control as the `nc2_r` counter, each with a sim mirror check. Full-chain harness both configs.
+- **SDP group registers as flat vectors** — as arrays they were inferred as distributed RAM whose output-register RESET the tool tied to the pixel PLL's PLL_INIT enable net (fanout 163).
+- **Framebuffer `x_last_r` on its own algebra** — registered width−2; identical except during the one line a width change lands in.
+- **Audio strobe accumulators** (a2mega top and dp_test) — exact reduced fraction 4/12375, 15-bit.
+
+### Policy: the bar as a constraint
+
+`set_clock_uncertainty 0.5 -setup` on clk100 / clk_sym / clk_pix (and
+clk_logic in the core SDCs) in all five a2mega SDCs. "0 setup violations"
+now means ≥ 0.5 ns real margin on every path, and the placer optimises
+against it on every build. Reported slack is after the uncertainty. A
+stricter requirement, not an exception. Separate commit so it can be
+discussed on its own.
+
+### Results (reported slack = real − 0.5 ns)
+
+| Build | viols | clk100 | clk_sym | clk_pix | clk_logic | clk1x |
+|---|---|---|---|---|---|---|
+| 138B gate | 0/0 | +0.02 | +0.11 | +0.05 | — | — |
+| 138B roll 1 | 0/0 | +0.29 | +0.04 | +0.55 | +2.36 | +2.62 |
+| 138B roll 2 | 0/0 | +0.15 | +0.01 | +0.13 | +0.97 | +1.55 |
+| 138B roll 3 | 0/0 | +0.01 | +0.18 | +0.00 | +1.84 | +2.39 |
+| 60K gate | 0/0 | +0.05 | +0.76 | +1.72 | — | — |
+| 60K roll | 0/0 | +0.26 | +0.45 | +0.19 | +3.56 | +1.93 |
+
+Verdict: three consecutive 138B rolls of one source, the 138B gate, the
+60K gate and a 60K roll all close with zero setup violations under the
+0.5 ns margin constraint, i.e. every fabric-clock path on both dies has
+at least 0.5 ns of real margin (138B minima across the three rolls: clk100
++0.51, clk_sym +0.51, clk_pix +0.50, clk_logic +1.47; vendor DDR3 clk1x
++2.05). No hold violations in any of these builds. The AUX ladder is no
+longer the clk100 floor on either die after the fanout replication. The
+bar is now self-enforcing: a roll that fell short would report a
+violation instead of a small positive number.
