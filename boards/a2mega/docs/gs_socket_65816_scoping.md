@@ -50,9 +50,10 @@ are the TransWarp endgame in `hyperram_scenarios.md`).
   the bus pins run in a **PH2-derived clock domain** (input capture on the
   PH2 falling edge, output enables driven from PH2 directly), and the core
   runs on a **~100 MHz clock with a clock enable**, not on clk_logic 54.
-  `FPGA_GS_PH2` sits on a non-clock ball on the 138B (AB17), so on 1.0a3
-  PH2 reaches the clock network through general routing; the 1.0a4 fix is
-  a net swap onto a clock-capable ball on the same connector (§6).
+  `FPGA_GS_PH2` sits on a non-clock ball (AB17, plain I/O on both dies),
+  so on 1.0a3 PH2 reaches the clock network through general routing; the
+  1.0a4 fix is a carrier net swap onto a clock-capable ball on the same
+  connector, W19/W20 preferred since it is a clock pair on both dies (§6).
 - **Recommendation:** proceed with iteration 1 as a pure drop-in — no
   cache, no speed control, no bus mastering — on the architecture in §4,
   sim-first per §7, then the C3→C5 bench ladder. Open questions that need
@@ -320,12 +321,18 @@ a 216 MHz clock (≤ 4.6 ns after the edge). 1.0a4: §6, finding F1.
 
 ## 6. Findings for `board_1_0a4_requirements.md`
 
-- **F1 — move `FPGA_GS_PH2` to a clock-capable ball.** The simplest change
-  is a net swap with `FPGA_GS_RDY_OUT` (V15 = SGCLKC_7, same bank 5, same
-  J3 connector; RDY_OUT is a slow open-drain output that does not care).
-  Better still, a PLL-input-capable pair pin (W19/W20 = MGCLK_5 / BPLL
-  inputs, today A6/A7) if a PLL should ever lock to PH2-derived clocks —
-  not needed for the drop-in. Decide at the 1.0a4 pin shuffle ("1.0a4
+- **F1 — move `FPGA_GS_PH2` to a clock-capable ball** (carrier routing
+  only; the SOM is untouched). AB17 is a plain I/O on both dies. Options,
+  checked against the Gowin pin tables for both dies:
+  - swap nets with `FPGA_GS_RDY_OUT` (J3-46 → V15): SGCLKC_7 on the 138B
+    but plain I/O on the 60K — helps one die only;
+  - swap nets with `FPGA_GS_A6` or `A7` (J3-21/19 → W19/W20): a global
+    clock pair on **both** dies (MGCLK_5 + BPLL2/3 input on the 138B,
+    GCLK_9 on the 60K), and PLL-input capable should a PLL ever lock to a
+    PH2-derived clock — **preferred**. The displaced address bit goes to
+    AB17; address lines have no use for a clock ball.
+  RDY_OUT is a slow open-drain output and A6/A7 are plain outputs, so
+  neither swap costs anything. Decide at the 1.0a4 pin shuffle ("1.0a4
   moves GS nets again", btb pinout notes).
 - **F2 — J5 pin 15 = BUS_5V.** Confirm intent: it is the slot +5 V rail
   upstream of the LM74700, so with the port powered from USB-C VBUS the
