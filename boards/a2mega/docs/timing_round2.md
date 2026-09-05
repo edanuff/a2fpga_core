@@ -248,3 +248,7 @@ at least 0.5 ns of real margin (138B minima across the three rolls: clk100
 longer the clk100 floor on either die after the fanout replication. The
 bar is now self-enforcing: a roll that fell short would report a
 violation instead of a small positive number.
+
+**Bench check 2026-09-05 (ed, 138B, bitstream fd064d24 = margin-policy roll 1 of the final source):** DP link
+trained through the carry-select encoder and replicated ladder, Apple II picture up, Ensoniq PASS. The 138B is
+now durable and bench-verified; this is the build to base the 65816 work on.
