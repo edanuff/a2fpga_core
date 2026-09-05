@@ -122,7 +122,9 @@ regardless of CPU presence).
   design (user, 08-20) — no verification needed, it is simply the
   choreography the bring-up relies on. Also: physical interposer
   hardware status (ribbon cable + socket plug — exists? needs
-  fabrication?). Deliverable: `GS_SOCKET_INTERFACE.md`
+  fabrication?). Deliverable: `GS_SOCKET_INTERFACE.md` — **delivered
+  2026-09-05 as `gs_socket_65816_scoping.md`** (C0 review + C1 inventory +
+  timing budget + sim/bench plan; two 1.0a4 findings).
   signal-by-signal.
 - C1. **RTL inventory:** P65C816 core provenance/completeness;
   wrapper review against real 65816 bus timing — bank byte multiplexed
