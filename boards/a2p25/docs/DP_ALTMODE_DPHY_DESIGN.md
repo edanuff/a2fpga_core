@@ -599,6 +599,18 @@ converter gate; the bench removed that premise. Product shape:
   supply** (charger/powered hub/modern laptop port — most deliver 1–1.5 A+
   despite the 500 mA spec floor); a strictly spec-limited port may brown
   out rather than flash.
+- **Parts evaluated (09-04): NX5P3001 — rejected for the switch roles.**
+  Bidirectional 3 A/62 mΩ with UVLO/OVLO(6.35 V)/OTP/ESD — but **NO current
+  limiting** (thermal-timescale only = fancy polyfuse for the rail-sag
+  scenario), and bidirectional ≠ ORing (would parallel supplies, not OR
+  them). Possible optional role only: OVLO armor ahead of the LM66100
+  (which is ~5.5 V max) against out-of-spec supplies on the bench input.
+  Noted alternates: **TPS25200** = TPS2553 + OVP in one part (upgrade
+  candidate for the source switches); **NX20P3483** = current-limited
+  source path + OVP sink path with direction control — the textbook
+  partner IF CC option B (second FUSB302) wins, replacing TPS2553+LM66100
+  with managed silicon; **NX5P3090UK** = Nexperia's actually-current-
+  limited Type-C switch (family sibling of the NX5P3001).
 - **CONSIDERED AND REJECTED: shared VBUS net across both connectors with a
   single TPS2553+LM66100 pair.** Saves $0.18 (one TPS2553 — the LM66100
   exists once either way) and costs: (1) re-imports the a2mega phantom-VBUS
