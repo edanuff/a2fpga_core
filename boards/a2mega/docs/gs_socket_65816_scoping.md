@@ -229,91 +229,128 @@ unlike the NMOS 6502); BE is asynchronous.
   look at the socket pins 7/39 with a meter (open = confirmed unused).
   VP **is** wired and driven by us.
 
-## 4. Timing budget → architecture rules
+## 4. Timing budget → architecture (as built in S2)
 
 ### 4.1 The two critical chains
 
 **(a) PHI2 fall → next address + bank byte on the bus.** Path: U13 port-1
-(ALVC164245 tpd ≈ 4–6 ns) → FPGA input (≈2 ns) → detect edge → core
-computes the next address → output register → FPGA output (≈3 ns) → U14
-(≈4–6 ns) → 75 Ω into the bus (≈4 ns). The core needs, after its clock
-enable: one clock for the microcode ROM (a synchronous BSRAM read), then
-the address logic (≈10 levels), then a register. Estimates:
-
-| Core clock | Edge detect | Core (CE→ROM→addr→reg) | Total fall→bus |
-|---|---|---|---|
-| 54 MHz clk_logic | 1–2 clk = 18–37 ns | 4 clk = 74 ns | **≈ 110–130 ns** — inside the 140 ns low phase with no margin, outside the 75 ns 4 MHz-grade tADS |
-| ~108 MHz | 1–2 clk = 9–18 ns | 4 clk = 37 ns | **≈ 65–75 ns** — meets the 4 MHz-grade tADS/tBAS |
-
-The current wrapper (three-flop synchronizer at 54 MHz, address issued a
-state later) is in the first row; it will not be reliable. **Rule 1: the
-core runs on a ~100 MHz clock with a clock enable.** The 138B PLL block
-has 8 unused PLLs and per-output fractional dividers; 108 MHz is also the
-clock the HyperRAM plan wants, so this is a spine we will need anyway.
-The core's single-cycle Fmax is ~52 MHz, so at 108 MHz its enabled paths
-are 2-clock paths by construction (CE is asserted at most once per two
-clocks); that is a structural fact to be expressed as a multicycle
-constraint on the CE-gated registers, not an exception. (Alternative
-avoiding any multicycle constraint: a dedicated ~50 MHz core clock, at the
-cost of the timing above — reject.)
+(ALVC164245 tpd ≈ 4–6 ns) → FPGA input (≈2 ns) → the core computes the
+next address → output register → FPGA output (≈3 ns) → U14 (≈4–6 ns) →
+75 Ω into the bus (≈4 ns). Budget: 4 MHz-grade tADS/tBAS = 75 ns; the
+FPI's low phase is ~140 ns.
 
 **(b) Read data capture at the PHI2 fall.** The motherboard guarantees
 data only until tDHR after the fall (20 ns at the 4 MHz grade; possibly
-much more in practice, unknown). A sampled-clock capture arrives ≥ one
-sampling period plus detection after the edge — fine at 216 MHz, marginal
-at 108, impossible at 54. **Rule 2: PHI2 is a clock.** D0–7, RDY, /IRQ,
-/NMI, /RES, /ABORT and BE are captured in IOB registers clocked by the
-falling edge of PH2 (PH2 and D0–7 pass through the same U13, so their
-relative timing is preserved to within package skew). The captured values
-are stable for a whole cycle (≥349 ns), so the transfer into the core
-clock domain is a plain two-flop handshake with no metastability exposure
-on the data.
+much more in practice, unknown). Anything that first synchronises the
+edge into a sampling clock and then captures is already late.
+
+**What S2 found.** The first draft (core in a 108 MHz clock-enable domain,
+fall synchronised over, then CE → microcode ROM → address logic → output
+register) measured 85–100 ns fall-to-address on the bench: the two-flop
+edge synchroniser plus three serialized core clocks eat the budget
+regardless of how fast the sequencer clock is. So the S2 design does what
+the real part does:
+
+- **The core is clocked by PHI2.** Its clock is the inverted PH2 pin, so
+  its active edge is the PHI2 falling edge. It samples D0–7, RDY, /IRQ,
+  /NMI and /ABORT straight from the pads at the 65816's own sample
+  instant (no capture registers, no synchroniser), and its state — hence
+  A0–23, RWB, VPB, D_OUT — is settled ~20 ns later. CE is tied high: the
+  core takes one clock per bus cycle (its microcode ROM is read from the
+  next state), and RDY_IN from the pad freezes it at the fall exactly as
+  the datasheet says. Every core path has a 349 ns period, so there is
+  nothing to close and no multicycle constraint at all.
+- **The pins are sequenced in a ~108 MHz domain** (the PLL output ed
+  chose; it is now the *sequencer* clock, the core no longer needs it). A
+  toggle written at the fall is two-flop synchronised across; two clocks
+  later the core's settled outputs are registered out (A0–15, RWB, VPB,
+  bank byte on D0–7), and the rise (two-flop synchronised) drives the
+  bank-hold / write-data / bus-release sequence of §4.2. The core's
+  outputs are quasi-static for a whole cycle, so this crossing is safe by
+  construction provided they have settled before the sample: the design
+  samples ≥ 37 ns after the pad fall against a ~20 ns settle.
+
+Measured at the socket side by the Sim 1 bench (transceiver delays 5 ns
+each way, enables 6 ns), worst case over ~6 000 cycles, fast and 1 MHz
+modes identical:
+
+| Parameter | Limit (4 MHz grade) | Measured |
+|---|---|---|
+| tADS address valid after fall | ≤ 75 ns | 66 ns |
+| tBAS bank byte valid after fall | ≤ 75 ns | 67 ns |
+| tAH address hold after fall | ≥ 20 ns | 56 ns |
+| tBH bank hold after rise | ≥ 20 ns | 40 ns |
+| tMDS write data valid after rise | ≤ 70 ns | 56 ns |
+| tDHW write data hold after fall | ≥ 20 ns | 56 ns |
+| read: bus released after rise | before any memory drive | 57 ns |
+| read data hold needed after fall | ≥ 20 ns available | sampled at the fall (+5 ns shifter) |
+
+tADS is the one with the least margin; it is set by the two-flop
+synchroniser (18–28 ns) plus three sequencer clocks (28 ns) plus the two
+shifters. It can be pulled in ~9 ns by sampling one clock earlier
+(OUT_DELAY 2 → 1) at the cost of settle margin, or by a faster sequencer
+clock; the address-delay sweep instrument in C4 will tell whether the FPI
+cares before anything is changed.
 
 ### 4.2 The turnaround at the PHI2 rise
 
 At the rise the bank byte must stay ≥ tBH (10–20 ns) and then, for a read,
 we must get off the bus before the FPI/RAM/ROM drives it; for a write we
-must present data within tMDS (70 ns). Driving `FPGA_GS_DATA_~OE` and
-`FPGA_GS_D_DIR` from **PH2 combinationally** (LUT + OBUF + U13 disable ≈
-15–20 ns after the rise as seen at the bus) holds the bank byte slightly
-longer than a real CPU and still well before any memory can respond.
-Sequence on reads: disable → FPGA tri-states its D pins → DIR to receive →
-enable, ≈ 25–30 ns total, inside the 210 ns high phase. Writes keep DIR =
-drive and switch the byte from bank to data ≈ 25–35 ns after the rise;
-write data then holds until the next bank byte (~65 ns after the fall),
-satisfying tDHW.
+must present data within tMDS (70 ns). The sequencer sees the rise through
+a two-flop sync (~10–20 ns), holds one more clock, then: writes switch the
+byte from bank to data (56 ns after the rise measured); reads release the
+bus — shifter off, pads tri-state, direction turned, receive on — done
+~57 ns after the rise, long before any memory can drive (the model drives
+at 100 ns). Write data holds until the next cycle's bank byte (~56 ns
+after the next fall), satisfying tDHW. A cycle whose RDY was low at the
+fall is repeated with the data bus left in its data-transfer state and no
+bank byte, per W65C816S §7.6.
 
-### 4.3 What the socket PHY looks like
+### 4.3 What the socket PHY looks like (`hdl/twgs/gs_socket_phy.sv`)
 
 ```
-PH2 (fabric-routed clock on 1.0a3) ──┬─► negedge IOB regs: D[7:0], RDY, IRQ, NMI, RES, ABORT, BE
-                                     ├─► combinational: DATA_~OE, D_DIR (with 'write' and 'armed')
-                                     └─► cycle toggle ──► core clock domain
-core clock (~108 MHz, PLL) ──► CE generator (one CE per PH2 fall, ≥2 clk apart)
-                           ──► P65C816 (unchanged) ──► A[23:0], D_OUT, WE, VP
-                           ──► IOB output regs: A[15:0], RW, VP, bank/data byte, ADDR_~OE (BE), RDY_OUT (released)
+PH2 pin ──┬─► ~PH2 = core clock: P65C816 (unchanged, CE=1, RDY_IN/D_IN/IRQ/NMI/ABORT from the pads)
+          ├─► negedge regs: /RES sample (two falls high → core reset released), RDY sample, cycle toggle
+          └─► two-flop syncs into the sequencer: fall toggle, rise level, BE, armed
+~108 MHz sequencer ──► fall + 2 clk: register A[15:0], RWB, VPB, bank byte; DIR/OE for the low phase
+                   ──► rise + hold: write data or bus release (OE off → tri-state → DIR → OE on)
+                   ──► enables: ADDR_~OE (armed & alive & BE), DATA_~OE, CTL_~OE (armed), RDY_OUT released
+                   ──► telemetry: PH2 alive, running, cycle / stall / BE counters
 ```
 
-Gating: `armed` (DIP / telnet) ANDed into every enable; BE low forces
-ADDR_~OE and DATA_~OE inactive asynchronously (tBVD); /RES low holds the
-core in reset and releases the bus like a real part (address buffers stay
-enabled during reset on a real 65816; we do the same so the FPI sees a
-driven bus).
+Gating: `armed` (DIP / telnet) ANDed into every enable; nothing is driven
+until PH2 has been seen toggling; BE low takes the address/RWB/data
+shifters and the D pads off within tBVD (measured well inside 60 ns) while
+the core keeps running, as a real 65816 does; /RES low holds the core in
+reset with the address bus still driven and RWB high.
 
-Everything in the PH2 domain gets a real SDC: PH2 declared as a clock with
-`set_input_delay`/`set_output_delay` relative to it and the 0.5 ns
-uncertainty policy, so the socket timing is a build property like the
-rest of the a2mega SDC.
+The socket SDC declares `gs_ph2` as a 349 ns clock (fast cycle; sync and
+slow cycles only add slack), the sequencer clock as a separate
+asynchronous group, and the 0.5 ns uncertainty policy on the sequencer
+clock. The core-output → sequencer sampling margin is a designed CDC that
+STA cannot see; it is stated in the module header and in the SDC comments.
+
+**138B PnR probe (S2, 2026-09-05).** gs_socket_phy + P65C816 placed on
+the real GS balls with `hdl/twgs/gs_socket.sdc` and
+`hdl/twgs/gs_socket_pins_138b.cst` (sequencer clock taken from a pin for
+the probe): 0 setup / 0 hold violations; sequencer clock +1.47 ns
+reported under the 0.5 ns policy (Fmax 128 MHz, 9 levels); gs_ph2 domain
++322 ns (Fmax 37 MHz, 20 levels — that figure also bounds the core's
+output settle at ~27 ns, which is the number the OUT_DELAY = 2 sample
+point at ≥ 37 ns is measured against). Footprint 2 095 logic, 398
+registers, 6 BSRAM, 44 I/O. PnR notes, as predicted, "Generic routing
+resource will be used to clock signal gs_ph2". Synthesis also reports a
+latch inferred in the core's BCD adder (`sum2low[8]`, inherited from the
+MiSTer source) — harmless at 2.86 MHz but worth cleaning before the
+timing campaign bar is applied to this domain (follow-up).
 
 ### 4.4 PH2 on a non-clock ball (1.0a3)
 
-Gowin PnR will route a general I/O onto the clock network through the
-fabric ("clock routed via general routing" warning). At 2.86 MHz with a
-~140 ns low phase the added insertion delay and skew (a few ns) are
-irrelevant; the only cost is that the negedge capture is a few ns later
-than a dedicated GCLK input would give — still inside tDHR. This is the
-1.0a3 approach. Fallback if the tool refuses: sample PH2 and the data with
-a 216 MHz clock (≤ 4.6 ns after the edge). 1.0a4: §6, finding F1.
+Gowin PnR routes a general I/O onto the clock network through the fabric
+("clock routed via general routing"). At 2.86 MHz the added insertion
+delay and skew (a few ns) are irrelevant to the core; they slightly delay
+the sample instant, which only helps read-data hold. This is the 1.0a3
+approach; the optional 1.0a4 note is §6 F1.
 
 ## 5. RTL inventory (C1)
 
@@ -362,24 +399,55 @@ a 216 MHz clock (≤ 4.6 ns after the edge). 1.0a4: §6, finding F1.
 
 ## 7. Verification plan (sim first, then C3→C5)
 
-**Sim 1 — socket PHY against a behavioral IIgs bus.** Testbench = our PHY +
-core against a model of the FPI clock (5-tick fast, 10-tick refresh every
-9th RAM cycle, sync cycles with PHI2 held high to the PH0 grid, 65th-cycle
-stretch — the MiSTer `clock_divider.v` is the reference), a memory model
-with programmable tACC/tDHR, and transceiver delays. Assertions: tADS,
-tBAS, tAH, tBH, tMDS, tDHW at the bus side; no cycle where both we and the
-memory drive D0–7; capture correctness at the late fall of a sync cycle;
-RDY stall (reads and writes); BE tri-state within tBVD; /RES mid-cycle.
-iverilog (13.0) and Verilator (5.034) are both installed.
+**Sim 1 — socket PHY against a behavioural IIgs bus — DONE in S2
+(`hdl/twgs/sim/tb_gs_socket.sv`, `run_gs_socket_sim.sh`, Verilator 5
+with `--timing`; Icarus cannot parse the core's typed localparams).**
+The bench models, at the socket side: the FPI clock (2 ticks low at
+14.318 MHz; 5-tick fast cycle; every 9th RAM cycle a 10-tick refresh, ROM
+hides refresh; 65th PH0 stretch; slow-class accesses — bank E0/E1, $C0xx —
+become sync cycles held high to the PH0 grid; Speed register $C036 bit 7
+= 0 runs on the PH0 grid at 1.023 MHz; power-up in slow mode), a 16 MB
+memory that latches the bank at the rise, drives read data 100 ns after
+the rise, holds it 20 ns after the fall and then drives garbage for
+15 ns (a late sampler is caught), latches writes at the fall, and the
+level shifters (5 ns data, 6 ns enable, both ways). Checks against the
+4 MHz-grade W65C816S limits every cycle: tAH, tADS, tBAS, tBH, tMDS, tDHW,
+no bus contention, the bank/address/RWB the FPI latched equal the core's,
+read data at the core's sample instant equals what memory drove, RDY-low
+cycles repeat the same cycle with no advance, BE-low tri-states within
+tBVD, VP low on vector fetches; plus a hand-assembled program (writes,
+RMW, JSR/RTS, an I/O read and a long write/read to bank E1 to force sync
+cycles, a RAM-resident loop to force refresh cycles, CLI + IRQ handler)
+whose results are checked in memory. Two configurations pass — fast mode
+(6 000 cycles, 40 RDY stalls, 3 sync, 657 refresh, IRQ vector fetch, BE
+test) and `+noturbo` 1 MHz throughout — with the socket timing in §4.1.
+Run: `boards/a2mega/hdl/twgs/sim/run_gs_socket_sim.sh [+noturbo]
+[+trace] [+vcd]`.
 
-**Sim 2 — execution.** Same bench with a ROM 01 or ROM 03 image (the
-MiSTer `roms/Makefile` builds `boot.rom`/`boot1.rom` from a MAME
-`apple2gs.zip` that we must supply; Apple ROM content stays out of git)
-and a minimal memory map: reset-vector fetch at `$00FFFC`, then the first
-N thousand cycles compared against the CPU log of the MiSTer Verilator
-build of the same core (logging is on by default there; `--no-cpu-log`
-disables it). Same core → the traces must be cycle-identical, which
-isolates our PHY from CPU questions.
+**Sim 2 — execution (S3) — DONE 2026-09-05, as a mode of the same bench
+(`ROM=<boot1.rom> run_gs_socket_sim.sh`).** The plan was a trace match
+against the MiSTer Verilator build; that cannot work past the first I/O
+read, because MiSTer models the whole machine and this bench does not. The
+bench instead carries a **lockstep reference**: a second instance of the
+same core, same clock/reset/RDY/interrupts, fed from an ideal copy of the
+memory model directly. Every cycle it compares address, RWB, VPB, write
+data and the read byte the socket-side core actually sampled against the
+reference, so any byte or address the PHY gets wrong is a divergence
+within one cycle — over real ROM code with its real instruction mix, bank
+FF/E1 accesses and sync cycles interleaved with fast ones. The ROM 01
+image (built locally by the MiSTer `roms/Makefile` from a MAME
+`apple2gs.zip`; Apple ROM content is never committed) sits in banks FE/FF
+behind the FPI's reset-state map (banks 00/01/E0/E1 $C100–$FFFF read the
+bank-FF image; $C0xx is a write-back register file with a minimal
+handshake so the ROM's init code progresses). Periodic RDY stalls and one
+DMA-style BE+RDY pause are applied during the run. Result: **2 000 000 socket cycles, zero divergences** (2 006 RDY
+stalls, 220 951 sync cycles, 1 047 distinct opcode addresses, 1 156
+text-page writes — the ROM initialised the screen — before parking in a
+hardware wait loop at FF:A5A0 — `LDA $C019 / BPL`, the vertical-blank poll, which needs the VGC); socket timing identical to §4.1.
+The ROM eventually parks in a hardware wait (no Mega II / ADB / VGC
+behind it); how far it gets is reported as distinct opcode addresses and
+text-page writes, which is also a preview of what C4 will show before the
+real hardware answers.
 
 **Bench (Phase C ladder, unchanged from the plan):**
 - C3 listen-only bitstream: enables inactive, telemetry of PH2 frequency
@@ -423,8 +491,8 @@ Every hardware result gets a `test_log.md` row; builds carry provenance.
 | Step | Deliverable | Gate |
 |---|---|---|
 | S1 | This document reviewed; answers to §8 — **closed 2026-09-05** (interposer exists, ROM 01 machine, 108 MHz PLL core clock, GPL already covered, PH2 swap optional) | ed ✔ |
-| S2 | Socket PHY + CE generator + SDC; Sim 1 passing | assertions clean |
-| S3 | Sim 2: vector fetch + trace match vs MiSTer | N cycles identical |
+| S2 | Socket PHY (`gs_socket_phy.sv`, core clocked by PHI2) + socket SDC + Sim 1 — **DONE 2026-09-05**, both configurations pass; 138B PnR probe on the real GS balls 0/0 (§4.3) | assertions clean ✔ |
+| S3 | Sim 2: ROM 01 through the socket path with a lockstep reference core — **DONE 2026-09-05** (see §7) | zero divergences ✔ |
 | S4 | Integration into the 138B full core behind `armed`; telemetry (trace ring, sweeps); 138B build under the margin policy (≥ +0.5 ns real on every clock incl. PH2-relative I/O) | dp_test gate + 3 rolls |
 | S5 | Bench C3 listen-only | test-log rows |
 | S6 | Bench C4 (sweeps → vector fetch → boot) | boot chime |
