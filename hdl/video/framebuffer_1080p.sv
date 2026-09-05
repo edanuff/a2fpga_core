@@ -1275,17 +1275,18 @@ module framebuffer_1080p #(
     // Fix: explicitly register the BSRAM read output on clk_pixel, and delay
     // the control signals to match.
 
-    // Horizontal tracker for the pixel at cx+3 (the 3-cycle read pipeline
-    // lookahead): H_SCALE phase + source-x advance incrementally from the
+    // Horizontal tracker for the pixel at cx+4 (the 4-cycle read pipeline
+    // lookahead — timing round 2 cone (i) added the address-copy stage
+    // 1b below): H_SCALE phase + source-x advance incrementally from the
     // one-shot equality trigger at the left border — no divider, no wide
     // subtract in the address path.
-    // Trigger pre-registered one cycle earlier (+5 == border at cycle N
-    // implies +4 == border at N+1; cx is monotonic and the border is far
+    // Trigger pre-registered one cycle earlier (+6 == border at cycle N
+    // implies +5 == border at N+1; cx is monotonic and the border is far
     // from the line wrap, so the identity is exact). The 12-bit equality
     // then never appears in the address/CE cone.
     reg h_trigger_r;
     always @(posedge clk_pixel)
-        h_trigger_r <= (cx0_r + 12'd5 == h_border_px_r);
+        h_trigger_r <= (cx0_r + 12'd6 == h_border_px_r);
     wire        h_trigger_w = h_trigger_r;
 
     reg        h_act_r;
@@ -1332,7 +1333,22 @@ module framebuffer_1080p #(
         in_active_s1_r <= h_act_n && in_v_active_px_w;
     end
 
-    // Pipeline stage 2: BSRAM read register + delayed control (posedge N+1)
+    // Pipeline stage 1b (timing round 2 cone (i)): a plain, CE-free copy of
+    // the read address right before the BSRAM. lb_rd_addr carries a CE cone
+    // (h_act_n && in_v_active), so the placer parks it by the walker logic —
+    // far from the several BSRAM blocks the 8192-entry line buffer spans —
+    // and "lb_rd_addr -> line_buf ADB" (routing + BSRAM address setup) sat
+    // at +0.004..+0.303 across 60K rolls. This copy has no logic on either
+    // side and can be placed at the blocks. +1 read latency, compensated by
+    // the cx+4 lookahead / +6 trigger above and the extra active-flag stage.
+    (* syn_keep = 1, syn_preserve = 1 *) reg [12:0] lb_rd_addr_q;
+    reg in_active_s1b_r;
+    always @(posedge clk_pixel) begin
+        lb_rd_addr_q    <= lb_rd_addr;
+        in_active_s1b_r <= in_active_s1_r;
+    end
+
+    // Pipeline stage 2: BSRAM read register + delayed control (posedge N+2)
     // This gives the synthesizer a clear clk_pixel read clock for the BSRAM
     // and ensures deterministic 1-cycle read latency.
     reg [COLOR_BITS-1:0] lb_rd_data_r;
@@ -1340,8 +1356,8 @@ module framebuffer_1080p #(
 
     always @(posedge clk_pixel) begin
         lb_rd_data_r <= (TEST_PATTERN == 2) ?
-            test_pixel(lb_rd_addr[9:0]) : line_buf[lb_rd_addr];
-        in_active_px_r <= in_active_s1_r;
+            test_pixel(lb_rd_addr_q[9:0]) : line_buf[lb_rd_addr_q];
+        in_active_px_r <= in_active_s1b_r;
     end
 
     // Pipeline stage 3 (08-30 structural timing): register the BSRAM
