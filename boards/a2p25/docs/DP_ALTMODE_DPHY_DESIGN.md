@@ -611,6 +611,19 @@ converter gate; the bench removed that premise. Product shape:
   partner IF CC option B (second FUSB302) wins, replacing TPS2553+LM66100
   with managed silicon; **NX5P3090UK** = Nexperia's actually-current-
   limited Type-C switch (family sibling of the NX5P3001).
+- **TPS25946 evaluated (09-04): strong TPS2553 UPGRADE candidate, not an
+  LM66100 replacement.** eFuse: adjustable ILIM 0.5–6 A ±10%, 500 ns
+  fast-trip (better rail-sag response than TPS2553), 2.7–23 V / 28 V abs
+  max + adjustable OVLO (bad-supply armor WITH current limiting — what the
+  NX5P3001 lacked), dV/dt inrush, PG/FLT telemetry, off-state blocks BOTH
+  directions (closes the reverse-block checklist item). Limitation: ON
+  state is explicitly BIDIRECTIONAL (OTG intent; OCP forward-only) → not
+  an ideal diode, can't OR on the bench input. Action: PCBWay quote — if
+  <~$0.60, prefer it on the DATA port (where weird supplies arrive), video
+  port stays TPS2553 ($0.18 proven). Sibling check: TPS25942A/44A advertise
+  reverse-current protection — if their ON-state VOUT>VIN blocking is true
+  ideal-diode behavior (verify!), the INPUT path could upgrade too
+  (LM66100 ORing + OVLO + inrush in one part).
 - **CONSIDERED AND REJECTED: shared VBUS net across both connectors with a
   single TPS2553+LM66100 pair.** Saves $0.18 (one TPS2553 — the LM66100
   exists once either way) and costs: (1) re-imports the a2mega phantom-VBUS
