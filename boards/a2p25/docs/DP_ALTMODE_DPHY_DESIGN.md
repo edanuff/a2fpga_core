@@ -155,7 +155,7 @@ pins), reusing the a2mega stack verbatim:
   PD Status/Attention VDMs; TUSB HPDIN stays NC/overridden as on a2mega):**
   - **HPD_SNK (11): NEVER NC** — DS §9.3.2: HPD_SNK low for tT(HPD)=400 ms
     → DP130 enters STANDBY (internal 130 k pulldown ⇒ NC = parked forever,
-    main link dead). **Option A DECISION (09-05): STUFF the 2 k pullup —
+    main link dead). **Option A DECISION (09-05): STUFF a 10 k pullup (existing BOM value; TI's 2 k is app-note convenience — the constraint is the divider vs HPD_SNK's internal 100–160 k pulldown: 10 k → ≥3.0 V vs the ~1.4 V threshold, and gentler on the FPGA-GPIO fallback than 1 k) —
     zero traces.** DP130 always-awake (standby loss ≈ tens of mW,
     irrelevant slot-powered); its other functions key off AUX/link
     activity, not HPD edges (bring-up checklist: verify no edge-keyed
@@ -173,7 +173,7 @@ pins), reusing the a2mega stack verbatim:
     route HPD_SRC → FPGA HPD input instead (3.3 V logic, 150 Ω internal
     series). Option B: HPD_SRC → FPGA HPD input.
   - **CAD_SNK (10): 1 MΩ to GND** (DS-recommended strap form) = DP mode,
-    sampled while HPD high; DNP 2 k pullup placeholder (§10.2.2.2). High
+    sampled while HPD high; DNP 10 k pullup placeholder (§10.2.2.2; beats the 1 M strap trivially). High
     would select TMDS mode (fixed 600 mVpp, training disabled) — wrong strap
     changes the whole link discipline.
   - **CAD_SRC (8): NC** — the only true NC (drives a GPU CAD input we don't
@@ -359,7 +359,7 @@ TX PLL takes `clkin` (19–800 MHz) from the fabric clock network:
      the sink-detect divider (~1.65 V → ~1.1 V) and eats detect margin.
      Net vs a2mega: same AUX BOM, caps relocated, nothing else new.
      - DP130 straps/placeholders (DS §10.2.2): CAD_SNK strapped V_IL (DP-only)
-       with DNP 2 k pullup placeholder (mode override); DNP 2 k pullup
+       with DNP 10 k pullup placeholder (mode override); DNP 10 k pullup
        placeholder on HPD_SNK (force sink presence on bench); DDC_SRC open.
      Option B (native jack): ①② identical; ③'s 100 k pair goes at the
      connector (pulldown AUX+ / pullup-3.3 V AUX−). SBU1/2 → receptacle DC
