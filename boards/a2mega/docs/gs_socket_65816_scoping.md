@@ -525,7 +525,7 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   | index | name | R/W | meaning |
   |---|---|---|---|
   | 0 | CTRL | RW | bit 0 arm (take the socket), bit 1 data-hold sweep on, bit 2 listen (enable the control-input shifter only: PHI2/RDY//RES/IRQ/NMI/ABORT/BE become visible, nothing is driven — the C3 step), bit 7 clear counters |
-  | 1 | STATUS | R | {PH2 alive, core running, enabled, BE ok, /RES pad, RDY pad, 0, 0} |
+  | 1 | STATUS | R | {PH2 alive, core running, enabled, BE pad, /RES pad, RDY pad, slot /DMA, slot /RDY} |
   | 2 | OUT_EXTRA | RW | address-delay sweep: extra sequencer clocks before the cycle is issued (0–15, 9.1 ns each) |
   | 3 | HOLD_TAP | RW | data-hold sweep: clocks after the synchronised fall at which D0–7 is re-sampled (0–31) |
   | 4–7 | CYCLES | R | bus cycles the core advanced through (32-bit, little-endian) |

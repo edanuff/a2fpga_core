@@ -2125,7 +2125,10 @@ module top #(
     // a wide counter may tear between bytes, as the other debug counters do)
     reg [159:0] gs_tele_s0, gs_tele_s1;
     always @(posedge clk_logic_w) begin
-        gs_tele_s0 <= {gs_last_w, gs_high_w, gs_per_w, gs_hsmp_w, gs_hmis_w, gs_be_w, gs_stall_w, gs_cycle_w, gs_status_w};
+        // STATUS bits 1:0 carry the SLOT-side /DMA and /RDY levels so the FPI's
+        // BE/RDY handshake can be matched against what the slots are asserting.
+        gs_tele_s0 <= {gs_last_w, gs_high_w, gs_per_w, gs_hsmp_w, gs_hmis_w, gs_be_w, gs_stall_w, gs_cycle_w,
+                       gs_status_w[7:2], a2_dma_n, a2_rdy_n};
         gs_tele_s1 <= gs_tele_s0;
     end
     assign gs_tele_w = gs_tele_s1;
