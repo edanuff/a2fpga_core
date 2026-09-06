@@ -223,6 +223,17 @@ unlike the NMOS 6502); BE is asynchronous.
 - RDY: honoured by the FPI only at Normal speed per the TWGS manual; we
   honor it always (safe superset). We do **not** need to drive RDY_OUT in
   iteration 1 (WAI can be internal); recommendation: leave it released.
+- **BE is a per-cycle pulse, not a DMA-only level (measured 2026-09-06,
+  AD3 directly on the ROM 01 socket, no CPU):** the FPI drives BE low for
+  ~66 ns every cycle, from ~32 ns before the PHI2 falling edge to ~34 ns
+  after it. A 4 MHz-grade 65816 (tBVD 60 ns) keeps driving through that
+  pulse and the machine is built for it, so the PHY ignores BE lows
+  shorter than ~110 ns and never gates its receive path on BE (the core
+  samples read data at the fall, while BE is low); a sustained BE low
+  (a real bus request) tri-states the address/RWB and data drivers. The
+  same measurement gave PHI2 1.021 MHz at 86 % high (slow mode, 2 low /
+  12 high ticks), /IRQ high and RDY high, i.e. the FPI does not hold the
+  CPU at all with the socket empty.
 - E, M/X, VDA, VPA, MLB: not connected on the card. Whether the FPI uses
   VDA/VPA is not stated in the Hardware Reference text; the motherboard
   works with a real 65C816 whose VDA/VPA are wired somewhere, so C3 should
