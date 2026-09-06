@@ -495,21 +495,29 @@ undefined there and neither the logic nor the 38 pins exist in that build):
 - `hdl/twgs/gs_socket_ctl.sv` — PHY + core + telemetry wrapper, instantiated
   in `top.sv` under `` `ifdef GS_SOCKET `` with the `gs_*` ports; the D bus
   is a plain `assign gs_d = oe ? d : 8'bz` inout.
-- **Sequencer clock: `clk100`**, the crystal-derived management PLL clock
-  the DP block already uses (independent of the DP link state). The first
-  integration gave the socket a PLL of its own (110 MHz — 108 is not
-  reachable from the 50 MHz crystal within the GW5AST PLL's 19–81 MHz PFD
-  window without a fractional divider). That build closed timing (roll 1:
-  0/0, +0.74 ns) but two of three rolls thrashed in routing until the
-  40-minute cap, and the clock resource table said why: the die has **8
-  PRIMARY clock nets and the full design uses 7**; the dedicated sequencer
-  clock took the 8th, so `gs_ph2` (fabric-routed on 1.0a3) fell to the
-  long-wire resources, which were also 8/8 used. In the standalone probe,
-  where PRIMARY nets were free, `gs_ph2` had one and routing took minutes.
-  Sharing clk100 costs ~4 ns of tADS (sequencer period 10 ns instead of
-  9.1) and keeps PHI2 on a PRIMARY net. A 108 MHz HyperRAM spine, if
-  wanted later, is a PLL-plan decision of its own and will have to buy its
-  PRIMARY net from somewhere. The uncertainty policy already covers clk100.
+- **Sequencer clock: a PLL of its own, `gowin_gs_pll` at 110 MHz** (VCO
+  50 × 22 = 1100 MHz, ODIV 10; 108 is not reachable from the 50 MHz
+  crystal inside the GW5AST PLL's 19–81 MHz PFD window without a
+  fractional divider — 110 keeps the proven management-PLL recipe and the
+  exact rate is immaterial, the socket runs at PHI2). It costs the die's
+  8th and last PRIMARY clock net, so the fabric-routed `gs_ph2` lands on a
+  long-wire net; that is acceptable at 2.86 MHz. The alternative, sharing
+  `clk100`, was tried and rejected: it crowds the DP AUX ladder, which
+  lives on the knife edge in that domain (one roll failed it at −1.07 ns).
+- **The routing thrash and its real cause.** The first integration rolls
+  routed erratically: 12 min, 31 min, and four kills at the 40-minute cap,
+  while the same source with the socket compiled out routed in 17 min.
+  Single-variable diagnostics: socket without the core = 15 min clean;
+  core on a legitimate PRIMARY 27 MHz clock = still thrashed. So the
+  core's own logic was the problem, and GowinSynthesis had said what:
+  "Latch inferred for net xhdl0.sum2low[8]" — branch-scoped temporaries
+  in the MiSTer core's ADDR_BUS block (its author had waived the same
+  Verilator warning). Latch loops make a timing-driven router iterate
+  without converging. Hoisting those temporaries (`sum2low/sum2car/sum1/
+  off/sum9/useWrap`) to continuous assignments — identical values, both
+  benches unchanged, Verilator `-Wall` latch-clean — brought every roll
+  back to finishing. Lesson recorded in the core README: treat EX2420 as
+  a build blocker on this design.
 - **Arming and telemetry over the existing ESP32 register path** (no
   firmware change needed: `spireg` reads/writes any register). A two-register
   window: write the index to `0x5F`, then read/write `0x4F`:
@@ -518,7 +526,7 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   |---|---|---|---|
   | 0 | CTRL | RW | bit 0 arm (take the socket), bit 1 data-hold sweep on, bit 7 clear counters |
   | 1 | STATUS | R | {PH2 alive, core running, enabled, BE ok, /RES pad, RDY pad, 0, 0} |
-  | 2 | OUT_EXTRA | RW | address-delay sweep: extra sequencer clocks before the cycle is issued (0–15, 10 ns each) |
+  | 2 | OUT_EXTRA | RW | address-delay sweep: extra sequencer clocks before the cycle is issued (0–15, 9.1 ns each) |
   | 3 | HOLD_TAP | RW | data-hold sweep: clocks after the synchronised fall at which D0–7 is re-sampled (0–31) |
   | 4–7 | CYCLES | R | bus cycles the core advanced through (32-bit, little-endian) |
   | 8–9 | STALLS | R | cycles repeated because RDY was low |
