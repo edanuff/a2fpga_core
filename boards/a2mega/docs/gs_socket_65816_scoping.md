@@ -553,9 +553,27 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   mismatches is where the motherboard stops holding read data after the
   fall.
 
-- Build: see the provenance entries in the PR / test log; durability bar =
-  0/0 with ≥ +0.5 ns real on every clock, dp_test gate untouched (no socket
-  there), three rolls of the final source.
+- **Build record (final S4 source, commit e8631053 HDL; Gowin V1.9.12.01;
+  138B).** Five rolls, all that finished were clean; one was killed by the
+  old 30/40-minute guard at 40 min and its two 60-minute-guard successors
+  finished at 23 and 41 min. The socket build takes 21–41 min against a
+  15–17 min baseline for the same source with the socket compiled out
+  (the fabric-routed PHI2 clock into ~300 core flops is the extra routing
+  effort); `tools/build.sh` now gives the `a2mega_138B` project a
+  60-minute guard for that reason, everything else keeps 30. Reported
+  slack under the 0.5 ns policy (real = reported + 0.5):
+
+  | roll | wall | clk_gs | gs_ph2 | clk100 | clk_sym | clk_pix | clk_logic | clk_x1 | bitstream sha256 |
+  |---|---|---|---|---|---|---|---|---|---|
+  | 1 | 32 min | +2.22 | +324.7 | +0.11 | +0.06 | +0.13 | +1.64 | +3.22 | 20aee44d7a6899b7… |
+  | 2 | 21 min | +2.40 | +325.5 | +0.04 | +0.09 | +0.35 | +2.94 | +2.40 | 60d7e6a70eff724b… |
+  | 3 | 23 min | +1.83 | +324.9 | +0.01 | +0.07 | +0.21 | +1.97 | +2.21 | 75616e6be5cdf99e… |
+  | 4 | 41 min | +2.02 | +324.9 | +0.05 | +0.02 | +0.05 | +2.38 | +2.92 | 8e4e77da3aa172f8… |
+
+  0 setup / 0 hold on every roll; 28 5xx logic (21 %), 127 BSRAM, 158 I/O,
+  5 PLL. The dp_test gate is untouched (no socket there). The clk100 /
+  clk_sym / clk_pix minima are the DP block's pre-existing knife edge
+  (the durability campaign's 138B rolls sat at +0.01…+0.29 there too).
 
 ## 9. Proposed work plan
 
@@ -564,7 +582,7 @@ undefined there and neither the logic nor the 38 pins exist in that build):
 | S1 | This document reviewed; answers to §8 — **closed 2026-09-05** (interposer exists, ROM 01 machine, 108 MHz PLL core clock, GPL already covered, PH2 swap optional) | ed ✔ |
 | S2 | Socket PHY (`gs_socket_phy.sv`, core clocked by PHI2) + socket SDC + Sim 1 — **DONE 2026-09-05**, both configurations pass; 138B PnR probe on the real GS balls 0/0 (§4.3) | assertions clean ✔ |
 | S3 | Sim 2: ROM 01 through the socket path with a lockstep reference core — **DONE 2026-09-05** (see §7) | zero divergences ✔ |
-| S4 | Integration into the 138B full core behind CTRL.arm; register window + sweeps (§8b); 138B build under the margin policy — **in progress 2026-09-05** | 0/0 + 3 rolls |
+| S4 | Integration into the 138B full core behind CTRL.arm; register window + sweeps (§8b); 138B build under the margin policy — **DONE 2026-09-06**, four clean rolls (§8b) | 0/0 + 3 rolls ✔ |
 | S5 | Bench C3 listen-only | test-log rows |
 | S6 | Bench C4 (sweeps → vector fetch → boot) | boot chime |
 | S7 | Bench C5 soak | board-turn bar |

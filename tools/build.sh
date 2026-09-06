@@ -72,7 +72,14 @@ fi
 
 start_epoch="$(date +%s)"
 buildlog="$(mktemp "${TMPDIR:-/tmp}/a2fpga_build.XXXXXX")"
-BUILD_TIMEOUT="${BUILD_TIMEOUT:-1800}"
+# Per-project default guard. The 138B full core with the IIgs CPU-socket
+# 65C816 (GS_SOCKET) routes a 2.86 MHz fabric clock into ~300 core flops;
+# measured builds of that project take 21-41 minutes and finish clean
+# (boards/a2mega/docs/gs_socket_65816_scoping.md §8b: five rolls, none
+# pathological). Everything else keeps the 30-minute thrash guard.
+default_timeout=1800
+[[ "$proj" == "a2mega_138B" ]] && default_timeout=3600
+BUILD_TIMEOUT="${BUILD_TIMEOUT:-$default_timeout}"
 
 # Run gw_sh under a wall-time cap (macOS has no coreutils `timeout`).
 CAFF=""
