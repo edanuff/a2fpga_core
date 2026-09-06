@@ -22,7 +22,7 @@
 //============================================================================
 import P65C816_pkg::*;
 
-module ALU
+module P65C816_ALU
   (
    input [15:0]        L,
    input [15:0]        R,
@@ -118,7 +118,7 @@ module ALU
   assign BCDIn = BCD & CTRL.secOp[0];
 
 
-  AddSubBCD AddSub
+  P65C816_AddSubBCD AddSub
     (
      .A    (L),
      .B    (R),

@@ -89,6 +89,44 @@ module gowin_mgmt_pll (output lock, output clkout, input clkin);
 endmodule
 
 // ---------------------------------------------------------------------------
+// 110 MHz sequencer clock for the IIgs CPU-socket PHY (gs_socket_ctl).
+// Same recipe as the management PLL (VCO = 50 x 22 = 1100 MHz, ODIV0 = 10)
+// so PLL_INIT's calibration stays in the proven MDIV range; the exact rate
+// is not critical (the socket runs at the FPI's PHI2; this clock only
+// sequences the pins - see docs/gs_socket_65816_scoping.md §4).
+// ---------------------------------------------------------------------------
+module gowin_gs_pll (output lock, output clkout, input clkin);
+
+    wire [5:0] icpsel;
+    wire [2:0] lpfres;
+    wire       pll_lock;
+    wire       pll_rst;
+
+    gowin_gs_pll_MOD u_pll (
+        .clkout0 (clkout),
+        .lock    (pll_lock),
+        .clkin   (clkin),
+        .reset   (pll_rst),
+        .icpsel  (icpsel),
+        .lpfres  (lpfres),
+        .lpfcap  (2'b00)
+    );
+
+    PLL_INIT u_pll_init (
+        .CLKIN   (clkin),         // 50 MHz crystal — always running
+        .I_RST   (1'b0),
+        .O_RST   (pll_rst),
+        .PLLLOCK (pll_lock),
+        .O_LOCK  (lock),
+        .ICPSEL  (icpsel),
+        .LPFRES  (lpfres)
+    );
+    defparam u_pll_init.CLK_PERIOD = 20;   // ns, 50 MHz
+    defparam u_pll_init.MULTI_FAC  = 22;   // MDIV_SEL
+
+endmodule
+
+// ---------------------------------------------------------------------------
 // 148.5 MHz pixel clock from the 135 MHz SERDES word clock.
 //
 // The parameter list mirrors the 60B wrapper so dp_transmitter's

@@ -78,6 +78,7 @@ module gs_socket_phy #(
     input  logic        clk,            // pin-sequencer clock (~108 MHz)
     input  logic        rst_n,          // system reset, active low
     input  logic        armed_i,        // 1 = take the socket (asynchronous ok)
+    input  logic [3:0]  out_extra_i,    // extra clks before issue (address-delay sweep instrument)
 
     // P65C816 side.  D_IN / RDY_IN / IRQ_N / NMI_N / ABORT_N connect straight
     // from the pads to the core in the top level.
@@ -107,6 +108,11 @@ module gs_socket_phy #(
     // Status / telemetry (clk domain)
     output logic        ph2_alive_o,
     output logic        running_o,      // core out of reset
+    output logic        enabled_o,      // armed & alive: pins are ours
+    output logic        be_ok_o,        // synchronised BE
+    output logic        fall_evt_o,     // one clk per PHI2 fall (synchronised)
+    output logic        issue_evt_o,    // one clk when a cycle is put on the bus
+    output logic        ended_read_o,   // valid with fall_evt_o: the cycle that ended was a running read
     output logic [31:0] cycle_count_o,  // bus cycles the core advanced through
     output logic [15:0] stall_count_o,  // cycles repeated because RDY was low
     output logic [15:0] be_count_o      // clk cycles spent with BE low
@@ -244,7 +250,7 @@ module gs_socket_phy #(
                         // A completed read leaves the shifter in receive;
                         // take it off the bus ahead of the bank byte.
                         if (!write_q && !(stall_last && run_q)) data_oe_n_seq <= 1'b1;
-                        wait_cnt <= 4'(OUT_DELAY - 1);
+                        wait_cnt <= 4'(OUT_DELAY - 1) + out_extra_i;
                         state    <= S_OUT_WAIT;
                     end
                 end
@@ -318,6 +324,11 @@ module gs_socket_phy #(
     assign gs_d_oe_o      = d_oe_seq & be_ok & enabled;
     assign gs_rdy_out_o   = 1'b1;
     assign running_o      = core_run;
+    assign enabled_o      = enabled;
+    assign be_ok_o        = be_ok;
+    assign fall_evt_o     = fall_evt;
+    assign issue_evt_o    = (state == S_ISSUE);
+    assign ended_read_o   = ~write_q & run_q & ~stall_last;
 
     logic [15:0] be_cnt;
     always_ff @(posedge clk or negedge rst_n) begin

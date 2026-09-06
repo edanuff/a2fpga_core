@@ -28,6 +28,12 @@ Author:   srg320 — https://github.com/srg320
   can insert the IIgs's RAM-refresh and slow-bus stretch cycles.
 - Assorted fixes found while running the Apple IIgs ROM self-tests and
   the 65C816 instruction-level test suites.
+- Submodules carry a `P65C816_` prefix (`P65C816_ALU`, `P65C816_AddrGen`,
+  `P65C816_AddSubBCD`, `P65C816_BCDAdder`, `P65C816_adder4`,
+  `P65C816_bit_adder`, `P65C816_mcode`): the a2mega build also contains
+  Gowin's encrypted DDR3 controller, whose netlist already defines a module
+  named `ALU`, and the generic names collided. Names only — no logic
+  differs from the MiSTer source.
 
 ## Files
 

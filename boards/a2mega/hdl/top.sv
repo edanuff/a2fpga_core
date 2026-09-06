@@ -137,6 +137,28 @@ module top #(
     input         esp_sclk,
     inout  [7:0]  esp_data
 
+`ifdef GS_SOCKET
+    // IIgs CPU socket: 65C816 drop-in through the 1.0a3 level shifters
+    // (138B builds only - hdl/twgs/gs_socket_defines.v; see
+    // docs/gs_socket_65816_scoping.md and hdl/twgs/gs_socket_phy.sv)
+    ,
+    input         gs_ph2,
+    input         gs_rdy,
+    input         gs_irq_n,
+    input         gs_nmi_n,
+    input         gs_res_n,
+    input         gs_abort_n,
+    input         gs_be,
+    inout  [7:0]  gs_d,
+    output [15:0] gs_a,
+    output        gs_rw,
+    output        gs_vp,
+    output        gs_rdy_out,
+    output        gs_d_dir,
+    output        gs_data_oe_n,
+    output        gs_addr_oe_n,
+    output        gs_oe_n
+`endif
 );
 
     // Clocks — all PLLs live in board_plls, a per-SOM-variant module:
@@ -1957,6 +1979,12 @@ module top #(
         dbg_resp_ovfl_sync1 <= dbg_resp_ovfl_sync0;
     end
 
+    // IIgs CPU-socket control/telemetry window (regs 0x5F index / 0x4F data)
+    wire [7:0]   gs_ctrl_w;        // {clear,0,0,0,0,0,sweep_en,arm}
+    wire [3:0]   gs_out_extra_w;   // address-delay sweep
+    wire [4:0]   gs_hold_tap_w;    // data-hold sweep
+    wire [159:0] gs_tele_w;        // telemetry, connector domain
+
     // Octal SPI connector instance
     esp32_ospi_connector #(
         .USE_SYNC(1),
@@ -2015,6 +2043,11 @@ module top #(
         .dbg_dp_serdes_i(dp_serdes_sync1),
         .ddr3_reinit_tgl_o(ddr3_reinit_tgl_w),
 
+        .gs_ctrl_o(gs_ctrl_w),
+        .gs_out_extra_o(gs_out_extra_w),
+        .gs_hold_tap_o(gs_hold_tap_w),
+        .gs_tele_i(gs_tele_w),
+
         .dbg_mem_addr_o(dbg_mem_addr_w),
         .dbg_mem_go_o(dbg_mem_go_w),
         .dbg_mem_busy_i(dbg_mem_busy_w),
@@ -2034,6 +2067,65 @@ module top #(
         .osd_addr_i(osd_vram_addr_w),
         .osd_data_o(osd_vram_data_w)
     );
+
+    // =========================================================================
+    // IIgs CPU-socket 65C816 (drop-in iteration) - 138B builds only
+    // =========================================================================
+`ifdef GS_SOCKET
+    // Dedicated ~110 MHz sequencer clock (a PLL of its own, so the socket is
+    // independent of the DP link clocks); the core itself runs on PHI2.
+    wire clk_gs_w, gs_pll_lock_w;
+    gowin_gs_pll i_gs_pll (.lock(gs_pll_lock_w), .clkout(clk_gs_w), .clkin(clk));
+
+    // control: connector (clk_logic) -> sequencer domain, quasi-static
+    reg [7:0] gs_ctrl_s0, gs_ctrl_s1;
+    reg [3:0] gs_oe_s0, gs_oe_s1;
+    reg [4:0] gs_ht_s0, gs_ht_s1;
+    always @(posedge clk_gs_w) begin
+        gs_ctrl_s0 <= gs_ctrl_w;      gs_ctrl_s1 <= gs_ctrl_s0;
+        gs_oe_s0   <= gs_out_extra_w; gs_oe_s1   <= gs_oe_s0;
+        gs_ht_s0   <= gs_hold_tap_w;  gs_ht_s1   <= gs_ht_s0;
+    end
+
+    wire [7:0]  gs_d_o_w;
+    wire        gs_d_oe_w;
+    assign gs_d = gs_d_oe_w ? gs_d_o_w : 8'bz;
+
+    wire [7:0]  gs_status_w;
+    wire [31:0] gs_cycle_w;
+    wire [15:0] gs_stall_w, gs_be_w, gs_hmis_w, gs_hsmp_w, gs_per_w, gs_high_w;
+    wire [23:0] gs_last_w;
+
+    gs_socket_ctl i_gs_socket (
+        .clk(clk_gs_w),
+        .rst_n(device_reset_n_w & gs_pll_lock_w),
+        .arm_i(gs_ctrl_s1[0]),
+        .sweep_en_i(gs_ctrl_s1[1]),
+        .out_extra_i(gs_oe_s1),
+        .hold_tap_i(gs_ht_s1),
+        .clear_i(gs_ctrl_s1[7]),
+        .gs_ph2_i(gs_ph2), .gs_rdy_i(gs_rdy), .gs_irq_n_i(gs_irq_n), .gs_nmi_n_i(gs_nmi_n),
+        .gs_res_n_i(gs_res_n), .gs_abort_n_i(gs_abort_n), .gs_be_i(gs_be),
+        .gs_d_i(gs_d), .gs_d_o(gs_d_o_w), .gs_d_oe_o(gs_d_oe_w),
+        .gs_a_o(gs_a), .gs_rw_o(gs_rw), .gs_vp_o(gs_vp), .gs_rdy_out_o(gs_rdy_out),
+        .gs_d_dir_o(gs_d_dir), .gs_data_oe_n_o(gs_data_oe_n), .gs_addr_oe_n_o(gs_addr_oe_n),
+        .gs_ctl_oe_n_o(gs_oe_n),
+        .status_o(gs_status_w), .cycle_count_o(gs_cycle_w), .stall_count_o(gs_stall_w),
+        .be_count_o(gs_be_w), .hold_mismatch_o(gs_hmis_w), .hold_samples_o(gs_hsmp_w),
+        .ph2_period_o(gs_per_w), .ph2_high_o(gs_high_w), .last_addr_o(gs_last_w)
+    );
+
+    // telemetry: sequencer domain -> connector domain (two flops per bit;
+    // a wide counter may tear between bytes, as the other debug counters do)
+    reg [159:0] gs_tele_s0, gs_tele_s1;
+    always @(posedge clk_logic_w) begin
+        gs_tele_s0 <= {gs_last_w, gs_high_w, gs_per_w, gs_hsmp_w, gs_hmis_w, gs_be_w, gs_stall_w, gs_cycle_w, gs_status_w};
+        gs_tele_s1 <= gs_tele_s0;
+    end
+    assign gs_tele_w = gs_tele_s1;
+`else
+    assign gs_tele_w = 160'd0;
+`endif
 
     /*
     // Data bus IOBUF instantiation

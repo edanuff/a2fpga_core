@@ -85,6 +85,15 @@ module esp32_ospi_connector #(
     input  wire [15:0] dbg_dp_caps_i,       // raw {DPCD 0x001 rate, DPCD 0x002 lanes}
     input  wire [7:0]  dbg_dp_status_i,     // {5'b0, wedge, video_live, link_est}
     input  wire [7:0]  dbg_dp_serdes_i,     // SERDES bring-up status
+
+    // IIgs CPU-socket 65C816 control/telemetry window (regs 0x5F/0x4F;
+    // hdl/twgs/gs_socket_ctl.sv).  Quasi-static both ways; the top
+    // synchronises them across the socket sequencer clock.
+    output wire [7:0]   gs_ctrl_o,          // {clear,0,0,0,0,0,sweep_en,arm}
+    output wire [3:0]   gs_out_extra_o,     // address-delay sweep (extra clks)
+    output wire [4:0]   gs_hold_tap_o,      // data-hold sweep tap (clks after the fall)
+    input  wire [159:0] gs_tele_i,          // {last_addr[23:0], high[15:0], period[15:0], hold_samples[15:0],
+                                            //  hold_mismatch[15:0], be[15:0], stall[15:0], cycle[31:0], status[7:0]}
     output reg         ddr3_reinit_tgl_o,   // toggles on REG_DDR3_REINIT write (CDC as toggle)
 
     // DDR3 debug read window (ddr3_debug_reader on idle port 4)
@@ -277,6 +286,15 @@ module esp32_ospi_connector #(
     localparam REG_DBG_DP_STATUS = 7'h3E;   // {5'b0, wedge, video_live, link_established}
     localparam REG_DBG_DP_SERDES = 7'h3F;   // SERDES bring-up status byte
 
+    // IIgs CPU-socket window: write the index to 0x5F, read/write 0x4F.
+    //  0 CTRL  (RW) {clear[7], .., sweep_en[1], arm[0]}    1 STATUS (RO)
+    //  2 OUT_EXTRA (RW) [3:0]   3 HOLD_TAP (RW) [4:0]
+    //  4-7 cycle count   8-9 stalls   10-11 BE-low clks   12-13 hold mismatches
+    //  14-15 hold samples   16-17 PHI2 period (clks/256 cyc)   18-19 PHI2 high
+    //  20-22 last issued address {lo, hi, bank}
+    localparam REG_GS_DATA = 7'h4F;
+    localparam REG_GS_SEL  = 7'h5F;
+
     // Memory spaces (XFER via reg 0x7F)
     localparam SPACE_TEST  = 3'd0;
     localparam SPACE_OSD   = 3'd1;   // OSD text page (write-only from ESP32)
@@ -311,6 +329,42 @@ module esp32_ospi_connector #(
 
     // System
     reg [7:0] scratch_r;
+    reg [4:0] gs_sel_r;
+    reg [7:0] gs_ctrl_r;
+    reg [3:0] gs_out_extra_r;
+    reg [4:0] gs_hold_tap_r;
+    assign gs_ctrl_o      = gs_ctrl_r;
+    assign gs_out_extra_o = gs_out_extra_r;
+    assign gs_hold_tap_o  = gs_hold_tap_r;
+    reg [7:0] gs_rdata;
+    always @* begin
+        case (gs_sel_r)
+            5'd0:  gs_rdata = gs_ctrl_r;
+            5'd1:  gs_rdata = gs_tele_i[7:0];
+            5'd2:  gs_rdata = {4'b0, gs_out_extra_r};
+            5'd3:  gs_rdata = {3'b0, gs_hold_tap_r};
+            5'd4:  gs_rdata = gs_tele_i[15:8];
+            5'd5:  gs_rdata = gs_tele_i[23:16];
+            5'd6:  gs_rdata = gs_tele_i[31:24];
+            5'd7:  gs_rdata = gs_tele_i[39:32];
+            5'd8:  gs_rdata = gs_tele_i[47:40];
+            5'd9:  gs_rdata = gs_tele_i[55:48];
+            5'd10: gs_rdata = gs_tele_i[63:56];
+            5'd11: gs_rdata = gs_tele_i[71:64];
+            5'd12: gs_rdata = gs_tele_i[79:72];
+            5'd13: gs_rdata = gs_tele_i[87:80];
+            5'd14: gs_rdata = gs_tele_i[95:88];
+            5'd15: gs_rdata = gs_tele_i[103:96];
+            5'd16: gs_rdata = gs_tele_i[111:104];
+            5'd17: gs_rdata = gs_tele_i[119:112];
+            5'd18: gs_rdata = gs_tele_i[127:120];
+            5'd19: gs_rdata = gs_tele_i[135:128];
+            5'd20: gs_rdata = gs_tele_i[143:136];
+            5'd21: gs_rdata = gs_tele_i[151:144];
+            5'd22: gs_rdata = gs_tele_i[159:152];
+            default: gs_rdata = 8'h00;
+        endcase
+    end
     reg [7:0] scratch1_r, scratch2_r, scratch3_r, scratch4_r;
     reg [31:0] sys_time_r;
 
@@ -530,6 +584,8 @@ module esp32_ospi_connector #(
             REG_PROTO_VER:    reg_rdata = PROTO_VER;
             REG_CAPABILITIES: reg_rdata = CAP0;
             REG_SCRATCH:      reg_rdata = scratch_r;
+            REG_GS_SEL:       reg_rdata = {3'b0, gs_sel_r};
+            REG_GS_DATA:      reg_rdata = gs_rdata;
             REG_STATUS:       reg_rdata = status_w;
             REG_SYSTIME_0:    reg_rdata = sys_time_r[7:0];
             REG_SYSTIME_1:    reg_rdata = sys_time_r[15:8];
@@ -681,6 +737,10 @@ module esp32_ospi_connector #(
             scratch2_r <= 8'h00;
             scratch3_r <= 8'h00;
             scratch4_r <= 8'h00;
+            gs_sel_r <= 5'd0;
+            gs_ctrl_r <= 8'h00;
+            gs_out_extra_r <= 4'd0;
+            gs_hold_tap_r <= 5'd0;
             video_enable_r <= 1'b0;
             video_mode_r <= 8'b00010001;  // TEXT_MODE=1, AN3=1
             text_color_r <= 4'd15;
@@ -757,6 +817,15 @@ module esp32_ospi_connector #(
                     REG_SCRATCH2:     scratch2_r <= reg_wdata;
                     REG_SCRATCH3:     scratch3_r <= reg_wdata;
                     REG_SCRATCH4:     scratch4_r <= reg_wdata;
+                    REG_GS_SEL:       gs_sel_r <= reg_wdata[4:0];
+                    REG_GS_DATA: begin
+                        case (gs_sel_r)
+                            5'd0: gs_ctrl_r      <= reg_wdata;
+                            5'd2: gs_out_extra_r <= reg_wdata[3:0];
+                            5'd3: gs_hold_tap_r  <= reg_wdata[4:0];
+                            default: ;
+                        endcase
+                    end
 
                     REG_VIDEO_ENABLE: video_enable_r <= reg_wdata[0];
                     REG_VIDEO_MODE:   video_mode_r <= reg_wdata;

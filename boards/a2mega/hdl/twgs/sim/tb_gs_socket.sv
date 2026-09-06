@@ -68,7 +68,7 @@ module tb_gs_socket;
     logic [23:0] cpu_a;
 
     gs_socket_phy u_phy (
-        .clk(clk), .rst_n(rst_n), .armed_i(armed),
+        .clk(clk), .rst_n(rst_n), .armed_i(armed), .out_extra_i(4'd0),
         .cpu_clk_o(cpu_clk), .cpu_rst_n_o(cpu_rst_n),
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n), .cpu_vp_n_i(cpu_vp_n),
         .gs_ph2_i(gs_ph2_f), .gs_rdy_i(gs_rdy_f), .gs_res_n_i(gs_res_n_f), .gs_be_i(gs_be_f),
@@ -76,7 +76,8 @@ module tb_gs_socket;
         .gs_a_o(gs_a_f), .gs_rw_o(gs_rw_f), .gs_vp_o(gs_vp_f), .gs_rdy_out_o(gs_rdy_out_f),
         .gs_d_dir_o(gs_d_dir_f), .gs_data_oe_n_o(gs_data_oe_n_f), .gs_addr_oe_n_o(gs_addr_oe_n_f),
         .gs_ctl_oe_n_o(gs_ctl_oe_n_f),
-        .ph2_alive_o(ph2_alive), .running_o(running),
+        .ph2_alive_o(ph2_alive), .running_o(running), .enabled_o(), .be_ok_o(),
+        .fall_evt_o(), .issue_evt_o(), .ended_read_o(),
         .cycle_count_o(cycle_count), .stall_count_o(stall_count), .be_count_o(be_count)
     );
 
