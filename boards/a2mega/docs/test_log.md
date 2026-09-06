@@ -204,3 +204,23 @@ Weekend backfill: only rows with certain provenance; `?` = not recorded
 | 89 | 08-24 (Mon) | B3 (138K) | f569d4f8 (CDC fixes + counter v2 + per-lane M5 + gate) | V2.1 fw | UGREEN / ANKER | captive | - | N | hub-backfed VBUS | 0 | DEAD-COLD start (boards inert ~48 h) | **Initial report: 'does not lock under 6 blinks of D4 if at all' on BOTH monitors — looked like a serious build regression. RETRACTED: the HDMI cable was still unplugged.** It is part of the power-down regimen (HDMI +5 V backpowers the hub — rows 79/80), and had not been reconnected. With no downstream sink the hub has nothing to train to, so D4 blinks without ever holding. Reconnected: colorbars up, several blinks then lock (normal cold-start range; cf. row 73 = 2 blinks, row 83 power-on = 4) | ⚠️ **BENCH LAW: a missing HDMI cable presents as an ACQUISITION FAILURE (D4 blinking without lock), NOT as an obvious 'no sink' error — it is indistinguishable at the LED from a genuine training regression.** The HDMI-unplug power-down regimen MUST be reversed before any test; check the cable first whenever a build suddenly looks catastrophic. **f569d4f8 is NOT implicated and the day's automated baseline (row 88, 30x L:01 / 2x L:02) stands.** Cold-start behavior of this build remains n=1 and unmeasured; a proper cold protocol (n>=3 per candidate, board genuinely cold) is still owed. Control build 1f99bdb1 rebuilt bit-identical and staged if a comparison is wanted |
 
 <!-- new rows below; never reuse ids -->
+
+## GS socket bench — in-socket 65C816 (Phase C of PRE_REV_EXERCISE_PLAN)
+
+Own table: the DP columns above do not apply. Machine = ROM 01 IIgs, no other
+cards, CPU socket empty, ribbon from the card's J5 to the socket. Card = B3
+(138K) in a slot, USB-C to the Mac (serial console `/dev/cu.usbmodem5101`,
+`+++` enters the CLI; register window `spireg 95 <idx>` / `spireg 79`).
+Builds: S4 roll 1 = 20aee44d (no listen bit), listen build = af74f29a,
+status-bits build = 19c79462, BE-pulse build = see §8b of
+gs_socket_65816_scoping.md. Design record: docs/gs_socket_65816_scoping.md.
+
+| id | date | build | step | reading | verdict |
+|---|---|---|---|---|---|
+| G1 | 09-05 | 20aee44d | first power-up, CTRL=0 | PH2 not alive, RDY low, /RES high, BE high | ⚠ INVALID: with CTRL=0 the control-input shifter (U13 port 1) is off, so PHI2 is invisible by design. Listen bit (CTRL.2) added. |
+| G2 | 09-06 | af74f29a | listen (CTRL=4), machine on | PH2 alive 1.020 MHz, 142 ns low / 838 ns high (= FPI slow mode, 2/12 ticks); /RES high; **RDY low, BE low** | PHI2 receive path proven. RDY/BE low later shown to be cable mapping, not the FPI (G6). |
+| G3 | 09-06 | 19c79462 | listen + slot bits | as G2 plus slot /DMA high, slot /RDY high | nothing in the slots asserting; FPI-hold hypothesis raised (wrong, see G6) |
+| G4 | 09-06 | 19c79462 | arm (CTRL=5) + reset pulse via reg 0x2E 0→1 | running=1, stalls climbing, BE/RDY unchanged | core comes out of reset; RDY low stalls it; no drive because BE low. Disarmed. |
+| G5 | 09-06 | — | AD3 digital in on the ribbon's IDC socket (card end unplugged) | clock on the hole numbered 7, steady high on hole 8 | ⚠ AD3 must be on a port that sources 600 mA (under-powered it opens but never acquires). Hole numbering vs the card's evidence still unresolved — see G7. |
+| G6 | 09-06 | — | **AD3 directly on the motherboard socket pins 37/4/2/36** | **PHI2 1.021 MHz 86 % high; /IRQ high; RDY HIGH; BE = 66 ns LOW PULSE every cycle, fall−32 ns → fall+34 ns** | 🏆 Ground truth. RDY is not held; BE is a per-cycle FPI turnaround pulse straddling the sample edge. PHY changed: BE lows < ~110 ns ignored, receive path never gated by BE (a 4 MHz-grade 65816 drives through it). |
+| G7 | 09-06 | — | cable | both ribbons built the same; continuity "DIP 4 to R38"; card counts the clock on ball AB17 = J3.28 = header pin 8 (PCB netlist + Sipeed connector table, all 38 J3 pins verified) | OPEN: either the cable is row-swapped and the card evidence is wrong, or the hand numbering on both connectors is a row off. Decider: the socket hole sitting over header pin 8 (square-pad row = odd) must carry the clock. |

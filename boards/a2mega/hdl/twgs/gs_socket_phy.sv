@@ -56,9 +56,16 @@
 //    data bus stays in the data-transfer state (write data kept driven, or
 //    bus kept in receive) and no bank byte is driven in the repeated
 //    cycle's low phase.
-//  * BE low (asynchronous, synchronised here): address/RWB/data shifters
-//    and the D pads off within tBVD.  The core keeps running, as a real
-//    65816 does; the FPI pairs BE with RDY when it means "stop".
+//  * BE (asynchronous, synchronised here).  MEASURED on a ROM 01 IIgs
+//    (2026-09-06, AD3 at the socket): the FPI pulses BE low for ~66 ns
+//    EVERY cycle, from ~32 ns before the PHI2 fall to ~34 ns after it -
+//    a bus-turnaround pulse around the sample edge, not a DMA-only level.
+//    A 4 MHz-grade 65816 (tBVD 60 ns) drives straight through it and the
+//    FPI is built for that, so the PHY ignores BE lows shorter than
+//    BE_MIN_CLKS (~110 ns).  A sustained BE low tri-states only what a
+//    65816 tri-states: the address/RWB shifters and our data DRIVE; the
+//    receive path is never gated (the core samples at the fall).  The
+//    core keeps running, as a real 65816 does.
 //  * /RES: sampled at the fall; the core is held in reset until /RES has
 //    been high at two consecutive falls, and is released synchronously to
 //    its own clock.  While in reset the address bus stays driven with the
@@ -73,11 +80,14 @@
 module gs_socket_phy #(
     parameter int OUT_DELAY  = 2,   // clks after the synchronised fall before core outputs are sampled
     parameter int RISE_HOLD  = 1,   // extra clks the bank byte is held after the synchronised rise
+    parameter int BE_MIN_CLKS = 12, // BE low shorter than this (~110 ns) is the FPI's per-cycle turnaround pulse: ignored
     parameter int ALIVE_BITS = 17   // no PH2 fall for 2^ALIVE_BITS clks => not alive
 ) (
     input  logic        clk,            // pin-sequencer clock (~108 MHz)
     input  logic        rst_n,          // system reset, active low
     input  logic        armed_i,        // 1 = take the socket (asynchronous ok)
+    input  logic        listen_i,       // 1 = enable the control-input shifter only (C3 listen-only: PH2/RDY/RES/IRQ/NMI/ABORT/BE visible, nothing driven)
+    input  logic [3:0]  out_extra_i,    // extra clks before issue (address-delay sweep instrument)
 
     // P65C816 side.  D_IN / RDY_IN / IRQ_N / NMI_N / ABORT_N connect straight
     // from the pads to the core in the top level.
@@ -107,6 +117,11 @@ module gs_socket_phy #(
     // Status / telemetry (clk domain)
     output logic        ph2_alive_o,
     output logic        running_o,      // core out of reset
+    output logic        enabled_o,      // armed & alive: pins are ours
+    output logic        be_ok_o,        // synchronised BE
+    output logic        fall_evt_o,     // one clk per PHI2 fall (synchronised)
+    output logic        issue_evt_o,    // one clk when a cycle is put on the bus
+    output logic        ended_read_o,   // valid with fall_evt_o: the cycle that ended was a running read
     output logic [31:0] cycle_count_o,  // bus cycles the core advanced through
     output logic [15:0] stall_count_o,  // cycles repeated because RDY was low
     output logic [15:0] be_count_o      // clk cycles spent with BE low
@@ -119,6 +134,7 @@ module gs_socket_phy #(
     logic [2:0] ph2_s;
     logic [1:0] be_s;
     logic [1:0] armed_s;
+    logic [1:0] listen_s;
     logic       cap_tog = 1'b0;         // PH2 domain, toggles at every fall
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -127,18 +143,33 @@ module gs_socket_phy #(
             ph2_s   <= '0;
             be_s    <= 2'b11;
             armed_s <= 2'b00;
+            listen_s <= 2'b00;
         end else begin
             tog_s   <= {tog_s[1:0], cap_tog};
             ph2_s   <= {ph2_s[1:0], gs_ph2_i};
             be_s    <= {be_s[0], gs_be_i};
             armed_s <= {armed_s[0], armed_i};
+            listen_s <= {listen_s[0], listen_i};
         end
     end
 
     wire fall_evt = tog_s[2] ^ tog_s[1];       // a PH2 falling edge happened
     wire rise_evt = ph2_s[1] & ~ph2_s[2];      // PH2 rising edge
-    wire be_ok    = be_s[1];
     wire armed    = armed_s[1];
+
+    // BE filter.  Measured on a ROM 01 IIgs: the FPI pulses BE low ~66 ns
+    // around EVERY PHI2 fall (from ~32 ns before to ~34 ns after).  A
+    // 4 MHz-grade 65816 (tBVD 60 ns) keeps driving through that pulse and
+    // the FPI is built for it, so we do the same: a BE low shorter than
+    // BE_MIN_CLKS is ignored; a sustained BE low (a real bus request, e.g.
+    // DMA) tri-states our drivers ~BE_MIN_CLKS + 2 clks after it starts.
+    logic [4:0] be_low_cnt;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)          be_low_cnt <= '0;
+        else if (be_s[1])    be_low_cnt <= '0;
+        else if (be_low_cnt != 5'd31) be_low_cnt <= be_low_cnt + 1'b1;
+    end
+    wire be_ok = be_s[1] | (be_low_cnt < 5'(BE_MIN_CLKS));
 
     logic [ALIVE_BITS-1:0] alive_cnt;
     logic [1:0]            falls_seen;
@@ -244,7 +275,7 @@ module gs_socket_phy #(
                         // A completed read leaves the shifter in receive;
                         // take it off the bus ahead of the bank byte.
                         if (!write_q && !(stall_last && run_q)) data_oe_n_seq <= 1'b1;
-                        wait_cnt <= 4'(OUT_DELAY - 1);
+                        wait_cnt <= 4'(OUT_DELAY - 1) + out_extra_i;
                         state    <= S_OUT_WAIT;
                     end
                 end
@@ -312,12 +343,20 @@ module gs_socket_phy #(
     //=========================================================================
     // Enables and status
     //=========================================================================
-    assign gs_ctl_oe_n_o  = ~armed;
+    assign gs_ctl_oe_n_o  = ~(armed | listen_s[1]);   // inputs only; harmless to enable without arming
     assign gs_addr_oe_n_o = ~(enabled & be_ok);
-    assign gs_data_oe_n_o = data_oe_n_seq | ~be_ok | ~enabled;
+    // BE low takes our data DRIVE off the bus (the pads, and the shifter only
+    // while we are driving); the receive direction is never gated by BE - the
+    // FPI holds BE low across the PHI2 fall, exactly where the core samples.
+    assign gs_data_oe_n_o = data_oe_n_seq | ~enabled | (d_oe_seq & ~be_ok);
     assign gs_d_oe_o      = d_oe_seq & be_ok & enabled;
     assign gs_rdy_out_o   = 1'b1;
     assign running_o      = core_run;
+    assign enabled_o      = enabled;
+    assign be_ok_o        = be_ok;
+    assign fall_evt_o     = fall_evt;
+    assign issue_evt_o    = (state == S_ISSUE);
+    assign ended_read_o   = ~write_q & run_q & ~stall_last;
 
     logic [15:0] be_cnt;
     always_ff @(posedge clk or negedge rst_n) begin
