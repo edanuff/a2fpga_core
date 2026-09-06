@@ -38,7 +38,12 @@ module tb_gs_socket;
     localparam real T_XEN  = 6.0;      // enable / disable
     // W65C816S, 4 MHz grade (datasheet table 4-2)
     localparam real T_ADS = 75.0, T_BAS = 75.0, T_AH = 20.0, T_BH = 20.0;
-    localparam real T_MDS = 70.0, T_DHW = 20.0, T_DHR = 20.0, T_BVD = 60.0;
+    localparam real T_MDS = 70.0, T_DHW = 20.0, T_DHR = 20.0;
+    // BE -> Hi-Z: the datasheet's tBVD is 60 ns, but the PHY deliberately
+    // ignores BE lows shorter than ~110 ns (the FPI's per-cycle turnaround
+    // pulse), so a sustained bus request is honoured ~110 + 25 ns after it
+    // starts.  Iteration 1 does not target DMA cards.
+    localparam real T_BVD = 200.0;
     // memory behaviour
     localparam real T_ACC   = 100.0;   // read data driven this long after the rise
     localparam real T_GARB  = 35.0;    // garbage driven until fall + T_GARB
@@ -107,8 +112,13 @@ module tb_gs_socket;
 
     //---------------------------------------------------------------- socket nets
     // Motherboard-driven inputs (socket side)
-    logic ph2_bus = 1'b0;
-    logic rdy_bus = 1'b1, irq_n_bus = 1'b1, nmi_n_bus = 1'b1, res_n_bus = 1'b0, abort_n_bus = 1'b1, be_bus = 1'b1;
+    logic ph2_bus;
+    logic rdy_bus = 1'b1, irq_n_bus = 1'b1, nmi_n_bus = 1'b1, res_n_bus = 1'b0, abort_n_bus = 1'b1;
+    // BE: the FPI pulses it low ~66 ns around every PHI2 fall (measured on a
+    // ROM 01 IIgs 2026-09-06: falls ~32 ns before the PHI2 fall, rises ~34 ns
+    // after).  be_dma = the bench's DMA-style hold; be_dma = what the socket sees.
+    logic be_dma = 1'b1, be_pulse_n = 1'b1;
+    wire  be_bus = be_dma & be_pulse_n;
 
     // Card -> socket through the shifters
     logic        addr_en;       // U14/U16 enabled
@@ -225,6 +235,23 @@ module tb_gs_socket;
     logic        rw_l, vp_l;
     real         t_fall = 0, t_rise = 0, t_prev_fall = 0;
 
+    // The socket's PHI2 is the model's PHI2 delayed by 32 ns, so a BE pulse
+    // started at the model's fall and lasting 66 ns reaches the socket as
+    // "low from 32 ns before the PHI2 fall to 34 ns after it" - the FPI's
+    // measured behaviour.  Everything timing-related is referenced to the
+    // socket PHI2 (ph2_bus), so nothing else moves.
+    logic ph2_int = 1'b0;
+    assign #(32.0) ph2_bus = ph2_int;
+    task automatic be_pulse();
+        fork
+            begin
+                be_pulse_n = 1'b0;
+                #(66.0);
+                be_pulse_n = 1'b1;
+            end
+        join_none
+    endtask
+
     always @(posedge tick) begin
         // PH0 grid
         ph0_wrap = (ph0_ctr == ((line_ctr == 64) ? 15 : 13));
@@ -240,7 +267,7 @@ module tb_gs_socket;
 
         if (ph2_ctr == 1) begin
             // rise (2 ticks low)
-            ph2_bus <= 1'b1;
+            ph2_int <= 1'b1;
         end
 
         // end-of-cycle decision (evaluated on the tick where the fall happens)
@@ -255,9 +282,10 @@ module tb_gs_socket;
             end else begin
                 end_now = (ph2_ctr >= (fast_stretch ? 6 : 4));
             end
-            if (end_now && ph2_bus) begin
-                ph2_bus <= 1'b0;
+            if (end_now && ph2_int) begin
+                ph2_int <= 1'b0;
                 ph2_ctr <= 0;
+                be_pulse();                    // socket BE: low from fall-32 ns to fall+34 ns
                 if (!(this_slow || slow_mode)) fast_stretch <= 1'b0;
                 // refresh cadence for the NEXT cycle
                 if (this_rom) begin
@@ -351,7 +379,7 @@ module tb_gs_socket;
         // (W65C816S 7.6); the FPI keeps the bank it latched for the original
         // cycle - also across a BE-low (DMA) stall, when the bus is not ours.
         if (stall_req) bank_l = prev_bank_l;
-        if (running && be_bus) begin
+        if (running && be_dma) begin
             if (!addr_en) err("address shifters not enabled at the rise");
             if (t_addr_change > t_fall && (t_addr_change - t_fall) > T_ADS)
                 err($sformatf("tADS: address settled %.1f ns after the fall", t_addr_change - t_fall));
@@ -392,7 +420,7 @@ module tb_gs_socket;
         t_prev_fall = t_fall;
         t_fall = $realtime;
         cyc_no++;
-        if (running && be_bus) begin
+        if (running && be_dma) begin
             if (!rw_l) begin
                 // write: data must have been stable since rise + T_MDS
                 if (!cpu_drv) err("write cycle: data not driven at the fall");
@@ -436,7 +464,7 @@ module tb_gs_socket;
     // sees there must be what memory drove for this cycle.
     longint ce_count = 0;
     always @(posedge cpu_clk) begin
-        if (cpu_rst_n && be_bus) begin
+        if (cpu_rst_n && be_dma) begin
             if (rw_l && exp_rd_valid && gs_d_i_f != exp_rd)
                 err($sformatf("read data at the core %02h != memory %02h at %02h:%04h", gs_d_i_f, exp_rd, bank_l, addr_l));
             if (gs_rdy_f) ce_count++;
@@ -446,7 +474,7 @@ module tb_gs_socket;
             if (cpu_a != ref_a || cpu_we_n != ref_we_n || cpu_vp_n != ref_vp_n || (!cpu_we_n && cpu_d_out != ref_dout))
                 err($sformatf("DIVERGENCE from reference: dut %06h rw%b vp%b d%02h  ref %06h rw%b vp%b d%02h",
                               cpu_a, cpu_we_n, cpu_vp_n, cpu_d_out, ref_a, ref_we_n, ref_vp_n, ref_dout));
-            if (ref_we_n && be_bus && gs_d_i_f != ref_din)
+            if (ref_we_n && be_dma && gs_d_i_f != ref_din)
                 err($sformatf("read data mismatch vs reference at %06h: dut %02h ref %02h", ref_a, gs_d_i_f, ref_din));
             if (!ref_we_n && gs_rdy_f) model_write(1, ref_a, ref_dout);
             // boot-progress bookkeeping (opcode fetches)
@@ -462,7 +490,7 @@ module tb_gs_socket;
     int     last_pcs_i = 0;
 
     // Stalled cycle must repeat the same bus cycle
-    always @(posedge ph2_bus) if (running && be_bus && stall_req) begin
+    always @(posedge ph2_bus) if (running && be_dma && stall_req) begin
         stall_checks++;
         if (addr_l != prev_addr_l || bank_l != prev_bank_l || rw_l != prev_rw_l)
             err($sformatf("stalled cycle did not repeat: %02h:%04h rw%b vs %02h:%04h rw%b", bank_l, addr_l, rw_l, prev_bank_l, prev_addr_l, prev_rw_l));
@@ -563,12 +591,12 @@ module tb_gs_socket;
                 wait_cycles(1);
                 if (cyc_no >= next_stall) begin stall_one(); next_stall += 997; end
                 if (cyc_no == 50000) begin
-                    @(posedge ph2_bus); #20; rdy_bus = 1'b0; be_bus = 1'b0;
+                    @(posedge ph2_bus); #20; rdy_bus = 1'b0; be_dma = 1'b0;
                     #(T_BVD); be_checks++;
                     if (addr_en) err("BE low: address shifters still enabled after tBVD");
                     if (cpu_drv) err("BE low: data still driven after tBVD");
                     wait_cycles(5);
-                    @(posedge ph2_bus); #20; be_bus = 1'b1; rdy_bus = 1'b1;
+                    @(posedge ph2_bus); #20; be_dma = 1'b1; rdy_bus = 1'b1;
                 end
             end
             $display("---- ROM run: %0d cycles, %0d distinct opcode addresses, %0d text-page writes, %0d I/O writes, %s mode",
@@ -608,13 +636,13 @@ module tb_gs_socket;
 
         // BE + RDY low (what a DMA would do): bus must float within tBVD
         begin
-            @(posedge ph2_bus); #20; rdy_bus = 1'b0; be_bus = 1'b0;
+            @(posedge ph2_bus); #20; rdy_bus = 1'b0; be_dma = 1'b0;
             #(T_BVD);
             be_checks++;
             if (addr_en) err("BE low: address shifters still enabled after tBVD");
             if (cpu_drv) err("BE low: data still driven after tBVD");
             wait_cycles(5);
-            @(posedge ph2_bus); #20; be_bus = 1'b1; rdy_bus = 1'b1;
+            @(posedge ph2_bus); #20; be_dma = 1'b1; rdy_bus = 1'b1;
             wait_cycles(10);
         end
         begin
