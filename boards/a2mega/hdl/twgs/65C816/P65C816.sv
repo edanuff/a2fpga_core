@@ -834,16 +834,22 @@ module P65C816
    // them (ported-VHDL structure); Verilator flags latches. Scoped waiver --
    // the block is combinationally consumed the same cycle, and the core is
    // validated against 504/512 SingleStepTests.
+   // Emulation-mode stack address helpers, hoisted out of the block below
+   // (a2mega): they are pure functions of registers, so computing them
+   // continuously is identical in value, and it removes the branch-scoped
+   // temporaries that GowinSynthesis turned into latches (EX2420 on
+   // sum2low[8]) - a latch loop is poison for timing-driven routing.
+   wire [8:0] pld_sum2low_w = {1'b0, PLD_Low0} + 9'd1;
+   wire [8:0] pld_sum2car_w = {1'b0, PLD_SPW0} + 9'd2;
+   wire [8:0] spw_sum1_w    = {1'b0, SPW[7:0]} + 9'd1;
+   wire [1:0] rtl_off_w     = RTL_SeqActive ? (RTL_Offset + 2'b01) : 2'b00; // effective offsets: 0,1,2
+   wire [8:0] rtl_sum9_w    = {1'b0, (RTL_SeqActive ? RTL_SPW0 : SPW[7:0])} + 9'd1 + {7'b0, rtl_off_w};
+
    /* verilator lint_off LATCH */
    always @*
    begin: xhdl0
       logic [15:0]     ADDR_INC;
       logic [8:0]      sp_inc9;
-      logic [8:0]      pld_inc9;
-      logic [8:0]      rtl_inc9;
-      // For RTL (6B) emulation stack read sequencing
-      logic [8:0]      rtl_base9;
-      logic [8:0]      rtl_addr9;
       ADDR_INC = { 14'b0, MC.ADDR_INC[1:0] };
       sp_inc9 = 9'((SP + ADDR_INC) & 16'h01FF);
       case (MC.ADDR_BUS)
@@ -897,27 +903,17 @@ module P65C816
                       if (PLD_Addr0_Valid == 1'b1)
                         begin
                           // Second byte: base on original SPW
-                          logic [8:0] sum2low;
-                          logic [8:0] sum2car;
-                          sum2low = {1'b0, PLD_Low0} + 9'd1;
-                          sum2car = {1'b0, PLD_SPW0} + 9'd2;
-                          ADDR_BUS = {8'h00, (8'h01 + {7'b0, sum2car[8]}), sum2low[7:0]};
+                          ADDR_BUS = {8'h00, (8'h01 + {7'b0, pld_sum2car_w[8]}), pld_sum2low_w[7:0]};
                         end
                       else begin
                           // First byte: low0 = (previous SP low + 1); page += 1 if previous SP low was 0xFF
-                          logic [8:0] sum1;
-                          sum1 = {1'b0, SPW[7:0]} + 9'd1;
-                          ADDR_BUS = {8'h00, (8'h01 + {7'b0, (SPW[7:0] == 8'hFF)}), sum1[7:0]};
+                          ADDR_BUS = {8'h00, (8'h01 + {7'b0, (SPW[7:0] == 8'hFF)}), spw_sum1_w[7:0]};
                       end
                   end else if (IR == 8'h6B) begin
                      // RTL reads: low byte from current SP (post-increment per microcode)
                      // Page determined by carry of (SPW.low + 1 + offset)
                      begin
-                       logic [1:0] off;
-                       logic [8:0] sum9;
-                       off = RTL_SeqActive ? (RTL_Offset + 2'b01) : 2'b00; // effective offsets: 0,1,2
-                       sum9 = {1'b0, (RTL_SeqActive ? RTL_SPW0 : SPW[7:0])} + 9'd1 + {7'b0, off};
-                       ADDR_BUS = {8'h00, (8'h01 + {7'b0, sum9[8]}), SP[7:0]};
+                       ADDR_BUS = {8'h00, (8'h01 + {7'b0, rtl_sum9_w[8]}), SP[7:0]};
                      end
                   end else if (IR == 8'hAB) begin
                      // PLB read: use page 0x01 plus carry if SP crossed FF->00 prior to this read

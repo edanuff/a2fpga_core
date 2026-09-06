@@ -34,6 +34,13 @@ Author:   srg320 — https://github.com/srg320
   Gowin's encrypted DDR3 controller, whose netlist already defines a module
   named `ALU`, and the generic names collided. Names only — no logic
   differs from the MiSTer source.
+- Emulation-mode stack address helpers (`pld_sum2low_w`, `pld_sum2car_w`,
+  `spw_sum1_w`, `rtl_off_w`, `rtl_sum9_w`) are continuous assignments
+  instead of branch-scoped temporaries inside the ADDR_BUS block. Same
+  values; the temporaries made GowinSynthesis infer a latch (EX2420 on
+  `sum2low[8]`), and a latch loop made timing-driven routing of the full
+  a2mega 138B design thrash (2 of 6 builds finished; the design without
+  the core routed in 15 minutes).
 
 ## Files
 
