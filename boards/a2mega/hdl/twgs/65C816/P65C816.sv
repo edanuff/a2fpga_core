@@ -844,6 +844,7 @@ module P65C816
    wire [8:0] spw_sum1_w    = {1'b0, SPW[7:0]} + 9'd1;
    wire [1:0] rtl_off_w     = RTL_SeqActive ? (RTL_Offset + 2'b01) : 2'b00; // effective offsets: 0,1,2
    wire [8:0] rtl_sum9_w    = {1'b0, (RTL_SeqActive ? RTL_SPW0 : SPW[7:0])} + 9'd1 + {7'b0, rtl_off_w};
+   wire       jsrl_usewrap_w = JSRL_WrapFF | (SP[7:0] == 8'hFF);
 
    /* verilator lint_off LATCH */
    always @*
@@ -929,9 +930,7 @@ module P65C816
                   // Special-case JSR long (22) PC-byte pushes: if the pair started at SP low FF, both bytes go to page 0; else page 1
                   if (IR == 8'h22 && MC.OUT_BUS == 3'b010) begin
                      // First PC-byte push decides wrap (SP low==FF) and latches JSRL_WrapFF; second uses latched value
-                     logic useWrap;
-                     useWrap = (JSRL_WrapFF | (SP[7:0] == 8'hFF));
-                     ADDR_BUS = {8'h00, (useWrap ? 8'h00 : 8'h01), SP[7:0]};
+                     ADDR_BUS = {8'h00, (jsrl_usewrap_w ? 8'h00 : 8'h01), SP[7:0]};
                   end else if (MC.OUT_BUS == 3'b100) begin
                      ADDR_BUS = {8'h00, 8'h01, SP[7:0]};
                   end else if (MC.BYTE_SEL[1] == 1'b1) begin

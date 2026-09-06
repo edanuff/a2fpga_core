@@ -17,6 +17,7 @@
         <File path="hdl/twgs/65C816/P65C816.sv" type="file.verilog" enable="1"/>
         <File path="hdl/twgs/gs_socket_phy.sv" type="file.verilog" enable="1"/>
         <File path="hdl/twgs/gs_socket_ctl.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_test_138b/pll/gowin_gs_pll_mod.v" type="file.verilog" enable="1"/>
         <File path="hdl/dp_test_138b/dp_test_die_pkg_138b.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/csr_replay_rom_lut_138b.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/displayport/gowin/csr_replay_rom_138b.hex" type="file.other" enable="1"/>
