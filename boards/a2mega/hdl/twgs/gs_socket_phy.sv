@@ -78,6 +78,7 @@ module gs_socket_phy #(
     input  logic        clk,            // pin-sequencer clock (~108 MHz)
     input  logic        rst_n,          // system reset, active low
     input  logic        armed_i,        // 1 = take the socket (asynchronous ok)
+    input  logic        listen_i,       // 1 = enable the control-input shifter only (C3 listen-only: PH2/RDY/RES/IRQ/NMI/ABORT/BE visible, nothing driven)
     input  logic [3:0]  out_extra_i,    // extra clks before issue (address-delay sweep instrument)
 
     // P65C816 side.  D_IN / RDY_IN / IRQ_N / NMI_N / ABORT_N connect straight
@@ -125,6 +126,7 @@ module gs_socket_phy #(
     logic [2:0] ph2_s;
     logic [1:0] be_s;
     logic [1:0] armed_s;
+    logic [1:0] listen_s;
     logic       cap_tog = 1'b0;         // PH2 domain, toggles at every fall
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -133,11 +135,13 @@ module gs_socket_phy #(
             ph2_s   <= '0;
             be_s    <= 2'b11;
             armed_s <= 2'b00;
+            listen_s <= 2'b00;
         end else begin
             tog_s   <= {tog_s[1:0], cap_tog};
             ph2_s   <= {ph2_s[1:0], gs_ph2_i};
             be_s    <= {be_s[0], gs_be_i};
             armed_s <= {armed_s[0], armed_i};
+            listen_s <= {listen_s[0], listen_i};
         end
     end
 
@@ -318,7 +322,7 @@ module gs_socket_phy #(
     //=========================================================================
     // Enables and status
     //=========================================================================
-    assign gs_ctl_oe_n_o  = ~armed;
+    assign gs_ctl_oe_n_o  = ~(armed | listen_s[1]);   // inputs only; harmless to enable without arming
     assign gs_addr_oe_n_o = ~(enabled & be_ok);
     assign gs_data_oe_n_o = data_oe_n_seq | ~be_ok | ~enabled;
     assign gs_d_oe_o      = d_oe_seq & be_ok & enabled;

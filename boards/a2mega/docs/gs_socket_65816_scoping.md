@@ -524,7 +524,7 @@ undefined there and neither the logic nor the 38 pins exist in that build):
 
   | index | name | R/W | meaning |
   |---|---|---|---|
-  | 0 | CTRL | RW | bit 0 arm (take the socket), bit 1 data-hold sweep on, bit 7 clear counters |
+  | 0 | CTRL | RW | bit 0 arm (take the socket), bit 1 data-hold sweep on, bit 2 listen (enable the control-input shifter only: PHI2/RDY//RES/IRQ/NMI/ABORT/BE become visible, nothing is driven — the C3 step), bit 7 clear counters |
   | 1 | STATUS | R | {PH2 alive, core running, enabled, BE ok, /RES pad, RDY pad, 0, 0} |
   | 2 | OUT_EXTRA | RW | address-delay sweep: extra sequencer clocks before the cycle is issued (0–15, 9.1 ns each) |
   | 3 | HOLD_TAP | RW | data-hold sweep: clocks after the synchronised fall at which D0–7 is re-sampled (0–31) |
@@ -542,9 +542,11 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   can tear between reads; read twice).
 
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
-  CTRL = 0 — nothing is driven, but STATUS shows PH2 alive and the pad
-  levels, and PH2_PERIOD/PH2_HIGH give the FPI clock's period and duty
-  (C3 listen-only). Then CTRL = 1 to arm: the core starts at the next
+  CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
+  driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/
+  PH2_HIGH give the FPI clock's period and duty (C3 listen-only). (With
+  CTRL = 0 that shifter is off too and PHI2 is invisible — found on the
+  first power-up.) Then CTRL = 1 to arm: the core starts at the next
   /RES release (or immediately if /RES is already high), CYCLES and
   LAST_ADDR show it running. C4 instruments: raise OUT_EXTRA until the
   machine misbehaves (that is the FPI's real tADS tolerance, in 9.1 ns

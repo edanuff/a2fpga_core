@@ -42,6 +42,7 @@ module gs_socket_ctl (
 
     // control (clk domain, quasi-static)
     input  logic        arm_i,          // take the socket
+    input  logic        listen_i,       // enable the control-input shifter only (C3)
     input  logic        sweep_en_i,     // data-hold sweep on
     input  logic [3:0]  out_extra_i,    // address-delay sweep: extra clks before issue
     input  logic [4:0]  hold_tap_i,     // data-hold sweep: clks after the fall event
@@ -90,7 +91,7 @@ module gs_socket_ctl (
     logic [15:0] stall_count, be_count;
 
     gs_socket_phy u_phy (
-        .clk(clk), .rst_n(rst_n), .armed_i(arm_i), .out_extra_i(out_extra_i),
+        .clk(clk), .rst_n(rst_n), .armed_i(arm_i), .listen_i(listen_i), .out_extra_i(out_extra_i),
         .cpu_clk_o(cpu_clk), .cpu_rst_n_o(cpu_rst_n),
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n), .cpu_vp_n_i(cpu_vp_n),
         .gs_ph2_i(gs_ph2_i), .gs_rdy_i(gs_rdy_i), .gs_res_n_i(gs_res_n_i), .gs_be_i(gs_be_i),

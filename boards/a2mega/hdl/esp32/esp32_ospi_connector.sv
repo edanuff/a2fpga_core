@@ -89,7 +89,7 @@ module esp32_ospi_connector #(
     // IIgs CPU-socket 65C816 control/telemetry window (regs 0x5F/0x4F;
     // hdl/twgs/gs_socket_ctl.sv).  Quasi-static both ways; the top
     // synchronises them across the socket sequencer clock.
-    output wire [7:0]   gs_ctrl_o,          // {clear,0,0,0,0,0,sweep_en,arm}
+    output wire [7:0]   gs_ctrl_o,          // {clear,0,0,0,0,listen,sweep_en,arm}
     output wire [3:0]   gs_out_extra_o,     // address-delay sweep (extra clks)
     output wire [4:0]   gs_hold_tap_o,      // data-hold sweep tap (clks after the fall)
     input  wire [159:0] gs_tele_i,          // {last_addr[23:0], high[15:0], period[15:0], hold_samples[15:0],
@@ -287,7 +287,7 @@ module esp32_ospi_connector #(
     localparam REG_DBG_DP_SERDES = 7'h3F;   // SERDES bring-up status byte
 
     // IIgs CPU-socket window: write the index to 0x5F, read/write 0x4F.
-    //  0 CTRL  (RW) {clear[7], .., sweep_en[1], arm[0]}    1 STATUS (RO)
+    //  0 CTRL  (RW) {clear[7], .., listen[2], sweep_en[1], arm[0]}    1 STATUS (RO)
     //  2 OUT_EXTRA (RW) [3:0]   3 HOLD_TAP (RW) [4:0]
     //  4-7 cycle count   8-9 stalls   10-11 BE-low clks   12-13 hold mismatches
     //  14-15 hold samples   16-17 PHI2 period (clks/256 cyc)   18-19 PHI2 high

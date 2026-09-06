@@ -1980,7 +1980,7 @@ module top #(
     end
 
     // IIgs CPU-socket control/telemetry window (regs 0x5F index / 0x4F data)
-    wire [7:0]   gs_ctrl_w;        // {clear,0,0,0,0,0,sweep_en,arm}
+    wire [7:0]   gs_ctrl_w;        // {clear,0,0,0,0,listen,sweep_en,arm}
     wire [3:0]   gs_out_extra_w;   // address-delay sweep
     wire [4:0]   gs_hold_tap_w;    // data-hold sweep
     wire [159:0] gs_tele_w;        // telemetry, connector domain
@@ -2105,6 +2105,7 @@ module top #(
         .clk(clk_gs_w),
         .rst_n(device_reset_n_w & gs_pll_lock_w),
         .arm_i(gs_ctrl_s1[0]),
+        .listen_i(gs_ctrl_s1[2]),
         .sweep_en_i(gs_ctrl_s1[1]),
         .out_extra_i(gs_oe_s1),
         .hold_tap_i(gs_ht_s1),

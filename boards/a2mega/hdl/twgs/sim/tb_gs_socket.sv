@@ -68,7 +68,7 @@ module tb_gs_socket;
     logic [23:0] cpu_a;
 
     gs_socket_phy u_phy (
-        .clk(clk), .rst_n(rst_n), .armed_i(armed), .out_extra_i(4'd0),
+        .clk(clk), .rst_n(rst_n), .armed_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
         .cpu_clk_o(cpu_clk), .cpu_rst_n_o(cpu_rst_n),
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n), .cpu_vp_n_i(cpu_vp_n),
         .gs_ph2_i(gs_ph2_f), .gs_rdy_i(gs_rdy_f), .gs_res_n_i(gs_res_n_f), .gs_be_i(gs_be_f),
