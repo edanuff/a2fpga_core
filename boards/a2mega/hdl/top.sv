@@ -2072,10 +2072,14 @@ module top #(
     // IIgs CPU-socket 65C816 (drop-in iteration) - 138B builds only
     // =========================================================================
 `ifdef GS_SOCKET
-    // Dedicated ~110 MHz sequencer clock (a PLL of its own, so the socket is
-    // independent of the DP link clocks); the core itself runs on PHI2.
-    wire clk_gs_w, gs_pll_lock_w;
-    gowin_gs_pll i_gs_pll (.lock(gs_pll_lock_w), .clkout(clk_gs_w), .clkin(clk));
+    // Sequencer clock = clk100_w (the crystal-derived management PLL clock,
+    // independent of the DP link).  NOT a PLL of its own: the die has 8
+    // PRIMARY clock nets and the full design uses 7; a dedicated sequencer
+    // clock took the 8th and pushed the PHI2 clock (fabric-routed on 1.0a3)
+    // onto the long-wire resources, which were also exhausted - two of three
+    // rolls then thrashed in routing.  Sharing clk100 keeps PHI2 on a
+    // PRIMARY net.  The core itself runs on PHI2.
+    wire clk_gs_w = clk100_w;
 
     // control: connector (clk_logic) -> sequencer domain, quasi-static
     reg [7:0] gs_ctrl_s0, gs_ctrl_s1;
@@ -2098,7 +2102,7 @@ module top #(
 
     gs_socket_ctl i_gs_socket (
         .clk(clk_gs_w),
-        .rst_n(device_reset_n_w & gs_pll_lock_w),
+        .rst_n(device_reset_n_w),
         .arm_i(gs_ctrl_s1[0]),
         .sweep_en_i(gs_ctrl_s1[1]),
         .out_extra_i(gs_oe_s1),

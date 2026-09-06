@@ -128,14 +128,13 @@ set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_logic}]
 // edge = the fall).  Period = the FAST cycle; sync/slow cycles only add
 // slack.  AB17 is not a dedicated clock ball on 1.0a3 - PnR routes the
 // clock generically, which is expected and harmless at 2.86 MHz.
-// clk_gs = the socket's own ~110 MHz sequencer PLL.  The two are
-// asynchronous to each other and to everything else: the crossings are
-// a two-flop toggle sync, quasi-static control/telemetry, and the core's
-// quasi-static outputs sampled >= 2 clk_gs after the fall by design
-// (gs_socket_phy OUT_DELAY; the core's longest path bounds its output
-// settle at ~27 ns - keep OUT_DELAY >= 2).
+// The pin sequencer runs on clk100 (shared with DP management; a
+// dedicated PLL clock would consume the die's 8th and last PRIMARY net
+// and push gs_ph2 onto long wires - see top.sv).  gs_ph2 is asynchronous
+// to everything: the crossings are a two-flop toggle sync, quasi-static
+// control/telemetry, and the core's quasi-static outputs sampled >= 2
+// clk100 after the fall by design (gs_socket_phy OUT_DELAY; the core's
+// longest path bounds its output settle at ~27 ns - keep OUT_DELAY >= 2).
 // ---------------------------------------------------------------------
 create_clock -name gs_ph2 -period 349.0 -waveform {209.4 349.0} [get_ports {gs_ph2}]
-create_clock -name clk_gs -period 9.091 -waveform {0 4.545} [get_pins {i_gs_pll/u_pll/PLL_inst/CLKOUT0}]
-set_clock_groups -asynchronous -group [get_clocks {gs_ph2}] -group [get_clocks {clk_gs}] -group [get_clocks {clk100}] -group [get_clocks {clk}] -group [get_clocks {clk_logic}] -group [get_clocks {clk_pixel}] -group [get_clocks {clk_pix}] -group [get_clocks {clk_sym}] -group [get_clocks {cm_life}] -group [get_clocks {clk4x}] -group [get_clocks {clk1x}]
-set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_gs}]
+set_clock_groups -asynchronous -group [get_clocks {gs_ph2}] -group [get_clocks {clk100}] -group [get_clocks {clk}] -group [get_clocks {clk_logic}] -group [get_clocks {clk_pixel}] -group [get_clocks {clk_pix}] -group [get_clocks {clk_sym}] -group [get_clocks {cm_life}] -group [get_clocks {clk4x}] -group [get_clocks {clk1x}]
