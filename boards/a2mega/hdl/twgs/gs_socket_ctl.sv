@@ -211,18 +211,24 @@ module gs_socket_ctl (
     // Trigger: opcode fetch (VPA & VDA) from bank 0 below $0800 - ROM 01
     // never executes there during startup, so the first one is the runaway.
     // 32 more cycles are recorded, then the ring freezes itself.
-    wire trig_hit = last_vpa & last_vda & (last_addr[23:11] == 13'd0);
-    logic        trigd, auto_frozen;
+    // The core's own reset sequence presents $0000 with VPA&VDA, so the
+    // trigger is held off until the first opcode fetch from ROM space
+    // (bank 0 >= $C000, or any other bank): trig_ready.
+    wire op_fetch = last_vpa & last_vda;
+    wire trig_hit = op_fetch & (last_addr[23:11] == 13'd0);
+    wire rom_op   = op_fetch & ((last_addr[23:16] != 8'h00) | (last_addr[15:14] == 2'b11));
+    logic        trigd, auto_frozen, trig_ready;
     logic [5:0]  post_cnt;
     wire         frozen = trace_freeze_i | auto_frozen;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            trigd <= 1'b0; auto_frozen <= 1'b0; post_cnt <= '0;
+            trigd <= 1'b0; auto_frozen <= 1'b0; post_cnt <= '0; trig_ready <= 1'b0;
         end else if (!trace_trig_en_i || clear_i) begin
-            trigd <= 1'b0; auto_frozen <= 1'b0; post_cnt <= '0;
+            trigd <= 1'b0; auto_frozen <= 1'b0; post_cnt <= '0; trig_ready <= 1'b0;
         end else if (fall_evt && !frozen) begin
             if (!trigd) begin
-                if (trig_hit) begin trigd <= 1'b1; post_cnt <= 6'd31; end
+                if (rom_op) trig_ready <= 1'b1;
+                if (trig_hit && trig_ready) begin trigd <= 1'b1; post_cnt <= 6'd31; end
             end else if (post_cnt == 6'd0) begin
                 auto_frozen <= 1'b1;
             end else begin
