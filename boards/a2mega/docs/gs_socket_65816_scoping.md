@@ -644,7 +644,7 @@ undefined there and neither the logic nor the 38 pins exist in that build):
 | S2 | Socket PHY (`gs_socket_phy.sv`, core clocked by PHI2) + socket SDC + Sim 1 — **DONE 2026-09-05**, both configurations pass; 138B PnR probe on the real GS balls 0/0 (§4.3) | assertions clean ✔ |
 | S3 | Sim 2: ROM 01 through the socket path with a lockstep reference core — **DONE 2026-09-05** (see §7) | zero divergences ✔ |
 | S4 | Integration into the 138B full core behind CTRL.arm; register window + sweeps (§8b); 138B build under the margin policy — **DONE 2026-09-06**, four clean rolls (§8b) | 0/0 + 3 rolls ✔ |
-| S5 | Bench C3 listen-only | test-log rows |
+| S5 | Bench C3→C5 on the ROM 01 machine — **DONE 2026-09-08**: listen reading = motherboard ground truth; armed: splash/beep; cold-start runaway root-caused (§4.5, phantom $C028 on an R-M-W internal cycle) and fixed; Applesoft + keyboard; **ProDOS boots from the a2mega block device** (test log G1–G29) | boot ladder ✔ |
 | S6 | Bench C4 (sweeps → vector fetch → boot) | boot chime |
 | S7 | Bench C5 soak | board-turn bar |
 
