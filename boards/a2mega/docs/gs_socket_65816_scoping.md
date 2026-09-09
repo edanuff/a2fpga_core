@@ -600,20 +600,28 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   `v` virtual-replug key moves it to SNK/UFP but the device still did not
   appear). Helper: scratch `gstel.py "<cmd>; <cmd>"`.
 
-- **Auto-arm (S6, ESP32 firmware `gs_socket.c`, 2026-09-08):** the card no
-  longer needs the console to take the socket. From the disk task (2 ms
-  loop): boot → CTRL = listen (input shifter only) → STATUS sampled every
-  10 ms → after five consecutive PHI2-alive samples CTRL = arm+listen →
-  while armed, sampled every 100 ms; five consecutive dead samples release
-  the socket (machine off, card still USB-powered). This happens ~50 ms
-  after power-up, long before the Apple II reset release (reg 0x2E), so
-  the core cold-starts on that release like the real chip would. Without
-  the ribbon the pulled-down PHI2 pin never reads alive and nothing is
-  driven; a 60K bitstream reads STATUS = 0. Setting `gs_socket_off`
-  (SETTINGS → GS SOCKET 65816: AUTO/OFF) disables it; the telnet
-  `gs arm|off|listen|set 0 …` commands take manual control until
-  `gs auto`. Presence detection for 1.0a4: see
-  board_1_0a4_requirements.md item 12 (not BUS_5V).
+- **Auto-arm (S6, ESP32 firmware `gs_socket.c`, v2 2026-09-09):** driven by
+  the machine's clock, not the console. The slot side already knows whether
+  the Apple II is alive (apple_bus counts PHI1; `sleep` when it stops); the
+  connector exposes it as STATUS.7 and adds an ESP32 reset assert (0x2E.1,
+  read back {hold, assert, release}; the storage-ready release is sticky).
+  Sequence, from the disk task's 2 ms loop:
+  MACHINE OFF (no clock, or slot RESET low - it also reads low unpowered):
+  socket shifters fully off, CTRL = 0. Enabling even the input shifter
+  across the IIgs power-up keeps the machine in its power-on reset (G34).
+  → machine alive AND out of its own reset for 100 ms → **assert our reset**,
+  CTRL = listen, wait for PHI2 at the socket (50 ms) → CTRL = arm, **release**
+  → the core cold-starts on /RES rising (the order that worked in G30).
+  → ARMED: stays armed through the machine's own resets; when the clock
+  stops → CTRL = 0, back to MACHINE OFF. No PHI2 within 2 s of listening
+  (no ribbon) → back off and retry each second. On ESP32 start an FPGA
+  that is already armed is adopted untouched (restart with the machine
+  running); an alive machine with an unarmed socket has no CPU, so it is
+  reset and armed. Setting `gs_socket_off` (SETTINGS → GS SOCKET 65816:
+  AUTO/OFF) disables it; telnet `gs arm|off|listen|set 0 …` take manual
+  control until `gs auto`; `gs` prints the state and the slot clock/reset.
+  Presence detection for 1.0a4: see board_1_0a4_requirements.md item 12
+  (not BUS_5V).
 
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
