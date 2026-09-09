@@ -752,7 +752,7 @@ void disk_poll(void)
                  * race-free. */
                 apply_slot_map();
 
-                fpga_reg_write(A2REG_A2_RST_RELEASE, 1);
+                gs_socket_a2_release();              /* 0x2E.0, via the socket module (keeps its assert bit) */
                 s_released = true;
                 DLOGI("A2: RESET RELEASED%s", any ? "" : " (NO MEDIA)");
             }

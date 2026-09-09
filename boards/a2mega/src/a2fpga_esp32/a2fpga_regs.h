@@ -173,3 +173,11 @@
 // RDY, slot /DMA, slot /RDY}. Full map: docs/gs_socket_65816_scoping.md §8b.
 #define A2REG_GS_SEL        0x5F
 #define A2REG_GS_DATA       0x4F
+
+// STATUS (0x07) bits used by the socket auto-arm
+#define A2ST_A2_ALIVE       0x80   // slot PHI1 running (machine powered)
+#define A2ST_A2_RESET_N     0x04   // slot RESET line (1 = out of reset)
+// A2_RST_RELEASE (0x2E) bits: read back {hold, assert, release}
+#define A2RST_RELEASE       0x01   // storage-ready release (sticky in the FPGA)
+#define A2RST_ASSERT        0x02   // hold the Apple II in reset while set
+#define A2RST_HOLDING       0x04   // read-only: FPGA is asserting the reset

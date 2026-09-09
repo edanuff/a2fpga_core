@@ -167,7 +167,11 @@ static void gs_dump(int fd)
     tn_printf(fd, "last_addr=%02X:%02X%02X trace: %s%s wptr=%u trig_en=%u\r\n",
               r[22], r[21], r[20], (r[23] & 0x80) ? "FROZEN" : "running",
               (r[23] & 0x40) ? " TRIGGERED" : "", r[23] & 0x3F, (r[0] >> 4) & 1);
-    tn_printf(fd, "%s\r\n", gs_socket_state_str());
+    {
+        uint8_t st07 = fpga_reg_read(0x07), rst = fpga_reg_read(0x2E);
+        tn_printf(fd, "%s | a2: clock %s, reset_n=%u, hold=%u (assert=%u release=%u)\r\n", gs_socket_state_str(),
+                  (st07 & 0x80) ? "RUNNING" : "STOPPED", (st07 >> 2) & 1, (rst >> 2) & 1, (rst >> 1) & 1, rst & 1);
+    }
     #undef U16
 }
 

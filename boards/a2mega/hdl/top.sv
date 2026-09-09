@@ -2014,6 +2014,7 @@ module top #(
 
         .ddr3_ready_i(init_calib_complete_w),
         .a2_reset_n_i(a2_reset_n),
+        .a2_alive_i(~sleep_w),
 
         .pad_typ_i(hid_typ_sync1),
         .pad_connerr_i(hid_connerr_sync1),

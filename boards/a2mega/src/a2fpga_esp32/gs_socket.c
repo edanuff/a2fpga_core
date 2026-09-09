@@ -1,4 +1,22 @@
-/* gs_socket.c — auto-arm for the in-socket 65C816. See gs_socket.h. */
+/* gs_socket.c — auto-arm for the in-socket 65C816. See gs_socket.h.
+ *
+ * Sequence (bench G30–G34, 2026-09-09):
+ *   MACHINE_OFF : socket shifters fully off (CTRL = 0). Enabling even the
+ *                 input shifter across the IIgs power-up keeps the machine
+ *                 in its power-on reset (G34), so nothing is touched until
+ *                 the slot side shows the machine ALIVE (PHI1 running,
+ *                 STATUS.7) and OUT of its own reset (STATUS.2, which also
+ *                 reads low while the machine is unpowered).
+ *   ARMING      : assert our reset (0x2E.1), listen (CTRL = 4), wait for
+ *                 PHI2 alive at the socket, arm (CTRL = 5), release our
+ *                 reset -> the core cold-starts on /RES rising. Arming under
+ *                 OUR reset is the sequence that worked all along (G30).
+ *   ARMED       : stay armed through the machine's own resets; when the
+ *                 clock stops (machine off) -> CTRL = 0, back to MACHINE_OFF.
+ *   start       : an FPGA that is already armed (ESP32 restart with the
+ *                 machine running) is adopted untouched; an alive machine
+ *                 with an unarmed socket has no CPU, so it is reset+armed.
+ */
 #include <stdio.h>
 #include "esp_timer.h"
 #include "fpga_link.h"
@@ -9,27 +27,28 @@
 
 #define GLOG(...) do { printf("[gs] " __VA_ARGS__); printf("\n"); osd_log(__VA_ARGS__); } while (0)
 
-/* CTRL register bits (window index 0) */
+/* GS window: CTRL (index 0) bits, STATUS (index 1) bits */
 #define GS_CTRL_ARM     0x01
 #define GS_CTRL_LISTEN  0x04
-/* STATUS bits (window index 1) */
 #define GS_ST_PH2_ALIVE 0x80
-#define GS_ST_RES_N     0x08     /* /RES pad level (1 = machine out of reset) */
+#define GS_ST_RES_N     0x08
 
-#define ALIVE_SAMPLES   5        /* consecutive alive samples before arming */
-#define DEAD_SAMPLES    5        /* consecutive dead samples before disarming */
-#define LISTEN_PERIOD_US   10000 /* 10 ms while waiting for PHI2 */
-#define ARMED_PERIOD_US   100000 /* 100 ms while armed */
+#define POLL_US          10000      /* 10 ms sampling */
+#define ARMED_POLL_US   100000      /* 100 ms while armed */
+#define ALIVE_SAMPLES        10     /* machine alive+out of reset for 100 ms */
+#define PH2_SAMPLES           5     /* PHI2 seen at the socket for 50 ms */
+#define DEAD_SAMPLES          5     /* clock gone for 500 ms -> machine off */
+#define ARMING_TIMEOUT_US 2000000   /* no PHI2 at the socket: back off, retry */
 
-typedef enum { ST_OFF = 0, ST_LISTEN, ST_ARMED, ST_MANUAL } st_t;
+typedef enum { ST_OFF = 0, ST_MACHINE_OFF, ST_ARMING, ST_ARMED, ST_MANUAL } st_t;
 
-static st_t    s_state   = ST_OFF;
-static bool    s_started = false;
-static int     s_count   = 0;
-static int64_t s_next_us = 0;
-static char    s_str[48] = "AUTO: OFF";
-static int64_t s_listen_since_us = 0;
-#define LISTEN_SETTLE_US 300000   /* no PHI2 for 300 ms = no ribbon / machine off */
+static st_t    s_state    = ST_OFF;
+static bool    s_started  = false;
+static bool    s_release  = false;   /* storage-ready release already requested (0x2E.0) */
+static int     s_count    = 0;
+static int64_t s_next_us  = 0;
+static int64_t s_arming_since_us = 0;
+static char    s_str[56]  = "AUTO: OFF";
 
 uint8_t gs_socket_reg_read(uint8_t idx)
 {
@@ -49,37 +68,47 @@ void gs_socket_reg_write(uint8_t idx, uint8_t val)
     fpga_link_unlock();
 }
 
+/* 0x2E owner: {assert, release} written together so neither side clobbers the other */
+static void a2_reset_write(bool assert_hold)
+{
+    fpga_reg_write(A2REG_A2_RST_RELEASE,
+                   (uint8_t)((assert_hold ? A2RST_ASSERT : 0) | (s_release ? A2RST_RELEASE : 0)));
+}
+
+void gs_socket_a2_release(void)
+{
+    s_release = true;
+    a2_reset_write(s_state == ST_ARMING);   /* keep our hold if a sequence is in flight */
+}
+
 static void set_state(st_t st, const char *why)
 {
     s_state = st;
     s_count = 0;
     switch (st) {
-    case ST_OFF:    snprintf(s_str, sizeof(s_str), "AUTO: OFF"); break;
-    case ST_LISTEN: snprintf(s_str, sizeof(s_str), "AUTO: LISTEN (NO PHI2)"); break;
-    case ST_ARMED:  snprintf(s_str, sizeof(s_str), "AUTO: ARMED (PHI2 ALIVE)"); break;
-    case ST_MANUAL: snprintf(s_str, sizeof(s_str), "MANUAL (gs auto TO RESUME)"); break;
+    case ST_OFF:         snprintf(s_str, sizeof(s_str), "AUTO: OFF"); break;
+    case ST_MACHINE_OFF: snprintf(s_str, sizeof(s_str), "AUTO: WAITING FOR MACHINE (SOCKET OFF)"); break;
+    case ST_ARMING:      snprintf(s_str, sizeof(s_str), "AUTO: ARMING (MACHINE HELD IN RESET)"); break;
+    case ST_ARMED:       snprintf(s_str, sizeof(s_str), "AUTO: ARMED"); break;
+    case ST_MANUAL:      snprintf(s_str, sizeof(s_str), "MANUAL (gs auto TO RESUME)"); break;
     }
     if (why) GLOG("GS SOCKET: %s", why);
 }
 
 const char *gs_socket_state_str(void) { return s_str; }
-
-bool gs_socket_ready(void)
-{
-    if (!s_started) return false;                 /* not evaluated yet */
-    if (s_state != ST_LISTEN) return true;        /* armed / off / manual */
-    return esp_timer_get_time() - s_listen_since_us >= LISTEN_SETTLE_US;
-}
 bool gs_socket_is_manual(void) { return s_state == ST_MANUAL; }
+bool gs_socket_ready(void) { return s_started; }
 
 void gs_socket_manual(void)
 {
-    if (s_state != ST_MANUAL) set_state(ST_MANUAL, "MANUAL CONTROL");
+    if (s_state == ST_MANUAL) return;
+    if (s_state == ST_ARMING) a2_reset_write(false);   /* never leave our hold behind */
+    set_state(ST_MANUAL, "MANUAL CONTROL");
 }
 
 void gs_socket_resume(void)
 {
-    s_started = false;           /* re-run the entry decision */
+    s_started = false;
     set_state(ST_OFF, NULL);
 }
 
@@ -90,6 +119,20 @@ void gs_socket_apply(void)
     set_state(ST_OFF, NULL);
 }
 
+static void enter_machine_off(const char *why)
+{
+    gs_socket_reg_write(0, 0x00);                    /* everything off */
+    set_state(ST_MACHINE_OFF, why);
+}
+
+static void begin_arming(const char *why)
+{
+    a2_reset_write(true);                            /* our reset first ... */
+    gs_socket_reg_write(0, GS_CTRL_LISTEN);          /* ... then the input shifter */
+    s_arming_since_us = esp_timer_get_time();
+    set_state(ST_ARMING, why);
+}
+
 void gs_socket_poll(void)
 {
     if (!fpga_link_ok()) return;
@@ -97,49 +140,68 @@ void gs_socket_poll(void)
 
     if (!s_started) {
         s_started = true;
-        /* The FPGA latches 'MCU ready' on the first STATUS read and, until
-         * then, drops its Apple II reset hold 3 s after configuration as a
-         * no-MCU fallback — re-asserting it when the MCU finally shows up.
-         * Declare ourselves before touching the socket (bench G32). */
+        /* STATUS read first: it latches "MCU ready" in the FPGA, whose no-MCU
+         * fallback would otherwise drop and later re-assert the Apple II reset. */
         (void)fpga_reg_read(A2REG_STATUS);
+        s_release = (fpga_reg_read(A2REG_A2_RST_RELEASE) & A2RST_RELEASE) != 0;
         if (settings()->gs_socket_off) {
-            gs_socket_reg_write(0, 0x00);            /* nothing driven, nothing listened */
+            gs_socket_reg_write(0, 0x00);
             set_state(ST_OFF, "DISABLED BY SETTING");
             return;
         }
-        gs_socket_reg_write(0, GS_CTRL_LISTEN);      /* input shifter only */
-        set_state(ST_LISTEN, "LISTENING FOR PHI2");
-        s_listen_since_us = now;
-        s_next_us = now + LISTEN_PERIOD_US;
+        uint8_t ctrl = gs_socket_reg_read(0);
+        if (ctrl & GS_CTRL_ARM) {
+            set_state(ST_ARMED, "ALREADY ARMED - ADOPTED");   /* ESP32 restart, machine running */
+            s_next_us = now + ARMED_POLL_US;
+            return;
+        }
+        enter_machine_off("WAITING FOR MACHINE CLOCK");
+        s_next_us = now + POLL_US;
         return;
     }
     if (s_state == ST_OFF || s_state == ST_MANUAL) return;
     if (now < s_next_us) return;
 
-    uint8_t st = gs_socket_reg_read(1);
-    bool alive = (st & GS_ST_PH2_ALIVE) != 0;
-    bool res_hi = (st & GS_ST_RES_N) != 0;
+    uint8_t st07   = fpga_reg_read(A2REG_STATUS);
+    bool alive     = (st07 & A2ST_A2_ALIVE) != 0;
+    bool a2_rst_hi = (st07 & A2ST_A2_RESET_N) != 0;
 
-    if (s_state == ST_LISTEN) {
-        /* Arm only once the machine is OUT of its power-on reset: driving the
-         * socket while /RES is still low at power-up keeps the IIgs in reset
-         * for ever (bench G31/G32: releasing the socket let /RES rise, then
-         * arming started the core). Later resets (Control-Reset) while armed
-         * are fine — we stay armed through them like the real chip. */
-        s_next_us = now + LISTEN_PERIOD_US;
-        s_count = (alive && res_hi) ? s_count + 1 : 0;
-        if (s_count >= ALIVE_SAMPLES) {
+    switch (s_state) {
+    case ST_MACHINE_OFF:
+        s_next_us = now + POLL_US;
+        /* alive AND out of reset: the machine finished its own power-on reset
+         * (or our storage hold was released) with the socket untouched */
+        s_count = (alive && a2_rst_hi) ? s_count + 1 : 0;
+        if (s_count >= ALIVE_SAMPLES)
+            begin_arming("MACHINE ALIVE - RESET ASSERTED, LISTENING");
+        break;
+
+    case ST_ARMING: {
+        s_next_us = now + POLL_US;
+        if (!alive) { a2_reset_write(false); enter_machine_off("CLOCK LOST WHILE ARMING"); break; }
+        uint8_t gs = gs_socket_reg_read(1);
+        s_count = (gs & GS_ST_PH2_ALIVE) ? s_count + 1 : 0;
+        if (s_count >= PH2_SAMPLES) {
             gs_socket_reg_write(0, GS_CTRL_LISTEN | GS_CTRL_ARM);
-            set_state(ST_ARMED, "PHI2 ALIVE, /RES HIGH - ARMED");
-            s_next_us = now + ARMED_PERIOD_US;
+            a2_reset_write(false);                   /* release: core cold-starts */
+            set_state(ST_ARMED, "PHI2 ALIVE - ARMED, RESET RELEASED");
+            s_next_us = now + ARMED_POLL_US;
+        } else if (now - s_arming_since_us > ARMING_TIMEOUT_US) {
+            a2_reset_write(false);
+            enter_machine_off("NO PHI2 AT THE SOCKET - RIBBON? RETRYING");
+            s_next_us = now + 1000000;
         }
-    } else if (s_state == ST_ARMED) {
-        s_next_us = now + ARMED_PERIOD_US;
+        break;
+    }
+
+    case ST_ARMED:
+        s_next_us = now + ARMED_POLL_US;
         s_count = alive ? 0 : s_count + 1;
-        if (s_count >= DEAD_SAMPLES) {
-            gs_socket_reg_write(0, GS_CTRL_LISTEN);  /* machine off: release the socket */
-            set_state(ST_LISTEN, "PHI2 LOST - RELEASED");
-            s_next_us = now + LISTEN_PERIOD_US;
-        }
+        if (s_count >= DEAD_SAMPLES)
+            enter_machine_off("MACHINE CLOCK STOPPED - SOCKET OFF");
+        break;
+
+    default:
+        break;
     }
 }

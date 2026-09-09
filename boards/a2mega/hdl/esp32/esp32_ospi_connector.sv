@@ -52,6 +52,7 @@ module esp32_ospi_connector #(
     // System status inputs (clk domain)
     input  wire        ddr3_ready_i,
     input  wire        a2_reset_n_i,
+    input  wire        a2_alive_i,         // slot PHI1 running (apple_bus sleep_o inverted): the machine is powered
 
     // USB HID readback (already synchronized into clk domain)
     input  wire [1:0]  pad_typ_i,        // 0 none, 1 kbd, 2 mouse, 3 gamepad
@@ -421,6 +422,7 @@ module esp32_ospi_connector #(
 
     // Apple II reset release
     reg        a2_rst_release_r;
+    reg        a2_rst_assert_r;    // 0x2E bit 1: hold the Apple II in reset while set (socket arm sequence)
 
     // W5100 doorbell clear
     reg [3:0]  w5100_cmd_clr_r;
@@ -493,7 +495,7 @@ module esp32_ospi_connector #(
                  rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0])
             rst_released_r <= 1'b1;
     end
-    assign a2bus_control_if.reset_hold = !rst_released_r;
+    assign a2bus_control_if.reset_hold = a2_rst_assert_r | !rst_released_r;
     assign a2bus_control_if.ready = 1'b1;
 
     // =========================================================================
@@ -586,8 +588,27 @@ module esp32_ospi_connector #(
     wire vol_pending_w = volumes[0].rd | volumes[0].wr | volumes[1].rd | volumes[1].wr;
     wire hdd_pending_w = hdd_volumes[0].rd | hdd_volumes[0].wr |
                          hdd_volumes[1].rd | hdd_volumes[1].wr;
+    // Apple II alive = slot PHI1 running. sleep_o drops out between edges only
+    // if the clock stops for >1 us, so a short filter makes a clean level:
+    // alive after ~100 us of clock, dead as soon as sleep is reported.
+    reg [12:0] alive_cnt_r;
+    reg        a2_alive_f_r;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            alive_cnt_r  <= '0;
+            a2_alive_f_r <= 1'b0;
+        end else if (!a2_alive_i) begin
+            alive_cnt_r  <= '0;
+            a2_alive_f_r <= 1'b0;
+        end else if (&alive_cnt_r) begin
+            a2_alive_f_r <= 1'b1;
+        end else begin
+            alive_cnt_r  <= alive_cnt_r + 1'b1;
+        end
+    end
+
     wire [7:0] status_w = {
-        1'b0,
+        a2_alive_f_r,               // [7] Apple II alive (slot PHI1 running)
         pad_typ_i != 2'd0,          // [6] HID device present
         |w5100_cmd_pending,         // [5] W5100 doorbell pending
         hdd_pending_w,              // [4] HDD request pending
@@ -686,7 +707,7 @@ module esp32_ospi_connector #(
             REG_HDD1_LBA_L:   reg_rdata = hdd_volumes[1].lba[7:0];
             REG_HDD1_LBA_H:   reg_rdata = hdd_volumes[1].lba[15:8];
 
-            REG_A2_RST_RELEASE: reg_rdata = {7'b0, a2_rst_release_r};
+            REG_A2_RST_RELEASE: reg_rdata = {5'b0, a2bus_control_if.reset_hold, a2_rst_assert_r, a2_rst_release_r};
 
             // Slot configuration
             REG_SLOT_SELECT:  reg_rdata = {5'b0, slot_select_r};
@@ -800,6 +821,7 @@ module esp32_ospi_connector #(
             hdd_ack_r[0] <= 1'b0;
             hdd_ack_r[1] <= 1'b0;
             a2_rst_release_r <= 1'b0;
+            a2_rst_assert_r  <= 1'b0;
             w5100_cmd_clr_r <= 4'b0;
             gpu_trigger_r <= 1'b0;
             gpu_pause_r <= 1'b0;
@@ -883,7 +905,10 @@ module esp32_ospi_connector #(
                     REG_HDD1_LBA_H:   hdd_size_r[1][15:8] <= reg_wdata;
                     REG_HDD1_ACK:     hdd_ack_r[1] <= 1'b1;
 
-                    REG_A2_RST_RELEASE: a2_rst_release_r <= reg_wdata[0];
+                    REG_A2_RST_RELEASE: begin
+                        a2_rst_release_r <= reg_wdata[0];
+                        a2_rst_assert_r  <= reg_wdata[1];
+                    end
 
                     REG_SLOT_SELECT:  slot_select_r <= reg_wdata[2:0];
                     REG_SLOT_CARD: begin

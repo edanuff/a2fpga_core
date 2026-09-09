@@ -47,6 +47,11 @@ bool gs_socket_ready(void);
 /* One-line state for `gs` / status pages, e.g. "AUTO: ARMED (PHI2 ALIVE)". */
 const char *gs_socket_state_str(void);
 
+/* Storage-ready release of the Apple II reset (0x2E.0). disk.c calls this
+ * instead of writing the register so an arm sequence in flight keeps its
+ * own reset assert (0x2E.1). */
+void gs_socket_a2_release(void);
+
 /* Register-window helpers shared with telnetd (locked). */
 uint8_t gs_socket_reg_read(uint8_t idx);
 void    gs_socket_reg_write(uint8_t idx, uint8_t val);
