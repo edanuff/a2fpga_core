@@ -96,6 +96,11 @@ module gs_socket_phy #(
     input  logic [23:0] cpu_a_i,        // core A_OUT
     input  logic [7:0]  cpu_d_out_i,    // core D_OUT
     input  logic        cpu_we_n_i,     // core WE: 1 = read, 0 = write (RWB polarity)
+    input  logic        cpu_vpa_i,      // core VPA/VDA: both low = internal cycle. The socket has no
+    input  logic        cpu_vda_i,      // VDA/VPA pins, so the FPI performs whatever address is on the bus;
+                                        // the real chip holds the operand address through an R-M-W internal
+                                        // cycle, the MiSTer core presents operand+1 (TSB $C027 -> $C028 =
+                                        // ROMBANK, bench G19). Internal cycles repeat the previous address as a read.
     input  logic        force_slow_i,   // DIAGNOSTIC: clear bit 7 on writes to $C036 (any I/O bank)
                                         // so the FPI never leaves 1 MHz - isolates fast-mode bus timing
     input  logic        cpu_vp_n_i,     // core VPB (active low)
@@ -235,6 +240,11 @@ module gs_socket_phy #(
     state_t     state;
     logic [3:0] wait_cnt;
     logic       write_q;         // cycle on the bus is a write
+    logic [7:0] bank_q;          // bank byte of the last non-internal cycle
+    // internal cycle whose address falls in I/O space ($C000-$C0FF of banks 00/01/E0/E1): the only
+    // case where a phantom address has side effects; elsewhere the core's own address is presented
+    wire        internal_cyc = core_run & ~cpu_vpa_i & ~cpu_vda_i & (cpu_a_i[15:8] == 8'hC0) &
+                               ((cpu_a_i[23:17] == 7'd0) | (cpu_a_i[23:17] == 7'h70));
     logic [7:0] wdata_q;
     logic       d_oe_seq;        // sequencer wants the D pads driven
     logic       data_oe_n_seq;   // sequencer's U13 port-2 enable
@@ -245,6 +255,7 @@ module gs_socket_phy #(
             state         <= S_OFF;
             wait_cnt      <= '0;
             write_q       <= 1'b0;
+            bank_q        <= 8'h00;
             wdata_q       <= 8'h00;
             run_q         <= 1'b0;
             d_oe_seq      <= 1'b0;
@@ -289,16 +300,28 @@ module gs_socket_phy #(
 
                 S_ISSUE: begin
                     // The core's outputs have settled: put the cycle on the bus.
-                    gs_a_o  <= cpu_a_i[15:0];
-                    gs_rw_o <= core_run ? cpu_we_n_i : 1'b1;
-                    gs_vp_o <= core_run ? cpu_vp_n_i : 1'b1;
+                    if (internal_cyc) begin
+                        // internal cycle: repeat the previous address/bank as a read
+                        // (gs_a_o unchanged) - never a new address on the bus
+                        gs_rw_o <= 1'b1;
+                        gs_vp_o <= 1'b1;
+                    end else begin
+                        gs_a_o  <= cpu_a_i[15:0];
+                        gs_rw_o <= core_run ? cpu_we_n_i : 1'b1;
+                        gs_vp_o <= core_run ? cpu_vp_n_i : 1'b1;
+                    end
                     if (!(stall_last && run_q)) begin
                         // normal cycle: new write flag/data, bank byte during the low phase
-                        write_q       <= core_run & ~cpu_we_n_i;
+                        write_q       <= core_run & ~cpu_we_n_i & ~internal_cyc;
                         wdata_q       <= (force_slow_i && cpu_a_i[15:0] == 16'hC036 &&
                                           (cpu_a_i[23:17] == 7'd0 || cpu_a_i[23:17] == 7'h70))
                                          ? {1'b0, cpu_d_out_i[6:0]} : cpu_d_out_i;   // banks 00/01, E0/E1
-                        gs_d_o        <= cpu_a_i[23:16];
+                        if (internal_cyc) begin
+                            gs_d_o    <= bank_q;
+                        end else begin
+                            gs_d_o    <= cpu_a_i[23:16];
+                            bank_q    <= cpu_a_i[23:16];
+                        end
                         d_oe_seq      <= 1'b1;
                         gs_d_dir_o    <= 1'b1;
                         data_oe_n_seq <= 1'b0;

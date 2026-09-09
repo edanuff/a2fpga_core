@@ -77,6 +77,7 @@ module tb_gs_socket;
         .clk(clk), .rst_n(rst_n), .armed_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
         .cpu_clk_o(cpu_clk), .cpu_rst_n_o(cpu_rst_n),
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n), .cpu_vp_n_i(cpu_vp_n),
+        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda),
         .gs_ph2_i(gs_ph2_f), .gs_rdy_i(gs_rdy_f), .gs_res_n_i(gs_res_n_f), .gs_be_i(gs_be_f),
         .gs_d_o(gs_d_o_f), .gs_d_oe_o(gs_d_oe_f),
         .gs_a_o(gs_a_f), .gs_rw_o(gs_rw_f), .gs_vp_o(gs_vp_f), .gs_rdy_out_o(gs_rdy_out_f),
@@ -167,7 +168,9 @@ module tb_gs_socket;
     logic [7:0] io_regs   [0:255];      // $C0xx write-back register file (DUT)
     logic [7:0] io_regs_r [0:255];      // ... reference copy
     bit         rom_loaded = 0;
-    logic       slow_mode = 1'b1;       // $C036 bit 7 = 0 after reset
+    logic       slow_mode = 1'b1;
+    int rombank_hits = 0;   // accesses to $C028 (ROMBANK) — a real 65816 never presents this address during ROM 01 startup;
+                            // the MiSTer core did on the internal cycle of TSB $C027 (hardware runaway, bench G19)       // $C036 bit 7 = 0 after reset
 
     // $C000-$C0FF in banks 00/01/E0/E1
     function automatic bit is_io(input logic [23:0] a);
@@ -195,6 +198,7 @@ module tb_gs_socket;
             // minimal hardware handshakes so the ROM's init code progresses:
             case (a[7:0])
                 8'h34: v[7] = 1'b0;        // clock chip: transaction always complete
+                8'h28: rombank_hits++;     // ROMBANK: any access flips the bank-0 ROM window
                 default: ;
             endcase
             return v;
@@ -206,6 +210,7 @@ module tb_gs_socket;
     task automatic model_write(input bit r, input logic [23:0] a, input logic [7:0] v);
         if (is_io(a)) begin
             if (a[15:0] == 16'hC036 && !r && !noturbo) slow_mode = ~v[7];
+            if (a[7:0] == 8'h28) rombank_hits++;
             if (rom_loaded) begin
                 if (r) io_regs_r[a[7:0]] = v; else io_regs[a[7:0]] = v;
             end
@@ -372,6 +377,10 @@ module tb_gs_socket;
     int         stall_checks = 0, be_checks = 0, sync_cycles = 0, refresh_cycles = 0, vp_fetches = 0;
 
     // the FPI at the rise: latch bank/address/RWB, classify, start memory
+    int int_io_hits = 0;
+    // the cycle now on the bus is an internal one (VDA=VPA=0) whose core address is in I/O space
+    wire int_io_cyc = running && !cpu_vpa && !cpu_vda && cpu_a[15:8] == 8'hC0 &&
+                      (cpu_a[23:17] == 7'd0 || cpu_a[23:17] == 7'h70);
     always @(posedge ph2_bus) begin
         t_rise = $realtime;
         bh_pending = 1;
@@ -385,6 +394,16 @@ module tb_gs_socket;
             if (t_addr_change > t_fall && (t_addr_change - t_fall) > T_ADS)
                 err($sformatf("tADS: address settled %.1f ns after the fall", t_addr_change - t_fall));
             if (t_addr_change > t_fall && (t_addr_change - t_fall) > st_max_tads) st_max_tads = t_addr_change - t_fall;
+            if (int_io_cyc) begin
+                // internal cycle aimed at I/O space: the PHY must repeat the previous
+                // address/bank (a real 65816 holds the operand address through an
+                // R-M-W internal cycle; the core presents operand+1 - TSB $C027 ->
+                // $C028 ROMBANK on hardware, bench G19). Never a new I/O address.
+                int_io_hits++;
+                if (addr_l != prev_addr_l || bank_l != prev_bank_l)
+                    err($sformatf("internal I/O cycle put a NEW address on the bus: %02h:%04h (core %06h, previous %02h:%04h)",
+                                  bank_l, addr_l, cpu_a, prev_bank_l, prev_addr_l));
+            end else
             if (addr_l != cpu_a[15:0]) err($sformatf("latched address %04h != core %06h", addr_l, cpu_a));
             if (rw_l != cpu_we_n) err($sformatf("latched RWB %b != core %b", rw_l, cpu_we_n));
             if (vp_l != cpu_vp_n) err($sformatf("VP %b != core VPB %b", vp_l, cpu_vp_n));
@@ -475,7 +494,8 @@ module tb_gs_socket;
             if (cpu_a != ref_a || cpu_we_n != ref_we_n || cpu_vp_n != ref_vp_n || (!cpu_we_n && cpu_d_out != ref_dout))
                 err($sformatf("DIVERGENCE from reference: dut %06h rw%b vp%b d%02h  ref %06h rw%b vp%b d%02h",
                               cpu_a, cpu_we_n, cpu_vp_n, cpu_d_out, ref_a, ref_we_n, ref_vp_n, ref_dout));
-            if (ref_we_n && be_dma && gs_d_i_f != ref_din)
+            if (ref_we_n && be_dma && gs_d_i_f != ref_din &&
+                !(!ref_vpa && !ref_vda && ref_a[15:8] == 8'hC0 && (ref_a[23:17] == 7'd0 || ref_a[23:17] == 7'h70)))
                 err($sformatf("read data mismatch vs reference at %06h: dut %02h ref %02h", ref_a, gs_d_i_f, ref_din));
             if (!ref_we_n && gs_rdy_f) model_write(1, ref_a, ref_dout);
             // boot-progress bookkeeping (opcode fetches)
@@ -664,6 +684,11 @@ module tb_gs_socket;
         if (refresh_cycles == 0 && !noturbo && !rom_loaded) err("no refresh cycles occurred");
         $display("---- socket timing (ns): tADS max %.1f  tBAS max %.1f  tAH min %.1f  tBH min %.1f  tMDS max %.1f  tDHW min %.1f  read release after rise max %.1f",
                  st_max_tads, st_max_tbas, st_min_tah, st_min_tbh, st_max_tmds, st_min_tdhw, st_max_rel);
+        if (rombank_hits != 0) begin
+            $display("FAIL: %0d phantom access(es) to $C028 ROMBANK (internal-cycle address on the bus)", rombank_hits);
+            errors++;
+        end
+        $display("internal I/O cycles guarded: %0d; phantom $C028 accesses: %0d", int_io_hits, rombank_hits);
         if (errors == 0) $display("PASS");
         else $display("FAIL: %0d errors", errors);
         $finish;

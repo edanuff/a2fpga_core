@@ -355,6 +355,38 @@ latch inferred in the core's BCD adder (`sum2low[8]`, inherited from the
 MiSTer source) — harmless at 2.86 MHz but worth cleaning before the
 timing campaign bar is applied to this domain (follow-up).
 
+### 4.5 Internal cycles: the socket has no VDA/VPA (bench finding G19, 2026-09-08)
+
+The 65816 marks cycles that do no bus work (VDA = VPA = 0) - the internal
+cycle of a read-modify-write, the dummy cycle of implied instructions,
+stack housekeeping. On the IIgs those pins are not connected: the FPI
+performs whatever address is on the bus, every cycle. The real W65C816
+holds the operand address through the R-M-W internal cycle (datasheet
+table 5-7, "IO: AAH AAL"), so the second read is harmless. The MiSTer
+P65C816 presents **operand + 1** on that cycle - harmless in MiSTer, whose
+memory ignores internal cycles, fatal in the socket: ROM 01's cold start
+does `TSB $C027` (ENBDATAREG, enable the ADB data interrupt) and the
+phantom read of **$C028 = ROMBANK** swaps which half of the ROM is mapped
+into bank 0's $C000-$FFFF window. Every later bank-0 fetch came from
+$Bxxx instead of $Fxxx (the "A14 cleared" signature in the bus trace),
+the PC ran off into zero page and executed $FF bytes for ever. Bank FF
+reads were unaffected, which is what ruled out an electrical fault.
+
+Rule in the PHY: on an internal cycle whose core address falls in I/O
+space ($C000-$C0FF of banks 00/01/E0/E1) the previous cycle's address and
+bank are repeated as a read (`internal_cyc` in `gs_socket_phy.sv`).
+Elsewhere the core's own address is presented (it matches the real
+part's PC+1 style dummy reads, and the bench's lockstep checker keeps
+watching it). The bench asserts the rule on every internal I/O cycle and
+counts phantom $C028 accesses; `TSB $C029` at the very start of the ROM
+exercises it on every run.
+
+Lesson for the rest of the drop-in work: any place the core's bus
+behaviour differs from the W65C816's on cycles the FPI cannot classify
+is a live bug on this machine, even when the core is "correct" as a CPU.
+Candidates to audit next: indexed-addressing dummy reads, the `MVN/MVP`
+extra cycles, interrupt-sequence cycles.
+
 ### 4.4 PH2 on a non-clock ball (1.0a3)
 
 Gowin PnR routes a general I/O onto the clock network through the fabric

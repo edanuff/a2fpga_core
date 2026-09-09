@@ -107,6 +107,7 @@ module gs_socket_ctl (
         .clk(clk), .rst_n(rst_n), .armed_i(arm_i), .listen_i(listen_i), .out_extra_i(out_extra_i), .force_slow_i(force_slow_i),
         .cpu_clk_o(cpu_clk), .cpu_rst_n_o(cpu_rst_n),
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n), .cpu_vp_n_i(cpu_vp_n),
+        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda),
         .gs_ph2_i(gs_ph2_i), .gs_rdy_i(gs_rdy_i), .gs_res_n_i(gs_res_n_i), .gs_be_i(gs_be_i),
         .gs_d_o(gs_d_o), .gs_d_oe_o(gs_d_oe_o),
         .gs_a_o(gs_a_o), .gs_rw_o(gs_rw_o), .gs_vp_o(gs_vp_o), .gs_rdy_out_o(gs_rdy_out_o),
