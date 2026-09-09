@@ -535,7 +535,7 @@ undefined there and neither the logic nor the 38 pins exist in that build):
 
   | index | name | R/W | meaning |
   |---|---|---|---|
-  | 0 | CTRL | RW | bit 0 arm (take the socket), bit 1 data-hold sweep on, bit 2 listen (enable the control-input shifter only: PHI2/RDY//RES/IRQ/NMI/ABORT/BE become visible, nothing is driven — the C3 step), bit 3 freeze the bus trace, bit 4 arm the trace trigger (auto-freeze 32 cycles after the first opcode fetch from bank 0 below $0800 — the runaway catcher), bit 7 clear counters (also re-arms the trigger) |
+  | 0 | CTRL | RW | bit 0 arm (take the socket), bit 1 data-hold sweep on, bit 2 listen (enable the control-input shifter only: PHI2/RDY//RES/IRQ/NMI/ABORT/BE become visible, nothing is driven — the C3 step), bit 3 freeze the bus trace, bit 4 arm the trace trigger (auto-freeze 32 cycles after the first opcode fetch from bank 0 below $0800, held off until the first ROM opcode fetch — the runaway catcher), bit 5 DIAGNOSTIC force-slow (clears bit 7 on writes to $C036 in banks 00/01/E0/E1 so the FPI never leaves 1 MHz — isolates fast-mode bus timing), bit 7 clear counters (also re-arms the trigger) |
   | 1 | STATUS | R | {PH2 alive, core running, enabled, BE pad, /RES pad, RDY pad, slot /DMA, slot /RDY} |
   | 2 | OUT_EXTRA | RW | address-delay sweep: extra sequencer clocks before the cycle is issued (0–15, 9.1 ns each) |
   | 3 | HOLD_TAP | RW | data-hold sweep: clocks after the synchronised fall at which D0–7 is re-sampled (0–31) |

@@ -96,6 +96,8 @@ module gs_socket_phy #(
     input  logic [23:0] cpu_a_i,        // core A_OUT
     input  logic [7:0]  cpu_d_out_i,    // core D_OUT
     input  logic        cpu_we_n_i,     // core WE: 1 = read, 0 = write (RWB polarity)
+    input  logic        force_slow_i,   // DIAGNOSTIC: clear bit 7 on writes to $C036 (any I/O bank)
+                                        // so the FPI never leaves 1 MHz - isolates fast-mode bus timing
     input  logic        cpu_vp_n_i,     // core VPB (active low)
 
     // Socket side: FPGA_GS_* pins
@@ -293,7 +295,9 @@ module gs_socket_phy #(
                     if (!(stall_last && run_q)) begin
                         // normal cycle: new write flag/data, bank byte during the low phase
                         write_q       <= core_run & ~cpu_we_n_i;
-                        wdata_q       <= cpu_d_out_i;
+                        wdata_q       <= (force_slow_i && cpu_a_i[15:0] == 16'hC036 &&
+                                          (cpu_a_i[23:17] == 7'd0 || cpu_a_i[23:17] == 7'h70))
+                                         ? {1'b0, cpu_d_out_i[6:0]} : cpu_d_out_i;   // banks 00/01, E0/E1
                         gs_d_o        <= cpu_a_i[23:16];
                         d_oe_seq      <= 1'b1;
                         gs_d_dir_o    <= 1'b1;

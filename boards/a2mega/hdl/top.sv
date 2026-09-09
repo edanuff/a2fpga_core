@@ -2117,6 +2117,7 @@ module top #(
         .out_extra_i(gs_oe_s1),
         .hold_tap_i(gs_ht_s1),
         .clear_i(gs_ctrl_s1[7]),
+        .force_slow_i(gs_ctrl_s1[5]),
         .trace_freeze_i(gs_ctrl_s1[3]),
         .trace_trig_en_i(gs_ctrl_s1[4]),
         .rd_clk(clk_logic_w), .trace_idx_i(gs_trace_idx_w),
