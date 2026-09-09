@@ -38,6 +38,12 @@ void gs_socket_manual(void);
 void gs_socket_resume(void);
 bool gs_socket_is_manual(void);
 
+/* True once the auto-arm has settled: armed, disabled, manual, or listening
+ * long enough (300 ms) to conclude there is no ribbon / no powered socket.
+ * The Apple II reset release waits for this so the core is armed BEFORE
+ * /RES rises, like the real chip (bench G30: the release beat the arm). */
+bool gs_socket_ready(void);
+
 /* One-line state for `gs` / status pages, e.g. "AUTO: ARMED (PHI2 ALIVE)". */
 const char *gs_socket_state_str(void);
 

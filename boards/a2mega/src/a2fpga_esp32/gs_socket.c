@@ -27,6 +27,8 @@ static bool    s_started = false;
 static int     s_count   = 0;
 static int64_t s_next_us = 0;
 static char    s_str[48] = "AUTO: OFF";
+static int64_t s_listen_since_us = 0;
+#define LISTEN_SETTLE_US 300000   /* no PHI2 for 300 ms = no ribbon / machine off */
 
 uint8_t gs_socket_reg_read(uint8_t idx)
 {
@@ -60,6 +62,13 @@ static void set_state(st_t st, const char *why)
 }
 
 const char *gs_socket_state_str(void) { return s_str; }
+
+bool gs_socket_ready(void)
+{
+    if (!s_started) return false;                 /* not evaluated yet */
+    if (s_state != ST_LISTEN) return true;        /* armed / off / manual */
+    return esp_timer_get_time() - s_listen_since_us >= LISTEN_SETTLE_US;
+}
 bool gs_socket_is_manual(void) { return s_state == ST_MANUAL; }
 
 void gs_socket_manual(void)
@@ -94,6 +103,7 @@ void gs_socket_poll(void)
         }
         gs_socket_reg_write(0, GS_CTRL_LISTEN);      /* input shifter only */
         set_state(ST_LISTEN, "LISTENING FOR PHI2");
+        s_listen_since_us = now;
         s_next_us = now + LISTEN_PERIOD_US;
         return;
     }
