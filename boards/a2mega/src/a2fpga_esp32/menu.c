@@ -30,6 +30,7 @@
 #include "osd_console.h"
 #include "settings.h"
 #include "disk.h"
+#include "gs_socket.h"
 #include "fpgaupdate.h"
 #include "net_status.h"
 #include "menu.h"
@@ -892,8 +893,24 @@ static void settings_do_reset(int id)
     screen_refresh();
 }
 
+static void gs_socket_change(int id, int dir)
+{
+    (void)id; (void)dir;
+    settings()->gs_socket_off = !settings()->gs_socket_off;
+    save_settings_status();
+    gs_socket_apply();
+    screen_refresh();
+}
+
 static void settings_build(void)
 {
+    {
+        menu_item_t *g = mi_add(MI_TOGGLE, "GS SOCKET 65816",
+                                settings()->gs_socket_off ? "OFF" : "AUTO");
+        g->on_change = gs_socket_change;
+        mi_add(MI_INFO, gs_socket_state_str(), "");
+        mi_add(MI_INFO, "", "");
+    }
     mi_add(MI_INFO, "STORAGE", "SD CARD");
     mi_add(MI_INFO, "IMAGES LIVE ON THE MICRO-SD CARD", "");
     mi_add(MI_INFO, "", "");

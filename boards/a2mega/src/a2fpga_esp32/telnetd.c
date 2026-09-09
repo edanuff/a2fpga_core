@@ -38,6 +38,7 @@
 
 #include "fpga_screen.h"
 #include "fpga_link.h"
+#include "gs_socket.h"
 #include "fpga_jtag.h"
 #include "osd_console.h"
 #include "menu.h"
@@ -166,6 +167,7 @@ static void gs_dump(int fd)
     tn_printf(fd, "last_addr=%02X:%02X%02X trace: %s%s wptr=%u trig_en=%u\r\n",
               r[22], r[21], r[20], (r[23] & 0x80) ? "FROZEN" : "running",
               (r[23] & 0x40) ? " TRIGGERED" : "", r[23] & 0x3F, (r[0] >> 4) & 1);
+    tn_printf(fd, "%s\r\n", gs_socket_state_str());
     #undef U16
 }
 
@@ -219,7 +221,7 @@ static void tn_exec_line(int fd, char *line)
     if (nt == 0)
         return;
     if (!strcmp(tok[0], "help") || !strcmp(tok[0], "?")) {
-        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|clear|freeze|run|trig|untrig | gs trace\r\n");
+        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|auto|clear|freeze|run|trig|untrig | gs trace\r\n");
         return;
     }
     if (!fpga_link_ok()) {
@@ -245,13 +247,17 @@ static void tn_exec_line(int fd, char *line)
         if (nt == 1) {
             gs_dump(fd);
         } else if (!strcmp(tok[1], "set") && nt == 4 && parse_num(tok[2], &idx) && idx < 32 && parse_num(tok[3], &val) && val < 256) {
+            if (idx == 0) gs_socket_manual();
             gs_wr((uint8_t)idx, (uint8_t)val);
             tn_printf(fd, "gs[%u] <= 0x%02X\r\n", idx, val);
         } else if (!strcmp(tok[1], "arm")) {
+            gs_socket_manual();
             gs_wr(0, 0x05); tn_puts(fd, "CTRL=0x05 (arm+listen)\r\n");
         } else if (!strcmp(tok[1], "listen")) {
+            gs_socket_manual();
             gs_wr(0, 0x04); tn_puts(fd, "CTRL=0x04 (listen)\r\n");
         } else if (!strcmp(tok[1], "off")) {
+            gs_socket_manual();
             gs_wr(0, 0x00); tn_puts(fd, "CTRL=0x00\r\n");
         } else if (!strcmp(tok[1], "clear")) {
             uint8_t c = gs_rd(0); gs_wr(0, c | 0x80); gs_wr(0, c & 0x7F); tn_puts(fd, "counters cleared\r\n");
@@ -266,10 +272,12 @@ static void tn_exec_line(int fd, char *line)
             tn_puts(fd, "trigger armed (opcode fetch from bank 0 < $0800; +32 cycles then freeze)\r\n");
         } else if (!strcmp(tok[1], "untrig")) {
             gs_wr(0, gs_rd(0) & ~0x10); tn_puts(fd, "trigger off\r\n");
+        } else if (!strcmp(tok[1], "auto")) {
+            gs_socket_resume(); tn_puts(fd, "auto-arm resumed\r\n");
         } else if (!strcmp(tok[1], "trace")) {
             gs_trace(fd);
         } else {
-            tn_puts(fd, "usage: gs | gs set <idx> <val> | gs arm|listen|off|clear|freeze|run|trig|untrig | gs trace\r\n");
+            tn_puts(fd, "usage: gs | gs set <idx> <val> | gs arm|listen|off|auto|clear|freeze|run|trig|untrig | gs trace\r\n");
         }
         return;
     }

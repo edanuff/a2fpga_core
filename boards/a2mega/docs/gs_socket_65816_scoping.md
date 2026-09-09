@@ -600,6 +600,21 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   `v` virtual-replug key moves it to SNK/UFP but the device still did not
   appear). Helper: scratch `gstel.py "<cmd>; <cmd>"`.
 
+- **Auto-arm (S6, ESP32 firmware `gs_socket.c`, 2026-09-08):** the card no
+  longer needs the console to take the socket. From the disk task (2 ms
+  loop): boot → CTRL = listen (input shifter only) → STATUS sampled every
+  10 ms → after five consecutive PHI2-alive samples CTRL = arm+listen →
+  while armed, sampled every 100 ms; five consecutive dead samples release
+  the socket (machine off, card still USB-powered). This happens ~50 ms
+  after power-up, long before the Apple II reset release (reg 0x2E), so
+  the core cold-starts on that release like the real chip would. Without
+  the ribbon the pulled-down PHI2 pin never reads alive and nothing is
+  driven; a 60K bitstream reads STATUS = 0. Setting `gs_socket_off`
+  (SETTINGS → GS SOCKET 65816: AUTO/OFF) disables it; the telnet
+  `gs arm|off|listen|set 0 …` commands take manual control until
+  `gs auto`. Presence detection for 1.0a4: see
+  board_1_0a4_requirements.md item 12 (not BUS_5V).
+
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
   driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/

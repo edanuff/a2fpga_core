@@ -323,6 +323,18 @@ no rev until the OPEN items that could change the netlist are closed.
    5a/5b's margin work. Also characterized: marginal acquisitions can
    latch a rotated frame (offset+wraparound, both axes, sink-independent
    — test log rows 49/53/56); clean catches always render true.
+12. **GS-socket ribbon presence detect (65816 drop-in).** The gateware only
+   drives the CPU socket when armed; today the firmware auto-arms from a
+   software test (listen mode, PHI2 seen alive for ~50 ms — the PHI2 pin
+   is pulled down, so no ribbon = never arms). Ed's decision 09-08: **do
+   NOT sense BUS_5V** — it is the socket power path and a divider on it
+   complicates the design. Candidates for a proper presence input: (a)
+   read back VP (the motherboard holds the socket's VP line high through
+   549 Ω to 5 V; through a 5 V→3.3 V shifter input it is a passive
+   "ribbon on a powered socket" level and is already on the header),
+   (b) a dedicated header pin that the DIP plug ties to VSS. Note the
+   NC header positions (VDA/VPA/E/MX/MLB) are CPU *outputs* on the real
+   part and float on the motherboard, so they cannot sense presence.
 
 ## OPEN questions that could still change the rev (close before Friday)
 

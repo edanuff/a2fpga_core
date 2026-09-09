@@ -165,3 +165,11 @@
 #define A2DISK_TRACK_BYTES  6656u                       // GCR nibbles per track
 #define A2HDD_WINDOW(u)     ((u) ? 0x200u : 0x000u)     // 512B per unit
 #define A2HDD_BLOCK_BYTES   512u
+
+// GS socket (in-socket 65C816, 138B gateware): two-register window.
+// Write the index to A2REG_GS_SEL, then read/write A2REG_GS_DATA.
+// Index 0 = CTRL {clear, trig-mode, force-slow(diag), trig-en, trace-freeze,
+// listen, sweep, arm}; 1 = STATUS {ph2_alive, running, enabled, be_ok, /RES,
+// RDY, slot /DMA, slot /RDY}. Full map: docs/gs_socket_65816_scoping.md §8b.
+#define A2REG_GS_SEL        0x5F
+#define A2REG_GS_DATA       0x4F
