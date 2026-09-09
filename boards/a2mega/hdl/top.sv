@@ -1985,6 +1985,7 @@ module top #(
     wire [4:0]   gs_hold_tap_w;    // data-hold sweep
     wire [159:0] gs_tele_w;        // telemetry, connector domain
     wire [5:0]   gs_trace_idx_w;   // bus-trace read index
+    wire [23:0]  gs_trig_addr_w;   // trace trigger address
     wire [47:0]  gs_trace_w;       // {frozen, 0, wptr, entry}
 
     // Octal SPI connector instance
@@ -2050,6 +2051,7 @@ module top #(
         .gs_hold_tap_o(gs_hold_tap_w),
         .gs_tele_i(gs_tele_w),
         .gs_trace_idx_o(gs_trace_idx_w),
+        .gs_trig_addr_o(gs_trig_addr_w),
         .gs_trace_i(gs_trace_w),
 
         .dbg_mem_addr_o(dbg_mem_addr_w),
@@ -2090,10 +2092,12 @@ module top #(
     reg [7:0] gs_ctrl_s0, gs_ctrl_s1;
     reg [3:0] gs_oe_s0, gs_oe_s1;
     reg [4:0] gs_ht_s0, gs_ht_s1;
+    reg [23:0] gs_ta_s0, gs_ta_s1;
     always @(posedge clk_gs_w) begin
         gs_ctrl_s0 <= gs_ctrl_w;      gs_ctrl_s1 <= gs_ctrl_s0;
         gs_oe_s0   <= gs_out_extra_w; gs_oe_s1   <= gs_oe_s0;
         gs_ht_s0   <= gs_hold_tap_w;  gs_ht_s1   <= gs_ht_s0;
+        gs_ta_s0   <= gs_trig_addr_w; gs_ta_s1   <= gs_ta_s0;
     end
 
     wire [7:0]  gs_d_o_w;
@@ -2120,6 +2124,7 @@ module top #(
         .force_slow_i(gs_ctrl_s1[5]),
         .trace_freeze_i(gs_ctrl_s1[3]),
         .trace_trig_en_i(gs_ctrl_s1[4]),
+        .trace_trig_mode_i(gs_ctrl_s1[6]), .trace_trig_addr_i(gs_ta_s1),
         .rd_clk(clk_logic_w), .trace_idx_i(gs_trace_idx_w),
         .trace_data_o(gs_trace_data_w), .trace_wptr_o(gs_trace_wptr_w),
         .trace_frozen_o(gs_trace_frozen_w), .trace_trigd_o(gs_trace_trigd_w),

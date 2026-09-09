@@ -93,6 +93,7 @@ module esp32_ospi_connector #(
     output wire [3:0]   gs_out_extra_o,     // address-delay sweep (extra clks)
     output wire [4:0]   gs_hold_tap_o,      // data-hold sweep tap (clks after the fall)
     output wire [5:0]   gs_trace_idx_o,     // bus-trace read index (window reg 23)
+    output wire [23:0]  gs_trig_addr_o,     // trace trigger address (window regs 29-31: lo, hi, bank)
     input  wire [47:0]  gs_trace_i,         // {frozen, triggered, wptr[5:0], trace_data[39:0]} (connector domain)
     input  wire [159:0] gs_tele_i,          // {last_addr[23:0], high[15:0], period[15:0], hold_samples[15:0],
                                             //  hold_mismatch[15:0], be[15:0], stall[15:0], cycle[31:0], status[7:0]}
@@ -337,6 +338,8 @@ module esp32_ospi_connector #(
     reg [4:0] gs_hold_tap_r;
     reg [5:0] gs_trace_idx_r;
     assign gs_trace_idx_o = gs_trace_idx_r;
+    reg [23:0] gs_trig_addr_r;
+    assign gs_trig_addr_o = gs_trig_addr_r;
     assign gs_ctrl_o      = gs_ctrl_r;
     assign gs_out_extra_o = gs_out_extra_r;
     assign gs_hold_tap_o  = gs_hold_tap_r;
@@ -372,6 +375,9 @@ module esp32_ospi_connector #(
             5'd26: gs_rdata = gs_trace_i[31:24];          // bank
             5'd27: gs_rdata = gs_trace_i[7:0];            // data at the fall
             5'd28: gs_rdata = gs_trace_i[39:32];          // {0,0,0, VDA, VPA, be_ok, rdy, rw}
+            5'd29: gs_rdata = gs_trig_addr_r[7:0];
+            5'd30: gs_rdata = gs_trig_addr_r[15:8];
+            5'd31: gs_rdata = gs_trig_addr_r[23:16];
             default: gs_rdata = 8'h00;
         endcase
     end
@@ -749,6 +755,7 @@ module esp32_ospi_connector #(
             scratch4_r <= 8'h00;
             gs_sel_r <= 5'd0;
             gs_trace_idx_r <= 6'd0;
+            gs_trig_addr_r <= 24'd0;
             gs_ctrl_r <= 8'h00;
             gs_out_extra_r <= 4'd0;
             gs_hold_tap_r <= 5'd0;
@@ -835,6 +842,9 @@ module esp32_ospi_connector #(
                             5'd2: gs_out_extra_r <= reg_wdata[3:0];
                             5'd3: gs_hold_tap_r  <= reg_wdata[4:0];
                             5'd23: gs_trace_idx_r <= reg_wdata[5:0];
+                            5'd29: gs_trig_addr_r[7:0]   <= reg_wdata;
+                            5'd30: gs_trig_addr_r[15:8]  <= reg_wdata;
+                            5'd31: gs_trig_addr_r[23:16] <= reg_wdata;
                             default: ;
                         endcase
                     end

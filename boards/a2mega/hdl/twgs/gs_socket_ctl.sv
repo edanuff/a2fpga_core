@@ -49,6 +49,9 @@ module gs_socket_ctl (
     input  logic        clear_i,        // hold counters at zero while high
     input  logic        force_slow_i,   // DIAGNOSTIC: keep the FPI at 1 MHz (see gs_socket_phy)
     input  logic        trace_freeze_i, // stop the bus-trace ring (read it while frozen)
+    input  logic        trace_trig_mode_i, // 1 = trigger on an opcode fetch at trace_trig_addr_i (any bank/addr);
+                                           // 0 = runaway heuristic below
+    input  logic [23:0] trace_trig_addr_i,
     input  logic        trace_trig_en_i,// arm the trigger: auto-freeze 32 cycles after the first
                                         // opcode fetch from bank 0 below $0800 (runaway catcher)
 
@@ -220,7 +223,8 @@ module gs_socket_ctl (
     // Runaway entry: an opcode fetch from bank 0 RAM below $C000 that is not
     // the stack page (ROM 01 legitimately runs a block-move built on the
     // stack at $01xx during the cold start).
-    wire trig_hit = op_fetch & (last_addr[23:16] == 8'h00) & (last_addr[15:14] != 2'b11) & (last_addr[15:8] != 8'h01);
+    wire trig_hit = trace_trig_mode_i ? (op_fetch & (last_addr == trace_trig_addr_i))
+                                      : (op_fetch & (last_addr[23:16] == 8'h00) & (last_addr[15:14] != 2'b11) & (last_addr[15:8] != 8'h01));
     wire rom_op   = op_fetch & ((last_addr[23:16] != 8'h00) | (last_addr[15:14] == 2'b11));
     logic        trigd, auto_frozen, trig_ready;
     logic [5:0]  post_cnt;
@@ -233,7 +237,7 @@ module gs_socket_ctl (
         end else if (fall_evt && !frozen) begin
             if (!trigd) begin
                 if (rom_op) trig_ready <= 1'b1;
-                if (trig_hit && trig_ready) begin trigd <= 1'b1; post_cnt <= 6'd7; end   // 56 cycles of history, 8 after
+                if (trig_hit && (trig_ready || trace_trig_mode_i)) begin trigd <= 1'b1; post_cnt <= 6'd7; end   // 56 cycles of history, 8 after
             end else if (post_cnt == 6'd0) begin
                 auto_frozen <= 1'b1;
             end else begin
