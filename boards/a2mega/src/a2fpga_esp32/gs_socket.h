@@ -5,9 +5,9 @@
  * §8b). This module makes that automatic and safe:
  *
  *   boot -> LISTEN (input shifter only; nothing driven)
- *        -> PHI2 seen alive for a few samples  -> ARM (core starts at the
- *           reset vector, or on the next /RES release — the Apple II is
- *           normally still held in reset by reg 0x2E at this point)
+ *        -> PHI2 alive AND /RES high for a few samples -> ARM (the core
+ *           cold-starts at once; arming while the machine is still in its
+ *           power-on reset keeps that reset asserted — bench G31/G32)
  *        -> PHI2 lost for a while (machine off) -> back to LISTEN
  *
  * A card without the ribbon never sees PHI2 (the pin is pulled down), so

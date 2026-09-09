@@ -481,9 +481,19 @@ module esp32_ospi_connector #(
     end
     wire rst_mcu_absent_w = !mcu_ready_r &&
                             (rst_hold_cnt_r >= RST_MCU_ALIVE_WAIT[RST_CW-1:0]);
-    assign a2bus_control_if.reset_hold =
-        !(a2_rst_release_r || rst_mcu_absent_w ||
-          rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0]);
+    // Any release is final: once the hold has dropped (MCU write, no-MCU
+    // fallback, or backstop) it must never re-assert — the no-MCU fallback
+    // used to un-release when the MCU's first STATUS read arrived later,
+    // resetting a machine that had already booted (bench G32).
+    reg rst_released_r;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            rst_released_r <= 1'b0;
+        else if (a2_rst_release_r || rst_mcu_absent_w ||
+                 rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0])
+            rst_released_r <= 1'b1;
+    end
+    assign a2bus_control_if.reset_hold = !rst_released_r;
     assign a2bus_control_if.ready = 1'b1;
 
     // =========================================================================

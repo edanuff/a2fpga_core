@@ -14,6 +14,7 @@
 #define GS_CTRL_LISTEN  0x04
 /* STATUS bits (window index 1) */
 #define GS_ST_PH2_ALIVE 0x80
+#define GS_ST_RES_N     0x08     /* /RES pad level (1 = machine out of reset) */
 
 #define ALIVE_SAMPLES   5        /* consecutive alive samples before arming */
 #define DEAD_SAMPLES    5        /* consecutive dead samples before disarming */
@@ -96,6 +97,11 @@ void gs_socket_poll(void)
 
     if (!s_started) {
         s_started = true;
+        /* The FPGA latches 'MCU ready' on the first STATUS read and, until
+         * then, drops its Apple II reset hold 3 s after configuration as a
+         * no-MCU fallback — re-asserting it when the MCU finally shows up.
+         * Declare ourselves before touching the socket (bench G32). */
+        (void)fpga_reg_read(A2REG_STATUS);
         if (settings()->gs_socket_off) {
             gs_socket_reg_write(0, 0x00);            /* nothing driven, nothing listened */
             set_state(ST_OFF, "DISABLED BY SETTING");
@@ -112,13 +118,19 @@ void gs_socket_poll(void)
 
     uint8_t st = gs_socket_reg_read(1);
     bool alive = (st & GS_ST_PH2_ALIVE) != 0;
+    bool res_hi = (st & GS_ST_RES_N) != 0;
 
     if (s_state == ST_LISTEN) {
+        /* Arm only once the machine is OUT of its power-on reset: driving the
+         * socket while /RES is still low at power-up keeps the IIgs in reset
+         * for ever (bench G31/G32: releasing the socket let /RES rise, then
+         * arming started the core). Later resets (Control-Reset) while armed
+         * are fine — we stay armed through them like the real chip. */
         s_next_us = now + LISTEN_PERIOD_US;
-        s_count = alive ? s_count + 1 : 0;
+        s_count = (alive && res_hi) ? s_count + 1 : 0;
         if (s_count >= ALIVE_SAMPLES) {
             gs_socket_reg_write(0, GS_CTRL_LISTEN | GS_CTRL_ARM);
-            set_state(ST_ARMED, "PHI2 ALIVE - ARMED");
+            set_state(ST_ARMED, "PHI2 ALIVE, /RES HIGH - ARMED");
             s_next_us = now + ARMED_PERIOD_US;
         }
     } else if (s_state == ST_ARMED) {
