@@ -223,6 +223,17 @@ unlike the NMOS 6502); BE is asynchronous.
 - RDY: honoured by the FPI only at Normal speed per the TWGS manual; we
   honor it always (safe superset). We do **not** need to drive RDY_OUT in
   iteration 1 (WAI can be internal); recommendation: leave it released.
+- **BE is a per-cycle pulse, not a DMA-only level (measured 2026-09-06,
+  AD3 directly on the ROM 01 socket, no CPU):** the FPI drives BE low for
+  ~66 ns every cycle, from ~32 ns before the PHI2 falling edge to ~34 ns
+  after it. A 4 MHz-grade 65816 (tBVD 60 ns) keeps driving through that
+  pulse and the machine is built for it, so the PHY ignores BE lows
+  shorter than ~110 ns and never gates its receive path on BE (the core
+  samples read data at the fall, while BE is low); a sustained BE low
+  (a real bus request) tri-states the address/RWB and data drivers. The
+  same measurement gave PHI2 1.021 MHz at 86 % high (slow mode, 2 low /
+  12 high ticks), /IRQ high and RDY high, i.e. the FPI does not hold the
+  CPU at all with the socket empty.
 - E, M/X, VDA, VPA, MLB: not connected on the card. Whether the FPI uses
   VDA/VPA is not stated in the Hardware Reference text; the motherboard
   works with a real 65C816 whose VDA/VPA are wired somewhere, so C3 should
@@ -343,6 +354,38 @@ resource will be used to clock signal gs_ph2". Synthesis also reports a
 latch inferred in the core's BCD adder (`sum2low[8]`, inherited from the
 MiSTer source) — harmless at 2.86 MHz but worth cleaning before the
 timing campaign bar is applied to this domain (follow-up).
+
+### 4.5 Internal cycles: the socket has no VDA/VPA (bench finding G19, 2026-09-08)
+
+The 65816 marks cycles that do no bus work (VDA = VPA = 0) - the internal
+cycle of a read-modify-write, the dummy cycle of implied instructions,
+stack housekeeping. On the IIgs those pins are not connected: the FPI
+performs whatever address is on the bus, every cycle. The real W65C816
+holds the operand address through the R-M-W internal cycle (datasheet
+table 5-7, "IO: AAH AAL"), so the second read is harmless. The MiSTer
+P65C816 presents **operand + 1** on that cycle - harmless in MiSTer, whose
+memory ignores internal cycles, fatal in the socket: ROM 01's cold start
+does `TSB $C027` (ENBDATAREG, enable the ADB data interrupt) and the
+phantom read of **$C028 = ROMBANK** swaps which half of the ROM is mapped
+into bank 0's $C000-$FFFF window. Every later bank-0 fetch came from
+$Bxxx instead of $Fxxx (the "A14 cleared" signature in the bus trace),
+the PC ran off into zero page and executed $FF bytes for ever. Bank FF
+reads were unaffected, which is what ruled out an electrical fault.
+
+Rule in the PHY: on an internal cycle whose core address falls in I/O
+space ($C000-$C0FF of banks 00/01/E0/E1) the previous cycle's address and
+bank are repeated as a read (`internal_cyc` in `gs_socket_phy.sv`).
+Elsewhere the core's own address is presented (it matches the real
+part's PC+1 style dummy reads, and the bench's lockstep checker keeps
+watching it). The bench asserts the rule on every internal I/O cycle and
+counts phantom $C028 accesses; `TSB $C029` at the very start of the ROM
+exercises it on every run.
+
+Lesson for the rest of the drop-in work: any place the core's bus
+behaviour differs from the W65C816's on cycles the FPI cannot classify
+is a live bug on this machine, even when the core is "correct" as a CPU.
+Candidates to audit next: indexed-addressing dummy reads, the `MVN/MVP`
+extra cycles, interrupt-sequence cycles.
 
 ### 4.4 PH2 on a non-clock ball (1.0a3)
 
@@ -486,6 +529,113 @@ Every hardware result gets a `test_log.md` row; builds carry provenance.
 5. ~~**1.0a4:** put F1 on the list now?~~ — **closed 09-05:** optional,
    only if 1.0a4 reshuffles GS nets anyway.
 
+## 8b. S4 — integration into the 138B build (2026-09-05)
+
+What the 138B full core now contains (`a2mega_138B.gprj` only; the 60K
+project does not list `hdl/twgs/gs_socket_defines.v`, so `GS_SOCKET` is
+undefined there and neither the logic nor the 38 pins exist in that build):
+
+- `hdl/twgs/gs_socket_ctl.sv` — PHY + core + telemetry wrapper, instantiated
+  in `top.sv` under `` `ifdef GS_SOCKET `` with the `gs_*` ports; the D bus
+  is a plain `assign gs_d = oe ? d : 8'bz` inout.
+- **Sequencer clock: a PLL of its own, `gowin_gs_pll` at 110 MHz** (VCO
+  50 × 22 = 1100 MHz, ODIV 10; 108 is not reachable from the 50 MHz
+  crystal inside the GW5AST PLL's 19–81 MHz PFD window without a
+  fractional divider — 110 keeps the proven management-PLL recipe and the
+  exact rate is immaterial, the socket runs at PHI2). It costs the die's
+  8th and last PRIMARY clock net, so the fabric-routed `gs_ph2` lands on a
+  long-wire net; that is acceptable at 2.86 MHz. The alternative, sharing
+  `clk100`, was tried and rejected: it crowds the DP AUX ladder, which
+  lives on the knife edge in that domain (one roll failed it at −1.07 ns).
+- **The routing thrash and its real cause.** The first integration rolls
+  routed erratically: 12 min, 31 min, and four kills at the 40-minute cap,
+  while the same source with the socket compiled out routed in 17 min.
+  Single-variable diagnostics: socket without the core = 15 min clean;
+  core on a legitimate PRIMARY 27 MHz clock = still thrashed. So the
+  core's own logic was the problem, and GowinSynthesis had said what:
+  "Latch inferred for net xhdl0.sum2low[8]" — branch-scoped temporaries
+  in the MiSTer core's ADDR_BUS block (its author had waived the same
+  Verilator warning). Latch loops make a timing-driven router iterate
+  without converging. Hoisting those temporaries (`sum2low/sum2car/sum1/
+  off/sum9/useWrap`) to continuous assignments — identical values, both
+  benches unchanged, Verilator `-Wall` latch-clean — brought every roll
+  back to finishing. Lesson recorded in the core README: treat EX2420 as
+  a build blocker on this design.
+- **Arming and telemetry over the existing ESP32 register path** (no
+  firmware change needed: `spireg` reads/writes any register). A two-register
+  window: write the index to `0x5F`, then read/write `0x4F`:
+
+  | index | name | R/W | meaning |
+  |---|---|---|---|
+  | 0 | CTRL | RW | bit 0 arm (take the socket), bit 1 data-hold sweep on, bit 2 listen (enable the control-input shifter only: PHI2/RDY//RES/IRQ/NMI/ABORT/BE become visible, nothing is driven — the C3 step), bit 3 freeze the bus trace, bit 4 arm the trace trigger (auto-freeze 32 cycles after the first opcode fetch from bank 0 below $0800, held off until the first ROM opcode fetch — the runaway catcher), bit 5 DIAGNOSTIC force-slow (clears bit 7 on writes to $C036 in banks 00/01/E0/E1 so the FPI never leaves 1 MHz — isolates fast-mode bus timing), bit 7 clear counters (also re-arms the trigger) |
+  | 1 | STATUS | R | {PH2 alive, core running, enabled, BE pad, /RES pad, RDY pad, slot /DMA, slot /RDY} |
+  | 2 | OUT_EXTRA | RW | address-delay sweep: extra sequencer clocks before the cycle is issued (0–15, 9.1 ns each) |
+  | 3 | HOLD_TAP | RW | data-hold sweep: clocks after the synchronised fall at which D0–7 is re-sampled (0–31) |
+  | 4–7 | CYCLES | R | bus cycles the core advanced through (32-bit, little-endian) |
+  | 8–9 | STALLS | R | cycles repeated because RDY was low |
+  | 10–11 | BE_LOW | R | sequencer clocks spent with BE low (saturating) |
+  | 12–13 | HOLD_MISMATCH | R | sweep: re-sampled byte ≠ the byte taken at the fall |
+  | 14–15 | HOLD_SAMPLES | R | sweep: read cycles sampled |
+  | 16–17 | PH2_PERIOD | R | sequencer clocks per 256 PHI2 cycles (fast mode ≈ 9 830; 1 MHz ≈ 27 500) |
+  | 18–19 | PH2_HIGH | R | sequencer clocks PHI2 high per 256 cycles (duty) |
+  | 20–22 | LAST_ADDR | R | {lo, hi, bank} of the last cycle issued |
+  | 23 | TRACE_IDX | RW | write: which of the 64 trace entries regs 24–28 show (0–63, ring index); read: {frozen, triggered, write pointer} — the write pointer is the next slot, i.e. the OLDEST entry |
+  | 24–28 | TRACE | R | one entry of the 64-cycle bus trace: {addr lo, addr hi, bank, data at the fall, flags {0,0,0, VDA, VPA, BE ok, RDY at the fall, R/W}} (VPA&VDA = opcode fetch, VDA only = data, VPA only = operand, neither = internal). One entry per PHI2 fall while not frozen: the address issued for the cycle that just ended, the byte on the pads at the fall (read: what the core took; write: what we drove). Freeze (CTRL.3) before reading — the ring is written in the sequencer clock and read in the connector clock with no synchroniser, which is fine only while it is static |
+
+  Telemetry crosses from the sequencer clock to the connector clock with
+  two flops per bit, like the other debug counters (a multi-byte counter
+  can tear between reads; read twice).
+
+  **Over the network (added 2026-09-08):** the telnet console (port 23) is a
+  single-key console — typing a CLI line there presses keys (`g` = reload
+  the FPGA from flash, which disarms the socket; learned the hard way).
+  The `:` key now opens a line mode with `spireg <reg> [val]`, `gs`
+  (the whole window decoded in one shot: status bits, PHI2 period/duty,
+  counters, last address, trace state), `gs set <idx> <val>`,
+  `gs arm|listen|off|clear|freeze|run|trig|untrig` and `gs trace` (freezes, then prints
+  the 64 entries oldest-first with the cycle kind). Empty line or ESC leaves line mode. This
+  matters on 1.0a3 because the USB-C port is the DP output: with the
+  monitor plugged in the serial CLI is gone, and a hot re-attach of the Mac
+  while the card is slot-powered does not enumerate (PD stays SRC/DFP; the
+  `v` virtual-replug key moves it to SNK/UFP but the device still did not
+  appear). Helper: scratch `gstel.py "<cmd>; <cmd>"`.
+
+- **Bench procedure this enables (C3/C4):** power up with the ribbon in and
+  CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
+  driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/
+  PH2_HIGH give the FPI clock's period and duty (C3 listen-only). (With
+  CTRL = 0 that shifter is off too and PHI2 is invisible — found on the
+  first power-up.) Then CTRL = 1 to arm: the core starts at the next
+  /RES release (or immediately if /RES is already high), CYCLES and
+  LAST_ADDR show it running. C4 instruments: raise OUT_EXTRA until the
+  machine misbehaves (that is the FPI's real tADS tolerance, in 9.1 ns
+  steps above the ~60 ns baseline); enable the sweep and step HOLD_TAP
+  from 0 upward, watching HOLD_MISMATCH/HOLD_SAMPLES — the first tap with
+  mismatches is where the motherboard stops holding read data after the
+  fall.
+
+- **Build record (final S4 source, commit e8631053 HDL; Gowin V1.9.12.01;
+  138B).** Five rolls, all that finished were clean; one was killed by the
+  old 30/40-minute guard at 40 min and its two 60-minute-guard successors
+  finished at 23 and 41 min. The socket build takes 21–41 min against a
+  15–17 min baseline for the same source with the socket compiled out
+  (the fabric-routed PHI2 clock into ~300 core flops is the extra routing
+  effort); `tools/build.sh` now gives the `a2mega_138B` project a
+  60-minute guard for that reason, everything else keeps 30. Reported
+  slack under the 0.5 ns policy (real = reported + 0.5):
+
+  | roll | wall | clk_gs | gs_ph2 | clk100 | clk_sym | clk_pix | clk_logic | clk_x1 | bitstream sha256 |
+  |---|---|---|---|---|---|---|---|---|---|
+  | 1 | 32 min | +2.22 | +324.7 | +0.11 | +0.06 | +0.13 | +1.64 | +3.22 | 20aee44d7a6899b7… |
+  | 2 | 21 min | +2.40 | +325.5 | +0.04 | +0.09 | +0.35 | +2.94 | +2.40 | 60d7e6a70eff724b… |
+  | 3 | 23 min | +1.83 | +324.9 | +0.01 | +0.07 | +0.21 | +1.97 | +2.21 | 75616e6be5cdf99e… |
+  | 4 | 41 min | +2.02 | +324.9 | +0.05 | +0.02 | +0.05 | +2.38 | +2.92 | 8e4e77da3aa172f8… |
+
+  0 setup / 0 hold on every roll; 28 5xx logic (21 %), 127 BSRAM, 158 I/O,
+  5 PLL. The dp_test gate is untouched (no socket there). The clk100 /
+  clk_sym / clk_pix minima are the DP block's pre-existing knife edge
+  (the durability campaign's 138B rolls sat at +0.01…+0.29 there too).
+
 ## 9. Proposed work plan
 
 | Step | Deliverable | Gate |
@@ -493,8 +643,8 @@ Every hardware result gets a `test_log.md` row; builds carry provenance.
 | S1 | This document reviewed; answers to §8 — **closed 2026-09-05** (interposer exists, ROM 01 machine, 108 MHz PLL core clock, GPL already covered, PH2 swap optional) | ed ✔ |
 | S2 | Socket PHY (`gs_socket_phy.sv`, core clocked by PHI2) + socket SDC + Sim 1 — **DONE 2026-09-05**, both configurations pass; 138B PnR probe on the real GS balls 0/0 (§4.3) | assertions clean ✔ |
 | S3 | Sim 2: ROM 01 through the socket path with a lockstep reference core — **DONE 2026-09-05** (see §7) | zero divergences ✔ |
-| S4 | Integration into the 138B full core behind `armed`; telemetry (trace ring, sweeps); 138B build under the margin policy (≥ +0.5 ns real on every clock incl. PH2-relative I/O) | dp_test gate + 3 rolls |
-| S5 | Bench C3 listen-only | test-log rows |
+| S4 | Integration into the 138B full core behind CTRL.arm; register window + sweeps (§8b); 138B build under the margin policy — **DONE 2026-09-06**, four clean rolls (§8b) | 0/0 + 3 rolls ✔ |
+| S5 | Bench C3→C5 on the ROM 01 machine — **DONE 2026-09-08**: listen reading = motherboard ground truth; armed: splash/beep; cold-start runaway root-caused (§4.5, phantom $C028 on an R-M-W internal cycle) and fixed; Applesoft + keyboard; **ProDOS boots from the a2mega block device** (test log G1–G29) | boot ladder ✔ |
 | S6 | Bench C4 (sweeps → vector fetch → boot) | boot chime |
 | S7 | Bench C5 soak | board-turn bar |
 
