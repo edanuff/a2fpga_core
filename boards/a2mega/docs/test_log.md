@@ -209,11 +209,11 @@ Weekend backfill: only rows with certain provenance; `?` = not recorded
 
 Own table: the DP columns above do not apply. Machine = ROM 01 IIgs, no other
 cards, CPU socket empty, ribbon from the card's J5 to the socket. Card = B3
-(138K) in a slot, USB-C to the Mac (serial console `/dev/cu.usbmodem5101`,
+(138K) in a slot, USB-C to the Mac (serial console `/dev/cu.usbmodem5101` or `…4101` after a replug,
 `+++` enters the CLI; register window `spireg 95 <idx>` / `spireg 79`).
 Builds: S4 roll 1 = 20aee44d (no listen bit), listen build = af74f29a,
-status-bits build = 19c79462, BE-pulse build = see §8b of
-gs_socket_65816_scoping.md. Design record: docs/gs_socket_65816_scoping.md.
+status-bits build = 19c79462, BE-pulse build = 4a02cd78 (§8b of
+gs_socket_65816_scoping.md). Design record: docs/gs_socket_65816_scoping.md.
 
 | id | date | build | step | reading | verdict |
 |---|---|---|---|---|---|
@@ -224,3 +224,6 @@ gs_socket_65816_scoping.md. Design record: docs/gs_socket_65816_scoping.md.
 | G5 | 09-06 | — | AD3 digital in on the ribbon's IDC socket (card end unplugged) | clock on the hole numbered 7, steady high on hole 8 | ⚠ AD3 must be on a port that sources 600 mA (under-powered it opens but never acquires). Hole numbering vs the card's evidence still unresolved — see G7. |
 | G6 | 09-06 | — | **AD3 directly on the motherboard socket pins 37/4/2/36** | **PHI2 1.021 MHz 86 % high; /IRQ high; RDY HIGH; BE = 66 ns LOW PULSE every cycle, fall−32 ns → fall+34 ns** | 🏆 Ground truth. RDY is not held; BE is a per-cycle FPI turnaround pulse straddling the sample edge. PHY changed: BE lows < ~110 ns ignored, receive path never gated by BE (a 4 MHz-grade 65816 drives through it). |
 | G7 | 09-06 | — | cable | both ribbons built the same; continuity "DIP 4 to R38"; card counts the clock on ball AB17 = J3.28 = header pin 8 (PCB netlist + Sipeed connector table, all 38 J3 pins verified) | OPEN: either the cable is row-swapped and the card evidence is wrong, or the hand numbering on both connectors is a row off. Decider: the socket hole sitting over header pin 8 (square-pad row = odd) must carry the clock. |
+| G8 | 09-08 | 4a02cd78 | new cable (ed rebuilt it), BE-pulse build flashed, listen (CTRL=4) | PH2 alive **1.020 MHz, 86 % high**; RDY high; /RES high; slot /DMA, /RDY high; BE-low counter saturated (≈7 clks/cycle) | 🏆 Card reading now identical to the motherboard ground truth (G6). G7 CLOSED: the earlier RDY-low/BE-low readings were the row-swapped cable. |
+| G9 | 09-08 | 4a02cd78 | **arm (CTRL=5), reset pulsed on the GS** | running=1, **1.024 M bus cycles/s (one per PHI2), stalls 0**, status 0xFF; last-address samples all bank 0 $007D–$01BF; **ed heard the system beep on reset** | 🏆 First execution through the socket: the ROM 01 beep is software (speaker toggles), so the core fetched the reset vector, ran ROM startup and the beep routine. Display not visible (USB-C on the Mac). |
+| G10 | 09-08 | 4a02cd78 | telnet console (192.168.232.127:23) tried for register reads | port 23 is a single-KEY console (c/m/p/x/g…), not a CLI: the letters of `spireg` were taken as keys and **`g` = FPGA reload from flash** — reloaded several times, socket disarmed, EQ stepped | ⚠ Register window is USB-serial only. Re-armed over USB; bench plan = arm over USB, then move the USB-C to the monitor (card is slot-powered, FPGA keeps state). Consider a telnet key that dumps the GS window. |
