@@ -23,6 +23,7 @@
  * On 1.0a3 this is the PRIMARY console: the USB-C port faces the DP
  *  monitor, so there is no PC serial link while the board is in service.
  */
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -36,6 +37,7 @@
 #include "lwip/netif.h"
 
 #include "fpga_screen.h"
+#include "fpga_link.h"
 #include "fpga_jtag.h"
 #include "osd_console.h"
 #include "menu.h"
@@ -92,6 +94,175 @@ static int tn_send(int fd, const void *buf, int len)
 static void tn_puts(int fd, const char *s)
 {
     tn_send(fd, s, (int)strlen(s));
+}
+
+static void tn_printf(int fd, const char *fmt, ...)
+{
+    char buf[200];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (n > 0)
+        tn_send(fd, buf, n < (int)sizeof(buf) ? n : (int)sizeof(buf) - 1);
+}
+
+/* ---- line mode (':' key): CLI-style register commands over telnet ---------
+ * The USB CLI lives in the sketch and prints to Serial; this is the subset
+ * the bench needs when the USB-C port is busy being the DP output:
+ *   spireg <reg> [val]      raw FPGA register read/write (dec or 0x..)
+ *   gs                      decoded GS-socket window (regs 0x5F/0x4F)
+ *   gs set <idx> <val>      write one window register
+ *   gs arm|listen|off|clear|freeze|run
+ *   gs trace                the 64-cycle bus trace (freezes it first)
+ * Empty line or ESC leaves line mode. */
+#define GS_REG_SEL   0x5F
+#define GS_REG_DATA  0x4F
+
+static uint8_t gs_rd(uint8_t idx)
+{
+    uint8_t v;
+    fpga_link_lock();
+    fpga_reg_write(GS_REG_SEL, idx);
+    v = fpga_reg_read(GS_REG_DATA);
+    fpga_link_unlock();
+    return v;
+}
+
+static void gs_wr(uint8_t idx, uint8_t val)
+{
+    fpga_link_lock();
+    fpga_reg_write(GS_REG_SEL, idx);
+    fpga_reg_write(GS_REG_DATA, val);
+    fpga_link_unlock();
+}
+
+static void gs_dump(int fd)
+{
+    uint8_t r[32];
+    fpga_link_lock();
+    for (int i = 0; i < 32; i++) {
+        fpga_reg_write(GS_REG_SEL, (uint8_t)i);
+        r[i] = fpga_reg_read(GS_REG_DATA);
+    }
+    fpga_link_unlock();
+    #define U16(lo) ((unsigned)r[lo] | ((unsigned)r[(lo) + 1] << 8))
+    uint32_t cyc = (uint32_t)r[4] | ((uint32_t)r[5] << 8) | ((uint32_t)r[6] << 16) | ((uint32_t)r[7] << 24);
+    unsigned per = U16(16), hi = U16(18);
+    tn_printf(fd, "CTRL=0x%02X STATUS=0x%02X ph2_alive=%u running=%u enabled=%u be_ok=%u res_n=%u rdy=%u slot_dma_n=%u slot_rdy_n=%u\r\n",
+              r[0], r[1], (r[1] >> 7) & 1, (r[1] >> 6) & 1, (r[1] >> 5) & 1, (r[1] >> 4) & 1,
+              (r[1] >> 3) & 1, (r[1] >> 2) & 1, (r[1] >> 1) & 1, r[1] & 1);
+    if (per) {
+        /* sequencer clock 110 MHz: 9.091 ns per clk; counters are per 256 cycles */
+        unsigned per_ns10 = (unsigned)((uint64_t)per * 9091 / 256 / 100);   /* 0.1 ns units */
+        unsigned hi_ns10  = (unsigned)((uint64_t)hi  * 9091 / 256 / 100);
+        unsigned khz = (unsigned)(256000000ULL * 1000 / ((uint64_t)per * 9091));
+        tn_printf(fd, "PHI2: %u.%u ns/cycle (%u.%03u MHz), high %u.%u ns (%u%%)\r\n",
+                  per_ns10 / 10, per_ns10 % 10, khz / 1000, khz % 1000,
+                  hi_ns10 / 10, hi_ns10 % 10, per ? hi * 100 / per : 0);
+    }
+    tn_printf(fd, "cycles=%lu stalls=%u be_low_clks=%u hold_mismatch=%u hold_samples=%u out_extra=%u hold_tap=%u\r\n",
+              (unsigned long)cyc, U16(8), U16(10), U16(12), U16(14), r[2], r[3]);
+    tn_printf(fd, "last_addr=%02X:%02X%02X trace: %s wptr=%u\r\n",
+              r[22], r[21], r[20], (r[23] & 0x80) ? "FROZEN" : "running", r[23] & 0x3F);
+    #undef U16
+}
+
+static void gs_trace(int fd)
+{
+    uint8_t ctrl = gs_rd(0);
+    if (!(ctrl & 0x08)) {
+        gs_wr(0, ctrl | 0x08);             /* freeze: the ring stops moving */
+        tn_puts(fd, "trace frozen (gs run to release)\r\n");
+    }
+    uint8_t st = gs_rd(23);
+    unsigned wptr = st & 0x3F;
+    tn_printf(fd, "%-3s %-9s %-4s %s   (oldest first; wptr=%u)\r\n", "#", "bank:addr", "data", "flags", wptr);
+    fpga_link_lock();
+    for (unsigned n = 0; n < 64; n++) {
+        unsigned idx = (wptr + n) & 0x3F;  /* wptr = next write = oldest entry */
+        fpga_reg_write(GS_REG_SEL, 23);
+        fpga_reg_write(GS_REG_DATA, (uint8_t)idx);
+        uint8_t b[5];
+        for (int k = 0; k < 5; k++) {
+            fpga_reg_write(GS_REG_SEL, (uint8_t)(24 + k));
+            b[k] = fpga_reg_read(GS_REG_DATA);
+        }
+        fpga_link_unlock();
+        tn_printf(fd, "%02u  %02X:%02X%02X   %02X   %c%s%s\r\n", n, b[2], b[1], b[0], b[3],
+                  (b[4] & 1) ? 'R' : 'W', (b[4] & 2) ? "" : " STALL", (b[4] & 4) ? "" : " BE0");
+        fpga_link_lock();
+    }
+    fpga_link_unlock();
+}
+
+static bool parse_num(const char *t, unsigned *out)
+{
+    if (!t || !*t) return false;
+    char *end;
+    unsigned long v = strtoul(t, &end, 0);
+    if (*end) return false;
+    *out = (unsigned)v;
+    return true;
+}
+
+static void tn_exec_line(int fd, char *line)
+{
+    char *tok[6];
+    int nt = 0;
+    for (char *p = strtok(line, " \t"); p && nt < 6; p = strtok(NULL, " \t"))
+        tok[nt++] = p;
+    if (nt == 0)
+        return;
+    if (!strcmp(tok[0], "help") || !strcmp(tok[0], "?")) {
+        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|clear|freeze|run | gs trace\r\n");
+        return;
+    }
+    if (!fpga_link_ok()) {
+        tn_puts(fd, "fpga link not up\r\n");
+        return;
+    }
+    if (!strcmp(tok[0], "spireg")) {
+        unsigned reg, val;
+        if (nt < 2 || !parse_num(tok[1], &reg) || reg > 126) {
+            tn_puts(fd, "usage: spireg <reg 0..126> [val]\r\n");
+        } else if (nt == 2) {
+            tn_printf(fd, "reg[0x%02X] -> 0x%02X\r\n", reg, fpga_reg_read((uint8_t)reg));
+        } else if (!parse_num(tok[2], &val) || val > 255) {
+            tn_puts(fd, "spireg: invalid value\r\n");
+        } else {
+            fpga_reg_write((uint8_t)reg, (uint8_t)val);
+            tn_printf(fd, "reg[0x%02X] <= 0x%02X\r\n", reg, val);
+        }
+        return;
+    }
+    if (!strcmp(tok[0], "gs")) {
+        unsigned idx, val;
+        if (nt == 1) {
+            gs_dump(fd);
+        } else if (!strcmp(tok[1], "set") && nt == 4 && parse_num(tok[2], &idx) && idx < 32 && parse_num(tok[3], &val) && val < 256) {
+            gs_wr((uint8_t)idx, (uint8_t)val);
+            tn_printf(fd, "gs[%u] <= 0x%02X\r\n", idx, val);
+        } else if (!strcmp(tok[1], "arm")) {
+            gs_wr(0, 0x05); tn_puts(fd, "CTRL=0x05 (arm+listen)\r\n");
+        } else if (!strcmp(tok[1], "listen")) {
+            gs_wr(0, 0x04); tn_puts(fd, "CTRL=0x04 (listen)\r\n");
+        } else if (!strcmp(tok[1], "off")) {
+            gs_wr(0, 0x00); tn_puts(fd, "CTRL=0x00\r\n");
+        } else if (!strcmp(tok[1], "clear")) {
+            uint8_t c = gs_rd(0); gs_wr(0, c | 0x80); gs_wr(0, c & 0x7F); tn_puts(fd, "counters cleared\r\n");
+        } else if (!strcmp(tok[1], "freeze")) {
+            gs_wr(0, gs_rd(0) | 0x08); tn_puts(fd, "trace frozen\r\n");
+        } else if (!strcmp(tok[1], "run")) {
+            gs_wr(0, gs_rd(0) & ~0x08); tn_puts(fd, "trace running\r\n");
+        } else if (!strcmp(tok[1], "trace")) {
+            gs_trace(fd);
+        } else {
+            tn_puts(fd, "usage: gs | gs set <idx> <val> | gs arm|listen|off|clear|freeze|run | gs trace\r\n");
+        }
+        return;
+    }
+    tn_printf(fd, "unknown: %s (help)\r\n", tok[0]);
 }
 
 /* Render one 40-char row of Apple II screen codes as ANSI. Inverse video
@@ -167,12 +338,15 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA a2mega remote console\r\n"
-                "keys: c=console m=menu p=pd d=census x=regs e=eq +/-=eqstep l=lanes v=replug f=flip r=retrain g=fpgareload u=fusb t=trace q=quit\r\n"
+                "keys: c=console m=menu p=pd d=census x=regs e=eq +/-=eqstep l=lanes v=replug f=flip r=retrain g=fpgareload u=fusb t=trace :=cmdline q=quit\r\n"
                 "menu: up/down move, left/right change, enter/a=ok,\r\n"
                 "      esc/backspace/b=back, y=view, s/tab=select\r\n\r\n");
 
     bool menu_mode = false;
     int esc_st = 0, iac_st = 0;
+    bool line_mode = false;                /* ':' command line (tn_exec_line) */
+    char line[96];
+    int line_len = 0;
     uint32_t last_paint = 0;
 
     /* start in console mode: replay the on-screen backlog */
@@ -215,6 +389,38 @@ static void session(int fd)
             }
             if (ch == 255) {
                 iac_st = 1;
+                continue;
+            }
+            if (line_mode) {
+                if (ch == 0x1b) {              /* ESC: leave line mode */
+                    line_mode = false;
+                    tn_puts(fd, "\r\n");
+                } else if (ch == '\r' || ch == '\n') {
+                    if (ch == '\n' && line_len == 0 && !line_mode)
+                        continue;
+                    tn_puts(fd, "\r\n");
+                    line[line_len] = 0;
+                    if (line_len == 0) {
+                        line_mode = false;     /* empty line: back to keys */
+                    } else {
+                        tn_exec_line(fd, line);
+                        line_len = 0;
+                        tn_puts(fd, ": ");
+                    }
+                } else if (ch == 0x7f || ch == 0x08) {
+                    if (line_len > 0) { line_len--; tn_puts(fd, "\b \b"); }
+                } else if (ch >= 0x20 && ch < 0x7f && line_len < (int)sizeof(line) - 1) {
+                    line[line_len++] = (char)ch;
+                    tn_send(fd, &ch, 1);
+                } else if (ch == 0) {
+                    /* telnet CR NUL */
+                }
+                continue;
+            }
+            if (esc_st == 0 && ch == ':' && !menu_mode) {
+                line_mode = true;
+                line_len = 0;
+                tn_puts(fd, "\r\n: ");
                 continue;
             }
             if (esc_st == 0 && ch == 'q')

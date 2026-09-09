@@ -535,7 +535,7 @@ undefined there and neither the logic nor the 38 pins exist in that build):
 
   | index | name | R/W | meaning |
   |---|---|---|---|
-  | 0 | CTRL | RW | bit 0 arm (take the socket), bit 1 data-hold sweep on, bit 2 listen (enable the control-input shifter only: PHI2/RDY//RES/IRQ/NMI/ABORT/BE become visible, nothing is driven — the C3 step), bit 7 clear counters |
+  | 0 | CTRL | RW | bit 0 arm (take the socket), bit 1 data-hold sweep on, bit 2 listen (enable the control-input shifter only: PHI2/RDY//RES/IRQ/NMI/ABORT/BE become visible, nothing is driven — the C3 step), bit 3 freeze the bus trace, bit 7 clear counters |
   | 1 | STATUS | R | {PH2 alive, core running, enabled, BE pad, /RES pad, RDY pad, slot /DMA, slot /RDY} |
   | 2 | OUT_EXTRA | RW | address-delay sweep: extra sequencer clocks before the cycle is issued (0–15, 9.1 ns each) |
   | 3 | HOLD_TAP | RW | data-hold sweep: clocks after the synchronised fall at which D0–7 is re-sampled (0–31) |
@@ -547,10 +547,26 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   | 16–17 | PH2_PERIOD | R | sequencer clocks per 256 PHI2 cycles (fast mode ≈ 9 830; 1 MHz ≈ 27 500) |
   | 18–19 | PH2_HIGH | R | sequencer clocks PHI2 high per 256 cycles (duty) |
   | 20–22 | LAST_ADDR | R | {lo, hi, bank} of the last cycle issued |
+  | 23 | TRACE_IDX | RW | write: which of the 64 trace entries regs 24–28 show (0–63, ring index); read: {frozen, 0, write pointer} — the write pointer is the next slot, i.e. the OLDEST entry |
+  | 24–28 | TRACE | R | one entry of the 64-cycle bus trace: {addr lo, addr hi, bank, data at the fall, flags {…, BE ok, RDY at the fall, R/W}}. One entry per PHI2 fall while not frozen: the address issued for the cycle that just ended, the byte on the pads at the fall (read: what the core took; write: what we drove). Freeze (CTRL.3) before reading — the ring is written in the sequencer clock and read in the connector clock with no synchroniser, which is fine only while it is static |
 
   Telemetry crosses from the sequencer clock to the connector clock with
   two flops per bit, like the other debug counters (a multi-byte counter
   can tear between reads; read twice).
+
+  **Over the network (added 2026-09-08):** the telnet console (port 23) is a
+  single-key console — typing a CLI line there presses keys (`g` = reload
+  the FPGA from flash, which disarms the socket; learned the hard way).
+  The `:` key now opens a line mode with `spireg <reg> [val]`, `gs`
+  (the whole window decoded in one shot: status bits, PHI2 period/duty,
+  counters, last address, trace state), `gs set <idx> <val>`,
+  `gs arm|listen|off|clear|freeze|run` and `gs trace` (freezes, then prints
+  the 64 entries oldest-first). Empty line or ESC leaves line mode. This
+  matters on 1.0a3 because the USB-C port is the DP output: with the
+  monitor plugged in the serial CLI is gone, and a hot re-attach of the Mac
+  while the card is slot-powered does not enumerate (PD stays SRC/DFP; the
+  `v` virtual-replug key moves it to SNK/UFP but the device still did not
+  appear). Helper: scratch `gstel.py "<cmd>; <cmd>"`.
 
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is

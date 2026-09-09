@@ -47,6 +47,13 @@ module gs_socket_ctl (
     input  logic [3:0]  out_extra_i,    // address-delay sweep: extra clks before issue
     input  logic [4:0]  hold_tap_i,     // data-hold sweep: clks after the fall event
     input  logic        clear_i,        // hold counters at zero while high
+    input  logic        trace_freeze_i, // stop the bus-trace ring (read it while frozen)
+
+    // bus-trace read port (reader's clock domain; only meaningful while frozen)
+    input  logic        rd_clk,
+    input  logic [5:0]  trace_idx_i,
+    output logic [39:0] trace_data_o,   // {3'b0, be_ok, rdy, rw, bank[7:0], addr[15:0], data[7:0]}
+    output logic [5:0]  trace_wptr_o,   // next write slot = oldest entry (clk domain)
 
     // socket pins (FPGA_GS_*)
     input  logic        gs_ph2_i,
@@ -177,9 +184,33 @@ module gs_socket_ctl (
     end
 
     //=========================================================================
+    // Bus trace: the last 64 cycles, one entry per PHI2 fall -
+    // {be_ok, rdy_at_fall, R/W, bank, address, data_at_fall}. The address is
+    // the one issued for the cycle that just ended (last_addr), the data byte
+    // is what was on the pads at the fall (read: what the core took; write:
+    // what we drove, read back through the pad). Written in clk, read in
+    // rd_clk by index while frozen (a static ring needs no synchroniser).
+    //=========================================================================
+    logic [23:0] last_addr;                   // issued {bank, address} (below)
+    logic        rdy_fall = 1'b1;             // PH2 domain: RDY at the fall
+    always_ff @(negedge gs_ph2_i) rdy_fall <= gs_rdy_i;
+
+    logic [39:0] trace_mem [0:63];
+    logic [5:0]  trace_wptr;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            trace_wptr <= '0;
+        end else if (fall_evt && !trace_freeze_i) begin
+            trace_mem[trace_wptr] <= {3'b000, be_ok, rdy_fall, gs_rw_o, last_addr, d_fall};
+            trace_wptr <= trace_wptr + 1'b1;
+        end
+    end
+    always_ff @(posedge rd_clk) trace_data_o <= trace_mem[trace_idx_i];
+    assign trace_wptr_o = trace_wptr;
+
+    //=========================================================================
     // Last issued address, status
     //=========================================================================
-    logic [23:0] last_addr;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)          last_addr <= '0;
         else if (issue_evt)  last_addr <= cpu_a;
