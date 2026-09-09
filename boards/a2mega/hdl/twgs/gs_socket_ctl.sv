@@ -48,12 +48,16 @@ module gs_socket_ctl (
     input  logic [4:0]  hold_tap_i,     // data-hold sweep: clks after the fall event
     input  logic        clear_i,        // hold counters at zero while high
     input  logic        trace_freeze_i, // stop the bus-trace ring (read it while frozen)
+    input  logic        trace_trig_en_i,// arm the trigger: auto-freeze 32 cycles after the first
+                                        // opcode fetch from bank 0 below $0800 (runaway catcher)
 
     // bus-trace read port (reader's clock domain; only meaningful while frozen)
     input  logic        rd_clk,
     input  logic [5:0]  trace_idx_i,
     output logic [39:0] trace_data_o,   // {3'b0, be_ok, rdy, rw, bank[7:0], addr[15:0], data[7:0]}
     output logic [5:0]  trace_wptr_o,   // next write slot = oldest entry (clk domain)
+    output logic        trace_frozen_o, // ring stopped (manual freeze or trigger)
+    output logic        trace_trigd_o,  // the trigger fired
 
     // socket pins (FPGA_GS_*)
     input  logic        gs_ph2_i,
@@ -92,6 +96,7 @@ module gs_socket_ctl (
     //=========================================================================
     logic        cpu_clk, cpu_rst_n, cpu_we_n, cpu_vp_n;
     logic [7:0]  cpu_d_out;
+    logic        cpu_vpa, cpu_vda;
     logic [23:0] cpu_a;
     logic        ph2_alive, running, enabled, be_ok, fall_evt, issue_evt, ended_read;
     logic [31:0] cycle_count;
@@ -117,7 +122,7 @@ module gs_socket_ctl (
         .CLK(cpu_clk), .RST_N(cpu_rst_n), .CE(1'b1), .RDY_IN(gs_rdy_i),
         .NMI_N(gs_nmi_n_i), .IRQ_N(gs_irq_n_i), .ABORT_N(gs_abort_n_i),
         .D_IN(gs_d_i), .D_OUT(cpu_d_out), .A_OUT(cpu_a), .WE(cpu_we_n), .RDY_OUT(),
-        .VPA(), .VDA(), .MLB(), .VPB(cpu_vp_n), .I_FLAG()
+        .VPA(cpu_vpa), .VDA(cpu_vda), .MLB(), .VPB(cpu_vp_n), .I_FLAG()
     );
 
     //=========================================================================
@@ -195,16 +200,49 @@ module gs_socket_ctl (
     logic        rdy_fall = 1'b1;             // PH2 domain: RDY at the fall
     always_ff @(negedge gs_ph2_i) rdy_fall <= gs_rdy_i;
 
+    // Entry layout (LSB first): data[7:0], addr[23:8], bank[31:24],
+    // flags[39:32] = {0, 0, 0, VDA, VPA, be_ok, rdy_at_fall, R/W}.
+    logic        last_vpa, last_vda;          // with last_addr: the issued cycle's kind
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)          {last_vpa, last_vda} <= 2'b00;
+        else if (issue_evt)  {last_vpa, last_vda} <= {cpu_vpa, cpu_vda};
+    end
+
+    // Trigger: opcode fetch (VPA & VDA) from bank 0 below $0800 - ROM 01
+    // never executes there during startup, so the first one is the runaway.
+    // 32 more cycles are recorded, then the ring freezes itself.
+    wire trig_hit = last_vpa & last_vda & (last_addr[23:11] == 13'd0);
+    logic        trigd, auto_frozen;
+    logic [5:0]  post_cnt;
+    wire         frozen = trace_freeze_i | auto_frozen;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            trigd <= 1'b0; auto_frozen <= 1'b0; post_cnt <= '0;
+        end else if (!trace_trig_en_i || clear_i) begin
+            trigd <= 1'b0; auto_frozen <= 1'b0; post_cnt <= '0;
+        end else if (fall_evt && !frozen) begin
+            if (!trigd) begin
+                if (trig_hit) begin trigd <= 1'b1; post_cnt <= 6'd31; end
+            end else if (post_cnt == 6'd0) begin
+                auto_frozen <= 1'b1;
+            end else begin
+                post_cnt <= post_cnt - 1'b1;
+            end
+        end
+    end
+
     logic [39:0] trace_mem [0:63];
     logic [5:0]  trace_wptr;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             trace_wptr <= '0;
-        end else if (fall_evt && !trace_freeze_i) begin
-            trace_mem[trace_wptr] <= {3'b000, be_ok, rdy_fall, gs_rw_o, last_addr, d_fall};
+        end else if (fall_evt && !frozen) begin
+            trace_mem[trace_wptr] <= {3'b000, last_vda, last_vpa, be_ok, rdy_fall, gs_rw_o, last_addr, d_fall};
             trace_wptr <= trace_wptr + 1'b1;
         end
     end
+    assign trace_frozen_o = frozen;
+    assign trace_trigd_o  = trigd;
     always_ff @(posedge rd_clk) trace_data_o <= trace_mem[trace_idx_i];
     assign trace_wptr_o = trace_wptr;
 

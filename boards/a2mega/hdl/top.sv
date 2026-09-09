@@ -2106,6 +2106,7 @@ module top #(
     wire [23:0] gs_last_w;
     wire [39:0] gs_trace_data_w;
     wire [5:0]  gs_trace_wptr_w;
+    wire        gs_trace_frozen_w, gs_trace_trigd_w;
 
     gs_socket_ctl i_gs_socket (
         .clk(clk_gs_w),
@@ -2117,8 +2118,10 @@ module top #(
         .hold_tap_i(gs_ht_s1),
         .clear_i(gs_ctrl_s1[7]),
         .trace_freeze_i(gs_ctrl_s1[3]),
+        .trace_trig_en_i(gs_ctrl_s1[4]),
         .rd_clk(clk_logic_w), .trace_idx_i(gs_trace_idx_w),
         .trace_data_o(gs_trace_data_w), .trace_wptr_o(gs_trace_wptr_w),
+        .trace_frozen_o(gs_trace_frozen_w), .trace_trigd_o(gs_trace_trigd_w),
         .gs_ph2_i(gs_ph2), .gs_rdy_i(gs_rdy), .gs_irq_n_i(gs_irq_n), .gs_nmi_n_i(gs_nmi_n),
         .gs_res_n_i(gs_res_n), .gs_abort_n_i(gs_abort_n), .gs_be_i(gs_be),
         .gs_d_i(gs_d), .gs_d_o(gs_d_o_w), .gs_d_oe_o(gs_d_oe_w),
@@ -2144,12 +2147,12 @@ module top #(
     // trace: the entry is read in clk_logic already; the write pointer is
     // two-flopped (it is static while the ring is frozen, which is when it
     // is read).
-    reg [5:0] gs_twp_s0, gs_twp_s1;
+    reg [7:0] gs_twp_s0, gs_twp_s1;
     always @(posedge clk_logic_w) begin
-        gs_twp_s0 <= gs_trace_wptr_w;
+        gs_twp_s0 <= {gs_trace_frozen_w, gs_trace_trigd_w, gs_trace_wptr_w};
         gs_twp_s1 <= gs_twp_s0;
     end
-    assign gs_trace_w = {gs_ctrl_w[3], 1'b0, gs_twp_s1, gs_trace_data_w};
+    assign gs_trace_w = {gs_twp_s1, gs_trace_data_w};
 `else
     assign gs_tele_w = 160'd0;
     assign gs_trace_w = 48'd0;

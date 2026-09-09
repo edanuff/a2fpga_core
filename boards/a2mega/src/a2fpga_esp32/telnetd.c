@@ -163,8 +163,9 @@ static void gs_dump(int fd)
     }
     tn_printf(fd, "cycles=%lu stalls=%u be_low_clks=%u hold_mismatch=%u hold_samples=%u out_extra=%u hold_tap=%u\r\n",
               (unsigned long)cyc, U16(8), U16(10), U16(12), U16(14), r[2], r[3]);
-    tn_printf(fd, "last_addr=%02X:%02X%02X trace: %s wptr=%u\r\n",
-              r[22], r[21], r[20], (r[23] & 0x80) ? "FROZEN" : "running", r[23] & 0x3F);
+    tn_printf(fd, "last_addr=%02X:%02X%02X trace: %s%s wptr=%u trig_en=%u\r\n",
+              r[22], r[21], r[20], (r[23] & 0x80) ? "FROZEN" : "running",
+              (r[23] & 0x40) ? " TRIGGERED" : "", r[23] & 0x3F, (r[0] >> 4) & 1);
     #undef U16
 }
 
@@ -177,7 +178,8 @@ static void gs_trace(int fd)
     }
     uint8_t st = gs_rd(23);
     unsigned wptr = st & 0x3F;
-    tn_printf(fd, "%-3s %-9s %-4s %s   (oldest first; wptr=%u)\r\n", "#", "bank:addr", "data", "flags", wptr);
+    tn_printf(fd, "%-3s %-9s %-4s %s   (oldest first; wptr=%u%s; OP=opcode fetch dat=data opr=operand int=internal)\r\n",
+              "#", "bank:addr", "data", "flags", wptr, (st & 0x40) ? "; TRIGGERED" : "");
     fpga_link_lock();
     for (unsigned n = 0; n < 64; n++) {
         unsigned idx = (wptr + n) & 0x3F;  /* wptr = next write = oldest entry */
@@ -189,8 +191,10 @@ static void gs_trace(int fd)
             b[k] = fpga_reg_read(GS_REG_DATA);
         }
         fpga_link_unlock();
-        tn_printf(fd, "%02u  %02X:%02X%02X   %02X   %c%s%s\r\n", n, b[2], b[1], b[0], b[3],
-                  (b[4] & 1) ? 'R' : 'W', (b[4] & 2) ? "" : " STALL", (b[4] & 4) ? "" : " BE0");
+        /* flags: bit0 R/W, bit1 RDY at the fall, bit2 BE ok, bit3 VPA, bit4 VDA */
+        const char *kind = (b[4] & 0x18) == 0x18 ? "OP " : (b[4] & 0x10) ? "dat" : (b[4] & 0x08) ? "opr" : "int";
+        tn_printf(fd, "%02u  %02X:%02X%02X   %02X   %c %s%s%s\r\n", n, b[2], b[1], b[0], b[3],
+                  (b[4] & 1) ? 'R' : 'W', kind, (b[4] & 2) ? "" : " STALL", (b[4] & 4) ? "" : " BE0");
         fpga_link_lock();
     }
     fpga_link_unlock();
@@ -215,7 +219,7 @@ static void tn_exec_line(int fd, char *line)
     if (nt == 0)
         return;
     if (!strcmp(tok[0], "help") || !strcmp(tok[0], "?")) {
-        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|clear|freeze|run | gs trace\r\n");
+        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|clear|freeze|run|trig|untrig | gs trace\r\n");
         return;
     }
     if (!fpga_link_ok()) {
@@ -255,10 +259,17 @@ static void tn_exec_line(int fd, char *line)
             gs_wr(0, gs_rd(0) | 0x08); tn_puts(fd, "trace frozen\r\n");
         } else if (!strcmp(tok[1], "run")) {
             gs_wr(0, gs_rd(0) & ~0x08); tn_puts(fd, "trace running\r\n");
+        } else if (!strcmp(tok[1], "trig")) {
+            /* arm the runaway trigger: clear pulse with trig_en set, freeze off */
+            uint8_t c = (gs_rd(0) & ~0x08) | 0x10;
+            gs_wr(0, c | 0x80); gs_wr(0, c);
+            tn_puts(fd, "trigger armed (opcode fetch from bank 0 < $0800; +32 cycles then freeze)\r\n");
+        } else if (!strcmp(tok[1], "untrig")) {
+            gs_wr(0, gs_rd(0) & ~0x10); tn_puts(fd, "trigger off\r\n");
         } else if (!strcmp(tok[1], "trace")) {
             gs_trace(fd);
         } else {
-            tn_puts(fd, "usage: gs | gs set <idx> <val> | gs arm|listen|off|clear|freeze|run | gs trace\r\n");
+            tn_puts(fd, "usage: gs | gs set <idx> <val> | gs arm|listen|off|clear|freeze|run|trig|untrig | gs trace\r\n");
         }
         return;
     }

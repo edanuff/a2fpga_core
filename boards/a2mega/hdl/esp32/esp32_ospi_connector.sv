@@ -93,7 +93,7 @@ module esp32_ospi_connector #(
     output wire [3:0]   gs_out_extra_o,     // address-delay sweep (extra clks)
     output wire [4:0]   gs_hold_tap_o,      // data-hold sweep tap (clks after the fall)
     output wire [5:0]   gs_trace_idx_o,     // bus-trace read index (window reg 23)
-    input  wire [47:0]  gs_trace_i,         // {frozen, 0, wptr[5:0], trace_data[39:0]} (connector domain)
+    input  wire [47:0]  gs_trace_i,         // {frozen, triggered, wptr[5:0], trace_data[39:0]} (connector domain)
     input  wire [159:0] gs_tele_i,          // {last_addr[23:0], high[15:0], period[15:0], hold_samples[15:0],
                                             //  hold_mismatch[15:0], be[15:0], stall[15:0], cycle[31:0], status[7:0]}
     output reg         ddr3_reinit_tgl_o,   // toggles on REG_DDR3_REINIT write (CDC as toggle)
@@ -366,12 +366,12 @@ module esp32_ospi_connector #(
             5'd20: gs_rdata = gs_tele_i[143:136];
             5'd21: gs_rdata = gs_tele_i[151:144];
             5'd22: gs_rdata = gs_tele_i[159:152];
-            5'd23: gs_rdata = gs_trace_i[47:40];          // {frozen, 0, wptr}
-            5'd24: gs_rdata = gs_trace_i[7:0];            // addr lo
-            5'd25: gs_rdata = gs_trace_i[15:8];           // addr hi
-            5'd26: gs_rdata = gs_trace_i[23:16];          // bank
-            5'd27: gs_rdata = gs_trace_i[31:24];          // data at the fall
-            5'd28: gs_rdata = gs_trace_i[39:32];          // {0,0,0,0,0, be_ok, rdy, rw}
+            5'd23: gs_rdata = gs_trace_i[47:40];          // {frozen, triggered, wptr}
+            5'd24: gs_rdata = gs_trace_i[15:8];           // addr lo   (entry = {flags, bank, addr, data})
+            5'd25: gs_rdata = gs_trace_i[23:16];          // addr hi
+            5'd26: gs_rdata = gs_trace_i[31:24];          // bank
+            5'd27: gs_rdata = gs_trace_i[7:0];            // data at the fall
+            5'd28: gs_rdata = gs_trace_i[39:32];          // {0,0,0, VDA, VPA, be_ok, rdy, rw}
             default: gs_rdata = 8'h00;
         endcase
     end
