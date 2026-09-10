@@ -52,6 +52,11 @@ const char *gs_socket_state_str(void);
  * own reset assert (0x2E.1). */
 void gs_socket_a2_release(void);
 
+/* Bench tunable: how long our reset stays asserted after the machine clock
+ * appears before the first release (default 5000 ms). */
+void gs_socket_set_por_hold_ms(unsigned ms);
+unsigned gs_socket_get_por_hold_ms(void);
+
 /* Register-window helpers shared with telnetd (locked). */
 uint8_t gs_socket_reg_read(uint8_t idx);
 void    gs_socket_reg_write(uint8_t idx, uint8_t val);

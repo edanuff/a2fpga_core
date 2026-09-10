@@ -36,7 +36,7 @@
 #define POLL_US          10000      /* 10 ms sampling */
 #define ARMED_POLL_US   100000      /* 100 ms while armed */
 #define ALIVE_SAMPLES        10     /* 100 ms of clock before we act */
-#define POR_HOLD_US     5000000     /* keep OUR reset asserted this long after the clock appears before
+#define POR_HOLD_US_DEFAULT 5000000 /* keep OUR reset asserted this long after the clock appears before
                                        the first release (G37: a release 100 ms after the clock wedges
                                        the IIgs's own reset logic until a power cycle; ~10 s worked) */
 #define PH2_SAMPLES           5     /* PHI2 seen at the socket for 50 ms */
@@ -53,6 +53,10 @@ static int64_t s_next_us  = 0;
 static int64_t s_arming_since_us = 0;
 static char    s_str[56]  = "AUTO: OFF";
 static uint8_t s_last_st07 = 0;
+static int64_t s_por_hold_us = POR_HOLD_US_DEFAULT;   /* tunable: gs hold <ms> */
+
+void gs_socket_set_por_hold_ms(unsigned ms) { s_por_hold_us = (int64_t)ms * 1000; }
+unsigned gs_socket_get_por_hold_ms(void) { return (unsigned)(s_por_hold_us / 1000); }
 
 uint8_t gs_socket_reg_read(uint8_t idx)
 {
@@ -91,7 +95,7 @@ static void set_state(st_t st, const char *why)
     s_count = 0;
     switch (st) {
     case ST_OFF:         snprintf(s_str, sizeof(s_str), "AUTO: OFF"); break;
-    case ST_MACHINE_OFF: snprintf(s_str, sizeof(s_str), "AUTO: HOLDING RESET, SOCKET OFF (WAITING FOR CLOCK + 5 S)"); break;
+    case ST_MACHINE_OFF: snprintf(s_str, sizeof(s_str), "AUTO: HOLDING RESET, SOCKET OFF (WAITING FOR CLOCK + %u MS)", gs_socket_get_por_hold_ms()); break;
     case ST_NO_RIBBON:   snprintf(s_str, sizeof(s_str), "AUTO: NO PHI2 AT SOCKET - RELEASED, IDLE"); break;
     case ST_POR_RELEASE: snprintf(s_str, sizeof(s_str), "AUTO: MACHINE ALIVE - FIRST RESET RELEASE (SOCKET OFF)"); break;
     case ST_ARMING:      snprintf(s_str, sizeof(s_str), "AUTO: ARMING (MACHINE HELD IN RESET)"); break;
@@ -185,7 +189,7 @@ void gs_socket_poll(void)
         if (!alive) { s_count = 0; break; }
         if (s_count == 0) s_arming_since_us = now; /* clock just appeared: start the POR hold timer */
         s_count++;
-        if (now - s_arming_since_us >= POR_HOLD_US) {
+        if (now - s_arming_since_us >= s_por_hold_us) {
             /* The machine's FIRST reset release after power-up must happen with
              * the socket shifters OFF (G36: enabling them before it leaves the
              * machine stuck in reset); later resets with the socket on are fine. */
