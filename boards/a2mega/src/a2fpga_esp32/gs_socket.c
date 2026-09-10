@@ -36,7 +36,7 @@
 #define POLL_US          10000      /* 10 ms sampling */
 #define ARMED_POLL_US   100000      /* 100 ms while armed */
 #define ALIVE_SAMPLES        10     /* 100 ms of clock before we act */
-#define POR_HOLD_US_DEFAULT 5000000 /* keep OUR reset asserted this long after the clock appears before
+#define POR_HOLD_US_DEFAULT 2000000 /* keep OUR reset asserted this long after the clock appears before
                                        the first release (G37: a release 100 ms after the clock wedges
                                        the IIgs's own reset logic until a power cycle; ~10 s worked) */
 #define PH2_SAMPLES           5     /* PHI2 seen at the socket for 50 ms */
@@ -86,7 +86,7 @@ static void a2_reset_write(bool assert_hold)
 void gs_socket_a2_release(void)
 {
     s_release = true;
-    a2_reset_write(s_state == ST_ARMING || s_state == ST_MACHINE_OFF);   /* keep our hold while we own the reset */
+    a2_reset_write(s_state == ST_MACHINE_OFF);   /* keep our hold while the machine is dead */
 }
 
 static void set_state(st_t st, const char *why)
@@ -98,7 +98,7 @@ static void set_state(st_t st, const char *why)
     case ST_MACHINE_OFF: snprintf(s_str, sizeof(s_str), "AUTO: HOLDING RESET, SOCKET OFF (WAITING FOR CLOCK + %u MS)", gs_socket_get_por_hold_ms()); break;
     case ST_NO_RIBBON:   snprintf(s_str, sizeof(s_str), "AUTO: NO PHI2 AT SOCKET - RELEASED, IDLE"); break;
     case ST_POR_RELEASE: snprintf(s_str, sizeof(s_str), "AUTO: MACHINE ALIVE - FIRST RESET RELEASE (SOCKET OFF)"); break;
-    case ST_ARMING:      snprintf(s_str, sizeof(s_str), "AUTO: ARMING (MACHINE HELD IN RESET)"); break;
+    case ST_ARMING:      snprintf(s_str, sizeof(s_str), "AUTO: ARMING (WAITING FOR PHI2 AT THE SOCKET)"); break;
     case ST_ARMED:       snprintf(s_str, sizeof(s_str), "AUTO: ARMED"); break;
     case ST_MANUAL:      snprintf(s_str, sizeof(s_str), "MANUAL (gs auto TO RESUME)"); break;
     }
@@ -112,7 +112,7 @@ bool gs_socket_ready(void) { return s_started; }
 void gs_socket_manual(void)
 {
     if (s_state == ST_MANUAL) return;
-    if (s_state == ST_ARMING || s_state == ST_MACHINE_OFF) a2_reset_write(false);   /* never leave our hold behind */
+    if (s_state == ST_MACHINE_OFF) a2_reset_write(false);   /* never leave our hold behind */
     set_state(ST_MANUAL, "MANUAL CONTROL");
 }
 
@@ -139,8 +139,10 @@ static void enter_machine_off(const char *why)
 
 static void begin_arming(const char *why)
 {
-    a2_reset_write(true);                            /* (already held) */
-    gs_socket_reg_write(0, GS_CTRL_LISTEN);          /* input shifter on, under our reset */
+    /* No second reset (G39: a re-assert right after the first release wedges
+     * a cold machine). /RESET is high and the machine has no CPU yet, so
+     * enabling the socket and arming simply cold-starts the core. */
+    gs_socket_reg_write(0, GS_CTRL_LISTEN);          /* input shifter on */
     s_arming_since_us = esp_timer_get_time();
     set_state(ST_ARMING, why);
 }
@@ -204,7 +206,7 @@ void gs_socket_poll(void)
         if (!alive) { enter_machine_off("CLOCK LOST"); break; }
         s_count = a2_rst_hi ? s_count + 1 : 0;
         if (s_count >= ALIVE_SAMPLES) {
-            begin_arming("MACHINE OUT OF RESET - RE-ASSERTING, LISTENING");
+            begin_arming("MACHINE OUT OF RESET - LISTENING");
         } else if (now - s_arming_since_us > ARMING_TIMEOUT_US) {
             GLOG("GS SOCKET: MACHINE RESET DID NOT RISE - RETRYING (st=%02X)", st07);
             enter_machine_off("RETRY");
@@ -217,9 +219,8 @@ void gs_socket_poll(void)
         uint8_t gs = gs_socket_reg_read(1);
         s_count = (gs & GS_ST_PH2_ALIVE) ? s_count + 1 : 0;
         if (s_count >= PH2_SAMPLES) {
-            gs_socket_reg_write(0, GS_CTRL_LISTEN | GS_CTRL_ARM);
-            a2_reset_write(false);                   /* release: core cold-starts */
-            set_state(ST_ARMED, "PHI2 ALIVE - ARMED, RESET RELEASED");
+            gs_socket_reg_write(0, GS_CTRL_LISTEN | GS_CTRL_ARM);   /* core cold-starts (/RES high) */
+            set_state(ST_ARMED, "PHI2 ALIVE - ARMED");
             s_next_us = now + ARMED_POLL_US;
         } else if (now - s_arming_since_us > ARMING_TIMEOUT_US) {
             gs_socket_reg_write(0, 0x00);
