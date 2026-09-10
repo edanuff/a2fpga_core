@@ -600,28 +600,32 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   `v` virtual-replug key moves it to SNK/UFP but the device still did not
   appear). Helper: scratch `gstel.py "<cmd>; <cmd>"`.
 
-- **Auto-arm (S6, ESP32 firmware `gs_socket.c`, v2 2026-09-09):** driven by
-  the machine's clock, not the console. The slot side already knows whether
-  the Apple II is alive (apple_bus counts PHI1; `sleep` when it stops); the
-  connector exposes it as STATUS.7 and adds an ESP32 reset assert (0x2E.1,
-  read back {hold, assert, release}; the storage-ready release is sticky).
-  Sequence, from the disk task's 2 ms loop:
-  MACHINE OFF (no clock, or slot RESET low - it also reads low unpowered):
-  socket shifters fully off, CTRL = 0. Enabling even the input shifter
-  across the IIgs power-up keeps the machine in its power-on reset (G34).
-  → machine alive AND out of its own reset for 100 ms → **assert our reset**,
-  CTRL = listen, wait for PHI2 at the socket (50 ms) → CTRL = arm, **release**
-  → the core cold-starts on /RES rising (the order that worked in G30).
-  → ARMED: stays armed through the machine's own resets; when the clock
-  stops → CTRL = 0, back to MACHINE OFF. No PHI2 within 2 s of listening
-  (no ribbon) → back off and retry each second. On ESP32 start an FPGA
-  that is already armed is adopted untouched (restart with the machine
-  running); an alive machine with an unarmed socket has no CPU, so it is
-  reset and armed. Setting `gs_socket_off` (SETTINGS → GS SOCKET 65816:
-  AUTO/OFF) disables it; telnet `gs arm|off|listen|set 0 …` take manual
-  control until `gs auto`; `gs` prints the state and the slot clock/reset.
-  Presence detection for 1.0a4: see board_1_0a4_requirements.md item 12
-  (not BUS_5V).
+- **Auto-arm (S6, v7 2026-09-09 — FPGA POR probe + hardware arm).** What the
+  ROM 01 machine taught us (test log G30–G41): (1) nothing may drive, or even
+  listen at, the socket while the machine is in its own power-on reset;
+  (2) a machine that leaves reset with no CPU present for long wedges until a
+  power cycle, and so does a second reset pulse right after the first;
+  (3) the machine's own power-on time varies (cold vs warm), so a fixed
+  delay is either too slow (ed's requirement: our added latency ≤ 500 ms)
+  or unsafe. So the card holds the slot reset whenever the machine is dead,
+  and the FPGA does the timing-critical part: with the **POR probe** enabled
+  (0x2E bit 2) it lets the /RESET line float for 40 µs every 1 ms while
+  holding and samples it at the end of the window; the first time the
+  machine's own reset logic no longer pulls it low it stays released
+  (`por_done`, 0x2E read bit 5) and, with bit 3 set, **arms the GS socket in
+  the same clock** (CTRL forced to arm+listen). The core cold-starts within
+  microseconds of the machine's own release, with a CPU present the whole
+  time. Gated on the storage-ready release (0x2E bit 0, sticky), so the boot
+  still finds its disks. The ESP32 (`gs_socket.c`) only sequences:
+  MACHINE OFF (no slot clock, STATUS.7): socket off, hold asserted (a fresh
+  assert clears `por_done`) → clock alive 100 ms → probe+auto-arm enabled →
+  `por_done` → ARMED; clock stops → back to MACHINE OFF; armed but no PHI2
+  at the socket for 2 s → no ribbon, release and idle like a plain card; an
+  already-armed FPGA on ESP32 start is adopted untouched. Setting
+  `gs_socket_off` disables it; telnet `gs …` commands take manual control
+  until `gs auto`; `gs` prints the state and the slot clock/reset/hold bits.
+  Presence detection for 1.0a4: board_1_0a4_requirements.md item 12 (not
+  BUS_5V).
 
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
