@@ -180,4 +180,7 @@
 // A2_RST_RELEASE (0x2E) bits: read back {hold, assert, release}
 #define A2RST_RELEASE       0x01   // storage-ready release (sticky in the FPGA)
 #define A2RST_ASSERT        0x02   // hold the Apple II in reset while set
-#define A2RST_HOLDING       0x04   // read-only: FPGA is asserting the reset
+#define A2RST_PROBE         0x04   // while holding: probe the line every ms, stay released when it floats high
+#define A2RST_AUTOARM       0x08   // on that release, arm the GS socket in hardware (same clock)
+#define A2RST_HOLDING       0x10   // read-only: FPGA is asserting the reset
+#define A2RST_POR_DONE      0x20   // read-only: the probe saw the machine's reset released (sticky until a new assert)

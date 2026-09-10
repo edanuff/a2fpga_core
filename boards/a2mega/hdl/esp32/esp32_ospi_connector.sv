@@ -335,19 +335,20 @@ module esp32_ospi_connector #(
     reg [7:0] scratch_r;
     reg [4:0] gs_sel_r;
     reg [7:0] gs_ctrl_r;
+    wire a2_rst_assert_set_w = reg_wr_req && reg_idx == REG_A2_RST_RELEASE && reg_wdata[1] && !a2_rst_assert_r;
     reg [3:0] gs_out_extra_r;
     reg [4:0] gs_hold_tap_r;
     reg [5:0] gs_trace_idx_r;
     assign gs_trace_idx_o = gs_trace_idx_r;
     reg [23:0] gs_trig_addr_r;
     assign gs_trig_addr_o = gs_trig_addr_r;
-    assign gs_ctrl_o      = gs_ctrl_r;
+    assign gs_ctrl_o      = gs_ctrl_r | ((a2_por_done_r & a2_rst_autoarm_r) ? 8'h05 : 8'h00);   // hardware auto-arm
     assign gs_out_extra_o = gs_out_extra_r;
     assign gs_hold_tap_o  = gs_hold_tap_r;
     reg [7:0] gs_rdata;
     always @* begin
         case (gs_sel_r)
-            5'd0:  gs_rdata = gs_ctrl_r;
+            5'd0:  gs_rdata = gs_ctrl_r | ((a2_por_done_r & a2_rst_autoarm_r) ? 8'h05 : 8'h00);
             5'd1:  gs_rdata = gs_tele_i[7:0];
             5'd2:  gs_rdata = {4'b0, gs_out_extra_r};
             5'd3:  gs_rdata = {3'b0, gs_hold_tap_r};
@@ -423,6 +424,11 @@ module esp32_ospi_connector #(
     // Apple II reset release
     reg        a2_rst_release_r;
     reg        a2_rst_assert_r;    // 0x2E bit 1: hold the Apple II in reset while set (socket arm sequence)
+    reg        a2_rst_probe_r;     // 0x2E bit 2: while holding, let the line go for PROBE_WINDOW every
+                                   //   PROBE_PERIOD and sample it: the moment the machine's own
+                                   //   power-on reset stops pulling it low, stay released (por_done)
+    reg        a2_rst_autoarm_r;   // 0x2E bit 3: on por_done, arm the GS socket in the same clock
+    reg        a2_por_done_r;      // read 0x2E bit 5: machine's reset released by the probe
 
     // W5100 doorbell clear
     reg [3:0]  w5100_cmd_clr_r;
@@ -495,7 +501,46 @@ module esp32_ospi_connector #(
                  rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0])
             rst_released_r <= 1'b1;
     end
-    assign a2bus_control_if.reset_hold = a2_rst_assert_r | !rst_released_r;
+    // --- POR probe -----------------------------------------------------------
+    // The IIgs (ROM 01 bench, G31-G40) wedges if the socket is driven during
+    // its own power-on reset, and again if it comes out of reset with no CPU
+    // present for long. So: hold the slot reset from the card, probe the line
+    // every ms with a short release, and the first time it floats high keep
+    // it released and arm the socket at once (microseconds, not a timer).
+    // Only meaningful once the storage-ready release (rst_released_r) is in.
+    localparam PROBE_PERIOD = CLOCK_SPEED_HZ / 1000;        // 1 ms
+    localparam PROBE_WINDOW = CLOCK_SPEED_HZ / 25000;       // 40 us
+    reg [$clog2(PROBE_PERIOD+1)-1:0] probe_cnt_r;
+    reg        probe_window_r;
+    reg [1:0]  a2_reset_n_s;                                // sync
+    wire       probe_active = a2_rst_probe_r & a2_rst_assert_r & rst_released_r & ~a2_por_done_r;
+    wire       por_done_set = probe_active & probe_window_r &
+                              (probe_cnt_r == PROBE_PERIOD - 1) & a2_reset_n_s[1];
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            probe_cnt_r    <= '0;
+            probe_window_r <= 1'b0;
+            a2_reset_n_s   <= 2'b00;
+            a2_por_done_r  <= 1'b0;
+        end else begin
+            a2_reset_n_s <= {a2_reset_n_s[0], a2_reset_n_i};
+            if (!probe_active) begin
+                probe_cnt_r    <= '0;
+                probe_window_r <= 1'b0;
+            end else begin
+                probe_cnt_r    <= (probe_cnt_r == PROBE_PERIOD - 1) ? '0 : probe_cnt_r + 1'b1;
+                probe_window_r <= (probe_cnt_r >= PROBE_PERIOD - PROBE_WINDOW - 1) &&
+                                  (probe_cnt_r != PROBE_PERIOD - 1);
+            end
+            if (por_done_set)
+                a2_por_done_r <= 1'b1;
+            else if (a2_rst_assert_set_w)
+                a2_por_done_r <= 1'b0;                      // a new hold starts a new sequence
+        end
+    end
+
+    assign a2bus_control_if.reset_hold =
+        (a2_rst_assert_r & ~probe_window_r & ~a2_por_done_r) | !rst_released_r;
     assign a2bus_control_if.ready = 1'b1;
 
     // =========================================================================
@@ -707,7 +752,7 @@ module esp32_ospi_connector #(
             REG_HDD1_LBA_L:   reg_rdata = hdd_volumes[1].lba[7:0];
             REG_HDD1_LBA_H:   reg_rdata = hdd_volumes[1].lba[15:8];
 
-            REG_A2_RST_RELEASE: reg_rdata = {5'b0, a2bus_control_if.reset_hold, a2_rst_assert_r, a2_rst_release_r};
+            REG_A2_RST_RELEASE: reg_rdata = {2'b0, a2_por_done_r, a2bus_control_if.reset_hold, a2_rst_autoarm_r, a2_rst_probe_r, a2_rst_assert_r, a2_rst_release_r};
 
             // Slot configuration
             REG_SLOT_SELECT:  reg_rdata = {5'b0, slot_select_r};
@@ -822,6 +867,8 @@ module esp32_ospi_connector #(
             hdd_ack_r[1] <= 1'b0;
             a2_rst_release_r <= 1'b0;
             a2_rst_assert_r  <= 1'b0;
+            a2_rst_probe_r   <= 1'b0;
+            a2_rst_autoarm_r <= 1'b0;
             w5100_cmd_clr_r <= 4'b0;
             gpu_trigger_r <= 1'b0;
             gpu_pause_r <= 1'b0;
@@ -908,6 +955,8 @@ module esp32_ospi_connector #(
                     REG_A2_RST_RELEASE: begin
                         a2_rst_release_r <= reg_wdata[0];
                         a2_rst_assert_r  <= reg_wdata[1];
+                        a2_rst_probe_r   <= reg_wdata[2];
+                        a2_rst_autoarm_r <= reg_wdata[3];
                     end
 
                     REG_SLOT_SELECT:  slot_select_r <= reg_wdata[2:0];
