@@ -40,7 +40,7 @@
 #define DEAD_SAMPLES          5     /* clock gone for 500 ms -> machine off */
 #define ARMING_TIMEOUT_US 2000000   /* no PHI2 at the socket: back off, retry */
 
-typedef enum { ST_OFF = 0, ST_MACHINE_OFF, ST_ARMING, ST_ARMED, ST_NO_RIBBON, ST_MANUAL } st_t;
+typedef enum { ST_OFF = 0, ST_MACHINE_OFF, ST_POR_RELEASE, ST_ARMING, ST_ARMED, ST_NO_RIBBON, ST_MANUAL } st_t;
 
 static st_t    s_state    = ST_OFF;
 static bool    s_started  = false;
@@ -90,6 +90,7 @@ static void set_state(st_t st, const char *why)
     case ST_OFF:         snprintf(s_str, sizeof(s_str), "AUTO: OFF"); break;
     case ST_MACHINE_OFF: snprintf(s_str, sizeof(s_str), "AUTO: MACHINE OFF (HOLDING RESET, SOCKET OFF)"); break;
     case ST_NO_RIBBON:   snprintf(s_str, sizeof(s_str), "AUTO: NO PHI2 AT SOCKET - RELEASED, IDLE"); break;
+    case ST_POR_RELEASE: snprintf(s_str, sizeof(s_str), "AUTO: MACHINE ALIVE - FIRST RESET RELEASE (SOCKET OFF)"); break;
     case ST_ARMING:      snprintf(s_str, sizeof(s_str), "AUTO: ARMING (MACHINE HELD IN RESET)"); break;
     case ST_ARMED:       snprintf(s_str, sizeof(s_str), "AUTO: ARMED"); break;
     case ST_MANUAL:      snprintf(s_str, sizeof(s_str), "MANUAL (gs auto TO RESUME)"); break;
@@ -179,8 +180,26 @@ void gs_socket_poll(void)
          * (or our storage hold was released) with the socket untouched */
         (void)a2_rst_hi;                          /* low: we are holding it */
         s_count = alive ? s_count + 1 : 0;
-        if (s_count >= ALIVE_SAMPLES)
-            begin_arming("MACHINE ALIVE - LISTENING UNDER OUR RESET");
+        if (s_count >= ALIVE_SAMPLES) {
+            /* The machine's FIRST reset release after power-up must happen with
+             * the socket shifters OFF (G36: enabling them before it leaves the
+             * machine stuck in reset); later resets with the socket on are fine. */
+            a2_reset_write(false);
+            set_state(ST_POR_RELEASE, "MACHINE ALIVE - RELEASING RESET (SOCKET OFF)");
+            s_arming_since_us = now;
+        }
+        break;
+
+    case ST_POR_RELEASE:
+        s_next_us = now + POLL_US;
+        if (!alive) { enter_machine_off("CLOCK LOST"); break; }
+        s_count = a2_rst_hi ? s_count + 1 : 0;
+        if (s_count >= ALIVE_SAMPLES) {
+            begin_arming("MACHINE OUT OF RESET - RE-ASSERTING, LISTENING");
+        } else if (now - s_arming_since_us > ARMING_TIMEOUT_US) {
+            GLOG("GS SOCKET: MACHINE RESET DID NOT RISE - RETRYING (st=%02X)", st07);
+            enter_machine_off("RETRY");
+        }
         break;
 
     case ST_ARMING: {
