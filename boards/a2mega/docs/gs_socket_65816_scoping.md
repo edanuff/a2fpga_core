@@ -627,6 +627,17 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   Presence detection for 1.0a4: board_1_0a4_requirements.md item 12 (not
   BUS_5V).
 
+  **Status 2026-09-10 (open):** the natural-release arm boots the machine
+  sometimes (G43, G44-with-a-pulse) and wedges it other times (G41); a
+  fixed 1–2 s hold before the release boots every time (G38, G40) but
+  misses the ≤500 ms requirement. Ed's reading, adopted as the working
+  hypothesis: this is a deterministic sequencing problem (the TransWarp GS
+  brings up a socket CPU in this machine; this card coexists with a TWGS
+  machine), not a timing window; the G44 trace points at two concrete
+  card-side facts — the HDD unit answering 'not ready' to an early start
+  (boot falls to the floppy) and a ~1.5 µs /RES pulse at the socket. See
+  the test log's end-of-day row for the experiment list.
+
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
   driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/
