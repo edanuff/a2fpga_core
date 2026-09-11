@@ -37,7 +37,7 @@
 #define NO_RIBBON_US    2000000     /* armed but no PHI2 at the socket for 2 s: plain card */
 #define PROBE_REPORT_US 15000000    /* log if the machine never lets go of its reset */
 
-typedef enum { ST_OFF = 0, ST_MACHINE_OFF, ST_PROBE, ST_ARMED, ST_NO_RIBBON, ST_MANUAL } st_t;
+typedef enum { ST_OFF = 0, ST_MACHINE_OFF, ST_PROBE, ST_ARM_DELAY, ST_ARMED, ST_NO_RIBBON, ST_MANUAL } st_t;
 
 static st_t    s_state    = ST_OFF;
 static bool    s_started  = false;
@@ -48,7 +48,7 @@ static int64_t s_next_us  = 0;
 static int64_t s_since_us = 0;
 static char    s_str[72]  = "AUTO: OFF";
 static uint8_t s_last_st07 = 0;
-static unsigned s_por_hold_ms = 0;   /* legacy tunable, no longer used by the sequence */
+static unsigned s_por_hold_ms = 0;   /* EXPERIMENT: arm delay after the machine's reset release, ms (0 = hardware arm in the same clock) */
 
 void gs_socket_set_por_hold_ms(unsigned ms) { s_por_hold_ms = ms; }
 unsigned gs_socket_get_por_hold_ms(void) { return s_por_hold_ms; }
@@ -76,7 +76,7 @@ static void a2_reset_write(bool assert_hold)
 {
     fpga_reg_write(A2REG_A2_RST_RELEASE,
                    (uint8_t)((assert_hold ? A2RST_ASSERT : 0) | (s_release ? A2RST_RELEASE : 0) |
-                             (s_probe ? (A2RST_PROBE | A2RST_AUTOARM) : 0)));
+                             (s_probe ? (A2RST_PROBE | (s_por_hold_ms ? 0 : A2RST_AUTOARM)) : 0)));
 }
 
 void gs_socket_a2_release(void)
@@ -93,6 +93,7 @@ static void set_state(st_t st, const char *why)
     case ST_OFF:         snprintf(s_str, sizeof(s_str), "AUTO: OFF"); break;
     case ST_MACHINE_OFF: snprintf(s_str, sizeof(s_str), "AUTO: HOLDING RESET, SOCKET OFF (WAITING FOR CLOCK)"); break;
     case ST_PROBE:       snprintf(s_str, sizeof(s_str), "AUTO: CLOCK UP - PROBING THE MACHINE RESET (FPGA ARMS ON RELEASE)"); break;
+    case ST_ARM_DELAY:   snprintf(s_str, sizeof(s_str), "AUTO: RELEASED, ARM DELAYED (EXPERIMENT)"); break;
     case ST_ARMED:       snprintf(s_str, sizeof(s_str), "AUTO: ARMED"); break;
     case ST_NO_RIBBON:   snprintf(s_str, sizeof(s_str), "AUTO: NO PHI2 AT SOCKET - PLAIN CARD, IDLE"); break;
     case ST_MANUAL:      snprintf(s_str, sizeof(s_str), "MANUAL (gs auto TO RESUME)"); break;
@@ -189,6 +190,11 @@ void gs_socket_poll(void)
         if (!alive) { enter_machine_off("CLOCK LOST WHILE PROBING"); break; }
         uint8_t rst = fpga_reg_read(A2REG_A2_RST_RELEASE);
         if (rst & A2RST_POR_DONE) {
+            if (s_por_hold_ms) {                        /* experiment: delayed arm after the release */
+                set_state(ST_ARM_DELAY, "MACHINE RESET RELEASED - ARM DELAYED");
+                s_since_us = now;
+                break;
+            }
             set_state(ST_ARMED, "MACHINE RESET RELEASED - SOCKET ARMED BY THE FPGA");
             s_since_us = now;
             s_next_us = now + ARMED_POLL_US;
@@ -198,6 +204,17 @@ void gs_socket_poll(void)
         }
         break;
     }
+
+    case ST_ARM_DELAY:
+        s_next_us = now + POLL_US;
+        if (!alive) { enter_machine_off("CLOCK LOST"); break; }
+        if (now - s_since_us >= (int64_t)s_por_hold_ms * 1000) {
+            gs_socket_reg_write(0, GS_CTRL_LISTEN | GS_CTRL_ARM);
+            set_state(ST_ARMED, "ARMED (DELAYED)");
+            s_since_us = now;
+            s_next_us = now + ARMED_POLL_US;
+        }
+        break;
 
     case ST_ARMED: {
         s_next_us = now + ARMED_POLL_US;
