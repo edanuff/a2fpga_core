@@ -639,11 +639,14 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   the test log's end-of-day row for the experiment list.
 
   **TransWarp GS reference model (schematic read 2026-09-10, test log):**
-  the TWGS's CPU reset is the slot /RESET re-registered by a single 74F74
+  the TWGS's CPU reset is the CPU socket's own /RES (cable J5 pin 2 = DIP
+  40; the slot's pin 31 is not used at all) re-registered by a single 74F74
   clocked by the CPU clock, held low only until the card's FPGA reports
-  DONE; its bus buffers are up from configuration on, the socket's RDY pin
-  is tied to +5 V, BE follows the slot /DMA logic, and it can pull the slot
-  /RESET low with an open-collector transistor exactly as we do. No RC and
+  DONE; its bus buffers are up from configuration on, it leaves the
+  socket's RDY, VDA, VPA, M/X, E and MLB pins unconnected, slot RDY/DMA/
+  PH0/Q3/7M go through a GAL to a GS_PAUSE wait for the fast CPU, and it
+  can pull the socket /RES low with an open-collector transistor exactly
+  as we do. No RC and
   no timed hold anywhere. The IIgs netlist adds the number the machine
   itself imposes: the M50741's power-on RC is 200 k × 1 µF (≈200 ms), which
   is the ≈230 ms natural release the probe sees. Proposed next step (test
