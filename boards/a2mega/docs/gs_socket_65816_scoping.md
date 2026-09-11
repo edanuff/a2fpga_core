@@ -638,6 +638,18 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   (boot falls to the floppy) and a ~1.5 µs /RES pulse at the socket. See
   the test log's end-of-day row for the experiment list.
 
+  **TransWarp GS reference model (schematic read 2026-09-10, test log):**
+  the TWGS's CPU reset is the slot /RESET re-registered by a single 74F74
+  clocked by the CPU clock, held low only until the card's FPGA reports
+  DONE; its bus buffers are up from configuration on, the socket's RDY pin
+  is tied to +5 V, BE follows the slot /DMA logic, and it can pull the slot
+  /RESET low with an open-collector transistor exactly as we do. No RC and
+  no timed hold anywhere. The IIgs netlist adds the number the machine
+  itself imposes: the M50741's power-on RC is 200 k × 1 µF (≈200 ms), which
+  is the ≈230 ms natural release the probe sees. Proposed next step (test
+  log): arm the socket while /RESET is still low and let the core leave
+  reset on the machine's own rise, so nothing is switched at release time.
+
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
   driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/
