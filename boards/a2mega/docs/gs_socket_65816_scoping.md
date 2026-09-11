@@ -221,8 +221,8 @@ unlike the NMOS 6502); BE is asynchronous.
   the low phase, not just "before the rise".
 - Reset clears the Speed register: the reset-vector fetch runs at 1 MHz.
 - RDY: honoured by the FPI only at Normal speed per the TWGS manual; we
-  honor it always (safe superset). We do **not** need to drive RDY_OUT in
-  iteration 1 (WAI can be internal); recommendation: leave it released.
+  honor it always (safe superset). We do **not** drive RDY_OUT (WAI stays
+  internal) — decision record and evidence in §3.3.
 - **BE is a per-cycle pulse, not a DMA-only level (measured 2026-09-06,
   AD3 directly on the ROM 01 socket, no CPU):** the FPI drives BE low for
   ~66 ns every cycle, from ~32 ns before the PHI2 falling edge to ~34 ns
@@ -239,6 +239,81 @@ unlike the NMOS 6502); BE is asynchronous.
   works with a real 65C816 whose VDA/VPA are wired somewhere, so C3 should
   look at the socket pins 7/39 with a meter (open = confirmed unused).
   VP **is** wired and driven by us.
+
+### 3.3 Deliberate departures from the W65C816 datasheet (decision record)
+
+Kept here so a future compatibility investigation does not have to
+rediscover why the socket PHY behaves differently from the chip it
+replaces. Each entry says what the datasheet expects, what we do, and the
+evidence the decision rests on.
+
+**RDY — we listen, we never drive (decided 2026-09-11, ed).**
+
+- *Datasheet:* RDY is bidirectional. As an input, a low level halts the CPU
+  at the next PHI2 fall (reads and writes, §7.17). As an output, the CPU
+  itself pulls RDY low after a WAI instruction until an interrupt arrives
+  (§7.6), which is why the pin must be wire-OR'd with an external pull-up.
+  A literal drop-in would therefore drive the socket's RDY pin low during
+  WAI.
+- *What we do:* `gs_socket_phy.sv` samples RDY at the PHI2 fall and repeats
+  the cycle while it is low (`stall_count`), and `gs_rdy_out_o` is tied
+  released — WAI stays internal to the core. The U15 open-drain driver on
+  `FPGA_GS_RDY_OUT` exists on the board and stays idle. The same holds for
+  the slot-side RDY driver: we do not pull the slot's RDY either.
+- *Evidence 1 — the machine (IIgs ROM 3 KiCad netlist, exported with
+  kicad-cli, test log 09-10):* the CPU's RDY pin 2 is the slot RDY.H net:
+  seven slot pin-21s, R113 4.7 k pull-up, the FPI's pin 55 (drawn as
+  INVBADR.L) and the UD12 74LS74 (D and /R of the DRES.H flop). Nothing on
+  that net is a consumer of a WAI announcement from the CPU; the FPI's
+  interest in RDY is the slot-card halt protocol, which is defined
+  relative to the 1 MHz PH0/Q3 cycle. The IIgs Hardware Reference and the
+  TWGS manual both say RDY is honoured only at Normal (1 MHz) speed.
+- *Evidence 2 — the TransWarp GS (ReActiveMicro schematic, test log
+  09-10/11):* the product that already puts a foreign 65816 in this socket
+  **leaves the socket's RDY pin unconnected** on its CPU cable (J5 pin 3
+  open, together with VDA, VPA, M/X, E and MLB), and its own W65C816's RDY
+  pin is only a pull-up (R5-4/9). It never halts its CPU through RDY at
+  all: slot RDY and DMA go from the slot edge into GAL U44, clocked by 7M
+  with PH0 and Q3 as inputs, and come out as GS_PAUSE, which steers the
+  U22 74F157 clock mux — the fast CPU is stopped by holding its clock, the
+  same way the FPI stretches PHI2 for slow cycles. Thirty years of
+  software ran on that arrangement, so a socket CPU that never drives RDY
+  and never sees a WAI reflected on the net is a proven-compatible state.
+- *Why the TWGS chose that (our reading):* (a) slot RDY is asynchronous
+  to a fast CPU clock; sampling it in the GAL on 7M and turning it into a
+  synchronous clock hold removes the tPCS race at the CPU pin; (b) the
+  protocol lives in the slot timing (PH0/Q3), which the card needs from the
+  edge anyway; (c) a clock hold freezes the cache and bus state machines
+  in lockstep with the CPU, which RDY cannot; (d) one fewer 5 V wired-OR
+  line to arbitrate with 74F parts, and fewer conductors in the ribbon.
+- *Why listening is still right for us:* our core is clocked by the FPI's
+  own PHI2 at Normal speed, so honouring RDY at the fall is exactly what a
+  real chip in the socket does when a card halts it, and it costs nothing
+  (safe superset of "only at Normal speed"). Reading it at the socket
+  rather than the slot is the same net; only the sample point differs.
+- *If this is ever revisited:* the one scenario that changes the answer
+  is a core running faster than PHI2 (the HyperRAM TransWarp plan). Then
+  the TWGS scheme applies — slot RDY/DMA into a synchronous clock hold —
+  and RDY_IN into the core is the wrong tool. Driving RDY_OUT would only
+  matter if some software depended on seeing WAI on the RDY net; none is
+  known, and the TWGS proves the machine does not need it.
+
+**BE — per-cycle 66 ns pulse ignored** (§3.2, measured 09-06): the
+datasheet treats BE as a DMA-style level; the FPI pulses it every cycle
+around the PHI2 fall, and a 4 MHz-grade chip drives through it (tBVD
+60 ns). The PHY ignores BE lows shorter than ~110 ns and never gates its
+receive path on BE. A sustained low is honoured.
+
+**Internal cycles — previous address repeated on I/O-space internal
+cycles** (§4.5, G19–G21): the socket has no VDA/VPA (the TWGS cable leaves
+those pins open too), so the FPI classifies every cycle by address; the
+core's operand+1 on the R-M-W internal cycle produced a phantom $C028 read.
+A real 65816 presents an address the FPI can also mis-classify, but its
+internal cycle repeats the operand address; we now do the same for I/O
+space. Audit list for other core-vs-chip differences lives in §4.5.
+
+**VP — driven** (pin 1, U15 open-drain out): the motherboard does not use
+it (the TWGS cable does carry GS_VP); harmless and kept for the trace.
 
 ## 4. Timing budget → architecture (as built in S2)
 
