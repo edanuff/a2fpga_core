@@ -128,7 +128,7 @@ void gs_socket_apply(void)
 static void enter_machine_off(const char *why)
 {
     s_probe = false;
-    gs_socket_reg_write(0, 0x00);                    /* everything off ... */
+    gs_socket_reg_write(0, gs_socket_reg_read(0) & 0x50);   /* everything off (bench trigger bits kept) ... */
     a2_reset_write(false);                           /* assert 0 -> 1 = a NEW sequence (clears por_done) */
     a2_reset_write(true);                            /* ... and hold the slot reset: the IIgs must power
                                                         up under a proper reset (G35); the FPGA releases it */
@@ -228,7 +228,8 @@ void gs_socket_poll(void)
                 gs_socket_reg_write(0, 0x00);
                 set_state(ST_NO_RIBBON, "NO PHI2 AT THE SOCKET - PLAIN CARD, IDLE");
             } else {
-                gs_socket_reg_write(0, GS_CTRL_LISTEN | GS_CTRL_ARM);   /* make the arm explicit in CTRL */
+                /* make the arm explicit in CTRL, keeping any bench trigger bits (4/6) */
+                gs_socket_reg_write(0, (gs_socket_reg_read(0) & 0x50) | GS_CTRL_LISTEN | GS_CTRL_ARM);
                 s_probe = false;
                 a2_reset_write(false);
             }
