@@ -764,6 +764,26 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   - 0x2E read-back is now {0, arm_early, por_done, hold, autoarm, probe,
     assert, release}; the telnet `gs` line decodes it.
 
+  **Status 2026-09-12 (bench G45–G52, event log):** the wedge is
+  understood well enough to ship around. With the card alive before the
+  machine, this IIgs releases its own reset at ~283 ms after its clock
+  starts; if our socket is enabled and the core running at that moment
+  (or within the next few ms), something on the motherboard re-asserts
+  reset exactly ~10 ms after that release and parks (power cycle only);
+  with the socket off it releases once and stays released (G51), so the
+  re-assert is provoked by our enabled socket, not native — the specific
+  thing it reacts to is still open (VP/bank-byte/R/W drive during the
+  core's reset state, or a first-instruction cycle shape; the trace and
+  `gs late` are the tools). Covering that window with our hold and
+  releasing at ~1 s boots every time (G40, G48, G50). **Firmware mode 4
+  (default, 6234a517)**: clock already running at firmware start =
+  slot-powered start (machine held by the 2G06 since power-on, its window
+  long past) → probe + arm-under-hold, release at once — **core running
+  490 ms after FPGA configuration (G52)**, inside the 500 ms budget; clock
+  appearing after us = card alive first → arm under hold, release 1 s
+  after the clock. Open: the 20 ms late-arm experiment for the card-first
+  case; the RDY/socket decision record is §3.3.
+
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
   driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/
