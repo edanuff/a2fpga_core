@@ -216,8 +216,9 @@ static void gs_trace(int fd)
 static const char *gs_mode_name(unsigned m)
 {
     static const char *n[] = { "NATURAL (FPGA arms at the machine's release)", "EARLY (armed under our hold, TWGS model)",
-                               "TIMED (release socket-off, arm on rise)", "TIMED+ (armed under hold, timed release)" };
-    return m < 4 ? n[m] : "?";
+                               "TIMED (release socket-off, arm on rise)", "TIMED+ (armed under hold, timed release)",
+                               "AUTO (clock already up at start -> EARLY; clock later -> TIMED+ 1 s)" };
+    return m < 5 ? n[m] : "?";
 }
 
 /* FPGA bring-up event log (window regs 32-39, hdl/esp32/a2_event_log.sv) */
@@ -333,7 +334,7 @@ static void tn_exec_line(int fd, char *line)
             gs_wr(0, gs_rd(0) & ~0x10); tn_puts(fd, "trigger off\r\n");
         } else if (!strcmp(tok[1], "hold") && nt == 3 && parse_num(tok[2], &val)) {
             gs_socket_set_hold_ms(val); tn_printf(fd, "timed hold = %u ms (modes 2/3)\r\n", val);
-        } else if (!strcmp(tok[1], "mode") && nt == 3 && parse_num(tok[2], &val) && val < 4) {
+        } else if (!strcmp(tok[1], "mode") && nt == 3 && parse_num(tok[2], &val) && val < 5) {
             gs_socket_set_mode(val); tn_printf(fd, "bring-up mode = %u (%s); takes effect at the next machine-off -> clock-up\r\n", val, gs_mode_name(val));
         } else if (!strcmp(tok[1], "autotrig") && nt == 3) {
             bool on = !strcmp(tok[2], "on") || !strcmp(tok[2], "1");
