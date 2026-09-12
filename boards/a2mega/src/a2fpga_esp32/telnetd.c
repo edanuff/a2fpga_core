@@ -178,6 +178,7 @@ static void gs_dump(int fd)
                   (rst >> 4) & 1, (rst >> 5) & 1, rst & 1, (rst >> 1) & 1, (rst >> 2) & 1, (rst >> 3) & 1, (rst >> 6) & 1,
                   gs_socket_get_mode(), gs_mode_name(gs_socket_get_mode()), gs_socket_get_hold_ms());
         if (gs_socket_get_autotrig()) tn_puts(fd, "autotrig ON\r\n");
+        if (gs_socket_get_late_ms()) tn_printf(fd, "mode 2 late arm = %u ms\r\n", gs_socket_get_late_ms());
     }
     #undef U16
 }
@@ -336,6 +337,8 @@ static void tn_exec_line(int fd, char *line)
             gs_socket_set_hold_ms(val); tn_printf(fd, "timed hold = %u ms (modes 2/3)\r\n", val);
         } else if (!strcmp(tok[1], "mode") && nt == 3 && parse_num(tok[2], &val) && val < 5) {
             gs_socket_set_mode(val); tn_printf(fd, "bring-up mode = %u (%s); takes effect at the next machine-off -> clock-up\r\n", val, gs_mode_name(val));
+        } else if (!strcmp(tok[1], "late") && nt == 3 && parse_num(tok[2], &val)) {
+            gs_socket_set_late_ms(val); tn_printf(fd, "mode 2: arm %u ms after the slot reset reads high\r\n", val);
         } else if (!strcmp(tok[1], "autotrig") && nt == 3) {
             bool on = !strcmp(tok[2], "on") || !strcmp(tok[2], "1");
             gs_socket_set_autotrig(on); tn_printf(fd, "autotrig %s: the /RES-fall trace trigger is armed 20 ms after the socket inputs come on\r\n", on ? "ON" : "OFF");

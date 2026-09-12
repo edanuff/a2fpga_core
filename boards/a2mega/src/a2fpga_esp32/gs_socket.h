@@ -69,6 +69,9 @@ unsigned gs_socket_get_hold_ms(void);
 /* Bench: arm the bus-trace /RES-fall trigger from inside the sequence, 20 ms after
  * the socket inputs come on (CTRL bits 4+6, TADDR FF:FFFF) so the first REAL /RES
  * fall after the machine's release freezes the ring. */
+/* Mode 2 only: arm this long after the slot reset first reads high (0 = at once). */
+void     gs_socket_set_late_ms(unsigned ms);
+unsigned gs_socket_get_late_ms(void);
 void     gs_socket_set_autotrig(bool on);
 bool     gs_socket_get_autotrig(void);
 

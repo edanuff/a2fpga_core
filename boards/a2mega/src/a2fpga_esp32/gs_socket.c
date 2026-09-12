@@ -73,6 +73,8 @@ static unsigned s_hold_ms  = HOLD_MS_DEFAULT;
 static bool     s_reported = false;
 static bool     s_alive_at_start = false;   /* machine clock already running on our first STATUS read */
 static unsigned s_eff_mode = 1;             /* mode 4 resolves to 1 or 3 per sequence */
+static unsigned s_late_ms  = 0;             /* mode 2: arm this long after the slot reset reads high */
+static int64_t  s_rise_us  = 0;
 static bool     s_autotrig = false;   /* bench: arm the /RES-fall trace trigger inside the sequence */
 static bool     s_trig_pending = false;
 static int64_t  s_trig_at_us = 0;
@@ -82,6 +84,8 @@ void     gs_socket_set_mode(unsigned m)     { s_mode = m > 4 ? 4 : m; }
 unsigned gs_socket_get_mode(void)           { return s_mode; }
 void     gs_socket_set_hold_ms(unsigned ms) { s_hold_ms = ms; }
 unsigned gs_socket_get_hold_ms(void)        { return s_hold_ms; }
+void     gs_socket_set_late_ms(unsigned ms) { s_late_ms = ms; }
+unsigned gs_socket_get_late_ms(void)        { return s_late_ms; }
 void     gs_socket_set_autotrig(bool on)    { s_autotrig = on; }
 bool     gs_socket_get_autotrig(void)       { return s_autotrig; }
 
@@ -162,7 +166,7 @@ static void set_state(st_t st, const char *why)
     case ST_PROBE:       snprintf(s_str, sizeof(s_str), s_eff_mode == 1 ? "AUTO: CLOCK UP - ARMED UNDER OUR HOLD, PROBING FOR THE MACHINE'S RELEASE"
                                                                     : "AUTO: CLOCK UP - PROBING (FPGA ARMS AT THE MACHINE'S RELEASE)"); break;
     case ST_TIMED_HOLD:  snprintf(s_str, sizeof(s_str), "AUTO: CLOCK UP - TIMED HOLD %u ms (SOCKET %s)", eff_hold_ms(), s_eff_mode == 3 ? "ARMED" : "OFF"); break;
-    case ST_WAIT_RISE:   snprintf(s_str, sizeof(s_str), "AUTO: RELEASED, SOCKET OFF - WAITING FOR SLOT RESET HIGH"); break;
+    case ST_WAIT_RISE:   snprintf(s_str, sizeof(s_str), "AUTO: RELEASED, SOCKET OFF - WAITING FOR SLOT RESET HIGH (+%u ms)", s_late_ms); break;
     case ST_ARMED:       snprintf(s_str, sizeof(s_str), s_mode == 4 ? "AUTO: ARMED (mode 4 -> %u)" : "AUTO: ARMED (mode %u)", s_mode == 4 ? s_eff_mode : s_mode); break;
     case ST_NO_RIBBON:   snprintf(s_str, sizeof(s_str), "AUTO: NO PHI2 AT SOCKET - PLAIN CARD, IDLE"); break;
     case ST_MANUAL:      snprintf(s_str, sizeof(s_str), "MANUAL (gs auto TO RESUME)"); break;
@@ -309,15 +313,19 @@ void gs_socket_poll(void)
         a2_reset_write(false);                       /* release our hold */
         s_since_us = now;
         if (s_eff_mode == 3) enter_armed("HOLD OVER - RESET RELEASED WITH THE SOCKET ARMED", now);
-        else             set_state(ST_WAIT_RISE, "HOLD OVER - RESET RELEASED, SOCKET OFF");
+        else           { s_rise_us = 0; set_state(ST_WAIT_RISE, "HOLD OVER - RESET RELEASED, SOCKET OFF"); }
         break;
 
     case ST_WAIT_RISE:
-        s_next_us = now + POLL_US;
+        s_next_us = now + (s_late_ms ? 1000 : POLL_US);   /* 1 ms polls once a delay is requested */
         if (!alive) { enter_machine_off("CLOCK LOST AFTER THE RELEASE"); break; }
         if (st07 & A2ST_A2_RESET_N) {
+            if (!s_rise_us) s_rise_us = now;                /* first time we see it high */
+            if (now - s_rise_us < (int64_t)s_late_ms * 1000) break;
             ctrl_write_keep(GS_CTRL_LISTEN | GS_CTRL_ARM);
-            enter_armed("SLOT RESET HIGH - ARMED", now);
+            enter_armed(s_late_ms ? "SLOT RESET HIGH + DELAY - ARMED" : "SLOT RESET HIGH - ARMED", now);
+        } else {
+            s_rise_us = 0;
         } else if (!s_reported && now - s_since_us > RISE_REPORT_US) {
             GLOG("GS SOCKET: SLOT RESET NEVER ROSE AFTER OUR RELEASE (st=%02X)", st07);
             s_reported = true;
