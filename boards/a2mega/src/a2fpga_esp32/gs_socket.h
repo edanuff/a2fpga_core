@@ -58,8 +58,9 @@ void gs_socket_a2_release(void);
  *              like a real chip) -> probe -> release at the machine's own end
  *   2 TIMED    hold -> clock -> hold_ms -> release, socket off -> slot reset high -> arm
  *   3 TIMED+   hold -> clock -> arm under our hold -> hold_ms -> release
- *   4 AUTO     (default) clock already running at firmware start -> 1; clock appears
- *              later (card alive before the machine) -> 3 with a 1 s hold
+ *   4 AUTO     (default) clock already running at firmware start -> 2 (release with the
+ *              socket off, arm `late` ms after the line reads high, default 20); clock
+ *              appears later (card alive before the machine) -> 3 with a 1 s hold
  * Takes effect at the next machine-off -> clock-up sequence. */
 void     gs_socket_set_mode(unsigned m);
 unsigned gs_socket_get_mode(void);

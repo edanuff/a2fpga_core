@@ -18,10 +18,12 @@
  *   2 TIMED    hold -> clock -> hold_ms -> release, socket off -> slot reset high -> arm (v6)
  *   3 TIMED+   hold -> clock -> arm under our hold -> hold_ms -> release
  *   4 AUTO     clock already running when we started (slot-powered start: the machine
- *              has been held by the 2G06 since power-on and its own release/re-assert
- *              window at ~283/293 ms is long past) -> mode 1; clock appears later (card
- *              alive before the machine) -> mode 3 with a 1 s hold, which covers that
- *              window (G45-G49: released inside it, this IIgs re-asserts and never lets go)
+ *              has been held by the 2G06 since power-on) -> release with the socket OFF
+ *              and arm LATE_MS after the line reads high (G53: with the core running at
+ *              our release, the machine pulled reset 9.9 ms after that rising edge, as it
+ *              does 9.9 ms after its own release in G45/G47/G49, ~50 %; with no core
+ *              running at +10 ms it never has, G51); clock appears later (card alive
+ *              before the machine) -> mode 3 with a 1 s hold (8/8 so far)
  * The ESP32 only sequences; the FPGA does the microsecond parts (0x2E bits
  * 2/3/4, connector). An FPGA already armed on ESP32 start is adopted. Storage
  * gating stays: the FPGA will not release until the disk task has written the
@@ -73,7 +75,7 @@ static unsigned s_hold_ms  = HOLD_MS_DEFAULT;
 static bool     s_reported = false;
 static bool     s_alive_at_start = false;   /* machine clock already running on our first STATUS read */
 static unsigned s_eff_mode = 1;             /* mode 4 resolves to 1 or 3 per sequence */
-static unsigned s_late_ms  = 0;             /* mode 2: arm this long after the slot reset reads high */
+static unsigned s_late_ms  = 20;            /* modes 2/4: arm this long after the slot reset reads high */
 static int64_t  s_rise_us  = 0;
 static bool     s_autotrig = false;   /* bench: arm the /RES-fall trace trigger inside the sequence */
 static bool     s_trig_pending = false;
@@ -152,7 +154,8 @@ void gs_socket_a2_release(void)
 
 static unsigned eff_hold_ms(void)
 {
-    return s_mode == 4 ? AUTO_LATE_HOLD_MS : s_hold_ms;
+    if (s_mode == 4) return s_eff_mode == 3 ? AUTO_LATE_HOLD_MS : 0;   /* slot-powered path: release at once */
+    return s_hold_ms;
 }
 
 static void set_state(st_t st, const char *why)
@@ -265,7 +268,7 @@ void gs_socket_poll(void)
             /* clock already running when we came up = slot-powered start, machine held
              * since power-on: release now (probe finds the line free). Clock appeared
              * after us = card alive first: cover the machine's 283/293 ms window. */
-            s_eff_mode = s_alive_at_start ? 1 : 3;
+            s_eff_mode = s_alive_at_start ? 2 : 3;   /* 2 = release socket-off, arm late */
             s_alive_at_start = false;              /* only the first sequence can be the slot-powered one */
         } else {
             s_eff_mode = s_mode;
