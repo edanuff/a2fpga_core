@@ -154,10 +154,11 @@ def cmd_drecord(dwf, args):
     dwf.FDwfDigitalInAcquisitionModeSet(hdwf, acqmodeRecord)
     dwf.FDwfDigitalInTriggerPositionSet(hdwf, ctypes.c_int(n_total))
     dwf.FDwfDigitalInConfigure(hdwf, ctypes.c_int(0), ctypes.c_int(1))
-    print("recording DIO%d for %.1f s at %.0f S/s - cycle the machine now" % (args.dio, args.seconds, rate), flush=True)
+    print("recording DIO %s for %.1f s at %.0f S/s - cycle the machine now" % (args.dio, args.seconds, rate), flush=True)
     sts = ctypes.c_byte(); avail = ctypes.c_int(); lost = ctypes.c_int(); corrupt = ctypes.c_int()
     buf = (ctypes.c_uint16 * 1000000)()
-    runs = []          # (level, length) run-length encoded
+    dios = [int(x) for x in str(args.dio).split(',')]
+    runs_by = {b: [] for b in dios}   # per DIO bit: (level, length) run-length encoded
     got = 0; n_lost = n_corrupt = 0; t0 = time.time()
     while got < n_total and time.time() - t0 < args.seconds + 20:
         dwf.FDwfDigitalInStatus(hdwf, ctypes.c_int(1), ctypes.byref(sts))
@@ -166,21 +167,28 @@ def cmd_drecord(dwf, args):
         if avail.value > 0:
             n = min(avail.value, 1000000)
             dwf.FDwfDigitalInStatusData(hdwf, buf, ctypes.c_int(2 * n))
-            bits = (np.frombuffer(bytes(bytearray(buf)[:2 * n]), dtype=np.uint16) >> args.dio) & 1
-            # RLE this chunk and merge with the previous run
-            change = np.flatnonzero(np.diff(bits)) + 1
-            starts = np.concatenate(([0], change)); ends = np.concatenate((change, [n]))
-            for s, e in zip(starts, ends):
-                lvl = int(bits[s]); ln = int(e - s)
-                if runs and runs[-1][0] == lvl: runs[-1] = (lvl, runs[-1][1] + ln)
-                else: runs.append((lvl, ln))
+            words = np.frombuffer(bytes(bytearray(buf)[:2 * n]), dtype=np.uint16)
+            for b in dios:
+                bits = (words >> b) & 1
+                change = np.flatnonzero(np.diff(bits)) + 1
+                starts = np.concatenate(([0], change)); ends = np.concatenate((change, [n]))
+                rb = runs_by[b]
+                for s, e in zip(starts, ends):
+                    lvl = int(bits[s]); ln = int(e - s)
+                    if rb and rb[-1][0] == lvl: rb[-1] = (lvl, rb[-1][1] + ln)
+                    else: rb.append((lvl, ln))
             got += n
         elif sts.value == DwfStateDone:
             break
         else:
             time.sleep(0.002)
     dwf.FDwfDeviceCloseAll()
-    print("got %d samples (%.2f s), lost %d, corrupt %d, %d runs" % (got, got / rate, n_lost, n_corrupt, len(runs)))
+    print("got %d samples (%.2f s), lost %d, corrupt %d" % (got, got / rate, n_lost, n_corrupt))
+    for b in dios:
+        print("== DIO%d: %d runs" % (b, len(runs_by[b])))
+        report_runs(runs_by[b], rate, args)
+
+def report_runs(runs, rate, args):
     # print runs with absolute time; suppress runs shorter than --min-us unless --all
     t = 0
     first_rise = None
@@ -214,7 +222,7 @@ def main():
     d = sub.add_parser("drecord")
     d.add_argument("--seconds", type=float, default=30.0)
     d.add_argument("--rate", type=float, default=1e6)
-    d.add_argument("--dio", type=int, default=0)
+    d.add_argument("--dio", default="0", help="DIO bit or comma list, e.g. 0,1,2,3,4,5")
     d.add_argument("--min-us", type=float, default=5.0)
     d.add_argument("--all", action="store_true")
     args = ap.parse_args()
