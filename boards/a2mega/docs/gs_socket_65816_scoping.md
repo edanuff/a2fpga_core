@@ -784,6 +784,21 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   after the clock. Open: the 20 ms late-arm experiment for the card-first
   case; the RDY/socket decision record is §3.3.
 
+  **Correction, later on 2026-09-12 (G53–G54):** the 10 ms clock runs from
+  the *last rising edge of /RESET*, whoever makes it — the slot-powered
+  path with arm-under-hold and an immediate release wedged the same way
+  9.9 ms after **our** release (G53, AD3-verified: a clean hard pull). It
+  pulls only when our core is running when that mark arrives (never with
+  the socket off, G51). **Firmware 974f179b: mode 4's slot-powered path
+  releases with the socket OFF and arms 20 ms after the line reads high
+  (`gs late 20`) — 6/6 boots, AD3 shows no dip.** Core running ≈ 535 ms
+  after configuration; trimming the 109 ms clock-alive confirmation and
+  the 10 ms poll brings it inside 500 ms. Card-first path still uses the
+  1 s cover; the 20 ms late arm is the candidate to replace it. The
+  identity of the puller and what our running core does in those first
+  10 ms that a stock 65816 does not remain open (M50740 P2.5 or Mega II;
+  logic-level pull, not contention).
+
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
   driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/
