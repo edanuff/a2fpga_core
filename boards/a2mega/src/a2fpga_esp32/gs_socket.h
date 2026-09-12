@@ -52,10 +52,18 @@ const char *gs_socket_state_str(void);
  * own reset assert (0x2E.1). */
 void gs_socket_a2_release(void);
 
-/* Bench tunable: how long our reset stays asserted after the machine clock
- * appears before the first release (default 5000 ms). */
-void gs_socket_set_por_hold_ms(unsigned ms);
-unsigned gs_socket_get_por_hold_ms(void);
+/* Bring-up mode (bench knob `gs mode <n>`; default GS_MODE_DEFAULT in gs_socket.c):
+ *   0 NATURAL  hold -> clock -> FPGA probe; FPGA arms at the machine's own release
+ *   1 EARLY    hold -> clock -> FPGA arms under our hold (core in reset, bus driven
+ *              like a real chip) -> probe -> release at the machine's own end
+ *   2 TIMED    hold -> clock -> hold_ms -> release, socket off -> slot reset high -> arm
+ *   3 TIMED+   hold -> clock -> arm under our hold -> hold_ms -> release
+ * Takes effect at the next machine-off -> clock-up sequence. */
+void     gs_socket_set_mode(unsigned m);
+unsigned gs_socket_get_mode(void);
+/* Timed modes: our hold after the clock appears, ms (default 1000). */
+void     gs_socket_set_hold_ms(unsigned ms);
+unsigned gs_socket_get_hold_ms(void);
 
 /* Register-window helpers shared with telnetd (locked). */
 uint8_t gs_socket_reg_read(uint8_t idx);

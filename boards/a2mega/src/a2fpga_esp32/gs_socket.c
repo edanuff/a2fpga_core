@@ -1,19 +1,26 @@
 /* gs_socket.c — auto-arm for the in-socket 65C816. See gs_socket.h.
  *
- * v7 (bench G31–G41, 2026-09-09). Measured rules on the ROM 01 IIgs:
- *   - nothing may drive (or even listen at) the socket while the machine is
- *     in its own power-on reset;
- *   - a machine that leaves reset with no CPU present for long wedges until
- *     a power cycle; so does a second reset pulse right after the first.
- * Hence the card holds the slot reset whenever the machine is dead, and the
- * FPGA does the timing-critical part: with the POR PROBE enabled it lets the
- * line float for 40 us every ms while holding; the first time the machine's
- * own reset logic no longer pulls it low it stays released and ARMS THE
- * SOCKET IN THE SAME CLOCK (0x2E bits 2/3, connector). The ESP32 only
- * sequences: MACHINE_OFF (hold) -> clock alive -> PROBE -> ARMED, and
- * re-holds when the clock stops. An FPGA already armed on ESP32 start is
- * adopted untouched. Storage gating stays: the FPGA will not release until
- * the disk task has written the storage-ready bit.
+ * v8 (2026-09-11). Bench rules measured on the ROM 01 IIgs (G31–G44):
+ *   - the machine must power up under our slot-reset hold (card powered first
+ *     and nothing holding: its own power-on reset never completes, G35);
+ *   - a release ~100 ms after the clock wedges it; a second reset pulse right
+ *     after the first wedges it (G37, G39);
+ *   - the FPGA's POR probe finds the machine's own release (~230 ms after the
+ *     clock = the M50740's 200 k/1 uF power-on RC) and can arm in that clock.
+ * The TransWarp GS reference (scoping §3.3/§8b): the socket CPU's reset is
+ * the machine's own /RES, the card's buffers are up from configuration, and
+ * nothing is switched at release time. Mode 1 below is that model.
+ *
+ * Bring-up modes (`gs mode <n>`, default GS_MODE_DEFAULT):
+ *   0 NATURAL  hold -> clock -> FPGA probe; FPGA arms at the machine's own release (v7)
+ *   1 EARLY    hold -> clock -> FPGA arms UNDER our hold (core in reset on a driven
+ *              bus, like a real chip) -> probe -> release at the machine's own end
+ *   2 TIMED    hold -> clock -> hold_ms -> release, socket off -> slot reset high -> arm (v6)
+ *   3 TIMED+   hold -> clock -> arm under our hold -> hold_ms -> release
+ * The ESP32 only sequences; the FPGA does the microsecond parts (0x2E bits
+ * 2/3/4, connector). An FPGA already armed on ESP32 start is adopted. Storage
+ * gating stays: the FPGA will not release until the disk task has written the
+ * storage-ready bit.
  */
 #include <stdio.h>
 #include "esp_timer.h"
@@ -28,6 +35,7 @@
 /* GS window: CTRL (index 0) bits, STATUS (index 1) bits */
 #define GS_CTRL_ARM     0x01
 #define GS_CTRL_LISTEN  0x04
+#define GS_CTRL_KEEP    0x50      /* bench trigger bits (4 trig-en, 6 address mode) survive our writes */
 #define GS_ST_PH2_ALIVE 0x80
 
 #define POLL_US           10000     /* 10 ms sampling */
@@ -36,22 +44,32 @@
 #define DEAD_SAMPLES          5     /* clock gone for 500 ms -> machine off */
 #define NO_RIBBON_US    2000000     /* armed but no PHI2 at the socket for 2 s: plain card */
 #define PROBE_REPORT_US 15000000    /* log if the machine never lets go of its reset */
+#define RISE_REPORT_US   3000000    /* mode 2: log if the slot reset never rises after our release */
 
-typedef enum { ST_OFF = 0, ST_MACHINE_OFF, ST_PROBE, ST_ARM_DELAY, ST_ARMED, ST_NO_RIBBON, ST_MANUAL } st_t;
+#ifndef GS_MODE_DEFAULT
+#define GS_MODE_DEFAULT 1
+#endif
+#define HOLD_MS_DEFAULT 1000
 
-static st_t    s_state    = ST_OFF;
-static bool    s_started  = false;
-static bool    s_release  = false;   /* storage-ready release requested (0x2E.0) */
-static bool    s_probe    = false;   /* probe + hardware auto-arm requested (0x2E.2/3) */
-static int     s_count    = 0;
-static int64_t s_next_us  = 0;
-static int64_t s_since_us = 0;
-static char    s_str[72]  = "AUTO: OFF";
-static uint8_t s_last_st07 = 0;
-static unsigned s_por_hold_ms = 0;   /* EXPERIMENT: arm delay after the machine's reset release, ms (0 = hardware arm in the same clock) */
+typedef enum { ST_OFF = 0, ST_MACHINE_OFF, ST_PROBE, ST_TIMED_HOLD, ST_WAIT_RISE, ST_ARMED, ST_NO_RIBBON, ST_MANUAL } st_t;
 
-void gs_socket_set_por_hold_ms(unsigned ms) { s_por_hold_ms = ms; }
-unsigned gs_socket_get_por_hold_ms(void) { return s_por_hold_ms; }
+static st_t     s_state    = ST_OFF;
+static bool     s_started  = false;
+static bool     s_release  = false;   /* storage-ready release requested (0x2E.0) */
+static bool     s_probe    = false;   /* FPGA probe + hardware arm requested (0x2E.2/3[/4]) */
+static int      s_count    = 0;
+static int64_t  s_next_us  = 0;
+static int64_t  s_since_us = 0;
+static char     s_str[80]  = "AUTO: OFF";
+static uint8_t  s_last_st07 = 0;
+static unsigned s_mode     = GS_MODE_DEFAULT;
+static unsigned s_hold_ms  = HOLD_MS_DEFAULT;
+static bool     s_reported = false;
+
+void     gs_socket_set_mode(unsigned m)     { s_mode = m > 3 ? 3 : m; }
+unsigned gs_socket_get_mode(void)           { return s_mode; }
+void     gs_socket_set_hold_ms(unsigned ms) { s_hold_ms = ms; }
+unsigned gs_socket_get_hold_ms(void)        { return s_hold_ms; }
 
 uint8_t gs_socket_reg_read(uint8_t idx)
 {
@@ -71,30 +89,46 @@ void gs_socket_reg_write(uint8_t idx, uint8_t val)
     fpga_link_unlock();
 }
 
-/* 0x2E owner: {autoarm, probe, assert, release} written together */
+static void ctrl_write_keep(uint8_t bits)
+{
+    gs_socket_reg_write(0, (uint8_t)((gs_socket_reg_read(0) & GS_CTRL_KEEP) | bits));
+}
+
+/* 0x2E owner: {arm_early, autoarm, probe, assert, release} written together */
 static void a2_reset_write(bool assert_hold)
 {
-    fpga_reg_write(A2REG_A2_RST_RELEASE,
-                   (uint8_t)((assert_hold ? A2RST_ASSERT : 0) | (s_release ? A2RST_RELEASE : 0) |
-                             (s_probe ? (A2RST_PROBE | (s_por_hold_ms ? 0 : A2RST_AUTOARM)) : 0)));
+    uint8_t v = (uint8_t)((assert_hold ? A2RST_ASSERT : 0) | (s_release ? A2RST_RELEASE : 0));
+    if (s_probe) {
+        v |= A2RST_PROBE | A2RST_AUTOARM;
+        if (s_mode == 1) v |= A2RST_ARM_EARLY;
+    }
+    fpga_reg_write(A2REG_A2_RST_RELEASE, v);
+}
+
+static bool owning_hold(void)
+{
+    return s_state == ST_MACHINE_OFF || s_state == ST_PROBE || s_state == ST_TIMED_HOLD;
 }
 
 void gs_socket_a2_release(void)
 {
     s_release = true;
-    a2_reset_write(s_state == ST_MACHINE_OFF || s_state == ST_PROBE);   /* keep our hold while we own it */
+    a2_reset_write(owning_hold());   /* keep our hold while we own it */
 }
 
 static void set_state(st_t st, const char *why)
 {
     s_state = st;
     s_count = 0;
+    s_reported = false;
     switch (st) {
     case ST_OFF:         snprintf(s_str, sizeof(s_str), "AUTO: OFF"); break;
     case ST_MACHINE_OFF: snprintf(s_str, sizeof(s_str), "AUTO: HOLDING RESET, SOCKET OFF (WAITING FOR CLOCK)"); break;
-    case ST_PROBE:       snprintf(s_str, sizeof(s_str), "AUTO: CLOCK UP - PROBING THE MACHINE RESET (FPGA ARMS ON RELEASE)"); break;
-    case ST_ARM_DELAY:   snprintf(s_str, sizeof(s_str), "AUTO: RELEASED, ARM DELAYED (EXPERIMENT)"); break;
-    case ST_ARMED:       snprintf(s_str, sizeof(s_str), "AUTO: ARMED"); break;
+    case ST_PROBE:       snprintf(s_str, sizeof(s_str), s_mode == 1 ? "AUTO: CLOCK UP - ARMED UNDER OUR HOLD, PROBING FOR THE MACHINE'S RELEASE"
+                                                                    : "AUTO: CLOCK UP - PROBING (FPGA ARMS AT THE MACHINE'S RELEASE)"); break;
+    case ST_TIMED_HOLD:  snprintf(s_str, sizeof(s_str), "AUTO: CLOCK UP - TIMED HOLD %u ms (SOCKET %s)", s_hold_ms, s_mode == 3 ? "ARMED" : "OFF"); break;
+    case ST_WAIT_RISE:   snprintf(s_str, sizeof(s_str), "AUTO: RELEASED, SOCKET OFF - WAITING FOR SLOT RESET HIGH"); break;
+    case ST_ARMED:       snprintf(s_str, sizeof(s_str), "AUTO: ARMED (mode %u)", s_mode); break;
     case ST_NO_RIBBON:   snprintf(s_str, sizeof(s_str), "AUTO: NO PHI2 AT SOCKET - PLAIN CARD, IDLE"); break;
     case ST_MANUAL:      snprintf(s_str, sizeof(s_str), "MANUAL (gs auto TO RESUME)"); break;
     }
@@ -108,7 +142,7 @@ bool gs_socket_ready(void) { return s_started; }
 void gs_socket_manual(void)
 {
     if (s_state == ST_MANUAL) return;
-    if (s_state == ST_MACHINE_OFF || s_state == ST_PROBE) { s_probe = false; a2_reset_write(false); }   /* never leave our hold behind */
+    if (owning_hold()) { s_probe = false; a2_reset_write(false); }   /* never leave our hold behind */
     set_state(ST_MANUAL, "MANUAL CONTROL");
 }
 
@@ -128,11 +162,18 @@ void gs_socket_apply(void)
 static void enter_machine_off(const char *why)
 {
     s_probe = false;
-    gs_socket_reg_write(0, gs_socket_reg_read(0) & 0x50);   /* everything off (bench trigger bits kept) ... */
-    a2_reset_write(false);                           /* assert 0 -> 1 = a NEW sequence (clears por_done) */
-    a2_reset_write(true);                            /* ... and hold the slot reset: the IIgs must power
-                                                        up under a proper reset (G35); the FPGA releases it */
+    ctrl_write_keep(0);                  /* everything off (bench trigger bits kept) ... */
+    a2_reset_write(false);               /* assert 0 -> 1 = a NEW sequence (clears por_done) */
+    a2_reset_write(true);                /* ... and hold the slot reset: the IIgs must power
+                                            up under a proper reset (G35) */
     set_state(ST_MACHINE_OFF, why);
+}
+
+static void enter_armed(const char *why, int64_t now)
+{
+    set_state(ST_ARMED, why);
+    s_since_us = now;
+    s_next_us = now + ARMED_POLL_US;
 }
 
 void gs_socket_poll(void)
@@ -154,9 +195,7 @@ void gs_socket_poll(void)
         }
         uint8_t ctrl = gs_socket_reg_read(0);
         if (ctrl & GS_CTRL_ARM) {
-            set_state(ST_ARMED, "ALREADY ARMED - ADOPTED");   /* ESP32 restart, machine running */
-            s_since_us = now;
-            s_next_us = now + ARMED_POLL_US;
+            enter_armed("ALREADY ARMED - ADOPTED", now);   /* ESP32 restart, machine running */
             return;
         }
         enter_machine_off("WAITING FOR MACHINE CLOCK");
@@ -175,13 +214,25 @@ void gs_socket_poll(void)
     case ST_MACHINE_OFF:
         s_next_us = now + POLL_US;
         s_count = alive ? s_count + 1 : 0;
-        if (s_count >= ALIVE_SAMPLES) {
-            /* clock is up: let the FPGA find the exact moment the machine's own
-             * reset logic lets go, and arm the socket in that same clock */
+        if (s_count < ALIVE_SAMPLES) break;
+        s_since_us = now;
+        switch (s_mode) {
+        case 0:
+        case 1:
+            /* clock is up: the FPGA finds the moment the machine's own reset
+             * logic lets go; mode 1 also arms the socket now, under the hold */
             s_probe = true;
             a2_reset_write(true);
-            s_since_us = now;
-            set_state(ST_PROBE, "MACHINE CLOCK UP - PROBE + AUTO-ARM ENABLED");
+            set_state(ST_PROBE, s_mode == 1 ? "MACHINE CLOCK UP - ARMED UNDER HOLD, PROBE ENABLED"
+                                            : "MACHINE CLOCK UP - PROBE + AUTO-ARM ENABLED");
+            break;
+        case 3:
+            ctrl_write_keep(GS_CTRL_LISTEN | GS_CTRL_ARM);   /* core sits in reset on a driven bus */
+            set_state(ST_TIMED_HOLD, "MACHINE CLOCK UP - ARMED UNDER HOLD, TIMED RELEASE");
+            break;
+        default:
+            set_state(ST_TIMED_HOLD, "MACHINE CLOCK UP - TIMED RELEASE, SOCKET OFF");
+            break;
         }
         break;
 
@@ -190,14 +241,8 @@ void gs_socket_poll(void)
         if (!alive) { enter_machine_off("CLOCK LOST WHILE PROBING"); break; }
         uint8_t rst = fpga_reg_read(A2REG_A2_RST_RELEASE);
         if (rst & A2RST_POR_DONE) {
-            if (s_por_hold_ms) {                        /* experiment: delayed arm after the release */
-                set_state(ST_ARM_DELAY, "MACHINE RESET RELEASED - ARM DELAYED");
-                s_since_us = now;
-                break;
-            }
-            set_state(ST_ARMED, "MACHINE RESET RELEASED - SOCKET ARMED BY THE FPGA");
-            s_since_us = now;
-            s_next_us = now + ARMED_POLL_US;
+            enter_armed(s_mode == 1 ? "MACHINE RESET RELEASED - CORE STARTED (ARMED UNDER HOLD)"
+                                    : "MACHINE RESET RELEASED - SOCKET ARMED BY THE FPGA", now);
         } else if (now - s_since_us > PROBE_REPORT_US) {
             GLOG("GS SOCKET: MACHINE RESET NEVER RELEASED (rst=%02X st=%02X)", rst, st07);
             s_since_us = now;
@@ -205,14 +250,25 @@ void gs_socket_poll(void)
         break;
     }
 
-    case ST_ARM_DELAY:
+    case ST_TIMED_HOLD:
         s_next_us = now + POLL_US;
-        if (!alive) { enter_machine_off("CLOCK LOST"); break; }
-        if (now - s_since_us >= (int64_t)s_por_hold_ms * 1000) {
-            gs_socket_reg_write(0, GS_CTRL_LISTEN | GS_CTRL_ARM);
-            set_state(ST_ARMED, "ARMED (DELAYED)");
-            s_since_us = now;
-            s_next_us = now + ARMED_POLL_US;
+        if (!alive) { enter_machine_off("CLOCK LOST DURING THE HOLD"); break; }
+        if (now - s_since_us < (int64_t)s_hold_ms * 1000) break;
+        a2_reset_write(false);                       /* release our hold */
+        s_since_us = now;
+        if (s_mode == 3) enter_armed("HOLD OVER - RESET RELEASED WITH THE SOCKET ARMED", now);
+        else             set_state(ST_WAIT_RISE, "HOLD OVER - RESET RELEASED, SOCKET OFF");
+        break;
+
+    case ST_WAIT_RISE:
+        s_next_us = now + POLL_US;
+        if (!alive) { enter_machine_off("CLOCK LOST AFTER THE RELEASE"); break; }
+        if (st07 & A2ST_A2_RESET_N) {
+            ctrl_write_keep(GS_CTRL_LISTEN | GS_CTRL_ARM);
+            enter_armed("SLOT RESET HIGH - ARMED", now);
+        } else if (!s_reported && now - s_since_us > RISE_REPORT_US) {
+            GLOG("GS SOCKET: SLOT RESET NEVER ROSE AFTER OUR RELEASE (st=%02X)", st07);
+            s_reported = true;
         }
         break;
 
@@ -228,8 +284,8 @@ void gs_socket_poll(void)
                 gs_socket_reg_write(0, 0x00);
                 set_state(ST_NO_RIBBON, "NO PHI2 AT THE SOCKET - PLAIN CARD, IDLE");
             } else {
-                /* make the arm explicit in CTRL, keeping any bench trigger bits (4/6) */
-                gs_socket_reg_write(0, (gs_socket_reg_read(0) & 0x50) | GS_CTRL_LISTEN | GS_CTRL_ARM);
+                /* make the arm explicit in CTRL, then drop the hardware terms */
+                ctrl_write_keep(GS_CTRL_LISTEN | GS_CTRL_ARM);
                 s_probe = false;
                 a2_reset_write(false);
             }

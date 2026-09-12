@@ -53,6 +53,7 @@ module esp32_ospi_connector #(
     input  wire        ddr3_ready_i,
     input  wire        a2_reset_n_i,
     input  wire        a2_alive_i,         // slot PHI1 running (apple_bus sleep_o inverted): the machine is powered
+    input  wire        gs_res_n_i,         // GS CPU-socket /RES pad, raw (synchronised here; bring-up event log only)
 
     // USB HID readback (already synchronized into clk domain)
     input  wire [1:0]  pad_typ_i,        // 0 none, 1 kbd, 2 mouse, 3 gamepad
@@ -333,8 +334,21 @@ module esp32_ospi_connector #(
 
     // System
     reg [7:0] scratch_r;
-    reg [4:0] gs_sel_r;
+    reg [5:0] gs_sel_r;
     reg [7:0] gs_ctrl_r;
+    reg       a2_rst_arm_early_r;  // 0x2E write bit 4 (read bit 6): hardware-arm the socket while we still hold
+    reg [6:0] evt_idx_r;           // bring-up event log read index (window reg 33)
+    wire [47:0] evt_rd_w;
+    wire [6:0]  evt_wptr_w;
+    wire        evt_full_w;
+    wire evt_clear_w  = reg_wr_req && reg_idx == REG_GS_DATA && gs_sel_r == 6'd32 && reg_wdata[7];
+    wire gs_ctrl_wr_w = reg_wr_req && reg_idx == REG_GS_DATA && gs_sel_r == 6'd0;
+    wire rst_reg_wr_w = reg_wr_req && reg_idx == REG_A2_RST_RELEASE;
+    // hardware arm: at the machine's own reset end (por_done), or - ARM_EARLY - already
+    // while we hold after storage-ready, so the core sits in reset on a driven bus like
+    // a real 65816 and starts on the /RES rise (TransWarp model, scoping §8b, log 09-11)
+    wire gs_hw_arm_w = a2_rst_autoarm_r &
+                       (a2_por_done_r | (a2_rst_arm_early_r & a2_rst_assert_r & rst_released_r));
     wire a2_rst_assert_set_w = reg_wr_req && reg_idx == REG_A2_RST_RELEASE && reg_wdata[1] && !a2_rst_assert_r;
     reg [3:0] gs_out_extra_r;
     reg [4:0] gs_hold_tap_r;
@@ -342,13 +356,13 @@ module esp32_ospi_connector #(
     assign gs_trace_idx_o = gs_trace_idx_r;
     reg [23:0] gs_trig_addr_r;
     assign gs_trig_addr_o = gs_trig_addr_r;
-    assign gs_ctrl_o      = gs_ctrl_r | ((a2_por_done_r & a2_rst_autoarm_r) ? 8'h05 : 8'h00);   // hardware auto-arm
+    assign gs_ctrl_o      = gs_ctrl_r | (gs_hw_arm_w ? 8'h05 : 8'h00);   // hardware auto-arm
     assign gs_out_extra_o = gs_out_extra_r;
     assign gs_hold_tap_o  = gs_hold_tap_r;
     reg [7:0] gs_rdata;
     always @* begin
         case (gs_sel_r)
-            5'd0:  gs_rdata = gs_ctrl_r | ((a2_por_done_r & a2_rst_autoarm_r) ? 8'h05 : 8'h00);
+            5'd0:  gs_rdata = gs_ctrl_r | (gs_hw_arm_w ? 8'h05 : 8'h00);
             5'd1:  gs_rdata = gs_tele_i[7:0];
             5'd2:  gs_rdata = {4'b0, gs_out_extra_r};
             5'd3:  gs_rdata = {3'b0, gs_hold_tap_r};
@@ -380,6 +394,14 @@ module esp32_ospi_connector #(
             5'd29: gs_rdata = gs_trig_addr_r[7:0];
             5'd30: gs_rdata = gs_trig_addr_r[15:8];
             5'd31: gs_rdata = gs_trig_addr_r[23:16];
+            6'd32: gs_rdata = {evt_full_w, evt_wptr_w};     // event log: {full, count}; write 0x80 = clear
+            6'd33: gs_rdata = {1'b0, evt_idx_r};            // event log read index
+            6'd34: gs_rdata = evt_rd_w[23:16];              // time[7:0]   (clk ticks, 54 MHz)
+            6'd35: gs_rdata = evt_rd_w[31:24];              // time[15:8]
+            6'd36: gs_rdata = evt_rd_w[39:32];              // time[23:16]
+            6'd37: gs_rdata = evt_rd_w[47:40];              // time[31:24]
+            6'd38: gs_rdata = evt_rd_w[15:8];               // event code (a2_event_log.sv)
+            6'd39: gs_rdata = evt_rd_w[7:0];                // context byte / register value
             default: gs_rdata = 8'h00;
         endcase
     end
@@ -543,6 +565,75 @@ module esp32_ospi_connector #(
         (a2_rst_assert_r & ~probe_window_r & ~a2_por_done_r) | !rst_released_r;
     assign a2bus_control_if.ready = 1'b1;
 
+    // --- bring-up event log (window regs 32-39; hdl/esp32/a2_event_log.sv) ------
+    // Timestamped edges of everything that touches the Apple II reset and the
+    // GS socket enables, so a bench power-up can be reconstructed after the
+    // fact (which lever pulsed /RES, when the core started, when the machine
+    // let go). Codes: 1 slot /RESET fall, 2 rise, 3 socket /RES fall, 4 rise,
+    // 5 our hold on, 6 off (probe windows excluded), 7 0x2E write (data =
+    // value), 8 CTRL write (data = value), 9 por_done, 10 clock alive, 11 clock
+    // lost, 12 storage/backstop release, 13 MCU ready, 14 core running, 15 core
+    // reset, 16 trace trigger, 17 socket pins ours, 18 pins released, 19 probe
+    // start, 20 hardware arm. Data (unless a register value) = context
+    // {hold, released, por_done, alive, listen, arm, pins_ours, running}.
+    reg [1:0] gs_res_n_s;
+    reg a2_reset_n_d, gs_res_n_d, hold_core_d, alive_d, released_d, mcu_ready_d,
+        running_d, enabled_d, trigd_d, probe_d, hwarm_d, por_done_d;
+    wire hold_core_w = (a2_rst_assert_r & ~a2_por_done_r) | !rst_released_r;   // our hold, probe windows excluded
+    wire running_w = gs_tele_i[6];      // socket status bit 6 (top synchronises gs_tele)
+    wire enabled_w = gs_tele_i[5];      // socket status bit 5: pins are ours
+    wire trigd_w   = gs_trace_i[46];    // trace trigger fired
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            gs_res_n_s <= 2'b11;
+            {a2_reset_n_d, gs_res_n_d, hold_core_d, alive_d, released_d, mcu_ready_d,
+             running_d, enabled_d, trigd_d, probe_d, hwarm_d, por_done_d} <= 12'b1100_0000_0000;
+        end else begin
+            gs_res_n_s   <= {gs_res_n_s[0], gs_res_n_i};
+            a2_reset_n_d <= a2_reset_n_s[1];
+            gs_res_n_d   <= gs_res_n_s[1];
+            hold_core_d  <= hold_core_w;
+            alive_d      <= a2_alive_f_r;
+            released_d   <= rst_released_r;
+            mcu_ready_d  <= mcu_ready_r;
+            running_d    <= running_w;
+            enabled_d    <= enabled_w;
+            trigd_d      <= trigd_w;
+            probe_d      <= probe_active;
+            hwarm_d      <= gs_hw_arm_w;
+            por_done_d   <= a2_por_done_r;
+        end
+    end
+    wire [23:0] evt_w = {
+        4'b0,
+        gs_hw_arm_w & ~hwarm_d,             // 20 hardware arm
+        probe_active & ~probe_d,            // 19 probe start
+        ~enabled_w & enabled_d,             // 18 socket pins released
+        enabled_w & ~enabled_d,             // 17 socket pins ours
+        trigd_w & ~trigd_d,                 // 16 trace trigger
+        ~running_w & running_d,             // 15 core reset
+        running_w & ~running_d,             // 14 core running
+        mcu_ready_r & ~mcu_ready_d,         // 13 MCU ready
+        rst_released_r & ~released_d,       // 12 storage/backstop release
+        ~a2_alive_f_r & alive_d,            // 11 clock lost
+        a2_alive_f_r & ~alive_d,            // 10 clock alive
+        a2_por_done_r & ~por_done_d,        //  9 por_done
+        gs_ctrl_wr_w,                       //  8 CTRL write
+        rst_reg_wr_w,                       //  7 0x2E write
+        ~hold_core_w & hold_core_d,         //  6 our hold off
+        hold_core_w & ~hold_core_d,         //  5 our hold on
+        gs_res_n_s[1] & ~gs_res_n_d,        //  4 socket /RES rise
+        ~gs_res_n_s[1] & gs_res_n_d,        //  3 socket /RES fall
+        a2_reset_n_s[1] & ~a2_reset_n_d,    //  2 slot /RESET rise
+        ~a2_reset_n_s[1] & a2_reset_n_d};   //  1 slot /RESET fall
+    wire [7:0] evt_ctx_w = {a2bus_control_if.reset_hold, rst_released_r, a2_por_done_r, a2_alive_f_r,
+                            gs_ctrl_o[2], gs_ctrl_o[0], enabled_w, running_w};
+    a2_event_log #(.DEPTH_LOG2(7)) i_evt_log (
+        .clk(clk), .rst_n(rst_n), .clear_i(evt_clear_w), .ev_i(evt_w), .ctx_i(evt_ctx_w),
+        .rst_wdata_i(reg_wdata), .ctrl_wdata_i(reg_wdata), .time_i(sys_time_r),
+        .rd_idx_i(evt_idx_r), .rd_data_o(evt_rd_w), .wptr_o(evt_wptr_w), .full_o(evt_full_w)
+    );
+
     // =========================================================================
     // Memory Spaces — using Gowin BSRAM inference pattern
     // =========================================================================
@@ -676,7 +767,7 @@ module esp32_ospi_connector #(
             REG_PROTO_VER:    reg_rdata = PROTO_VER;
             REG_CAPABILITIES: reg_rdata = CAP0;
             REG_SCRATCH:      reg_rdata = scratch_r;
-            REG_GS_SEL:       reg_rdata = {3'b0, gs_sel_r};
+            REG_GS_SEL:       reg_rdata = {2'b0, gs_sel_r};
             REG_GS_DATA:      reg_rdata = gs_rdata;
             REG_STATUS:       reg_rdata = status_w;
             REG_SYSTIME_0:    reg_rdata = sys_time_r[7:0];
@@ -752,7 +843,7 @@ module esp32_ospi_connector #(
             REG_HDD1_LBA_L:   reg_rdata = hdd_volumes[1].lba[7:0];
             REG_HDD1_LBA_H:   reg_rdata = hdd_volumes[1].lba[15:8];
 
-            REG_A2_RST_RELEASE: reg_rdata = {2'b0, a2_por_done_r, a2bus_control_if.reset_hold, a2_rst_autoarm_r, a2_rst_probe_r, a2_rst_assert_r, a2_rst_release_r};
+            REG_A2_RST_RELEASE: reg_rdata = {1'b0, a2_rst_arm_early_r, a2_por_done_r, a2bus_control_if.reset_hold, a2_rst_autoarm_r, a2_rst_probe_r, a2_rst_assert_r, a2_rst_release_r};
 
             // Slot configuration
             REG_SLOT_SELECT:  reg_rdata = {5'b0, slot_select_r};
@@ -829,7 +920,8 @@ module esp32_ospi_connector #(
             scratch2_r <= 8'h00;
             scratch3_r <= 8'h00;
             scratch4_r <= 8'h00;
-            gs_sel_r <= 5'd0;
+            gs_sel_r <= 6'd0;
+            evt_idx_r <= 7'd0;
             gs_trace_idx_r <= 6'd0;
             gs_trig_addr_r <= 24'd0;
             gs_ctrl_r <= 8'h00;
@@ -869,6 +961,7 @@ module esp32_ospi_connector #(
             a2_rst_assert_r  <= 1'b0;
             a2_rst_probe_r   <= 1'b0;
             a2_rst_autoarm_r <= 1'b0;
+            a2_rst_arm_early_r <= 1'b0;
             w5100_cmd_clr_r <= 4'b0;
             gpu_trigger_r <= 1'b0;
             gpu_pause_r <= 1'b0;
@@ -914,7 +1007,7 @@ module esp32_ospi_connector #(
                     REG_SCRATCH2:     scratch2_r <= reg_wdata;
                     REG_SCRATCH3:     scratch3_r <= reg_wdata;
                     REG_SCRATCH4:     scratch4_r <= reg_wdata;
-                    REG_GS_SEL:       gs_sel_r <= reg_wdata[4:0];
+                    REG_GS_SEL:       gs_sel_r <= reg_wdata[5:0];
                     REG_GS_DATA: begin
                         case (gs_sel_r)
                             5'd0: gs_ctrl_r      <= reg_wdata;
@@ -924,6 +1017,7 @@ module esp32_ospi_connector #(
                             5'd29: gs_trig_addr_r[7:0]   <= reg_wdata;
                             5'd30: gs_trig_addr_r[15:8]  <= reg_wdata;
                             5'd31: gs_trig_addr_r[23:16] <= reg_wdata;
+                            6'd33: evt_idx_r <= reg_wdata[6:0];
                             default: ;
                         endcase
                     end
@@ -957,6 +1051,7 @@ module esp32_ospi_connector #(
                         a2_rst_assert_r  <= reg_wdata[1];
                         a2_rst_probe_r   <= reg_wdata[2];
                         a2_rst_autoarm_r <= reg_wdata[3];
+                        a2_rst_arm_early_r <= reg_wdata[4];
                     end
 
                     REG_SLOT_SELECT:  slot_select_r <= reg_wdata[2:0];

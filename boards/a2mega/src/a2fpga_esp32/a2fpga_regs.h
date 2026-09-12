@@ -184,3 +184,13 @@
 #define A2RST_AUTOARM       0x08   // on that release, arm the GS socket in hardware (same clock)
 #define A2RST_HOLDING       0x10   // read-only: FPGA is asserting the reset
 #define A2RST_POR_DONE      0x20   // read-only: the probe saw the machine's reset released (sticky until a new assert)
+#define A2RST_ARM_EARLY     0x10   // write: with AUTOARM, arm the GS socket already while we hold (core in reset on a driven bus)
+#define A2RST_ARM_EARLY_RD  0x40   // read-back position of ARM_EARLY (bit 4 reads as HOLDING)
+// GS window regs 32-39: bring-up event log (hdl/esp32/a2_event_log.sv)
+//   32 R {full, count[6:0]}  W 0x80 = clear;  33 R/W read index;  34-37 time[31:0] (54 MHz ticks);
+//   38 event code;  39 context {hold,released,por_done,alive,listen,arm,pins_ours,running} or register value
+#define A2GS_EVT_STATUS     32
+#define A2GS_EVT_IDX        33
+#define A2GS_EVT_T0         34
+#define A2GS_EVT_CODE       38
+#define A2GS_EVT_DATA       39

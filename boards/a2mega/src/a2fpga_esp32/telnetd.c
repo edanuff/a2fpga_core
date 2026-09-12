@@ -116,6 +116,8 @@ static void tn_printf(int fd, const char *fmt, ...)
  *   gs set <idx> <val>      write one window register
  *   gs arm|listen|off|clear|freeze|run
  *   gs trace                the 64-cycle bus trace (freezes it first)
+ *   gs mode <0-3> | gs hold <ms>   bring-up mode / timed hold (gs_socket.h)
+ *   gs events | gs evclear  the FPGA bring-up event log (window regs 32-39)
  * Empty line or ESC leaves line mode. */
 #define GS_REG_SEL   0x5F
 #define GS_REG_DATA  0x4F
@@ -137,6 +139,8 @@ static void gs_wr(uint8_t idx, uint8_t val)
     fpga_reg_write(GS_REG_DATA, val);
     fpga_link_unlock();
 }
+
+static const char *gs_mode_name(unsigned m);
 
 static void gs_dump(int fd)
 {
@@ -169,8 +173,10 @@ static void gs_dump(int fd)
               (r[23] & 0x40) ? " TRIGGERED" : "", r[23] & 0x3F, (r[0] >> 4) & 1);
     {
         uint8_t st07 = fpga_reg_read(0x07), rst = fpga_reg_read(0x2E);
-        tn_printf(fd, "%s | a2: clock %s, reset_n=%u, hold=%u (assert=%u release=%u)\r\n", gs_socket_state_str(),
-                  (st07 & 0x80) ? "RUNNING" : "STOPPED", (st07 >> 2) & 1, (rst >> 2) & 1, (rst >> 1) & 1, rst & 1);
+        tn_printf(fd, "%s | a2: clock %s, reset_n=%u | 0x2E=%02X hold=%u por_done=%u (release=%u assert=%u probe=%u autoarm=%u early=%u) | mode %u %s, timed hold %u ms\r\n",
+                  gs_socket_state_str(), (st07 & 0x80) ? "RUNNING" : "STOPPED", (st07 >> 2) & 1, rst,
+                  (rst >> 4) & 1, (rst >> 5) & 1, rst & 1, (rst >> 1) & 1, (rst >> 2) & 1, (rst >> 3) & 1, (rst >> 6) & 1,
+                  gs_socket_get_mode(), gs_mode_name(gs_socket_get_mode()), gs_socket_get_hold_ms());
     }
     #undef U16
 }
@@ -206,6 +212,54 @@ static void gs_trace(int fd)
     fpga_link_unlock();
 }
 
+static const char *gs_mode_name(unsigned m)
+{
+    static const char *n[] = { "NATURAL (FPGA arms at the machine's release)", "EARLY (armed under our hold, TWGS model)",
+                               "TIMED (release socket-off, arm on rise)", "TIMED+ (armed under hold, timed release)" };
+    return m < 4 ? n[m] : "?";
+}
+
+/* FPGA bring-up event log (window regs 32-39, hdl/esp32/a2_event_log.sv) */
+static void gs_events(int fd)
+{
+    static const char *name[] = {
+        "?", "SLOT /RESET fall", "SLOT /RESET rise", "SOCKET /RES fall", "SOCKET /RES rise",
+        "our hold ON", "our hold OFF", "0x2E write", "CTRL write", "POR DONE (machine let go)",
+        "clock alive", "clock lost", "release (storage/backstop)", "MCU ready", "core RUNNING",
+        "core in reset", "trace trigger", "socket pins OURS", "socket pins released", "probe start", "hardware arm" };
+    uint8_t st = gs_rd(32);
+    unsigned n = (st & 0x80) ? 128 : (st & 0x7F);
+    tn_printf(fd, "%u events%s; t = ms from the first; ctx letters: H our hold, R released, P por_done, A clock alive, L listen, M arm, O pins ours, X core running\r\n",
+              n, (st & 0x80) ? " (LOG FULL - gs evclear)" : "");
+    uint32_t t0 = 0, tp = 0;
+    for (unsigned i = 0; i < n; i++) {
+        uint8_t b[6];
+        fpga_link_lock();
+        fpga_reg_write(GS_REG_SEL, 33);
+        fpga_reg_write(GS_REG_DATA, (uint8_t)i);
+        for (int k = 0; k < 6; k++) {
+            fpga_reg_write(GS_REG_SEL, (uint8_t)(34 + k));
+            b[k] = fpga_reg_read(GS_REG_DATA);
+        }
+        fpga_link_unlock();
+        uint32_t t = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+        if (i == 0) { t0 = t; tp = t; }
+        uint32_t dt = t - t0, dp = t - tp;            /* wrap-safe (32-bit ticks at 54 MHz, 79 s) */
+        tp = t;
+        unsigned code = b[4], d = b[5];
+        uint32_t us = dt / 54, dus = dp / 54;
+        char ctx[10];
+        snprintf(ctx, sizeof(ctx), "%c%c%c%c%c%c%c%c", (d & 0x80) ? 'H' : '.', (d & 0x40) ? 'R' : '.', (d & 0x20) ? 'P' : '.',
+                 (d & 0x10) ? 'A' : '.', (d & 0x08) ? 'L' : '.', (d & 0x04) ? 'M' : '.', (d & 0x02) ? 'O' : '.', (d & 0x01) ? 'X' : '.');
+        if (code == 7 || code == 8)
+            tn_printf(fd, "%3u %9lu.%03lu ms (+%lu.%03lu) %-28s value 0x%02X\r\n", i, (unsigned long)(us / 1000), (unsigned long)(us % 1000),
+                      (unsigned long)(dus / 1000), (unsigned long)(dus % 1000), code < 21 ? name[code] : "?", d);
+        else
+            tn_printf(fd, "%3u %9lu.%03lu ms (+%lu.%03lu) %-28s %s\r\n", i, (unsigned long)(us / 1000), (unsigned long)(us % 1000),
+                      (unsigned long)(dus / 1000), (unsigned long)(dus % 1000), code < 21 ? name[code] : "?", ctx);
+    }
+}
+
 static bool parse_num(const char *t, unsigned *out)
 {
     if (!t || !*t) return false;
@@ -225,7 +279,7 @@ static void tn_exec_line(int fd, char *line)
     if (nt == 0)
         return;
     if (!strcmp(tok[0], "help") || !strcmp(tok[0], "?")) {
-        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|auto|hold <ms>|clear|freeze|run|trig|untrig | gs trace\r\n");
+        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|auto|mode <0-3>|hold <ms>|clear|freeze|run|trig|untrig | gs trace | gs events|evclear\r\n");
         return;
     }
     if (!fpga_link_ok()) {
@@ -250,7 +304,7 @@ static void tn_exec_line(int fd, char *line)
         unsigned idx, val;
         if (nt == 1) {
             gs_dump(fd);
-        } else if (!strcmp(tok[1], "set") && nt == 4 && parse_num(tok[2], &idx) && idx < 32 && parse_num(tok[3], &val) && val < 256) {
+        } else if (!strcmp(tok[1], "set") && nt == 4 && parse_num(tok[2], &idx) && idx < 64 && parse_num(tok[3], &val) && val < 256) {
             if (idx == 0) gs_socket_manual();
             gs_wr((uint8_t)idx, (uint8_t)val);
             tn_printf(fd, "gs[%u] <= 0x%02X\r\n", idx, val);
@@ -277,13 +331,19 @@ static void tn_exec_line(int fd, char *line)
         } else if (!strcmp(tok[1], "untrig")) {
             gs_wr(0, gs_rd(0) & ~0x10); tn_puts(fd, "trigger off\r\n");
         } else if (!strcmp(tok[1], "hold") && nt == 3 && parse_num(tok[2], &val)) {
-            gs_socket_set_por_hold_ms(val); tn_printf(fd, "POR hold = %u ms\r\n", val);
+            gs_socket_set_hold_ms(val); tn_printf(fd, "timed hold = %u ms (modes 2/3)\r\n", val);
+        } else if (!strcmp(tok[1], "mode") && nt == 3 && parse_num(tok[2], &val) && val < 4) {
+            gs_socket_set_mode(val); tn_printf(fd, "bring-up mode = %u (%s); takes effect at the next machine-off -> clock-up\r\n", val, gs_mode_name(val));
+        } else if (!strcmp(tok[1], "events")) {
+            gs_events(fd);
+        } else if (!strcmp(tok[1], "evclear")) {
+            gs_wr(32, 0x80); tn_puts(fd, "event log cleared\r\n");
         } else if (!strcmp(tok[1], "auto")) {
             gs_socket_resume(); tn_puts(fd, "auto-arm resumed\r\n");
         } else if (!strcmp(tok[1], "trace")) {
             gs_trace(fd);
         } else {
-            tn_puts(fd, "usage: gs | gs set <idx> <val> | gs arm|listen|off|auto|hold <ms>|clear|freeze|run|trig|untrig | gs trace\r\n");
+            tn_puts(fd, "usage: gs | gs set <idx> <val> | gs arm|listen|off|auto|mode <0-3>|hold <ms>|clear|freeze|run|trig|untrig | gs trace | gs events|evclear\r\n");
         }
         return;
     }
