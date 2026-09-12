@@ -177,6 +177,7 @@ static void gs_dump(int fd)
                   gs_socket_state_str(), (st07 & 0x80) ? "RUNNING" : "STOPPED", (st07 >> 2) & 1, rst,
                   (rst >> 4) & 1, (rst >> 5) & 1, rst & 1, (rst >> 1) & 1, (rst >> 2) & 1, (rst >> 3) & 1, (rst >> 6) & 1,
                   gs_socket_get_mode(), gs_mode_name(gs_socket_get_mode()), gs_socket_get_hold_ms());
+        if (gs_socket_get_autotrig()) tn_puts(fd, "autotrig ON\r\n");
     }
     #undef U16
 }
@@ -279,7 +280,7 @@ static void tn_exec_line(int fd, char *line)
     if (nt == 0)
         return;
     if (!strcmp(tok[0], "help") || !strcmp(tok[0], "?")) {
-        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|auto|mode <0-3>|hold <ms>|clear|freeze|run|trig|untrig | gs trace | gs events|evclear\r\n");
+        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|auto|mode <0-3>|hold <ms>|autotrig on|off|clear|freeze|run|trig|untrig | gs trace | gs events|evclear\r\n");
         return;
     }
     if (!fpga_link_ok()) {
@@ -334,6 +335,9 @@ static void tn_exec_line(int fd, char *line)
             gs_socket_set_hold_ms(val); tn_printf(fd, "timed hold = %u ms (modes 2/3)\r\n", val);
         } else if (!strcmp(tok[1], "mode") && nt == 3 && parse_num(tok[2], &val) && val < 4) {
             gs_socket_set_mode(val); tn_printf(fd, "bring-up mode = %u (%s); takes effect at the next machine-off -> clock-up\r\n", val, gs_mode_name(val));
+        } else if (!strcmp(tok[1], "autotrig") && nt == 3) {
+            bool on = !strcmp(tok[2], "on") || !strcmp(tok[2], "1");
+            gs_socket_set_autotrig(on); tn_printf(fd, "autotrig %s: the /RES-fall trace trigger is armed 20 ms after the socket inputs come on\r\n", on ? "ON" : "OFF");
         } else if (!strcmp(tok[1], "events")) {
             gs_events(fd);
         } else if (!strcmp(tok[1], "evclear")) {

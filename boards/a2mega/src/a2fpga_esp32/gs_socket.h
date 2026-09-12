@@ -64,6 +64,11 @@ unsigned gs_socket_get_mode(void);
 /* Timed modes: our hold after the clock appears, ms (default 1000). */
 void     gs_socket_set_hold_ms(unsigned ms);
 unsigned gs_socket_get_hold_ms(void);
+/* Bench: arm the bus-trace /RES-fall trigger from inside the sequence, 20 ms after
+ * the socket inputs come on (CTRL bits 4+6, TADDR FF:FFFF) so the first REAL /RES
+ * fall after the machine's release freezes the ring. */
+void     gs_socket_set_autotrig(bool on);
+bool     gs_socket_get_autotrig(void);
 
 /* Register-window helpers shared with telnetd (locked). */
 uint8_t gs_socket_reg_read(uint8_t idx);

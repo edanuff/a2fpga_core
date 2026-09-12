@@ -65,11 +65,17 @@ static uint8_t  s_last_st07 = 0;
 static unsigned s_mode     = GS_MODE_DEFAULT;
 static unsigned s_hold_ms  = HOLD_MS_DEFAULT;
 static bool     s_reported = false;
+static bool     s_autotrig = false;   /* bench: arm the /RES-fall trace trigger inside the sequence */
+static bool     s_trig_pending = false;
+static int64_t  s_trig_at_us = 0;
+#define AUTOTRIG_DELAY_US 20000       /* after the socket inputs come on; well before the ~230 ms release */
 
 void     gs_socket_set_mode(unsigned m)     { s_mode = m > 3 ? 3 : m; }
 unsigned gs_socket_get_mode(void)           { return s_mode; }
 void     gs_socket_set_hold_ms(unsigned ms) { s_hold_ms = ms; }
 unsigned gs_socket_get_hold_ms(void)        { return s_hold_ms; }
+void     gs_socket_set_autotrig(bool on)    { s_autotrig = on; }
+bool     gs_socket_get_autotrig(void)       { return s_autotrig; }
 
 uint8_t gs_socket_reg_read(uint8_t idx)
 {
@@ -92,6 +98,22 @@ void gs_socket_reg_write(uint8_t idx, uint8_t val)
 static void ctrl_write_keep(uint8_t bits)
 {
     gs_socket_reg_write(0, (uint8_t)((gs_socket_reg_read(0) & GS_CTRL_KEEP) | bits));
+}
+
+/* /RES-fall trace trigger: TADDR = FF:FFFF, clear pulse with trig-en + address mode set */
+static void arm_res_trigger(void)
+{
+    gs_socket_reg_write(29, 0xFF); gs_socket_reg_write(30, 0xFF); gs_socket_reg_write(31, 0xFF);
+    uint8_t c = (uint8_t)((gs_socket_reg_read(0) & ~0x08) | 0x50);
+    gs_socket_reg_write(0, (uint8_t)(c | 0x80));
+    gs_socket_reg_write(0, c);
+    GLOG("GS SOCKET: /RES-FALL TRACE TRIGGER ARMED");
+}
+static void schedule_autotrig(int64_t now)
+{
+    if (!s_autotrig) return;
+    s_trig_pending = true;
+    s_trig_at_us = now + AUTOTRIG_DELAY_US;
 }
 
 /* 0x2E owner: {arm_early, autoarm, probe, assert, release} written together */
@@ -162,6 +184,7 @@ void gs_socket_apply(void)
 static void enter_machine_off(const char *why)
 {
     s_probe = false;
+    s_trig_pending = false;
     ctrl_write_keep(0);                  /* everything off (bench trigger bits kept) ... */
     a2_reset_write(false);               /* assert 0 -> 1 = a NEW sequence (clears por_done) */
     a2_reset_write(true);                /* ... and hold the slot reset: the IIgs must power
@@ -205,6 +228,8 @@ void gs_socket_poll(void)
     if (s_state == ST_OFF || s_state == ST_MANUAL) return;
     if (now < s_next_us) return;
 
+    if (s_trig_pending && now >= s_trig_at_us) { s_trig_pending = false; arm_res_trigger(); }
+
     uint8_t st07 = fpga_reg_read(A2REG_STATUS);
     if (!(st07 & 0x01)) return;            /* ready bit clear = bad link read; never act on it */
     bool alive = (st07 & A2ST_A2_ALIVE) != 0;
@@ -225,10 +250,12 @@ void gs_socket_poll(void)
             a2_reset_write(true);
             set_state(ST_PROBE, s_mode == 1 ? "MACHINE CLOCK UP - ARMED UNDER HOLD, PROBE ENABLED"
                                             : "MACHINE CLOCK UP - PROBE + AUTO-ARM ENABLED");
+            schedule_autotrig(now);
             break;
         case 3:
             ctrl_write_keep(GS_CTRL_LISTEN | GS_CTRL_ARM);   /* core sits in reset on a driven bus */
             set_state(ST_TIMED_HOLD, "MACHINE CLOCK UP - ARMED UNDER HOLD, TIMED RELEASE");
+            schedule_autotrig(now);
             break;
         default:
             set_state(ST_TIMED_HOLD, "MACHINE CLOCK UP - TIMED RELEASE, SOCKET OFF");
