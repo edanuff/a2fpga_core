@@ -728,6 +728,42 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   log): arm the socket while /RESET is still low and let the core leave
   reset on the machine's own rise, so nothing is switched at release time.
 
+  **v8 (2026-09-11) — what the bench can now do without another build:**
+
+  - *Bring-up modes* (`gs mode <n>`, firmware `gs_socket.c`, default 1):
+    0 NATURAL = v7 (FPGA probe, hardware arm at the machine's own release);
+    1 EARLY = the TransWarp model: 0x2E bit 4 ARM_EARLY makes the FPGA
+    force CTRL |= 0x05 as soon as it is holding after storage-ready, so
+    the socket shifters are on and the core sits in reset on a driven bus
+    (address = the core's reset-state address, R/W high, data hi-Z) exactly
+    as a real 65816 does under /RES low; the probe then finds the machine's
+    own release (~230 ms) and the core starts on that rise — nothing is
+    switched at release time; 2 TIMED = v6 (hold `gs hold <ms>` after the
+    clock, release with the socket off, arm when the slot reset reads
+    high); 3 TIMED+ = arm under the hold, then a timed release. G36 (arm
+    under hold → reset stayed low) is not a counter-example to mode 1: v3
+    released ~100 ms after the clock, and G37 showed that timing wedges the
+    machine with the socket off too.
+  - *Bring-up event log* (`hdl/esp32/a2_event_log.sv`, GS window regs
+    32–39; `gs events` / `gs evclear`): 128 entries of {54 MHz timestamp,
+    code, context}. Codes: 1/2 slot /RESET fall/rise, 3/4 socket /RES
+    fall/rise, 5/6 our hold on/off (probe windows excluded), 7 0x2E write
+    (data = value), 8 CTRL write (data = value), 9 por_done, 10/11 clock
+    alive/lost, 12 storage/backstop release, 13 MCU ready, 14/15 core
+    running/reset, 16 trace trigger, 17/18 socket pins ours/released, 19
+    probe start, 20 hardware arm. Context byte = {hold, released, por_done,
+    alive, listen, arm, pins_ours, running}. The log stops when full (the
+    first 128 events after a clear are the boot sequence); coincident
+    events drain one per clock in code order, so their timestamps can be a
+    few 18.5 ns ticks late. Reg 32 reads {full, count}; write 0x80 to
+    clear; 33 = read index; 34–37 time bytes; 38 code; 39 data. This is
+    the instrument for the G44 pulse question: a 1.5 µs /RES pulse shows
+    as a fall/rise pair at both the slot and the socket, and whether our
+    hold or a CTRL/0x2E write sits next to it in time settles which lever
+    it was.
+  - 0x2E read-back is now {0, arm_early, por_done, hold, autoarm, probe,
+    assert, release}; the telnet `gs` line decodes it.
+
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
   driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/
