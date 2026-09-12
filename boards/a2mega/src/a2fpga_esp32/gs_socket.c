@@ -326,9 +326,10 @@ void gs_socket_poll(void)
             enter_armed(s_late_ms ? "SLOT RESET HIGH + DELAY - ARMED" : "SLOT RESET HIGH - ARMED", now);
         } else {
             s_rise_us = 0;
-        } else if (!s_reported && now - s_since_us > RISE_REPORT_US) {
-            GLOG("GS SOCKET: SLOT RESET NEVER ROSE AFTER OUR RELEASE (st=%02X)", st07);
-            s_reported = true;
+            if (!s_reported && now - s_since_us > RISE_REPORT_US) {
+                GLOG("GS SOCKET: SLOT RESET NEVER ROSE AFTER OUR RELEASE (st=%02X)", st07);
+                s_reported = true;
+            }
         }
         break;
 
