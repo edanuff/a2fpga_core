@@ -35,6 +35,21 @@ def main():
     r_rise, r_fall = edges(b[0])
     if len(r_rise) == 0:
         print("no /RESET rise in the capture"); return
+    # per power cycle (each +5V rise): clock start = first 7M edge after it, then every
+    # /RESET edge of that cycle relative to the clock start
+    v5r, _ = edges(b[2])
+    m7r, m7f = edges(b[4]); m7 = np.sort(np.concatenate((m7r, m7f)))
+    rall = np.sort(np.concatenate((r_rise, r_fall)))
+    if len(v5r):
+        print("power cycles (t from the clock start of each):")
+        for c, t5 in enumerate(v5r):
+            nxt = v5r[c + 1] if c + 1 < len(v5r) else len(w)
+            e = m7[m7 > t5]
+            if len(e) == 0: print("  cycle %d: +5V at %.3f s, no clock" % (c + 1, t5 / rate)); continue
+            clk = int(e[0])
+            ev = rall[(rall > clk) & (rall < nxt)]
+            parts = ["%s %+.3f ms" % ("rise" if i in r_rise else "FALL", (i - clk) * 1000.0 / rate) for i in ev[:6]]
+            print("  cycle %d: +5V at %.3f s, clock %+.1f ms after it; /RESET: %s" % (c + 1, t5 / rate, (clk - t5) * 1000.0 / rate, ", ".join(parts) if parts else "no edge"))
     t0 = int(r_rise[0])
     ms = lambda i: (i - t0) * 1000.0 / rate
 
