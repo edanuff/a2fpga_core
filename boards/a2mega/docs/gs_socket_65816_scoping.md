@@ -799,6 +799,22 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   10 ms that a stock 65816 does not remain open (M50740 P2.5 or Mega II;
   logic-level pull, not contention).
 
+  **Resolved further, evening of 2026-09-12 (G59–G67):** the puller is the
+  **M50740 ADB micro on ROM 01, through its IIe-keyboard Control-Reset
+  path** (firmware `$146C` → `$147E`; the micro does not hold /RESET at
+  power-on, the 333 ms release is the Mega II's power-on reset; a Timer X
+  watchdog expiry restarts the firmware into the released state; notes in
+  `adb_micro_rom01_notes.md`). Condition: ROM 01 + IIe keyboard on J13 +
+  a2mega in the slot + no real 65816 executing. Evidence: stock ROM 01
+  8/8 clean; empty socket without the card 4/4 clean; card in with a real
+  CPU 5/5 clean; card in, socket empty: 12 pulls / 22 with the IIe
+  keyboard, 0 / 10 without; ROM 03 (ADB keyboard, M50741) 7/7 clean. Open:
+  why the micro's KRESET.L input reads low ~10 ms after the release under
+  that condition. The firmware's sequence (hold through the machine's first
+  second when the card is powered first; release ~0.5 s after configuration
+  when slot-powered, arm 20 ms after the edge) is the mitigation and is
+  sufficient on both machines.
+
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
   driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/
