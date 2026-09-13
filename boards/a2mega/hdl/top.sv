@@ -977,6 +977,7 @@ module top #(
     wire [7:0] hdd_d_w;
     wire hdd_rd;
 
+    wire storage_settled_w;     // from the connector: MCU mount pass over (or no MCU)
     HDD #(
         .ENABLE(HDD_ENABLE),
         .ID(HDD_ID)
@@ -986,7 +987,8 @@ module top #(
         .data_o(hdd_d_w),
         .rd_en_o(hdd_rd),
         .ram_hdd_if(hdd_ram_if),
-        .volumes(hdd_volumes)
+        .volumes(hdd_volumes),
+        .storage_settled_i(storage_settled_w)
     );
 
     // Uthernet II (W5100) Ethernet card. The ESP32 services the MACRAW
@@ -2016,6 +2018,7 @@ module top #(
         .a2_reset_n_i(a2_reset_n),
         .a2_alive_i(~sleep_w),
         .gs_res_n_i(gs_res_n),
+        .storage_settled_o(storage_settled_w),
 
         .pad_typ_i(hid_typ_sync1),
         .pad_connerr_i(hid_connerr_sync1),

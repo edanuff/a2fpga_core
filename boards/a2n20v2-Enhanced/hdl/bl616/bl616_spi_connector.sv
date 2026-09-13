@@ -48,6 +48,7 @@ module bl616_spi_connector #(
     output wire        mcu_ready_o,
     output wire        standalone_o,   // high once standalone fallback engages (no BL616)
     output wire        mcu_access_stb_o, // pulses on any MCU register transaction (liveness watchdog feed)
+    output wire        storage_settled_o, // MCU finished its mount pass (0x2E write), or no MCU came: HDD answers NO_DEVICE instead of NOT_READY
     output wire [39:0] scratch_o,      // 5 MCU scratch regs packed {s4,s3,s2,s1,s0} (0x07,0x0C-0x0F)
 
     // CardROM
@@ -231,6 +232,13 @@ module bl616_spi_connector #(
     assign a2bus_control_if.reset_hold =
         !(slots_configured_r || a2_rst_release_r || rst_mcu_absent_w ||
           rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0]);
+    // Storage bring-up over (mount pass done, MCU absent, or backstop): the
+    // HDD card answers NO_DEVICE for an unmounted unit from here on; before
+    // this it answers NOT_READY and its boot ROM keeps polling. The slot-map
+    // strobe deliberately does not count — slots are configured before the
+    // mounts finish.
+    assign storage_settled_o = a2_rst_release_r || rst_mcu_absent_w ||
+                               rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0];
 
     // -------------------------------------------------------
     // Constants

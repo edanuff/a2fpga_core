@@ -54,6 +54,7 @@ module esp32_ospi_connector #(
     input  wire        a2_reset_n_i,
     input  wire        a2_alive_i,         // slot PHI1 running (apple_bus sleep_o inverted): the machine is powered
     input  wire        gs_res_n_i,         // GS CPU-socket /RES pad, raw (synchronised here; bring-up event log only)
+    output wire        storage_settled_o,  // MCU finished its mount pass (0x2E release write), or no MCU came: HDD answers NO_DEVICE instead of NOT_READY
 
     // USB HID readback (already synchronized into clk domain)
     input  wire [1:0]  pad_typ_i,        // 0 none, 1 kbd, 2 mouse, 3 gamepad
@@ -523,6 +524,10 @@ module esp32_ospi_connector #(
                  rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0])
             rst_released_r <= 1'b1;
     end
+    // The same fact, for the HDD card: once storage bring-up is over an
+    // unmounted unit is a genuine "no device"; before that it is "not ready"
+    // and the boot ROM waits for it instead of the machine being held in reset.
+    assign storage_settled_o = rst_released_r;
     // --- POR probe -----------------------------------------------------------
     // The IIgs (ROM 01 bench, G31-G40) wedges if the socket is driven during
     // its own power-on reset, and again if it comes out of reset with no CPU
