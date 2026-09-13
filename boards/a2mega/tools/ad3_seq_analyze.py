@@ -44,10 +44,11 @@ def main():
     for n, name in ((4, "7M"), (3, "PH0"), (1, "CREF")):
         rs, fs = edges(b[n])
         act = np.sort(np.concatenate((rs, fs)))
-        # first sustained activity: first edge followed by >= 100 edges within 1 ms
+        # first sustained activity: first edge followed by >= 20 edges within 1 ms
+        # (a clock above half the sample rate aliases, so the edge density is irregular)
         first = None
-        for k in range(0, len(act) - 100):
-            if act[k + 100] - act[k] < rate / 1000.0:
+        for k in range(0, len(act) - 20):
+            if act[k + 20] - act[k] < rate / 1000.0:
                 first = act[k]; break
         print("  %-5s first active %12.3f ms" % (name, ms(first) if first is not None else float("nan")))
     print("  /RESET edges:")
@@ -80,10 +81,10 @@ def main():
     fr = np.diff(vs) / rate * 1000.0
     print("vertical sync: %d found, frame period %.3f ms (median), first at %12.3f ms" % (len(vs), np.median(fr), ms(vs[0])))
     # clock start reference = first PH0 activity
-    rs3, fs3 = edges(b[3]); act3 = np.sort(np.concatenate((rs3, fs3)))
+    rs3, fs3 = edges(b[4]); act3 = np.sort(np.concatenate((rs3, fs3)))   # 7M: the densest clock line
     clk0 = None
-    for k in range(0, len(act3) - 100):
-        if act3[k + 100] - act3[k] < rate / 1000.0: clk0 = act3[k]; break
+    for k in range(0, len(act3) - 20):
+        if act3[k + 20] - act3[k] < rate / 1000.0: clk0 = act3[k]; break
     if clk0 is not None and line_us == line_us:
         print("  lines from clock start to first vsync: %.2f" % ((vs[0] - clk0) * us / line_us))
     def phase(i):
