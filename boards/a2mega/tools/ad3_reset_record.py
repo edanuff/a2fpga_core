@@ -158,7 +158,13 @@ def cmd_drecord(dwf, args):
     sts = ctypes.c_byte(); avail = ctypes.c_int(); lost = ctypes.c_int(); corrupt = ctypes.c_int()
     buf = (ctypes.c_uint16 * 1000000)()
     dios = [int(x) for x in str(args.dio).split(',')]
-    runs_by = {b: [] for b in dios}   # per DIO bit: (level, length) run-length encoded
+    clocks = [int(x) for x in str(args.clock).split(',') if x != ""]   # clock-like bits: activity per ms, not runs
+    runs_by = {b: [] for b in dios if b not in clocks}   # per DIO bit: (level, length) run-length encoded
+    per_ms = int(round(rate / 1000.0))
+    n_bins = n_total // per_ms + 2
+    # clock bits: per 1 ms bin, min and max sample value (0/0 static low, 1/1 static high, 0/1 toggling)
+    binmin = {b: np.ones(n_bins, dtype=np.uint8) for b in clocks}
+    binmax = {b: np.zeros(n_bins, dtype=np.uint8) for b in clocks}
     got = 0; n_lost = n_corrupt = 0; t0 = time.time()
     while got < n_total and time.time() - t0 < args.seconds + 20:
         dwf.FDwfDigitalInStatus(hdwf, ctypes.c_int(1), ctypes.byref(sts))
@@ -168,7 +174,12 @@ def cmd_drecord(dwf, args):
             n = min(avail.value, 1000000)
             dwf.FDwfDigitalInStatusData(hdwf, buf, ctypes.c_int(2 * n))
             words = np.frombuffer(bytes(bytearray(buf)[:2 * n]), dtype=np.uint16)
-            for b in dios:
+            for b in clocks:
+                bits = ((words >> b) & 1).astype(np.uint8)
+                idx = (np.arange(n) + got) // per_ms
+                np.minimum.at(binmin[b], idx, bits)
+                np.maximum.at(binmax[b], idx, bits)
+            for b in runs_by:
                 bits = (words >> b) & 1
                 change = np.flatnonzero(np.diff(bits)) + 1
                 starts = np.concatenate(([0], change)); ends = np.concatenate((change, [n]))
@@ -184,20 +195,47 @@ def cmd_drecord(dwf, args):
             time.sleep(0.002)
     dwf.FDwfDeviceCloseAll()
     print("got %d samples (%.2f s), lost %d, corrupt %d" % (got, got / rate, n_lost, n_corrupt))
+    # common time reference: first rise of --ref (default: the first run-listed DIO), else record start
+    ref = 0
+    refbit = args.ref if args.ref is not None else (next(iter(runs_by)) if runs_by else None)
+    if refbit in runs_by:
+        ref = first_rise_of(runs_by[refbit])
+    print("t = ms from the first rise of DIO%s after start (record start if none)" % refbit)
     for b in dios:
-        print("== DIO%d: %d runs" % (b, len(runs_by[b])))
-        report_runs(runs_by[b], rate, args)
+        if b in clocks:
+            print("== DIO%d (clock): activity per 1 ms bin" % b)
+            report_activity(binmin[b], binmax[b], got // per_ms, per_ms, rate, ref)   # whole bins only
+        else:
+            print("== DIO%d: %d runs" % (b, len(runs_by[b])))
+            report_runs(runs_by[b], rate, args, ref)
 
-def report_runs(runs, rate, args):
-    # print runs with absolute time; suppress runs shorter than --min-us unless --all
-    t = 0
-    first_rise = None
+def first_rise_of(runs):
     acc = 0
     for lvl, ln in runs:
-        if lvl == 1 and first_rise is None and acc > 0: first_rise = acc
+        if lvl == 1 and acc > 0: return acc
         acc += ln
-    ref = first_rise or 0
-    print("t = ms from the first rise after start (or from start); runs shorter than %.0f us are marked *" % args.min_us)
+    return 0
+
+def report_activity(bmin, bmax, nb, per_ms, rate, ref):
+    """Collapse per-ms bins into intervals: TOGGLING (min!=max), static HIGH, static LOW."""
+    def kind(i):
+        if bmin[i] == 0 and bmax[i] == 1: return "TOGGLING"
+        return "HIGH" if bmax[i] == 1 else "LOW"
+    i = 0
+    while i < nb:
+        k = kind(i); j = i
+        while j + 1 < nb and kind(j + 1) == k: j += 1
+        t0 = (i * per_ms - ref) * 1000.0 / rate
+        t1 = ((j + 1) * per_ms - ref) * 1000.0 / rate
+        print("  %10.1f ms .. %10.1f ms  %-8s (%d ms)" % (t0, t1, k, j - i + 1))
+        i = j + 1
+
+def report_runs(runs, rate, args, ref=None):
+    # print runs with absolute time; suppress runs shorter than --min-us unless --all
+    t = 0
+    if ref is None:
+        ref = first_rise_of(runs)
+    print("runs shorter than %.0f us are marked *" % args.min_us)
     shown = 0
     for lvl, ln in runs:
         dur_us = ln * 1e6 / rate
@@ -223,6 +261,8 @@ def main():
     d.add_argument("--seconds", type=float, default=30.0)
     d.add_argument("--rate", type=float, default=1e6)
     d.add_argument("--dio", default="0", help="DIO bit or comma list, e.g. 0,1,2,3,4,5")
+    d.add_argument("--clock", default="", help="subset of --dio to summarise as per-ms activity (clock lines: CREF, 7M, PH0) instead of runs")
+    d.add_argument("--ref", type=int, default=None, help="DIO bit whose first rise is t=0 for every channel (default: first non-clock DIO)")
     d.add_argument("--min-us", type=float, default=5.0)
     d.add_argument("--all", action="store_true")
     args = ap.parse_args()

@@ -219,3 +219,31 @@ Two cheap facts that would settle the timing model, if the ADB port can be
 reached: the `$16C9` ADB reset pulse (~5 ms low on the ADB data line) should
 start ≈10 ms after every RESET.L rise, pull or no pull; and TP74 gives the
 micro's own start time.
+
+## Die-photo findings (separate session, 2026-09-13; Mega II tiles + siliconpr0n KEYGLU 344S0048)
+
+- **Mega II pin 35 (~RESET) has no output device: the Mega II is a listener on
+  RESET.L.** Nothing on that die can hold the line low, so the 282.78 ms
+  power-on hold is not the Mega II's; by function (the CPU-side controller)
+  and by the Mega-IIe argument (their firmware releases reset 50 ms after
+  power and reads the line back once, never seeing a long hold, on a board
+  with a Mega II but no FPI) the **FPI (pin 23) is the likely POR owner**;
+  KEYGLU remained the other candidate pending its pad structure at pin 33.
+- **CREF (pin 79) is a plain push-pull output** with one data line into the
+  core, never tri-stated. Whether the core stops it during reset is not
+  visible on the die; the reset the core sees arrives through pin 35's input
+  cell and is distributed, not generated.
+- **RESET.L therefore has: no motherboard pull-up (both revisions), a
+  listener in the Mega II, a firmware-controlled push-pull driver in the
+  M50740's P25 (clocked by CREF, its own 200 k/1 µF reset RC), and a
+  crystal-timed pull-down somewhere else — presumably the FPI.** The pull-up
+  that gives the line its idle high is still unlocated: a mask-option port
+  pull-up on P25 (MAME's model) or inside the FPI.
+- Consequences for the bench: (1) the FPI is the one chip on the net that
+  watches the 65816 socket pins (E, M/X, VDA, VPA, RDY, ABORT), which is the
+  first mechanism with a reason to care whether a real 65816 is present;
+  (2) the micro-timing reading of the 9.97 ms pull needs CREF to be stopped
+  during the hold, which only a slot-7 pin 35 measurement across a power-up
+  can settle; (3) the firmware still has no P25 action at +9.97 ms after a
+  cold clock start (cold-init start; the assert needs /KRESET and CNTRL both
+  low and comes ~8 ms later).
