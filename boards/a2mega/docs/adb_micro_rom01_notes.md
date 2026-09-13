@@ -172,3 +172,50 @@ keeps its RAM power-up flag ($51 = $A5) across a Ctrl-Reset. So the
 10 ms re-assert and the Mega II's power-on behaviour are not documented
 anywhere in software; they have to come from the bench.
 
+
+## Closure pass (2026-09-12, after the keyboard in/out ladder)
+
+**IIe keyboard is passive** (IIe schematic fig. 7.4, keyboard block, and the
+papodaca pinout gist): RESET' (pin 15) reaches ground only through the RESET
+switch in series with the CTRL switch (standard jumper), CTRL'/SHIFT'/CAPLOCK'
+are bare switches to ground, no pull-ups, no RC, no active parts on the
+keyboard side. On the ROM 01 (schematic part 5) those lines go straight to the
+micro: KRESET.L → P26 with R125 4.7 k to +5 V, CNTRL → P31 (R126), CAPLOCK →
+P32 (R127), SHIFT → P30, KSW0/1 → P36/P37; X0–7 → P10–17; Y0–9 ← KEYGLU
+SC0–SC9. Also from part 5: **micro CLK = CREF.H (3.579545 MHz → 894.9 kHz
+instruction rate)**, micro RESET (pin 16) = its own R105 200 k / C39 1 µF /
+CR3 network (TP74), independent of the system RESET.L; micro INT.L = VBL.L.
+
+**Every write to P2 / P2DIR in 341s0345** (grep of the listing): P2DIR is
+written at $143C ($1F, init), $147E/$148B and $15BC/$15C4 only. So the reset
+pin (P25) can be driven low from exactly two places: `$147E` (main-loop
+decision) and `$15BC` (GLU command $10 from the CPU side — a 3.4 ms pulse,
+then release). The whole-byte P2 writes ($1439 `LDM #$14`, $18AC/$18BE matrix
+scan, $1F13/$1F15/$1F24/$1F2D GLU access) do put 0 in latch bit 5 but the bit
+is an input then. **Right after cold init** ($0A/$0B/$03 all zero) the `$146C`
+decision asserts only if **/KRESET (P26) reads low AND CNTRL (P31) reads low**
+— i.e. a real Control-Reset; a single line reading low releases. A pure
+firmware path that asserts with the inputs idle does not exist.
+
+**Timing coincidence.** With the GLU held in reset by RESET.L, the micro (which
+started earlier on its own RC) sits in the SYNC wait. From the moment the GLU
+comes out of reset the poll `\$1F3A` runs 209 iterations of ≈42 cycles
+(6502-family counts: DEX 2, BEQ 2, JSR sp 5, LDA# 2, LDM 4, CLC 2, CLB 5,
+AND 3, SEB 5, BNE 2, RTS 6, BCC 4) ≈ 8.8 k cycles = **9.84 ms** at 894.9 kHz;
+if Y wraps on that INY (Y powered up as $00: `$1446 DEY` then `$140A INY`),
+cold init `$1457` → `$141A` → `$1433` reaches its first GLU write ≈115 cycles
+later, ≈ **9.97 ms** after the RESET.L rise. The bench pull sits at 9.95–9.98
+ms after the rise with ~30 µs spread over 13 events. So the micro is, to
+within the count uncertainty (~2 %), starting its cold init (GLU reg 3 ← 0,
+reg 0 ← 0, P3 outputs, then the ~5 ms ADB reset pulse of `$16C9`) at the
+instant of the pull — but none of those actions touches P25, and the decision
+that could (`$146C`) comes only after `$16C9` (~8 ms later). The coincidence
+places the micro at a schedule boundary; it does not, by the code, make it
+the puller. Caveats: MELPS 740 cycle counts taken as 6502-equivalent; the
+edge-synchronisation needs the reset GLU to keep the poll returning early
+(or the micro to start with the edge), and Y = $00 at power-up.
+
+Two cheap facts that would settle the timing model, if the ADB port can be
+reached: the `$16C9` ADB reset pulse (~5 ms low on the ADB data line) should
+start ≈10 ms after every RESET.L rise, pull or no pull; and TP74 gives the
+micro's own start time.
