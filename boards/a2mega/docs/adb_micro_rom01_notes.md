@@ -130,3 +130,24 @@ beyond a clip on the keyboard cable):
    is out of its SYNC-wait and polling; silence = still waiting.
 3. Micro P25 (pin 49) vs the line, if the above are inconclusive.
 
+## Mega II reset behaviour — what the Mega-IIe project shows (rev3b, `/Users/edanuff/GitHub/Mega-IIe`)
+
+A working Apple II built around an extracted Mega II (no FPI, no ADB micro,
+a 65C02 and an RP2040 keyboard/power controller). Netlist (kicad-cli):
+- `/IWM/~{RESET}`: Mega II pin 35, the 65C02 RESB, the IWM, the Slotmaker,
+  the slot connector pin 31, **two 4k7 pull-ups**, the front-panel reset
+  switch to ground, an **NPN open-collector driver (Q3 BC817) from the RP2040's
+  RESET_CTL**, and two read-backs into the RP2040s (74LVC2G04 → GPIO11
+  `RESET_STATUS`, 74HCT245 → the video RP2040). Nothing drives the line
+  push-pull: they treat it as a shared open-drain net, i.e. consistent with
+  the Mega II being able to drive it itself.
+- Firmware `power_sequence.c`: on power-on the RP2040 **asserts reset before
+  enabling the supplies, waits 50 ms after they are on, then releases**;
+  its power-cycle and Control-Reset paths hold for 250 ms. It never waits on
+  or relies on the Mega II's own power-on reset; `RESET_STATUS` is only read
+  once at start-up (no monitoring for a Mega II-originated reset).
+- No comment or code in the project describes the Mega II re-asserting
+  reset after release. Their design choice — always give the Mega II an
+  externally-held reset that outlasts the supply ramp by 50 ms — is the same
+  posture the a2mega's 2G06 hold gives it in slot-powered use.
+
