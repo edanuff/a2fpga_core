@@ -99,3 +99,34 @@ IIe-keyboard CAPLOCK/CNTRL/SHIFT. Vectors $1FF4–$1FFF: **every interrupt
    breakpoint at `$147E` and `$1400`, trace the normal boot's timeline
    (when the main loop starts, when the first keyboard poll happens) to
    calibrate the 10 ms.
+
+## Bench specifics (ed, 2026-09-12)
+
+- **This ROM 01 machine uses a classic IIe keyboard on J13, not ADB.** So the
+  live inputs to the reset logic are the IIe-connector lines: P2.6 /KRESET
+  (the keyboard's RESET key line) and P3.1 CNTRL (the Control key line),
+  plus the matrix scan through P1 / the GLU select lines (`$18AC`). On the
+  ROM 3 netlist those port pins are grounded (Parker: "always 0 on ROM 3");
+  on ROM 01 they come from J13. The Control-Reset path in the main loop is
+  therefore: `/KRESET low` and (`CNTRL low` or `$03.7` or `$0B.0`) → assert
+  at `$147E`; release when /KRESET reads high again. **A /KRESET that reads
+  low persistently parks the machine in reset** — the same symptom as the
+  bench wedge. The ADB-keyboard paths (`$0A.2/$0A.3` via `$44`) are inert
+  without ADB devices: a Talk with no response leaves them clear.
+- **The ADB GLU (KEYGLU, UI12) sits on RESET.L too**, as an input (pin 33):
+  it is the register file between the CPU ($C000/$C010/$C024–$C027) and the
+  micro (P0 data, P2.0–3 select, P2.4 strobe), reset by the line, with no
+  reason or means to drive it. It matters only as the path by which
+  spurious bus writes could reach the micro's command register.
+
+Measurements that follow from this (all digital, AD3, no board handling
+beyond a clip on the keyboard cable):
+1. **J13 /KRESET and CNTRL** alongside slot /RESET: if either reads low
+   at, or in the 10 ms before, the pull, the micro is asserting via its
+   Control-Reset logic and the question becomes why the line dips
+   (pull-up value on this board, keyboard cable, coupling from the bus
+   starting up).
+2. **ADB data line at the ADB port**: traffic before the pull = the micro
+   is out of its SYNC-wait and polling; silence = still waiting.
+3. Micro P25 (pin 49) vs the line, if the above are inconclusive.
+
