@@ -247,3 +247,26 @@ micro's own start time.
   can settle; (3) the firmware still has no P25 action at +9.97 ms after a
   cold clock start (cold-init start; the assert needs /KRESET and CNTRL both
   low and comes ~8 ms later).
+
+## Bench closure (2026-09-13, slot-7 AD3 records G71–G74)
+
+- **CREF runs from the same instant as 7M and Φ0 and never stops**, through the
+  whole 283 ms hold and through the pull. The micro is clocked throughout; its
+  start is its own RC. The "clock gated by reset" synchroniser is dead.
+- **The power-on hold is 4442 lines = 256 + 16 × 262 after the clock start**,
+  the 17th wrap of the vertical counter (video counter starts at $100, first
+  frame 256 lines, vsync 224 lines in). POR owner = a frame-counting chip on
+  RESET.L: the VGC or the KEYGLU. Not the Mega II (die), not the FPI (no frame
+  input).
+- **The 10 ms pull follows whichever edge releases the line**, ours included,
+  by 9.952–9.990 ms, and only when that edge lands within ~10–20 ms of the
+  machine's own release (2/6 for our edges at 284–293 ms after the clock start,
+  0/27 at ≥ 306 ms). The 38 µs spread of the delay is the size of the SYNC-wait
+  poll iteration (≈42 cycles at CREF/4), which is the strongest remaining hint
+  that the micro's cold init is in the causal chain, re-timed by the KEYGLU
+  leaving reset at the edge. Which chip sinks the line and why the IIe keyboard
+  on J13 gates it remain open; the firmware's own assert path does not fit
+  the time, so either an input we cannot see is low or the KEYGLU drives it.
+- **Card rule adopted:** never release inside that window and never arm at the
+  edge (firmware mode 4: socket-off release + 20 ms arm; card-first hold 300 ms
+  after the clock).

@@ -218,7 +218,7 @@ static const char *gs_mode_name(unsigned m)
 {
     static const char *n[] = { "NATURAL (FPGA arms at the machine's release)", "EARLY (armed under our hold, TWGS model)",
                                "TIMED (release socket-off, arm on rise)", "TIMED+ (armed under hold, timed release)",
-                               "AUTO (clock already up at start -> release socket-off, arm late; clock later -> TIMED+ 1 s)" };
+                               "AUTO (release socket-off, arm late; clock already up at start -> at once, clock later -> after a 300 ms hold)" };
     return m < 5 ? n[m] : "?";
 }
 

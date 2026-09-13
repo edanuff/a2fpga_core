@@ -815,6 +815,32 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   when slot-powered, arm 20 ms after the edge) is the mitigation and is
   sufficient on both machines.
 
+  **Closed as far as the slot allows, 2026-09-13 (G70–G74, six AD3 taps
+  on the slot 7 breakout: /RESET, CREF, +5V, Φ0, 7M, SYNC.L; Mega II die
+  photos in a separate session).** What the ROM 01 does at power-on: the
+  clocks start ~50 ms after +5V, CREF among them and never gated; /RESET
+  is held low for exactly 4442 lines = 256 + 16 × 262 after the clock
+  start (282.934 ms, identical to 2 µs on every power-up and on the ROM
+  03) — the 17th wrap of the vertical counter, so the POR owner counts
+  video frames: the VGC or the KEYGLU. The Mega II has no driver on its
+  reset pin (die), the FPI has no frame-rate input, and the net has no
+  motherboard pull-up on either revision. **The 10 ms pull follows
+  whichever rising edge releases the line — the machine's own or ours —
+  by 9.952–9.990 ms, about half the time, and only when that edge lands
+  within ~10–20 ms of the machine's own release: 2 pulls / 6 for our
+  releases at 284–293 ms after the clock start, 0 / 27 for every release
+  at ≥ 306 ms up to 1.6 s.** The 38 µs spread of the delay is the size of
+  the ADB micro's SYNC-wait poll iteration, the strongest remaining hint
+  that its cold init (re-timed by the KEYGLU leaving reset at the edge)
+  is in the causal chain; which chip sinks the line (M50740 P25 or KEYGLU
+  pin 33) and why the IIe keyboard on J13 gates it cannot be resolved from
+  the slot. **Firmware (09-13): mode 4 uses the same recipe on both paths —
+  release with the socket OFF, arm 20 ms after the line reads high — and
+  the card-first hold is 300 ms after the clock (release ≈ 410 ms after
+  the clock, 100+ ms past the window) instead of 1 s.** Notes:
+  `adb_micro_rom01_notes.md`; tools: `ad3_reset_record.py drecord --save`,
+  `ad3_seq_analyze.py`.
+
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
   driven; STATUS shows PH2 alive and the pad levels, and PH2_PERIOD/

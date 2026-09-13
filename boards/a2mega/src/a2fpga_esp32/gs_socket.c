@@ -17,13 +17,17 @@
  *              bus, like a real chip) -> probe -> release at the machine's own end
  *   2 TIMED    hold -> clock -> hold_ms -> release, socket off -> slot reset high -> arm (v6)
  *   3 TIMED+   hold -> clock -> arm under our hold -> hold_ms -> release
- *   4 AUTO     clock already running when we started (slot-powered start: the machine
- *              has been held by the 2G06 since power-on) -> release with the socket OFF
- *              and arm LATE_MS after the line reads high (G53: with the core running at
- *              our release, the machine pulled reset 9.9 ms after that rising edge, as it
- *              does 9.9 ms after its own release in G45/G47/G49, ~50 %; with no core
- *              running at +10 ms it never has, G51); clock appears later (card alive
- *              before the machine) -> mode 3 with a 1 s hold (8/8 so far)
+ *   4 AUTO     default. Always: release with the socket OFF, arm LATE_MS (20 ms) after
+ *              the line reads high. Clock already running when we started (slot-powered
+ *              start: the machine has been held by the 2G06 since power-on) -> release
+ *              at once (G54 6/6). Clock appears later (card alive before the machine)
+ *              -> hold AUTO_LATE_HOLD_MS (300 ms) after the clock first (release ~410 ms
+ *              after the clock). Why: this ROM 01 IIgs (IIe keyboard on J13, no real
+ *              65816 executing) re-asserts /RESET 9.95-9.99 ms after ANY rising edge
+ *              that lands within ~10-20 ms of its own power-on release at 282.9 ms
+ *              after its clocks start, about half the time, and parks (G45-G74); no
+ *              edge at >= 306 ms has ever pulled (0/27). Arming 20 ms after the edge
+ *              keeps the core out of that 10 ms too (G53 vs G54).
  * The ESP32 only sequences; the FPGA does the microsecond parts (0x2E bits
  * 2/3/4, connector). An FPGA already armed on ESP32 start is adopted. Storage
  * gating stays: the FPGA will not release until the disk task has written the
@@ -57,7 +61,14 @@
 #define GS_MODE_DEFAULT 4
 #endif
 #define HOLD_MS_DEFAULT 1000
-#define AUTO_LATE_HOLD_MS 1000   /* mode 4, clock appeared after us: hold after the clock */
+/* Mode 4, clock appeared after us (card alive first): timed hold after the clock.
+ * The ROM 01 bench (test_log G74) showed the machine's 10 ms re-assert follows ANY
+ * rising edge of /RESET that lands within ~10-20 ms of its own release at 282.9 ms
+ * after its clocks start (2 pulls / 6 for edges at 284-293 ms), and never one at
+ * 306 ms or later (0 / 27 up to 1.6 s). The clock-alive confirmation already adds
+ * ~110 ms, so 300 ms here puts our release ~410 ms after the clock: 100+ ms past the
+ * window with the same socket-off release + late arm the slot-powered path uses. */
+#define AUTO_LATE_HOLD_MS 300
 
 typedef enum { ST_OFF = 0, ST_MACHINE_OFF, ST_PROBE, ST_TIMED_HOLD, ST_WAIT_RISE, ST_ARMED, ST_NO_RIBBON, ST_MANUAL } st_t;
 
@@ -74,7 +85,8 @@ static unsigned s_mode     = GS_MODE_DEFAULT;
 static unsigned s_hold_ms  = HOLD_MS_DEFAULT;
 static bool     s_reported = false;
 static bool     s_alive_at_start = false;   /* machine clock already running on our first STATUS read */
-static unsigned s_eff_mode = 1;             /* mode 4 resolves to 1 or 3 per sequence */
+static unsigned s_eff_mode = 1;             /* mode 4 resolves to mode 2 per sequence (hold differs) */
+static unsigned s_auto_hold_ms = 0;         /* mode 4: 0 slot-powered (machine held since power-on), AUTO_LATE_HOLD_MS card-first */
 static unsigned s_late_ms  = 20;            /* modes 2/4: arm this long after the slot reset reads high */
 static int64_t  s_rise_us  = 0;
 static bool     s_autotrig = false;   /* bench: arm the /RES-fall trace trigger inside the sequence */
@@ -154,7 +166,7 @@ void gs_socket_a2_release(void)
 
 static unsigned eff_hold_ms(void)
 {
-    if (s_mode == 4) return s_eff_mode == 3 ? AUTO_LATE_HOLD_MS : 0;   /* slot-powered path: release at once */
+    if (s_mode == 4) return s_auto_hold_ms;   /* slot-powered: release at once; card-first: cover the window */
     return s_hold_ms;
 }
 
@@ -265,10 +277,14 @@ void gs_socket_poll(void)
         if (s_count < ALIVE_SAMPLES) break;
         s_since_us = now;
         if (s_mode == 4) {
-            /* clock already running when we came up = slot-powered start, machine held
-             * since power-on: release now (probe finds the line free). Clock appeared
-             * after us = card alive first: cover the machine's 283/293 ms window. */
-            s_eff_mode = s_alive_at_start ? 2 : 3;   /* 2 = release socket-off, arm late */
+            /* Both paths: release with the socket OFF, arm LATE_MS after the line reads
+             * high (G54 6/6, G70 7/7). Clock already running when we came up = slot-
+             * powered start, machine held by the 2G06 since power-on: release now.
+             * Clock appeared after us = card alive first: hold AUTO_LATE_HOLD_MS past the
+             * clock so our release lands well after the machine's own 282.9 ms release
+             * and its ~20 ms re-assert window (G74). */
+            s_eff_mode = 2;
+            s_auto_hold_ms = s_alive_at_start ? 0 : AUTO_LATE_HOLD_MS;
             s_alive_at_start = false;              /* only the first sequence can be the slot-powered one */
         } else {
             s_eff_mode = s_mode;
