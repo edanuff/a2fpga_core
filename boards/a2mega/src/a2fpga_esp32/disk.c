@@ -40,6 +40,7 @@
 #include "gcr_dsk.h"      /* on-the-fly .dsk/.do <-> 6-and-2 GCR nibble codec */
 #include "settings.h"     /* persisted image overrides + slot map */
 #include "disk.h"
+#include "gs_socket.h"
 
 static const char *TAG = "disk";
 
@@ -743,7 +744,7 @@ void disk_poll(void)
             bool any = false;
             for (int v = 0; v < NDRV; v++) any = any || g_mounted[v];
             for (int u = 0; u < NHDD; u++) any = any || g_hdd_mounted[u];
-            if ((any && !g_remount_req) ||
+            if ((any && !g_remount_req && gs_socket_ready()) ||
                 esp_timer_get_time() > 7000000) {
                 /* Program the slot map JUST before the release — this late in
                  * boot the link is proven good (the mounts above ran over it),
@@ -751,7 +752,7 @@ void disk_poll(void)
                  * race-free. */
                 apply_slot_map();
 
-                fpga_reg_write(A2REG_A2_RST_RELEASE, 1);
+                gs_socket_a2_release();              /* 0x2E.0, via the socket module (keeps its assert bit) */
                 s_released = true;
                 DLOGI("A2: RESET RELEASED%s", any ? "" : " (NO MEDIA)");
             }

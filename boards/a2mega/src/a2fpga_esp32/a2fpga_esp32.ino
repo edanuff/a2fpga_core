@@ -43,6 +43,7 @@
 #include "settings.h"
 #include "wedge_watch.h"
 #include "disk.h"
+#include "gs_socket.h"
 #include "menu.h"
 #include "w5100.h"
 #include "wifi_bridge.h"
@@ -852,6 +853,7 @@ static void load_wifi_credentials() {
 static void disk_task(void *arg) {
     (void)arg;
     for (;;) {
+        gs_socket_poll();      /* in-socket 65816 auto-arm (no-op without the ribbon) */
         disk_poll();
         fpgaupdate_poll();
         vTaskDelay(pdMS_TO_TICKS(2));

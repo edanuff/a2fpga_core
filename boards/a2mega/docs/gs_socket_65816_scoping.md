@@ -221,8 +221,8 @@ unlike the NMOS 6502); BE is asynchronous.
   the low phase, not just "before the rise".
 - Reset clears the Speed register: the reset-vector fetch runs at 1 MHz.
 - RDY: honoured by the FPI only at Normal speed per the TWGS manual; we
-  honor it always (safe superset). We do **not** need to drive RDY_OUT in
-  iteration 1 (WAI can be internal); recommendation: leave it released.
+  honor it always (safe superset). We do **not** drive RDY_OUT (WAI stays
+  internal) — decision record and evidence in §3.3.
 - **BE is a per-cycle pulse, not a DMA-only level (measured 2026-09-06,
   AD3 directly on the ROM 01 socket, no CPU):** the FPI drives BE low for
   ~66 ns every cycle, from ~32 ns before the PHI2 falling edge to ~34 ns
@@ -239,6 +239,81 @@ unlike the NMOS 6502); BE is asynchronous.
   works with a real 65C816 whose VDA/VPA are wired somewhere, so C3 should
   look at the socket pins 7/39 with a meter (open = confirmed unused).
   VP **is** wired and driven by us.
+
+### 3.3 Deliberate departures from the W65C816 datasheet (decision record)
+
+Kept here so a future compatibility investigation does not have to
+rediscover why the socket PHY behaves differently from the chip it
+replaces. Each entry says what the datasheet expects, what we do, and the
+evidence the decision rests on.
+
+**RDY — we listen, we never drive (decided 2026-09-11, ed).**
+
+- *Datasheet:* RDY is bidirectional. As an input, a low level halts the CPU
+  at the next PHI2 fall (reads and writes, §7.17). As an output, the CPU
+  itself pulls RDY low after a WAI instruction until an interrupt arrives
+  (§7.6), which is why the pin must be wire-OR'd with an external pull-up.
+  A literal drop-in would therefore drive the socket's RDY pin low during
+  WAI.
+- *What we do:* `gs_socket_phy.sv` samples RDY at the PHI2 fall and repeats
+  the cycle while it is low (`stall_count`), and `gs_rdy_out_o` is tied
+  released — WAI stays internal to the core. The U15 open-drain driver on
+  `FPGA_GS_RDY_OUT` exists on the board and stays idle. The same holds for
+  the slot-side RDY driver: we do not pull the slot's RDY either.
+- *Evidence 1 — the machine (IIgs ROM 3 KiCad netlist, exported with
+  kicad-cli, test log 09-10):* the CPU's RDY pin 2 is the slot RDY.H net:
+  seven slot pin-21s, R113 4.7 k pull-up, the FPI's pin 55 (drawn as
+  INVBADR.L) and the UD12 74LS74 (D and /R of the DRES.H flop). Nothing on
+  that net is a consumer of a WAI announcement from the CPU; the FPI's
+  interest in RDY is the slot-card halt protocol, which is defined
+  relative to the 1 MHz PH0/Q3 cycle. The IIgs Hardware Reference and the
+  TWGS manual both say RDY is honoured only at Normal (1 MHz) speed.
+- *Evidence 2 — the TransWarp GS (ReActiveMicro schematic, test log
+  09-10/11):* the product that already puts a foreign 65816 in this socket
+  **leaves the socket's RDY pin unconnected** on its CPU cable (J5 pin 3
+  open, together with VDA, VPA, M/X, E and MLB), and its own W65C816's RDY
+  pin is only a pull-up (R5-4/9). It never halts its CPU through RDY at
+  all: slot RDY and DMA go from the slot edge into GAL U44, clocked by 7M
+  with PH0 and Q3 as inputs, and come out as GS_PAUSE, which steers the
+  U22 74F157 clock mux — the fast CPU is stopped by holding its clock, the
+  same way the FPI stretches PHI2 for slow cycles. Thirty years of
+  software ran on that arrangement, so a socket CPU that never drives RDY
+  and never sees a WAI reflected on the net is a proven-compatible state.
+- *Why the TWGS chose that (our reading):* (a) slot RDY is asynchronous
+  to a fast CPU clock; sampling it in the GAL on 7M and turning it into a
+  synchronous clock hold removes the tPCS race at the CPU pin; (b) the
+  protocol lives in the slot timing (PH0/Q3), which the card needs from the
+  edge anyway; (c) a clock hold freezes the cache and bus state machines
+  in lockstep with the CPU, which RDY cannot; (d) one fewer 5 V wired-OR
+  line to arbitrate with 74F parts, and fewer conductors in the ribbon.
+- *Why listening is still right for us:* our core is clocked by the FPI's
+  own PHI2 at Normal speed, so honouring RDY at the fall is exactly what a
+  real chip in the socket does when a card halts it, and it costs nothing
+  (safe superset of "only at Normal speed"). Reading it at the socket
+  rather than the slot is the same net; only the sample point differs.
+- *If this is ever revisited:* the one scenario that changes the answer
+  is a core running faster than PHI2 (the HyperRAM TransWarp plan). Then
+  the TWGS scheme applies — slot RDY/DMA into a synchronous clock hold —
+  and RDY_IN into the core is the wrong tool. Driving RDY_OUT would only
+  matter if some software depended on seeing WAI on the RDY net; none is
+  known, and the TWGS proves the machine does not need it.
+
+**BE — per-cycle 66 ns pulse ignored** (§3.2, measured 09-06): the
+datasheet treats BE as a DMA-style level; the FPI pulses it every cycle
+around the PHI2 fall, and a 4 MHz-grade chip drives through it (tBVD
+60 ns). The PHY ignores BE lows shorter than ~110 ns and never gates its
+receive path on BE. A sustained low is honoured.
+
+**Internal cycles — previous address repeated on I/O-space internal
+cycles** (§4.5, G19–G21): the socket has no VDA/VPA (the TWGS cable leaves
+those pins open too), so the FPI classifies every cycle by address; the
+core's operand+1 on the R-M-W internal cycle produced a phantom $C028 read.
+A real 65816 presents an address the FPI can also mis-classify, but its
+internal cycle repeats the operand address; we now do the same for I/O
+space. Audit list for other core-vs-chip differences lives in §4.5.
+
+**VP — driven** (pin 1, U15 open-drain out): the motherboard does not use
+it (the TWGS cable does carry GS_VP); harmless and kept for the trace.
 
 ## 4. Timing budget → architecture (as built in S2)
 
@@ -599,6 +674,146 @@ undefined there and neither the logic nor the 38 pins exist in that build):
   while the card is slot-powered does not enumerate (PD stays SRC/DFP; the
   `v` virtual-replug key moves it to SNK/UFP but the device still did not
   appear). Helper: scratch `gstel.py "<cmd>; <cmd>"`.
+
+- **Auto-arm (S6, v7 2026-09-09 — FPGA POR probe + hardware arm).** What the
+  ROM 01 machine taught us (test log G30–G41): (1) nothing may drive, or even
+  listen at, the socket while the machine is in its own power-on reset;
+  (2) a machine that leaves reset with no CPU present for long wedges until a
+  power cycle, and so does a second reset pulse right after the first;
+  (3) the machine's own power-on time varies (cold vs warm), so a fixed
+  delay is either too slow (ed's requirement: our added latency ≤ 500 ms)
+  or unsafe. So the card holds the slot reset whenever the machine is dead,
+  and the FPGA does the timing-critical part: with the **POR probe** enabled
+  (0x2E bit 2) it lets the /RESET line float for 40 µs every 1 ms while
+  holding and samples it at the end of the window; the first time the
+  machine's own reset logic no longer pulls it low it stays released
+  (`por_done`, 0x2E read bit 5) and, with bit 3 set, **arms the GS socket in
+  the same clock** (CTRL forced to arm+listen). The core cold-starts within
+  microseconds of the machine's own release, with a CPU present the whole
+  time. Gated on the storage-ready release (0x2E bit 0, sticky), so the boot
+  still finds its disks. The ESP32 (`gs_socket.c`) only sequences:
+  MACHINE OFF (no slot clock, STATUS.7): socket off, hold asserted (a fresh
+  assert clears `por_done`) → clock alive 100 ms → probe+auto-arm enabled →
+  `por_done` → ARMED; clock stops → back to MACHINE OFF; armed but no PHI2
+  at the socket for 2 s → no ribbon, release and idle like a plain card; an
+  already-armed FPGA on ESP32 start is adopted untouched. Setting
+  `gs_socket_off` disables it; telnet `gs …` commands take manual control
+  until `gs auto`; `gs` prints the state and the slot clock/reset/hold bits.
+  Presence detection for 1.0a4: board_1_0a4_requirements.md item 12 (not
+  BUS_5V).
+
+  **Status 2026-09-10 (open):** the natural-release arm boots the machine
+  sometimes (G43, G44-with-a-pulse) and wedges it other times (G41); a
+  fixed 1–2 s hold before the release boots every time (G38, G40) but
+  misses the ≤500 ms requirement. Ed's reading, adopted as the working
+  hypothesis: this is a deterministic sequencing problem (the TransWarp GS
+  brings up a socket CPU in this machine; this card coexists with a TWGS
+  machine), not a timing window; the G44 trace points at two concrete
+  card-side facts — the HDD unit answering 'not ready' to an early start
+  (boot falls to the floppy) and a ~1.5 µs /RES pulse at the socket. See
+  the test log's end-of-day row for the experiment list.
+
+  **TransWarp GS reference model (schematic read 2026-09-10, test log):**
+  the TWGS's CPU reset is the CPU socket's own /RES (cable J5 pin 2 = DIP
+  40; the slot's pin 31 is not used at all) re-registered by a single 74F74
+  clocked by the CPU clock, held low only until the card's FPGA reports
+  DONE; its bus buffers are up from configuration on, it leaves the
+  socket's RDY, VDA, VPA, M/X, E and MLB pins unconnected, slot RDY/DMA/
+  PH0/Q3/7M go through a GAL to a GS_PAUSE wait for the fast CPU, and it
+  can pull the socket /RES low with an open-collector transistor exactly
+  as we do. No RC and
+  no timed hold anywhere. The IIgs netlist adds the number the machine
+  itself imposes: the M50741's power-on RC is 200 k × 1 µF (≈200 ms), which
+  is the ≈230 ms natural release the probe sees. Proposed next step (test
+  log): arm the socket while /RESET is still low and let the core leave
+  reset on the machine's own rise, so nothing is switched at release time.
+
+  **v8 (2026-09-11) — what the bench can now do without another build:**
+
+  - *Bring-up modes* (`gs mode <n>`, firmware `gs_socket.c`, default 1):
+    0 NATURAL = v7 (FPGA probe, hardware arm at the machine's own release);
+    1 EARLY = the TransWarp model: 0x2E bit 4 ARM_EARLY makes the FPGA
+    force CTRL |= 0x05 as soon as it is holding after storage-ready, so
+    the socket shifters are on and the core sits in reset on a driven bus
+    (address = the core's reset-state address, R/W high, data hi-Z) exactly
+    as a real 65816 does under /RES low; the probe then finds the machine's
+    own release (~230 ms) and the core starts on that rise — nothing is
+    switched at release time; 2 TIMED = v6 (hold `gs hold <ms>` after the
+    clock, release with the socket off, arm when the slot reset reads
+    high); 3 TIMED+ = arm under the hold, then a timed release. G36 (arm
+    under hold → reset stayed low) is not a counter-example to mode 1: v3
+    released ~100 ms after the clock, and G37 showed that timing wedges the
+    machine with the socket off too.
+  - *Bring-up event log* (`hdl/esp32/a2_event_log.sv`, GS window regs
+    32–39; `gs events` / `gs evclear`): 128 entries of {54 MHz timestamp,
+    code, context}. Codes: 1/2 slot /RESET fall/rise, 3/4 socket /RES
+    fall/rise, 5/6 our hold on/off (probe windows excluded), 7 0x2E write
+    (data = value), 8 CTRL write (data = value), 9 por_done, 10/11 clock
+    alive/lost, 12 storage/backstop release, 13 MCU ready, 14/15 core
+    running/reset, 16 trace trigger, 17/18 socket pins ours/released, 19
+    probe start, 20 hardware arm. Context byte = {hold, released, por_done,
+    alive, listen, arm, pins_ours, running}. The log stops when full (the
+    first 128 events after a clear are the boot sequence); coincident
+    events drain one per clock in code order, so their timestamps can be a
+    few 18.5 ns ticks late. Reg 32 reads {full, count}; write 0x80 to
+    clear; 33 = read index; 34–37 time bytes; 38 code; 39 data. This is
+    the instrument for the G44 pulse question: a 1.5 µs /RES pulse shows
+    as a fall/rise pair at both the slot and the socket, and whether our
+    hold or a CTRL/0x2E write sits next to it in time settles which lever
+    it was.
+  - 0x2E read-back is now {0, arm_early, por_done, hold, autoarm, probe,
+    assert, release}; the telnet `gs` line decodes it.
+
+  **Status 2026-09-12 (bench G45–G52, event log):** the wedge is
+  understood well enough to ship around. With the card alive before the
+  machine, this IIgs releases its own reset at ~283 ms after its clock
+  starts; if our socket is enabled and the core running at that moment
+  (or within the next few ms), something on the motherboard re-asserts
+  reset exactly ~10 ms after that release and parks (power cycle only);
+  with the socket off it releases once and stays released (G51), so the
+  re-assert is provoked by our enabled socket, not native — the specific
+  thing it reacts to is still open (VP/bank-byte/R/W drive during the
+  core's reset state, or a first-instruction cycle shape; the trace and
+  `gs late` are the tools). Covering that window with our hold and
+  releasing at ~1 s boots every time (G40, G48, G50). **Firmware mode 4
+  (default, 6234a517)**: clock already running at firmware start =
+  slot-powered start (machine held by the 2G06 since power-on, its window
+  long past) → probe + arm-under-hold, release at once — **core running
+  490 ms after FPGA configuration (G52)**, inside the 500 ms budget; clock
+  appearing after us = card alive first → arm under hold, release 1 s
+  after the clock. Open: the 20 ms late-arm experiment for the card-first
+  case; the RDY/socket decision record is §3.3.
+
+  **Correction, later on 2026-09-12 (G53–G54):** the 10 ms clock runs from
+  the *last rising edge of /RESET*, whoever makes it — the slot-powered
+  path with arm-under-hold and an immediate release wedged the same way
+  9.9 ms after **our** release (G53, AD3-verified: a clean hard pull). It
+  pulls only when our core is running when that mark arrives (never with
+  the socket off, G51). **Firmware 974f179b: mode 4's slot-powered path
+  releases with the socket OFF and arms 20 ms after the line reads high
+  (`gs late 20`) — 6/6 boots, AD3 shows no dip.** Core running ≈ 535 ms
+  after configuration; trimming the 109 ms clock-alive confirmation and
+  the 10 ms poll brings it inside 500 ms. Card-first path still uses the
+  1 s cover; the 20 ms late arm is the candidate to replace it. The
+  identity of the puller and what our running core does in those first
+  10 ms that a stock 65816 does not remain open (M50740 P2.5 or Mega II;
+  logic-level pull, not contention).
+
+  **Resolved further, evening of 2026-09-12 (G59–G67):** the puller is the
+  **M50740 ADB micro on ROM 01, through its IIe-keyboard Control-Reset
+  path** (firmware `$146C` → `$147E`; the micro does not hold /RESET at
+  power-on, the 333 ms release is the Mega II's power-on reset; a Timer X
+  watchdog expiry restarts the firmware into the released state; notes in
+  `adb_micro_rom01_notes.md`). Condition: ROM 01 + IIe keyboard on J13 +
+  a2mega in the slot + no real 65816 executing. Evidence: stock ROM 01
+  8/8 clean; empty socket without the card 4/4 clean; card in with a real
+  CPU 5/5 clean; card in, socket empty: 12 pulls / 22 with the IIe
+  keyboard, 0 / 10 without; ROM 03 (ADB keyboard, M50741) 7/7 clean. Open:
+  why the micro's KRESET.L input reads low ~10 ms after the release under
+  that condition. The firmware's sequence (hold through the machine's first
+  second when the card is powered first; release ~0.5 s after configuration
+  when slot-powered, arm 20 ms after the edge) is the mitigation and is
+  sufficient on both machines.
 
 - **Bench procedure this enables (C3/C4):** power up with the ribbon in and
   CTRL = 4 (listen) — only the control-input shifter is enabled, nothing is
