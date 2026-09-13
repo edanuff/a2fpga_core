@@ -160,20 +160,23 @@ def cmd_drecord(dwf, args):
     dios = [int(x) for x in str(args.dio).split(',')]
     clocks = [int(x) for x in str(args.clock).split(',') if x != ""]   # clock-like bits: activity per ms, not runs
     runs_by = {b: [] for b in dios if b not in clocks}   # per DIO bit: (level, length) run-length encoded
-    per_ms = int(round(rate / 1000.0))
+    per_ms = max(1, int(round(rate * args.bin_us / 1e6)))   # samples per activity bin (--bin-us; default 1 ms)
     n_bins = n_total // per_ms + 2
     # clock bits: per 1 ms bin, min and max sample value (0/0 static low, 1/1 static high, 0/1 toggling)
     binmin = {b: np.ones(n_bins, dtype=np.uint8) for b in clocks}
     binmax = {b: np.zeros(n_bins, dtype=np.uint8) for b in clocks}
     got = 0; n_lost = n_corrupt = 0; t0 = time.time()
+    raw = np.zeros(n_total, dtype=np.uint16) if args.save else None   # --save: keep every sample word
     while got < n_total and time.time() - t0 < args.seconds + 20:
         dwf.FDwfDigitalInStatus(hdwf, ctypes.c_int(1), ctypes.byref(sts))
         dwf.FDwfDigitalInStatusRecord(hdwf, ctypes.byref(avail), ctypes.byref(lost), ctypes.byref(corrupt))
         n_lost += lost.value; n_corrupt += corrupt.value
         if avail.value > 0:
-            n = min(avail.value, 1000000)
+            n = min(avail.value, 1000000, n_total - got)
             dwf.FDwfDigitalInStatusData(hdwf, buf, ctypes.c_int(2 * n))
             words = np.frombuffer(bytes(bytearray(buf)[:2 * n]), dtype=np.uint16)
+            if raw is not None:
+                raw[got:got + n] = words
             for b in clocks:
                 bits = ((words >> b) & 1).astype(np.uint8)
                 idx = (np.arange(n) + got) // per_ms
@@ -195,6 +198,9 @@ def cmd_drecord(dwf, args):
             time.sleep(0.002)
     dwf.FDwfDeviceCloseAll()
     print("got %d samples (%.2f s), lost %d, corrupt %d" % (got, got / rate, n_lost, n_corrupt))
+    if raw is not None:
+        np.save(args.save, raw[:got])
+        print("raw samples saved to %s (uint16 words, bit n = DIO n, %.0f S/s)" % (args.save, rate))
     # common time reference: first rise of --ref (default: the first run-listed DIO), else record start
     ref = 0
     refbit = args.ref if args.ref is not None else (next(iter(runs_by)) if runs_by else None)
@@ -203,7 +209,7 @@ def cmd_drecord(dwf, args):
     print("t = ms from the first rise of DIO%s after start (record start if none)" % refbit)
     for b in dios:
         if b in clocks:
-            print("== DIO%d (clock): activity per 1 ms bin" % b)
+            print("== DIO%d (clock): activity per %.0f us bin" % (b, per_ms * 1e6 / rate))
             report_activity(binmin[b], binmax[b], got // per_ms, per_ms, rate, ref)   # whole bins only
         else:
             print("== DIO%d: %d runs" % (b, len(runs_by[b])))
@@ -217,9 +223,23 @@ def first_rise_of(runs):
     return 0
 
 def report_activity(bmin, bmax, nb, per_ms, rate, ref):
-    """Collapse per-ms bins into intervals: TOGGLING (min!=max), static HIGH, static LOW."""
+    """Collapse activity bins into intervals: TOGGLING (min!=max), static HIGH, static LOW.
+    A clock sampled below its rate aliases, so single static-looking bins appear inside a
+    toggling stretch; any bin within 1 ms of a toggling bin counts as toggling."""
+    import numpy as np
+    tog = (bmin[:nb] == 0) & (bmax[:nb] == 1)
+    if tog.any():
+        # fill static gaps shorter than 1 ms that lie between toggling bins (keeps the
+        # first toggling bin, i.e. the clock-start instant, exact)
+        w = max(1, int(round(1000.0 * rate / 1e6 / per_ms)))   # bins per ms
+        t = tog.astype(np.int8)
+        d = np.diff(np.concatenate(([1], t, [1])))            # pad with toggling on both ends
+        gap_start = np.flatnonzero(d == -1); gap_end = np.flatnonzero(d == 1)
+        for s, e in zip(gap_start, gap_end):
+            if e - s < w and s > 0 and e < nb:                   # interior short gap
+                tog[s:e] = True
     def kind(i):
-        if bmin[i] == 0 and bmax[i] == 1: return "TOGGLING"
+        if tog[i]: return "TOGGLING"
         return "HIGH" if bmax[i] == 1 else "LOW"
     i = 0
     while i < nb:
@@ -227,7 +247,7 @@ def report_activity(bmin, bmax, nb, per_ms, rate, ref):
         while j + 1 < nb and kind(j + 1) == k: j += 1
         t0 = (i * per_ms - ref) * 1000.0 / rate
         t1 = ((j + 1) * per_ms - ref) * 1000.0 / rate
-        print("  %10.1f ms .. %10.1f ms  %-8s (%d ms)" % (t0, t1, k, j - i + 1))
+        print("  %11.3f ms .. %11.3f ms  %-8s (%d bins)" % (t0, t1, k, j - i + 1))
         i = j + 1
 
 def report_runs(runs, rate, args, ref=None):
@@ -263,6 +283,8 @@ def main():
     d.add_argument("--dio", default="0", help="DIO bit or comma list, e.g. 0,1,2,3,4,5")
     d.add_argument("--clock", default="", help="subset of --dio to summarise as per-ms activity (clock lines: CREF, 7M, PH0) instead of runs")
     d.add_argument("--ref", type=int, default=None, help="DIO bit whose first rise is t=0 for every channel (default: first non-clock DIO)")
+    d.add_argument("--bin-us", type=float, default=1000.0, help="activity bin for --clock lines in us (default 1000; 10 resolves clock start to 10 us)")
+    d.add_argument("--save", default="", help="save every sample word to this .npy (uint16, bit n = DIO n) for offline analysis")
     d.add_argument("--min-us", type=float, default=5.0)
     d.add_argument("--all", action="store_true")
     args = ap.parse_args()
