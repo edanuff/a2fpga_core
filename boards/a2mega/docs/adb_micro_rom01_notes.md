@@ -151,3 +151,24 @@ a 65C02 and an RP2040 keyboard/power controller). Netlist (kicad-cli):
   externally-held reset that outlasts the supply ramp by 50 ms — is the same
   posture the a2mega's 2G06 hold gives it in slot-powered use.
 
+## Emulator / FPGA-core survey (2026-09-12; clones under the session scratchpad)
+
+MAME (`apple2gs.cpp` + `m5074x.cpp`), KEGS (a2kegs mirror), GSplus, Clemens,
+MiSTer `Apple-IIgs_MiSTer`. **None models the Mega II as a reset source,
+holder or watchdog; none has a "Mega II re-resets when pulled low" comment;
+none has a power-on timing constant.** Only MAME models the real topology:
+the micro runs its real firmware, `set_pullups<2>(0x20)` puts a pull-up on
+P25, the M5074x ports reset to inputs, so the line is released until the
+firmware drives it; a P25 1→0 asserts the 65816 reset and resets the bus
+and the Mega II soft-switch state as a side effect (`adbmicro_p2_out`,
+3424–3461). MAME's only ordering note: "the 65816 loses a race to the
+microcontroller on reset" (modifier snapshot frozen for two $C061 reads).
+KEGS/GSplus: `do_reset()` at start, on host Ctrl-Reset, and on ADB command
+$10 — instantaneous. Clemens: RESB held 3 CPU cycles at power-on, 2 on
+Ctrl-Reset; its GLU is explicitly "not an accurate emulation". MiSTer:
+reset = OR of PLL-lock/buttons/host events, CPU `.RST_N(~reset)`; the ADB
+micro is behavioural; the only micro-power note is that the real micro
+keeps its RAM power-up flag ($51 = $A5) across a Ctrl-Reset. So the
+10 ms re-assert and the Mega II's power-on behaviour are not documented
+anywhere in software; they have to come from the bench.
+
