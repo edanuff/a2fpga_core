@@ -144,7 +144,13 @@ was, the edges are series-terminated (75/47/27 Ω), and the bus is
   - 2A `FPGA_GS_VP` → 2Y GS_VP with 549 Ω to +5 V (≈9 mA sink when low,
     τ ≈ 30 ns with ~50 pF). Not pulled on the FPGA side: during
     configuration VP follows the GW5A's default weak pull-up (high =
-    inactive). Harmless either way with no CPU running.
+    inactive). Harmless either way with no CPU running. **1.0a3 defect
+    (ed, 09-13): that 549 Ω goes to the card's +5 V rail, downstream of
+    the LM74700 ideal diode, so a VBUS-powered card with the machine off
+    back-feeds ≈ 9 mA into the FPI's VP input through the ribbon. 1.0a4:
+    pull GS_VP up to BUS_5V (J5-15) instead — `board_1_0a4_requirements.md`
+    item 13, which also asks for the same rail review on the shifters'
+    5 V sides and the slot-side pull-ups.**
 - **Series terminations:** 75 Ω on every address line, 47 Ω on data, 27 Ω at
   each end of PH2. Fine at 2.8 MHz edges over a short ribbon.
 
