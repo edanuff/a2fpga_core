@@ -323,6 +323,44 @@ no rev until the OPEN items that could change the netlist are closed.
    5a/5b's margin work. Also characterized: marginal acquisitions can
    latch a rotated frame (offset+wraparound, both axes, sink-independent
    — test log rows 49/53/56); clean catches always render true.
+12. **GS-socket ribbon presence detect (65816 drop-in).** The gateware only
+   drives the CPU socket when armed; today the firmware auto-arms from a
+   software test (listen mode, PHI2 seen alive for ~50 ms — the PHI2 pin
+   is pulled down, so no ribbon = never arms). Ed's decision 09-08: **do
+   NOT sense BUS_5V** — it is the socket power path and a divider on it
+   complicates the design. Candidates for a proper presence input: (a)
+   read back VP — **correction 09-13: the 549 Ω pull-up on GS_VP is our
+   own (U15's), not the motherboard's, and on 1.0a3 it hangs on the card's
+   +5 V rail; once it is moved to BUS_5V (item 13) VP becomes a genuine
+   "ribbon on a powered socket" level and needs only a 5 V→3.3 V shifter
+   input, which is already on the header** — (b) a dedicated header pin
+   that the DIP plug ties to VSS. Note the NC header positions
+   (VDA/VPA/E/MX/MLB) are CPU *outputs* on the real part and float on the
+   motherboard, so they cannot sense presence.
+
+13. **GS socket: reference every socket-side pull-up and 5 V supply pin to
+   BUS_5V, not the card's +5 V rail (ed, 09-13).** On 1.0a3 the 549 Ω
+   pull-up on U15's GS_VP output goes to the card's +5 V, which sits on the
+   *card* side of the LM74700 ideal diode. Whenever the card is powered
+   from VBUS (dock, monitor hub, bench) with the machine off and the ribbon
+   in the socket, that resistor **back-feeds ≈ 9 mA at up to 5 V through
+   the socket's VP pin into the FPI's input clamp and from there into the
+   unpowered motherboard rail.** Not the cause of any bench failure (the
+   ROM 01 re-assert reproduced with no ribbon fitted) and probably survivable,
+   but it is the one path by which our card powers an unpowered IIgs, and
+   every dock user has it. Fix: pull GS_VP up to BUS_5V (J5-15, the socket's
+   own VDD, upstream of the ideal diode), so the pull-up is dead exactly
+   when the motherboard is. While there, audit the rest of the socket side
+   for the same rule: U13/U14 VCCB and U16 VCC (the 5 V sides of the
+   shifters) — the 74ALVC164245 and SN74LV1T125 both specify Ioff partial-
+   power-down, so their 5 V side can come from BUS_5V and be unpowered with
+   the machine off without back-driving through the 3.3 V side (verify on
+   the datasheets before committing); RDY_OUT has no card pull-up (the
+   motherboard's 4.7 kΩ does it) and needs nothing. Apply the same review
+   to the slot side (2G06 RES_OUT / BUS_OE pull-ups, the LSF0108's 5 V
+   reference): pull-ups toward the Apple bus should reference the slot's
+   own +5 V, except where the card must *sink* with the machine off (the
+   reset hold is an open-drain low and needs no pull-up of ours).
 
 ## OPEN questions that could still change the rev (close before Friday)
 

@@ -223,7 +223,21 @@ module gs_socket_ctl (
     // Runaway entry: an opcode fetch from bank 0 RAM below $C000 that is not
     // the stack page (ROM 01 legitimately runs a block-move built on the
     // stack at $01xx during the cold start).
-    wire trig_hit = trace_trig_mode_i ? (op_fetch & (last_addr == trace_trig_addr_i))
+    // Address mode with TADDR = FF:FFFF means "freeze when the socket /RES
+    // falls while running" - what did the CPU do right before the machine
+    // asserted reset (bench G41: early starts make the IIgs reset and stay).
+    logic res_q;
+    always_ff @(posedge clk) res_q <= gs_res_n_i;
+    wire res_fall = res_q & ~gs_res_n_i;
+    wire trig_res = trace_trig_mode_i & (trace_trig_addr_i == 24'hFFFFFF);
+    logic res_fall_l;                            // /RES fall seen since the last fall_evt
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) res_fall_l <= 1'b0;
+        else if (fall_evt) res_fall_l <= 1'b0;
+        else if (trig_res & res_fall) res_fall_l <= 1'b1;
+    end
+    wire trig_hit = trig_res ? res_fall_l
+                  : trace_trig_mode_i ? (op_fetch & (last_addr == trace_trig_addr_i))
                                       : (op_fetch & (last_addr[23:16] == 8'h00) & (last_addr[15:14] != 2'b11) & (last_addr[15:8] != 8'h01));
     wire rom_op   = op_fetch & ((last_addr[23:16] != 8'h00) | (last_addr[15:14] == 2'b11));
     logic        trigd, auto_frozen, trig_ready;
