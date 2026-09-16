@@ -181,6 +181,17 @@ no rev until the OPEN items that could change the netlist are closed.
    so the bench powering story must be deliberate on 1.0a4, not
    accidental.
 
+4c. **Apple-off backfeed through the level shifters (NEW 09-14).** With the
+   card on USB power and the Apple off, R65 (549 Ω to `+5V` on `GS_VP`)
+   sources ~8 mA into the unpowered FPI, and the enabled LSF0108 passes
+   ~3-4 mA from the FPGA-side control pull-ups. Rev change: transceiver
+   `VCC(B)`, the LSF bias resistor, R65 and U16's supply move to `BUS_5V`,
+   a `BUS_5V`-present input gates the enables, and the transceiver BOM
+   becomes Nexperia 74ALVC164245 or TI SN74LVC16T245 (never TI
+   SN74ALVC164245, which has no partial-power-down rating). Full analysis,
+   datasheet citations and bench checks:
+   `apple_off_backfeed_level_shifters.md`.
+
 5. **Local bulk capacitance on the VBUS source rail** for bus-powered
    sink inrush: hub cold-boot inrush through the source switch sagged
    the shared rail hard enough to kill ESP32 WiFi for ~1 min in-slot
