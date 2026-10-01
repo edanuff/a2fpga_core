@@ -83,4 +83,4 @@ spi_connector: $(SPI_CONNECTOR_FILES)
 	@if [ -f esp32_spi_connector.vcd ]; then echo "=== VCD file generated: esp32_spi_connector.vcd ==="; echo "Open with: gtkwave esp32_spi_connector.vcd"; fi
 .PHONY: all qspi qspi_serializer stream sim wave clean help
 
-include hyperram.mk
+-include hyperram.mk
