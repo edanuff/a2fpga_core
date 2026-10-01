@@ -62,8 +62,8 @@ BSRAM, and this rev has no I2S path back from the ESP32.
 
 | Step | What | Status |
 |---|---|---|
-| B1 | `hyperram_ctrl` (custom, see §4) + Infineon-model TB | in progress |
-| B2 | `hyperram_bist` + ESP32 register access + standalone `a2p25_psram_test` project, built at several CK rates | in progress |
+| B1 | `hyperram_ctrl` (custom, see §4) + Infineon-model TB (`make hyperram`) | **sim PASS at 0–4 ns board delay**; standalone PnR clk_mem 116.8 MHz |
+| B2 | `hyperram_bist` (`make hyperram_bist`, register map in its header) | **sim PASS**; next: `a2p25_psram_test` project = BIST + ESP32 OPI link (a2mega `esp32_ospi_connector`) + firmware commands, built at 108/81/54 MHz CK |
 | B3 | DOC5503: `sound_glu` + `doc5503_pipelined` on a HyperRAM port | todo |
 | B4 | Framebuffer on PSRAM (the existing render/scanout mechanism) feeding DP | todo |
 | B5 | Shadow memory in PSRAM (`apple_memory_sdram`, `VGC_IN_SDRAM`) | todo |
@@ -110,6 +110,21 @@ phase-shifted CK) and changes it:
 
 At CK = 108 MHz the projected worst case is about 45% of the bus, against about
 90% with the IP.
+
+Measured in simulation, at L=6, in clk cycles per transaction including the
+user handshake:
+
+| Transaction | 1 word | 4 words | 16 words |
+|---|---|---|---|
+| Read | 14 | 17 | 29 |
+| Write | 10 | 13 | 25 |
+
+Writes and bursts beat the IP. Single-word random reads only roughly match the
+IP's 15-clock floor, because the next request waits for read data to drain.
+If the shadow-read budget needs it, the next step is a pipelined user port.
+
+Timing needs `set_false_path -from [get_regs {<inst>/dly_code*}]`, since the
+IODELAY code is quasi-static.
 
 ### 4.2 Clock rate is an open question
 
