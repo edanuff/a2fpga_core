@@ -47,7 +47,7 @@ unusable.
 | Step | What | Status |
 |---|---|---|
 | A1 | `a2p25_dp_test`: 720p60 RBR×2 colorbars + tone, AUX telemetry | **built, 0 violations, TB-verified PHY** |
-| A2 | ESP32 firmware a2p25 variant: PD (FUSB302B) → TUSB546A → SN75DP130, HPD to FPGA, telemetry tee | in progress |
+| A2 | ESP32 firmware a2p25 variant (`make BOARD_REV=225`, see [ESP32_FW_A2P25.md](ESP32_FW_A2P25.md)): PD (FUSB302B) → TUSB546A → SN75DP130 probe, HPD to FPGA, telemetry tee | **builds**; not yet run on hardware |
 | A3 | AUX validation matrix across our sink census (§6) | bench |
 | A4 | 4-lane RBR 1080p60 variant of A1 (`a2p25_dp_test_4l.gprj`) | **built, 0 violations (thin: clk100 +0.02 ns, pix +0.17 ns)**; bench after A3 |
 | A5 | ESP32 OPI link + OSD (reuse a2mega `esp32_ospi_connector`; the pinout is the same family) | todo |
