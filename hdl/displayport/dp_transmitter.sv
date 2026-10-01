@@ -192,6 +192,17 @@ module dp_transmitter #(
     // tx_running[1:0]}; ties to all-ones on non-Gowin/sim builds.
     output logic [7:0] serdes_status,
     output logic hpd_present_out,
+`ifdef DP_VENDOR_DPHY
+    // External PHY (a2p25: hardened MIPI D-PHY as a raw serializer). The
+    // board top hosts the serializer (boards/a2p25/hdl/dp/
+    // transceiver_bank_dphy.sv) because its pads are inout macro ports;
+    // this module hands it the pre-8b/10b symbol stream and takes back
+    // the symbol clock it derives from the D-PHY PLL.
+    input  logic        ext_symbol_clk,
+    input  logic [3:0]  ext_tx_running,
+    output logic [79:0] ext_tx_symbols,
+    output logic [3:0]  ext_powerup_channel,
+`endif
     // DRP register-dump readback (Gowin only; zeros elsewhere) — see
     // transceiver_bank_gowin dbg_* ports.
     input  logic [4:0]  drp_dbg_idx,
@@ -267,7 +278,12 @@ module dp_transmitter #(
     // ------------------------------------------------------------------
     // Pixel clock (synchronous clocking: generated from the symbol clock)
     // ------------------------------------------------------------------
-`ifdef DP_VENDOR_GOWIN
+`ifdef DP_VENDOR_DPHY
+ `define DP_GOWIN_PIXEL_PLL
+`elsif DP_VENDOR_GOWIN
+ `define DP_GOWIN_PIXEL_PLL
+`endif
+`ifdef DP_GOWIN_PIXEL_PLL
  `ifdef GOWIN_PLL_IP
     // IDE-generated PLLA wrapper: clk_pixel = tx_symbol_clk * MULT / DIV,
     // realized as VCO = f_symbol * PIXEL_PLL_MDIV / PIXEL_PLL_IDIV and
@@ -831,6 +847,22 @@ module dp_transmitter #(
         .dbg_wrusewd     (debug_wrusewd)
     );
     assign tx_running[3:2] = 2'b00;
+`elsif DP_VENDOR_DPHY
+    // External serializer (see port comment). All four lanes are handed
+    // over; the board PHY owns 8b/10b, lane mapping and the D-PHY.
+    assign tx_symbol_clk       = ext_symbol_clk;
+    assign ext_tx_symbols      = tx_symbols;
+    assign ext_powerup_channel = wdog_force ? 4'b0000 : tx_powerup_channel;
+    assign tx_running          = ext_tx_running;
+    assign dp_tx_lane_p  = '0;
+    assign dp_tx_lane_n  = '1;
+    assign serdes_status = {4'b0000, ext_tx_running};
+    assign wdog_replay_ack = wdog_replay_req;  // no DRP on this PHY
+    assign debug_wrusewd = 10'd0;
+    assign afe_drp_clk = clk100; assign afe_drp_gnt = afe_drp_req; assign afe_drp_ready = 1'b1;
+    assign drp_dbg_data = 32'd0;
+    assign drp_dbg_addr = 24'd0;
+    assign drp_dbg_done = 1'b0;
 `else
     // Behavioural stub for simulation and lint: refclk0 stands in for the
     // recovered symbol clock, lanes are tied off, all channels report running

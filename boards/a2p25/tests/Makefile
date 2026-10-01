@@ -60,6 +60,20 @@ dp_dphy: $(DP_DPHY_FILES)
 	./dp_dphy.out
 	@if [ -f dp_dphy_tx.vcd ]; then echo "=== VCD file generated: dp_dphy_tx.vcd ==="; echo "Open with: gtkwave dp_dphy_tx.vcd"; fi
 
+# DP PHY integration test: transceiver_bank_dphy + generated Gowin_MIPI_DPHY
+# wrapper (PLL_INIT etc.) + behavioural PLL and D-PHY hard-macro stand-ins
+GOWIN_SIMLIB ?= /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/simlib/gw5a/prim_sim.v
+DPHY_BANK_FILES = ../hdl/dp/transceiver_bank_dphy.sv ../hdl/dp/dp_dphy_tx.sv \
+	../hdl/gowin/gowin_mipi_dphy/gowin_mipi_dphy.v sim_models/gowin_mipi_dphy_mipi_dphy_sim.v \
+	sim_models/gowin_mipi_dphy_plla_sim.v ../hdl/gowin/pll_init.v \
+	../../../hdl/displayport/gowin/lane_encoder_8b10b.v ../../../hdl/displayport/gowin/enc_8b10b.v \
+	../../../hdl/displayport/gowin/benz_encode.v test_transceiver_bank_dphy.sv
+dphy_bank: $(DPHY_BANK_FILES)
+	@echo "=== Compiling DP PHY bank integration test ==="
+	iverilog -g2012 -s test_transceiver_bank_dphy -o dphy_bank.out $(DPHY_BANK_FILES) $(GOWIN_SIMLIB)
+	@echo "=== Running ==="
+	vvp dphy_bank.out
+
 SPI_CONNECTOR_FILES = ../hdl/esp32/esp32_spi_proto_proc.sv ../hdl/esp32/esp32_spi_connector.sv test_esp32_spi_connector.sv
 spi_connector: $(SPI_CONNECTOR_FILES)
 	@echo "=== Compiling ESP32 SPI Connector Test ==="

@@ -63,7 +63,7 @@
 -de3_en false
 -en_clkout4 true
 -clkout4_bypass false
--odiv4_sel 8
+-odiv4_sel 10
 -dyn_dt4_sel false
 -clkout4_dt_dir 1
 -clkout4_dt_step 0
