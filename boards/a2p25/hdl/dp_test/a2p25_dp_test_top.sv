@@ -14,7 +14,10 @@
 // Default configuration: 1280x720p60, RBR (1.62 Gbps) x 2 lanes — fits
 // every sink class we have (2-lane hub converters included). DP lanes 0/1
 // leave on D-PHY lanes 3/2 (board routing reversed; see
-// transceiver_bank_dphy). Set LANES = 4 for the 4-lane experiment.
+// transceiver_bank_dphy). a2p25_dp_test_4l.gprj defines
+// DP_TEST_4LANE_1080P: 1920x1080p60 on RBR x 4 (148.5 MHz pixel clock,
+// 69% of link capacity) — needs a 4-lane sink path (pin assignment C/E
+// AND a 4-lane converter or native DP).
 //
 // Bring-up-only pin repurposing (this bitstream only — the production core
 // uses these pins for the ESP32 OPI link):
@@ -37,9 +40,22 @@
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
+`ifdef DP_TEST_4LANE_1080P
+ `define DPT_LANES 4
+`else
+ `define DPT_LANES 2
+`endif
+`ifdef DP_TEST_PROBE
+ `define DPT_PROBE 1
+`else
+ `define DPT_PROBE 0
+`endif
+
 module a2p25_dp_test_top #(
-    parameter int LANES = 2,
-    parameter int PROBE = 0         // 1 = raw square wave on all lanes (scope)
+    // Selected per project (.gprj defines file): 2 lanes = 720p60,
+    // 4 lanes = 1080p60. PROBE = raw square wave on all lanes (scope).
+    parameter int LANES = `DPT_LANES,
+    parameter int PROBE = `DPT_PROBE
 ) (
     input  logic clk50_in,          // E2, SOM 50 MHz oscillator
 
@@ -102,40 +118,51 @@ module a2p25_dp_test_top #(
     // ------------------------------------------------------------------
     // Colorbars (1280 wide: eight 160-px bars) + 2-px white frame
     // ------------------------------------------------------------------
-    localparam int H_VIS = 1280;
-    localparam int V_VIS = 720;
+    localparam bit HD    = (LANES == 4);
+    localparam int H_VIS = HD ? 1920 : 1280;
+    localparam int H_TOT = HD ? 2200 : 1650;
+    localparam int H_SYN = HD ? 44   : 40;
+    localparam int H_STA = HD ? 192  : 260;
+    localparam int V_VIS = HD ? 1080 : 720;
+    localparam int V_TOT = HD ? 1125 : 750;
+    localparam int V_SYN = 5;
+    localparam int V_STA = HD ? 41   : 25;
+    localparam int PIX_DIV  = HD ? 6 : 12;      // 81 MHz * 11 / DIV
+    localparam int PIX_HZ   = HD ? 148_500_000 : 74_250_000;
+    localparam int BAR_W    = H_VIS / 8;
+    localparam int CY_MSB   = $clog2(V_TOT) - 1;   // dp_transmitter's cy width - 1
 
     logic        clk_pixel;
-    logic [10:0] cx;
-    logic [9:0]  cy;
+    logic [11:0] cx;
+    logic [10:0] cy;
     logic [23:0] rgb, bar;
 
     always_comb begin
-        if      (cx < 11'd160)  bar = 24'hFFFFFF;
-        else if (cx < 11'd320)  bar = 24'hFFFF00;
-        else if (cx < 11'd480)  bar = 24'h00FFFF;
-        else if (cx < 11'd640)  bar = 24'h00FF00;
-        else if (cx < 11'd800)  bar = 24'hFF00FF;
-        else if (cx < 11'd960)  bar = 24'hFF0000;
-        else if (cx < 11'd1120) bar = 24'h0000FF;
-        else                    bar = 24'h000000;
+        if      (cx < 12'(BAR_W*1)) bar = 24'hFFFFFF;
+        else if (cx < 12'(BAR_W*2)) bar = 24'hFFFF00;
+        else if (cx < 12'(BAR_W*3)) bar = 24'h00FFFF;
+        else if (cx < 12'(BAR_W*4)) bar = 24'h00FF00;
+        else if (cx < 12'(BAR_W*5)) bar = 24'hFF00FF;
+        else if (cx < 12'(BAR_W*6)) bar = 24'hFF0000;
+        else if (cx < 12'(BAR_W*7)) bar = 24'h0000FF;
+        else                        bar = 24'h000000;
     end
 
     always_ff @(posedge clk_pixel) begin
-        if (cx < 11'd2 || cx >= 11'(H_VIS - 2) || cy < 10'd2 || cy >= 10'(V_VIS - 2))
+        if (cx < 12'd2 || cx >= 12'(H_VIS - 2) || cy < 11'd2 || cy >= 11'(V_VIS - 2))
             rgb <= 24'hFFFFFF;
         else
             rgb <= bar;
     end
 
-    // 48 kHz strobe, ~1 kHz sawtooth at -18 dB (pixel clock 74.25 MHz)
+    // 48 kHz strobe, ~1 kHz sawtooth at -18 dB
     logic               clk_audio;
-    logic signed [28:0] aud_acc = -29'sd74_250_000;
+    logic signed [28:0] aud_acc = -29'(PIX_HZ);
     logic [15:0]        tone;
     always_ff @(posedge clk_pixel) begin
         clk_audio <= 1'b0;
         if (!aud_acc[28]) begin
-            aud_acc   <= aud_acc + 29'sd48_000 - 29'sd74_250_000;
+            aud_acc   <= aud_acc + 29'sd48_000 - 29'(PIX_HZ);
             clk_audio <= 1'b1;
             tone      <= tone + 16'd1365;
         end else
@@ -186,14 +213,15 @@ module a2p25_dp_test_top #(
         .POLITE_ATTACH    (1),
         .ERRCNT_READ      (1),
         .TX_PROBE         (0),
-        // 1280x720p60 (CEA-861 VIC 4), pixel = 81 MHz * 11/12 = 74.25 MHz
-        .H_VISIBLE (1280), .H_TOTAL (1650), .H_SYNC_WIDTH (40), .H_START (260),
-        .V_VISIBLE (720),  .V_TOTAL (750),  .V_SYNC_WIDTH (5),  .V_START (25),
+        // 720p60 (VIC 4, 74.25 MHz) or 1080p60 (VIC 16, 148.5 MHz);
+        // pixel = 81 MHz * 11 / PIX_DIV via VCO 891
+        .H_VISIBLE (H_VIS), .H_TOTAL (H_TOT), .H_SYNC_WIDTH (H_SYN), .H_START (H_STA),
+        .V_VISIBLE (V_VIS), .V_TOTAL (V_TOT), .V_SYNC_WIDTH (V_SYN), .V_START (V_STA),
         .PIXEL_CLK_MULT   (11),
-        .PIXEL_CLK_DIV    (12),
+        .PIXEL_CLK_DIV    (PIX_DIV),
         .PIXEL_PLL_IDIV   (1),
         .PIXEL_PLL_MDIV   (11),
-        .PIXEL_PLL_ODIV0  (12),
+        .PIXEL_PLL_ODIV0  (PIX_DIV),
         .PIXEL_PLL_FCLKIN ("81"),
         .AUDIO_RATE       (48000),
         .AUDIO_BIT_WIDTH  (16)
@@ -306,8 +334,8 @@ module a2p25_dp_test_top #(
     logic [7:0] frame_cnt = '0;
     logic       cy_msb_d = 1'b0;
     always_ff @(posedge clk_pixel) begin
-        cy_msb_d <= cy[9];
-        if (cy_msb_d && !cy[9])
+        cy_msb_d <= cy[CY_MSB];
+        if (cy_msb_d && !cy[CY_MSB])
             frame_cnt <= frame_cnt + 8'd1;
     end
 

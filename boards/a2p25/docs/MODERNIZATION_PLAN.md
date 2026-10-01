@@ -49,7 +49,7 @@ unusable.
 | A1 | `a2p25_dp_test`: 720p60 RBR×2 colorbars + tone, AUX telemetry | **built, 0 violations, TB-verified PHY** |
 | A2 | ESP32 firmware a2p25 variant: PD (FUSB302B) → TUSB546A → SN75DP130, HPD to FPGA, telemetry tee | in progress |
 | A3 | AUX validation matrix across our sink census (§6) | bench |
-| A4 | 4-lane RBR 1080p60 variant of A1 | after A3 |
+| A4 | 4-lane RBR 1080p60 variant of A1 (`a2p25_dp_test_4l.gprj`) | **built, 0 violations (thin: clk100 +0.02 ns, pix +0.17 ns)**; bench after A3 |
 | A5 | ESP32 OPI link + OSD (reuse a2mega `esp32_ospi_connector`; the pinout is the same family) | todo |
 | A6 | Apple bus core + real-time `apple_video` at 480p over DP, shadow memory in BSRAM as today | todo |
 
@@ -154,7 +154,7 @@ is a no-respin fix at assembly.
 1. **ESP32 firmware first.** Flash the a2p25 variant (see `ESP32_FW_A2P25.md`
    once it lands). It does the PD contract, the alt-mode entry, the TUSB546A
    lanes, the DP130 probe, HPD on IO10, and the FPGA telemetry on IO11.
-2. **Lane-probe bitstream.** Build `a2p25_dp_test` with `PROBE=1` and scope
+2. **Lane-probe bitstream.** Flash `a2p25_dp_test_probe` (`PROBE=1`) and scope
    each lane at the DP130 inputs. Expect a 2.53 MHz square wave on all four.
    This proves the D-PHY HS driver runs continuously with no LP excursions,
    and shows the lane order and polarity. Telemetry `S:` bit 1 = `TX_CLK_O`
@@ -203,4 +203,7 @@ is a no-respin fix at assembly.
 
 | Date | Project | Base | Toolchain | Result | `.fs` sha256 |
 |---|---|---|---|---|---|
-| 2026-10-01 | `a2p25_dp_test` | c56c691a | Gowin V1.9.12.01 | 0/0 violations | `9af2ff657ca33c833e2dca44f34547ab9287a67af189b711fc2f458c4ab81bb6` |
+| 2026-10-01 | `a2p25_dp_test` (superseded) | c56c691a | Gowin V1.9.12.01 | 0/0 violations | `9af2ff657ca33c833e2dca44f34547ab9287a67af189b711fc2f458c4ab81bb6` |
+| 2026-10-01 | `a2p25_dp_test` 720p ×2 | this commit | Gowin V1.9.12.01 | 0/0; clk100 101.1, pix 130.5 MHz | `2fb2d479954d09aa5c29371279e9e2145b1fed5c1555b28605c97e967b1bbc6f` |
+| 2026-10-01 | `a2p25_dp_test_4l` 1080p ×4 | this commit | Gowin V1.9.12.01 | 0/0; clk100 100.24 (+0.02 ns), pix 152.25 vs 148.5 (+0.17 ns) — thin | `4b1d2e74bd52abc95118dd487e0c9776c902b040c51986beefd20e45bcc2d798` |
+| 2026-10-01 | `a2p25_dp_test_probe` (PROBE=1, 720p) | this commit | Gowin V1.9.12.01 | 0/0 | `bbe086b98ece01a3f273a9ae04bd1d52e5e7bb8e712ca4fa14401a0c0118f429` |
