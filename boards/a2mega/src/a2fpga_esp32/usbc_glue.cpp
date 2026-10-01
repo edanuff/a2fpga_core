@@ -17,6 +17,13 @@
  *     generated here (SPEC.md §8; 0.5-1.0 ms window).
  *   - VBUS sourcing = TPS2553 EN on PIN_VBUS_SRC_EN (1 A limit in hardware).
  *
+ * a2p25 (BOARD_REV 225): same model with a TUSB546A-DCI (register- and
+ * pin-compatible sibling of the TUSB1046A; same General/DPEQ/DPCTL3 map)
+ * and an SN75DP130 redriver (sn75dp130.c) on the same bus. The mux
+ * address is probed at boot (0x12 expected, 0x10-0x17 scanned as a
+ * fallback). HPD to the FPGA is a wire only in dp_test mode (IO10 ->
+ * ball B2); with PIN_DP_HPD_OUT < 0 the level is just recorded.
+ *
  * The PD policy task runs at 1 kHz and is woken immediately by the FUSB302B
  * INT_N falling edge, per the usbc_port_task() contract.
  */
@@ -37,7 +44,11 @@ extern "C" {
 }
 #include "usbc_glue.h"
 
-#define TUSB1046_I2C_ADDR   0x12
+#define TUSB1046_I2C_ADDR_DEFAULT 0x12
+/* Mux address actually in use: 0x12 unless the boot probe finds the mux
+ * elsewhere in 0x10-0x17 (TUSB546A A0/A1 strap table unverified locally). */
+static uint8_t s_tusb_addr = TUSB1046_I2C_ADDR_DEFAULT;
+#define TUSB1046_I2C_ADDR   s_tusb_addr
 #define TUSB1046_REG_GENERAL 0x0A
 #define TUSB_GEN_CTLSEL_USB3 0x01   /* DP lanes off (as-built disable state) */
 #define TUSB_GEN_CTLSEL_DP4  0x02   /* four-lane DP, pin assignment C/E */
@@ -142,6 +153,86 @@ static void io_delay_us(void *ctx, uint32_t us)
     delayMicroseconds(us);
 }
 
+/* Shared-bus access for other drivers (sn75dp130.c) and the CLI: same
+ * mutex as the PD task. Valid once usbc_pd_init() has run Wire.begin. */
+extern "C" int usbc_i2c_read(uint8_t address, uint8_t reg, uint8_t *data,
+                             size_t length)
+{
+    return i2c_read(NULL, address, reg, data, length);
+}
+
+extern "C" int usbc_i2c_write(uint8_t address, uint8_t reg,
+                              const uint8_t *data, size_t length)
+{
+    return i2c_write(NULL, address, reg, data, length);
+}
+
+/* Address-only probe (START, addr+W, STOP): true on ACK. */
+extern "C" bool usbc_i2c_probe(uint8_t address)
+{
+    i2c_lock();
+    Wire.beginTransmission(address);
+    bool ack = Wire.endTransmission(true) == 0;
+    i2c_unlock();
+    return ack;
+}
+
+/* Scan 0x08-0x77 and report responders via osd_log (OSD + telnet tee) and
+ * Serial. Expected on a2p25: 0x12 TUSB546A, 0x22 FUSB302B, 0x2C DP130. */
+extern "C" void usbc_i2c_scan_log(void)
+{
+    char line[41];
+    int n = snprintf(line, sizeof line, "I2C:");
+    int found = 0;
+    for (uint8_t a = 0x08; a < 0x78; a++) {
+        if (!usbc_i2c_probe(a))
+            continue;
+        found++;
+        if (n > (int)sizeof line - 4) {
+            osd_log("%s", line);
+            Serial.println(line);
+            n = snprintf(line, sizeof line, "I2C:");
+        }
+        n += snprintf(line + n, sizeof line - n, " %02X", a);
+    }
+    if (found == 0)
+        n += snprintf(line + n, sizeof line - n, " NO DEVICES");
+    osd_log("%s", line);
+    Serial.println(line);
+}
+
+/* Find the mux: 0x12 first, then the rest of 0x10-0x17 (skipping nothing
+ * else lives there on either board). Returns true if one answered. */
+static bool tusb_detect_addr(void)
+{
+    if (usbc_i2c_probe(TUSB1046_I2C_ADDR_DEFAULT)) {
+        s_tusb_addr = TUSB1046_I2C_ADDR_DEFAULT;
+        return true;
+    }
+    for (uint8_t a = 0x10; a <= 0x17; a++) {
+        if (a != TUSB1046_I2C_ADDR_DEFAULT && usbc_i2c_probe(a)) {
+            s_tusb_addr = a;
+            Serial.printf("[usbc] DP mux found at 0x%02X (not 0x12)\n", a);
+            osd_log("USBC: DP MUX AT 0x%02X (NOT 0x12)", a);
+            return true;
+        }
+    }
+    return false;
+}
+
+/* HPD wire to the FPGA (absent when PIN_DP_HPD_OUT < 0). LED1 mirrors it
+ * on boards that have one. */
+static void hpd_pin_write(bool level)
+{
+#if PIN_DP_HPD_OUT >= 0
+    digitalWrite(PIN_DP_HPD_OUT, level ? HIGH : LOW);
+#endif
+#if PIN_LED1 >= 0
+    digitalWrite(PIN_LED1, level ? HIGH : LOW);
+#endif
+    (void)level;
+}
+
 static uint8_t s_general_last = 0;   /* last value written to reg 0x0A */
 static bool    s_flip_invert = false; /* live A/B: invert FLIPSEL convention */
 
@@ -162,7 +253,8 @@ static uint32_t hal_millis(void *ctx)
 static void hal_set_vbus(void *ctx, bool enable)
 {
     (void)ctx;
-    /* Strapping pin: held low by R29 at reset; only ever driven here. */
+    /* a2mega 1.0a3: strapping pin IO46 held low by R29 at reset;
+     * a2p25: IO6 with R46 pull-down. Only ever driven here. */
     digitalWrite(PIN_VBUS_SRC_EN, enable ? HIGH : LOW);
     s_vbus_on = enable;
 }
@@ -255,7 +347,7 @@ static void hal_set_fpga_dp_enable(void *ctx, bool enable)
 static void hal_set_fpga_hpd(void *ctx, bool level)
 {
     (void)ctx;
-    digitalWrite(PIN_DP_HPD_OUT, level ? HIGH : LOW);
+    hpd_pin_write(level);
     s_hpd_level = level;
 }
 
@@ -290,10 +382,14 @@ extern "C" void usbc_hpd_retrain(void)
         osd_log("RETRAIN: HPD is low (no sink) - nothing to pulse");
         return;
     }
+#if PIN_DP_HPD_OUT < 0
+    osd_log("RETRAIN: no HPD wire on this build");
+    return;
+#endif
     osd_log("RETRAIN: pulsing HPD low 250 ms (ladder restart)");
-    digitalWrite(PIN_DP_HPD_OUT, LOW);
+    hpd_pin_write(false);
     vTaskDelay(pdMS_TO_TICKS(250));
-    digitalWrite(PIN_DP_HPD_OUT, HIGH);
+    hpd_pin_write(true);
 }
 
 /* Telnet 't': PD event trace (TX/RX/IRQ/state ring) — the PD-silent dig. */
@@ -325,9 +421,9 @@ static void hal_pulse_fpga_hpd_irq(void *ctx)
      * (hotplug_decode's IRQ threshold is 0.5 ms, disconnect is 2 ms). */
     if (!s_hpd_level)
         return;
-    digitalWrite(PIN_DP_HPD_OUT, LOW);
+    hpd_pin_write(false);
     delayMicroseconds(750);
-    digitalWrite(PIN_DP_HPD_OUT, HIGH);
+    hpd_pin_write(true);
 }
 
 static void hal_log(void *ctx, usbc_log_level_t level, const char *message)
@@ -367,12 +463,19 @@ extern "C" bool usbc_pd_init(void)
         return true;
 
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
+    /* Bus mutex before ANY traffic: other drivers (DP130) and the CLI
+     * share the bus even if the PD PHY turns out to be missing. */
+    if (!s_i2c_lock)
+        s_i2c_lock = xSemaphoreCreateMutex();
 
     /* Park the mux in its documented disable state (DP lanes off, HPDIN
      * ignored) before PD policy starts. A NAK here usually means the board
      * is unpowered on the 3.3 V rail or the mux is missing. */
+    if (!tusb_detect_addr())
+        Serial.println("[usbc] warning: DP mux not found at 0x10-0x17");
     if (tusb_write_general(TUSB_GEN_CTLSEL_USB3 | TUSB_GEN_HPDIN_OVR) != 0)
-        Serial.println("[usbc] warning: TUSB1046A (0x12) not responding");
+        Serial.printf("[usbc] warning: DP mux (0x%02X) not responding\n",
+                      s_tusb_addr);
 
     fusb302_io_t io = {};
     io.context = NULL;
@@ -406,7 +509,6 @@ extern "C" bool usbc_pd_init(void)
         return false;
     }
 
-    s_i2c_lock = xSemaphoreCreateMutex();
     s_wake = xSemaphoreCreateBinary();
     attachInterrupt(digitalPinToInterrupt(PIN_FUSB_INT), fusb_int_isr, FALLING);
     xTaskCreatePinnedToCore(usbc_task, "usbc_pd", 4096, NULL, 6, NULL, 1);
@@ -429,7 +531,8 @@ extern "C" void usbc_pd_status(void)
                   "fpga-dp-en %d\n",
                   s_port.polarity == FUSB302_POLARITY_CC2 ? 2 : 1,
                   (int)s_hpd_level, (int)s_vbus_on, (int)s_dp_mux_on,
-                  (int)s_fpga_dp_en);
+                  (int)s_fpga_dp_en);    Serial.printf("    DP mux I2C 0x%02X, HPD wire %s\n", s_tusb_addr,
+                  PIN_DP_HPD_OUT >= 0 ? "yes" : "none (register path)");
 }
 
 /* TUSB1046A register dump via osd_log (OSD + telnet tee). The DCI AUX

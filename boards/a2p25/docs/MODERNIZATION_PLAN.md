@@ -1,7 +1,7 @@
 # a2p25 modernization — displayport1 board rev
 
 Gateware/firmware plan for the a2-p25 board revision on branch `displayport1`
-of the board repo (`/Users/edanuff/GitHub/a2-p25`): Tang Primer 25K
+of the board repo (`the a2-p25 board repo`): Tang Primer 25K
 (GW5A-LV25MG121), Infineon S27KL0642 HyperRAM, ESP32-S3 on an 8-bit link,
 USB-C DisplayPort through the GW5A's hardened MIPI D-PHY.
 
@@ -96,7 +96,7 @@ or CPU write would cost 15 cycles. That is about 3× what the original budget
 assumed (~5.5 cycles), and it pushes worst-case bus load to about 90%.
 
 `hdl/hyperram/hyperram_ctrl.sv` starts from nand2mario's psram-tang-nano-9k
-controller (`/Users/edanuff/GitHub/psram-tang-nano-9k`: ODDR/IDDR and a
+controller (`ed's psram-tang-nano-9k fork`: ODDR/IDDR and a
 phase-shifted CK) and changes it:
 
 - **Clocking:** 2:1 synchronous. CK runs on `clk_mem` = 2× `clk`, the user

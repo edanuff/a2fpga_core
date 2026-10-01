@@ -1,4 +1,4 @@
-<!-- Netlist-derived 2026-10-01 from /Users/edanuff/GitHub/a2-p25 @ displayport1 7c47fa0. -->
+<!-- Netlist-derived 2026-10-01 from the a2-p25 board repo @ displayport1 7c47fa0. -->
 > **Resolved since extraction (2026-10-01, a2p25_dp_test build):**
 > - §4.4 AUX: `IO_TYPE=LVDS25` on L2/L1 is accepted with `BANK_VCCIO=3.3`
 >   (same as the a2mega's proven closed-loop AUX). Pin `BANK_VCCIO=3.3`
@@ -17,7 +17,7 @@
 
 ## Sources and how the balls were established
 
-- **New board:** netlist exported with kicad-cli from `/Users/edanuff/GitHub/a2-p25` @ `displayport1` (HEAD 7c47fa0; the working tree had no uncommitted schematic edits). Board connectors: J1 = BTB0 and J2 = BTB1 (DF40C-60DS). The old revisions used refs J4 and J5 for the same connectors.
+- **New board:** netlist exported with kicad-cli from `the a2-p25 board repo` @ `displayport1` (HEAD 7c47fa0; the working tree had no uncommitted schematic edits). Board connectors: J1 = BTB0 and J2 = BTB1 (DF40C-60DS). The old revisions used refs J4 and J5 for the same connectors.
 - **BTB pin to SOM IO name:** Sipeed `Tang_Primer_25K_52300_Schematic.pdf` (in /Volumes/Storage/Downloads), page 5, SOM J1 and J2. Board BTBn pin N mates to SOM Jn pin N with no mirroring.
 - **IO name to ball:** Gowin TN725-1.2 (Arora V package delay table), sheet GW5A-25, column `GW5A-LV25MG121N`. Cross-checked against the SOM schematic page 3, which also gives the bank grouping.
 - **Verification:** I also exported netlists for old revisions `main`, `rev2`, `rev3` and `rev4`. The old `a2p25.cst` matches **rev3** exactly: ESP32 LCAM/parallel, I2S, UART, HDMI. For every one of the 75 signals in the old .cst, the derived ball equals the old .cst ball. That validates the BTB-to-ball method end to end. The two docs agree with the derivation too:

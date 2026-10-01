@@ -134,6 +134,12 @@ int fusb302_send_hard_reset(fusb302_t *device)
     return 0;
 }
 
+int fusb302_pd_reset(fusb302_t *device)
+{
+    (void)device;
+    return 0;
+}
+
 int fusb302_requalify_cc(fusb302_t *device, bool *present, bool *moved)
 {
     if (device->source_role)
