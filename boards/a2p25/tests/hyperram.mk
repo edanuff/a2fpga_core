@@ -92,3 +92,17 @@ hyperram_clean:
 	rm -rf $(HR_BUILD)
 
 .PHONY: hyperram hyperram_bist hyperram_clean
+
+# Standalone PSRAM bitstream system test: a2p25_psram_test_top (CK 108)
+# driven over its console UART against the vendor model.
+#   make psram_test_top
+PT_RTL = ../hdl/psram_test/psram_test_defines_ck108.v sim_models/hr_clk_pll_sim.v \
+         ../hdl/gowin/gowin_pll/gowin_pll.v ../hdl/gowin/gowin_pll/gowin_pll_mod.v ../hdl/gowin/pll_init.v \
+         ../hdl/psram_test/hr_uart_cmd.sv ../hdl/psram_test/a2p25_psram_test_top.sv
+$(HR_BUILD)/psram_test_top.vvp: $(HR_RTL) $(HR_BIST_RTL) $(PT_RTL) $(HR_TB_COMMON) test_psram_test_top.sv $(HR_PMODEL)
+	iverilog $(HR_IVFLAGS) -s test_psram_test_top -o $@ \
+	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(HR_BIST_RTL) $(PT_RTL) $(HR_PMODEL) $(HR_TB_COMMON) test_psram_test_top.sv $(HR_IVFILTER)
+	@test -f $@
+
+psram_test_top: $(HR_BUILD)/psram_test_top.vvp
+	vvp $(HR_BUILD)/psram_test_top.vvp | grep -v 'Timing checks'

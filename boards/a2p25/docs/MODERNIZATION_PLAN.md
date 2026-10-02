@@ -63,7 +63,7 @@ BSRAM, and this rev has no I2S path back from the ESP32.
 | Step | What | Status |
 |---|---|---|
 | B1 | `hyperram_ctrl` (custom, see §4) + Infineon-model TB (`make hyperram`) | **sim PASS at 0–4 ns board delay**; standalone PnR clk_mem 116.8 MHz |
-| B2 | `hyperram_bist` (`make hyperram_bist`, register map in its header) | **sim PASS**; next: `a2p25_psram_test` project = BIST + ESP32 OPI link (a2mega `esp32_ospi_connector`) + firmware commands, built at 108/81/54 MHz CK |
+| B2 | `a2p25_psram_test_ck{108,81,54}`: BIST + UART console (C2/F2 to ESP32 IO11/IO12, firmware passthrough); procedure in [PSRAM_TEST.md](PSRAM_TEST.md) | **all three built, 0/0; system sim PASS** (`make psram_test_top`); bench next |
 | B3 | DOC5503: `sound_glu` + `doc5503_pipelined` on a HyperRAM port | todo |
 | B4 | Framebuffer on PSRAM (the existing render/scanout mechanism) feeding DP | todo |
 | B5 | Shadow memory in PSRAM (`apple_memory_sdram`, `VGC_IN_SDRAM`) | todo |
@@ -76,15 +76,24 @@ All clocks come from the 50 MHz SOM oscillator on E2.
 |---|---|---|
 | 100 MHz | `gowin_mgmt_pll` (VCO 1200) | AUX bit timing, link policy |
 | 54 MHz | system PLL | logic clock; D-PHY PLL reference |
-| 108 MHz, plus a 90° copy | system PLL, retuned to VCO 1080 (B track) | HyperBus CK; `hyperram_ctrl` core |
+| 108 MHz + 90° copy, and the logic 54 MHz | HyperRAM PLL fed by the board PLL's 54 MHz: VCO 1080 (×20), ÷10 / ÷10 +90° / ÷20 | HyperBus CK; `hyperram_ctrl` core; all logic in the full core |
 | 810 MHz ×4 phases | D-PHY PLL (CLKIN 54 MHz, ×15) | serializer |
 | 81 MHz | D-PHY PLL `clkout4` = VCO ÷ 10 | DP link-symbol clock |
 | 101.25 MHz | D-PHY `TX_CLK_O` = VCO ÷ 8 | gearbox |
 | 74.25 / 148.5 MHz | pixel PLL fed by 81 MHz (VCO 891, ÷12 or ÷6) | DP pixel clock, synchronous clocking |
 
-The dp_test keeps the old system PLL (VCO 1350), because it only needs 54 MHz.
-The PSRAM test and the full core move it to VCO 1080 (IDIV 5, MDIV 108). That
-gives 27, 54 and 108 MHz plus a 108 MHz 90° copy from one VCO.
+The board PLL (VCO 1350, 50 MHz in) makes 54 MHz. Everything that needs 108
+MHz or the HyperRAM phase relationships cascades from that 54 MHz into a
+second PLLA.
+
+⚠ **A single PLL cannot make 108 MHz from the 50 MHz oscillator.** GW5A PLLA
+requires a PFD (FCLKIN / IDIV) of 19–87.5 MHz; Gowin reports PA2078 when it is
+out of range. From 50 MHz that allows only IDIV 1 or 2, which gives VCO
+multiples of 50 or 25. No legal VCO is also a multiple of 108. The earlier
+"VCO 1080 = 50 ÷ 5 × 108" plan was illegal. `hr_clk_pll` takes 54 MHz
+instead: PFD 54, VCO 1080 (108 MHz) or 810 (81 MHz). In the full core, all
+logic should clock from this second PLL's 54 MHz so that it stays
+phase-related to `clk_mem`.
 
 ## 4. PSRAM
 
@@ -249,3 +258,6 @@ pull-up.
 | 2026-10-01 | `a2p25_dp_test` 720p ×2 | this commit | Gowin V1.9.12.01 | 0/0; clk100 101.1, pix 130.5 MHz | `2fb2d479954d09aa5c29371279e9e2145b1fed5c1555b28605c97e967b1bbc6f` |
 | 2026-10-01 | `a2p25_dp_test_4l` 1080p ×4 | this commit | Gowin V1.9.12.01 | 0/0; clk100 100.24 (+0.02 ns), pix 152.25 vs 148.5 (+0.17 ns) — thin | `4b1d2e74bd52abc95118dd487e0c9776c902b040c51986beefd20e45bcc2d798` |
 | 2026-10-01 | `a2p25_dp_test_probe` (PROBE=1, 720p) | this commit | Gowin V1.9.12.01 | 0/0 | `bbe086b98ece01a3f273a9ae04bd1d52e5e7bb8e712ca4fa14401a0c0118f429` |
+| 2026-10-01 | `a2p25_psram_test_ck108` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 112.0 vs 108 (+0.31 ns — below the +0.5 durability bar) | `c78ffe7423efa974d0ef524d44ae2d0cf0e32f58d9fedcbedd6d5841999b9a4b` |
+| 2026-10-01 | `a2p25_psram_test_ck81` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 118.2 vs 81 | `16a5c29f7fbe63d67f07b224a785a33ce03eedbce2c7278b5c3f1ead55966c71` |
+| 2026-10-01 | `a2p25_psram_test_ck54` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 110.9 vs 54 | `4cb6a3908ea4e18e5f6801f955b13b5dc0d661a51f851a6470216e3d37478fb2` |

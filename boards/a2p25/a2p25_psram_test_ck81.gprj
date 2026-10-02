@@ -1,0 +1,21 @@
+<?xml version="1" encoding="UTF-8"?>
+<!DOCTYPE gowin-fpga-project>
+<Project>
+    <Template>FPGA</Template>
+    <Version>5</Version>
+    <Device name="GW5A-25A" pn="GW5A-LV25MG121NC1/I0">gw5a25a-002</Device>
+    <FileList>
+        <File path="hdl/psram_test/psram_test_defines_ck81.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_pll/gowin_pll.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_pll/gowin_pll_mod.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/pll_init.v" type="file.verilog" enable="1"/>
+        <File path="hdl/psram_test/hr_clk_pll.v" type="file.verilog" enable="1"/>
+        <File path="hdl/psram_test/hr_uart_cmd.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/hyperram/hyperram_phy_gw5a.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/hyperram/hyperram_ctrl.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/hyperram/hyperram_bist.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/psram_test/a2p25_psram_test_top.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/psram_test/a2p25_psram_test.cst" type="file.cst" enable="1"/>
+        <File path="hdl/psram_test/a2p25_psram_test_ck81.sdc" type="file.sdc" enable="1"/>
+    </FileList>
+</Project>

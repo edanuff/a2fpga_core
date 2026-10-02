@@ -1142,8 +1142,9 @@ void setup() {
 #endif
     Serial.begin(115200);
 #if A2MEGA_HAS_FPGA_UART
-    // a2mega: UART pads 44/43. a2p25 dp_test: RX only, GPIO-matrix routed
-    // to IO11 (ESP32_OPI_D0 = FPGA ball C2, the bitstream's uart_tx).
+    // a2mega: UART pads 44/43. a2p25 dp_test: GPIO-matrix routed — RX on
+    // IO11 (ESP32_OPI_D0 = FPGA ball C2, the bitstream's uart_tx), TX on
+    // IO12 (ESP32_OPI_D1 = ball F2, the PSRAM test console's uart_rx).
     Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);
 #endif
     delay(300);
@@ -1291,7 +1292,7 @@ void loop() {
             Serial.write(c1);
             // Tee FPGA debug-UART lines into the telnet console: the only
             // FPGA-status channel that works while the monitor owns USB-C.
-            static char fline[40];
+            static char fline[96];   // PSRAM test status lines are 63 chars
             static uint8_t flen = 0;
             if (c1 == '\n' || flen >= sizeof(fline) - 1) {
                 if (flen > 0) {

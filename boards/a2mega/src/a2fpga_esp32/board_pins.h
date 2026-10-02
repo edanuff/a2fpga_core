@@ -147,7 +147,8 @@
 // repurposes two ESP32-link balls — B2 (ESP32_INT_N) is its HPD INPUT and
 // C2 (ESP32_OPI_D0) its 115200 8N1 telemetry TX. In this mode the OSPI link
 // is never initialized; IO10 drives HPD and UART1 RX is matrix-routed to
-// IO11. Build with DP_TEST=0 for a core that speaks OSPI (IO10 then stays
+// IO11, UART1 TX to IO12 (ESP32_OPI_D1 = ball F2: the PSRAM test
+// bitstream's console RX — serial forwarding mode makes it the USB console). Build with DP_TEST=0 for a core that speaks OSPI (IO10 then stays
 // an input: in production the FPGA drives ESP32_INT_N).
 #ifndef A2P25_DP_TEST
 #define A2P25_DP_TEST       1
@@ -213,7 +214,9 @@
 #define PIN_DP_HPD_OUT       PIN_FPGA_INT_N  // dp_test: B2 = HPD input
 #define A2MEGA_HAS_FPGA_UART 1
 #define PIN_RXD              PIN_OPI_D0      // dp_test telemetry (ball C2)
-#define PIN_TXD              -1              // no ESP32 -> FPGA UART
+#define PIN_TXD              PIN_OPI_D1      // ESP32 -> FPGA console (ball F2):
+                                             // a2p25_psram_test's hr_uart_cmd;
+                                             // ignored by the dp_test bitstream
 #define A2MEGA_HAS_OSPI_LINK 0
 #else
 #define PIN_DP_HPD_OUT       -1   // HPD must travel as an OSPI register write
