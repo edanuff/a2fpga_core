@@ -168,11 +168,17 @@ So on the fitted Infineon part a floating CK# is within spec, as long as
 nothing ever writes CR1[6] = 0. `hyperram_ctrl` only ever writes CR0, and its
 header records this as a hard rule.
 
+Second sources, checked on 2026-10-01. All three parts share the same CR1[6]
+"Master Clock Type" bit, which resets to 1 (single-ended):
+
+| Vendor | Pin-table note on CK# | CR1 section | Fit on boards with a floating CK#? |
+|---|---|---|---|
+| Infineon S27KL0642 (002-24692 Rev *I) | tie to VCCQ/VSSQ, do not float | §6.3.3.1: single-ended default, CK# input **not enabled, may float** | **yes** (explicitly allowed) |
+| Winbond W956x8MBYA (A01-003) | no tie-off instruction; "CK# is not used" in single-ended mode | Table 13 / §9.5.1: same bit and default | **yes** (not forbidden) |
+| ISSI IS66/67WVH8M8FALL/BLL | Table note 1: tie to VccQ/VssQ, "do not leave it floating" | Table 5.7: same bit and default, but no "may float" statement | **avoid** until a respin ties B1 to C1 |
+
 Open items:
 
-- **Second sources:** before fitting ISSI or Winbond parts on boards with a
-  floating CK#, confirm they have the same default-single-ended statement.
-  Their pin tables alone say to tie it.
 - **Next respins:** tying B1 to the adjacent C1 (VSSQ) is still the cleanest
   fix and makes the board vendor-agnostic. It is a 1 mm top-layer trace on
   both boards.
