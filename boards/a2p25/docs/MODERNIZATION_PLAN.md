@@ -149,20 +149,39 @@ be multi-sourced: Infineon, ISSI and Winbond use the same CR0 encoding.
 | Ensoniq wave RAM (64 KB) | 0x200000 |
 | BIST / calibration scratch (the controller's `CAL_ADDR` is the last 64 B) | top of memory |
 
-## 5. ⚠ HyperRAM CK# floats — on both boards
+## 5. HyperRAM CK# floats — OK on Infineon, check per vendor
 
-The S27KL0642 datasheet, Table 1 note 2, says to tie CK# to VCCQ or VSSQ when
-it is not connected, and not to leave it floating. Both boards leave it open:
+Both boards leave CK# unconnected:
 
 - **a2-p25 displayport1:** U6 ball B1 is no-connect.
 - **a2-mega 1.0a5:** U17 ball B1 is `unconnected-(U17-~{CK}-PadB1)`.
-  **Fix this before the a2mega turn: tie it to VSSQ.**
+
+The pin descriptions in the Infineon, ISSI and Winbond datasheets all say to tie
+an unused CK# to VSS or VCC. However, the Infineon S27KL0642 datasheet
+(002-24692 Rev *I) has a more specific statement, found by ed on 2026-10-01:
+
+- **§6.3.3.1:** "In the single ended clock mode (by default), CK# input is not
+  enabled; hence it may be left either floating or biased to HIGH or LOW."
+- **Table 12:** CR1[6] master clock type resets to 1, which is single-ended.
+
+So on the fitted Infineon part a floating CK# is within spec, as long as
+nothing ever writes CR1[6] = 0. `hyperram_ctrl` only ever writes CR0, and its
+header records this as a hard rule.
+
+Open items:
+
+- **Second sources:** before fitting ISSI or Winbond parts on boards with a
+  floating CK#, confirm they have the same default-single-ended statement.
+  Their pin tables alone say to tie it.
+- **Next respins:** tying B1 to the adjacent C1 (VSSQ) is still the cleanest
+  fix and makes the board vendor-agnostic. It is a 1 mm top-layer trace on
+  both boards.
+- **Assembly:** no rework instruction is needed for the a2p25 run with
+  Infineon parts. A paste bridge would not work anyway: there is no copper
+  between B1 and C1, and B1 sits next to the CK pad.
 
 RESET# (A4) is unconnected on both boards, which is fine: it has an internal
-pull-up. The a2p25 is already built, so the B2 standalone test measures whether
-the floating CK# matters, and at which CK rates. Also check whether the ISSI or
-Winbond equivalents document a floating CK# as allowed. If one does, that part
-is a no-respin fix at assembly.
+pull-up.
 
 ## 6. Day-one bench ladder (DP)
 
@@ -209,6 +228,8 @@ is a no-respin fix at assembly.
   is in the design doc.
 - **clk100 slack.** It is +0.1 ns in the dp_test (shared AUX/link-policy
   logic). That passes but is thin; watch it as the core grows.
+- **CK# floating** (§5): within spec on Infineon parts. Never write CR1.
+  Re-check before using ISSI or Winbond.
 - **IODELAY dynamic-load semantics.** These are taken from the GW5A sim model
   and still need confirming against UG289. The PSRAM eye scan exercises them.
 - **OPI_CLK lands on a non-GCLK ball.** The link oversamples it on the 54 MHz

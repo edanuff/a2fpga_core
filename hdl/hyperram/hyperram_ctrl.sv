@@ -146,6 +146,12 @@
 // ---------------------------------------------------------------------------
 // Boot / calibration
 // ---------------------------------------------------------------------------
+// ⚠ NEVER WRITE CR1. CR1[6] (master clock type) resets to 1 = single-ended;
+// in that mode the CK# input is disabled and may float (S27KL0642 DS
+// §6.3.3.1). Both a2p25 and a2mega 1.0a5 leave CK# (ball B1) unconnected,
+// so selecting differential clocking would leave CK# floating on an
+// ENABLED input. This controller only ever writes CR0.
+//
 // Wait tVCS (POR_US), write CR0 (latency, variable/fixed, drive strength),
 // then calibrate the input delay: write a 16-word pattern at CAL_ADDR
 // (twice, so a refresh collision on the first write cannot poison it),
