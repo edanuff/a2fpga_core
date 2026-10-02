@@ -86,14 +86,27 @@ The board PLL (VCO 1350, 50 MHz in) makes 54 MHz. Everything that needs 108
 MHz or the HyperRAM phase relationships cascades from that 54 MHz into a
 second PLLA.
 
-⚠ **A single PLL cannot make 108 MHz from the 50 MHz oscillator.** GW5A PLLA
-requires a PFD (FCLKIN / IDIV) of 19–87.5 MHz; Gowin reports PA2078 when it is
-out of range. From 50 MHz that allows only IDIV 1 or 2, which gives VCO
-multiples of 50 or 25. No legal VCO is also a multiple of 108. The earlier
-"VCO 1080 = 50 ÷ 5 × 108" plan was illegal. `hr_clk_pll` takes 54 MHz
-instead: PFD 54, VCO 1080 (108 MHz) or 810 (81 MHz). In the full core, all
-logic should clock from this second PLL's 54 MHz so that it stays
-phase-related to `clk_mem`.
+**Why the cascade.** GW5A PLLA requires a PFD (FCLKIN / IDIV) of
+19–87.5 MHz; Gowin reports PA2078 when it is out of range. From 50 MHz that
+allows only IDIV 1 or 2, so the plan's "VCO 1080 = 50 ÷ 5 × 108" was illegal.
+
+A single PLL *can* make 108 MHz: the board PLL's VCO 1350 with CLKOUT0's
+**fractional** divider ÷12.5 (12 + 4/8), confirmed by ed in the IDE. That
+is not suitable for HyperRAM:
+
+- **No 90° copy.** Only CLKOUT0 has a fractional divider, and 1350 / 108 is
+  not an integer, so no other output can produce the +90° CK clock.
+- **Jitter.** ÷12.5 alternates ÷12 / ÷13, so successive periods are 8.9 and
+  9.6 ns (about ±0.37 ns of deterministic jitter). That eats directly into the
+  ~4.6 ns per-byte capture window.
+
+`hr_clk_pll` therefore takes 54 MHz: PFD 54, VCO 1080 (108 MHz) or 810
+(81 MHz), with integer dividers and a +90° output. In the full core, all
+logic clocks from this PLL's 54 MHz so it stays phase-related to `clk_mem`.
+PLL budget: board, HyperRAM, AUX 100 MHz, D-PHY and pixel = 5 of 6 PLLA.
+A plain, jitter-tolerant 108 MHz elsewhere can still use the single-PLL
+fractional CLKOUT0.
+
 
 ## 4. PSRAM
 

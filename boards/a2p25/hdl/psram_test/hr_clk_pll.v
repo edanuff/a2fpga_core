@@ -8,8 +8,10 @@
 // the IDE-generated D-PHY PLL: ODIV 1, 90 deg = PE_FINE 2). For ODIV_MEM = N,
 // 90 deg = N/4 VCO cycles -> COARSE = N/4, FINE = 2*(N%4).
 // Input is 54 MHz from the board PLL (Gowin_PLL), NOT the 50 MHz
-// oscillator: GW5A PLLA needs PFD = FCLKIN/IDIV in 19..87.5 MHz, so from
-// 50 MHz IDIV is 1 or 2 and no VCO is a multiple of 108 (PA2078). From 54:
+// oscillator: GW5A PLLA needs PFD = FCLKIN/IDIV in 19..87.5 MHz (PA2078).
+// From 50 MHz the only single-PLL 108 is CLKOUT0's FRACTIONAL /12.5 off
+// VCO 1350 — +-0.37 ns period jitter and no integer +90 deg sibling, so
+// unusable for HyperBus CK. From 54 (integer dividers, +90 deg output):
 //   CK 108: VCO 1080 (1/20), ODIV 20/10, PE 2/4
 //   CK  81: VCO  810 (1/15), ODIV 20/10, PE 2/4
 //   CK  54: VCO 1080 (1/20), ODIV 40/20, PE 5/0
