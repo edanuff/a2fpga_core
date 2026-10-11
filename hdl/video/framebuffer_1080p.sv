@@ -295,6 +295,7 @@ module framebuffer_1080p #(
     reg [15:0] wr_pixel_even_r;      // buffered even pixel (RGB565)
     reg        frame_pending_r;      // waiting for first fb_we after accepted frame start
     reg        frame_parity_r;      // toggles each frame for TEST_PATTERN==6
+    reg        frame_done_parity_r; // buffer the writer last COMPLETED (read side)
 
     // 4-pair accumulator: collects 4 × 32-bit pixel pairs before FIFO push
     reg [31:0] wr_accum_r [0:2];     // Slots 0-2; slot 3 comes from current pair
@@ -334,6 +335,7 @@ module framebuffer_1080p #(
             wr_pixel_even_r <= 16'd0;
             frame_pending_r <= 1'b0;
             frame_parity_r <= 1'b0;
+            frame_done_parity_r <= 1'b1;
             wr_accum_r[0] <= 32'd0;
             wr_accum_r[1] <= 32'd0;
             wr_accum_r[2] <= 32'd0;
@@ -341,6 +343,7 @@ module framebuffer_1080p #(
             wr_accum_addr_r <= 21'd0;
         end else begin
             if (frame_start_w) begin
+                frame_done_parity_r <= frame_parity_r;   // the frame just written is complete
                 frame_parity_r <= ~frame_parity_r;
                 // Arm reset, but align to the first pixel write pulse so
                 // wr_x/wr_y stay phase-locked to the producer's fb_we stream.
@@ -956,9 +959,14 @@ module framebuffer_1080p #(
                 // line and pixels are written to wrong line buffer positions.
                 if (fetch_start_line0_w) begin
                     // Approaching active area — prefetch line 0
-                    // Latch read buffer: read from the buffer the writer
-                    // just FINISHED (opposite of writer's current buffer).
-                    rd_buf_offset_r <= frame_parity_r ? 21'd0 : BUFFER_OFFSET;
+                    // Latch read buffer: the buffer the writer last
+                    // COMPLETED. (Was "opposite of the writer's current
+                    // buffer" — wrong whenever the writer is idle between
+                    // frames: the display then picked the buffer the
+                    // writer took next and tore one frame later; a2p25
+                    // bench 10-11, fixed-phase 60 Hz renderer, stripe
+                    // stepped at 1/8 down every frame.)
+                    rd_buf_offset_r <= frame_done_parity_r ? BUFFER_OFFSET : 21'd0;
                     last_fetched_line_r <= 9'd0;
                     line0_prefetched_r <= 1'b1;
                     fetch_bank_r <= 3'd0;
