@@ -47,6 +47,7 @@ unusable.
 | Step | What | Status |
 |---|---|---|
 | A1 | `a2p25_dp_test`: 720p60 RBR×2 colorbars + tone, AUX telemetry | **🏆 COLORBARS + DP AUDIO ON HARDWARE 2026-10-10/11** on all three monitors (Sceptre via USB-C→DP cable; FANGOR and UFYQL native USB-C); replugs + both orientations OK; established-state AUX soak clean (§6b) |
+| A1b | `a2p25_dp_test_4l`: **1080p60 RBR×4** colorbars | **🏆 COLORBARS 2026-10-11, Sceptre OSD 1920×1080@60** (§6d) — the a2mega-unifying mode |
 | A2 | ESP32 firmware a2p25 variant (`make BOARD_REV=225`, see [ESP32_FW_A2P25.md](ESP32_FW_A2P25.md)): PD (FUSB302B) → TUSB546A → SN75DP130 probe, HPD to FPGA, telemetry tee | **builds**; not yet run on hardware |
 | A3 | AUX validation matrix across our sink census (§6) | bench |
 | A4 | 4-lane RBR 1080p60 variant of A1 (`a2p25_dp_test_4l.gprj`) | **built, 0 violations (thin: clk100 +0.02 ns, pix +0.17 ns)**; bench after A3 |
@@ -284,7 +285,7 @@ DP130 note: in auto mode it sets its *input* EQ from the pre-emphasis we declare
 Next steps (DP):
 1. ~~Bad attach self-heal~~ — done: LINK_CHECK=1 baseline (spec retrain).
 2. ~~Sceptre time-to-picture~~ — it is the monitor's own re-lock schedule (see above); nothing more to gain source-side.
-2b. 4-lane 1080p RBR (`_4l`, rebuilt dbf6006b…): never worked — trains, then saturated symbol errors on lanes 0/1 and teardown. Needed to unify video with a2mega.
+2b. ~~4-lane 1080p RBR~~ — working (§6d).
 3. ~~Established-state AUX RX reliability~~ — done, clean on three sinks (§6b soak).
 4. ~~UFYQL~~ — colorbars.
 5. 4-lane 1080p (saturated symbol errors).
@@ -300,6 +301,15 @@ Next steps (DP):
 | Eye scan (4096-word range, 64 reads/tap) | errors only at taps 0x40–0x68 (~0.5 ns band); clean from 0x70 up through 0xFF and from 0x00 to 0x38, i.e. the eye runs off both ends of the 3.2 ns delay range; the calibrated tap sits ≥0.9 ns from the nearest edge |
 
 So the floating CK# is a non-issue on the Infineon part (CR1 default single-ended, as §5 predicted), and 108 MHz works with margin on the first try. The 81/54 MHz variants are not needed for bring-up. Remaining PSRAM items: longer soak, CR0 drive-strength sweep (34 Ω default is fine), and the scope checks in PSRAM_TEST.md if anything ever looks marginal.
+
+## 6d. Bench results — 4-lane 1080p (2026-10-11)
+
+Symptom: `_4l` trained and aligned on all four lanes (new P6 `3:` field = DPCD 0x203 = 0x77), sink reported receiving, then dropped every few seconds with saturated symbol-error counters; the Sceptre stayed at "no signal". Same at 4 lanes/720p (`_4l720`), so the 4-lane path, not the pixel rate. Two bugs, both in shared `hdl/displayport`:
+
+1. **AUX dropped-request hang** (commit 84b65c72): a status read issued within 15 clocks of entering `link_established` (pending IRQ_HPD after a retrain) was dropped by the message engine, which was still "busy" with the empty link_established message; the ladder then waited forever (`PB` line: tx idle, 0 bytes, 9 expected). Fix: msg 0x00 no longer occupies the engine; check_link entry waits for it. Affects a2mega too (candidate explanation for its old "checks not running for minutes" anomaly).
+2. **`msa_inserter_4ch` width bugs** (same commit): lane-2 Vheight rows were 22-bit concatenations into 18 bits (720p announced as 8400 lines, 1080p as 16440), and the lane-2/lane-3 pass-through rows were 19/16 bits wide (symbols shifted, lane 3 lost its K bits). Synthesis had warned (EX3791) all along. 2-lane inserter unaffected, so a2mega never saw it.
+
+After the fixes (Sceptre via USB-C→DP cable): `_4l720` holds, aligned ×4, 0 symbol errors, colorbars, OSD 1280×720. `_4l` (1080p60): link up in 0.8 s, aligned ×4, 0 symbol errors, pixel clock 148,500,000 exact, 0 underruns, **colorbars, OSD 1920×1080@60**. a2p25 and a2mega now share the same 1080p video path.
 
 ## 7. Known risks
 
@@ -341,6 +351,9 @@ So the floating CK# is a non-issue on the Infineon part (CR1 default single-ende
 | 2026-10-10 | ESP32 fw `make BOARD_REV=225` (DP_TEST=1) | this commit | arduino-cli 1.2.2 / esp32 3.3.5 | builds | `1ea60d8aa9ba5ef93ae1f339f1db6ad32acfb9ea8075a6520f9612ce4e1e5816` |
 | 2026-10-10 | **`a2p25_dp_test` — FIRST COLORBARS** (hold-link, P7/P8 telemetry) | 6d0b148d | Gowin V1.9.12.01 | 0/0 | `4257f701389f46809ab3f27eab356b95223a39344fed51d0ef4df28b0e09a373` |
 | 2026-10-11 | `a2p25_dp_test_auxobs` (LINK_CHECK=2 observe; P9/PA) — **AUX soak clean on 3 sinks** | c7064c6e | Gowin V1.9.12.01 | 0/0; worst setup +0.33 | `d758d1c8b1edc3690a0738b19900e4501165c260b35c5723a1b91932498ce9ec` |
+| 2026-10-11 | **`a2p25_dp_test_4l` 1080p ×4 — COLORBARS, OSD 1920×1080@60** (MSA 4ch + AUX hang fixes) | 84b65c72 | Gowin V1.9.12.01 | 0/0 | `b0d9b84f7f666f5a530c48672838c58cf3a6765e3d8a94be75c325cd750f1885` |
+| 2026-10-11 | `a2p25_dp_test_4l720` 4 lanes at 720p (discriminator; colorbars) | 84b65c72 | Gowin V1.9.12.01 | 0/0 | `bb41780cbd8dc1b27b10b560cb256dac3afc98e3e3b2324ba2fb60ab340d2bc1` |
+| 2026-10-11 | `a2p25_dp_test` 2-lane baseline (same fixes, ERRCNT_READ=1, PB line) | 84b65c72 | Gowin V1.9.12.01 | 0/0 | `ed988c98de513c39c9dd2989953ccac005cae78b65772c53668d12105572f3d3` |
 | 2026-10-11 | `a2p25_dp_test_4l` 1080p ×4 (rebuilt on the LINK_CHECK=1 baseline) | this commit | Gowin V1.9.12.01 | 0/0; worst setup +0.22 | `dbf6006bd57e8df194736a49e5f6531788c39f795f29f5ad5b1cb7ee3c94f40d` |
 | 2026-10-11 | `a2p25_dp_test` + ECHO_SINK_ADJUST + 200 ms poll (**baseline**) | this commit | Gowin V1.9.12.01 | 0/0; worst setup +0.63 | `bdca565fb27954fdaf856b47d4f7ef6513b29d0b6a3e2d8ff1ef1202fc1d4070` |
 | 2026-10-11 | **`a2p25_dp_test` — LINK_CHECK=1 BASELINE** (spec flow; Sceptre 20/20 attaches as `_lc1`, sha a21f23c8…) | this commit | Gowin V1.9.12.01 | 0/0; worst setup +0.16 (thin) | `6ec36c790f12e8d349c2a4935ee6ed8b6ae9808a465922f0d2f72e4a5023bf17` |
