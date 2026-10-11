@@ -514,18 +514,25 @@ module framebuffer_1080p #(
     // line is 0, and 0 never equals v_border (60/40) or v_border-LEAD
     // (48/28), so the +1 form is exact there too. fb_line_last_r is
     // consumed a full line after fb_line_px_r settles.
-    reg at_border_nxt_r, at_lead_nxt_r, fb_line_last_r;
+    // (10-11, a2p25 GW5A-25: the change detect and the cy==0 compare still
+    // fed the tracker's update directly — -0.75 ns at 148.5 MHz on the
+    // smaller die. Every input to the decision is now a registered 1-bit
+    // flag evaluated against the CURRENT cy0_r and consumed one cycle
+    // later, so the decision is a few gates. One more cycle of latency,
+    // still deep inside blanking; the export hold below moves with it.)
+    reg at_border_nxt_r, at_lead_nxt_r, fb_line_last_r, cy_zero_r;
     always @(posedge clk_pixel) begin
-        at_border_nxt_r <= (cy0_r + 11'd1 == v_border_px_r);
-        at_lead_nxt_r   <= (cy0_r + 11'd1 == v_border_px_r - 11'(PREFETCH_LEAD_LINES));
+        at_border_nxt_r <= (cy0_r == v_border_px_r);
+        at_lead_nxt_r   <= (cy0_r == v_border_px_r - 11'(PREFETCH_LEAD_LINES));
+        cy_zero_r       <= (cy0_r == 11'd0);
         fb_line_last_r  <= (fb_line_px_r == fb_height_px_r[8:0] - 9'd1);
     end
 
     always @(posedge clk_pixel) begin
         cy_prev_px_r    <= cy0_r;
         cy_changed_px_r <= (cy0_r != cy_prev_px_r);
-        if (cy0_r != cy_prev_px_r) begin
-            if (cy0_r == 11'd0) begin
+        if (cy_changed_px_r) begin
+            if (cy_zero_r) begin
                 v_active_px_r   <= 1'b0;
                 v_approach_px_r <= 1'b0;
                 v_phase_px_r    <= 3'd0;
@@ -569,7 +576,7 @@ module framebuffer_1080p #(
     reg [8:0] fb_line_hold_px_r;
     reg       v_active_hold_px_r, v_approach_hold_px_r;
     always @(posedge clk_pixel) begin
-        if (cy0_r != cy_prev_px_r) begin
+        if (cy_changed_px_r) begin
             fb_line_hold_px_r    <= fb_line_px_r;
             v_active_hold_px_r   <= v_active_px_r;
             v_approach_hold_px_r <= v_approach_px_r;
