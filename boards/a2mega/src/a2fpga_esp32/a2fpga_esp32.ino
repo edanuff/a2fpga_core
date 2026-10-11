@@ -686,6 +686,13 @@ static void cmd_process(String cmd) {
 #endif
 
 #if A2MEGA_HAS_USBC_PD
+    } else if (cmd == "muxdump") {
+        usbc_mux_dump_serial();
+    } else if (cmd == "muxflip") {
+        // Live A/B of the CC -> FLIPSEL convention (same as telnet 'f').
+        // Persists across attaches until toggled back or reboot.
+        usbc_mux_flip_toggle();
+        usbc_mux_dump_serial();
     } else if (cmd == "i2cscan") {
         usbc_i2c_scan_log();
 #endif

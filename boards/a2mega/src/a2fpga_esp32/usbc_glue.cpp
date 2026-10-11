@@ -309,7 +309,11 @@ static void hal_set_tusb1046(void *ctx, bool dp_enable, bool flipped)
          * switch was effectively open, our AUX bursts reached the monitor
          * only capacitively, and the sink never replied to ANY request.
          * 01 = AUXp->SBU1/AUXn->SBU2 (normal), 10 = crossed (flipped). */
-        uint8_t dc = TUSB_DP_SNOOP_DIS | (flip_eff ? 0x20 : 0x10) |
+        /* AUX crossing follows the DETECTED orientation only: it is proven
+         * correct in both orientations (a2p25 bench 10-10). s_flip_invert
+         * is a lane-only A/B — the SS-lane crosspoint is what never worked
+         * reliably in one orientation on either TUSB (1046A or 546A). */
+        uint8_t dc = TUSB_DP_SNOOP_DIS | (flipped ? 0x20 : 0x10) |
                      (s_lanes23_off ? TUSB_DP23_DISABLE : 0);
         s_dpctl3_last = dc;
         if (i2c_write(NULL, TUSB1046_I2C_ADDR, TUSB1046_REG_DPCTL3, &dc, 1) != 0)
@@ -606,10 +610,10 @@ extern "C" void usbc_mux_eq_step(int dir)
         osd_log("MUX EQ: WRITE FAILED");
 }
 
-/* Toggle the FLIPSEL convention live (telnet 'f') and rewrite the mux
- * General register in place. If the CC->FLIPSEL mapping convention is
- * inverted, this one bit un-crosses the AUX pair AND moves the DP lanes
- * onto the connector pins the sink actually watches. */
+/* Toggle the main-lane FLIPSEL convention live (telnet 'f', serial
+ * 'muxflip') and rewrite the mux General register in place. AUX crossing is
+ * NOT affected (AUX_SBU_OVR in DPCTL3 follows the detected orientation), and
+ * the inversion persists across attaches until toggled back or reboot. */
 /* M1: live-toggle the unused mux DP inputs (DP2/DP3) for the thermal /
  * warm-attach A/B. Rewrites DPCTL3 in place on the running link — the
  * used pair (DP0/DP1) is untouched, so video must survive; if it dies,
@@ -625,6 +629,22 @@ extern "C" void usbc_mux_lanes23_toggle(void)
                 s_lanes23_off ? "DISABLED" : "ENABLED", dc);
     } else
         osd_log("MUX LANES 2/3: WRITE FAILED");
+}
+
+/* Serial-console twin of usbc_mux_dump_log (a2p25 bring-up: no WiFi /
+ * telnet needed). Prints the General and DP EQ/control registers plus the
+ * live FLIPSEL convention. */
+extern "C" void usbc_mux_dump_serial(void)
+{
+    uint8_t v;
+    Serial.printf("mux @0x%02X  flip_invert=%d\n", TUSB1046_I2C_ADDR, (int)s_flip_invert);
+    for (uint8_t r = 0x08; r <= 0x13; r++) {
+        if (r > 0x0B && r < 0x10) continue;
+        if (i2c_read(NULL, TUSB1046_I2C_ADDR, r, &v, 1) != 0)
+            Serial.printf("  %02X: --\n", r);
+        else
+            Serial.printf("  %02X: %02X\n", r, v);
+    }
 }
 
 extern "C" void usbc_mux_flip_toggle(void)
