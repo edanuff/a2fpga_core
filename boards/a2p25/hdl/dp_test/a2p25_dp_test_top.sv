@@ -290,7 +290,11 @@ module a2p25_dp_test_top #(
         // the a2mega 1.0a3 open-loop policy (writes DPCD, never waits for
         // replies) to prove the main link independently of AUX receive
         .BLIND_SINK       (`DPT_BLIND),
-        .HPD_DISCONNECT_RESETS(0),
+        // With LINK_CHECK=0 nothing else notices a replug: restart the
+        // ladder when HPD drops >= 2 ms (bench 10-10: Y stayed 11 through
+        // replugs, new attach never retrained). a2mega keeps this OFF
+        // (sleeping-monitor HPD flap storms) — revisit if the FANGOR flaps.
+        .HPD_DISCONNECT_RESETS(1),
         .ENABLE_AFE_ADJUST(0),       // swing/pre-emphasis live in the SN75DP130
         .AFE_APPLY_ON_START(0),
         .ENABLE_PHASE_DONE_GATE(1),

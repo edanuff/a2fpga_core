@@ -286,3 +286,4 @@ pull-up.
 | 2026-10-10 | `a2p25_psram_test_ck54` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 85.6 vs 54 | `1ba81136659674a716ca84982b8feac7a21754972bcfddbdf0d5b5c2f0ac272e` |
 | 2026-10-10 | ESP32 fw `make BOARD_REV=225` (DP_TEST=1) | this commit | arduino-cli 1.2.2 / esp32 3.3.5 | builds | `1ea60d8aa9ba5ef93ae1f339f1db6ad32acfb9ea8075a6520f9612ce4e1e5816` |
 | 2026-10-10 | **`a2p25_dp_test` — FIRST COLORBARS** (hold-link, P7/P8 telemetry) | 6d0b148d | Gowin V1.9.12.01 | 0/0 | `4257f701389f46809ab3f27eab356b95223a39344fed51d0ef4df28b0e09a373` |
+| 2026-10-10 | `a2p25_dp_test` + HPD_DISCONNECT_RESETS=1 (**replug recovery verified**: Y 11→22→33, bars return) | this commit | Gowin V1.9.12.01 | 0/0 | `bc08d218a69cf396d0b618d27176b416c6d7a92a0cbf4be69d36ca5dd076a9c2` |
