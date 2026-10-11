@@ -247,6 +247,31 @@ pull-up.
    (2.5 µs) was tuned for the a2mega's cap placement and may need retuning
    now that the caps sit in front of the DP130.
 
+## 6b. Bench results — DP first light (2026-10-10)
+
+Setup: Sceptre DP monitor via USB-C→DP cable. The FANGOR portable never woke.
+
+| Result | Detail |
+|---|---|
+| Video | 1280×720@60 (monitor OSD), colorbars |
+| Audio | 1 kHz SDP test tone heard |
+| Clocks | symbol 81,000,000 / pixel 74,250,000 exact, 0 packer underruns |
+| Replug | recovers every time (`HPD_DISCONNECT_RESETS=1`) |
+| Orientation | both CC1 and CC2 work with the default FLIPSEL convention (7/7 tagged attaches); `muxdump`/`muxflip` serial commands for A/B |
+| Time to picture | ~0.5 s to trained link; Sceptre displays 5–15 s after attach (normal input detect) |
+| Occasional bad training | ~1 in 6 attaches: sink asks swing 2 (+PE 1), lanes lock but no interlane alignment → dark. Signal-margin suspect (D-PHY ~0.28 V worst case vs DP130 0.3 V min input) |
+
+Required gateware policy (dp_test today): `LINK_CHECK=0` (established-state AUX reads intermittently fail and used to tear the link down), watchdog exemption, `HPD_DISCONNECT_RESETS=1`.
+
+DP130 note: in auto mode it sets its *input* EQ from the pre-emphasis we declare (8 dB at PE0). `05h ← 0x80` (I2C EQ, 0 dB) was tried live; it did not change the bad-training rate. The CLI parses decimal unless `0x` is given.
+
+Next steps (DP):
+1. Make a bad attach self-heal: after "established", do one evidence-only status read. Retrain if lanes or alignment are lost; ignore AUX errors.
+2. Characterise amplitude margin: DP130 squelch / EQ / VOD via I2C, D-PHY drive options.
+3. Established-state AUX RX reliability (P7 capture) — this is the a2mega-turn gate.
+4. FANGOR (EDID DEFERs to the give-up cap; never wakes).
+5. 4-lane 1080p (saturated symbol errors).
+
 ## 7. Known risks
 
 - **D-PHY amplitude vs the DP130 input.** The DP130's minimum VID is
