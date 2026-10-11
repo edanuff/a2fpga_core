@@ -288,6 +288,18 @@ Next steps (DP):
 4. ~~UFYQL~~ — colorbars.
 5. 4-lane 1080p (saturated symbol errors).
 
+## 6c. Bench results — PSRAM first run (2026-10-11)
+
+`a2p25_psram_test_ck108` (sha `ee1dfc31…`), console through the ESP32 forwarding mode, no monitor needed.
+
+| Item | Result |
+|---|---|
+| Init / calibration | CR0 0x8F17 accepted, cal ok, calibrated tap 0xB0, arrival 17, cal map `FFFFE07F` |
+| Continuous test, CK 108 MHz | 102 full-device passes in 36 s, 207 M words compared, **0 error words, 0 error bits**, 0 read timeouts; 0x9522 refresh-collision (2x latency) transactions |
+| Eye scan (4096-word range, 64 reads/tap) | errors only at taps 0x40–0x68 (~0.5 ns band); clean from 0x70 up through 0xFF and from 0x00 to 0x38, i.e. the eye runs off both ends of the 3.2 ns delay range; the calibrated tap sits ≥0.9 ns from the nearest edge |
+
+So the floating CK# is a non-issue on the Infineon part (CR1 default single-ended, as §5 predicted), and 108 MHz works with margin on the first try. The 81/54 MHz variants are not needed for bring-up. Remaining PSRAM items: longer soak, CR0 drive-strength sweep (34 Ω default is fine), and the scope checks in PSRAM_TEST.md if anything ever looks marginal.
+
 ## 7. Known risks
 
 - **D-PHY amplitude vs the DP130 input.** The DP130's minimum VID is

@@ -156,7 +156,9 @@ Run it for each CK variant (108, then 81 and 54 if 108 shows errors):
 
 | CK | CR0 | cal_map | tap | eye window (taps) | passes | words | err words | err bits | 2x count |
 |---|---|---|---|---|---|---|---|---|---|
-| 108 | 8F17 | | | | | | | | |
+| 108 | 8F17 | FFFFE07F | B0 | clean 0x70→0xFF and 0x00→0x38 (wraps past both ends of the range); errors only 0x40–0x68 (~0.5 ns transition band); ≥0.9 ns to the nearest edge | 102 (36 s) | 0x0C5FF9D0 (207 M) | 0 | 0 | 0x9522 |
+
+First hardware run 2026-10-11 (bitstream `ee1dfc31…`, Infineon S27KL0642 U6, CK# floating): calibration ok, arrival 17, read timeouts 0. The LED heartbeat was 1.5 Hz throughout. Soak continues; see MODERNIZATION_PLAN §6c.
 
 **Also check on the scope:**
 - CK vs DQ phase. CK edges should sit centred in the DQ eye on writes; the

@@ -12,27 +12,27 @@
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
   <Device Version>: A
-  <Created Time>:Sat Oct 10 22:55:51 2026
+  <Created Time>:Sun Oct 11 12:42:10 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.53s, Elapsed time = 0h 0m 0.538s
-    Placement Phase 1: CPU time = 0h 0m 0.156s, Elapsed time = 0h 0m 0.162s
-    Placement Phase 2: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
-    Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
-    Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
+    Placement Phase 0: CPU time = 0h 0m 0.54s, Elapsed time = 0h 0m 0.552s
+    Placement Phase 1: CPU time = 0h 0m 0.162s, Elapsed time = 0h 0m 0.168s
+    Placement Phase 2: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 12s
+    Placement Phase 3: CPU time = 0h 0m 6s, Elapsed time = 0h 0m 7s
+    Total Placement: CPU time = 0h 0m 18s, Elapsed time = 0h 0m 20s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.003s
-    Routing Phase 1: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
-    Routing Phase 2: CPU time = 0h 0m 0.06s, Elapsed time = 0h 0m 0.062s
+    Routing Phase 0: CPU time = 0h 0m 0.007s, Elapsed time = 0h 0m 0.007s
+    Routing Phase 1: CPU time = 0h 0m 14s, Elapsed time = 0h 0m 15s
+    Routing Phase 2: CPU time = 0h 0m 0.208s, Elapsed time = 0h 0m 0.506s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 4s
+    Total Routing: CPU time = 0h 0m 14s, Elapsed time = 0h 0m 16s
  Generate output files:
-    CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
+    CPU time = 0h 0m 4s, Elapsed time = 0h 0m 6s
 
- Total Time and Memory Usage: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 10s, Peak memory usage = 811MB
+ Total Time and Memory Usage: CPU time = 0h 0m 36s, Elapsed time = 0h 0m 42s, Peak memory usage = 771MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 6972/23040                          |  31%
-    --LUT,ALU,ROM16           | 6972(6421 LUT, 551 ALU, 0 ROM16)    | -
+  Logic                       | 7138/23040                          |  31%
+    --LUT,ALU,ROM16           | 7138(6588 LUT, 550 ALU, 0 ROM16)    | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 5214/23280                          |  23%
+  Register                    | 5240/23280                          |  23%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 5212/23040                          |  23%
+    --Logic Register as FF    | 5238/23040                          |  23%
     --I/O Register as Latch   | 0/240                               |  0%
     --I/O Register as FF      | 2/240                               |  <1%
-  CLS                         | 5767/11520                          |  51%
+  CLS                         | 5839/11520                          |  51%
   I/O Port                    | 16/86                               |  19%
   I/O Buf                     | 5                                   | -
     --Input Buf               | 2                                   | -
@@ -97,14 +97,14 @@
   -------------------------------------------
   Signal         | Global Clock   | Location
   -------------------------------------------
-  clk50_in_d     | PRIMARY        |  TL BR BL
+  clk50_in_d     | PRIMARY        |  TR TL BR BL
   clk100         | PRIMARY        |  TR TL BR BL
   clk54          | PRIMARY        |  BL
-  clk_pixel      | PRIMARY        |  BR BL
+  clk_pixel      | PRIMARY        |  TL BR BL
   clk_sym        | PRIMARY        |  TR TL BR BL
   i_phy/tx_clk   | PRIMARY        |  TR BR BL
   i_phy/u_dphy/u_mipi_dphy/rx_clk_o| PRIMARY        |  BL
-  n967_22        | LW             |  -
+  n2908_11       | LW             |  -
   por_done       | LW             |  -
   dphy_status[2] | LW             |  -
   i_dp/i_sdp_engine/inserting| LW             |  -
