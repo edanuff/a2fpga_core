@@ -46,7 +46,7 @@ unusable.
 
 | Step | What | Status |
 |---|---|---|
-| A1 | `a2p25_dp_test`: 720p60 RBR×2 colorbars + tone, AUX telemetry | **🏆 COLORBARS + DP AUDIO ON HARDWARE 2026-10-10** (Sceptre via USB-C→DP cable, OSD 1280×720@60, 1 kHz test tone heard; LINK_CHECK=0 hold-link) — repeatability + FANGOR still open |
+| A1 | `a2p25_dp_test`: 720p60 RBR×2 colorbars + tone, AUX telemetry | **🏆 COLORBARS + DP AUDIO ON HARDWARE 2026-10-10/11** on all three monitors (Sceptre via USB-C→DP cable; FANGOR and UFYQL native USB-C); replugs + both orientations OK; established-state AUX soak clean (§6b) |
 | A2 | ESP32 firmware a2p25 variant (`make BOARD_REV=225`, see [ESP32_FW_A2P25.md](ESP32_FW_A2P25.md)): PD (FUSB302B) → TUSB546A → SN75DP130 probe, HPD to FPGA, telemetry tee | **builds**; not yet run on hardware |
 | A3 | AUX validation matrix across our sink census (§6) | bench |
 | A4 | 4-lane RBR 1080p60 variant of A1 (`a2p25_dp_test_4l.gprj`) | **built, 0 violations (thin: clk100 +0.02 ns, pix +0.17 ns)**; bench after A3 |
@@ -263,7 +263,19 @@ Setup: Sceptre DP monitor via USB-C→DP cable. FANGOR USB-C portable: see the 2
 | UFYQL (USB-C native) | **Colorbars 2026-10-11**, `bc08d218`: 6 flips → 6 pictures once its own power supply was connected correctly. With its power mis-plugged it tried to draw from our port: PD churn (`no PD Request after 12 Source_Caps`, source/sink role flapping), no stable DP. Final link `A:0022`/`C:8177`, 0 symbol errors (this run was not logged per-attach) |
 | Occasional bad training | ~1 in 6 attaches: sink asks swing 2 (+PE 1), lanes lock but no interlane alignment → dark. Training-time only: once a picture appears it is perfect and stable (no sparkle, zero symbol errors). Treat as a handshake/ladder problem first (cf. a2mega, where similar symptoms were protocol, not swing); amplitude margin only if new evidence points there |
 
-Required gateware policy (dp_test today): `LINK_CHECK=0` (established-state AUX reads intermittently fail and used to tear the link down), watchdog exemption, `HPD_DISCONNECT_RESETS=1`.
+**Established-state AUX soak 2026-10-11** (`a2p25_dp_test_auxobs`, `LINK_CHECK=2`: periodic status reads run, failures only counted, link never torn down; P9 counters, PA = capture of the failing reply):
+
+| Monitor | Path | Status reads | short | NACK | DEFER | timeout | lock-gate fails |
+|---|---|---|---|---|---|---|---|
+| FANGOR | direct USB-C | ~1,000 (17 min) | 0 | 0 | 0 | 0 | 0 |
+| UFYQL | direct USB-C | ~300 (5 min) | 0 | 0 | 0 | 0 | 0 |
+| Sceptre | USB-C→DP cable | ~300 (5 min) | 0 | 0 | 0 | 0 | **10** (first 0.3 s after established: 0x202=0x66 both lanes = CR lost + align lost; sink re-locked by itself ~10 s later) |
+
+Verdict: **the a2p25 AUX circuit + .cst (LVDS25, BANK_VCCIO 3.3, pulldowns) and the FPGA turnaround logic are clean** — ~1,800 established-state transactions, zero AUX-level failures, across three sinks. Yesterday's "intermittent NACK/timeout" that forced `LINK_CHECK=0` was the bad USB-C cable. This is the AUX validation the a2mega board turn was waiting on.
+
+The Sceptre's lock-gate failures are the "bad training" from 10-10: the sink drops CR shortly after training and waits for the source to retrain (spec flow). `LINK_CHECK=0` never looks, so a sink that does not recover on its own stays dark. `a2p25_dp_test_lc1` (`LINK_CHECK=1`, spec flow: periodic checks + IRQ_HPD service + teardown/retrain on failure) on the Sceptre: gate failed at +1.2 s after load, torn down and retrained once (sink asked VS2/PE1 on the retrain), aligned, then held 4 min with 0 AUX failures and 2 IRQ services. Replug tally pending.
+
+Gateware policy at first light (10-10): `LINK_CHECK=0` (established-state AUX reads intermittently fail and used to tear the link down), watchdog exemption, `HPD_DISCONNECT_RESETS=1`.
 
 DP130 note: in auto mode it sets its *input* EQ from the pre-emphasis we declare (8 dB at PE0). `05h ← 0x80` (I2C EQ, 0 dB) was tried live; it did not change the bad-training rate. The CLI parses decimal unless `0x` is given.
 

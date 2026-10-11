@@ -1,0 +1,51 @@
+<?xml version="1" encoding="UTF-8"?>
+<!DOCTYPE gowin-fpga-project>
+<Project>
+    <Template>FPGA</Template>
+    <Version>5</Version>
+    <Device name="GW5A-25A" pn="GW5A-LV25MG121NC1/I0">gw5a25a-002</Device>
+    <FileList>
+        <File path="hdl/dp_test/dp_dphy_defines_lc1.v" type="file.verilog" enable="1"/>
+        <File path="../a2mega/hdl/dp_aux_pad.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_pll/gowin_pll.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_pll/gowin_pll_mod.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/pll_init.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_mipi_dphy/gowin_mipi_dphy.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_mipi_dphy/gowin_mipi_dphy_mipi_dphy.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_mipi_dphy/gowin_mipi_dphy_plla.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp/dp_dphy_tx.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/dp/transceiver_bank_dphy.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_test/a2p25_dp_test_top.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/audio/audio_sample_buffer.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/audio/maud_measure.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/audio/sdp_engine.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/aux_channel.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/aux_interface.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/channel_managemnt.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/dp_aux_messages.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/dp_register_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/edid_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/hotplug_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/link_signal_mgmt.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/idle_pattern_inserter.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/insert_training_pattern.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/main_stream_processing.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/scrambler_all_channels.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/scrambler_reset_inserter.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/skew_channels.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/dp_transmitter.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/afe_adjust_seq.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/benz_encode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/enc_8b10b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/lane_encoder_8b10b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/gowin_plls.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/dp_video_timing.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/msa_inserter_1ch.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/msa_inserter_2ch.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/msa_inserter_4ch.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/pixel_cdc_fifo.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/video_stream_packer.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_test/a2p25_dp_test.cst" type="file.cst" enable="1"/>
+        <File path="hdl/dp_test/a2p25_dp_test.sdc" type="file.sdc" enable="1"/>
+    </FileList>
+</Project>

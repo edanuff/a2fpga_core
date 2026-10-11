@@ -66,6 +66,8 @@
 `endif
 `ifdef DP_TEST_AUXOBS
  `define DPT_LINK_CHECK 2       // observe: periodic checks, count, never tear down
+`elsif DP_TEST_LINKCHECK1
+ `define DPT_LINK_CHECK 1       // spec: periodic checks + IRQ_HPD service, retrain on failure
 `else
  `define DPT_LINK_CHECK 0       // hold the link once trained
 `endif
