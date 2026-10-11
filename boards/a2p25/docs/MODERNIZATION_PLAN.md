@@ -46,7 +46,7 @@ unusable.
 
 | Step | What | Status |
 |---|---|---|
-| A1 | `a2p25_dp_test`: 720p60 RBR×2 colorbars + tone, AUX telemetry | **🏆 COLORBARS ON HARDWARE 2026-10-10** (Sceptre via USB-C→DP cable; LINK_CHECK=0 hold-link) — repeatability + FANGOR still open |
+| A1 | `a2p25_dp_test`: 720p60 RBR×2 colorbars + tone, AUX telemetry | **🏆 COLORBARS + DP AUDIO ON HARDWARE 2026-10-10** (Sceptre via USB-C→DP cable, OSD 1280×720@60, 1 kHz test tone heard; LINK_CHECK=0 hold-link) — repeatability + FANGOR still open |
 | A2 | ESP32 firmware a2p25 variant (`make BOARD_REV=225`, see [ESP32_FW_A2P25.md](ESP32_FW_A2P25.md)): PD (FUSB302B) → TUSB546A → SN75DP130 probe, HPD to FPGA, telemetry tee | **builds**; not yet run on hardware |
 | A3 | AUX validation matrix across our sink census (§6) | bench |
 | A4 | 4-lane RBR 1080p60 variant of A1 (`a2p25_dp_test_4l.gprj`) | **built, 0 violations (thin: clk100 +0.02 ns, pix +0.17 ns)**; bench after A3 |
