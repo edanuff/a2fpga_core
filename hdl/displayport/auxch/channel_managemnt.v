@@ -73,6 +73,7 @@ module channel_management #(
     parameter [5:0] EDID_DEFER_CAP = 6'd40,
     parameter TRAIN_RECOVER = 1,
     parameter ERRCNT_READ = 0,
+    parameter LINK_CHECK = 1,
     parameter WEDGE_BIT = 30,
     parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000
 )(
@@ -291,6 +292,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .EDID_DEFER_CAP(EDID_DEFER_CAP),
               .TRAIN_RECOVER(TRAIN_RECOVER),
               .ERRCNT_READ(ERRCNT_READ),
+              .LINK_CHECK(LINK_CHECK),
               .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),

@@ -49,6 +49,21 @@
 `else
  `define DPT_PROBE 0
 `endif
+`ifdef DP_TEST_LANESWAP
+ `define DPT_LANE_MAP 8'h4E      // D-PHY 3<-DP1, 2<-DP0, 1<-DP3, 0<-DP2
+`else
+ `define DPT_LANE_MAP 8'h00      // REVERSE_LANES (netlist reading)
+`endif
+`ifdef DP_TEST_POLINV
+ `define DPT_POL_INV 4'hF
+`else
+ `define DPT_POL_INV 4'h0
+`endif
+`ifdef DP_TEST_BLIND
+ `define DPT_BLIND 1
+`else
+ `define DPT_BLIND 0
+`endif
 
 module a2p25_dp_test_top #(
     // Selected per project (.gprj defines file): 2 lanes = 720p60,
@@ -113,6 +128,75 @@ module a2p25_dp_test_top #(
         .auxch_out (auxch_out),
         .auxch_tri (auxch_tri)
     );
+
+    // ------------------------------------------------------------------
+    // AUX reply capture (bring-up instrument, telemetry line P7). After
+    // each AUX transmit ends (auxch_tri rises) record: the level at
+    // release, the gap to the first RX edge (G:, 10 ns ticks, 16 bit) and
+    // the next 48 edge-to-edge intervals (8 bit, saturating; 50 = one
+    // 0.5 us Manchester half-bit, 100 = full bit, ~200 = SYNC-END pulse).
+    // One capture is published every ~2.7 s, then the next transmit
+    // re-arms it. Window: 600 us after release.
+    // ------------------------------------------------------------------
+    localparam int CAP_N = 48;
+    logic [2:0]  cap_rx_s = '0;
+    logic        cap_tri_d = 1'b1;
+    logic [1:0]  cap_st = 2'd0;           // 0 armed, 1 wait first edge, 2 record, 3 done
+    logic [15:0] cap_t = '0;
+    logic [15:0] cap_gap = '0;
+    logic [5:0]  cap_n = '0;
+    logic        cap_lvl = 1'b0;
+    logic [7:0]  cap_iv [0:CAP_N-1];
+    logic [27:0] cap_rearm = '0;
+    // published copy (quasi-static, read by the clk50 telemetry)
+    logic [7:0]  pub_iv [0:CAP_N-1];
+    logic [15:0] pub_gap = '0;
+    logic [5:0]  pub_n = '0;
+    logic        pub_lvl = 1'b0;
+    logic [7:0]  pub_seq = '0;
+    always_ff @(posedge clk100) begin
+        cap_rx_s  <= {cap_rx_s[1:0], auxch_in};
+        cap_tri_d <= auxch_tri;
+        cap_rearm <= cap_rearm + 28'd1;
+        case (cap_st)
+        2'd0: if (auxch_tri && !cap_tri_d) begin       // TX just released
+                  cap_st  <= 2'd1;
+                  cap_t   <= '0;
+                  cap_n   <= '0;
+                  cap_lvl <= cap_rx_s[2];
+              end
+        2'd1: begin
+                  cap_t <= cap_t + 16'd1;
+                  if (cap_rx_s[2] != cap_rx_s[1]) begin
+                      cap_gap <= cap_t;
+                      cap_t   <= '0;
+                      cap_st  <= 2'd2;
+                  end else if (cap_t == 16'd60000) begin
+                      cap_gap <= 16'hFFFF;              // no reply edge
+                      cap_st  <= 2'd3;
+                  end
+              end
+        2'd2: begin
+                  cap_t <= cap_t + 16'd1;
+                  if (cap_rx_s[2] != cap_rx_s[1]) begin
+                      cap_iv[cap_n] <= (cap_t > 16'd255) ? 8'hFF : cap_t[7:0];
+                      cap_n <= cap_n + 6'd1;
+                      cap_t <= '0;
+                      if (cap_n == 6'(CAP_N - 1)) cap_st <= 2'd3;
+                  end else if (cap_t == 16'd60000) begin
+                      cap_st <= 2'd3;
+                  end
+              end
+        2'd3: if (cap_rearm == '0) begin               // publish + re-arm
+                  for (int i = 0; i < CAP_N; i++) pub_iv[i] <= cap_iv[i];
+                  pub_gap <= cap_gap;
+                  pub_n   <= cap_n;
+                  pub_lvl <= cap_lvl;
+                  pub_seq <= pub_seq + 8'd1;
+                  cap_st  <= 2'd0;
+              end
+        endcase
+    end
 
     // ------------------------------------------------------------------
     // Colorbars (1280 wide: eight 160-px bars) + 2-px white frame
@@ -194,13 +278,18 @@ module a2p25_dp_test_top #(
     logic        hpd_present_w;
 
     logic        clk_sym;
+    logic [7:0]  urun_cnt;
+    logic [15:0] fifo_lvl;
     logic [79:0] tx_symbols;
     logic [3:0]  powerup_channel, tx_running;
 
     dp_transmitter #(
         .LANE_COUNT       (LANES),
         .LINK_RATE_MBPS   (1620),
-        .BLIND_SINK       (0),       // closed loop: AUX RX is under test
+        // closed loop (AUX RX under test) unless the _blind project selects
+        // the a2mega 1.0a3 open-loop policy (writes DPCD, never waits for
+        // replies) to prove the main link independently of AUX receive
+        .BLIND_SINK       (`DPT_BLIND),
         .HPD_DISCONNECT_RESETS(0),
         .ENABLE_AFE_ADJUST(0),       // swing/pre-emphasis live in the SN75DP130
         .AFE_APPLY_ON_START(0),
@@ -210,7 +299,12 @@ module a2p25_dp_test_top #(
         .LATE_REPLY_DRAIN (0),
         .IRQ_SERVICE      (2),
         .POLITE_ATTACH    (1),
-        .ERRCNT_READ      (1),
+        .ERRCNT_READ      (0),
+        // Bring-up 10-10: training succeeds (0x202=77, aligned, 0 symbol
+        // errors) but established-state AUX checks intermittently fail and
+        // tore the link down every ~1 s, before the FANGOR could display.
+        // Hold the link once trained until AUX RX margin is fixed.
+        .LINK_CHECK       (0),
         .TX_PROBE         (0),
         // 720p60 (VIC 4, 74.25 MHz) or 1080p60 (VIC 16, 148.5 MHz);
         // pixel = 81 MHz * 11 / PIX_DIV via VCO 891
@@ -271,6 +365,8 @@ module a2p25_dp_test_top #(
         .clk_symbol_out    (),
         .serdes_status     (serdes_status),
         .hpd_present_out   (hpd_present_w),
+        .debug_underrun_cnt(urun_cnt),
+        .debug_fifo_level  (fifo_lvl),
         .ext_symbol_clk    (clk_sym),
         .ext_tx_running    (tx_running),
         .ext_tx_symbols    (tx_symbols),
@@ -287,6 +383,8 @@ module a2p25_dp_test_top #(
     logic [7:0] dphy_status;
     transceiver_bank_dphy #(
         .REVERSE_LANES (1),
+        .LANE_MAP      (`DPT_LANE_MAP),
+        .POL_INV       (`DPT_POL_INV),
         .PROBE         (PROBE)
     ) i_phy (
         .mgmt_clk        (clk100),
@@ -330,6 +428,19 @@ module a2p25_dp_test_top #(
         end
     end
 
+    // Pixel-clock meter: pixels per 1 s crystal window (expect 74,250,000
+    // at 720p, 148,500,000 at 1080p — exactly MULT/DIV of Q:)
+    logic [27:0] pix_cnt = '0, pix_last = '0, pix_delta = '0;
+    logic [2:0]  ptgl_sync = '0;
+    always_ff @(posedge clk_pixel) begin
+        pix_cnt   <= pix_cnt + 28'd1;
+        ptgl_sync <= {ptgl_sync[1:0], win_tgl};
+        if (ptgl_sync[2] != ptgl_sync[1]) begin
+            pix_delta <= pix_cnt - pix_last;
+            pix_last  <= pix_cnt;
+        end
+    end
+
     logic [7:0] frame_cnt = '0;
     logic       cy_msb_d = 1'b0;
     always_ff @(posedge clk_pixel) begin
@@ -357,6 +468,9 @@ module a2p25_dp_test_top #(
     logic [7:0]  defr_s0, defr_s;
     logic [27:0] edet_s0, edet_s;
     logic [31:0] snap_s0, snap_s;
+    logic [27:0] pxd_s0, pxd_s;
+    logic [7:0]  ur_s0, ur_s;
+    logic [15:0] fl_s0, fl_s;
     always_ff @(posedge clk50_in) begin
         st_s0   <= dphy_status;         st_s   <= st_s0;
         dbg_s0  <= debug;               dbg_s  <= dbg_s0;
@@ -378,6 +492,9 @@ module a2p25_dp_test_top #(
         defr_s0 <= {aux_wedge, aux_dbg_defer}; defr_s <= defr_s0;
         edet_s0 <= aux_dbg_errdet;      edet_s <= edet_s0;
         snap_s0 <= aux_dbg_snap;        snap_s <= snap_s0;
+        pxd_s0  <= pix_delta;           pxd_s  <= pxd_s0;
+        ur_s0   <= urun_cnt;            ur_s   <= ur_s0;
+        fl_s0   <= fifo_lvl;            fl_s   <= fl_s0;
     end
 
     logic [3:0] link_rises = '0, vid_rises = '0;
@@ -396,7 +513,7 @@ module a2p25_dp_test_top #(
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 172;
+    localparam int MSG_LEN = 318;   // P1..P8 lines
     logic [7:0] msg [0:MSG_LEN-1];
     always_comb begin
         for (int i = 0; i < MSG_LEN; i++) msg[i] = " ";
@@ -450,12 +567,31 @@ module a2p25_dp_test_top #(
         msg[160]="1"; msg[161]=":";
         for (int i = 0; i < 4; i++) msg[162+i] = hexch(ec1_s[15-4*i -: 4]);
         msg[171]=8'h0A;
+        // P7: AUX reply capture (see instrument above)
+        msg[172]="P"; msg[173]="7"; msg[175]="#"; msg[176]=hexch(pub_seq[3:0]);
+        msg[178]="L"; msg[179]=":"; msg[180]=8'h30 + 8'(pub_lvl);
+        msg[182]="G"; msg[183]=":";
+        for (int i = 0; i < 4; i++) msg[184+i] = hexch(pub_gap[15-4*i -: 4]);
+        msg[189]="N"; msg[190]=":"; msg[191]=hexch({2'b0, pub_n[5:4]}); msg[192]=hexch(pub_n[3:0]);
+        msg[193]=" ";
+        for (int i = 0; i < CAP_N; i++) begin
+            msg[194+2*i] = hexch(pub_iv[i][7:4]);
+            msg[195+2*i] = hexch(pub_iv[i][3:0]);
+        end
+        msg[290]=8'h0A;
+        // P8: pixel clock (per 1 s), packer underruns, pixel FIFO level
+        msg[291]="P"; msg[292]="8"; msg[294]="X"; msg[295]=":";
+        for (int i = 0; i < 7; i++) msg[296+i] = hexch(pxd_s[27-4*i -: 4]);
+        msg[304]="U"; msg[305]="R"; msg[306]=":"; msg[307]=hexch(ur_s[7:4]); msg[308]=hexch(ur_s[3:0]);
+        msg[310]="L"; msg[311]=":";
+        for (int i = 0; i < 4; i++) msg[312+i] = hexch(fl_s[15-4*i -: 4]);
+        msg[317]=8'h0A;
     end
 
     logic [8:0]  baud_cnt = '0;
     logic        baud_tick;
     logic [24:0] msg_timer = '0;
-    logic [7:0]  msg_idx = MSG_LEN[7:0];
+    logic [8:0]  msg_idx = MSG_LEN[8:0];
     logic [3:0]  bit_idx = '0;
     logic [9:0]  shifter = 10'h3FF;
     always_ff @(posedge clk50_in) begin
@@ -464,12 +600,12 @@ module a2p25_dp_test_top #(
         else baud_cnt <= baud_cnt + 9'd1;
 
         msg_timer <= msg_timer + 25'd1;
-        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[7:0]) begin
+        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[8:0]) begin
             msg_idx <= '0;
             bit_idx <= 4'd10;
         end
 
-        if (baud_tick && msg_idx != MSG_LEN[7:0]) begin
+        if (baud_tick && msg_idx != MSG_LEN[8:0]) begin
             if (bit_idx >= 4'd10) begin
                 shifter <= {1'b1, msg[msg_idx], 1'b0};
                 bit_idx <= 4'd0;
@@ -477,11 +613,11 @@ module a2p25_dp_test_top #(
                 shifter <= {1'b1, shifter[9:1]};
                 bit_idx <= bit_idx + 4'd1;
                 if (bit_idx == 4'd9)
-                    msg_idx <= msg_idx + 8'd1;
+                    msg_idx <= msg_idx + 9'd1;
             end
         end
     end
-    assign uart_tx = (msg_idx == MSG_LEN[7:0]) ? 1'b1 : shifter[0];
+    assign uart_tx = (msg_idx == MSG_LEN[8:0]) ? 1'b1 : shifter[0];
 
     // ------------------------------------------------------------------
     // Heartbeat: hb[24] at 50 MHz = 1.49 Hz (same as a2mega led[0])

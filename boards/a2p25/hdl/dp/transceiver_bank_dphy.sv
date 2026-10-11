@@ -55,6 +55,16 @@
 
 module transceiver_bank_dphy #(
     parameter REVERSE_LANES     = 1,
+    // LANE_MAP overrides REVERSE_LANES when non-zero: 4 x 2-bit fields,
+    // [2k+1:2k] = DP lane carried by D-PHY data lane k. 8'h1B = reversed
+    // (k -> 3-k), 8'hE4 = straight. Bring-up knob for the lane-order
+    // question (training cannot see a DP0/DP1 swap; video can).
+    parameter [7:0] LANE_MAP    = 8'h00,
+    // Per-D-PHY-lane polarity inversion (bit k = invert data lane k).
+    // Training CANNOT detect an inverted lane (inverted D10.2 / K28.5 are
+    // still valid patterns, the complement of an 8b/10b stream is still a
+    // valid stream) — only video decode can.
+    parameter [3:0] POL_INV     = 4'h0,
     parameter PROBE             = 0,
     parameter DRV_SETTLE_CYCLES = 20'd10125,   // ~100 us @ 101.25 MHz
     parameter HS_SETTLE_CYCLES  = 20'd10125
@@ -325,8 +335,11 @@ module transceiver_bank_dphy #(
     wire [79:0] shim_pair;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : g_lane
-            assign shim_pair[gi*20 +: 20] = REVERSE_LANES ? rd_pair[(3-gi)*20 +: 20]
+            wire [19:0] lane_pair = (LANE_MAP != 8'h00)
+                                            ? rd_pair[LANE_MAP[2*gi +: 2]*20 +: 20]
+                                            : REVERSE_LANES ? rd_pair[(3-gi)*20 +: 20]
                                                           : rd_pair[gi*20 +: 20];
+            assign shim_pair[gi*20 +: 20] = lane_pair ^ {20{POL_INV[gi]}};
         end
     endgenerate
 

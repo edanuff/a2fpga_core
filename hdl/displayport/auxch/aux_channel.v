@@ -178,6 +178,13 @@ module aux_channel #(
     // read NEVER tear down the link — every error path skips to
     // check_wait. Default 0 = legacy byte-identical.
     parameter ERRCNT_READ = 0,
+    // LINK_CHECK: 1 (default) = periodic / hpd_irq status checks while the
+    // link is established (spec flow; a failed check tears the link down).
+    // 0 = once established, stay established until HPD drops or the
+    // watchdog fires — bring-up aid for a marginal AUX RX path (a2p25
+    // displayport1: training succeeds, established-state AUX transactions
+    // intermittently NACK/time out and tore the link down every ~1 s).
+    parameter LINK_CHECK = 1,
     // WEDGE-SUSPECT DETECTOR (advisory ONLY — no autonomous action in
     // this build; the ESP32 auto-replug policy arms separately after
     // bench validation). Fires when, within one established session:
@@ -1429,7 +1436,7 @@ always @(posedge clk) begin
     //-----------------------------------------------
     if (IRQ_SERVICE != 0 && hpd_irq)
         irq_pending <= 1'b1;
-    if(state == link_established &&
+    if(LINK_CHECK != 0 && state == link_established &&
        (link_check_now == 1'b1 || (IRQ_SERVICE != 0 && irq_pending))) begin
         next_state  <= check_link;
         // ESI mode: remember an hpd_irq-triggered check owes an ESI

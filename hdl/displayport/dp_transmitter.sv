@@ -115,6 +115,7 @@ module dp_transmitter #(
     parameter [5:0]  EDID_DEFER_CAP = 6'd40,
     parameter        TRAIN_RECOVER = 1,
     parameter        ERRCNT_READ = 0,
+    parameter        LINK_CHECK = 1,   // see auxch/aux_channel.v
     parameter        WEDGE_BIT = 30,
     parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
@@ -192,6 +193,14 @@ module dp_transmitter #(
     // tx_running[1:0]}; ties to all-ones on non-Gowin/sim builds.
     output logic [7:0] serdes_status,
     output logic hpd_present_out,
+    // Packer health (tx_symbol_clk domain, quasi-static): saturating count
+    // of pixel-FIFO underruns since the link was last established, and the
+    // current FIFO read level. A non-zero count while video_live means the
+    // pixel clock is not exactly locked to the symbol clock (or the FIFO
+    // pre-fill is short) — the stream content is then garbage even though
+    // the link trains perfectly.
+    output logic [7:0]  debug_underrun_cnt,
+    output logic [15:0] debug_fifo_level,
 `ifdef DP_VENDOR_DPHY
     // External PHY (a2p25: hardened MIPI D-PHY as a raw serializer). The
     // board top hosts the serializer (boards/a2p25/hdl/dp/
@@ -372,6 +381,15 @@ module dp_transmitter #(
     logic [72:0] packed_data, sdp_merged_data, sdp_engine_out;
     assign sdp_merged_data = AUDIO_ENABLE ? sdp_engine_out : packed_data;
     logic        sdp_gap, frame_pulse, fifo_underrun;
+    logic        link_est_d = 1'b0;
+    always_ff @(posedge tx_symbol_clk) begin
+        link_est_d <= tx_link_established;
+        if (tx_link_established && !link_est_d)
+            debug_underrun_cnt <= 8'd0;
+        else if (fifo_underrun && debug_underrun_cnt != 8'hFF)
+            debug_underrun_cnt <= debug_underrun_cnt + 8'd1;
+        debug_fifo_level <= 16'(fifo_rlevel);
+    end
     logic        audio_strobe_sym, audio_buffer_ready, audio_buffer_take;
     logic        audio_mute;
     logic [4*2*AUDIO_BIT_WIDTH-1:0] audio_buffer_flat;
@@ -642,6 +660,7 @@ module dp_transmitter #(
                          .EDID_DEFER_CAP(EDID_DEFER_CAP),
                          .TRAIN_RECOVER(TRAIN_RECOVER),
                          .ERRCNT_READ(ERRCNT_READ),
+                         .LINK_CHECK(LINK_CHECK),
                          .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
@@ -724,7 +743,9 @@ module dp_transmitter #(
     // "streaming" can never be observed - without this gate the watchdog
     // would tear down a healthy blind link every WDOG_GRACE forever
     // (observed on hw 2026-08-16: W cycling on the blind-monitor build).
-    wire wdog_streaming = (BLIND_SINK != 0)
+    // Same for LINK_CHECK=0: no status reads once established, so K stays
+    // 0 and a healthy held link would be pulsed off every WDOG_GRACE.
+    wire wdog_streaming = (BLIND_SINK != 0 || LINK_CHECK == 0)
                         ? tx_link_established
                         : tx_link_established && (debug_sink[1:0] != 2'b00);
     always_ff @(posedge clk100) begin
