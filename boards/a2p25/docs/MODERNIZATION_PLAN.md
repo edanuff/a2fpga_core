@@ -223,11 +223,15 @@ pull-up.
    alive, bit 7 = D-PHY reset released.
 3. **Colorbars.** Build `a2p25_dp_test` with `PROBE=0` and use the best sink
    class first: a direct USB-C→DP cable into a DP monitor (HBR2 ×4 in the
-   census, both gates passing). Use the LED ladder:
-   - slow blink: alive
-   - fast blink: HPD
-   - double blink: link up
-   - solid: video
+   census, both gates passing).
+
+   LEDs:
+   - **FPGA LED (B10):** a ~1.5 Hz heartbeat in every state. Dark or solid
+     means the bitstream is not running.
+   - **ESP32 LED0:** ESP32 heartbeat.
+   - **ESP32 LED1:** the HPD level being sent to the FPGA.
+
+   The link ladder is in telemetry `P1 HLV:` (HPD / link / video).
 
    In telemetry, `Q:` must read `04D3F640` (81,000,000 symbol clocks per
    second). `P2 C:` shows lane lock state, and `P6` shows the symbol error
@@ -274,3 +278,10 @@ pull-up.
 | 2026-10-01 | `a2p25_psram_test_ck108` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 112.0 vs 108 (+0.31 ns — below the +0.5 durability bar) | `c78ffe7423efa974d0ef524d44ae2d0cf0e32f58d9fedcbedd6d5841999b9a4b` |
 | 2026-10-01 | `a2p25_psram_test_ck81` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 118.2 vs 81 | `16a5c29f7fbe63d67f07b224a785a33ce03eedbce2c7278b5c3f1ead55966c71` |
 | 2026-10-01 | `a2p25_psram_test_ck54` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 110.9 vs 54 | `4cb6a3908ea4e18e5f6801f955b13b5dc0d661a51f851a6470216e3d37478fb2` |
+| 2026-10-10 | **heartbeat LED rebuild (current bench set)** — `a2p25_dp_test` 720p ×2 | this commit | Gowin V1.9.12.01 | 0/0; clk100 102.8, pix 104.7 | `224aa743e16d21a2b27a0438b109ce4381aa7e73ac8c8af833d1caddf4f135a4` |
+| 2026-10-10 | `a2p25_dp_test_probe` | this commit | Gowin V1.9.12.01 | 0/0 | `dc172e27fe2f0e1bf3116d4e92b071c72fe1459a313c1e56a050a9111cc06f69` |
+| 2026-10-10 | `a2p25_dp_test_4l` 1080p ×4 | this commit | Gowin V1.9.12.01 | 0/0; clk100 100.43 (+0.04 ns), pix 156.9 vs 148.5 | `b6a56dbd484e6695cf9772f68f834c7b876e2c0ed01ee3a9bec2f8552d399af4` |
+| 2026-10-10 | `a2p25_psram_test_ck108` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 109.7 vs 108 (+0.15 ns, thin) | `ee1dfc317c94b35f8fcda796fed9a0415bbbeaf33ce4e9a18c12e2c709fecf0f` |
+| 2026-10-10 | `a2p25_psram_test_ck81` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 107.6 vs 81 | `386e1a36924867884278341b70459381f03216e377b205644c500647bc673851` |
+| 2026-10-10 | `a2p25_psram_test_ck54` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 85.6 vs 54 | `1ba81136659674a716ca84982b8feac7a21754972bcfddbdf0d5b5c2f0ac272e` |
+| 2026-10-10 | ESP32 fw `make BOARD_REV=225` (DP_TEST=1) | this commit | arduino-cli 1.2.2 / esp32 3.3.5 | builds | `1ea60d8aa9ba5ef93ae1f339f1db6ad32acfb9ea8075a6520f9612ce4e1e5816` |

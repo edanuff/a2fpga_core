@@ -12,27 +12,27 @@
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
   <Device Version>: A
-  <Created Time>:Thu Oct  1 11:06:44 2026
+  <Created Time>:Sat Oct 10 21:49:50 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.335s, Elapsed time = 0h 0m 0.35s
-    Placement Phase 1: CPU time = 0h 0m 0.172s, Elapsed time = 0h 0m 0.68s
-    Placement Phase 2: CPU time = 0h 0m 0.906s, Elapsed time = 0h 0m 0.997s
-    Placement Phase 3: CPU time = 0h 0m 0.819s, Elapsed time = 0h 0m 1s
-    Total Placement: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 3s
+    Placement Phase 0: CPU time = 0h 0m 0.312s, Elapsed time = 0h 0m 0.313s
+    Placement Phase 1: CPU time = 0h 0m 0.129s, Elapsed time = 0h 0m 0.135s
+    Placement Phase 2: CPU time = 0h 0m 0.968s, Elapsed time = 0h 0m 0.976s
+    Placement Phase 3: CPU time = 0h 0m 0.869s, Elapsed time = 0h 0m 0.891s
+    Total Placement: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.003s
+    Routing Phase 0: CPU time = 0h 0m 0.001s, Elapsed time = 0h 0m 0.001s
     Routing Phase 1: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-    Routing Phase 2: CPU time = 0h 0m 0.035s, Elapsed time = 0h 0m 0.038s
+    Routing Phase 2: CPU time = 0h 0m 0.033s, Elapsed time = 0h 0m 0.033s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
     Total Routing: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
  Generate output files:
     CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
 
- Total Time and Memory Usage: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 7s, Peak memory usage = 688MB
+ Total Time and Memory Usage: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 6s, Peak memory usage = 689MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 3898/23040                          |  17%
-    --LUT,ALU,ROM16           | 3898(3518 LUT, 380 ALU, 0 ROM16)    | -
+  Logic                       | 3992/23040                          |  18%
+    --LUT,ALU,ROM16           | 3992(3636 LUT, 356 ALU, 0 ROM16)    | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 2814/23280                          |  13%
+  Register                    | 2791/23280                          |  12%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 2812/23040                          |  13%
+    --Logic Register as FF    | 2789/23040                          |  13%
     --I/O Register as Latch   | 0/240                               |  0%
     --I/O Register as FF      | 2/240                               |  <1%
-  CLS                         | 3101/11520                          |  27%
+  CLS                         | 3183/11520                          |  28%
   I/O Port                    | 16/86                               |  19%
   I/O Buf                     | 5                                   | -
     --Input Buf               | 2                                   | -
@@ -96,10 +96,10 @@
   -------------------------------------------
   Signal         | Global Clock   | Location
   -------------------------------------------
-  clk50_in_d     | PRIMARY        |  TR TL BR BL
+  clk50_in_d     | PRIMARY        |  TL BR BL
   clk100         | PRIMARY        |  TR TL BR BL
   clk54          | PRIMARY        |  BL
-  clk_pixel      | PRIMARY        |  TR TL BR
+  clk_pixel      | PRIMARY        |  TR BR BL
   clk_sym        | PRIMARY        |  TR TL BR BL
   i_phy/tx_clk   | PRIMARY        |  TL BL
   i_phy/u_dphy/u_mipi_dphy/rx_clk_o| PRIMARY        |  BL

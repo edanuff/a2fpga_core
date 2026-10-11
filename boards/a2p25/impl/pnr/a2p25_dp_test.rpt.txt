@@ -12,27 +12,27 @@
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
   <Device Version>: A
-  <Created Time>:Thu Oct  1 11:05:20 2026
+  <Created Time>:Sat Oct 10 21:47:36 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.461s, Elapsed time = 0h 0m 0.526s
-    Placement Phase 1: CPU time = 0h 0m 0.191s, Elapsed time = 0h 0m 0.202s
+    Placement Phase 0: CPU time = 0h 0m 0.432s, Elapsed time = 0h 0m 0.439s
+    Placement Phase 1: CPU time = 0h 0m 0.141s, Elapsed time = 0h 0m 0.156s
     Placement Phase 2: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
     Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
     Total Placement: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 4s
  Running routing:
     Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
     Routing Phase 1: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
-    Routing Phase 2: CPU time = 0h 0m 0.049s, Elapsed time = 0h 0m 0.05s
+    Routing Phase 2: CPU time = 0h 0m 0.05s, Elapsed time = 0h 0m 0.051s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
     Total Routing: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
  Generate output files:
     CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
 
- Total Time and Memory Usage: CPU time = 0h 0m 8s, Elapsed time = 0h 0m 8s, Peak memory usage = 747MB
+ Total Time and Memory Usage: CPU time = 0h 0m 7s, Elapsed time = 0h 0m 8s, Peak memory usage = 730MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 5601/23040                          |  25%
-    --LUT,ALU,ROM16           | 5601(5117 LUT, 484 ALU, 0 ROM16)    | -
+  Logic                       | 5751/23040                          |  25%
+    --LUT,ALU,ROM16           | 5751(5291 LUT, 460 ALU, 0 ROM16)    | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 4188/23280                          |  18%
+  Register                    | 4165/23280                          |  18%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 4186/23040                          |  19%
+    --Logic Register as FF    | 4163/23040                          |  19%
     --I/O Register as Latch   | 0/240                               |  0%
     --I/O Register as FF      | 2/240                               |  <1%
-  CLS                         | 4422/11520                          |  39%
+  CLS                         | 4503/11520                          |  40%
   I/O Port                    | 16/86                               |  19%
   I/O Buf                     | 5                                   | -
     --Input Buf               | 2                                   | -
@@ -86,7 +86,7 @@
   Clock Resource| Usage         | Utilization 
   ------------------------------------------
   PRIMARY       | 7/8           | 88%
-  LW            | 6/8           | 75%
+  LW            | 5/8           | 63%
   GCLK_PIN      | 1/30          | 4%
   PLLA          | 4/6           | 67%
   ==========================================
@@ -97,19 +97,18 @@
   -------------------------------------------
   Signal         | Global Clock   | Location
   -------------------------------------------
-  clk50_in_d     | PRIMARY        |  TR TL BR BL
+  clk50_in_d     | PRIMARY        |  TL BR BL
   clk100         | PRIMARY        |  TR TL BR BL
   clk54          | PRIMARY        |  BL
-  clk_pixel      | PRIMARY        |  BR BL
-  clk_sym        | PRIMARY        |  TR TL BR BL
-  i_phy/tx_clk   | PRIMARY        |  TR BR BL
+  clk_pixel      | PRIMARY        |  TL BR BL
+  clk_sym        | PRIMARY        |  TR TL BR
+  i_phy/tx_clk   | PRIMARY        |  TR TL BR BL
   i_phy/u_dphy/u_mipi_dphy/rx_clk_o| PRIMARY        |  BL
   por_done       | LW             |  -
   dphy_status[2] | LW             |  -
-  i_dp/i_sdp_engine/inserting| LW             |  -
   i_phy/rst_tx_s[2]| LW             |  -
-  i_phy/u_shim/n1323_7| LW             |  -
   i_phy/u_shim/gb_cnt_r_5_8| LW             |  -
+  i_phy/u_shim/n1323_9| LW             |  -
   ===========================================
 
 

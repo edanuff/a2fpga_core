@@ -12,27 +12,27 @@
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
   <Device Version>: A
-  <Created Time>:Thu Oct  1 18:40:22 2026
+  <Created Time>:Sat Oct 10 21:53:16 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 0.451s, Elapsed time = 0h 0m 0.455s
-    Placement Phase 1: CPU time = 0h 0m 0.162s, Elapsed time = 0h 0m 0.168s
+    Placement Phase 0: CPU time = 0h 0m 0.457s, Elapsed time = 0h 0m 0.46s
+    Placement Phase 1: CPU time = 0h 0m 0.156s, Elapsed time = 0h 0m 0.158s
     Placement Phase 2: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
-    Placement Phase 3: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
+    Placement Phase 3: CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
     Total Placement: CPU time = 0h 0m 5s, Elapsed time = 0h 0m 5s
  Running routing:
     Routing Phase 0: CPU time = 0h 0m 0.002s, Elapsed time = 0h 0m 0.002s
-    Routing Phase 1: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 3s
+    Routing Phase 1: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
     Routing Phase 2: CPU time = 0h 0m 0.071s, Elapsed time = 0h 0m 0.071s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 3s, Elapsed time = 0h 0m 4s
+    Total Routing: CPU time = 0h 0m 4s, Elapsed time = 0h 0m 4s
  Generate output files:
     CPU time = 0h 0m 1s, Elapsed time = 0h 0m 1s
 
- Total Time and Memory Usage: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 10s, Peak memory usage = 747MB
+ Total Time and Memory Usage: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 10s, Peak memory usage = 746MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 8030/23040                          |  35%
-    --LUT,ALU,ROM16           | 8030(6999 LUT, 1031 ALU, 0 ROM16)   | -
+  Logic                       | 8073/23040                          |  36%
+    --LUT,ALU,ROM16           | 8073(7039 LUT, 1034 ALU, 0 ROM16)   | -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 3596/23280                          |  16%
+  Register                    | 3603/23280                          |  16%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 3593/23040                          |  16%
+    --Logic Register as FF    | 3601/23040                          |  16%
     --I/O Register as Latch   | 0/240                               |  0%
-    --I/O Register as FF      | 3/240                               |  2%
-  CLS                         | 5634/11520                          |  49%
+    --I/O Register as FF      | 2/240                               |  <1%
+  CLS                         | 5660/11520                          |  50%
   I/O Port                    | 16/86                               |  19%
   I/O Buf                     | 16                                  | -
     --Input Buf               | 2                                   | -
@@ -88,7 +88,7 @@
   Clock Resource| Usage         | Utilization 
   ------------------------------------------
   PRIMARY       | 5/8           | 63%
-  LW            | 7/8           | 88%
+  LW            | 8/8           | 100%
   GCLK_PIN      | 12/30         | 40%
   PLLA          | 2/6           | 34%
   ==========================================
@@ -102,15 +102,16 @@
   clk50_in_d     | PRIMARY        |  BR BL
   clk54          | PRIMARY        |  TL
   clk            | PRIMARY        |  TR TL BR BL
-  clk_mem        | PRIMARY        |  TR TL BR
+  clk_mem        | PRIMARY        |  TR BR
   clk_mem_90     | PRIMARY        |  TL
   rst_n          | LW             |  -
+  i_ctrl/n8028_3 | LW             |  -
   i_ctrl/n2552_20| LW             |  -
   i_bist/n9844_4 | LW             |  -
+  i_bist/bist_rvalid| LW             |  -
   i_bist/n8886_7 | LW             |  -
   i_bist/n8975_5 | LW             |  -
-  i_cmd/out[4]_2_14| LW             |  -
-  i_cmd/n14157_8 | LW             |  -
+  i_cmd/n14157_10| LW             |  -
   ===========================================
 
 

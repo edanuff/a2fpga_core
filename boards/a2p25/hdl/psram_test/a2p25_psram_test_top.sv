@@ -21,11 +21,11 @@
 // reports progress (see hr_uart_cmd). Any command written over the UART can
 // STOP / reconfigure / restart it (register map: hyperram_bist.sv header).
 //
-// LED (B10, active high):
-//   off           calibration running
-//   solid on      calibration failed (no passing delay window)
-//   1 Hz blink    test running, no errors so far
-//   8 Hz blink    errors seen (ERR_WORDS != 0)
+// LED (B10, active high): heartbeat that toggles in every state (a2mega
+// led[0] parity), clocked from the cascaded HyperRAM PLL's logic clock, so
+// blinking also proves both PLLs locked. A dark or solid LED = not running.
+//   ~1.5 Hz   calibrating, or test running with no errors
+//   ~6 Hz     errors seen (BIST STATUS bit4) or calibration failed
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
@@ -310,19 +310,21 @@ module a2p25_psram_test_top #(
     // ------------------------------------------------------------------
     // LED
     // ------------------------------------------------------------------
-    logic [25:0] hb = '0;
+    localparam int HB_SLOW = CLK_HZ / 3;     // toggle period -> 1.5 Hz
+    localparam int HB_FAST = CLK_HZ / 12;    // -> 6 Hz
+    logic [31:0] hb = '0;
     logic        errs_seen = 1'b0;
+    initial led = 1'b0;
+    wire         alarm = errs_seen || (m_init_done && !m_cal_ok);
     always_ff @(posedge clk) begin
-        hb <= hb + 26'd1;
-        if (m_init_done && !m_cal_ok)
-            led <= 1'b1;
-        else if (!m_init_done)
-            led <= 1'b0;
-        else if (errs_seen)
-            led <= hb[$clog2(CLK_HZ) - 4];
-        else
-            led <= hb[$clog2(CLK_HZ) - 1];
+        if (hb >= 32'(alarm ? HB_FAST : HB_SLOW) - 1) begin
+            hb  <= '0;
+            led <= ~led;
+        end else begin
+            hb <= hb + 32'd1;
+        end
     end
+
     // Error flag for the LED: BIST STATUS bit4 (errors seen), captured
     // whenever STATUS is read — the console's periodic status line reads it
     // every second. reg_rdata is valid one clock after reg_addr.

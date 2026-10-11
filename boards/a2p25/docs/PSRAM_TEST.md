@@ -39,14 +39,16 @@ console. FPGA lines are also teed to telnet.
    - `CAL_INFO` = `[7:0]` live tap, `[15:8]` calibrated tap, `[20:16]` read
      arrival, `[21]` cal_ok, `[22]` init_done.
 
-LED (B10):
+LED (B10) is a heartbeat that toggles in every state. It is clocked from the
+cascaded HyperRAM PLL, so blinking also proves both PLLs locked. A dark or
+solid LED means the bitstream or its clocks are not running.
 
 | LED | Meaning |
 |---|---|
-| off | calibrating |
-| solid | calibration failed (no delay window) |
-| 1 Hz blink | running, no errors |
-| fast blink | errors seen (updated from the status line, so it needs `F2` = 1) |
+| ~1.5 Hz | calibrating, or running with no errors |
+| ~6 Hz | errors seen or calibration failed |
+
+The errors flag is updated from the status line, so it needs `F2` = 1.
 
 ## Console commands
 

@@ -27,11 +27,10 @@
 //   uart_tx -> C2  ESP32_OPI_D0  115200 8N1 telemetry; ESP32 routes a UART
 //                                RX to GPIO11 and tees it to its console
 //
-// LED (B10, active high) — single LED bring-up ladder:
-//   slow blink (~1 Hz)   bitstream alive, no HPD
-//   fast blink (~6 Hz)   HPD seen, link not established
-//   double blink         link established, video not live
-//   solid on             video live
+// LED (B10, active high): heartbeat, ~1.5 Hz, toggling in every state
+// (a2mega led[0] parity) — a dark or solid LED means the bitstream/clock is
+// NOT running. Link state lives in the telemetry (P1 HLV:) and the ESP32's
+// LED1 (HPD level).
 //
 // Telemetry lines (every ~0.34 s): see the a2mega dp_test field legend
 // (boards/a2mega/hdl/dp_test/a2mega_dp_test_top.sv) — same letters; S: is
@@ -485,19 +484,12 @@ module a2p25_dp_test_top #(
     assign uart_tx = (msg_idx == MSG_LEN[7:0]) ? 1'b1 : shifter[0];
 
     // ------------------------------------------------------------------
-    // LED ladder
+    // Heartbeat: hb[24] at 50 MHz = 1.49 Hz (same as a2mega led[0])
     // ------------------------------------------------------------------
-    logic [25:0] hb = '0;
-    always_ff @(posedge clk50_in) hb <= hb + 26'd1;
+    logic [24:0] hb = '0;
     always_ff @(posedge clk50_in) begin
-        if (flg_s[0])                       // video live
-            led <= 1'b1;
-        else if (flg_s[1])                  // link up: double blink
-            led <= (hb[25:23] == 3'd0) || (hb[25:23] == 3'd2);
-        else if (flg_s[2])                  // HPD: fast blink
-            led <= hb[22];
-        else                                // alive
-            led <= hb[25];
+        hb  <= hb + 25'd1;
+        led <= hb[24];
     end
 
 endmodule
