@@ -173,6 +173,7 @@ module dp_transmitter #(
     output logic [15:0] debug_errcnt0,  // SYMBOL_ERROR_COUNT lane0 (raw, bit15=valid)
     output logic [15:0] debug_errcnt1,  // SYMBOL_ERROR_COUNT lane1
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
+    output logic [103:0] debug_obs,     // LINK_CHECK==2 observe counters (auxch/aux_channel.v)
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
     output logic [3:0]  debug_wdog,  // {cold-restart forcing, attempts[2:0]}
@@ -681,6 +682,7 @@ module dp_transmitter #(
         .errcnt0              (debug_errcnt0),
         .errcnt1              (debug_errcnt1),
         .debug_err_detail     (debug_err_detail),
+        .debug_obs            (debug_obs),
         .debug_snapshot       (debug_snapshot),
         .debug_caps           (debug_caps),
         .hpd                  (hpd),
@@ -745,7 +747,7 @@ module dp_transmitter #(
     // (observed on hw 2026-08-16: W cycling on the blind-monitor build).
     // Same for LINK_CHECK=0: no status reads once established, so K stays
     // 0 and a healthy held link would be pulsed off every WDOG_GRACE.
-    wire wdog_streaming = (BLIND_SINK != 0 || LINK_CHECK == 0)
+    wire wdog_streaming = (BLIND_SINK != 0 || LINK_CHECK != 1)
                         ? tx_link_established
                         : tx_link_established && (debug_sink[1:0] != 2'b00);
     always_ff @(posedge clk100) begin

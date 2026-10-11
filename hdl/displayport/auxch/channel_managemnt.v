@@ -100,6 +100,7 @@ module channel_management #(
         output [15:0] errcnt0,       // SYMBOL_ERROR_COUNT lane0 (raw, bit15=valid)
         output [15:0] errcnt1,       // SYMBOL_ERROR_COUNT lane1
         output [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
+        output [103:0] debug_obs,       // LINK_CHECK==2 observe counters (aux_channel)
         // ATOMIC FIRST-FAILURE SNAPSHOT (second-opinion instrumentation,
         // 08-24): latched in the same clock as the FIRST failing check_wait
         // evaluation since config. {raw 0x204, 0x203, 0x202 at that moment,
@@ -307,6 +308,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
         .errcnt0_o       (errcnt0),
         .errcnt1_o       (errcnt1),
         .debug_err_detail(debug_err_detail),
+        .debug_obs       (debug_obs),
         .gate_fail_evt   (gate_fail_evt_w),
         .status_seq      (status_seq_w),
         .debug_sink      (debug_sink),

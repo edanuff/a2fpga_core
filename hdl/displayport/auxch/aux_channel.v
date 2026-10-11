@@ -184,6 +184,11 @@ module aux_channel #(
     // watchdog fires — bring-up aid for a marginal AUX RX path (a2p25
     // displayport1: training succeeds, established-state AUX transactions
     // intermittently NACK/time out and tore the link down every ~1 s).
+    // 2 = OBSERVE: periodic checks run as in 1, but nothing in the
+    // established set ever tears the link down — short replies, non-ACKs,
+    // DEFERs, timeouts and failed lock gates are only counted (debug_obs)
+    // and the FSM returns to link_established. Bring-up instrument for
+    // measuring established-state AUX reliability with the picture up.
     parameter LINK_CHECK = 1,
     // WEDGE-SUSPECT DETECTOR (advisory ONLY — no autonomous action in
     // this build; the ESP32 auto-replug policy arms separately after
@@ -264,6 +269,11 @@ module aux_channel #(
         // {reason[3:0], from_state[7:0], expected[7:0], rx_byte_count[7:0]}
         // reason: 1=short reply, 2=non-ACK, 3=gate, 4=AUX timeout, 5=retry
         output [27:0] debug_err_detail,
+        // LINK_CHECK==2 observe counters (16-bit, wrapping; zero otherwise):
+        // {last_hdr[7:0], checks, short, nack, defer, timeout, gate}
+        // checks = check_link reads issued; one error class counted per
+        // read; last_hdr = reply header byte of the last non-ACK.
+        output [103:0] debug_obs,
         // 1-clk pulse on a failing check_wait evaluation (snapshot trigger)
         output reg   gate_fail_evt,
         // completed periodic status reads: increments when the 0x204 byte
@@ -497,7 +507,14 @@ module aux_channel #(
                               (state == irq_clear) ||
                               (state == esi_read_rt) || (state == esi_clear_rt) ||
                               (state == esi_clear2_rt) || (state == esi_eval_rt);
-    wire obs_active = (GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS);
+    wire obs_active = (LINK_CHECK == 2) ||
+                      ((GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS));
+    wire obs_mode   = (LINK_CHECK == 2) && in_established_set;
+    reg [15:0] ob_chk = 16'd0, ob_short = 16'd0, ob_nack = 16'd0,
+               ob_defer = 16'd0, ob_tmo = 16'd0, ob_gate = 16'd0;
+    reg [7:0]  ob_hdr = 8'd0;
+    reg        ob_counted = 1'b0;     // one class per check_link read
+    reg        ob_defer_evt = 1'b0;
     // Registered at the state transition (not combinational off `state`):
     // the six 8-bit compares fed the short-read/non-ACK/DEFER/timeout
     // branches of the next_state mux and tipped the knife-edge (23
@@ -511,6 +528,7 @@ module aux_channel #(
     assign debug_aux_err  = {dbg_short_sat, dbg_nack_sat, dbg_other_sat,
                              dbg_obs_sat, dbg_kick_sat, dbg_irq_sat};
     assign debug_err_detail = err_detail;
+    assign debug_obs = {ob_hdr, ob_chk, ob_short, ob_nack, ob_defer, ob_tmo, ob_gate};
     assign debug_esi   = {dbg_esi2003, dbg_esi2005};
     assign debug_defer = {edid_giveup, defer_cnt};
     assign wedge_suspect_o = wedge_suspect;
@@ -635,6 +653,21 @@ always @(posedge clk) begin
     // The per-reason counters are ALSO incremented here — once per tagged
     // event — instead of at the sites: the short-read site evaluates per
     // received byte and over-counted (accounting discrepancy, 08-24).
+    // LINK_CHECK==2 observe accounting (sites set err_evt/ob_defer_evt)
+    ob_defer_evt <= 1'b0;
+    if (LINK_CHECK == 2) begin
+        if (state == check_link && state_d != check_link) begin
+            ob_chk     <= ob_chk + 16'd1;
+            ob_counted <= 1'b0;
+        end else if ((err_evt || ob_defer_evt) && !ob_counted) begin
+            ob_counted <= 1'b1;
+            if (ob_defer_evt)              ob_defer <= ob_defer + 16'd1;
+            else if (err_reason == 4'd1)   ob_short <= ob_short + 16'd1;
+            else if (err_reason == 4'd2)   ob_nack  <= ob_nack  + 16'd1;
+            else if (err_reason == 4'd3)   ob_gate  <= ob_gate  + 16'd1;
+            else if (err_reason == 4'd4)   ob_tmo   <= ob_tmo   + 16'd1;
+        end
+    end
     if (err_evt) begin
         if (!err_detail_v) begin
             err_detail_v <= 1'b1;
@@ -833,6 +866,11 @@ always @(posedge clk) begin
                                     // at the poll cadence).
                                     if (dbg_obs_sat != 4'hF)
                                         dbg_obs_sat <= dbg_obs_sat + 4'd1;
+                                    if (LINK_CHECK == 2) begin
+                                        err_evt <= 1'b1; err_reason <= 4'd3;
+                                        err_from <= state; err_exp <= expected;
+                                        err_rxc <= rx_byte_count;
+                                    end
                                     state_on_success <= link_established;
                                     dbg_fail_mask <= dbg_fail_mask |
                                         ~{clock_locked_i, equ_locked_i,
@@ -1219,6 +1257,11 @@ always @(posedge clk) begin
                     end else begin
                         next_state      <= clock_training;
                     end
+                end else if (obs_mode) begin
+                    next_state <= link_established;   // observe: count only
+                    err_evt <= 1'b1; err_reason <= 4'd1;
+                    err_from <= state; err_exp <= expected;
+                    err_rxc <= rx_byte_count;
                 end else begin
                     next_state <= error;
                     if (in_established_set) begin
@@ -1258,6 +1301,14 @@ always @(posedge clk) begin
                         end else begin
                             next_state      <= clock_training;
                         end
+                    end else if (obs_mode) begin
+                        next_state <= link_established;   // observe: count only
+                        ob_hdr     <= aux_rx_data;
+                        if (aux_rx_data != 8'h20) begin   // DEFER counted below
+                            err_evt <= 1'b1; err_reason <= 4'd2;
+                            err_from <= state; err_exp <= expected;
+                            err_rxc <= rx_byte_count;
+                        end
                     end else begin
                         next_state <= error;
                         if (in_established_set) begin
@@ -1280,7 +1331,10 @@ always @(posedge clk) begin
                 // transactions that aeert "AUX DEFER"
                 //--------------------------------------------
                 if(aux_rx_data == 8'h20) begin
-                    if (errcnt_st) begin
+                    if (obs_mode) begin
+                        ob_defer_evt <= 1'b1;             // observe: count only
+                        next_state   <= link_established;
+                    end else if (errcnt_st) begin
                         // deferred instrumentation read: skip (defer_wait
                         // would drop tx_link_established mid-stream)
                         next_state <= check_wait;
@@ -1396,6 +1450,12 @@ always @(posedge clk) begin
         esi_off    <= 1'b1;
         next_state <= esi_attach_st ? set_power_d0 : link_established;
         state      <= error;   // force the transition machinery
+    end else
+    if (BLIND_SINK == 0 && channel_timeout == 1'b1 && obs_mode) begin
+        next_state <= link_established;   // observe: count only
+        state      <= error;              // force the transition machinery
+        err_evt    <= 1'b1; err_reason <= 4'd4;
+        err_from   <= state; err_exp <= expected; err_rxc <= rx_byte_count;
     end else
     if (BLIND_SINK == 0 && channel_timeout == 1'b1 && errcnt_st) begin
         next_state <= check_wait;   // instrumentation timeout: skip

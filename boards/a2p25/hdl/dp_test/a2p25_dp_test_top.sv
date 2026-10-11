@@ -64,6 +64,11 @@
 `else
  `define DPT_BLIND 0
 `endif
+`ifdef DP_TEST_AUXOBS
+ `define DPT_LINK_CHECK 2       // observe: periodic checks, count, never tear down
+`else
+ `define DPT_LINK_CHECK 0       // hold the link once trained
+`endif
 
 module a2p25_dp_test_top #(
     // Selected per project (.gprj defines file): 2 lanes = 720p60,
@@ -130,14 +135,21 @@ module a2p25_dp_test_top #(
     );
 
     // ------------------------------------------------------------------
-    // AUX reply capture (bring-up instrument, telemetry line P7). After
-    // each AUX transmit ends (auxch_tri rises) record: the level at
+    // AUX reply capture (bring-up instrument, telemetry lines P7 and PA).
+    // After each AUX transmit ends (auxch_tri rises) record: the level at
     // release, the gap to the first RX edge (G:, 10 ns ticks, 16 bit) and
     // the next 48 edge-to-edge intervals (8 bit, saturating; 50 = one
     // 0.5 us Manchester half-bit, 100 = full bit, ~200 = SYNC-END pulse).
-    // One capture is published every ~2.7 s, then the next transmit
-    // re-arms it. Window: 600 us after release.
+    // Window: 600 us without an edge ends a capture. Every transaction is
+    // captured; the last complete one is kept.
+    //   P7: the last complete capture, republished every ~2.7 s.
+    //   PA: the capture of the last FAILING established-state reply
+    //       (LINK_CHECK=2 observe counters: S short, N non-ACK, D DEFER,
+    //       T timeout). A timeout is flagged ~20 ms after its (empty)
+    //       capture completed, so an idle capture engine publishes the
+    //       kept copy; one still in progress publishes when it finishes.
     // ------------------------------------------------------------------
+    logic [103:0] aux_dbg_obs;            // dp_transmitter observe counters
     localparam int CAP_N = 48;
     logic [2:0]  cap_rx_s = '0;
     logic        cap_tri_d = 1'b1;
@@ -148,16 +160,54 @@ module a2p25_dp_test_top #(
     logic        cap_lvl = 1'b0;
     logic [7:0]  cap_iv [0:CAP_N-1];
     logic [27:0] cap_rearm = '0;
-    // published copy (quasi-static, read by the clk50 telemetry)
+    logic        per_due = 1'b0;
+    // last complete capture
+    logic [7:0]  lst_iv [0:CAP_N-1];
+    logic [15:0] lst_gap = '0;
+    logic [5:0]  lst_n = '0;
+    logic        lst_lvl = 1'b0;
+    // published copies (quasi-static, read by the clk50 telemetry)
     logic [7:0]  pub_iv [0:CAP_N-1];
     logic [15:0] pub_gap = '0;
     logic [5:0]  pub_n = '0;
     logic        pub_lvl = 1'b0;
     logic [7:0]  pub_seq = '0;
+    logic [7:0]  fpub_iv [0:CAP_N-1];
+    logic [15:0] fpub_gap = '0;
+    logic [5:0]  fpub_n = '0;
+    logic        fpub_lvl = 1'b0;
+    logic [7:0]  fpub_seq = '0;
+    logic [7:0]  fpub_rsn = "-";
+    // failure events from the observe counters (same clk100 domain)
+    logic [63:0] obs_d = '0;              // {short, nack, defer, timeout}
+    logic        f_pend = 1'b0;
+    logic [7:0]  f_rsn = "-";
+    wire  [63:0] obs_now = aux_dbg_obs[79:16];
+    // change flags registered (timing: one compare per clock, then decode)
+    logic [3:0]  f_chg = '0;              // {short, nack, defer, timeout}
+    wire         f_evt = |f_chg;
+    wire  [7:0]  f_evt_rsn = f_chg[3] ? "S" : f_chg[2] ? "N" : f_chg[1] ? "D" : "T";
     always_ff @(posedge clk100) begin
         cap_rx_s  <= {cap_rx_s[1:0], auxch_in};
         cap_tri_d <= auxch_tri;
         cap_rearm <= cap_rearm + 28'd1;
+        if (cap_rearm == '0) per_due <= 1'b1;
+        obs_d <= obs_now;
+        f_chg <= {obs_now[63:48] != obs_d[63:48], obs_now[47:32] != obs_d[47:32],
+                  obs_now[31:16] != obs_d[31:16], obs_now[15:0]  != obs_d[15:0]};
+        if (f_evt) begin
+            if (cap_st == 2'd0) begin             // idle: publish the kept copy
+                for (int i = 0; i < CAP_N; i++) fpub_iv[i] <= lst_iv[i];
+                fpub_gap <= lst_gap;
+                fpub_n   <= lst_n;
+                fpub_lvl <= lst_lvl;
+                fpub_rsn <= f_evt_rsn;
+                fpub_seq <= fpub_seq + 8'd1;
+            end else begin
+                f_pend <= 1'b1;
+                f_rsn  <= f_evt_rsn;
+            end
+        end
         case (cap_st)
         2'd0: if (auxch_tri && !cap_tri_d) begin       // TX just released
                   cap_st  <= 2'd1;
@@ -187,13 +237,29 @@ module a2p25_dp_test_top #(
                       cap_st <= 2'd3;
                   end
               end
-        2'd3: if (cap_rearm == '0) begin               // publish + re-arm
-                  for (int i = 0; i < CAP_N; i++) pub_iv[i] <= cap_iv[i];
-                  pub_gap <= cap_gap;
-                  pub_n   <= cap_n;
-                  pub_lvl <= cap_lvl;
-                  pub_seq <= pub_seq + 8'd1;
-                  cap_st  <= 2'd0;
+        2'd3: begin                                    // keep, publish, re-arm
+                  for (int i = 0; i < CAP_N; i++) lst_iv[i] <= cap_iv[i];
+                  lst_gap <= cap_gap;
+                  lst_n   <= cap_n;
+                  lst_lvl <= cap_lvl;
+                  if (per_due) begin
+                      for (int i = 0; i < CAP_N; i++) pub_iv[i] <= cap_iv[i];
+                      pub_gap <= cap_gap;
+                      pub_n   <= cap_n;
+                      pub_lvl <= cap_lvl;
+                      pub_seq <= pub_seq + 8'd1;
+                      per_due <= 1'b0;
+                  end
+                  if (f_pend && !f_evt) begin
+                      for (int i = 0; i < CAP_N; i++) fpub_iv[i] <= cap_iv[i];
+                      fpub_gap <= cap_gap;
+                      fpub_n   <= cap_n;
+                      fpub_lvl <= cap_lvl;
+                      fpub_rsn <= f_rsn;
+                      fpub_seq <= fpub_seq + 8'd1;
+                      f_pend   <= 1'b0;
+                  end
+                  cap_st <= 2'd0;
               end
         endcase
     end
@@ -308,7 +374,9 @@ module a2p25_dp_test_top #(
         // errors) but established-state AUX checks intermittently fail and
         // tore the link down every ~1 s, before the FANGOR could display.
         // Hold the link once trained until AUX RX margin is fixed.
-        .LINK_CHECK       (0),
+        // _auxobs variant: LINK_CHECK=2 runs the periodic checks but only
+        // counts failures (P9) and freezes the failing reply (PA).
+        .LINK_CHECK       (`DPT_LINK_CHECK),
         .TX_PROBE         (0),
         // 720p60 (VIC 4, 74.25 MHz) or 1080p60 (VIC 16, 148.5 MHz);
         // pixel = 81 MHz * 11 / PIX_DIV via VCO 891
@@ -358,6 +426,7 @@ module a2p25_dp_test_top #(
         .debug_errcnt0     (aux_errcnt0),
         .debug_errcnt1     (aux_errcnt1),
         .debug_err_detail  (aux_dbg_errdet),
+        .debug_obs         (aux_dbg_obs),
         .debug_snapshot    (aux_dbg_snap),
         .debug_caps        (aux_dbg_caps),
         .debug_wdog        (aux_dbg_wdog),
@@ -475,6 +544,7 @@ module a2p25_dp_test_top #(
     logic [27:0] pxd_s0, pxd_s;
     logic [7:0]  ur_s0, ur_s;
     logic [15:0] fl_s0, fl_s;
+    logic [103:0] obs_s0, obs_s;
     always_ff @(posedge clk50_in) begin
         st_s0   <= dphy_status;         st_s   <= st_s0;
         dbg_s0  <= debug;               dbg_s  <= dbg_s0;
@@ -499,6 +569,7 @@ module a2p25_dp_test_top #(
         pxd_s0  <= pix_delta;           pxd_s  <= pxd_s0;
         ur_s0   <= urun_cnt;            ur_s   <= ur_s0;
         fl_s0   <= fifo_lvl;            fl_s   <= fl_s0;
+        obs_s0  <= aux_dbg_obs;         obs_s  <= obs_s0;
     end
 
     logic [3:0] link_rises = '0, vid_rises = '0;
@@ -517,7 +588,7 @@ module a2p25_dp_test_top #(
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 318;   // P1..P8 lines
+    localparam int MSG_LEN = 489;   // P1..P8, P9, PA lines
     logic [7:0] msg [0:MSG_LEN-1];
     always_comb begin
         for (int i = 0; i < MSG_LEN; i++) msg[i] = " ";
@@ -590,6 +661,30 @@ module a2p25_dp_test_top #(
         msg[310]="L"; msg[311]=":";
         for (int i = 0; i < 4; i++) msg[312+i] = hexch(fl_s[15-4*i -: 4]);
         msg[317]=8'h0A;
+        // P9: LINK_CHECK=2 observe counters (16-bit, wrapping):
+        // C checks issued, S short, N non-ACK, D DEFER, T timeout,
+        // A lock-gate failures, H last non-ACK header byte
+        msg[318]="P"; msg[319]="9";
+        for (int f = 0; f < 6; f++) begin
+            msg[321+7*f] = (f==0)?"C":(f==1)?"S":(f==2)?"N":(f==3)?"D":(f==4)?"T":"A";
+            msg[322+7*f] = ":";
+            for (int i = 0; i < 4; i++)
+                msg[323+7*f+i] = hexch(obs_s[95-16*f-4*i -: 4]);
+        end
+        msg[362]="H"; msg[363]=":"; msg[364]=hexch(obs_s[103:100]); msg[365]=hexch(obs_s[99:96]);
+        msg[366]=8'h0A;
+        // PA: capture of the last FAILING reply (layout as P7, + reason)
+        msg[367]="P"; msg[368]="A"; msg[370]="#"; msg[371]=hexch(fpub_seq[3:0]);
+        msg[372]=fpub_rsn;
+        msg[374]="L"; msg[375]=":"; msg[376]=8'h30 + 8'(fpub_lvl);
+        msg[378]="G"; msg[379]=":";
+        for (int i = 0; i < 4; i++) msg[380+i] = hexch(fpub_gap[15-4*i -: 4]);
+        msg[385]="N"; msg[386]=":"; msg[387]=hexch({2'b0, fpub_n[5:4]}); msg[388]=hexch(fpub_n[3:0]);
+        for (int i = 0; i < CAP_N; i++) begin
+            msg[390+2*i] = hexch(fpub_iv[i][7:4]);
+            msg[391+2*i] = hexch(fpub_iv[i][3:0]);
+        end
+        msg[488]=8'h0A;
     end
 
     logic [8:0]  baud_cnt = '0;
