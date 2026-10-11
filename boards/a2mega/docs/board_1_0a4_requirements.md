@@ -10,6 +10,10 @@ EVIDENCED (links to test log / bringup log) or marked OPEN with the
 experiment that closes it. Nothing goes on the board without a reason;
 no rev until the OPEN items that could change the netlist are closed.
 
+**2026-10-11:** the a2p25 displayport1 board validated the §1 AUX network on
+hardware and produced shared-gateware fixes and HyperRAM results that this rev
+inherits — see [a2p25_carryover_2026-10-11.md](a2p25_carryover_2026-10-11.md).
+
 ## CONFIRMED changes (evidence in hand)
 
 1. **AUX front-end: proper bias + level network on DPAUX_P/N (SBU path).**
