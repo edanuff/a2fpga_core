@@ -69,6 +69,11 @@
 `else
  `define DPT_BLIND 0
 `endif
+`ifdef DP_TEST_FB
+ `define DPT_RGB_LAT 2          // framebuffer_1080p output register + the rgb register
+`else
+ `define DPT_RGB_LAT 1
+`endif
 `ifdef DP_TEST_AUXOBS
  `define DPT_LINK_CHECK 2       // observe: periodic checks, count, never tear down
 `elsif DP_TEST_HOLDLINK
@@ -92,6 +97,13 @@ module a2p25_dp_test_top #(
 
     output logic led,               // B10, active high
     output logic uart_tx,           // C2 (ESP32_OPI_D0, repurposed)
+`ifdef DP_TEST_FB
+    // HyperRAM U6 (S27KL0642), pins as a2p25_psram_test.cst
+    output wire  hr_ck,
+    output wire  hr_cs_n,
+    inout  wire  hr_rwds,
+    inout  wire  [7:0] hr_dq,
+`endif
 
     // MIPI D-PHY M0 quad (dedicated pads)
     inout  wire  dphy_ck_p,
@@ -128,6 +140,32 @@ module a2p25_dp_test_top #(
         end
     end
     wire reset = !por_done;
+`ifdef DP_TEST_FB
+    // HyperRAM clock cascade (as a2p25_psram_test_top): clk54 -> hr_clk_pll
+    // -> clk_hr (54, controller/arbiter/framebuffer/renderer), clk_mem (108,
+    // HyperBus CK), clk_mem_90. All logic on the HyperRAM side runs on the
+    // second PLL's outputs, which are mutually phase-related.
+    logic clk_hr, clk_mem, clk_mem_90, hr_pll_lock;
+    hr_clk_pll i_hr_pll (
+        .lock       (hr_pll_lock),
+        .clk        (clk_hr),
+        .clk_mem    (clk_mem),
+        .clk_mem_90 (clk_mem_90),
+        .clkin      (clk54)
+    );
+    logic [15:0] hr_por_cnt = '0;
+    logic        rst_n_hr = 1'b0;
+    always_ff @(posedge clk_hr) begin
+        if (!hr_pll_lock || !por_done) begin
+            hr_por_cnt <= '0;
+            rst_n_hr   <= 1'b0;
+        end else if (hr_por_cnt != 16'hFFFF) begin
+            hr_por_cnt <= hr_por_cnt + 16'd1;
+        end else begin
+            rst_n_hr <= 1'b1;
+        end
+    end
+`endif
 
     // ------------------------------------------------------------------
     // AUX pad (shared with a2mega — the cell under validation)
@@ -273,6 +311,156 @@ module a2p25_dp_test_top #(
         endcase
     end
 
+`ifdef DP_TEST_FB
+    // ------------------------------------------------------------------
+    // Track B4 bench: HyperRAM-backed framebuffer_1080p (the a2mega's
+    // render -> framebuffer -> scanout mechanism, memory ports served by
+    // hyperram_ports instead of ddr3_ports) scanned out into the DP raster.
+    // A synthetic renderer fills a 560x192 RGB666 frame at ~60 Hz: eight
+    // colour bars, a 2-px white border and an 8-px white stripe that
+    // sweeps right one pixel per frame (proves continuous rendering).
+    // ------------------------------------------------------------------
+    localparam int FB_W = 560;
+    localparam int FB_H = 192;
+    logic        fb_vsync, fb_we;
+    logic [17:0] fb_data;
+    logic [9:0]  rx, ry, sweep;
+    logic [1:0]  rdiv;
+    logic [19:0] rf_cnt;
+    logic        rendering;
+    function automatic [17:0] bar_rgb666(input [9:0] x);
+        case (x / 70)
+            0: bar_rgb666 = 18'h3FFFF;                 // white
+            1: bar_rgb666 = 18'h3FFC0;                 // yellow
+            2: bar_rgb666 = 18'h00FFF;                 // cyan
+            3: bar_rgb666 = 18'h00FC0;                 // green
+            4: bar_rgb666 = 18'h3F03F;                 // magenta
+            5: bar_rgb666 = 18'h3F000;                 // red
+            6: bar_rgb666 = 18'h0003F;                 // blue
+            default: bar_rgb666 = 18'h00000;           // black
+        endcase
+    endfunction
+    always_ff @(posedge clk_hr) begin
+        fb_vsync <= 1'b0;
+        fb_we    <= 1'b0;
+        if (!rst_n_hr) begin
+            rf_cnt <= '0; rendering <= 1'b0; sweep <= '0; rx <= '0; ry <= '0; rdiv <= '0;
+        end else begin
+            rf_cnt <= (rf_cnt == 20'd899_999) ? 20'd0 : rf_cnt + 20'd1;   // 60 Hz at 54 MHz
+            if (rf_cnt == 20'd0) begin
+                fb_vsync <= 1'b1;
+                sweep    <= (sweep == 10'(FB_W - 1)) ? 10'd0 : sweep + 10'd1;
+                rx <= '0; ry <= '0; rdiv <= '0;
+            end else if (rf_cnt == 20'd256) begin
+                rendering <= 1'b1;                     // let the frame start settle
+            end else if (rendering) begin
+                rdiv <= rdiv + 2'd1;
+                if (rdiv == 2'd3) begin                // one pixel per 4 clocks (13.5 Mpx/s)
+                    fb_we <= 1'b1;
+                    if (rx < 10'd2 || rx >= 10'(FB_W - 2) || ry < 10'd2 || ry >= 10'(FB_H - 2))
+                        fb_data <= 18'h3FFFF;
+                    else if (rx >= sweep && rx < sweep + 10'd8)
+                        fb_data <= 18'h3FFFF;
+                    else
+                        fb_data <= bar_rgb666(rx);
+                    if (rx == 10'(FB_W - 1)) begin
+                        rx <= '0;
+                        if (ry == 10'(FB_H - 1)) rendering <= 1'b0;
+                        else ry <= ry + 10'd1;
+                    end else
+                        rx <= rx + 10'd1;
+                end
+            end
+        end
+    end
+
+    // HyperRAM controller + 2-port arbiter: [0] FB write (wide), [1] FB read (burst 8)
+    logic        hr_ready, hr_init_done, hr_req, hr_we, hr_rvalid, hr_done, hr_rd_err, hr_cal_ok;
+    logic [20:0] hr_addr;
+    logic [4:0]  hr_len;
+    logic [31:0] hr_wdata, hr_wbuf_data, hr_rdata, hr_stat_rd_timeouts;
+    logic [3:0]  hr_wbe, hr_wbuf_idx, hr_wbuf_be, hr_arb_state;
+    logic        hr_wbuf_we;
+    logic [1:0]  hr_pending;
+    hyperram_ctrl #(
+        .CLK_HZ     (54_000_000),
+        .ADDR_WIDTH (21),
+        .LATENCY    (6)
+    ) i_hr_ctrl (
+        .clk (clk_hr), .clk_mem (clk_mem), .clk_mem_90 (clk_mem_90), .clk_cap (clk_mem),
+        .rst_n (rst_n_hr),
+        .ready (hr_ready), .init_done (hr_init_done),
+        .req (hr_req), .we (hr_we), .addr (hr_addr), .len (hr_len),
+        .wdata (hr_wdata), .wbe (hr_wbe),
+        .wbuf_we (hr_wbuf_we), .wbuf_idx (hr_wbuf_idx), .wbuf_data (hr_wbuf_data), .wbuf_be (hr_wbuf_be),
+        .rvalid (hr_rvalid), .rdata (hr_rdata), .done (hr_done),
+        .rd_err (hr_rd_err), .xfer_lat2x (),
+        .recal (1'b0), .cfg_cr0 (16'd0), .cfg_cr0_write (1'b0), .cr0_active (),
+        .dly_force (1'b0), .dly_force_code (8'd0), .dly_code (), .cal_tap (), .cal_map (),
+        .cal_ok (hr_cal_ok), .rd_arrival (),
+        .stat_xfers (), .stat_lat2x (), .stat_rd_timeouts (hr_stat_rd_timeouts), .stat_lat_mismatch (),
+        .hr_ck (hr_ck), .hr_cs_n (hr_cs_n), .hr_rwds (hr_rwds), .hr_dq (hr_dq)
+    );
+    mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32))
+        hr_ports [0:1] ();
+    logic [95:0] fb_wide_hi;
+    hyperram_ports_if #(
+        .NUM_PORTS        (2),
+        .PORT_BASE_ADDR   ({21'd0, 21'd0}),
+        .PORT_BURST_WORDS ({5'd8, 5'd4}),
+        .WIDE_WR_PORT     (0)
+    ) i_hr_ports (
+        .clk (clk_hr), .rst_n (rst_n_hr),
+        .ports (hr_ports),
+        .wide_wr_data_hi (fb_wide_hi),
+        .hr_ready (hr_ready), .hr_init_done (hr_init_done),
+        .hr_req (hr_req), .hr_we (hr_we), .hr_addr (hr_addr), .hr_len (hr_len),
+        .hr_wdata (hr_wdata), .hr_wbe (hr_wbe),
+        .hr_wbuf_we (hr_wbuf_we), .hr_wbuf_idx (hr_wbuf_idx), .hr_wbuf_data (hr_wbuf_data), .hr_wbuf_be (hr_wbuf_be),
+        .hr_rvalid (hr_rvalid), .hr_rdata (hr_rdata), .hr_done (hr_done),
+        .dbg_req_pending (hr_pending), .dbg_state (hr_arb_state)
+    );
+
+    logic [7:0]  fb_r, fb_g, fb_b;
+    logic [7:0]  fb_dbg_flags, fb_dbg_overflow, fb_dbg_not_ready, fb_dbg_fetch_done, fb_dbg_late;
+    logic        clk_pixel;             // declared here; the colorbars block below reuses it
+    logic [11:0] cx;
+    logic [10:0] cy;
+    framebuffer_1080p #(
+        .COLOR_BITS          (18),
+        .FB_READ_BURST_WORDS (8),
+        .TEST_PATTERN        (0)
+    ) i_fb (
+        .clk              (clk_hr),
+        .clk_pixel        (clk_pixel),
+        .rst_n            (rst_n_hr),
+        .fb_vsync         (fb_vsync),
+        .fb_we            (fb_we),
+        .fb_data          (fb_data),
+        .fb_width         (11'(FB_W)),
+        .fb_height        (10'(FB_H)),
+        .fb_write_port    (hr_ports[0]),
+        .fb_read_port     (hr_ports[1]),
+        .hdmi_cx          (cx),
+        .hdmi_cy          (cy),
+        .r_o              (fb_r),
+        .g_o              (fb_g),
+        .b_o              (fb_b),
+        .fb_wr_wide_data_hi_o (fb_wide_hi),
+        .border_color     (18'h00010),  // dark blue
+        .v_scale_o        (),
+        .v_border_o       (),
+        .sleep_i          (1'b0),
+        .dbg_fifo_level_o (), .dbg_fifo_highwater_o (), .dbg_fifo_overflow_o (fb_dbg_overflow),
+        .dbg_fetch_start_o (), .dbg_fetch_done_o (fb_dbg_fetch_done), .dbg_read_blocked_o (),
+        .dbg_yield_busy_o (), .dbg_late_line_o (fb_dbg_late), .dbg_flags_o (fb_dbg_flags),
+        .dbg_line_not_ready_o (), .dbg_line_lag_max_o (), .dbg_ready_phase_err_o (),
+        .fetch_active_o (), .dbg_vsync_raw_o (), .dbg_frame_start_accept_o (),
+        .dbg_frame_start_reject_o (), .dbg_fifo_pop_o (), .dbg_fifo_push_o (),
+        .dbg_rd_fifo_max_o (), .dbg_rd_fifo_drop_o (),
+        .dbg_line_not_ready_total_o (fb_dbg_not_ready), .dbg_beat_extra_o (), .dbg_beat_timeout_o ()
+    );
+`endif
     // ------------------------------------------------------------------
     // Colorbars (1280 wide: eight 160-px bars) + 2-px white frame
     // ------------------------------------------------------------------
@@ -290,9 +478,11 @@ module a2p25_dp_test_top #(
     localparam int BAR_W    = H_VIS / 8;
     localparam int CY_MSB   = $clog2(V_TOT) - 1;   // dp_transmitter's cy width - 1
 
+`ifndef DP_TEST_FB
     logic        clk_pixel;
     logic [11:0] cx;
     logic [10:0] cy;
+`endif
     logic [23:0] rgb, bar;
 
     always_comb begin
@@ -307,10 +497,14 @@ module a2p25_dp_test_top #(
     end
 
     always_ff @(posedge clk_pixel) begin
+`ifdef DP_TEST_FB
+        rgb <= {fb_r, fb_g, fb_b};          // RGB_LATENCY 2 with the fb's own register
+`else
         if (cx < 12'd2 || cx >= 12'(H_VIS - 2) || cy < 11'd2 || cy >= 11'(V_VIS - 2))
             rgb <= 24'hFFFFFF;
         else
             rgb <= bar;
+`endif
     end
 
     // 48 kHz strobe, ~1 kHz sawtooth at -18 dB
@@ -361,6 +555,7 @@ module a2p25_dp_test_top #(
     dp_transmitter #(
         .LANE_COUNT       (LANES),
         .LINK_RATE_MBPS   (1620),
+        .RGB_LATENCY      (`DPT_RGB_LAT),
         // closed loop (AUX RX under test) unless the _blind project selects
         // the a2mega 1.0a3 open-loop policy (writes DPCD, never waits for
         // replies) to prove the main link independently of AUX receive
@@ -563,6 +758,13 @@ module a2p25_dp_test_top #(
     logic [7:0]  ur_s0, ur_s;
     logic [15:0] fl_s0, fl_s;
     logic [103:0] obs_s0, obs_s;
+    logic [55:0]  pc_s0, pc_s;
+`ifdef DP_TEST_FB
+    wire [55:0] pc_w = {fb_dbg_flags, fb_dbg_overflow, fb_dbg_not_ready, fb_dbg_fetch_done, fb_dbg_late,
+                        hr_init_done, hr_cal_ok, hr_rd_err, 1'b0, hr_arb_state, hr_stat_rd_timeouts[7:0]};
+`else
+    wire [55:0] pc_w = 56'd0;
+`endif
     logic [23:0]  aif_s0, aif_s;
     always_ff @(posedge clk50_in) begin
         st_s0   <= dphy_status;         st_s   <= st_s0;
@@ -589,6 +791,7 @@ module a2p25_dp_test_top #(
         ur_s0   <= urun_cnt;            ur_s   <= ur_s0;
         fl_s0   <= fifo_lvl;            fl_s   <= fl_s0;
         obs_s0  <= aux_dbg_obs;         obs_s  <= obs_s0;
+        pc_s0   <= pc_w;                pc_s   <= pc_s0;
         aif_s0  <= aux_dbg_if;          aif_s  <= aif_s0;
     end
 
@@ -608,7 +811,7 @@ module a2p25_dp_test_top #(
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 501;   // P1..P8, P9, PA, PB lines
+    localparam int MSG_LEN = 539;   // P1..P8, P9, PA, PB, PC lines
     logic [7:0] msg [0:MSG_LEN-1];
     always_comb begin
         for (int i = 0; i < MSG_LEN; i++) msg[i] = " ";
@@ -711,12 +914,25 @@ module a2p25_dp_test_top #(
         msg[489]="P"; msg[490]="B"; msg[492]="I"; msg[493]=":";
         for (int i = 0; i < 6; i++) msg[494+i] = hexch(aif_s[23-4*i -: 4]);
         msg[500]=8'h0A;
+        // PC: framebuffer / HyperRAM (FB builds; zeros otherwise)
+        //  F fb flags, O write-FIFO overflows/frame, N line-not-ready (sticky),
+        //  D line fetches done/frame, L late lines/frame, I {init_done, cal_ok,
+        //  rd_err, arb_state[3:0]}, E read timeouts
+        msg[501]="P"; msg[502]="C";
+        msg[504]="F"; msg[505]=":"; msg[506]=hexch(pc_s[55:52]); msg[507]=hexch(pc_s[51:48]);
+        msg[509]="O"; msg[510]=":"; msg[511]=hexch(pc_s[47:44]); msg[512]=hexch(pc_s[43:40]);
+        msg[514]="N"; msg[515]=":"; msg[516]=hexch(pc_s[39:36]); msg[517]=hexch(pc_s[35:32]);
+        msg[519]="D"; msg[520]=":"; msg[521]=hexch(pc_s[31:28]); msg[522]=hexch(pc_s[27:24]);
+        msg[524]="L"; msg[525]=":"; msg[526]=hexch(pc_s[23:20]); msg[527]=hexch(pc_s[19:16]);
+        msg[529]="I"; msg[530]=":"; msg[531]=hexch(pc_s[15:12]); msg[532]=hexch(pc_s[11:8]);
+        msg[534]="E"; msg[535]=":"; msg[536]=hexch(pc_s[7:4]);   msg[537]=hexch(pc_s[3:0]);
+        msg[538]=8'h0A;
     end
 
     logic [8:0]  baud_cnt = '0;
     logic        baud_tick;
     logic [24:0] msg_timer = '0;
-    logic [8:0]  msg_idx = MSG_LEN[8:0];
+    logic [9:0]  msg_idx = MSG_LEN[9:0];
     logic [3:0]  bit_idx = '0;
     logic [9:0]  shifter = 10'h3FF;
     always_ff @(posedge clk50_in) begin
@@ -725,12 +941,12 @@ module a2p25_dp_test_top #(
         else baud_cnt <= baud_cnt + 9'd1;
 
         msg_timer <= msg_timer + 25'd1;
-        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[8:0]) begin
+        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[9:0]) begin
             msg_idx <= '0;
             bit_idx <= 4'd10;
         end
 
-        if (baud_tick && msg_idx != MSG_LEN[8:0]) begin
+        if (baud_tick && msg_idx != MSG_LEN[9:0]) begin
             if (bit_idx >= 4'd10) begin
                 shifter <= {1'b1, msg[msg_idx], 1'b0};
                 bit_idx <= 4'd0;
@@ -738,11 +954,11 @@ module a2p25_dp_test_top #(
                 shifter <= {1'b1, shifter[9:1]};
                 bit_idx <= bit_idx + 4'd1;
                 if (bit_idx == 4'd9)
-                    msg_idx <= msg_idx + 9'd1;
+                    msg_idx <= msg_idx + 10'd1;
             end
         end
     end
-    assign uart_tx = (msg_idx == MSG_LEN[8:0]) ? 1'b1 : shifter[0];
+    assign uart_tx = (msg_idx == MSG_LEN[9:0]) ? 1'b1 : shifter[0];
 
     // ------------------------------------------------------------------
     // Heartbeat: hb[24] at 50 MHz = 1.49 Hz (same as a2mega led[0])

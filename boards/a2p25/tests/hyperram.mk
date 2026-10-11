@@ -88,6 +88,17 @@ hyperram_bist: $(HR_BUILD)/hyperram_bist.vvp
 	done; \
 	if [ $$fail = 0 ]; then echo "=== HYPERRAM BIST PASS ==="; else echo "=== HYPERRAM BIST FAIL (logs in $(HR_BUILD)) ==="; exit 1; fi
 
+# mem_port_if arbiter (hyperram_ports) over the controller + model
+#   make hyperram_ports
+HR_PORTS_RTL = ../../../hdl/hyperram/hyperram_ports.sv
+$(HR_BUILD)/hyperram_ports.vvp: $(HR_RTL) $(HR_PORTS_RTL) $(HR_TB_COMMON) test_hyperram_ports.sv $(HR_PMODEL)
+	iverilog $(HR_IVFLAGS) -s test_hyperram_ports -o $@ \
+	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(HR_PORTS_RTL) $(HR_PMODEL) $(HR_TB_COMMON) test_hyperram_ports.sv $(HR_IVFILTER)
+	@test -f $@
+
+hyperram_ports: $(HR_BUILD)/hyperram_ports.vvp
+	vvp -n $(HR_BUILD)/hyperram_ports.vvp | grep -v 'Timing checks'
+
 hyperram_clean:
 	rm -rf $(HR_BUILD)
 
