@@ -66,10 +66,11 @@
 `endif
 `ifdef DP_TEST_AUXOBS
  `define DPT_LINK_CHECK 2       // observe: periodic checks, count, never tear down
-`elsif DP_TEST_LINKCHECK1
- `define DPT_LINK_CHECK 1       // spec: periodic checks + IRQ_HPD service, retrain on failure
+`elsif DP_TEST_HOLDLINK
+ `define DPT_LINK_CHECK 0       // bench: hold the link once trained, never look again
 `else
- `define DPT_LINK_CHECK 0       // hold the link once trained
+ `define DPT_LINK_CHECK 1       // spec flow (baseline since 10-11): periodic checks,
+                                // IRQ_HPD service, teardown + retrain on failure
 `endif
 
 module a2p25_dp_test_top #(
@@ -372,12 +373,14 @@ module a2p25_dp_test_top #(
         .IRQ_SERVICE      (2),
         .POLITE_ATTACH    (1),
         .ERRCNT_READ      (0),
-        // Bring-up 10-10: training succeeds (0x202=77, aligned, 0 symbol
-        // errors) but established-state AUX checks intermittently fail and
-        // tore the link down every ~1 s, before the FANGOR could display.
-        // Hold the link once trained until AUX RX margin is fixed.
-        // _auxobs variant: LINK_CHECK=2 runs the periodic checks but only
-        // counts failures (P9) and freezes the failing reply (PA).
+        // Baseline = 1 (spec flow). 10-10 first light needed 0 (hold the
+        // link) because established-state AUX reads "failed" — that was a
+        // bad USB-C cable. 10-11 soak: ~1,800 established-state reads on
+        // three sinks, 0 AUX failures (_auxobs variant, LINK_CHECK=2 counts
+        // failures on P9, captures the failing reply on PA). The Sceptre via
+        // USB-C->DP cable drops CR ~2 s after establish and only holds once
+        // the retrain loop reaches its VS2/PE1 request — 1 kept 20/20
+        // attaches, 0 left ~1/6 dark. _hold variant keeps 0 for the bench.
         .LINK_CHECK       (`DPT_LINK_CHECK),
         .TX_PROBE         (0),
         // 720p60 (VIC 4, 74.25 MHz) or 1080p60 (VIC 16, 148.5 MHz);

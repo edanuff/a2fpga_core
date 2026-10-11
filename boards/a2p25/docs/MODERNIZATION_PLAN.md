@@ -273,17 +273,19 @@ Setup: Sceptre DP monitor via USB-C→DP cable. FANGOR USB-C portable: see the 2
 
 Verdict: **the a2p25 AUX circuit + .cst (LVDS25, BANK_VCCIO 3.3, pulldowns) and the FPGA turnaround logic are clean** — ~1,800 established-state transactions, zero AUX-level failures, across three sinks. Yesterday's "intermittent NACK/timeout" that forced `LINK_CHECK=0` was the bad USB-C cable. This is the AUX validation the a2mega board turn was waiting on.
 
-The Sceptre's lock-gate failures are the "bad training" from 10-10: the sink drops CR shortly after training and waits for the source to retrain (spec flow). `LINK_CHECK=0` never looks, so a sink that does not recover on its own stays dark. `a2p25_dp_test_lc1` (`LINK_CHECK=1`, spec flow: periodic checks + IRQ_HPD service + teardown/retrain on failure) on the Sceptre: gate failed at +1.2 s after load, torn down and retrained once (sink asked VS2/PE1 on the retrain), aligned, then held 15 min with 0 AUX failures. **Sceptre replug run under `_lc1`: 20 attaches (10 flips, CC1/CC2 alternating), 20/20 ended with an aligned, streaming link (`C:0177`, `K:03`)**, 8–10 s from alt-mode entry to aligned (one at 20 s). Every attach follows the same script: train (sink asks VS2/PE0 `A:0022`, established within 0.4 s) → ~2 s later the sink drops CR on both lanes → teardown/retrain (same request) → ~5 s later drops again → third retrain, sink now asks **VS2/PE1 (`A:6666`)** → aligned and stable. The SN75DP130 snoops our TRAINING_LANEx_SET writes and applies the declared pre-emphasis, so the third pass is the first one that actually delivers PE1 to the sink. The old `LINK_CHECK=0` hold stopped after pass 1, which is why ~1/6 attaches stayed dark: the Sceptre/cable path needs the adjust loop to run to the sink's final request. Not an amplitude-margin problem.
+The Sceptre's lock-gate failures are the "bad training" from 10-10: the sink drops CR shortly after training and waits for the source to retrain (spec flow). `LINK_CHECK=0` never looks, so a sink that does not recover on its own stays dark. `LINK_CHECK=1` (spec flow, built first as `_lc1`, now the baseline: periodic checks + IRQ_HPD service + teardown/retrain on failure) on the Sceptre: gate failed at +1.2 s after load, torn down and retrained once (sink asked VS2/PE1 on the retrain), aligned, then held 15 min with 0 AUX failures. **Sceptre replug run under LINK_CHECK=1: 20 attaches (10 flips, CC1/CC2 alternating), 20/20 ended with an aligned, streaming link (`C:0177`, `K:03`)**, 8–10 s from alt-mode entry to aligned (one at 20 s). Every attach follows the same script: train (sink asks VS2/PE0 `A:0022`, established within 0.4 s) → ~2 s later the sink drops CR on both lanes → teardown/retrain (same request) → ~5 s later drops again → third retrain, sink now asks **VS2/PE1 (`A:6666`)** → aligned and stable. The SN75DP130 snoops our TRAINING_LANEx_SET writes and applies the declared pre-emphasis, so the third pass is the first one that actually delivers PE1 to the sink. The old `LINK_CHECK=0` hold stopped after pass 1, which is why ~1/6 attaches stayed dark: the Sceptre/cable path needs the adjust loop to run to the sink's final request. Not an amplitude-margin problem.
+
+**Baseline policy since 10-11: `LINK_CHECK=1`** (spec flow). `a2p25_dp_test_hold.gprj` keeps the first-light hold-link policy for the bench; `_auxobs` is the observe/count build.
 
 Gateware policy at first light (10-10): `LINK_CHECK=0` (established-state AUX reads intermittently fail and used to tear the link down), watchdog exemption, `HPD_DISCONNECT_RESETS=1`.
 
 DP130 note: in auto mode it sets its *input* EQ from the pre-emphasis we declare (8 dB at PE0). `05h ← 0x80` (I2C EQ, 0 dB) was tried live; it did not change the bad-training rate. The CLI parses decimal unless `0x` is given.
 
 Next steps (DP):
-1. Make a bad attach self-heal: after "established", do one evidence-only status read. Retrain if lanes or alignment are lost; ignore AUX errors.
-2. Debug the bad-training ladder path (training sequence/timing, the retrain that declared established without alignment).
-3. Established-state AUX RX reliability (P7 capture) — this is the a2mega-turn gate. The AUX board circuit is simple; suspect .cst (IO standard, pulls, VCCIO) and FPGA-side direction-turnaround logic first.
-4. UFYQL USB-C monitor (untried).
+1. ~~Bad attach self-heal~~ — done: LINK_CHECK=1 baseline (spec retrain).
+2. Sceptre time-to-picture (8–10 s): act on a changed post-establish ADJUST_REQUEST directly (retrain on the request, not on the CR drop ~2 s later) — should cut two dead waits.
+3. ~~Established-state AUX RX reliability~~ — done, clean on three sinks (§6b soak).
+4. ~~UFYQL~~ — colorbars.
 5. 4-lane 1080p (saturated symbol errors).
 
 ## 7. Known risks
@@ -325,4 +327,7 @@ Next steps (DP):
 | 2026-10-10 | `a2p25_psram_test_ck54` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 85.6 vs 54 | `1ba81136659674a716ca84982b8feac7a21754972bcfddbdf0d5b5c2f0ac272e` |
 | 2026-10-10 | ESP32 fw `make BOARD_REV=225` (DP_TEST=1) | this commit | arduino-cli 1.2.2 / esp32 3.3.5 | builds | `1ea60d8aa9ba5ef93ae1f339f1db6ad32acfb9ea8075a6520f9612ce4e1e5816` |
 | 2026-10-10 | **`a2p25_dp_test` — FIRST COLORBARS** (hold-link, P7/P8 telemetry) | 6d0b148d | Gowin V1.9.12.01 | 0/0 | `4257f701389f46809ab3f27eab356b95223a39344fed51d0ef4df28b0e09a373` |
+| 2026-10-11 | `a2p25_dp_test_auxobs` (LINK_CHECK=2 observe; P9/PA) — **AUX soak clean on 3 sinks** | c7064c6e | Gowin V1.9.12.01 | 0/0; worst setup +0.33 | `d758d1c8b1edc3690a0738b19900e4501165c260b35c5723a1b91932498ce9ec` |
+| 2026-10-11 | **`a2p25_dp_test` — LINK_CHECK=1 BASELINE** (spec flow; Sceptre 20/20 attaches as `_lc1`, sha a21f23c8…) | this commit | Gowin V1.9.12.01 | 0/0; worst setup +0.16 (thin) | `6ec36c790f12e8d349c2a4935ee6ed8b6ae9808a465922f0d2f72e4a5023bf17` |
+| 2026-10-11 | `a2p25_dp_test_hold` (LINK_CHECK=0, the 10-10 first-light policy, bench only) | this commit | Gowin V1.9.12.01 | 0/0; worst setup +0.29 | `4eb4705442788e960f2c8cf3772b379ea95f4830925df963f9f7f15fd71eb6ef` |
 | 2026-10-10 | `a2p25_dp_test` + HPD_DISCONNECT_RESETS=1 (**replug recovery verified**: Y 11→22→33, bars return) | this commit | Gowin V1.9.12.01 | 0/0 | `bc08d218a69cf396d0b618d27176b416c6d7a92a0cbf4be69d36ca5dd076a9c2` |

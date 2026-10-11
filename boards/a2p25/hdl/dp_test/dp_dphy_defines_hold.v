@@ -8,5 +8,5 @@
 // 81 MHz symbol clock (DP synchronous clocking).
 `define DP_VENDOR_DPHY
 `define GOWIN_PLL_IP
-// Spec-flow build: LINK_CHECK=1 (periodic checks, IRQ_HPD service, teardown+retrain on failure)
-`define DP_TEST_LINKCHECK1
+// Bench hold-link build: LINK_CHECK=0 (never re-check an established link; the 10-10 first-light policy)
+`define DP_TEST_HOLDLINK

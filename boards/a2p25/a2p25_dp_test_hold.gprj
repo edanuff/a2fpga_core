@@ -5,7 +5,7 @@
     <Version>5</Version>
     <Device name="GW5A-25A" pn="GW5A-LV25MG121NC1/I0">gw5a25a-002</Device>
     <FileList>
-        <File path="hdl/dp_test/dp_dphy_defines_lc1.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp_test/dp_dphy_defines_hold.v" type="file.verilog" enable="1"/>
         <File path="../a2mega/hdl/dp_aux_pad.sv" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/gowin_pll.v" type="file.verilog" enable="1"/>
         <File path="hdl/gowin/gowin_pll/gowin_pll_mod.v" type="file.verilog" enable="1"/>
