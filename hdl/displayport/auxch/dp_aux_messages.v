@@ -395,7 +395,13 @@ always @(posedge clk) begin
     // But only do it of we are not already
     // sending something!
     //--------------------------------------
-    if(msg_de == 1'b1 && counter[3:0] == 4'hF) begin
+    // msg 0x00 is "no message" (wait states, link_established): do not
+    // occupy the engine for it. Before this fix an empty message held
+    // `busy` for 15 clocks and a real request arriving in that window
+    // (link_established -> check_link on a pending hpd_irq) was DROPPED,
+    // leaving aux_channel waiting forever for a reply to a request that
+    // never went out (a2p25 1080p x4, 2026-10-11: PB tx idle / rx 0 / exp 9).
+    if(msg_de == 1'b1 && counter[3:0] == 4'hF && msg != 8'h00) begin
        counter <= {msg, 4'b0000};
        busy    <= 1'b1;
     end

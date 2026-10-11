@@ -183,6 +183,7 @@ module dp_transmitter #(
     output logic [15:0] debug_errcnt1,  // SYMBOL_ERROR_COUNT lane1
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
     output logic [103:0] debug_obs,     // LINK_CHECK==2 observe counters (auxch/aux_channel.v)
+    output logic [23:0]  debug_auxif,   // AUX interface liveness (auxch/aux_channel.v)
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
     output logic [3:0]  debug_wdog,  // {cold-restart forcing, attempts[2:0]}
@@ -711,6 +712,7 @@ module dp_transmitter #(
         .errcnt1              (debug_errcnt1),
         .debug_err_detail     (debug_err_detail),
         .debug_obs            (debug_obs),
+        .debug_auxif          (debug_auxif),
         .debug_snapshot       (debug_snapshot),
         .debug_caps           (debug_caps),
         .hpd                  (hpd),

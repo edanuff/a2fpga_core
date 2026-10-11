@@ -41,8 +41,13 @@
 
 `ifdef DP_TEST_4LANE_1080P
  `define DPT_LANES 4
+ `define DPT_HD 1
+`elsif DP_TEST_4LANE_720P
+ `define DPT_LANES 4            // 4-lane striping at the 720p pixel rate (discriminator)
+ `define DPT_HD 0
 `else
  `define DPT_LANES 2
+ `define DPT_HD 0
 `endif
 `ifdef DP_TEST_PROBE
  `define DPT_PROBE 1
@@ -153,6 +158,7 @@ module a2p25_dp_test_top #(
     //       kept copy; one still in progress publishes when it finishes.
     // ------------------------------------------------------------------
     logic [103:0] aux_dbg_obs;            // dp_transmitter observe counters
+    logic [23:0]  aux_dbg_if;             // AUX interface liveness
     localparam int CAP_N = 48;
     logic [2:0]  cap_rx_s = '0;
     logic        cap_tri_d = 1'b1;
@@ -270,7 +276,7 @@ module a2p25_dp_test_top #(
     // ------------------------------------------------------------------
     // Colorbars (1280 wide: eight 160-px bars) + 2-px white frame
     // ------------------------------------------------------------------
-    localparam bit HD    = (LANES == 4);
+    localparam bit HD    = `DPT_HD;
     localparam int H_VIS = HD ? 1920 : 1280;
     localparam int H_TOT = HD ? 2200 : 1650;
     localparam int H_SYN = HD ? 44   : 40;
@@ -372,7 +378,7 @@ module a2p25_dp_test_top #(
         .LATE_REPLY_DRAIN (0),
         .IRQ_SERVICE      (2),
         .POLITE_ATTACH    (1),
-        .ERRCNT_READ      (0),
+        .ERRCNT_READ      (1),   // lane 0/1 symbol-error counters on P6 (never tears down)
         // Baseline = 1 (spec flow). 10-10 first light needed 0 (hold the
         // link) because established-state AUX reads "failed" — that was a
         // bad USB-C cable. 10-11 soak: ~1,800 established-state reads on
@@ -438,6 +444,7 @@ module a2p25_dp_test_top #(
         .debug_errcnt1     (aux_errcnt1),
         .debug_err_detail  (aux_dbg_errdet),
         .debug_obs         (aux_dbg_obs),
+        .debug_auxif       (aux_dbg_if),
         .debug_snapshot    (aux_dbg_snap),
         .debug_caps        (aux_dbg_caps),
         .debug_wdog        (aux_dbg_wdog),
@@ -556,6 +563,7 @@ module a2p25_dp_test_top #(
     logic [7:0]  ur_s0, ur_s;
     logic [15:0] fl_s0, fl_s;
     logic [103:0] obs_s0, obs_s;
+    logic [23:0]  aif_s0, aif_s;
     always_ff @(posedge clk50_in) begin
         st_s0   <= dphy_status;         st_s   <= st_s0;
         dbg_s0  <= debug;               dbg_s  <= dbg_s0;
@@ -581,6 +589,7 @@ module a2p25_dp_test_top #(
         ur_s0   <= urun_cnt;            ur_s   <= ur_s0;
         fl_s0   <= fifo_lvl;            fl_s   <= fl_s0;
         obs_s0  <= aux_dbg_obs;         obs_s  <= obs_s0;
+        aif_s0  <= aux_dbg_if;          aif_s  <= aif_s0;
     end
 
     logic [3:0] link_rises = '0, vid_rises = '0;
@@ -599,7 +608,7 @@ module a2p25_dp_test_top #(
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 489;   // P1..P8, P9, PA lines
+    localparam int MSG_LEN = 501;   // P1..P8, P9, PA, PB lines
     logic [7:0] msg [0:MSG_LEN-1];
     always_comb begin
         for (int i = 0; i < MSG_LEN; i++) msg[i] = " ";
@@ -652,6 +661,8 @@ module a2p25_dp_test_top #(
         for (int i = 0; i < 4; i++) msg[155+i] = hexch(ec0_s[15-4*i -: 4]);
         msg[160]="1"; msg[161]=":";
         for (int i = 0; i < 4; i++) msg[162+i] = hexch(ec1_s[15-4*i -: 4]);
+        // 3: raw DPCD 0x203 (lanes 2/3 status) — the C: field shows 0x204/0x202
+        msg[167]="3"; msg[168]=":"; msg[169]=hexch(chst_s[15:12]); msg[170]=hexch(chst_s[11:8]);
         msg[171]=8'h0A;
         // P7: AUX reply capture (see instrument above)
         msg[172]="P"; msg[173]="7"; msg[175]="#"; msg[176]=hexch(pub_seq[3:0]);
@@ -696,6 +707,10 @@ module a2p25_dp_test_top #(
             msg[391+2*i] = hexch(fpub_iv[i][3:0]);
         end
         msg[488]=8'h0A;
+        // PB: AUX interface liveness {tx_state, rx_state, busy, rx_empty, expected, rx_cnt}
+        msg[489]="P"; msg[490]="B"; msg[492]="I"; msg[493]=":";
+        for (int i = 0; i < 6; i++) msg[494+i] = hexch(aif_s[23-4*i -: 4]);
+        msg[500]=8'h0A;
     end
 
     logic [8:0]  baud_cnt = '0;

@@ -278,6 +278,9 @@ module aux_channel #(
         // checks = check_link reads issued; one error class counted per
         // read; last_hdr = reply header byte of the last non-ACK.
         output [103:0] debug_obs,
+        // AUX interface liveness: {tx_state[2:0], rx_state[2:0], channel_busy,
+        //  aux_rx_empty, expected[7:0], rx_byte_count[7:0]}
+        output [23:0] debug_auxif,
         // 1-clk pulse on a failing check_wait evaluation (snapshot trigger)
         output reg   gate_fail_evt,
         // completed periodic status reads: increments when the 0x204 byte
@@ -453,6 +456,7 @@ module aux_channel #(
     reg [7:0]  irq_vec_r        = 8'd0;   // last nonzero 0x201 read
     reg [7:0]  irq_clear_byte_r = 8'd0;   // value being written back
     reg        irq_pending      = 1'b0;   // hpd_irq seen; service due
+    reg        link_check_pend  = 1'b0;   // periodic check due (held while msg engine busy)
     reg [3:0]  dbg_irq_sat      = 4'd0;   // IRQ services performed
     // POLITE_ATTACH / ESI state (all inert at legacy defaults)
     reg [7:0]  sink_count_r     = 8'd0;   // presence-read count byte
@@ -533,6 +537,8 @@ module aux_channel #(
                              dbg_obs_sat, dbg_kick_sat, dbg_irq_sat};
     assign debug_err_detail = err_detail;
     assign debug_obs = {ob_hdr, ob_chk, ob_short, ob_nack, ob_defer, ob_tmo, ob_gate};
+    wire [5:0] auxif_state;
+    assign debug_auxif = {auxif_state, channel_busy, aux_rx_empty, expected, rx_byte_count};
     assign debug_esi   = {dbg_esi2003, dbg_esi2005};
     assign debug_defer = {edid_giveup, defer_cnt};
     assign wedge_suspect_o = wedge_suspect;
@@ -635,7 +641,8 @@ aux_interface #(
            //------------------------------
            .busy        (channel_busy),
            .abort       (1'b0),   
-           .timeout     (channel_timeout)
+           .timeout     (channel_timeout),
+           .debug_state (auxif_state)
     );
 
     assign aux_rx_rd_en = (!channel_busy) & (!aux_rx_empty);  // CHECK THIS!
@@ -1500,8 +1507,17 @@ always @(posedge clk) begin
     //-----------------------------------------------
     if (IRQ_SERVICE != 0 && hpd_irq)
         irq_pending <= 1'b1;
-    if(LINK_CHECK != 0 && state == link_established &&
-       (link_check_now == 1'b1 || (IRQ_SERVICE != 0 && irq_pending))) begin
+    // (msg_busy: never hand the message engine a request while it is still
+    // emitting the previous one — it would be dropped and the FSM would
+    // wait forever in check_link. link_check_now is a pulse, so remember it.)
+    // Latch the periodic-check pulse only for the busy-engine hold; a pulse
+    // that lands while the FSM is elsewhere is dropped exactly as before
+    // (tb_polite_attach counts its runtime ESI services).
+    if (link_check_now) link_check_pend <= 1'b1;
+    if (state != link_established) link_check_pend <= 1'b0;
+    if(LINK_CHECK != 0 && state == link_established && !msg_busy &&
+       (link_check_pend == 1'b1 || (IRQ_SERVICE != 0 && irq_pending))) begin
+        link_check_pend <= 1'b0;
         next_state  <= check_link;
         // ESI mode: remember an hpd_irq-triggered check owes an ESI
         // service pass after the status gate (0x201 is never raised by

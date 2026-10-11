@@ -84,7 +84,8 @@ module aux_interface #(
        //----------------------------
        output       busy,
        input        abort,
-       output reg   timeout
+       output reg   timeout,
+       output [5:0] debug_state   // {tx_state, rx_state}
      );
 
     //----------------------------------------
@@ -123,6 +124,7 @@ module aux_interface #(
     localparam [2:0] rx_receiving_data = 3'b001;
     localparam [2:0] rx_done           = 3'b010;
     reg  [2:0] rx_state;
+    assign debug_state = {tx_state, rx_state};
     reg  [7:0] rx_fifo [31:0];
     reg  [4:0] rx_wr_ptr;
     wire [4:0] rx_wr_ptr_plus_1;
