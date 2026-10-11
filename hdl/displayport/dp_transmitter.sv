@@ -116,6 +116,15 @@ module dp_transmitter #(
     parameter        TRAIN_RECOVER = 1,
     parameter        ERRCNT_READ = 0,
     parameter        LINK_CHECK = 1,   // see auxch/aux_channel.v
+    parameter [26:0] LINK_CHECK_CLKS = 27'd99999999, // see auxch/aux_channel.v
+    // ECHO_SINK_ADJUST (AFE sequencer off only): declare the sink's last
+    // ADJUST_REQUEST in TRAINING_LANEx_SET instead of the constant
+    // IDLE_SET_BYTE. For a PHY whose swing/PE are set by a downstream
+    // redriver that snoops those writes (a2p25: SN75DP130 auto mode) this
+    // is what makes the sink's request take effect. MAX_*_REACHED bits set
+    // at level 3. Until the first request of a training the legacy byte
+    // (VS2 + MAX_SWING) is declared. Default 0 = byte-identical legacy.
+    parameter        ECHO_SINK_ADJUST = 0,
     parameter        WEDGE_BIT = 30,
     parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
@@ -583,8 +592,26 @@ module dp_transmitter #(
     // M5 runtime AFE adjust: ADJUST_REQUEST -> DRP sequence -> truthful
     // TRAINING_LANE_SET. Tied off (byte-identical legacy) when disabled.
     // per lane: [7:0] = lane 0 (DPCD 0x103), [15:8] = lane 1 (0x104)
-    logic [15:0] train_set_byte;
+    logic [15:0] train_set_byte, train_set_byte_afe;
     logic        adjust_evt;
+    // ECHO_SINK_ADJUST: per-lane {00, PE_MAX, PE[1:0], VS_MAX, VS[1:0]}
+    // from the raw request nibbles; falls back to 0x06 until the sink has
+    // asked for something in this training (adjust_seen clears with the
+    // link powerup, i.e. on every teardown).
+    logic        adjust_seen = 1'b0;
+    always_ff @(posedge clk100) begin
+        if (tx_powerup_channel == 4'b0000) adjust_seen <= 1'b0;
+        else if (adjust_evt)  adjust_seen <= 1'b1;
+    end
+    function automatic [7:0] echo_byte(input [1:0] vs, input [1:0] pe);
+        echo_byte = {2'b00, (pe == 2'd3), pe, (vs == 2'd3), vs};
+    endfunction
+    wire [15:0] train_set_byte_echo = adjust_seen
+        ? {echo_byte(debug_adjust[5:4], debug_adjust[7:6]),
+           echo_byte(debug_adjust[1:0], debug_adjust[3:2])}
+        : 16'h0606;
+    assign train_set_byte = (ECHO_SINK_ADJUST != 0 && ENABLE_AFE_ADJUST == 0)
+                          ? train_set_byte_echo : train_set_byte_afe;
     logic        afe_busy_w, afe_phy_reinit;
     logic        afe_drp_clk, afe_drp_req, afe_drp_gnt;
     assign debug_drp_clk = afe_drp_clk;
@@ -629,7 +656,7 @@ module dp_transmitter #(
         // watchdog replaying the boot CSR — all return the AFE to boot
         // state, so the sequencer must forget what it applied.
         .phy_reinit      (afe_phy_reinit),
-        .train_set_byte  (train_set_byte),
+        .train_set_byte  (train_set_byte_afe),
         .afe_busy        (afe_busy_w),
         .dbg_afe         (debug_afe),
         .dbg_afe1        (debug_afe1),
@@ -662,6 +689,7 @@ module dp_transmitter #(
                          .TRAIN_RECOVER(TRAIN_RECOVER),
                          .ERRCNT_READ(ERRCNT_READ),
                          .LINK_CHECK(LINK_CHECK),
+                         .LINK_CHECK_CLKS(LINK_CHECK_CLKS),
                          .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),

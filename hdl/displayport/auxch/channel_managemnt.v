@@ -74,6 +74,7 @@ module channel_management #(
     parameter TRAIN_RECOVER = 1,
     parameter ERRCNT_READ = 0,
     parameter LINK_CHECK = 1,
+    parameter [26:0] LINK_CHECK_CLKS = 27'd99999999,
     parameter WEDGE_BIT = 30,
     parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000
 )(
@@ -294,6 +295,7 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .TRAIN_RECOVER(TRAIN_RECOVER),
               .ERRCNT_READ(ERRCNT_READ),
               .LINK_CHECK(LINK_CHECK),
+              .LINK_CHECK_CLKS(LINK_CHECK_CLKS),
               .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),

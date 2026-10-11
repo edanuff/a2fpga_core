@@ -190,6 +190,10 @@ module aux_channel #(
     // and the FSM returns to link_established. Bring-up instrument for
     // measuring established-state AUX reliability with the picture up.
     parameter LINK_CHECK = 1,
+    // Periodic established-state check interval in clk cycles (default
+    // ~1 s at 100 MHz). a2p25 polls faster so a sink that drops CR after
+    // establish (Sceptre: ~2 s and ~5 s in) is retrained promptly.
+    parameter [26:0] LINK_CHECK_CLKS = 27'd99999999,
     // WEDGE-SUSPECT DETECTOR (advisory ONLY — no autonomous action in
     // this build; the ESP32 auto-replug policy arms separately after
     // bench validation). Fires when, within one established session:
@@ -1564,7 +1568,7 @@ always @(posedge clk) begin
     if(link_check_count == 0) begin
         link_check_now   <= 1'b1;
         // PPS actually became a 2Hz pulse....
-        link_check_count <= 27'd99999999;
+        link_check_count <= LINK_CHECK_CLKS;
     end else begin
         link_check_now   <= 1'b0;
         link_check_count <= link_check_count - 1;

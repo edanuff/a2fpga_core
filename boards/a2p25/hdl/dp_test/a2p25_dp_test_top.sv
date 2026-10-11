@@ -382,6 +382,12 @@ module a2p25_dp_test_top #(
         // the retrain loop reaches its VS2/PE1 request — 1 kept 20/20
         // attaches, 0 left ~1/6 dark. _hold variant keeps 0 for the bench.
         .LINK_CHECK       (`DPT_LINK_CHECK),
+        // Sceptre via USB-C->DP cable drops CR ~2 s and ~5 s after each
+        // establish (10-11): poll every 200 ms so the retrain follows the
+        // drop promptly, and declare the sink's own swing/PE request in the
+        // lane-set writes so the DP130 (auto mode) applies it.
+        .LINK_CHECK_CLKS  (27'd19999999),
+        .ECHO_SINK_ADJUST (1),
         .TX_PROBE         (0),
         // 720p60 (VIC 4, 74.25 MHz) or 1080p60 (VIC 16, 148.5 MHz);
         // pixel = 81 MHz * 11 / PIX_DIV via VCO 891
