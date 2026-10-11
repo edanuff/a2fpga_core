@@ -309,7 +309,7 @@ Symptom: `_4l` trained and aligned on all four lanes (new P6 `3:` field = DPCD 0
 1. **AUX dropped-request hang** (commit 84b65c72): a status read issued within 15 clocks of entering `link_established` (pending IRQ_HPD after a retrain) was dropped by the message engine, which was still "busy" with the empty link_established message; the ladder then waited forever (`PB` line: tx idle, 0 bytes, 9 expected). Fix: msg 0x00 no longer occupies the engine; check_link entry waits for it. Affects a2mega too (candidate explanation for its old "checks not running for minutes" anomaly).
 2. **`msa_inserter_4ch` width bugs** (same commit): lane-2 Vheight rows were 22-bit concatenations into 18 bits (720p announced as 8400 lines, 1080p as 16440), and the lane-2/lane-3 pass-through rows were 19/16 bits wide (symbols shifted, lane 3 lost its K bits). Synthesis had warned (EX3791) all along. 2-lane inserter unaffected, so a2mega never saw it.
 
-After the fixes (Sceptre via USB-C→DP cable): `_4l720` holds, aligned ×4, 0 symbol errors, colorbars, OSD 1280×720. `_4l` (1080p60): link up in 0.8 s, aligned ×4, 0 symbol errors, pixel clock 148,500,000 exact, 0 underruns, **colorbars, OSD 1920×1080@60**. a2p25 and a2mega now share the same 1080p video path.
+After the fixes (Sceptre via USB-C→DP cable): `_4l720` holds, aligned ×4, 0 symbol errors, colorbars, OSD 1280×720. `_4l` (1080p60): link up in 0.8 s, aligned ×4, 0 symbol errors, pixel clock 148,500,000 exact, 0 underruns, **colorbars, OSD 1920×1080@60**. a2p25 and a2mega now share the same 1080p video path. Also colorbars at 1080p on the FANGOR (native USB-C, 4 lanes).
 
 ## 7. Known risks
 
