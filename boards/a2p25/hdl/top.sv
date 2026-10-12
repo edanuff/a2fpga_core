@@ -1668,9 +1668,12 @@ module top #(
         cml_hex_sync1[3] <= cml_hex_sync0[3];
     end
 
+    // DebugOverlay off on the GW5A-25 first fit: CLS was 99.4% and its
+    // compare cone was the worst setup path (-0.34 ns). The ESP32 OSD text
+    // overlay and the debug registers over the OPI link remain.
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),
-        .ENABLE(1'b1),
+        .ENABLE(1'b0),
         .X_OFFSET(16),
         .Y_OFFSET(24)
     ) debug_overlay (
@@ -1699,7 +1702,7 @@ module top #(
         .b_o            (overlay_rgb_w[7:0])
     );
 
-    assign overlay_en_w = 1'b1;
+    assign overlay_en_w = 1'b0;   // DebugOverlay disabled (see above)
 
     // =========================================================================
     // ESP32 Octal SPI Interface

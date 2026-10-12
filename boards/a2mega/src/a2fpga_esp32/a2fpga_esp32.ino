@@ -1143,9 +1143,7 @@ void setup() {
 #endif
 #if A2MEGA_BOARD_REV == 225
     pinMode(PIN_FPGA_RECONFIG_N, INPUT);   // R32 pull-up; never driven here
-#if !A2P25_DP_TEST
-    pinMode(PIN_FPGA_INT_N, INPUT);        // production: FPGA drives it
-#endif
+    // (IO10 is PIN_DP_HPD_OUT in both variants — set up as an output below)
 #endif
     Serial.begin(115200);
 #if A2MEGA_HAS_FPGA_UART

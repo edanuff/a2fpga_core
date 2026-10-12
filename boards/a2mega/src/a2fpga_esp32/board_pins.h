@@ -219,7 +219,10 @@
                                              // ignored by the dp_test bitstream
 #define A2MEGA_HAS_OSPI_LINK 0
 #else
-#define PIN_DP_HPD_OUT       -1   // HPD must travel as an OSPI register write
+// Production (OSPI core): the a2mega-derived core has no FPGA->ESP32
+// interrupt line, so ESP32_INT_N (IO10 <-> ball B2) carries the PD-derived
+// HPD to the FPGA's dp_hpd input here too (2026-10-11, first a2p25 core).
+#define PIN_DP_HPD_OUT       PIN_FPGA_INT_N
 #define A2MEGA_HAS_FPGA_UART 0
 #define A2MEGA_HAS_OSPI_LINK 1
 #endif

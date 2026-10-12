@@ -105,7 +105,10 @@ This is a product decision — see "Decisions" below.
 |---|---|---|---|---|
 | everything else in | — | — | 67 | BSRAM over (Uthernet2 10, DOC 8, FB line buffer 9 + write FIFO 5, DP pixel FIFO 11, ESP32 disk lanes 8 + HDD/OSD 3, D-PHY bank FIFO 3, ROMs/PLL-init 6) |
 | Uthernet2 off (RAM now generate-guarded), line buffer stored as RGB565 (−1), DP pixel FIFO 1 line / half-line prefill (−8, new `FIFO_LINES`/`PREFILL_WORDS` params, a2mega unchanged), bank FIFO in registers (−3) | 20,344 (89%) | 11,092 (97%) | 56 (100%) | placement failed (95 regs unplaced) |
-| + Mockingboard off | see §3b | | | |
+| + Mockingboard off | 18,472 (81%) | 11,448 (99%) | 56 | routed, 20 setup violations (worst −0.34: DebugOverlay, DOC, HyperRAM ck_en, framebuffer, scanline dim, AUX) |
+| + DebugOverlay off (ESP32 OSD stays) | 17,991 (79%) | 11,397 (99%) | 54 | **0 violations, worst +0.09 ns** — first core bitstream `0c651f95…` (thin; the +0.5 ns durability bar is still ahead) |
+
+Note (ed): CLS % this high is the placer spreading cells to close timing, not design logic; with logic at ~80% the remaining work is the timing cones themselves (DOC, HyperRAM ck_en half-cycle, framebuffer, scanline dim, AUX), not more feature removal.
 
 So the 25K takes video + DP + DOC + ESP32 (disk/HDD/OSD) + shadow, but not Mockingboard and Uthernet2 on top of that. Uthernet2 is BSRAM-bound (10 blocks), Mockingboard logic-bound (~2k). Candidates to win them back later: DOC register banks into BSRAM (`DOC_BANKS_IN_BSRAM=1`, −2k logic / +6 BSRAM — only if BSRAM is freed elsewhere), the ESP32 disk lanes 4→2 (−4 BSRAM, firmware-visible), the DebugOverlay (bring-up aid).
 
