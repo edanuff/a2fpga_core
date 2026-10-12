@@ -526,6 +526,23 @@ Carry-overs for the production core: LATE_REPLY_DRAIN=1 (converter
 DEFER trailing bytes), EQ dwell from DPCD 0x00E, DR_Swap in the PD
 firmware for powered adapters, a serial command for the TUSB546 DP EQ.
 
+**Resolution (10-12, late): the Anker USB-C hub's DP→HDMI converter
+trains and streams on the same 2-lane 720p hold build** — DPCD
+`12 14 C2 81 01 1D 01 81 02 00 04 04 3E 00 81 00` (DP 1.2, HBR2, 2 lanes
++ TPS3 + enhanced framing, 4 ms interval, downstream HDMI), first-pass
+training to 0x202 = 0x77 / 0x204 = 0x81, HLV 111, colorbars, and
+SYMBOL_ERROR_COUNT **0x8000 = valid, zero errors** on both lanes.
+Matched conditions (same bitstream, AUX path, D-PHY → DP130 → TUSB546)
+on which the Cable Matters adapter never symbol-locks and saturates the
+error counter. Verdict: the board's converter-facing path is sound; the
+Cable Matters 48G adapter's receiver does not decode a 1.62 Gbps stream
+(HBR2/HBR3-class receiver, CR "locks", symbols garbage) and HBR is
+beyond the D-PHY, so that adapter class is out of reach for the a2p25.
+Consequences: 2-lane hubs cap the a2p25 at 720p (RBR×2); 1080p needs a
+4-lane sink or a direct DP monitor. Sink census row: Anker hub = PASS
+(720p×2), Cable Matters 48G #1 = FAIL (no RBR symbol lock), #2 = FAIL
+(AUX replies undecodable; powered mode needs DR_Swap).
+
 Bench traps recorded today: every SRAM load is a real reload (verify via
 `PF` stamp); `pd` shows "unattached" when the adapter is out — check
 HPD before reading a run; a powered adapter flips our port to sink/UFP.
