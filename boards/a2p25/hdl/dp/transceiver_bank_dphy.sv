@@ -241,7 +241,9 @@ module transceiver_bank_dphy #(
     // Async FIFO, 16 x 80, gray pointers
     // ------------------------------------------------------------------
     localparam AW = 4;
-    reg  [79:0]  mem [0:(1<<AW)-1];
+    // 16 x 80 bits: registers, not BSRAM (3 blocks on the GW5A-25 otherwise;
+    // 1280 FFs is the cheaper medium on a die with no distributed RAM)
+    reg  [79:0]  mem [0:(1<<AW)-1] /* synthesis syn_ramstyle="registers" */;
     reg  [AW:0]  wp_bin = '0, wp_gray = '0;
     reg  [AW:0]  rp_bin = '0, rp_gray = '0;
     reg  [AW:0]  rp_gray_w1 = '0, rp_gray_w2 = '0;   // rp gray in write domain

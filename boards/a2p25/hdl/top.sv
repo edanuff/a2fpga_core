@@ -39,7 +39,9 @@ module top #(
     parameter bit SUPERSPRITE_ENABLE = 0,
     parameter bit [7:0] SUPERSPRITE_ID = 1,
 
-    parameter bit MOCKINGBOARD_ENABLE = 1,
+    // Mockingboard off for the first fit on the GW5A-25: with it the core was
+    // 20.3k/23k logic, 97% CLS, and placement failed (integration plan §3).
+    parameter bit MOCKINGBOARD_ENABLE = 0,
     parameter bit [7:0] MOCKINGBOARD_ID = 2,
 
     // No UART pins on this revision: the SSC can be built but has no wire.
@@ -50,7 +52,9 @@ module top #(
     parameter bit DISK_II_ENABLE = 1,
     parameter bit [7:0] DISK_II_ID = 4,
 
-    parameter bit UTHERNET2_ENABLE = 1,
+    // Uthernet II off on the GW5A-25: its 16 KB W5100 buffer is ~10 of the
+    // 56 BSRAM blocks and the first fit check came out at 67 (integration plan §3).
+    parameter bit UTHERNET2_ENABLE = 0,
     parameter bit [7:0] UTHERNET2_ID = 5,
 
     parameter bit HDD_ENABLE = 1,
@@ -1278,10 +1282,13 @@ module top #(
     wire [3:0]  dp_tx_running_w, dp_powerup_channel_w;
     wire [79:0] dp_tx_symbols_w;
     wire        dp_hpd_present_w;
+    wire [7:0]  dp_underrun_cnt_w;    // pixel FIFO underruns (OSD hex 5)
     dp_transmitter #(
         .LANE_COUNT       (4),
         .LINK_RATE_MBPS   (1620),
         .RGB_LATENCY      (2),
+        .FIFO_LINES       (1),       // 512 x 97 = 3 BSRAM (was 11); level swings +-60 at prefill
+        .PREFILL_WORDS    (256),     // half a line
         .BLIND_SINK       (0),
         .HPD_DISCONNECT_RESETS(1),
         .ENABLE_AFE_ADJUST(0),       // swing/pre-emphasis live in the SN75DP130
@@ -1356,7 +1363,7 @@ module top #(
         .clk_symbol_out    (),
         .serdes_status     (dp_serdes_status_w),
         .hpd_present_out   (dp_hpd_present_w),
-        .debug_underrun_cnt(),
+        .debug_underrun_cnt(dp_underrun_cnt_w),
         .debug_fifo_level  (),
         .ext_symbol_clk    (dp_clk_sym_w),
         .ext_tx_running    (dp_tx_running_w),
@@ -1562,7 +1569,7 @@ module top #(
                                                 dbg_hex_sync1[4] <= dbg_hex_sync0[4];
         // Hex 5: RD FIFO DROP — read beats dropped because rd_fifo was full.
         // Nonzero = data loss in the read response path (corruption source).
-        dbg_hex_sync0[5] <= fb_dbg_rd_fifo_drop_w;
+        dbg_hex_sync0[5] <= dp_underrun_cnt_w;   // (a2mega: fb_dbg_rd_fifo_drop_w)
                                                 dbg_hex_sync1[5] <= dbg_hex_sync0[5];
 `ifdef DOC_KEEP_FB_DEBUG_HEX
         // Hex 6: LINE LAG MAX — peak display-vs-completed-line lag in lines.

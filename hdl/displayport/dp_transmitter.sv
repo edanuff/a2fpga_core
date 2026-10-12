@@ -45,6 +45,8 @@ module dp_transmitter #(
     // rgb pull-contract latency (see dp_video_timing.v): 1 = classic
     // next-cycle answer; 2 = consumer gets an extra pipeline cycle
     parameter int RGB_LATENCY = 1,
+    parameter int FIFO_LINES    = 3,   // pixel CDC FIFO depth, in video lines (see FIFO_ADDR_BITS)
+    parameter int PREFILL_WORDS = 0,   // 0 = one line (WORDS_PER_LINE)
     parameter bit AUDIO_ENABLE = 1,  // 0: bypass SDP engine entirely (no
                                      // secondary packets on the wire) —
                                      // video-restart-bug discriminator
@@ -284,7 +286,13 @@ module dp_transmitter #(
     localparam int VALID_NUM     = TU_SIZE * 3 * PIXEL_CLK_MULT;
     localparam int VALID_DEN     = 2 * PIXEL_CLK_DIV * LANE_COUNT;
     localparam int WORDS_PER_LINE = H_VISIBLE / LANE_COUNT;
-    localparam int FIFO_ADDR_BITS = $clog2(3 * WORDS_PER_LINE);
+    // Pixel CDC FIFO depth in video lines and the prefill before a frame
+    // starts (defaults = the shipped sizing: 3 lines, prime at 1 line).
+    // The GW5A-25 build uses 1 line / half a line: the level only swings
+    // ~+-60 words around the prefill point at 1080p x4 (a2p25 bench), and
+    // 97 x 2048 bits was 11 of its 56 BSRAM blocks.
+    localparam int FIFO_ADDR_BITS = $clog2(FIFO_LINES * WORDS_PER_LINE);
+    localparam int FIFO_PREFILL   = (PREFILL_WORDS > 0) ? PREFILL_WORDS : WORDS_PER_LINE;
 
     initial begin
         if (H_TOTAL * 2 * PIXEL_CLK_DIV % PIXEL_CLK_MULT != 0)
@@ -416,7 +424,7 @@ module dp_transmitter #(
         .SYMS_PER_LINE (SYMS_PER_LINE),
         .VALID_NUM     (VALID_NUM),
         .VALID_DEN     (VALID_DEN),
-        .PREFILL       (WORDS_PER_LINE),
+        .PREFILL       (FIFO_PREFILL),
         .SCHED_ROM     (SCHED_ROM),
         .SCHED_HEX     (SCHED_HEX)
     ) i_video_stream_packer (

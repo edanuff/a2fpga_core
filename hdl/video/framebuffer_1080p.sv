@@ -1125,7 +1125,9 @@ module framebuffer_1080p #(
     // Stores 1 pixel per entry, serializing the 2-pixel words through a
     // small buffer on the write side.
 
-    reg [COLOR_BITS-1:0] line_buf [0:8191] /* synthesis syn_ramstyle="block_ram" */;
+    // Stored as RGB565 (the memory format, converted back on the read side):
+    // 8192 x 16 = 8 BSRAM blocks; 8192 x 18 needed 9 (a2p25 GW5A-25 fit, 10-11).
+    reg [15:0] line_buf [0:8191] /* synthesis syn_ramstyle="block_ram" */;
 
     // ---- Write side (clk domain, 54 MHz) ----
     // Each 32-bit word contains 2 packed RGB565 pixels.
@@ -1183,9 +1185,9 @@ module framebuffer_1080p #(
         end else if (rd_pixel_active_r) begin
             // Extract pixel from latched word and write to line buffer
             line_buf[{fetch_bank_r, lb_wr_pixel_x[9:0]}] <=
-                (TEST_PATTERN == 1) ? test_pixel(lb_wr_pixel_x[9:0]) :
-                rd_pixel_idx_r ? rgb565_to_666(rd_word_latched_r[31:16]) :
-                                 rgb565_to_666(rd_word_latched_r[15:0]);
+                (TEST_PATTERN == 1) ? rgb666_to_565(test_pixel(lb_wr_pixel_x[9:0])) :
+                rd_pixel_idx_r ? rd_word_latched_r[31:16] :
+                                 rd_word_latched_r[15:0];
             lb_wr_pixel_x <= lb_wr_pixel_x + 11'd1;
             if (rd_pixel_idx_r)
                 rd_pixel_active_r <= 1'b0;
@@ -1226,7 +1228,7 @@ module framebuffer_1080p #(
                     bp_sync_pending_r <= 1'b1;
 
                 if (fb_we_r) begin
-                    line_buf[{bypass_y_r[2:0], bypass_x_r[9:0]}] <= fb_data_r;
+                    line_buf[{bypass_y_r[2:0], bypass_x_r[9:0]}] <= rgb666_to_565(fb_data_r);
                     if (bypass_x_r == fb_width - 11'd1) begin
                         bypass_x_r <= 11'd0;
                         // Apply frame sync at clean line boundary only
@@ -1345,7 +1347,7 @@ module framebuffer_1080p #(
 
     always @(posedge clk_pixel) begin
         lb_rd_data_r <= (TEST_PATTERN == 2) ?
-            test_pixel(lb_rd_addr[9:0]) : line_buf[lb_rd_addr];
+            test_pixel(lb_rd_addr[9:0]) : rgb565_to_666(line_buf[lb_rd_addr]);
         in_active_px_r <= in_active_s1_r;
     end
 

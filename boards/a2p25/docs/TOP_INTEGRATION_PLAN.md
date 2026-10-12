@@ -97,7 +97,17 @@ board is therefore:
   + ~5k logic). Re-evaluate once the real numbers are in; the 25K may take it
   if the ESP32-served peripherals are trimmed instead (e.g. Uthernet2).
 
-This is a product decision — see "Decisions needed" below.
+This is a product decision — see "Decisions" below.
+
+**Measured 2026-10-11 (first full-core builds, SuperSprite out):**
+
+| Build | Logic | CLS | BSRAM | Result |
+|---|---|---|---|---|
+| everything else in | — | — | 67 | BSRAM over (Uthernet2 10, DOC 8, FB line buffer 9 + write FIFO 5, DP pixel FIFO 11, ESP32 disk lanes 8 + HDD/OSD 3, D-PHY bank FIFO 3, ROMs/PLL-init 6) |
+| Uthernet2 off (RAM now generate-guarded), line buffer stored as RGB565 (−1), DP pixel FIFO 1 line / half-line prefill (−8, new `FIFO_LINES`/`PREFILL_WORDS` params, a2mega unchanged), bank FIFO in registers (−3) | 20,344 (89%) | 11,092 (97%) | 56 (100%) | placement failed (95 regs unplaced) |
+| + Mockingboard off | see §3b | | | |
+
+So the 25K takes video + DP + DOC + ESP32 (disk/HDD/OSD) + shadow, but not Mockingboard and Uthernet2 on top of that. Uthernet2 is BSRAM-bound (10 blocks), Mockingboard logic-bound (~2k). Candidates to win them back later: DOC register banks into BSRAM (`DOC_BANKS_IN_BSRAM=1`, −2k logic / +6 BSRAM — only if BSRAM is freed elsewhere), the ESP32 disk lanes 4→2 (−4 BSRAM, firmware-visible), the DebugOverlay (bring-up aid).
 
 ## 4. Build/bench sequence
 

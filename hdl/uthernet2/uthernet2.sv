@@ -114,8 +114,8 @@ module Uthernet2 #(
     // mode (read output holds during a write) -- the supported Gowin DPB mode; a
     // data-port access is read XOR write, so holding the read output is fine.
     // -------------------------------------------------------
-    (* syn_ramstyle="block_ram" *) reg [7:0] reg_mem [0:2047];    // 0x0000-0x07FF
-    (* syn_ramstyle="block_ram" *) reg [7:0] buf_mem [0:16383];   // 0x4000-0x7FFF
+    // (ENABLE=0 removes the 10 BSRAM blocks entirely — a2p25 GW5A-25 fit;
+    // the synthesizer did not prune them from the disabled card on its own.)
 
     // Port A (Apple II) region decode
     wire        a_reg  = (data_addr_r[15:11] == 5'd0);     // 0x0000-0x07FF
@@ -126,12 +126,29 @@ module Uthernet2 #(
 
     reg [7:0] a_reg_q, a_buf_q;
     reg       a_reg_sel_q, a_buf_sel_q;
+    reg [7:0] b_reg_q, b_buf_q;
+    reg       b_reg_sel_q, b_buf_sel_q;
+    generate if (ENABLE) begin : g_w5100_ram
+    (* syn_ramstyle="block_ram" *) reg [7:0] reg_mem [0:2047];    // 0x0000-0x07FF
+    (* syn_ramstyle="block_ram" *) reg [7:0] buf_mem [0:16383];   // 0x4000-0x7FFF
     always @(posedge a2bus_if.clk_logic) begin
         if (a_we && a_reg) reg_mem[a_reg_i] <= a2bus_if.data; else a_reg_q <= reg_mem[a_reg_i];
         if (a_we && a_buf) buf_mem[a_buf_i] <= a2bus_if.data; else a_buf_q <= buf_mem[a_buf_i];
         a_reg_sel_q <= a_reg;
         a_buf_sel_q <= a_buf;
     end
+    always @(posedge a2bus_if.clk_logic) begin
+        if (w5100_host_wr && b_reg) reg_mem[b_reg_i] <= w5100_host_wdata; else b_reg_q <= reg_mem[b_reg_i];
+        if (w5100_host_wr && b_buf) buf_mem[b_buf_i] <= w5100_host_wdata; else b_buf_q <= buf_mem[b_buf_i];
+        b_reg_sel_q <= b_reg;
+        b_buf_sel_q <= b_buf;
+    end
+    end else begin : g_no_w5100_ram
+    always @(posedge a2bus_if.clk_logic) begin
+        a_reg_q <= 8'h00; a_buf_q <= 8'h00; a_reg_sel_q <= 1'b0; a_buf_sel_q <= 1'b0;
+        b_reg_q <= 8'h00; b_buf_q <= 8'h00; b_reg_sel_q <= 1'b0; b_buf_sel_q <= 1'b0;
+    end
+    end endgenerate
     wire [7:0] a_q = a_reg_sel_q ? a_reg_q : a_buf_sel_q ? a_buf_q : 8'h00;
 
     // Port B (BL616 host, SPI SPACE 3) region decode -- W5100 addresses
@@ -140,14 +157,6 @@ module Uthernet2 #(
     wire [10:0] b_reg_i = w5100_host_addr[10:0];
     wire [13:0] b_buf_i = w5100_host_addr[13:0];
 
-    reg [7:0] b_reg_q, b_buf_q;
-    reg       b_reg_sel_q, b_buf_sel_q;
-    always @(posedge a2bus_if.clk_logic) begin
-        if (w5100_host_wr && b_reg) reg_mem[b_reg_i] <= w5100_host_wdata; else b_reg_q <= reg_mem[b_reg_i];
-        if (w5100_host_wr && b_buf) buf_mem[b_buf_i] <= w5100_host_wdata; else b_buf_q <= buf_mem[b_buf_i];
-        b_reg_sel_q <= b_reg;
-        b_buf_sel_q <= b_buf;
-    end
     assign w5100_host_rdata = b_reg_sel_q ? b_reg_q : b_buf_sel_q ? b_buf_q : 8'h00;
 
     // DEBUG: count port-B writes and latch the last addr/data the card actually
