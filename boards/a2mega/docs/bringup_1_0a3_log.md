@@ -1401,3 +1401,57 @@ Pending (needs the bench): attach the a2mega to the Mac (Apple II OFF) →
 build since 08-28); (b) hub (2-lane) DOC/speaker audio still works;
 (c) direct USB-C→DP cable to a DP monitor: audio over the 2-lane link the
 a2mega trains there (the 4-lane case does not arise on this SOM).
+
+### 10-11 night, addendum — trigger lead 5 → 11 (a9d19c90) + vertical-tracker pipelining (d15af6fd); builds 2 and 3
+
+The a2p25 session reported a second shared-HDL fix after the entry above:
+**a9d19c90** — `H_TRIGGER_LEAD` 5 → 11. The lead must cover every register
+between hdmi_cx and the DP transmitter's rgb input less RGB_LATENCY (2):
+framebuffer 5 + the top's composite chain 8 = 13 → 11. With 5, every 1080p
+frame scanned out 6 raster px late — hidden inside the Apple modes' 120-px
+borders, but on the borderless 640-wide SHR frame it is one 320-mode pixel
+of border colour at the left edge (visible until the game sets the border
+black). The a2mega top's chain was counted here and is identical to the
+a2p25's (`fb_rgb_osd_r` 1, `osd_text_overlay` 1, `scanline_dim` 0,
+`DebugOverlay` 6 with ENABLE=1 — its stages are unconditional, ENABLE only
+gates the pixel colour; `overlay_en_w = 1`), so 11 holds. Apple modes move
+6 px left to true centre; the ESP32 OSD text keeps its own coordinate path.
+
+- **Build 2 = 9c703ba0** (ad88e341 + lead 11): **NOT CLEAN** — 4 setup /
+  1 hold. clk_pix 145.878 < 148.5, clk_logic 53.897 < 54.0, clk1x hold
+  -0.009. Violators: framebuffer vertical tracker `cy0_r → v_approach_px_r
+  RESET` (-0.121) and `→ v_active_px_r CE` (-0.027), `ovl_cy_q →
+  scanline_dim phase_r RESET` (-0.057), DOC `curr_rts_r → osc_state_r`
+  (-0.035), DDR3 PHY cmd oserdes hold (-0.009). None is in the changed
+  logic (a constant in the h_trigger subtractor) — the a2mega 60K
+  knife-edge re-rolling under a changed `BUILD_DATETIME`. fs sha256
+  225d019f4884f49a790af34977e3be64366136cbb889a2544574dc82e879ab46
+  (archived, NOT for flashing).
+- Rather than re-roll, took the a2p25's structural fix for exactly the
+  worst cone: **d15af6fd** registers the vertical tracker's decision inputs
+  (line-changed / cy==0 / at-border / at-lead flags), one more
+  blanking-time cycle; its commit message already said "a2mega inherits
+  (regression build pending)". Applied in isolation (19 lines; the module's
+  port list is unchanged between main and the a2p25 tip). = **50eae999**.
+- **Build 3 = 50eae999** (main ce4a0595 + ad88e341 + 9c703ba0 + 50eae999):
+  **CLEAN** — 0 setup / 0 hold, TNS 0.000 every clock, Fmax ≥ constraint
+  every clock. gw_sh V1.9.12.01 (84072), `GPRJ=a2mega.gprj`, SecurityBit OFF.
+  - `impl/pnr/a2mega.fs` sha256 **32b860082d1469d62e18d3b814d2ad8c5d5e525eb3b071cc0a524b50014e7a5f**
+  - `impl/pnr/a2mega.bin` sha256 **a43dfe4cc6ff8aafd65cd83e6db472f657f3f1632213bd1c9dc5b806ee23e846**
+  - Logic 20179/59904, Register 20718/60780, BSRAM 108/118.
+  - Fmax: clk 123.105/50; clk4x 2016/324; clk1x 123.058/80.998; clk100
+    100.559/100; clk_sym 136.752/135.007; clk_pix 149.896/148.5; cm_life
+    160.114/66.667; clk_logic 54.033/54.0.
+  - Worst setup: 0.012 clk_logic DOC `curr_rts_r → ram_wds_din_r` (×2);
+    0.056 clk100 AUX `next_state`; 0.063 clk_pix framebuffer `fb_width_px_r
+    → lb_rd_addr CE` (×3); **0.086 clk_pix `cx0_r → h_trigger_r`** (the new
+    registered 12-bit equality — now in the top 10, was absent in build 1);
+    0.095 clk_sym packer `line_cycle → pf_vb0`; 0.105 clk_sym FIFO-DO →
+    packer `ready`. Worst hold 0.052 clk_logic (fb wr_accum → wr_fifo).
+  - Still ONE roll of the final source — same caveat as the first entry.
+
+**Flash candidate = build 3 (50eae999, fs 32b86008…).** Still UNFLASHED:
+the a2mega has not been on the Mac's JTAG chain tonight. Pending bench
+list unchanged, plus: during the transition INTO SHR (before the game
+blacks the border) the left edge should be flush with no border-colour
+stripe; Apple modes sit 6 px further left than before.
