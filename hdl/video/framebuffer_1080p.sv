@@ -140,6 +140,7 @@ module framebuffer_1080p #(
 
     localparam HDMI_WIDTH  = 1920;
     localparam HDMI_H_TOTAL = 2200;  // raster line length incl. blanking (cx wraps here)
+    localparam H_TRIGGER_LEAD = 11;  // see the h_trigger block in the output path
     localparam HDMI_HEIGHT = 1080;
     localparam H_SCALE     = 3;    // 560->1680 / 640->1920
     localparam V_SCALE     = 5;    // 192->960  / 200->1000
@@ -1281,11 +1282,24 @@ module framebuffer_1080p #(
     // IIgs SHR frames scanned out black while the framebuffer held the
     // rendered image (a2p25 10-11; the a2mega shares this read side).
     // Apple geometry unchanged: 120 - 5 = 115.
+    // H_TRIGGER_LEAD: raster cycles between the trigger and the first
+    // active pixel reaching the DP transmitter's rgb input, less the
+    // transmitter's RGB_LATENCY (2). Counted 10-11 on the a2p25 (identical
+    // chain on the a2mega): this module 5 (cx0_r, h_trigger_r, stage 1-3),
+    // then the top's composite 8 (fb_rgb_osd_r 1, osd_text_overlay 1,
+    // scanline_dim 0, DebugOverlay 6 — s0/sA/sB/s1/s2/output, ENABLE
+    // notwithstanding) = 13, minus 2 = 11. The value had been 5 since the
+    // 08-30 stage-3 split, from before the OSD/overlay stages existed in
+    // this path: every frame scanned out 6 raster pixels late — invisible
+    // inside the Apple modes' 120-px borders, but the borderless 640-wide
+    // IIgs SHR frame showed 6 px (one 320-mode pixel) of border colour at
+    // its left edge. Change the chain, change this number.
     reg [11:0] h_trigger_x_px_r;
     reg h_trigger_r;
     always @(posedge clk_pixel) begin
-        h_trigger_x_px_r <= (h_border_px_r < 12'd5) ? h_border_px_r + 12'(HDMI_H_TOTAL - 5)
-                                                    : h_border_px_r - 12'd5;
+        h_trigger_x_px_r <= (h_border_px_r < 12'(H_TRIGGER_LEAD))
+                              ? h_border_px_r + 12'(HDMI_H_TOTAL - H_TRIGGER_LEAD)
+                              : h_border_px_r - 12'(H_TRIGGER_LEAD);
         h_trigger_r <= (cx0_r == h_trigger_x_px_r);
     end
     wire        h_trigger_w = h_trigger_r;
