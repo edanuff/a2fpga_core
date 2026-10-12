@@ -1318,3 +1318,86 @@ Tooling shipped today and load-bearing throughout: fpgastream WiFi
 flashing, telnet 'g' reload, .fs->.bin converter (validated byte-exact),
 HDMI capture eyes (imagesnap loop in user Terminal; Claude Code app
 lacks camera TCC — workaround documented), automated boot classifier.
+
+## 2026-10-11 night — 60K regression build with the a2p25's two shared-HDL fixes (SHR scanout trigger + sdp_engine 4-lane)
+
+Context: the a2p25 bring-up (branch `claude/a2p25-modernization-8a97cc`,
+commit 24df5029) found two bugs in shared HDL that the a2mega inherits:
+
+- `hdl/video/framebuffer_1080p.sv` — the left-border scanout trigger
+  `cx0_r + 5 == h_border_px_r` can never match for a 640-wide IIgs SHR
+  frame (h_border = 0, cx wraps at 2200). SHR scans out black while the
+  framebuffer holds the image. The `+5` form came in with the 1.0a3 epic
+  squash 0a62d8ca (08-28) ⇒ **a2mega SHR has very likely been black since
+  08-28**. Fix: trigger X computed modulo the raster line (2195 for SHR,
+  115 for 560-wide Apple modes — unchanged for the modes we have been
+  testing, which is why nothing noticed).
+- `hdl/displayport/audio/sdp_engine.v` — no 4-lane mode existed (with
+  LANE_COUNT=4 it emitted the 1-lane byte table on lane 0 only). DP 1.1a
+  4-lane packet-to-lane mapping added; `hdl/displayport/sim/tb_sdp_4lane.v`
+  self-check PASS for 4 and 2 lanes (re-run here under iverilog: PASS/PASS).
+  **a2mega note:** `boards/a2mega/hdl/top.sv` instantiates `dp_transmitter`
+  with `LANE_COUNT(2)` (two die lanes on the 60K SOM), so the 4-lane path is
+  pruned in this build. A direct USB-C→DP cable to a 4-lane-capable monitor
+  (census second gate, 09-02) still trains as a 2-lane link on the a2mega
+  side; the "4-lane audio was silent" finding is an a2p25 fact, carried here
+  for parity only. 2-lane audio behaviour should be unchanged.
+
+Cherry-pick: the three files only (`git format-patch -1 24df5029 -- <3 files>`
+applied onto main ce4a0595), commit **ad88e341** on
+`claude/quirky-hellman-d19038`. No a2p25 files touched.
+
+**Build provenance (the binary hash is ground truth):**
+- Base: main ce4a0595 + ad88e341 (the cherry-pick); worktree clean.
+- Toolchain: gw_sh V1.9.12.01 (84072), pipe method via `tools/build.sh`,
+  `GPRJ=a2mega.gprj` (60K SOM, GW5AT-LV60PG484AC1/I0), Gowin IDE GUI not
+  running; waited for another session's a2p25 gw_sh to exit first (license).
+- `impl/pnr/a2mega.fs` sha256 **77dcb9dfd0f9e05539577b8ae187eaa005bb41b55d753c3b4778f45dd3831d37**
+  (20,723,670 bytes; header: SecurityBit OFF, CRCCheck ON, Created Sun Oct 11 22:07:51 2026)
+- `impl/pnr/a2mega.bin` sha256 **d0b15355eca734fa294eb704c0ef128f8f0b0f035d416e74b0cd7c57013349be** (2,586,632 bytes)
+- Resources: Logic 20304/59904 (34%), Register 20714/60780 (35%), BSRAM 108/118 (92%), DSP 2/118.
+- Build wall time 14 min 52 s (21:53:10 → 22:08:02).
+
+**Timing (single roll of the committed source — not yet "durable" per the
+no-skating rule, which wants ≥3 rolls of the final source):** 0 setup / 0
+hold violated endpoints, TNS 0.000 on every clock, Actual Fmax ≥ constraint
+on every clock:
+
+- clk 50.000 → 158.306 MHz
+- clk4x 324.044 → 2016.128 MHz
+- clk1x 80.998 → 118.888 MHz
+- clk100 100.000 → 103.855 MHz
+- clk_sym 135.007 → 135.869 MHz (worst slack 0.047 ns)
+- clk_pix 148.500 → 151.185 MHz
+- cm_life 66.667 → 154.114 MHz
+- clk_logic 54.000 → 54.928 MHz
+- clk_pixel: no timing paths reported (as before)
+
+Worst setup paths (margins are the a2mega's usual knife-edge, not new):
+1. 0.047 ns clk_sym `i_pixel_cdc_fifo mem DO → video_stream_packer data` (the
+   known FIFO-DO cone, cf. timing_round2.md)
+2. 0.051 ns clk_sym `i_sdp_engine wb_idx_b_r → wb_b_r[1]/wb_b_r[0]` (x3 in the
+   top 11) — the sdp wire-byte precompute. This cone exists in the 2-lane
+   form too (the 4-lane case prunes), but the loop rewrite is the change
+   under test; no pre-change baseline roll was done tonight, so whether it
+   tightened is unknown. Watch item.
+3. 0.120 ns clk_pix `debug_overlay s2_x_bit → r_o/g_o/b_o SET` (overlay decodes)
+4. 0.150 ns clk_sym `video_stream_packer line_cycle → pf_vb0` (packer fanout)
+5. 0.313 ns clk_logic DOC pipelined `curr_rts_r → ram_wds_din_r`
+6. 0.371 ns clk100 AUX `tx_rd_ptr → esi_off CE`
+
+No `framebuffer_1080p` / `h_trigger` path appears in the 25 worst setup paths
+(the trigger compare is now a registered 12-bit equality, as intended).
+
+Archived copy: `a2mega_60k_ad88e341_77dcb9df.fs` (session scratchpad; the
+`.fs`/`.bin` are gitignored — rebuild from ad88e341 reproduces, cf. the
+08-22 determinism finding).
+
+**Hardware status at time of writing:** NOT flashed. The ESP32-S3 JTAG chain
+on this Mac reports a GW5A-25 (the a2p25), i.e. the a2mega is not attached.
+Pending (needs the bench): attach the a2mega to the Mac (Apple II OFF) →
+`GPRJ=a2mega.gprj tools/flash.sh a2mega` → power-cycle → on the IIgs:
+(a) Arkanoid (SHR) shows its SHR screen (expected: was black on every
+build since 08-28); (b) hub (2-lane) DOC/speaker audio still works;
+(c) direct USB-C→DP cable to a DP monitor: audio over the 2-lane link the
+a2mega trains there (the 4-lane case does not arise on this SOM).
