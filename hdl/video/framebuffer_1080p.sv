@@ -139,6 +139,7 @@ module framebuffer_1080p #(
     // =========================================================================
 
     localparam HDMI_WIDTH  = 1920;
+    localparam HDMI_H_TOTAL = 2200;  // raster line length incl. blanking (cx wraps here)
     localparam HDMI_HEIGHT = 1080;
     localparam H_SCALE     = 3;    // 560->1680 / 640->1920
     localparam V_SCALE     = 5;    // 192->960  / 200->1000
@@ -1290,9 +1291,20 @@ module framebuffer_1080p #(
     // implies +4 == border at N+1; cx is monotonic and the border is far
     // from the line wrap, so the identity is exact). The 12-bit equality
     // then never appears in the address/CE cone.
+    // The trigger X is computed modulo the raster line: with a 640-wide
+    // source the active window spans the full 1920 and h_border is 0, so
+    // the +5 lookahead lands in the previous line's blanking (cx = 2195).
+    // The earlier "cx0_r + 5 == h_border" form could never match there —
+    // IIgs SHR frames scanned out black while the framebuffer held the
+    // rendered image (a2p25 10-11; the a2mega shares this read side).
+    // Apple geometry unchanged: 120 - 5 = 115.
+    reg [11:0] h_trigger_x_px_r;
     reg h_trigger_r;
-    always @(posedge clk_pixel)
-        h_trigger_r <= (cx0_r + 12'd5 == h_border_px_r);
+    always @(posedge clk_pixel) begin
+        h_trigger_x_px_r <= (h_border_px_r < 12'd5) ? h_border_px_r + 12'(HDMI_H_TOTAL - 5)
+                                                    : h_border_px_r - 12'd5;
+        h_trigger_r <= (cx0_r == h_trigger_x_px_r);
+    end
     wire        h_trigger_w = h_trigger_r;
 
     reg        h_act_r;

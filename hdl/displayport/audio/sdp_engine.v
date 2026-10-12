@@ -15,12 +15,15 @@
 //  - GF(2^4) primitive polynomial x^4+x+1, generator (x-a^0)(x-a^1);
 //    parity computed by a 2-register nibble LFSR, fed low nibble first;
 //    parity byte = {x0, x1}
-//  - on the wire, paired lanes swap high nibbles byte-for-byte (2 lanes);
-//    on 1 lane consecutive codewords interleave per Figures 2-27/2-29
+//  - on the wire, paired lanes swap high nibbles byte-for-byte (lanes
+//    0<->1 and 2<->3 on 2- and 4-lane links, Figures 2-26/2-28); on 1
+//    lane consecutive codewords interleave per Figures 2-27/2-29
 //
 // All three packet types carry exactly 32 payload bytes (InfoFrame is 28
-// zero-padded to 32), so the wire length is constant: 24 bytes per lane
-// on 2 lanes, 48 bytes on 1 lane, plus SS/SE.
+// zero-padded to 32), so the wire length is constant: 12 bytes per lane
+// on 4 lanes, 24 on 2 lanes, 48 on 1 lane, plus SS/SE. 4-lane mapping
+// (DP 1.1a section 2.2.5.1 figure, page 72): lane n carries
+// HBn PBn DB(4n..4n+3) PB(4+n) DB(16+4n..16+4n+3) PB(8+n).
 //
 // Scheduling per gap: Audio_TimeStamp (once per frame) > Audio_Stream
 // (4-sample buffer ready) > Audio InfoFrame (once per frame). VB-ID
@@ -34,7 +37,7 @@
 `timescale 1ns / 1ps
 
 module sdp_engine #(
-    parameter LANE_COUNT      = 2,      // 1 or 2
+    parameter LANE_COUNT      = 2,      // 1, 2 or 4
     parameter AUDIO_BIT_WIDTH = 16,     // 16 only for now (subframe packing)
     parameter AUDIO_RATE      = 48000
 )(
@@ -61,7 +64,8 @@ module sdp_engine #(
     localparam [23:0] NAUD = 24'd32768;
 
     // wire bytes per lane between SS and SE
-    localparam integer WB_PER_LANE = (LANE_COUNT == 1) ? 48 : 24;
+    localparam integer WB_PER_LANE = (LANE_COUNT == 1) ? 48 :
+                                     (LANE_COUNT == 4) ? 12 : 24;
     localparam integer INS_CYCLES  = (WB_PER_LANE + 2) / 2;   // incl. SS/SE
 
     // ------------------------------------------------------------------
@@ -222,13 +226,45 @@ module sdp_engine #(
         end
     endfunction
 
+    //   4-lane: lane n = HBn PBhn [DBg(n) P(n)] [DBg(n+4) P(n+4)]
+    //           wire: lanes 0<->1 and 2<->3 swap high nibbles
+    function [7:0] pre_byte4(input [1:0] lane, input [5:0] k,
+                             input [31:0] fhb, input [31:0] fpbh,
+                             input [63:0] fpbd, input [255:0] fdb);
+        begin
+            // flat 12-way mux with constant slices (lane is a constant
+            // after the precompute loop unrolls); a k-dependent part-select
+            // here synthesized as a barrel shifter over the 256-bit payload
+            // (-6 ns at clk_sym)
+            case (k)
+                6'd0:  pre_byte4 = fhb[8*lane +: 8];
+                6'd1:  pre_byte4 = fpbh[8*lane +: 8];
+                6'd2:  pre_byte4 = fdb[32*lane      +: 8];
+                6'd3:  pre_byte4 = fdb[32*lane + 8  +: 8];
+                6'd4:  pre_byte4 = fdb[32*lane + 16 +: 8];
+                6'd5:  pre_byte4 = fdb[32*lane + 24 +: 8];
+                6'd6:  pre_byte4 = fpbd[8*lane +: 8];
+                6'd7:  pre_byte4 = fdb[128 + 32*lane      +: 8];
+                6'd8:  pre_byte4 = fdb[128 + 32*lane + 8  +: 8];
+                6'd9:  pre_byte4 = fdb[128 + 32*lane + 16 +: 8];
+                6'd10: pre_byte4 = fdb[128 + 32*lane + 24 +: 8];
+                6'd11: pre_byte4 = fpbd[32 + 8*lane +: 8];
+                default: pre_byte4 = 8'h00;
+            endcase
+        end
+    endfunction
+
     // wire byte for lane l, position k (0..WB_PER_LANE-1)
     function [7:0] wire_byte(input [1:0] l, input [5:0] k,
                              input [31:0] fhb, input [31:0] fpbh,
                              input [63:0] fpbd, input [255:0] fdb);
         reg [7:0] a, b;
         begin
-            if (LANE_COUNT == 2) begin
+            if (LANE_COUNT == 4) begin
+                a = pre_byte4(l, k, fhb, fpbh, fpbd, fdb);
+                b = pre_byte4({l[1], ~l[0]}, k, fhb, fpbh, fpbd, fdb);
+                wire_byte = {b[7:4], a[3:0]};
+            end else if (LANE_COUNT == 2) begin
                 a = pre_byte(l[0], k, fhb, fpbh, fpbd, fdb);
                 b = pre_byte(~l[0], k, fhb, fpbh, fpbd, fdb);
                 wire_byte = {b[7:4], a[3:0]};
@@ -359,25 +395,23 @@ module sdp_engine #(
         wb_idx_a_r <= {wb_nxt2[4:0], 1'b0};
         wb_idx_b_r <= {wb_nxt[4:0],  1'b1};   // 2*(k+2)-1 = {k+1, 1}
     end
-    reg [7:0] wb_a_r [0:1];      // byte index 2*ins_cyc   (slot 1)
-    reg [7:0] wb_b_r [0:1];      // byte index 2*ins_cyc-1 (slot 0)
-    reg [7:0] wb0_r  [0:1];      // byte index 0 (start cycle)
-    reg [7:0] wb1a_r [0:1];      // byte index 2 (cycle-1 slot 1)
-    reg [7:0] wb1b_r [0:1];      // byte index 1 (cycle-1 slot 0)
-    reg [7:0] wblast_r [0:1];    // byte index WB_PER_LANE-1 (last cycle)
+    // (lanes 2/3 are only consumed when LANE_COUNT == 4; otherwise pruned)
+    reg [7:0] wb_a_r [0:3];      // byte index 2*ins_cyc   (slot 1)
+    reg [7:0] wb_b_r [0:3];      // byte index 2*ins_cyc-1 (slot 0)
+    reg [7:0] wb0_r  [0:3];      // byte index 0 (start cycle)
+    reg [7:0] wb1a_r [0:3];      // byte index 2 (cycle-1 slot 1)
+    reg [7:0] wb1b_r [0:3];      // byte index 1 (cycle-1 slot 0)
+    reg [7:0] wblast_r [0:3];    // byte index WB_PER_LANE-1 (last cycle)
+    integer wl;
     always @(posedge clk) begin
-        wb_a_r[0]   <= wire_byte(2'd0, wb_idx_a_r,          hbv, pbhv, pbdv, db);
-        wb_b_r[0]   <= wire_byte(2'd0, wb_idx_b_r,          hbv, pbhv, pbdv, db);
-        wb_a_r[1]   <= wire_byte(2'd1, wb_idx_a_r,          hbv, pbhv, pbdv, db);
-        wb_b_r[1]   <= wire_byte(2'd1, wb_idx_b_r,          hbv, pbhv, pbdv, db);
-        wb1a_r[0]   <= wire_byte(2'd0, 6'd2,                hbv, pbhv, pbdv, db);
-        wb1a_r[1]   <= wire_byte(2'd1, 6'd2,                hbv, pbhv, pbdv, db);
-        wb1b_r[0]   <= wire_byte(2'd0, 6'd1,                hbv, pbhv, pbdv, db);
-        wb1b_r[1]   <= wire_byte(2'd1, 6'd1,                hbv, pbhv, pbdv, db);
-        wb0_r[0]    <= wire_byte(2'd0, 6'd0,                     hbv, pbhv, pbdv, db);
-        wb0_r[1]    <= wire_byte(2'd1, 6'd0,                     hbv, pbhv, pbdv, db);
-        wblast_r[0] <= wire_byte(2'd0, WB_PER_LANE[5:0]-6'd1,    hbv, pbhv, pbdv, db);
-        wblast_r[1] <= wire_byte(2'd1, WB_PER_LANE[5:0]-6'd1,    hbv, pbhv, pbdv, db);
+        for (wl = 0; wl < 4; wl = wl + 1) begin
+            wb_a_r[wl]   <= wire_byte(wl[1:0], wb_idx_a_r,          hbv, pbhv, pbdv, db);
+            wb_b_r[wl]   <= wire_byte(wl[1:0], wb_idx_b_r,          hbv, pbhv, pbdv, db);
+            wb1a_r[wl]   <= wire_byte(wl[1:0], 6'd2,                hbv, pbhv, pbdv, db);
+            wb1b_r[wl]   <= wire_byte(wl[1:0], 6'd1,                hbv, pbhv, pbdv, db);
+            wb0_r[wl]    <= wire_byte(wl[1:0], 6'd0,                hbv, pbhv, pbdv, db);
+            wblast_r[wl] <= wire_byte(wl[1:0], WB_PER_LANE[5:0]-6'd1, hbv, pbhv, pbdv, db);
+        end
     end
 
     always @(posedge clk) begin
@@ -460,15 +494,23 @@ module sdp_engine #(
                     ins_cyc   <= 6'd1;
                     // slot0 = SS, slot1 = wire byte 0 (precomputed)
                     out_data[17:0] <= {1'b0, wb0_r[0], SS};
-                    if (LANE_COUNT == 2)
+                    if (LANE_COUNT >= 2)
                         out_data[35:18] <= {1'b0, wb0_r[1], SS};
+                    if (LANE_COUNT == 4) begin
+                        out_data[53:36] <= {1'b0, wb0_r[2], SS};
+                        out_data[71:54] <= {1'b0, wb0_r[3], SS};
+                    end
                 end
             end else begin
                 if (ins_cyc == INS_CYCLES[5:0]-1) begin
                     // last cycle: slot0 = final wire byte, slot1 = SE
                     out_data[17:0] <= {SE, 1'b0, wblast_r[0]};
-                    if (LANE_COUNT == 2)
+                    if (LANE_COUNT >= 2)
                         out_data[35:18] <= {SE, 1'b0, wblast_r[1]};
+                    if (LANE_COUNT == 4) begin
+                        out_data[53:36] <= {SE, 1'b0, wblast_r[2]};
+                        out_data[71:54] <= {SE, 1'b0, wblast_r[3]};
+                    end
                     inserting   <= 1'b0;
                     ins_cyc     <= 6'd0;
                     pkt_pending <= 1'b0;
@@ -480,16 +522,24 @@ module sdp_engine #(
                     // become valid at cycle 2, seeded by the idle
                     // default index)
                     out_data[17:0] <= {1'b0, wb1a_r[0], 1'b0, wb1b_r[0]};
-                    if (LANE_COUNT == 2)
+                    if (LANE_COUNT >= 2)
                         out_data[35:18] <= {1'b0, wb1a_r[1], 1'b0, wb1b_r[1]};
+                    if (LANE_COUNT == 4) begin
+                        out_data[53:36] <= {1'b0, wb1a_r[2], 1'b0, wb1b_r[2]};
+                        out_data[71:54] <= {1'b0, wb1a_r[3], 1'b0, wb1b_r[3]};
+                    end
                     ins_cyc <= ins_cyc + 1'b1;
                 end else begin
                     // slot0 = wire byte 2c-1, slot1 = wire byte 2c
                     // (2-stage pipeline: index registered at c-2,
                     // byte registered at c-1, consumed at c)
                     out_data[17:0] <= {1'b0, wb_a_r[0], 1'b0, wb_b_r[0]};
-                    if (LANE_COUNT == 2)
+                    if (LANE_COUNT >= 2)
                         out_data[35:18] <= {1'b0, wb_a_r[1], 1'b0, wb_b_r[1]};
+                    if (LANE_COUNT == 4) begin
+                        out_data[53:36] <= {1'b0, wb_a_r[2], 1'b0, wb_b_r[2]};
+                        out_data[71:54] <= {1'b0, wb_a_r[3], 1'b0, wb_b_r[3]};
+                    end
                     ins_cyc <= ins_cyc + 1'b1;
                 end
             end

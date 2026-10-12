@@ -63,7 +63,7 @@ module top #(
     parameter bit ENSONIQ_ENABLE = 1,
     parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
-    parameter int GS = 0,                       // IIgs mode is autodetected (apple_bus)
+    parameter int GS = 0,                       // IIgs mode is autodetected (apple_bus); forcing it did not change SHR/DOC (10-11)
     parameter int ENABLE_FILTER = 0,            // Enable audio filtering
     parameter int ENABLE_DENOISE = 0,           // Enable denoise of clocks
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
@@ -244,7 +244,11 @@ module top #(
     apple_bus #(
         .GS(GS),
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
-        .ENABLE_DENOISE(ENABLE_DENOISE)
+        .ENABLE_DENOISE(ENABLE_DENOISE),
+        // This carrier's level shifters: sample M2B0 the way the rev-0 a2p25
+        // bus did (2FF + phase count 12), not at the a2mega's Q3 edge.
+        .M2B0_PHASE_SAMPLE(0),
+        .M2B0_COUNT(12)
     ) apple_bus (
         .clk_logic_i(clk_logic_w),
         .clk_pixel_i(clk_logic_w),    // F18A runs on clk_logic (54 MHz) — no separate pixel clock
@@ -255,6 +259,7 @@ module top #(
         .a2_7M_i(a2_7M),
 
         .sw_gs_i(1'b0),               // no DIP: IIgs mode comes from the autodetect
+        .gs_status_o(gs_status_w),
 
         .a2bus_if(a2bus_if),
 
@@ -1416,12 +1421,45 @@ module top #(
     wire [7:0]  key_mod_sync1      = 8'd0;
     wire [7:0]  key0_sync1         = 8'd0;
     wire [7:0]  key1_sync1         = 8'd0;
-    wire [7:0]  dbg_usb_line_w     = 8'd0;
-    wire [7:0]  dbg_usb_pc_w       = 8'd0;
-    wire [47:0] usb_dbg_desc_sync1 = 48'd0;
-    wire [7:0]  usb_dbg_flags_sync1 = 8'd0;
-    wire [7:0]  usb_cnt_start_sync1 = 8'd0;
-    wire [7:0]  usb_cnt_rdy_sync1   = 8'd0;
+    // No USB host on this board: the two USB debug registers carry the IIgs
+    // detector status and the raw bank-qualifier pins instead.
+    wire [7:0]  gs_status_w;
+    wire [7:0]  dbg_usb_line_w     = gs_status_w;
+    // 0x7B: {M2SEL seen low, M2B0 seen high, M2B0 seen low, /RES seen low,
+    //        $C029 READ seen, $C029 WRITE seen, M2SEL now, M2B0 now} — the
+    //        "seen" bits are sticky since configuration (M2B0 is a ~140 ns
+    //        pulse: a live sample alone says little)
+    reg  [7:0]  dbg_usb_pc_w       = 8'd0;
+    reg  [1:0]  pin_m2sel_s = 2'b11, pin_m2b0_s = 2'b00, pin_res_s = 2'b11;
+    reg         m2sel_low_seen_r = 1'b0, m2b0_high_seen_r = 1'b0, m2b0_low_seen_r = 1'b0, res_low_seen_r = 1'b0;
+    reg         c029_rd_seen_r = 1'b0, c029_wr_seen_r = 1'b0;
+    always @(posedge clk_logic_w) begin
+        pin_m2sel_s <= {pin_m2sel_s[0], a2_m2sel_n};
+        pin_m2b0_s  <= {pin_m2b0_s[0],  a2_mb20};
+        pin_res_s   <= {pin_res_s[0],   a2_reset_n};
+        if (!pin_m2sel_s[1]) m2sel_low_seen_r <= 1'b1;
+        if (pin_m2b0_s[1])   m2b0_high_seen_r <= 1'b1;
+        if (!pin_m2b0_s[1])  m2b0_low_seen_r  <= 1'b1;
+        if (!pin_res_s[1])   res_low_seen_r   <= 1'b1;
+        if (a2bus_if.data_in_strobe && (a2bus_if.addr == 16'hC029)) begin
+            if (a2bus_if.rw_n) c029_rd_seen_r <= 1'b1; else c029_wr_seen_r <= 1'b1;
+        end
+        dbg_usb_pc_w <= {m2sel_low_seen_r, m2b0_high_seen_r, m2b0_low_seen_r, res_low_seen_r,
+                         c029_rd_seen_r, c029_wr_seen_r, pin_m2sel_s[1], pin_m2b0_s[1]};
+    end
+    // No USB host on this board: the USB debug registers carry DOC/GLU
+    // activity instead — flags = oscillator enables (GLU writes landed),
+    // cnt_start = wavetable fetches in the last frame, cnt_rdy = sound-RAM
+    // write-queue drops (sticky).
+    // DOC/GLU counters on the spare USB debug regs (0x1C-0x1F/0x7C/0x7D desc,
+    // 0x20 flags, 0x21/0x22 counts). The 10-11 bus-phase probe that lived
+    // here (sticky M2B0/M2SEL-vs-phase masks) found M2B0 high through the
+    // whole PHI1-high half and M2SEL low throughout — bus capture is clean;
+    // see TOP_INTEGRATION_PLAN.md.
+    wire [47:0] usb_dbg_desc_sync1 = {doc_dbg_fetch_count_w, doc_dbg_req_count_w, doc_dbg_prime_miss_w, doc_dbg_stale_fetch_w};
+    wire [7:0]  usb_dbg_flags_sync1 = doc_osc_en_w;
+    wire [7:0]  usb_cnt_start_sync1 = doc_dbg_req_frame_r[7:0];
+    wire [7:0]  usb_cnt_rdy_sync1   = glu_wq_drops_w;
 
 
     // DDR3 sequencer telemetry (clk 50 MHz -> clk_logic; quasi-static)

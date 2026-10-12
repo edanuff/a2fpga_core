@@ -328,6 +328,85 @@ After the fixes (Sceptre via USB-C→DP cable): `_4l720` holds, aligned ×4, 0 s
 
 `a2p25.fs` `0c651f95…` (commit 391abc13) in the FPGA flash, ESP32 fw rev 225 production variant (OSPI link, HPD on IO10): card in the IIgs, monitor on the card's USB-C → **Apple II boot screen** over DP 1080p×4. Path: Apple bus → `apple_bus` (IIgs autodetect, no DIP) → shadow memory in HyperRAM (`apple_memory` on `hyperram_ports` 0/1) → `apple_video_gen`/`vgc_gen` → `framebuffer_1080p` on HyperRAM (ports 4/5) → `dp_transmitter` → D-PHY → SN75DP130 → TUSB546A → USB-C. Firmware status: FPGA DONE, OSPI link UP (A2FP), HyperRAM calibrated, 0 retries. One replug of the monitor was needed after the firmware reflash (the known stale-attach case). Exercised: keyboard echo, IIgs control panel, system beep over DP audio — all OK; video-pipeline counters over 5 min: 0 shadow-write drops, 0 VGC missed hsyncs, 0 stale-word swaps. No scanline effect: the first build bypassed the composite (scanline_dim + OSD) when the DebugOverlay was disabled — fixed in the next build (the OSD text overlay from the ESP32 would have been hidden too). Tracks A and B of this plan are now both on hardware; what remains is characterization (shadow-read latency under load, DP audio, DOC listening, disk images over the ESP32 link) and winning back the deferred features (TOP_INTEGRATION_PLAN.md §3).
 
+## 6g. SHR black / DOC silent on the new core — SHR root-caused (2026-10-11)
+
+Symptoms on the IIgs (ROM 03, slot 4): text, 80-col, hires and keyboard
+fine; IIgs autodetect fires (reg 0x79 = 0x53); Arkanoid goes black when it
+switches to SHR; no DOC audio from the monitor (the dp_test tone WAS heard
+earlier, so DP audio itself works).
+
+Bus side cleared first (the board rev changed the M2B0/M2SEL/SYNC
+termination, so that was the obvious suspect):
+
+- Bus-phase probe build (sha 7562b5f0, SRAM only): sticky masks of which
+  `apple_bus` phase counts (18.5 ns) see M2B0 high / M2SEL low, split by
+  PHI1 half. Result: M2B0 high at every count of the PHI1-high half and
+  counts 2-3 after PHI0 rises; M2SEL low throughout. The sampler (count 12
+  of the 2-FF-synced line, ~185 ns after PH0 falls) sits inside the
+  140-280 ns window Apple's tech note gives for M2B0 (latch at Q3 falling).
+  Consistent with the note; the union mask is wider than 140 ns because
+  the tri-stated line decays slowly through the pulldown.
+- HyperRAM debug reader (regs 0x34-0x3B over the ESP32 CLI, scratch
+  `memdump.py`): with Arkanoid on the black screen the SHR aux words
+  (unified words 2/3 at 0x060000+) hold live pixel data, i.e. bank-$E1
+  writes are captured and land correctly; AND the framebuffer region
+  (0x000000+, 320 words/line) holds rendered RGB565 SHR pixels
+  (0x4208 / 0xC002 brick patterns at line 100) versus the all-0x211E
+  (IIgs blue) text-mode reference. VGC fetch + renderer + FB write all work.
+- `viddbg` in that state: mode 0xF1 (use_vgc=1 SHRG=1 LINEAR=1), shadow rd
+  fsm is_vgc=1 cache_valid=1, no missed hsync, no drops.
+
+Root cause — scanout, `hdl/video/framebuffer_1080p.sv`: the left-border
+trigger `h_trigger_r <= (cx0_r + 5 == h_border_px_r)` (introduced with the
+a2mega 1.0a3 epic squash 0a62d8ca, 08-28). A 640-wide frame scales to the
+full 1920 so `h_border = 0`; `cx` runs 0..2199 with active at 0, so the
+lookahead must fire at cx = 2195 in the previous line's blanking — the
+`+5 == 0` compare never matches, the horizontal tracker never starts, the
+frame scans out black. Fix: trigger X computed modulo the raster
+(`h_border < 5 ? h_border + 2200 - 5 : h_border - 5`); Apple geometry
+unchanged (115). **The a2mega shares this read side — SHR there has very
+likely been black since 08-28 and needs a retest after the fix.**
+
+SHR fix verified on hardware: build d08273f0 (0 violations) — Arkanoid
+title screen in SHR.
+
+DOC silence root-caused the same evening — not the DOC: with Arkanoid's
+music playing the counters showed 62 oscillators enabled, the wavetable
+fetch counter running, 0 prime misses / stale fetches / GLU write drops.
+The audio mix and 48 kHz strobe are wired exactly as on the a2mega. What
+had never been exercised anywhere is **audio on a 4-lane link**: the a2mega
+plays audio on 2-lane links only (hubs are HBR2x2, its 1080p is 2-lane),
+and the dp_test tone heard on this board was the 720p 2-lane build.
+`hdl/displayport/audio/sdp_engine.v` was written for 1 or 2 lanes;
+instantiated with LANE_COUNT=4 it fell into the 1-lane byte table,
+truncated to 24 bytes, on lane 0 only — lanes 1-3 never carried the
+packet, so every audio SDP was malformed and dropped by the sink. Fix: a
+4-lane mode per the DP 1.1a packet-to-lane figure (page 72: lane n =
+HBn PBn DB(4n..4n+3) PB(4+n) DB(16+4n..) PB(8+n), 12 wire bytes per
+lane) with the spec's nibble interleaving between lanes 0<->1 and 2<->3
+(section 2.2.6.3). New self-check `hdl/displayport/sim/tb_sdp_4lane.v`
+captures all lanes between SS/SE, un-interleaves and compares against an
+independent model incl. RS(15,13) parity: PASS for 4 and 2 lanes (1-lane
+not covered by the TB; untouched code path). The a2mega inherits this
+fix for its direct-cable HBR2x4 case.
+
+**Verified on hardware (evening 10-11):** build 6dfd236e (SDP 4-lane fix;
+11 knife-edge violations, SRAM only) — Arkanoid title music through the
+monitor. First 4-lane DP audio anywhere in the project. The first
+attempt (be07dfb9) had -6 ns at clk_sym: a k-dependent part-select in
+the 4-lane byte lookup became a barrel shifter — rewritten as a flat
+12-way case (TB unchanged, PASS). Clean build for the flash follows with
+M2B0 sampling returned to the shared Q3-falling latch (tech-note edge;
+the rev-0 phase sampler was a red herring during the SHR hunt).
+
+Console lessons (cost an hour): opening the USB console with DTR/RTS
+asserted resets the ESP32 → it re-holds Apple RESET (beep) and drops HPD
+(dark monitor, alt-mode session lost → replug). Use one persistent session
+with dtr=rts=False (`scratchpad/console.py`), `+++` enters the CLI. With no
+disk images the firmware deliberately leaves the OSD console up
+(`disk.c`: hide only scheduled after a good mount) — `spireg 0x10 0`
+hides it; the SD-less a2p25 needs a policy change (hide at reset-release).
+
 ## 7. Known risks
 
 - **D-PHY amplitude vs the DP130 input.** The DP130's minimum VID is
