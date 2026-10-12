@@ -407,6 +407,29 @@ disk images the firmware deliberately leaves the OSD console up
 (`disk.c`: hide only scheduled after a good mount) — `spireg 0x10 0`
 hides it; the SD-less a2p25 needs a policy change (hide at reset-release).
 
+### 6g.1 SHR left-edge stripe = scanout 6 px late (2026-10-11, late)
+
+With SHR up, Arkanoid's title shows a stripe one 320-mode pixel wide at
+the left edge, in the IIgs border colour (visible only until the game
+sets the border black). Framebuffer dumps proved the content exact
+(pixel 0 = SHR nibble 0 on every line checked), and a 1-cycle-earlier
+trigger changed nothing, so the chain was counted: `framebuffer_1080p`
+5 registers + the top's composite 8 (fb_rgb_osd_r, osd_text_overlay,
+DebugOverlay's 6 stages — present even with ENABLE=0) = 13, minus the
+transmitter's RGB_LATENCY 2 → the trigger lead must be 11; it had been 5
+since 08-30, from before the OSD/overlay stages were in this path. Every
+frame on both boards has scanned out 6 raster px late — hidden inside the
+Apple modes' 120-px borders. `H_TRIGGER_LEAD = 11` (hdl/video/
+framebuffer_1080p.sv); **verified**: build 43d2486d (0 violations) — stripe
+gone, Arkanoid SHR flush to the left edge; written to flash.
+Side effect to expect: the Apple image moves 6 px left (true centre);
+the OSD text box keeps its own coordinate path.
+
+**Test list addition (ed):** USB-C→HDMI adapters do not work on the
+a2p25 yet (they would give a screen-capture path for exactly this kind
+of pixel-level check). Add to the sink census for this board; the a2mega
+converter notes (DDC deferral, DPCD presence) apply.
+
 ## 7. Known risks
 
 - **D-PHY amplitude vs the DP130 input.** The DP130's minimum VID is
