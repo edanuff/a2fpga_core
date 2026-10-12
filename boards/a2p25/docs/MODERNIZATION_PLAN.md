@@ -324,6 +324,10 @@ After the fixes (Sceptre via USB-C→DP cable): `_4l720` holds, aligned ×4, 0 s
 
 `hyperram_ports` simulation: `make -C boards/a2p25/tests hyperram_ports` — random traffic on three ports (single r/w with byte enables, wide writes, burst-8 reads, priority contention) against the Infineon model, PASS. The arbiter bug it caught (re-picking a port in the cycle its pop landed) would have been a hardware mystery.
 
+## 6f. 🏆 Apple IIgs boots on the new core (2026-10-11)
+
+`a2p25.fs` `0c651f95…` (commit 391abc13) in the FPGA flash, ESP32 fw rev 225 production variant (OSPI link, HPD on IO10): card in the IIgs, monitor on the card's USB-C → **Apple II boot screen** over DP 1080p×4. Path: Apple bus → `apple_bus` (IIgs autodetect, no DIP) → shadow memory in HyperRAM (`apple_memory` on `hyperram_ports` 0/1) → `apple_video_gen`/`vgc_gen` → `framebuffer_1080p` on HyperRAM (ports 4/5) → `dp_transmitter` → D-PHY → SN75DP130 → TUSB546A → USB-C. Firmware status: FPGA DONE, OSPI link UP (A2FP), HyperRAM calibrated, 0 retries. One replug of the monitor was needed after the firmware reflash (the known stale-attach case). Tracks A and B of this plan are now both on hardware; what remains is characterization (shadow-read latency under load, DP audio, DOC listening, disk images over the ESP32 link) and winning back the deferred features (TOP_INTEGRATION_PLAN.md §3).
+
 ## 7. Known risks
 
 - **D-PHY amplitude vs the DP130 input.** The DP130's minimum VID is
