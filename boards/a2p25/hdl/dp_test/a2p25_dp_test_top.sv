@@ -71,6 +71,9 @@
 `endif
 `ifdef DP_TEST_FB
  `define DPT_RGB_LAT 2          // framebuffer_1080p output register + the rgb register
+ `ifndef DPT_FB_TP
+  `define DPT_FB_TP 0           // framebuffer_1080p TEST_PATTERN (1 = pattern at the line buffer, no memory)
+ `endif
 `else
  `define DPT_RGB_LAT 1
 `endif
@@ -423,13 +426,14 @@ module a2p25_dp_test_top #(
 
     logic [7:0]  fb_r, fb_g, fb_b;
     logic [7:0]  fb_dbg_flags, fb_dbg_overflow, fb_dbg_not_ready, fb_dbg_fetch_done, fb_dbg_late;
+    logic [7:0]  fb_dbg_rdfifo_max, fb_dbg_rdfifo_drop, fb_dbg_beat_extra, fb_dbg_beat_tmo, fb_dbg_fifo_hw;
     logic        clk_pixel;             // declared here; the colorbars block below reuses it
     logic [11:0] cx;
     logic [10:0] cy;
     framebuffer_1080p #(
         .COLOR_BITS          (18),
         .FB_READ_BURST_WORDS (8),
-        .TEST_PATTERN        (0)
+        .TEST_PATTERN        (`DPT_FB_TP)
     ) i_fb (
         .clk              (clk_hr),
         .clk_pixel        (clk_pixel),
@@ -451,14 +455,14 @@ module a2p25_dp_test_top #(
         .v_scale_o        (),
         .v_border_o       (),
         .sleep_i          (1'b0),
-        .dbg_fifo_level_o (), .dbg_fifo_highwater_o (), .dbg_fifo_overflow_o (fb_dbg_overflow),
+        .dbg_fifo_level_o (), .dbg_fifo_highwater_o (fb_dbg_fifo_hw), .dbg_fifo_overflow_o (fb_dbg_overflow),
         .dbg_fetch_start_o (), .dbg_fetch_done_o (fb_dbg_fetch_done), .dbg_read_blocked_o (),
         .dbg_yield_busy_o (), .dbg_late_line_o (fb_dbg_late), .dbg_flags_o (fb_dbg_flags),
         .dbg_line_not_ready_o (), .dbg_line_lag_max_o (), .dbg_ready_phase_err_o (),
         .fetch_active_o (), .dbg_vsync_raw_o (), .dbg_frame_start_accept_o (),
         .dbg_frame_start_reject_o (), .dbg_fifo_pop_o (), .dbg_fifo_push_o (),
-        .dbg_rd_fifo_max_o (), .dbg_rd_fifo_drop_o (),
-        .dbg_line_not_ready_total_o (fb_dbg_not_ready), .dbg_beat_extra_o (), .dbg_beat_timeout_o ()
+        .dbg_rd_fifo_max_o (fb_dbg_rdfifo_max), .dbg_rd_fifo_drop_o (fb_dbg_rdfifo_drop),
+        .dbg_line_not_ready_total_o (fb_dbg_not_ready), .dbg_beat_extra_o (fb_dbg_beat_extra), .dbg_beat_timeout_o (fb_dbg_beat_tmo)
     );
 `endif
     // ------------------------------------------------------------------
@@ -758,12 +762,13 @@ module a2p25_dp_test_top #(
     logic [7:0]  ur_s0, ur_s;
     logic [15:0] fl_s0, fl_s;
     logic [103:0] obs_s0, obs_s;
-    logic [55:0]  pc_s0, pc_s;
+    logic [95:0]  pc_s0, pc_s;
 `ifdef DP_TEST_FB
-    wire [55:0] pc_w = {fb_dbg_flags, fb_dbg_overflow, fb_dbg_not_ready, fb_dbg_fetch_done, fb_dbg_late,
+    wire [95:0] pc_w = {fb_dbg_rdfifo_max, fb_dbg_rdfifo_drop, fb_dbg_beat_extra, fb_dbg_beat_tmo, fb_dbg_fifo_hw,
+                        fb_dbg_flags, fb_dbg_overflow, fb_dbg_not_ready, fb_dbg_fetch_done, fb_dbg_late,
                         hr_init_done, hr_cal_ok, hr_rd_err, 1'b0, hr_arb_state, hr_stat_rd_timeouts[7:0]};
 `else
-    wire [55:0] pc_w = 56'd0;
+    wire [95:0] pc_w = 96'd0;
 `endif
     logic [23:0]  aif_s0, aif_s;
     always_ff @(posedge clk50_in) begin
@@ -811,7 +816,7 @@ module a2p25_dp_test_top #(
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 539;   // P1..P8, P9, PA, PB, PC lines
+    localparam int MSG_LEN = 564;   // P1..P8, P9, PA, PB, PC lines
     logic [7:0] msg [0:MSG_LEN-1];
     always_comb begin
         for (int i = 0; i < MSG_LEN; i++) msg[i] = " ";
@@ -926,7 +931,13 @@ module a2p25_dp_test_top #(
         msg[524]="L"; msg[525]=":"; msg[526]=hexch(pc_s[23:20]); msg[527]=hexch(pc_s[19:16]);
         msg[529]="I"; msg[530]=":"; msg[531]=hexch(pc_s[15:12]); msg[532]=hexch(pc_s[11:8]);
         msg[534]="E"; msg[535]=":"; msg[536]=hexch(pc_s[7:4]);   msg[537]=hexch(pc_s[3:0]);
-        msg[538]=8'h0A;
+        // M rd_fifo peak, X rd_fifo drops, B duplicate beats, T beat timeouts, W write-FIFO high-water
+        msg[539]="M"; msg[540]=":"; msg[541]=hexch(pc_s[95:92]); msg[542]=hexch(pc_s[91:88]);
+        msg[544]="X"; msg[545]=":"; msg[546]=hexch(pc_s[87:84]); msg[547]=hexch(pc_s[83:80]);
+        msg[549]="B"; msg[550]=":"; msg[551]=hexch(pc_s[79:76]); msg[552]=hexch(pc_s[75:72]);
+        msg[554]="T"; msg[555]=":"; msg[556]=hexch(pc_s[71:68]); msg[557]=hexch(pc_s[67:64]);
+        msg[559]="W"; msg[560]=":"; msg[561]=hexch(pc_s[63:60]); msg[562]=hexch(pc_s[59:56]);
+        msg[563]=8'h0A;
     end
 
     logic [8:0]  baud_cnt = '0;

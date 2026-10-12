@@ -66,7 +66,7 @@ BSRAM, and this rev has no I2S path back from the ESP32.
 | B1 | `hyperram_ctrl` (custom, see §4) + Infineon-model TB (`make hyperram`) | **sim PASS at 0–4 ns board delay**; standalone PnR clk_mem 116.8 MHz |
 | B2 | `a2p25_psram_test_ck{108,81,54}`: BIST + UART console (C2/F2 to ESP32 IO11/IO12, firmware passthrough); procedure in [PSRAM_TEST.md](PSRAM_TEST.md) | **all three built, 0/0; system sim PASS** (`make psram_test_top`); bench next |
 | B3 | DOC5503: `sound_glu` + `doc5503_pipelined` on a HyperRAM port | todo |
-| B4 | Framebuffer on PSRAM (the existing render/scanout mechanism) feeding DP | **🏆 FIRST LIGHT 2026-10-11** — `a2p25_dp_test_fb`: `hyperram_ports` (new mem_port_if arbiter over `hyperram_ctrl`, same client contract as `ddr3_ports`) + unchanged `framebuffer_1080p` + synthetic 560×192 renderer → colorbars + sweeping stripe on the monitor at 1080p×4; HyperRAM 0 read errors under the real load. Fixed on the way: framebuffer vertical-tracker timing (−0.75 ns on the 25K) and a latent double-buffer tear (display picked the writer's *next* buffer when the writer idled; now reads the last completed one). See §6e |
+| B4 | Framebuffer on PSRAM (the existing render/scanout mechanism) feeding DP | **🏆 FIRST LIGHT 2026-10-11** — `a2p25_dp_test_fb`: `hyperram_ports` (new mem_port_if arbiter over `hyperram_ctrl`, same client contract as `ddr3_ports`) + unchanged `framebuffer_1080p` + synthetic 560×192 renderer → colorbars + sweeping stripe on the monitor at 1080p×4; HyperRAM 0 read errors under the real load. Fixed on the way: framebuffer vertical-tracker timing (−0.75 ns on the 25K) ; the visible 1-px step is the shipped single-buffer tear made visible by a 1 px/frame stripe (§6e) |
 | B5 | Shadow memory in PSRAM (`apple_memory_sdram`, `VGC_IN_SDRAM`) | todo |
 
 ## 3. Clocking
@@ -320,7 +320,7 @@ After the fixes (Sceptre via USB-C→DP cable): `_4l720` holds, aligned ×4, 0 s
 | HyperRAM under load | init + cal OK, 0 read timeouts, write FIFO never overflowed |
 | Scanout | ~192 line fetches/frame, pixel clock 148.5 MHz exact, 0 underruns |
 | Picture | dark-blue field, colour bars, moving stripe — on the first load that reached a monitor |
-| Artifact | stripe stepped 1 px at 1/8 down: display chose the writer's *next* buffer when the writer was idle between frames (both at exactly 60 Hz → fixed phase). `framebuffer_1080p` now latches the last *completed* buffer. Shared module: a2mega inherits (and the vertical-tracker pipeline); a2mega regression build pending |
+| Artifact | stripe stepped 1 px at 1/8 down, every frame, fixed position. Not a data-path fault (beat/FIFO counters all zero): `framebuffer_1080p` is deliberately **single-buffered** (`BUFFER_OFFSET = 0`, comment: double-buffering made Apple II updates feel slow), so the renderer overtakes the scanout at a fixed line — both run at exactly 60.000 Hz. Invisible with static content, same on the a2mega. The read side now latches the writer's last *completed* buffer (a no-op at offset 0, correct if double-buffering is ever re-enabled). The vertical-tracker pipeline (−0.75 ns on the 25K) is the one functional change the a2mega inherits — regression build pending |
 
 `hyperram_ports` simulation: `make -C boards/a2p25/tests hyperram_ports` — random traffic on three ports (single r/w with byte enables, wide writes, burst-8 reads, priority contention) against the Infineon model, PASS. The arbiter bug it caught (re-picking a port in the cycle its pop landed) would have been a hardware mystery.
 
