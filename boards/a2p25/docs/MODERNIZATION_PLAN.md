@@ -65,9 +65,9 @@ BSRAM, and this rev has no I2S path back from the ESP32.
 |---|---|---|
 | B1 | `hyperram_ctrl` (custom, see §4) + Infineon-model TB (`make hyperram`) | **sim PASS at 0–4 ns board delay**; standalone PnR clk_mem 116.8 MHz |
 | B2 | `a2p25_psram_test_ck{108,81,54}`: BIST + UART console (C2/F2 to ESP32 IO11/IO12, firmware passthrough); procedure in [PSRAM_TEST.md](PSRAM_TEST.md) | **all three built, 0/0; system sim PASS** (`make psram_test_top`); bench next |
-| B3 | DOC5503: `sound_glu` + `doc5503_pipelined` on a HyperRAM port | todo |
+| B3 | DOC5503: `sound_glu` + `doc5503_pipelined` on a HyperRAM port | needs the Apple bus → part of the full-core integration, see [TOP_INTEGRATION_PLAN.md](TOP_INTEGRATION_PLAN.md) |
 | B4 | Framebuffer on PSRAM (the existing render/scanout mechanism) feeding DP | **🏆 FIRST LIGHT 2026-10-11** — `a2p25_dp_test_fb`: `hyperram_ports` (new mem_port_if arbiter over `hyperram_ctrl`, same client contract as `ddr3_ports`) + unchanged `framebuffer_1080p` + synthetic 560×192 renderer → colorbars + sweeping stripe on the monitor at 1080p×4; HyperRAM 0 read errors under the real load. Fixed on the way: framebuffer vertical-tracker timing (−0.75 ns on the 25K) ; the visible 1-px step is the shipped single-buffer tear made visible by a 1 px/frame stripe (§6e) |
-| B5 | Shadow memory in PSRAM (`apple_memory_sdram`, `VGC_IN_SDRAM`) | todo |
+| B5 | Shadow memory in PSRAM (`apple_memory_sdram`, `VGC_IN_SDRAM`) | same: [TOP_INTEGRATION_PLAN.md](TOP_INTEGRATION_PLAN.md) — **resource scoping decision pending** (a2mega feature set does not fit the 25K; §3 there) |
 
 ## 3. Clocking
 
