@@ -117,7 +117,7 @@ always @(posedge clk) begin
        12'h040: begin aux_tx_data <= 8'h90; aux_tx_wr_en <= 1'b1; end
        12'h041: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
        12'h042: begin aux_tx_data <= 8'h00; aux_tx_wr_en <= 1'b1; end
-       12'h043: begin aux_tx_data <= 8'h0B; aux_tx_wr_en <= 1'b1; end
+       12'h043: begin aux_tx_data <= 8'h0F; aux_tx_wr_en <= 1'b1; end
 
        // Write DPCD powerstate D3 
        12'h050: begin aux_tx_data <= 8'h80; aux_tx_wr_en <= 1'b1; end

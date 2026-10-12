@@ -38,6 +38,7 @@
 // (should read 0x04D3F640 = 81,000,000 per second).
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
+`include "../datetime.svh"   // the a2p25 copy (boards/a2p25/hdl), regenerated per build; a bare include resolved the stale a2mega one
 
 `ifdef DP_TEST_4LANE_1080P
  `define DPT_LANES 4
@@ -574,7 +575,7 @@ module a2p25_dp_test_top #(
         .ENABLE_PHASE_DONE_GATE(1),
         .GATE_GRACE       (0),
         .GATE_KICK        (0),
-        .LATE_REPLY_DRAIN (0),
+        .LATE_REPLY_DRAIN (1),   // 10-12: converter DEFER replies carry trailing bytes (01 00) that landed in defer_wait -> error
         .IRQ_SERVICE      (2),
         .POLITE_ATTACH    (1),
         .ERRCNT_READ      (1),   // lane 0/1 symbol-error counters on P6 (never tears down)
@@ -593,6 +594,9 @@ module a2p25_dp_test_top #(
         // lane-set writes so the DP130 (auto mode) applies it.
         .LINK_CHECK_CLKS  (27'd19999999),
         .ECHO_SINK_ADJUST (1),
+        .RETRY_WATCHDOG_CLKS (29'd399999999),   // 4 s (10-12 adapter experiment; default 0.5 s)
+        .TRAIN_ERRCNT     (1),                  // 10-12: SYMBOL_ERROR_COUNT read inside the EQ loop (P6)
+        .EQ_WAIT_MULT     (6'd45),              // 10-12: 4 x 4.5 ms = 18 ms EQ dwell (this converter's 0x00E = 4 -> 16 ms)
         .TX_PROBE         (0),
         // 720p60 (VIC 4, 74.25 MHz) or 1080p60 (VIC 16, 148.5 MHz);
         // pixel = 81 MHz * 11 / PIX_DIV via VCO 891
@@ -816,7 +820,7 @@ module a2p25_dp_test_top #(
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 564;   // P1..P8, P9, PA, PB, PC lines
+    localparam int MSG_LEN = 828;   // P1..P8, P9, PA, PB, PC, PD, PE, PF lines
     logic [7:0] msg [0:MSG_LEN-1];
     always_comb begin
         for (int i = 0; i < MSG_LEN; i++) msg[i] = " ";
@@ -938,11 +942,96 @@ module a2p25_dp_test_top #(
         msg[554]="T"; msg[555]=":"; msg[556]=hexch(pc_s[71:68]); msg[557]=hexch(pc_s[67:64]);
         msg[559]="W"; msg[560]=":"; msg[561]=hexch(pc_s[63:60]); msg[562]=hexch(pc_s[59:56]);
         msg[563]=8'h0A;
+        // PD: AUX FSM state trace — the last 24 distinct states, oldest
+        // first (10-12 adapter investigation: which request loops)
+        msg[564]="P"; msg[565]="D"; msg[566]=" ";
+        for (int i = 0; i < 24; i++) begin
+            msg[567+5*i] = hexch(st_snap[(st_snap_wp + i) % 24][19:16]);
+            msg[568+5*i] = hexch(st_snap[(st_snap_wp + i) % 24][15:12]);
+            msg[569+5*i] = hexch(st_snap[(st_snap_wp + i) % 24][11:8]);
+            msg[570+5*i] = hexch(st_snap[(st_snap_wp + i) % 24][7:4]);
+            msg[571+5*i] = hexch(st_snap[(st_snap_wp + i) % 24][3:0]);
+        end
+        msg[687]=8'h0A;
+        // PE: one-shot ring — the FIRST 24 entries after HPD rose (attach
+        // sequence incl. the raw capability bytes), frozen until HPD drops
+        msg[688]="P"; msg[689]="E"; msg[690]=" ";
+        for (int i = 0; i < 24; i++) begin
+            msg[691+5*i] = hexch(st_first[i][19:16]);
+            msg[692+5*i] = hexch(st_first[i][15:12]);
+            msg[693+5*i] = hexch(st_first[i][11:8]);
+            msg[694+5*i] = hexch(st_first[i][7:4]);
+            msg[695+5*i] = hexch(st_first[i][3:0]);
+        end
+        msg[811]=8'h0A;
+        // PF: build stamp (datetime.svh) so every capture names its bitstream
+        msg[812]="P"; msg[813]="F"; msg[814]=" ";
+        for (int i = 0; i < 12; i++) msg[815+i] = BUILD_STAMP[8*(11-i) +: 8];
+        msg[827]=8'h0A;
     end
 
     logic [8:0]  baud_cnt = '0;
     logic        baud_tick;
     logic [24:0] msg_timer = '0;
+    // state trace with timestamps: {state[7:0], t_ms[11:0]} — t_ms counts
+    // from the last entry into reset (0x01), so each attempt reads 0-based
+    logic [19:0] st_trace [0:23];
+    logic [4:0]  st_trace_wp = '0;
+    logic [7:0]  st_trace_last = 8'hFF;
+    logic [15:0] st_ms_div = '0;       // 50 MHz -> 1 ms
+    logic [11:0] st_ms = '0;
+    logic [3:0]  rx_cnt_last = '0;
+    // coherent publication: the ring is copied when a telemetry message
+    // starts (msg_idx leaves MSG_LEN), so the PD line is one consistent
+    // snapshot instead of a mix of old and new entries
+    logic [19:0] st_snap [0:23];
+    logic [19:0] st_first [0:23];
+    logic [4:0]  st_first_n = '0;
+    logic        hpd_d = 1'b0;
+    localparam [95:0] BUILD_STAMP = `BUILD_DATETIME;   // 14 chars; the low 12 (YYMMDDhhmmss) are published
+    initial for (int i = 0; i < 24; i++) st_first[i] = 20'hFFFFF;
+    // armed by HPD; starts recording at read_sink_count (0x0C) so the 16
+    // capability bytes (0x000-0x00F) and the first training steps fit
+    logic st_first_go = 1'b0;
+    always_ff @(posedge clk50_in) begin
+        hpd_d <= flg_s[2];
+        if (!flg_s[2]) begin st_first_n <= '0; st_first_go <= 1'b0; end
+        else if (!st_first_go) begin
+            if (dbg_s == 8'h0C) st_first_go <= 1'b1;
+        end
+        else if (dbg_s != st_trace_last && st_first_n != 5'd24) begin
+            st_first[st_first_n] <= {dbg_s, (dbg_s == 8'h01) ? 12'd0 : st_ms};
+            st_first_n <= st_first_n + 5'd1;
+        end else if (hp_s[3:0] != rx_cnt_last && st_first_n != 5'd24) begin
+            st_first[st_first_n] <= {8'hA0, hp_s[15:8], hp_s[3:0]};
+            st_first_n <= st_first_n + 5'd1;
+        end
+    end
+    logic [4:0]  st_snap_wp = '0;
+    initial for (int i = 0; i < 24; i++) st_snap[i] = 20'hFFFFF;
+    always_ff @(posedge clk50_in) begin
+        if (msg_timer[23:0] == 24'd0 && msg_idx == MSG_LEN[9:0]) begin
+            for (int i = 0; i < 24; i++) st_snap[i] <= st_trace[i];
+            st_snap_wp <= st_trace_wp;
+        end
+    end
+    initial for (int i = 0; i < 24; i++) st_trace[i] = 20'hFFFFF;
+    always_ff @(posedge clk50_in) begin
+        if (st_ms_div == 16'd49999) begin st_ms_div <= '0; if (st_ms != 12'hFFF) st_ms <= st_ms + 12'd1; end
+        else st_ms_div <= st_ms_div + 16'd1;
+        // reply bytes interleaved: entry {8'hA0, last_byte[7:0], accepted[3:0]}
+        // whenever the RX accepted-byte counter moves (hp_s[7:0] = debug_rx)
+        rx_cnt_last <= hp_s[3:0];
+        if (dbg_s != st_trace_last) begin
+            st_trace_last         <= dbg_s;
+            st_trace[st_trace_wp] <= {dbg_s, (dbg_s == 8'h01) ? 12'd0 : st_ms};
+            st_trace_wp           <= (st_trace_wp == 5'd23) ? 5'd0 : st_trace_wp + 5'd1;
+            if (dbg_s == 8'h01) begin st_ms <= '0; st_ms_div <= '0; end
+        end else if (hp_s[3:0] != rx_cnt_last) begin
+            st_trace[st_trace_wp] <= {8'hA0, hp_s[15:8], hp_s[3:0]};
+            st_trace_wp           <= (st_trace_wp == 5'd23) ? 5'd0 : st_trace_wp + 5'd1;
+        end
+    end
     logic [9:0]  msg_idx = MSG_LEN[9:0];
     logic [3:0]  bit_idx = '0;
     logic [9:0]  shifter = 10'h3FF;

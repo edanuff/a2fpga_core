@@ -430,6 +430,106 @@ a2p25 yet (they would give a screen-capture path for exactly this kind
 of pixel-level check). Add to the sink census for this board; the a2mega
 converter notes (DDC deferral, DPCD presence) apply.
 
+## 6h. USB-C→HDMI adapter (Cable Matters 48G, "for macOS") — investigation (2026-10-12)
+
+Setup: adapter plugged into the card, HDMI to the Sceptre's HDMI input;
+adapter verified on a Mac with the same monitor. PD/alt-mode layer is
+fine (pin C, 4-lane OK, HPD 1, mux-DP 1; we source VBUS; TPS2553 limit
+≈1.1 A from R48 = 23.7 k). Everything below is from the dp_test
+telemetry (DP_TEST=1 fw) with new instruments added today: a 24-entry
+AUX-FSM state/reply trace with ms timestamps (`PD`, snapshot at message
+start), a one-shot attach ring from `read_sink_count` (`PE`), a build
+stamp (`PF`, now from the a2p25 `datetime.svh`; `TclPre` hooked into
+every dp_test process config).
+
+Found and fixed on the way (all real spec gaps, none the blocker):
+1. The converter's AUX_DEFER replies carry trailing bytes (`20 01 00`);
+   in `defer_wait` (expected 0) they were "unexpected bytes → error".
+   `LATE_REPLY_DRAIN=1` drains them (dp_test; production top to follow).
+2. The 0.5 s retry watchdog is free-running — parameterized
+   (`RETRY_WATCHDOG_CLKS`), 4 s in dp_test; not the cause here.
+3. The capability read was 12 bytes; now 16, exposing 0x00E
+   TRAINING_AUX_RD_INTERVAL. This sink says **0x84 → 16 ms**; our EQ
+   status read came 0.4 ms after TPS2 and re-issued the lane settings
+   on every miss. `EQ_WAIT_MULT` parameter (align_wait0-3 dwell ×100 µs)
+   added; 18 ms tried. TODO: derive the dwell from 0x00E (0 → 400 µs,
+   n → n×4 ms) instead of a constant.
+
+Sink caps (0x000-0x00F): `12 14 C4 81 01 1D 01 81 2A 3F 04 00 00 00 84 00`
+= DPCD 1.2, HBR2, 4 lanes + TPS3 + enhanced framing, downstream HDMI
+converter, local EDID present (serves the Sceptre EDID promptly,
+manufacturer SPT), extended caps at 0x2200.
+
+The blocker signature, unchanged across every experiment (1/2/4 lanes,
+swing level 2 via the DP130 window, lanes 1-3 inverted, 0.4/4.8/18 ms EQ
+dwell, hold mode): training status read (0x200-0x207) =
+`01 00 11 00 00 00 00 00` — SINK_COUNT 1, **CR_DONE on every active lane,
+never SYMBOL_LOCKED / CHANNEL_EQ_DONE, no interlane align, adjust
+request 0/0**. TPS2 is spec-exact (K28.5− first, forced disparity
+verified in `enc_8b10b`). DP130 manual pre-emphasis (swing1/PE1, swing1/PE2, swing0/PE3 via the
+DPCD window, LT auto off): no change. `TRAIN_ERRCNT` instrument added
+(SYMBOL_ERROR_COUNT 0x210-0x213 read after every EQ status read, new
+FSM state `errcnt_train`, P6 line): the sink reports **0xFFFF on both
+lanes** = valid + saturated — it rejects essentially every symbol while
+CR is locked. The soft 8b10b path was then verified in simulation
+(`scratchpad/enc/tb_enc.v` + independent reference): 528/528 D/K28
+characters correct at both disparities, TPS2 wire sequence exactly
+K28.5− D11.6 K28.5+ D11.6 D10.2…, disparity chained correctly across
+lane words. So the bits leaving the FPGA are right. DP130 is in DP mode
+(CAD_SNK pulled low via R40). Open: calibrate the error-count
+instrument against a monitor (Sceptre on the direct DP cable: does a
+good sink read 0 during TPS2?); powered adapter #2; if the stream is
+clean by that measure, the receiver-side eye (D-PHY jitter / DP130
+input EQ / TUSB546 DP EQ) for this receiver class.
+
+Calibration: the Sceptre on the direct USB-C→DP cable with the same
+build trains in one pass (0x202 = 0x77, HLV 111, colorbars) and reads
+SYMBOL_ERROR_COUNT 0x0000 during TPS2; its caps also say 0x00E = 0x81
+(4 ms) — it merely tolerates early polling. So the stream is clean by a
+monitor's measure and converter #1's receiver genuinely rejects it.
+
+Adapter #2 (second Cable Matters, with a USB-C power input): WITH its
+power connected it advertises as a PD source, our port takes the 5 V and
+ends up sink + UFP (`state device`) — no DP Alt Mode, because only the
+DFP configures it; the firmware never requests a Data-Role Swap (Macs
+do). Firmware gap: DR_Swap to DFP when attached as UFP to a DP-capable
+partner. WITHOUT its power (bus-powered from us, LED lit): alt mode
+active, HPD 1, but the AUX FSM never leaves `check_presence` — reply
+timeouts saturate (`T:000F`) while the reply capture shows a 1 MHz
+Manchester preamble filling the window: the adapter drives AUX back
+and our receiver gets no decodable frame. Two converters, two
+interfaces (AUX decode for #2, main-link symbol errors for #1), three
+monitors + the a2mega hub fine → the converter-facing analog margins
+of this board (AUX RX bias — the a2mega notes already call the monitor
+path "offset-marginal"; main-link eye through D-PHY → DP130 → TUSB546)
+are the next thing to measure, not more protocol changes. AD3 analog
+capture of AUX at R41/R42 with adapter #2 is the first measurement.
+
+Adapter #1 again, DP130 INPUT EQ sweep (EQ_I2C_ENABLE, settings 1/2/3/5
+on all lanes): no change at any setting. Protocol delta noted: we write
+LANE_COUNT_SET = 0x02 (standard framing) while the sink advertises
+ENHANCED_FRAME_CAP; the spec makes enhanced framing optional for a
+non-HDCP source and the core has no enhanced-framing generator, so a
+sink requiring it would be out of spec — not pursued.
+
+**Status (end of 10-12):** every lever reachable from this board has
+been exercised with the verdict unchanged (CR on all lanes, never
+symbol lock, SYMBOL_ERROR_COUNT valid+saturated), while the encoder is
+proven correct and the Sceptre reads a clean stream on the same build.
+Two hypotheses remain, both outside the FPGA: (a) the converter's DP
+receiver does not genuinely support RBR (CR locks at a harmonic, TPS2
+decodes as garbage); HBR 2.7 Gbps is beyond the D-PHY's 2.5 Gbps, so
+the a2p25 could not drive that class at all; (b) an analog margin
+specific to converter receivers through D-PHY → DP130 → TUSB546.
+Discriminator: adapter #1 on the a2mega (SERDES, HBR×2, same AUX FSM).
+Carry-overs for the production core: LATE_REPLY_DRAIN=1 (converter
+DEFER trailing bytes), EQ dwell from DPCD 0x00E, DR_Swap in the PD
+firmware for powered adapters, a serial command for the TUSB546 DP EQ.
+
+Bench traps recorded today: every SRAM load is a real reload (verify via
+`PF` stamp); `pd` shows "unattached" when the adapter is out — check
+HPD before reading a run; a powered adapter flips our port to sink/UFP.
+
 ## 7. Known risks
 
 - **D-PHY amplitude vs the DP130 input.** The DP130's minimum VID is

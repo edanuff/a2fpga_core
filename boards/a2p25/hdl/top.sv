@@ -1340,16 +1340,16 @@ module top #(
         .auxch_tri         (dp_auxch_tri_w),
         .link_established  (dp_link_established_w),
         .video_live        (dp_video_live_w),
-        .debug             (),
+        .debug (dp_dbg_state_w),
         .debug_rx          (),
-        .debug_locks       (),
+        .debug_locks (dp_dbg_locks_w),
         .debug_gate        (),
-        .debug_sink        (),
+        .debug_sink (dp_dbg_sink_w),
         .debug_adjust      (),
-        .debug_chstate     (),
-        .debug_aux_err     (),
+        .debug_chstate (dp_dbg_chstate_w),
+        .debug_aux_err     (dp_dbg_aux_err_w),
         .debug_esi         (),
-        .debug_defer       (),
+        .debug_defer (dp_dbg_defer_w),
         .wedge_suspect     (dp_wedge_w),
         .debug_drp_clk     (dp_drp_clk_w),
         .debug_errcnt0     (dp_errcnt0_w),
@@ -1358,9 +1358,9 @@ module top #(
         .debug_obs         (),
         .debug_auxif       (),
         .debug_snapshot    (),
-        .debug_caps        (),
+        .debug_caps (dp_dbg_caps_w),
         .debug_wdog        (),
-        .debug_teardown    (),
+        .debug_teardown (dp_dbg_teardown_w),
         .debug_wrusewd     (),
         .debug_afe         (),
         .debug_afe1        (),
@@ -1451,15 +1451,25 @@ module top #(
     // activity instead — flags = oscillator enables (GLU writes landed),
     // cnt_start = wavetable fetches in the last frame, cnt_rdy = sound-RAM
     // write-queue drops (sticky).
-    // DOC/GLU counters on the spare USB debug regs (0x1C-0x1F/0x7C/0x7D desc,
-    // 0x20 flags, 0x21/0x22 counts). The 10-11 bus-phase probe that lived
-    // here (sticky M2B0/M2SEL-vs-phase masks) found M2B0 high through the
-    // whole PHI1-high half and M2SEL low throughout — bus capture is clean;
-    // see TOP_INTEGRATION_PLAN.md.
-    wire [47:0] usb_dbg_desc_sync1 = {doc_dbg_fetch_count_w, doc_dbg_req_count_w, doc_dbg_prime_miss_w, doc_dbg_stale_fetch_w};
-    wire [7:0]  usb_dbg_flags_sync1 = doc_osc_en_w;
-    wire [7:0]  usb_cnt_start_sync1 = doc_dbg_req_frame_r[7:0];
-    wire [7:0]  usb_cnt_rdy_sync1   = glu_wq_drops_w;
+    // DP link-state debug taps (10-12, USB-C->HDMI adapter investigation)
+    wire [7:0]  dp_dbg_state_w;      // transmitter training-state byte
+    wire [23:0] dp_dbg_chstate_w;    // raw DPCD {0x204, 0x203, 0x202}
+    wire [7:0]  dp_dbg_caps_w;       // sink capability profile
+    wire [7:0]  dp_dbg_sink_w;       // DPCD 0x205 SINK_STATUS
+    wire [6:0]  dp_dbg_defer_w;      // {edid_giveup, defer_cnt}
+    wire [15:0] dp_dbg_teardown_w;   // {first_mask, fail_mask, gate_fail_sat, timeout_sat}
+    wire [3:0]  dp_dbg_locks_w;      // {clock, equ, symbol, align}_locked
+    wire [23:0] dp_dbg_aux_err_w;    // {short, nack, other, obs, kicks, irq_services}
+    // DP link state on the spare USB debug regs (the DOC counters that
+    // lived here are verified; swap back if the DOC needs watching):
+    //   0x1C/0x1D/0x1E = DPCD 0x202/0x203/0x204   0x1F = training state
+    //   0x7C = sink caps profile   0x7D = SINK_STATUS (0x205)
+    //   0x20 = {edid_giveup, defer_cnt[6:0]}      0x21 = teardown[7:0]
+    //   0x22 = {locks[3:0], aux_err[3:0] (irq_services low nibble)}
+    wire [47:0] usb_dbg_desc_sync1 = {dp_dbg_sink_w, dp_dbg_caps_w, dp_dbg_state_w, dp_dbg_chstate_w};
+    wire [7:0]  usb_dbg_flags_sync1 = {1'b0, dp_dbg_defer_w};
+    wire [7:0]  usb_cnt_start_sync1 = dp_dbg_teardown_w[7:0];
+    wire [7:0]  usb_cnt_rdy_sync1   = {dp_dbg_locks_w, dp_dbg_aux_err_w[3:0]};
 
 
     // DDR3 sequencer telemetry (clk 50 MHz -> clk_logic; quasi-static)
