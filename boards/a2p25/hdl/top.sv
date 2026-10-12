@@ -1702,7 +1702,9 @@ module top #(
         .b_o            (overlay_rgb_w[7:0])
     );
 
-    assign overlay_en_w = 1'b0;   // DebugOverlay disabled (see above)
+    // The composite (scanline_dim + ESP32 OSD text + DebugOverlay pass-through)
+    // is always selected; DebugOverlay's ENABLE=0 makes it transparent.
+    assign overlay_en_w = 1'b1;
 
     // =========================================================================
     // ESP32 Octal SPI Interface
