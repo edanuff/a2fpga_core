@@ -136,7 +136,11 @@ This is a product decision — see "Decisions needed" below.
 - ESP32 firmware: `BOARD_REV=225` without `DP_TEST` (the production mode of the
   a2mega firmware: OSPI link, HPD on IO10, I2C mux/PD/DP130 unchanged).
 
-## 6. Decisions needed
+## 6. Decisions (ed, 2026-10-11)
+
+**Scope confirmed:** first core as recommended — SuperSprite/F18A deferred; Uthernet2 decided after the first fit check. Scanlines/speaker/slot-7 as build parameters for now. Double-buffering off.
+
+Original questions:
 
 1. **Feature scope for the first full core** (§3): drop SuperSprite/F18A
    first, or trim ESP32-served peripherals instead? (Recommendation: start
