@@ -1455,3 +1455,36 @@ the a2mega has not been on the Mac's JTAG chain tonight. Pending bench
 list unchanged, plus: during the transition INTO SHR (before the game
 blacks the border) the left edge should be flush with no border-colour
 stripe; Apple modes sit 6 px further left than before.
+
+### 10-12 — FOLLOW-UP (not in build 3): a2p25 AUX/training stack port
+
+The a2p25 session asked for e4f2e056 (EQ status-read dwell from DPCD 0x00E
+TRAINING_AUX_RD_INTERVAL: 0 → 400 µs as before, n → n × 4 ms, cap 16 ms, as
+a registered advance; 16-byte capability read; default-off
+RETRY_WATCHDOG_CLKS / EQ_WAIT_MULT / TRAIN_ERRCNT) plus the shared parts of
+999a7492. **Declined for build 3** — it is not a cherry-pick on main:
+
+- main's `hdl/displayport/auxch/aux_channel.v`, `channel_managemnt.v`,
+  `dp_aux_messages.v`, `dp_transmitter.sv` are SEVEN commits behind the
+  a2p25 branch (6d0b148d, c7064c6e, 84b65c72, 77cc1b60, 1ea23fc7,
+  999a7492, e4f2e056). e4f2e056 alone does not apply.
+- The stack changes `dp_transmitter`'s interface: new params FIFO_LINES,
+  PREFILL_WORDS, RETRY_WATCHDOG_CLKS, EQ_WAIT_MULT, TRAIN_ERRCNT,
+  LINK_CHECK, LINK_CHECK_CLKS, ECHO_SINK_ADJUST; new ports `debug_obs[103:0]`,
+  `debug_auxif[23:0]`, `debug_underrun_cnt`, `debug_fifo_level`,
+  `ext_symbol_clk` (in), `ext_tx_running[3:0]` (in), `ext_tx_symbols[79:0]`,
+  `ext_powerup_channel[3:0]` (the D-PHY external-SerDes hooks). The a2mega
+  top would need wiring for the inputs at minimum.
+- It touches the closed-loop training ladder that was soak-proven on both
+  dies (08-30 port) and census-validated (09-02). Changing it in the same
+  bitstream as the SHR/audio regression check would confound the hub-audio
+  result.
+
+If wanted: a separate a2mega branch porting c7064c6e..e4f2e056 whole, top
+wired for the new ports (a2p25's `LATE_REPLY_DRAIN=1` NOT taken unless on
+the a2mega's own merits), built and A/B'd against build 3 on both hubs and
+the direct cable. Expected delta per the a2p25 session: sinks with 0x00E =
+0x81 (4 ms, e.g. the Sceptre) wait 16 ms in EQ instead of 1.6 ms (~15 ms
+longer, still single-pass); hubs unchanged; the registered dwell form closed
+at 0 violations on the GW5A-25 (the nested form was -1.2 ns at clk100 — the
+a2mega's clk100 margin tonight is 0.056 ns, so watch it).
