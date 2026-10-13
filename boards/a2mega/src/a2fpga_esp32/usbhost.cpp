@@ -31,6 +31,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "usbstorage.h"
 
 #include "osd_console.h"   /* osd_log (C linkage) */
 
@@ -198,7 +200,7 @@ static void parse_consumer_layout(const uint8_t *d, uint32_t len, consumer_layou
 }
 
 /* ---- per-device bookkeeping ------------------------------------------------ */
-enum devkind { DK_NONE, DK_XINPUT, DK_KBD, DK_CONSUMER };
+enum devkind { DK_NONE, DK_XINPUT, DK_KBD, DK_CONSUMER, DK_MSC };
 struct hdev {
     usb_device_handle_t dev;
     uint8_t  addr;
@@ -209,6 +211,11 @@ struct hdev {
     usb_transfer_t *xin;
     consumer_layout con;
     bool     claimed;
+    /* MSC (bulk-only transport) */
+    uint8_t  bulk_in, bulk_out;
+    uint16_t mps_bulk;
+    uint32_t msc_blocks, msc_bsize;
+    uint32_t msc_tag;
 };
 #define MAX_DEV 4
 static hdev s_devs[MAX_DEV];
@@ -216,15 +223,132 @@ static hdev s_devs[MAX_DEV];
 static hdev *dev_find(usb_device_handle_t h) { for (auto &d : s_devs) if (d.dev == h) return &d; return NULL; }
 static hdev *dev_alloc(void) { for (auto &d : s_devs) if (!d.dev) { memset(&d, 0, sizeof(d)); return &d; } return NULL; }
 
+static hdev *s_msc = NULL;                     /* the mounted mass-storage device */
+static SemaphoreHandle_t s_msc_lock = NULL;
+
 static void recompute_presence(void)
 {
-    bool pad = false, hid = false;
-    for (auto &d : s_devs) { if (d.dev && d.kind == DK_XINPUT) pad = true; if (d.dev && (d.kind == DK_KBD || d.kind == DK_CONSUMER)) hid = true; }
+    bool pad = false, hid = false, msc = false;
+    for (auto &d : s_devs) {
+        if (d.dev && d.kind == DK_XINPUT) pad = true;
+        if (d.dev && (d.kind == DK_KBD || d.kind == DK_CONSUMER)) hid = true;
+        if (d.dev && d.kind == DK_MSC) msc = true;
+    }
     s_pad_present = pad; s_hid_present = hid;
     if (!pad) s_pad_buttons = 0;
     if (!hid) { s_kbd_buttons = 0; s_con_buttons = 0; }
-    snprintf(s_status, sizeof(s_status), "HOST%s%s", pad ? " PAD" : "", hid ? " HID" : "");
+    snprintf(s_status, sizeof(s_status), "HOST%s%s%s", pad ? " PAD" : "", hid ? " HID" : "", msc ? " STICK" : "");
 }
+
+static esp_err_t ctrl_xfer(hdev *d, uint8_t bmRT, uint8_t bReq, uint16_t wVal, uint16_t wIdx, uint16_t wLen, uint8_t *data_out);
+
+/* ---- MSC bulk-only transport (SCSI transparent) ------------------------------
+ * Blocking helpers usable from any task except the client task: completions
+ * are delivered by the client task's event pump and wake the caller. */
+static void blk_done_cb(usb_transfer_t *t) { xTaskNotifyGive((TaskHandle_t)t->context); }
+static bool bulk_xfer(hdev *d, uint8_t ep, uint8_t *buf, size_t len, size_t *done, uint32_t timeout_ms)
+{
+    usb_transfer_t *t = NULL;
+    /* IN transfers must be a whole multiple of the endpoint's max packet
+     * size (usb_host rejects the submit otherwise); round up and copy the
+     * actual length back. OUT transfers go as-is. */
+    size_t req = len;
+    if ((ep & 0x80) && d->mps_bulk) req = ((len + d->mps_bulk - 1) / d->mps_bulk) * d->mps_bulk;
+    size_t alloc = req ? req : 1;
+    if (usb_host_transfer_alloc(alloc, 0, &t) != ESP_OK) return false;
+    if (!(ep & 0x80) && len) memcpy(t->data_buffer, buf, len);
+    t->num_bytes = req; t->device_handle = d->dev; t->bEndpointAddress = ep;
+    t->callback = blk_done_cb; t->context = (void *)xTaskGetCurrentTaskHandle(); t->timeout_ms = timeout_ms;
+    ulTaskNotifyTake(pdTRUE, 0);                         /* clear stale notifications */
+    if (usb_host_transfer_submit(t) != ESP_OK) { usb_host_transfer_free(t); return false; }
+    if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout_ms + 500))) { usb_host_transfer_free(t); return false; }
+    bool ok = (t->status == USB_TRANSFER_STATUS_COMPLETED);
+    if (ok && (ep & 0x80) && len) memcpy(buf, t->data_buffer, t->actual_num_bytes > len ? len : t->actual_num_bytes);
+    if (done) *done = t->actual_num_bytes;
+    if (t->status == USB_TRANSFER_STATUS_STALL) {      /* clear halt, as the BOT spec asks */
+        ctrl_xfer(d, 0x02, 0x01, 0x0000, ep, 0, NULL);
+    }
+    usb_host_transfer_free(t);
+    return ok;
+}
+
+/* one SCSI command: CBW, optional data phase, CSW. Returns true on a good CSW. */
+static bool scsi_cmd(hdev *d, const uint8_t *cb, uint8_t cblen, uint8_t *data, uint32_t dlen, bool data_in)
+{
+    uint8_t cbw[31]; memset(cbw, 0, sizeof(cbw));
+    uint32_t tag = ++d->msc_tag;
+    cbw[0]='U'; cbw[1]='S'; cbw[2]='B'; cbw[3]='C';
+    memcpy(&cbw[4], &tag, 4); memcpy(&cbw[8], &dlen, 4);
+    cbw[12] = data_in ? 0x80 : 0x00; cbw[13] = 0; cbw[14] = cblen; memcpy(&cbw[15], cb, cblen);
+    if (!bulk_xfer(d, d->bulk_out, cbw, 31, NULL, 1000)) return false;
+    if (dlen) {
+        /* data phase in chunks the host library accepts */
+        uint32_t off = 0;
+        while (off < dlen) {
+            uint32_t n = dlen - off; if (n > 4096) n = 4096;
+            size_t got = 0;
+            if (!bulk_xfer(d, data_in ? d->bulk_in : d->bulk_out, data + off, n, &got, 3000)) return false;
+            off += data_in ? (got ? got : n) : n;
+            if (data_in && got < n) break;               /* short read: device sent less */
+        }
+    }
+    uint8_t csw[13]; size_t got = 0;
+    if (!bulk_xfer(d, d->bulk_in, csw, 13, &got, 1000)) {
+        if (!bulk_xfer(d, d->bulk_in, csw, 13, &got, 1000)) return false;   /* one retry after a STALL clear */
+    }
+    return got == 13 && csw[0]=='U' && csw[1]=='S' && csw[2]=='B' && csw[3]=='S' && csw[12] == 0;
+}
+
+static bool msc_init(hdev *d)
+{
+    uint8_t inq[36]; uint8_t cb[16];
+    memset(cb, 0, 16); cb[0] = 0x12; cb[4] = 36;                      /* INQUIRY */
+    scsi_cmd(d, cb, 6, inq, 36, true);
+    bool ready = false;
+    for (int i = 0; i < 20 && !ready; i++) {                           /* TEST UNIT READY, spin-up */
+        memset(cb, 0, 16);
+        ready = scsi_cmd(d, cb, 6, NULL, 0, true);
+        if (!ready) { memset(cb, 0, 16); cb[0] = 0x03; cb[4] = 18; uint8_t sense[18]; scsi_cmd(d, cb, 6, sense, 18, true); vTaskDelay(pdMS_TO_TICKS(100)); }
+    }
+    if (!ready) { osd_log("USB HOST: STORAGE NOT READY (TUR)"); return false; }
+    uint8_t cap[8]; memset(cb, 0, 16); cb[0] = 0x25;                  /* READ CAPACITY(10) */
+    if (!scsi_cmd(d, cb, 10, cap, 8, true)) { osd_log("USB HOST: STORAGE READ CAPACITY FAILED"); return false; }
+    uint32_t last = ((uint32_t)cap[0] << 24) | ((uint32_t)cap[1] << 16) | ((uint32_t)cap[2] << 8) | cap[3];
+    uint32_t bs   = ((uint32_t)cap[4] << 24) | ((uint32_t)cap[5] << 16) | ((uint32_t)cap[6] << 8) | cap[7];
+    if (bs != 512) { ESP_LOGW(TAG, "MSC block size %u unsupported", (unsigned)bs); return false; }
+    d->msc_blocks = last + 1; d->msc_bsize = bs;
+    ESP_LOGI(TAG, "MSC: %.8s %.16s, %u blocks", (const char *)&inq[8], (const char *)&inq[16], (unsigned)d->msc_blocks);
+    return true;
+}
+
+bool usbhost_msc_present(void) { return s_msc != NULL; }
+bool usbhost_msc_capacity(uint32_t *blocks, uint32_t *bsize)
+{
+    if (!s_msc) return false;
+    if (blocks) *blocks = s_msc->msc_blocks;
+    if (bsize)  *bsize  = s_msc->msc_bsize;
+    return true;
+}
+static bool msc_rw(uint32_t lba, uint32_t count, uint8_t *buf, bool write)
+{
+    hdev *d = s_msc;
+    if (!d || !s_msc_lock) return false;
+    xSemaphoreTake(s_msc_lock, portMAX_DELAY);
+    bool ok = true;
+    while (count && ok && s_msc == d) {
+        uint32_t n = count > 8 ? 8 : count;                            /* 4 KB per command */
+        uint8_t cb[16]; memset(cb, 0, 16);
+        cb[0] = write ? 0x2A : 0x28;                                   /* WRITE(10) / READ(10) */
+        cb[2] = lba >> 24; cb[3] = lba >> 16; cb[4] = lba >> 8; cb[5] = lba;
+        cb[7] = n >> 8; cb[8] = n;
+        ok = scsi_cmd(d, cb, 10, buf, n * 512, !write);
+        buf += n * 512; lba += n; count -= n;
+    }
+    xSemaphoreGive(s_msc_lock);
+    return ok;
+}
+bool usbhost_msc_read(uint32_t lba, uint32_t count, uint8_t *buf)        { return msc_rw(lba, count, buf, false); }
+bool usbhost_msc_write(uint32_t lba, uint32_t count, const uint8_t *buf) { return msc_rw(lba, count, (uint8_t *)buf, true); }
 
 /* ---- transfers ------------------------------------------------------------ */
 static void in_xfer_cb(usb_transfer_t *t)
@@ -332,7 +456,21 @@ static void attach_device(uint8_t addr)
         if (id->bInterfaceClass == 0xFF && id->bInterfaceSubClass == 0x5D && id->bInterfaceProtocol == 0x01) k = DK_XINPUT;
         else if (id->bInterfaceClass == 0x03 && id->bInterfaceSubClass == 0x01 && id->bInterfaceProtocol == 0x01) k = DK_KBD;
         else if (id->bInterfaceClass == 0x03) k = DK_CONSUMER;
+        else if (id->bInterfaceClass == 0x08 && id->bInterfaceSubClass == 0x06 && id->bInterfaceProtocol == 0x50 && !s_msc) k = DK_MSC;
         if (k == DK_NONE) continue;
+        if (k == DK_MSC) {
+            for (uint8_t e = 0; e < id->bNumEndpoints; e++) {
+                int eoff = off;
+                const usb_ep_desc_t *ep = usb_parse_endpoint_descriptor_by_index(id, e, cfg->wTotalLength, &eoff);
+                if (!ep || (ep->bmAttributes & 0x03) != USB_BM_ATTRIBUTES_XFER_BULK) continue;
+                if (ep->bEndpointAddress & 0x80) d->bulk_in = ep->bEndpointAddress; else d->bulk_out = ep->bEndpointAddress;
+                d->mps_bulk = ep->wMaxPacketSize;
+            }
+            if (!d->bulk_in || !d->bulk_out) continue;
+            if (usb_host_interface_claim(s_client, d->dev, i, 0) != ESP_OK) continue;
+            d->intf = i; d->claimed = true; d->kind = k;
+            continue;
+        }
         /* endpoints */
         for (uint8_t e = 0; e < id->bNumEndpoints; e++) {
             int eoff = off;
@@ -360,6 +498,17 @@ static void attach_device(uint8_t addr)
         }
     }
     if (d->kind == DK_NONE) goto drop;
+    if (d->kind == DK_MSC) {
+        if (!msc_init(d)) {
+            osd_log("USB HOST: STORAGE DEVICE NOT READY");
+            usb_host_interface_release(s_client, d->dev, d->intf); d->claimed = false; goto drop;
+        }
+        s_msc = d;
+        recompute_presence();
+        osd_log("USB HOST: STORAGE %u MB", (unsigned)((uint64_t)d->msc_blocks * d->msc_bsize / (1024 * 1024)));
+        usbstorage_on_msc(true);
+        return;
+    }
     if (d->kind == DK_KBD) {
         ctrl_xfer(d, 0x21, 0x0B, 0, d->intf, 0, NULL);          /* SET_PROTOCOL boot */
         ctrl_xfer(d, 0x21, 0x0A, 0, d->intf, 0, NULL);          /* SET_IDLE 0 */
@@ -385,6 +534,11 @@ static void detach_device(usb_device_handle_t h)
 {
     hdev *d = dev_find(h);
     if (!d) return;
+    if (d == s_msc) {
+        s_msc = NULL;                                     /* readers see "gone" first */
+        usbstorage_on_msc(false);
+        if (s_msc_lock) { xSemaphoreTake(s_msc_lock, portMAX_DELAY); xSemaphoreGive(s_msc_lock); }
+    }
     if (d->xin) { usb_host_transfer_free(d->xin); d->xin = NULL; }
     if (d->claimed) usb_host_interface_release(s_client, d->dev, d->intf);
     usb_host_device_close(s_client, d->dev);
@@ -446,6 +600,7 @@ static bool engage_host_mode(void)
     cc.async.callback_arg          = NULL;
     if (usb_host_client_register(&cc, &s_client) != ESP_OK) { ESP_LOGE(TAG, "client register failed"); return false; }
     s_work = xQueueCreate(8, sizeof(work_item));
+    s_msc_lock = xSemaphoreCreateMutex();
     xTaskCreatePinnedToCore(worker_task, "usbh_work", 6144, NULL, 5, NULL, 0);
     s_active = true;
     snprintf(s_status, sizeof(s_status), "HOST");
@@ -459,12 +614,12 @@ static void role_task(void *arg)
      * If nobody does, the port is ours to host. BOOT (S2) held at boot
      * forces device mode deterministically (programming/console), as does
      * any PC enumeration inside the window. */
-#if PIN_BOOT_BTN >= 0
+#if defined(PIN_BOOT_BTN) && PIN_BOOT_BTN >= 0
     pinMode(PIN_BOOT_BTN, INPUT_PULLUP);   /* S2 to GND; strapping pin, read only */
 #endif
     const uint32_t t0 = millis();
     while (millis() - t0 < 5000) {
-#if PIN_BOOT_BTN >= 0
+#if defined(PIN_BOOT_BTN) && PIN_BOOT_BTN >= 0
         if (digitalRead(PIN_BOOT_BTN) == LOW) {
             snprintf(s_status, sizeof(s_status), "DEVICE MODE (BOOT HELD)");
             osd_log("USB PORT: DEVICE MODE (BOOT HELD)");
@@ -511,5 +666,9 @@ bool     usbhost_pad_present(void) { return false; }
 bool     usbhost_hid_present(void) { return false; }
 uint16_t usbhost_buttons(void)     { return 0; }
 const char *usbhost_status_str(void) { return "DEVICE MODE"; }
+bool     usbhost_msc_present(void) { return false; }
+bool     usbhost_msc_capacity(uint32_t *b, uint32_t *s) { (void)b; (void)s; return false; }
+bool     usbhost_msc_read(uint32_t l, uint32_t c, uint8_t *b) { (void)l; (void)c; (void)b; return false; }
+bool     usbhost_msc_write(uint32_t l, uint32_t c, const uint8_t *b) { (void)l; (void)c; (void)b; return false; }
 
 #endif

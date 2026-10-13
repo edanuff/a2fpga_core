@@ -588,7 +588,7 @@ HPD before reading a run; a powered adapter flips our port to sink/UFP.
 
 ## 6i. ESP32 firmware: porting the Enhanced (BL616) feature set
 
-Plan and gap table: [ESP32_FEATURE_PORT.md](ESP32_FEATURE_PORT.md) (10-12). Key hardware facts: no USB host on either ESP32 board (USB1 is the device port, the video port has no D+/D−) → BLE HID for gamepads/keyboards/remotes; LittleFS 1.9 MB → network image serving for HDD images. P1 (reset hold on IO33 until media mounted, 15 s backstop) implemented 10-12.
+Plan and gap table: [ESP32_FEATURE_PORT.md](ESP32_FEATURE_PORT.md) (10-12). Key hardware facts: no USB host on either ESP32 board (USB1 is the device port, the video port has no D+/D−) → BLE HID for gamepads/keyboards/remotes; LittleFS 1.9 MB → network image serving for HDD images. P1 (reset hold on IO33 until media mounted, 15 s backstop), P2 (USB host on USB1: XInput pads, HID keyboards/remotes, hubs) and P3 (USB stick as the image volume) implemented and hardware-verified 10-12: the IIgs boots disk1.dsk from a FAT32 stick on a hub, keyboard on the hub, pad drives the OSD menu.
 
 ## 7. Known risks
 

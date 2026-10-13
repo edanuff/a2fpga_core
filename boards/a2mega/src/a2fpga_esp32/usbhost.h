@@ -37,6 +37,14 @@ uint16_t usbhost_buttons(void);
 /* one-line status for the OSD/telnet status screens */
 const char *usbhost_status_str(void);
 
+/* USB mass storage (first MSC device, LUN 0, 512-byte blocks). The
+ * read/write helpers block and may be called from any task except the
+ * host client task; usbstorage.cpp wraps them for FatFS. */
+bool     usbhost_msc_present(void);
+bool     usbhost_msc_capacity(uint32_t *blocks, uint32_t *bsize);
+bool     usbhost_msc_read(uint32_t lba, uint32_t count, uint8_t *buf);
+bool     usbhost_msc_write(uint32_t lba, uint32_t count, const uint8_t *buf);
+
 #ifdef __cplusplus
 }
 #endif

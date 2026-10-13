@@ -6,7 +6,7 @@ the same ESP32-S3-MINI-1-N4R2, have **no SD card**, **no USB host port**
 and **no wired Ethernet**; everything below is done once, behind the
 existing `BOARD_REV` / `A2MEGA_HAS_*` switches, so the a2mega gets it too.
 
-Status: P1 and P2 done and hardware-verified (2026-10-12 evening); P3 next. Gap analysis by file-level comparison of
+Status: P1, P2 and P3 done and hardware-verified (2026-10-12 evening); P4/P5 next. Gap analysis by file-level comparison of
 `boards/a2n20v2-Enhanced/src/a2n20_bl616/` (BL616, `firmware_host/`) with
 the ESP32 tree; see `boards/a2mega/docs/ESP32_ENHANCED_PORT.md` for the
 first slice that was already ported.
@@ -62,8 +62,18 @@ first slice that was already ported.
    remote paths are code-complete, not yet exercised on hardware.
    Not done: feeding the FPGA's Apple-side joystick (needs ESP32-writable
    pad regs in the OSPI connector — the 0x16-0x1B regs are fabric→ESP32).
-3. **P3 USB mass storage** as the image volume (FatFS, image library,
-   boot_pref), LittleFS/FTP as fallback.
+3. **P3 USB mass storage** — DONE: MSC bulk-only/SCSI in `usbhost.cpp`
+   (INQUIRY, TEST UNIT READY spin-up, READ CAPACITY, READ/WRITE(10), 4 KB
+   per command, IN transfers rounded to the packet size — the host library
+   rejects anything else); `usbstorage.cpp` = FatFS diskio glue + VFS mount
+   of the stick at `/sdcard`; the backend switch runs in the disk task
+   (`disk_poll`: unmount images → `storage_activate(usb)` swaps what sits
+   at `/sdcard` → remount), release deadline 7 → 10 s. One-root model as
+   on the BL616: stick when present, flash otherwise. Verified: 32 GB
+   FAT32 stick on a hub with a keyboard — `STORAGE 30145 MB`, mounted,
+   disk1/disk2.dsk + hdd1.hdv mounted RW, `/RES RELEASED (MEDIA MOUNTED)`,
+   Apple boots from the stick. Not ported: the BL616 hub supervisor
+   (stalled-hub adopt / VBUS cycle), `boot_pref`.
 4. **P4 MCU self-update** (OTA) — decide together with P3 (flash budget).
 5. **P5 Uthernet2 core back on the a2p25** (HDL, BSRAM budget).
 6. P6 boot timeline / debug; P7 SSC bridge (needs HDL).

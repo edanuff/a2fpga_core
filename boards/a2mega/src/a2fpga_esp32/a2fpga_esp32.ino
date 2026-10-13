@@ -44,6 +44,7 @@
 #include "fpga_screen.h"
 #include "osd_console.h"
 #include "usbhost.h"
+#include "usbstorage.h"
 #include "settings.h"
 #include "wedge_watch.h"
 #include "disk.h"
@@ -930,6 +931,33 @@ static bool mount_sd() {
     return true;
 }
 #endif
+
+// Storage backend swap at /sdcard (called by disk.c from the disk task,
+// images closed): USB stick (FatFS over usbhost) or the local volume.
+extern "C" void storage_activate(bool usb) {
+#if A2MEGA_HAS_OSPI_LINK
+    if (usb) {
+#if !A2MEGA_HAS_SD
+        LittleFS.end();
+#else
+        SD_MMC.end();
+#endif
+        if (!usbstorage_mount("/sdcard")) {
+            osd_log("USB STICK: MOUNT FAILED (FAT?)");
+            sd_mounted = mount_sd();          /* back to the local volume */
+            return;
+        }
+        osd_log("USB STICK MOUNTED AT /SDCARD");
+        sd_mounted = true;
+    } else {
+        usbstorage_unmount();
+        sd_mounted = mount_sd();
+        osd_log(sd_mounted ? "LOCAL VOLUME MOUNTED" : "LOCAL VOLUME FAILED");
+    }
+#else
+    (void)usb;
+#endif
+}
 
 // WiFi configuration file: wifi.txt on the SD card (root, with
 // /sdcard/A2FPGA/wifi.txt as a fallback location).
