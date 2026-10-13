@@ -543,6 +543,18 @@ Consequences: 2-lane hubs cap the a2p25 at 720p (RBR×2); 1080p needs a
 (720p×2), Cable Matters 48G #1 = FAIL (no RBR symbol lock), #2 = FAIL
 (AUX replies undecodable; powered mode needs DR_Swap).
 
+**DR_Swap carry-over implemented (10-12, late; ESP32 fw, not yet flashed):**
+the powered-adapter case (`state device`, sink + UFP) now requests a PD
+DR_Swap after the explicit contract and retries it per spec (`Wait` →
+tDRSwapWait 100 ms, up to 10; silence → up to 3 sends; `Reject` → give up
+at once, one log line, plain USB device). On `Accept` the port is DFP
+while staying a power sink and runs the unchanged DP alt-mode ladder,
+TUSB546A mux and HPD path. Bus-powered partners (we source) are untouched.
+Details and expected `pd` output: `ESP32_FW_A2P25.md`, "PD: Data-Role
+Swap for powered adapters"; host test `tests/host/test_dr_swap.c`. Bench
+check pending: adapter #2 WITH power → `pd` should read `dp-active`
+(sink, DFP); whether its AUX then decodes is the separate §6h question.
+
 ### 6h.1 Recipe: qualifying a USB-C→HDMI adapter (RBR capability, lane count)
 
 Goal (ed, 10-12): two classes to sort — (i) 48 Gbps / 8K@60-branded
@@ -638,3 +650,5 @@ Plan and gap table: [ESP32_FEATURE_PORT.md](ESP32_FEATURE_PORT.md) (10-12). Key 
 | 2026-10-11 | **`a2p25_dp_test` — LINK_CHECK=1 BASELINE** (spec flow; Sceptre 20/20 attaches as `_lc1`, sha a21f23c8…) | this commit | Gowin V1.9.12.01 | 0/0; worst setup +0.16 (thin) | `6ec36c790f12e8d349c2a4935ee6ed8b6ae9808a465922f0d2f72e4a5023bf17` |
 | 2026-10-11 | `a2p25_dp_test_hold` (LINK_CHECK=0, the 10-10 first-light policy, bench only) | this commit | Gowin V1.9.12.01 | 0/0; worst setup +0.29 | `4eb4705442788e960f2c8cf3772b379ea95f4830925df963f9f7f15fd71eb6ef` |
 | 2026-10-10 | `a2p25_dp_test` + HPD_DISCONNECT_RESETS=1 (**replug recovery verified**: Y 11→22→33, bars return) | this commit | Gowin V1.9.12.01 | 0/0 | `bc08d218a69cf396d0b618d27176b416c6d7a92a0cbf4be69d36ca5dd076a9c2` |
+| 2026-10-12 | ESP32 fw `make BOARD_REV=225 DP_TEST=0 compile` — DR_Swap for powered adapters (sink+UFP → DFP), rebased on the USB-host/storage/OTA tree | 5b541a5f + this change | arduino-cli 1.2.2 / esp32 3.3.5 | builds, 0 warnings; 1,113,959 B (84 % of the 1.25 MB OTA slot); host tests 14/14 + DR_Swap 11/11; NOT flashed | `a79c4ff5e74c80c6287bf7d53aa334281cc2ed1cce302456090bbd21c292d060` |
+| 2026-10-12 | ESP32 fw `make BOARD_REV=225 DP_TEST=1 compile` — same change, dp_test variant | 5b541a5f + this change | arduino-cli 1.2.2 / esp32 3.3.5 | builds, 0 warnings; 1,001,055 B (76 %); NOT flashed (this is the binary left in `./build`) | `585053934145c6df88c0583ebc2423b32f53b6bc10c75a48c46939e2650a817b` |

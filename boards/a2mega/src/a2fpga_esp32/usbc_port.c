@@ -19,6 +19,19 @@ enum {
     SINK_PS_RDY_TIMEOUT_MS = 600,      /* tPSTransition 550 ms max */
     SINK_DR_SWAP_TIMEOUT_MS = 200,
     SINK_CONTRACT_RETRIES = 2,
+    /* DR_Swap (sink+UFP -> DFP) retry policy, 2026-10-12 (a2p25 plan
+     * 6h, Cable Matters USB-C->HDMI with its own power input: it
+     * sources VBUS, we attach as UFP and no DP ever came up). Before:
+     * ONE DR_Swap, and any Wait / silence parked the port in USB-only
+     * for the rest of the attach. A freshly-contracted DFP is typically
+     * busy with its own Discover Identity ladder toward us and answers
+     * Wait (or the swap crosses its VDM and is lost); PD says retry
+     * after tDRSwapWait (100 ms). Macs get DFP from this adapter class
+     * by swapping, so persist a bounded number of times, then give up
+     * once (one log line) and stay a plain USB device. */
+    DR_SWAP_RETRY_MS = 100,            /* tDRSwapWait */
+    DR_SWAP_MAX_ATTEMPTS = 10,         /* Wait storms: ~1.3 s total */
+    DR_SWAP_MAX_TIMEOUTS = 3,          /* unanswered sends before giving up */
     /* Sink requests from the source's 5 V PDO, bounded by our real draw
      * (~0.5 A board) and what the source offers. */
     SINK_OPERATING_MA = 500,
@@ -126,6 +139,9 @@ static void reset_protocol(usbc_port_t *port)
     port->power_sink = false;
     port->data_dfp = true;
     port->sink_attempts = 0u;
+    port->dr_swap_attempts = 0u;
+    port->dr_swap_timeouts = 0u;
+    port->dr_swap_given_up = false;
     port->dp_hpd_level = false;
 }
 
@@ -338,6 +354,39 @@ static void fall_back_to_usb_only(usbc_port_t *port, const char *reason)
      * physical replug wastes an otherwise healthy contract. */
     port->deadline_ms = now_ms(port) + 2000u;
     log_message(port, USBC_LOG_WARNING, reason);
+}
+
+/* Sink+UFP: the DR_Swap did not get us DFP. Park as a plain USB device
+ * (USBC_STATE_DEVICE, not USB_ONLY — USB_ONLY's auto-retry is for a
+ * sink that IS DFP and only lost the VDM exchange). Logged once per
+ * contract; a fresh Source_Caps -> contract re-arms the budget. The
+ * partner may still hand us DFP with its own DR_Swap (accepted in
+ * handle_received_message). */
+static void dr_swap_give_up(usbc_port_t *port, const char *reason)
+{
+    set_dp_outputs(port, false, false);
+    port->state = USBC_STATE_DEVICE;
+    if (!port->dr_swap_given_up) {
+        port->dr_swap_given_up = true;
+        log_message(port, USBC_LOG_ERROR, reason);
+    }
+}
+
+/* Sink+UFP: schedule the next DR_Swap (SINK_READY sends it when
+ * data_dfp is still false) after tDRSwapWait, or give up when the
+ * per-contract budget is spent. */
+static void dr_swap_retry_or_give_up(usbc_port_t *port, const char *why,
+                                     const char *give_up_reason)
+{
+    if (port->dr_swap_attempts >= DR_SWAP_MAX_ATTEMPTS ||
+        port->dr_swap_timeouts >= DR_SWAP_MAX_TIMEOUTS) {
+        dr_swap_give_up(port, give_up_reason);
+        return;
+    }
+    if (port->dr_swap_attempts == 1u)   /* first retry only: no spam */
+        log_message(port, USBC_LOG_INFO, why);
+    port->state = USBC_STATE_SINK_READY;
+    port->deadline_ms = now_ms(port) + DR_SWAP_RETRY_MS;
 }
 
 static void apply_hpd_status(usbc_port_t *port, uint32_t status_vdo)
@@ -613,6 +662,14 @@ static int handle_received_message(usbc_port_t *port,
             return 0;
         }
         if (port->state == USBC_STATE_SINK_DR_SWAP_SENT) {
+            /* The Accept proves our DR_Swap was delivered: complete the
+             * pending transmit if its TX_SUCCESS has not been polled yet
+             * (same ACK-before-TXOK race as the VDM ladder), so the
+             * Discover Identity below is not refused with tx_busy. */
+            if (port->tx_busy && port->tx_kind == USBC_TX_DR_SWAP)
+                handle_tx_success(port);
+            /* Role change is effective once the Accept is on the wire:
+             * every later header (and the auto-GoodCRC) says DFP. */
             port->data_dfp = true;
             fusb302_set_data_role(&port->fusb302, true);
             log_message(port, USBC_LOG_INFO,
@@ -626,16 +683,31 @@ static int handle_received_message(usbc_port_t *port,
         port->state == USBC_STATE_SINK_WAIT_PS_RDY) {
         log_message(port, USBC_LOG_INFO, "Sink 5 V PD contract established");
         port->sink_attempts = 0u;
+        /* fresh explicit contract = fresh DR_Swap budget */
+        port->dr_swap_attempts = 0u;
+        port->dr_swap_timeouts = 0u;
+        port->dr_swap_given_up = false;
         port->state = USBC_STATE_SINK_READY;
         port->deadline_ms = now_ms(port) + DISCOVERY_START_DELAY_MS;
         return 0;
     }
     if (count == 0u && (type == USB_PD_CTRL_REJECT ||
-                        type == USB_PD_CTRL_WAIT) &&
+                        type == USB_PD_CTRL_NOT_SUPPORTED) &&
         port->state == USBC_STATE_SINK_DR_SWAP_SENT) {
-        log_message(port, USBC_LOG_ERROR,
-                    "DR_Swap rejected; partner keeps DFP (no DP source role)");
-        port->state = USBC_STATE_DEVICE;
+        if (port->tx_busy && port->tx_kind == USBC_TX_DR_SWAP)
+            handle_tx_success(port);
+        /* A Reject is the partner's policy, not a transient: no retry. */
+        dr_swap_give_up(port,
+                        "DR_Swap rejected; partner keeps DFP, USB-only (no DP)");
+        return 0;
+    }
+    if (count == 0u && type == USB_PD_CTRL_WAIT &&
+        port->state == USBC_STATE_SINK_DR_SWAP_SENT) {
+        if (port->tx_busy && port->tx_kind == USBC_TX_DR_SWAP)
+            handle_tx_success(port);
+        dr_swap_retry_or_give_up(port,
+                                 "DR_Swap: partner says Wait; retrying",
+                                 "DR_Swap: Wait persisted; USB-only (no DP)");
         return 0;
     }
     if (count == 0u && type == USB_PD_CTRL_DR_SWAP &&
@@ -830,18 +902,26 @@ static int service_state_timer(usbc_port_t *port)
         if (!port->tx_busy && time_reached(now, port->deadline_ms)) {
             if (port->data_dfp)
                 return send_discover_identity(port);
+            /* UFP after the contract: ask for DFP (see DR_SWAP_* notes). */
             if (send_control(port, USB_PD_CTRL_DR_SWAP,
                              USBC_TX_DR_SWAP) != 0)
                 return -1;
+            port->dr_swap_attempts++;
             port->state = USBC_STATE_SINK_DR_SWAP_SENT;
             port->deadline_ms = now + SINK_DR_SWAP_TIMEOUT_MS;
         }
         break;
     case USBC_STATE_SINK_DR_SWAP_SENT:
         if (time_reached(now, port->deadline_ms)) {
-            log_message(port, USBC_LOG_ERROR,
-                        "DR_Swap unanswered; staying UFP (no DP)");
-            port->state = USBC_STATE_DEVICE;
+            /* No Accept/Reject/Wait within the window (tSenderResponse is
+             * 30 ms; 200 ms covers GoodCRC retries and a crossed VDM).
+             * A send that never got a GoodCRC also ends here. */
+            port->dr_swap_timeouts++;
+            port->tx_busy = false;        /* abandon the unanswered send */
+            port->tx_kind = USBC_TX_NONE;
+            dr_swap_retry_or_give_up(port,
+                                     "DR_Swap unanswered; retrying",
+                                     "DR_Swap unanswered; USB-only (no DP)");
         }
         break;
     case USBC_STATE_USB_ONLY:

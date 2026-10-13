@@ -196,6 +196,68 @@ travel as an OSPI register write, which is not implemented yet: a
 production displayport1 core and its register don't exist yet. In that
 build `hal_set_fpga_hpd` only records the level.
 
+## PD: Data-Role Swap for powered adapters (2026-10-12)
+
+Plan §6h, adapter #2: a Cable Matters USB-C→HDMI adapter with its own
+USB-C power input advertises as a **PD source** when that power is
+connected. The DRP port then attaches as **sink + UFP**, takes the 5 V
+contract, and `pd` reported `state device (sink power role, UFP data
+role)`, HPD 0, mux-DP 0: DP Alt Mode never came up, because only the DFP
+runs the Discover Identity / SVIDs / Modes → Enter Mode → DP Status /
+Configure ladder. A Mac handles this class by requesting a **DR_Swap**
+(PD control message 9) after the explicit contract, becoming DFP while
+staying a power sink.
+
+The stack already sent one DR_Swap after PS_RDY (`SINK_READY` →
+`SINK_DR_SWAP_SENT`), but any `Wait`, a `Reject`, or 200 ms of silence
+parked the port in `device` for the rest of the attach. A freshly
+contracted DFP is normally busy with its own Discover Identity toward us
+and answers `Wait` (or our swap crosses its VDM), so one shot was not
+enough. Now (`usbc_port.c`, all inside the `power_sink` path):
+
+- after `PS_RDY`, DR_Swap goes out ~10 ms later with a sink + UFP header;
+- `Accept` → data role DFP (`fusb302_set_data_role`, so the auto-GoodCRC
+  and every later header say DFP), power role stays sink, then the
+  **same** VDM ladder, TUSB546A mux programming (`set_dp_outputs`) and
+  HPD reconstruction as the source+DFP attach — no separate code path;
+- `Wait` → retry after tDRSwapWait (100 ms), up to 10 attempts;
+- no answer in 200 ms → retry, up to 3 unanswered sends;
+- `Reject` (or PD3 `Not_Supported`) → give up at once;
+- giving up = `state device` (plain USB device, DP outputs off), **one**
+  `[usbc]` error line per contract (`DR_Swap rejected…` / `…unanswered…`
+  / `…Wait persisted…`); a renegotiation (new `Source_Caps` → contract)
+  re-arms the budget; a partner-initiated DR_Swap is still accepted;
+- an `Accept` that arrives before our own TX_SUCCESS completes the send
+  (the ACK-before-TXOK race fixed for VDMs on 2026-09-02) so the
+  Discover Identity is not refused with `tx_busy`.
+
+Bus-powered partners (we source VBUS and are DFP from the toggle: the
+a2mega hubs, the a2p25 monitors, the Anker hub) never enter this path;
+their negotiation is unchanged and the census results stand
+(`boards/a2mega/docs/acquisition_matrix_results.md`). Host test:
+`tests/host/test_dr_swap.c` (11 scenarios incl. the source-path smoke
+test), run with `tests/host/run.sh`. Hardware verification with
+adapter #2 powered is pending (expect `pd: state dp-active (sink power
+role, DFP data role)`, HPD 1, mux-DP 1; its AUX replies were undecodable
+in the bus-powered case, so DP may still not train — that is the AUX
+margin question in §6h, separate from this fix).
+
+Build (2026-10-12, on 5b541a5f = the USB-host / USB-storage / OTA
+self-update tree; arduino-cli 1.2.2 / esp32 3.3.5, 0 warnings, not
+flashed):
+
+| Variant | Size | `a2fpga_esp32.ino.bin` sha256 |
+|---|---|---|
+| `make BOARD_REV=225 DP_TEST=0 compile` (production, OSPI core) | 1,113,959 B (84 % of the OTA slot) | `a79c4ff5e74c80c6287bf7d53aa334281cc2ed1cce302456090bbd21c292d060` |
+| `make BOARD_REV=225 DP_TEST=1 compile` (dp_test) | 1,001,055 B | `585053934145c6df88c0583ebc2423b32f53b6bc10c75a48c46939e2650a817b` |
+
+Both variants share `./build`; the DP_TEST=1 binary is the one left there.
+Rebuild the variant you flash and check the hash before uploading. Note
+the partition scheme changed to `default` (two OTA slots) with the OTA
+work: the first flash of a build on this scheme is a download-mode flash
+to install the new partition table; after that, updates are a file drop
+on the image volume.
+
 ## Telnet / CLI additions
 
 - **Telnet `i`, CLI `i2cscan`:** I2C bus scan. Expect `12 22 2C`.
@@ -323,6 +385,10 @@ All firmware changes are under `boards/a2mega/src/a2fpga_esp32/`:
 - `tests/host/mock_fusb302.c`: added the missing `fusb302_pd_reset` stub.
   The host test had stopped linking after the PD-reset work; it now passes
   14/14.
+- `usbc_port.c/.h`, `usb_pd.h` (2026-10-12): DR_Swap retry/give-up policy
+  for the sink+UFP attach (powered adapters), `USB_PD_CTRL_NOT_SUPPORTED`;
+  `tests/host/test_dr_swap.c` + `run.sh` runs both test programs. See
+  "PD: Data-Role Swap for powered adapters" above.
 
 There is one known issue outside this work: `BOARD_REV=102` (a2mega 1.0a2x)
 fails to link at HEAD with an undefined `usbc_virtual_replug_fast`. The

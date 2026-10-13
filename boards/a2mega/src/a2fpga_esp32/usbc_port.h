@@ -152,6 +152,12 @@ typedef struct {
     bool power_sink;         /* true = partner sources VBUS (monitor) */
     bool data_dfp;           /* current data role for TX headers */
     uint8_t sink_attempts;   /* contract retries before USB-only fallback */
+    /* Sink+UFP -> DFP via DR_Swap (powered USB-C->HDMI adapters that
+     * source VBUS and attach us as UFP; only the DFP runs the DP
+     * alt-mode ladder). Budget per explicit contract; see usbc_port.c. */
+    uint8_t dr_swap_attempts;    /* DR_Swap requests sent this contract */
+    uint8_t dr_swap_timeouts;    /* of which went unanswered */
+    bool    dr_swap_given_up;    /* final verdict logged (once) */
     /* stale-session guard (see stale_session_guard in usbc_port.c) */
     uint32_t guard_verify_deadline_ms;
     uint32_t guard_last_rx_ms;   /* idle-bus gate for the CC re-qual */

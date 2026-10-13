@@ -25,6 +25,7 @@ enum usb_pd_control_message {
     USB_PD_CTRL_VCONN_SWAP     = 11,
     USB_PD_CTRL_WAIT           = 12,
     USB_PD_CTRL_SOFT_RESET     = 13,
+    USB_PD_CTRL_NOT_SUPPORTED  = 16,  /* PD 3.0 reply; treated as Reject */
 };
 
 enum usb_pd_data_message {
