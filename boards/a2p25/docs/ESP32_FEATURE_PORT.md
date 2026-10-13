@@ -6,7 +6,7 @@ the same ESP32-S3-MINI-1-N4R2, have **no SD card**, **no USB host port**
 and **no wired Ethernet**; everything below is done once, behind the
 existing `BOARD_REV` / `A2MEGA_HAS_*` switches, so the a2mega gets it too.
 
-Status: P1, P2 and P3 done and hardware-verified (2026-10-12 evening); P4/P5 next. Gap analysis by file-level comparison of
+Status: P1–P4 hardware-verified (2026-10-12 evening); P5 next. Gap analysis by file-level comparison of
 `boards/a2n20v2-Enhanced/src/a2n20_bl616/` (BL616, `firmware_host/`) with
 the ESP32 tree; see `boards/a2mega/docs/ESP32_ENHANCED_PORT.md` for the
 first slice that was already ported.
@@ -78,7 +78,22 @@ first slice that was already ported.
    disk1/disk2.dsk + hdd1.hdv mounted RW, `/RES RELEASED (MEDIA MOUNTED)`,
    Apple boots from the stick. Not ported: the BL616 hub supervisor
    (stalled-hub adopt / VBUS cycle), `boot_pref`.
-4. **P4 MCU self-update** (OTA) — decide together with P3 (flash budget).
+4. **P4 MCU self-update** — DONE (code): `fwupdate.c` on ESP-IDF OTA
+   (`esp_ota_begin/write/end`, boot partition switch, restart in 2 s);
+   the image is any `*.bin` on the volume (stick, or FTP-dropped onto
+   whatever is mounted at `/sdcard`), checked for the ESP image magic +
+   ESP32-S3 chip id and the OTA slot size. FIRMWARE menu: `MCU SLOT`,
+   `UPDATE MCU (.BIN ON VOLUME)` → picker → `INSTALL MCU FIRMWARE NOW`;
+   CLI `fwupdate <file> | go | cancel`. Partition scheme for the 4 MB
+   boards (225 and 103) is now Arduino `default`: 2 × 1.25 MB OTA app
+   slots + 1.4 MB LittleFS (firmware is 1.11 MB = 84 %; `min_spiffs`
+   gives 1.9 MB slots if it grows). The first install of this scheme is
+   one more download-mode flash; afterwards updates are a file drop.
+   The Arduino core marks the running app valid at init, so there is no
+   automatic rollback — the install validates the image before switching.
+   Verified: image FTP'd onto the stick, installed from the FIRMWARE menu
+   driven over telnet, board rebooted into `MCU SLOT: APP1` with the
+   stick and images remounted.
 5. **P5 Uthernet2 core back on the a2p25** (HDL, BSRAM budget).
 6. P6 boot timeline / debug; P7 SSC bridge (needs HDL).
 

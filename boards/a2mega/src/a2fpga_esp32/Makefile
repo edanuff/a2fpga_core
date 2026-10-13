@@ -30,7 +30,7 @@ REV_FLAGS = --build-property compiler.c.extra_flags=-DA2MEGA_BOARD_REV=102 \
             --build-property compiler.cpp.extra_flags=-DA2MEGA_BOARD_REV=102
 else ifeq ($(BOARD_REV),225)
 # a2p25 displayport1: same N4R2 module + partition rationale as 1.0a3 below.
-FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=4M,PSRAM=enabled,PartitionScheme=no_ota
+FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=4M,PSRAM=enabled,PartitionScheme=default
 REV_FLAGS = --build-property "compiler.c.extra_flags=-DA2MEGA_BOARD_REV=225 -DA2P25_DP_TEST=$(DP_TEST)" \
             --build-property "compiler.cpp.extra_flags=-DA2MEGA_BOARD_REV=225 -DA2P25_DP_TEST=$(DP_TEST)"
 else
@@ -41,14 +41,14 @@ else
 # PC-driven JTAG via the bridge is unaffected. The board footprint accepts
 # either MINI variant — an N8-fitted 1.0a3 builds with BOARD_REV=103 plus
 # the 102 flash settings if that ever comes up.
-FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=4M,PSRAM=enabled,PartitionScheme=no_ota
+FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=4M,PSRAM=enabled,PartitionScheme=default
 REV_FLAGS =
 endif
 
 # Source files
 SKETCH = a2fpga_esp32.ino
 CPP_FILES = a2fpga_jtag.cpp usbc_glue.cpp usbhost.cpp usbstorage.cpp
-C_FILES = a2fpga_ospi_link.c a2fpga_spi_service.c fpga_link.c fpga_screen.c wedge_watch.c \
+C_FILES = fwupdate.c a2fpga_ospi_link.c a2fpga_spi_service.c fpga_link.c fpga_screen.c wedge_watch.c \
           osd_console.c menu.c settings.c disk.c gcr_dsk.c w5100.c \
           wifi_bridge.c fpga_jtag.c fpgaupdate.c fpgastream.c ftpd.c telnetd.c \
           fusb302.c usbc_port.c esp32s3_integration.c sn75dp130.c
@@ -57,7 +57,7 @@ HEADER_FILES = a2fpga_jtag.h a2fpga_ospi_link.h a2fpga_spi_service.h wedge_watch
                net_status.h settings.h disk.h gcr_dsk.h w5100.h \
                wifi_bridge.h fpga_jtag.h fpgaupdate.h fpgastream.h ftpd.h telnetd.h \
                board_pins.h fusb302.h usb_pd.h usbc_port.h usbc_glue.h \
-               esp32s3_integration.h sn75dp130.h usbhost.h usbstorage.h
+               esp32s3_integration.h sn75dp130.h usbhost.h usbstorage.h fwupdate.h
 ALL_SOURCES = $(SKETCH) $(CPP_FILES) $(C_FILES) $(HEADER_FILES)
 
 # Default target

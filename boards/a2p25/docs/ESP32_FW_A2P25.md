@@ -344,3 +344,15 @@ build. That failure was already there before these changes.
   flash, reboot with the Mac attached (device-first window) or hold BOOT.
 - With a Mac on USB1 the board is back-powered through PTC F1: an IIgs
   power cycle does not reboot the ESP32.
+
+## Updating the firmware without the download-mode dance (10-12)
+
+Builds on the OTA partition scheme (`PartitionScheme=default`, two app
+slots). Put `build/a2fpga_esp32.ino.bin` on the image volume — copy it to
+the USB stick, or FTP it to the board (`curl -T build/a2fpga_esp32.ino.bin
+ftp://<board-ip>/`, which lands on whatever is mounted at /sdcard) — then
+FIRMWARE menu → `UPDATE MCU (.BIN ON VOLUME)` → pick the file → `INSTALL
+MCU FIRMWARE NOW`; or over the serial/telnet CLI `fwupdate <file>` then
+`fwupdate go`. The board restarts into the other slot (`MCU SLOT: ota_x`
+on the FIRMWARE screen). `make upload` over USB1 still works for the
+bench and is required once to install the OTA partition table.

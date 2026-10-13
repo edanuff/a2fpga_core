@@ -45,6 +45,7 @@
 #include "osd_console.h"
 #include "usbhost.h"
 #include "usbstorage.h"
+#include "fwupdate.h"
 #include "settings.h"
 #include "wedge_watch.h"
 #include "disk.h"
@@ -779,6 +780,16 @@ static void cmd_process(String cmd) {
 #endif
 
 #if A2MEGA_BOARD_REV == 225
+    } else if (cmd.startsWith("fwupdate")) {
+        // fwupdate <file>   check a .bin on the volume (relative to /sdcard)
+        // fwupdate go       install the checked file and restart
+        // fwupdate cancel
+        String arg = cmd.length() > 9 ? cmd.substring(9) : String("");
+        arg.trim();
+        if (arg == "go") { fwupdate_commit(); Serial.println("fwupdate: installing"); }
+        else if (arg == "cancel") { fwupdate_cancel(); Serial.println("fwupdate: cancelled"); }
+        else if (arg.length()) { Serial.printf("fwupdate: %s\n", fwupdate_request(arg.c_str()) ? "checking" : "busy"); }
+        else Serial.printf("fwupdate: state %d: %s (slot %s)\n", (int)fwupdate_state(), fwupdate_message(), fwupdate_running_slot());
     } else if (cmd == "reconfig") {
         // Pulse the FPGA's RECONFIG_N (open-drain style: drive low, then
         // release to the R32 pull-up) — reload the bitstream from flash.
@@ -829,6 +840,7 @@ static void cmd_process(String cmd) {
 #endif
 #if A2MEGA_BOARD_REV == 225
         Serial.println("  reconfig  - Pulse FPGA RECONFIG_N (reload from flash)");
+        Serial.println("  fwupdate [<file>|go|cancel] - MCU self-update from a .bin on the volume");
 #endif
         Serial.println("  restart   - Reboot the ESP32");
         Serial.println("  exit      - Return to serial forwarding mode");
@@ -1031,6 +1043,7 @@ static void disk_task(void *arg) {
     for (;;) {
         disk_poll();
         fpgaupdate_poll();
+        fwupdate_poll();
         vTaskDelay(pdMS_TO_TICKS(2));
     }
 }
