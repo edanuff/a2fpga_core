@@ -201,9 +201,9 @@ static void parse_consumer_layout(const uint8_t *d, uint32_t len, consumer_layou
 
 /* ---- per-device bookkeeping ------------------------------------------------ */
 enum devkind { DK_NONE, DK_XINPUT, DK_KBD, DK_CONSUMER, DK_MSC };
-struct hdev {
-    usb_device_handle_t dev;
-    uint8_t  addr;
+/* one serviced interface of a device (composite remotes carry a keyboard
+ * interface AND a consumer-page interface; both must be read) */
+struct hintf {
     devkind  kind;
     uint8_t  intf;
     uint8_t  ep_in, ep_out;
@@ -211,7 +211,17 @@ struct hdev {
     usb_transfer_t *xin;
     consumer_layout con;
     bool     claimed;
+    uint16_t buttons;                /* last decoded buttons of this interface */
+    struct hdev *dev;
+};
+#define MAX_INTF 4
+struct hdev {
+    usb_device_handle_t dev;
+    uint8_t  addr;
+    hintf    in[MAX_INTF];
+    uint8_t  nin;
     /* MSC (bulk-only transport) */
+    hintf   *msc;
     uint8_t  bulk_in, bulk_out;
     uint16_t mps_bulk;
     uint32_t msc_blocks, msc_bsize;
@@ -230,14 +240,32 @@ static void recompute_presence(void)
 {
     bool pad = false, hid = false, msc = false;
     for (auto &d : s_devs) {
-        if (d.dev && d.kind == DK_XINPUT) pad = true;
-        if (d.dev && (d.kind == DK_KBD || d.kind == DK_CONSUMER)) hid = true;
-        if (d.dev && d.kind == DK_MSC) msc = true;
+        if (!d.dev) continue;
+        if (d.msc) msc = true;
+        for (uint8_t i = 0; i < d.nin; i++) {
+            if (d.in[i].kind == DK_XINPUT) pad = true;
+            if (d.in[i].kind == DK_KBD || d.in[i].kind == DK_CONSUMER) hid = true;
+        }
     }
     s_pad_present = pad; s_hid_present = hid;
     if (!pad) s_pad_buttons = 0;
     if (!hid) { s_kbd_buttons = 0; s_con_buttons = 0; }
     snprintf(s_status, sizeof(s_status), "HOST%s%s%s", pad ? " PAD" : "", hid ? " HID" : "", msc ? " STICK" : "");
+}
+
+/* buttons = OR over every serviced interface of every device */
+static void recompute_buttons(void)
+{
+    uint16_t pad = 0, kbd = 0, con = 0;
+    for (auto &d : s_devs) {
+        if (!d.dev) continue;
+        for (uint8_t i = 0; i < d.nin; i++) {
+            if (d.in[i].kind == DK_XINPUT)   pad |= d.in[i].buttons;
+            if (d.in[i].kind == DK_KBD)      kbd |= d.in[i].buttons;
+            if (d.in[i].kind == DK_CONSUMER) con |= d.in[i].buttons;
+        }
+    }
+    s_pad_buttons = pad; s_kbd_buttons = kbd; s_con_buttons = con;
 }
 
 static esp_err_t ctrl_xfer(hdev *d, uint8_t bmRT, uint8_t bReq, uint16_t wVal, uint16_t wIdx, uint16_t wLen, uint8_t *data_out);
@@ -353,23 +381,23 @@ bool usbhost_msc_write(uint32_t lba, uint32_t count, const uint8_t *buf) { retur
 /* ---- transfers ------------------------------------------------------------ */
 static void in_xfer_cb(usb_transfer_t *t)
 {
-    hdev *d = (hdev *)t->context;
-    if (!d || !d->dev) return;
+    hintf *f = (hintf *)t->context;
+    if (!f || !f->dev || !f->dev->dev) return;
     if (t->status == USB_TRANSFER_STATUS_COMPLETED && t->actual_num_bytes > 0) {
         const uint8_t *buf = t->data_buffer; int n = t->actual_num_bytes;
-        switch (d->kind) {
+        switch (f->kind) {
         case DK_XINPUT:
             if (n >= 14 && buf[0] == 0x00 && buf[1] == 0x14)
-                s_pad_buttons = xinput_to_a2pad((uint16_t)buf[2] | ((uint16_t)buf[3] << 8));
+                f->buttons = xinput_to_a2pad((uint16_t)buf[2] | ((uint16_t)buf[3] << 8));
             break;
         case DK_KBD: {               /* boot report: [mods, reserved, key1..key6] */
             uint16_t bits = 0;
             for (int k = 2; k < 8 && k < n; k++) if (buf[k] > 0x01) bits |= map_kbd_usage(buf[k]);
-            s_kbd_buttons = bits;
+            f->buttons = bits;
             break;
         }
         case DK_CONSUMER: {
-            const consumer_layout *c = &d->con; uint16_t bits = 0; int off = 0;
+            const consumer_layout *c = &f->con; uint16_t bits = 0; int off = 0;
             if (c->rid) { if (n < 1 || buf[0] != c->rid) break; off = 1; }
             if (c->is_array) {
                 int bytes = c->field_bits / 8;
@@ -383,16 +411,17 @@ static void in_xfer_cb(usb_transfer_t *t)
                     if (byte < n && (buf[byte] >> bit) & 1) bits |= map_consumer_usage(c->usages[f]);
                 }
             }
-            s_con_buttons = bits;
+            f->buttons = bits;
             break;
         }
         default: break;
         }
+        recompute_buttons();
     } else if (t->status != USB_TRANSFER_STATUS_COMPLETED &&
                t->status != USB_TRANSFER_STATUS_TIMED_OUT) {
         return;                      /* device gone / stalled: stop re-arming */
     }
-    t->num_bytes = d->mps_in;
+    t->num_bytes = f->mps_in;
     usb_host_transfer_submit(t);     /* re-arm (the report pattern) */
 }
 
@@ -420,23 +449,23 @@ static esp_err_t ctrl_xfer(hdev *d, uint8_t bmRT, uint8_t bReq, uint16_t wVal, u
 }
 
 static void out_done_cb(usb_transfer_t *t) { usb_host_transfer_free(t); }
-static void int_out(hdev *d, const uint8_t *data, int n)
+static void int_out(hintf *f, const uint8_t *data, int n)
 {
     usb_transfer_t *t = NULL;
-    if (!d->ep_out || usb_host_transfer_alloc(n, 0, &t) != ESP_OK) return;
+    if (!f->ep_out || usb_host_transfer_alloc(n, 0, &t) != ESP_OK) return;
     memcpy(t->data_buffer, data, n);
-    t->num_bytes = n; t->device_handle = d->dev; t->bEndpointAddress = d->ep_out;
-    t->callback = out_done_cb; t->context = d; t->timeout_ms = 500;
+    t->num_bytes = n; t->device_handle = f->dev->dev; t->bEndpointAddress = f->ep_out;
+    t->callback = out_done_cb; t->context = f; t->timeout_ms = 500;
     if (usb_host_transfer_submit(t) != ESP_OK) usb_host_transfer_free(t);
 }
 
-static void arm_in(hdev *d)
+static void arm_in(hintf *f)
 {
-    if (!d->ep_in) return;
-    if (usb_host_transfer_alloc(d->mps_in, 0, &d->xin) != ESP_OK) return;
-    d->xin->device_handle = d->dev; d->xin->bEndpointAddress = d->ep_in;
-    d->xin->num_bytes = d->mps_in; d->xin->callback = in_xfer_cb; d->xin->context = d; d->xin->timeout_ms = 0;
-    usb_host_transfer_submit(d->xin);
+    if (!f->ep_in) return;
+    if (usb_host_transfer_alloc(f->mps_in, 0, &f->xin) != ESP_OK) return;
+    f->xin->device_handle = f->dev->dev; f->xin->bEndpointAddress = f->ep_in;
+    f->xin->num_bytes = f->mps_in; f->xin->callback = in_xfer_cb; f->xin->context = f; f->xin->timeout_ms = 0;
+    usb_host_transfer_submit(f->xin);
 }
 
 /* ---- device attach --------------------------------------------------------- */
@@ -446,18 +475,24 @@ static void attach_device(uint8_t addr)
     if (!d) return;
     if (usb_host_device_open(s_client, addr, &d->dev) != ESP_OK) { d->dev = NULL; return; }
     d->addr = addr;
+    const usb_device_desc_t *dd = NULL;
     const usb_config_desc_t *cfg = NULL;
+    char ifs[96] = ""; int ifl = 0;   /* composite devices list several interfaces */
+    usb_host_get_device_descriptor(d->dev, &dd);
     if (usb_host_get_active_config_descriptor(d->dev, &cfg) != ESP_OK) goto drop;
-    for (uint8_t i = 0; i < cfg->bNumInterfaces && d->kind == DK_NONE; i++) {
+    for (uint8_t i = 0; i < cfg->bNumInterfaces; i++) {
         int off = 0;
         const usb_intf_desc_t *id = usb_parse_interface_descriptor(cfg, i, 0, &off);
         if (!id) continue;
+        if (ifl < (int)sizeof(ifs) - 8)
+            ifl += snprintf(ifs + ifl, sizeof(ifs) - ifl, "%s%02X/%02X/%02X", i ? " " : "", id->bInterfaceClass, id->bInterfaceSubClass, id->bInterfaceProtocol);
         devkind k = DK_NONE;
         if (id->bInterfaceClass == 0xFF && id->bInterfaceSubClass == 0x5D && id->bInterfaceProtocol == 0x01) k = DK_XINPUT;
         else if (id->bInterfaceClass == 0x03 && id->bInterfaceSubClass == 0x01 && id->bInterfaceProtocol == 0x01) k = DK_KBD;
         else if (id->bInterfaceClass == 0x03) k = DK_CONSUMER;
-        else if (id->bInterfaceClass == 0x08 && id->bInterfaceSubClass == 0x06 && id->bInterfaceProtocol == 0x50 && !s_msc) k = DK_MSC;
-        if (k == DK_NONE) continue;
+        else if (id->bInterfaceClass == 0x08 && id->bInterfaceSubClass == 0x06 && id->bInterfaceProtocol == 0x50 && !s_msc && !d->msc) k = DK_MSC;
+        if (k == DK_NONE || d->nin >= MAX_INTF) continue;
+        hintf *f = &d->in[d->nin]; memset(f, 0, sizeof(*f)); f->dev = d; f->intf = i;
         if (k == DK_MSC) {
             for (uint8_t e = 0; e < id->bNumEndpoints; e++) {
                 int eoff = off;
@@ -468,61 +503,66 @@ static void attach_device(uint8_t addr)
             }
             if (!d->bulk_in || !d->bulk_out) continue;
             if (usb_host_interface_claim(s_client, d->dev, i, 0) != ESP_OK) continue;
-            d->intf = i; d->claimed = true; d->kind = k;
+            f->claimed = true; f->kind = k; d->msc = f; d->nin++;
             continue;
         }
-        /* endpoints */
         for (uint8_t e = 0; e < id->bNumEndpoints; e++) {
             int eoff = off;
             const usb_ep_desc_t *ep = usb_parse_endpoint_descriptor_by_index(id, e, cfg->wTotalLength, &eoff);
             if (!ep || (ep->bmAttributes & 0x03) != USB_BM_ATTRIBUTES_XFER_INT) continue;
-            if (ep->bEndpointAddress & 0x80) { d->ep_in = ep->bEndpointAddress; d->mps_in = ep->wMaxPacketSize; }
-            else                             { d->ep_out = ep->bEndpointAddress; d->mps_out = ep->wMaxPacketSize; }
+            if (ep->bEndpointAddress & 0x80) { f->ep_in = ep->bEndpointAddress; f->mps_in = ep->wMaxPacketSize; }
+            else                             { f->ep_out = ep->bEndpointAddress; f->mps_out = ep->wMaxPacketSize; }
         }
-        if (!d->ep_in) continue;
+        if (!f->ep_in) continue;
+        if (usb_host_interface_claim(s_client, d->dev, i, 0) != ESP_OK) continue;
+        f->claimed = true;
         if (k == DK_CONSUMER) {
-            /* need the report descriptor: find the HID descriptor's report length */
+            /* report descriptor: the HID descriptor (0x21) carries its length */
             uint16_t rlen = 0; int hoff = off;
             const usb_standard_desc_t *hd = usb_parse_next_descriptor_of_type((const usb_standard_desc_t *)id, cfg->wTotalLength, 0x21, &hoff);
             if (hd && hd->bLength >= 9) { const uint8_t *hb = (const uint8_t *)hd; rlen = hb[7] | ((uint16_t)hb[8] << 8); }
-            if (!rlen || rlen > 512) continue;
-            if (usb_host_interface_claim(s_client, d->dev, i, 0) != ESP_OK) continue;
-            d->intf = i; d->claimed = true;
             static uint8_t rdesc[512];
-            if (ctrl_xfer(d, 0x81, 0x06, 0x2200, i, rlen, rdesc) == ESP_OK) parse_consumer_layout(rdesc, rlen, &d->con);
-            if (!d->con.valid) { usb_host_interface_release(s_client, d->dev, i); d->claimed = false; d->ep_in = 0; continue; }
-            d->kind = k;
-        } else {
-            if (usb_host_interface_claim(s_client, d->dev, i, 0) != ESP_OK) continue;
-            d->intf = i; d->claimed = true; d->kind = k;
+            if (rlen && rlen <= 512 && ctrl_xfer(d, 0x81, 0x06, 0x2200, i, rlen, rdesc) == ESP_OK)
+                parse_consumer_layout(rdesc, rlen, &f->con);
+            if (!f->con.valid) {
+                /* not a consumer-page report: a non-boot keyboard or something
+                 * else on this interface — leave it claimed but unread */
+                usb_host_interface_release(s_client, d->dev, i); f->claimed = false;
+                continue;
+            }
         }
+        f->kind = k; d->nin++;
     }
-    if (d->kind == DK_NONE) goto drop;
-    if (d->kind == DK_MSC) {
-        if (!msc_init(d)) {
-            osd_log("USB HOST: STORAGE DEVICE NOT READY");
-            usb_host_interface_release(s_client, d->dev, d->intf); d->claimed = false; goto drop;
+    osd_log("USB HOST: %04X:%04X [%s]", dd ? dd->idVendor : 0, dd ? dd->idProduct : 0, ifs);
+    if (d->nin == 0) goto drop;
+    for (uint8_t n = 0; n < d->nin; n++) {
+        hintf *f = &d->in[n];
+        if (f->kind == DK_MSC) {
+            if (!msc_init(d)) {
+                osd_log("USB HOST: STORAGE DEVICE NOT READY");
+                usb_host_interface_release(s_client, d->dev, f->intf); f->claimed = false; f->kind = DK_NONE; d->msc = NULL;
+                continue;
+            }
+            s_msc = d;
+            osd_log("USB HOST: STORAGE %u MB", (unsigned)((uint64_t)d->msc_blocks * d->msc_bsize / (1024 * 1024)));
+            usbstorage_on_msc(true);
+            continue;
         }
-        s_msc = d;
-        recompute_presence();
-        osd_log("USB HOST: STORAGE %u MB", (unsigned)((uint64_t)d->msc_blocks * d->msc_bsize / (1024 * 1024)));
-        usbstorage_on_msc(true);
-        return;
+        if (f->kind == DK_KBD) {
+            ctrl_xfer(d, 0x21, 0x0B, 0, f->intf, 0, NULL);          /* SET_PROTOCOL boot */
+            ctrl_xfer(d, 0x21, 0x0A, 0, f->intf, 0, NULL);          /* SET_IDLE 0 */
+        } else if (f->kind == DK_XINPUT) {
+            uint8_t tmp[32];
+            for (int i = 0; i < 4; i++)
+                ctrl_xfer(d, k_xbox_init_ctrl[i].bmRequestType, k_xbox_init_ctrl[i].bRequest,
+                          k_xbox_init_ctrl[i].wValue, k_xbox_init_ctrl[i].wIndex, k_xbox_init_ctrl[i].wLength, tmp);
+            for (int i = 0; i < 4; i++) int_out(f, k_xbox_ep2[i], 3);
+        }
+        arm_in(f);
+        osd_log("USB HOST: %s CONNECTED", f->kind == DK_XINPUT ? "XINPUT CONTROLLER" : f->kind == DK_KBD ? "KEYBOARD" : "HID REMOTE");
     }
-    if (d->kind == DK_KBD) {
-        ctrl_xfer(d, 0x21, 0x0B, 0, d->intf, 0, NULL);          /* SET_PROTOCOL boot */
-        ctrl_xfer(d, 0x21, 0x0A, 0, d->intf, 0, NULL);          /* SET_IDLE 0 */
-    } else if (d->kind == DK_XINPUT) {
-        uint8_t tmp[32];
-        for (int i = 0; i < 4; i++)
-            ctrl_xfer(d, k_xbox_init_ctrl[i].bmRequestType, k_xbox_init_ctrl[i].bRequest,
-                      k_xbox_init_ctrl[i].wValue, k_xbox_init_ctrl[i].wIndex, k_xbox_init_ctrl[i].wLength, tmp);
-        for (int i = 0; i < 4; i++) int_out(d, k_xbox_ep2[i], 3);
-    }
-    arm_in(d);
     recompute_presence();
-    osd_log("USB HOST: %s CONNECTED", d->kind == DK_XINPUT ? "XINPUT CONTROLLER" : d->kind == DK_KBD ? "KEYBOARD" : "HID REMOTE");
-    ESP_LOGI(TAG, "attached addr %u kind %d ep_in %02x", addr, (int)d->kind, d->ep_in);
+    ESP_LOGI(TAG, "attached addr %u, %u interfaces", addr, d->nin);
     return;
 drop:
     ESP_LOGI(TAG, "addr %u: no supported interface", addr);
@@ -539,12 +579,16 @@ static void detach_device(usb_device_handle_t h)
         usbstorage_on_msc(false);
         if (s_msc_lock) { xSemaphoreTake(s_msc_lock, portMAX_DELAY); xSemaphoreGive(s_msc_lock); }
     }
-    if (d->xin) { usb_host_transfer_free(d->xin); d->xin = NULL; }
-    if (d->claimed) usb_host_interface_release(s_client, d->dev, d->intf);
+    for (uint8_t n = 0; n < d->nin; n++) {
+        hintf *f = &d->in[n];
+        if (f->xin) { usb_host_transfer_free(f->xin); f->xin = NULL; }
+        if (f->claimed) usb_host_interface_release(s_client, d->dev, f->intf);
+    }
     usb_host_device_close(s_client, d->dev);
     osd_log("USB HOST: DEVICE REMOVED");
     memset(d, 0, sizeof(*d));
     recompute_presence();
+    recompute_buttons();
 }
 
 static void client_cb(const usb_host_client_event_msg_t *m, void *arg)

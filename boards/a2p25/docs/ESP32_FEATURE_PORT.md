@@ -58,8 +58,12 @@ first slice that was already ported.
    loop). Role policy: device mode for 5 s after boot; a PC enumerating
    us or BOOT (S2) held keeps device mode, otherwise the PHY moves to the
    OTG controller in host mode (CDC console gone, telnet stays). Verified:
-   XInput pad on USB1 via C-to-A adapter drives the OSD menu. Keyboard /
-   remote paths are code-complete, not yet exercised on hardware.
+   XInput pad on USB1 via C-to-A adapter drives the OSD menu. Every
+   supported interface of a device is serviced (composite remotes =
+   keyboard + consumer-page interfaces; the first version claimed only
+   one): the XING WEI remote dongle (1915:1025, audio + 2 HID
+   interfaces) navigates the menu on a hub. Attach logs `VID:PID
+   [class/sub/proto …]` per device for diagnosis over telnet.
    Not done: feeding the FPGA's Apple-side joystick (needs ESP32-writable
    pad regs in the OSPI connector — the 0x16-0x1B regs are fabric→ESP32).
 3. **P3 USB mass storage** — DONE: MSC bulk-only/SCSI in `usbhost.cpp`
