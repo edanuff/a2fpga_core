@@ -1493,3 +1493,107 @@ for the PARAMETERS only — the 0x00E-derived EQ dwell is a behaviour change
 even at defaults, so the port's A/B must RE-MEASURE first-draw /
 time-to-picture rows (blinks-to-lock, L: counter, n ≥ 5 per build per the
 08-22 lesson), not assume them from the parameter defaults.
+
+### 10-12 — AUX/training stack port BUILT (branch `claude/a2mega-aux-stack-port`, UNFLASHED)
+
+The follow-up above, done as its own branch off the build-3 state
+(c3142418 = 50eae999 HDL + the log notes). Port commit **c478d26d**.
+
+**What was ported** — the a2p25 stack c7064c6e..e4f2e056 taken WHOLE, files
+verbatim from e4f2e056 (`git diff e4f2e056 -- <file>` empty for each):
+`hdl/displayport/auxch/aux_channel.v`, `channel_managemnt.v`,
+`dp_aux_messages.v`, `dp_transmitter.sv`, plus **`aux_interface.v`** — a 5th
+file the 10-12 note did not list: it grows a `debug_state` port that the new
+`aux_channel` connects, so the four alone do not elaborate. NOT taken:
+`video/msa_inserter_4ch.v` (84b65c72's three 4-lane width fixes; the a2mega
+is LANE_COUNT=2 and the 2-lane rows are untouched). The D-PHY `ext_*` ports
+sit inside `` `ifdef DP_VENDOR_DPHY `` and do not exist on this build
+(`dp_gowin_defines.v` = DP_VENDOR_GOWIN), so nothing to tie off.
+
+**Top wiring (`boards/a2mega/hdl/top.sv`)** — every new knob pinned
+EXPLICITLY at what the board ran before, with the reasoning in comments:
+`LINK_CHECK=1` (spec flow — a2p25's 0/2 were AUX-RX bring-up aids),
+`LINK_CHECK_CLKS` ~1 s, `RETRY_WATCHDOG_CLKS` 0.5 s, `EQ_WAIT_MULT=1`,
+`TRAIN_ERRCNT=0`, `LATE_REPLY_DRAIN=0` (a2p25's 1 not taken), and
+`ECHO_SINK_ADJUST=0`: it is an AFE-sequencer-OFF feature (the a2p25's
+SN75DP130 snoops TRAINING_LANEx_SET); the a2mega's AFE policy is the M5
+runtime sequencer (`ENABLE_AFE_ADJUST=1` from the die pkg,
+`AFE_APPLY_ON_START=0` / trust boot csr) which already declares the truthful
+lane-set byte, and the echo path is gated off when the sequencer is on
+anyway. New outputs `debug_obs`, `debug_auxif`, `debug_underrun_cnt`,
+`debug_fifo_level` connected open (no ESP32 telemetry slot yet).
+
+**The ONLY intended behaviour change at these values**: the EQ status-read
+dwell follows DPCD 0x00E (0 → 4 × 100 µs as before; n → n × 4 ms per pass,
+cap 16 ms; registered advance), fetched by the now-16-byte capability read;
+plus the `dp_aux_messages` msg-0x00 fix (an empty message no longer occupies
+the engine for 15 clocks, so a check_link request landing in that window is
+no longer dropped — on the a2mega that window was a latent hang, not an
+observed one).
+
+**Sim on the ported files (iverilog)**: `tb_polite_attach` PASS (default +
+`+giveup`), `tb_train_recover` PASS (default, `+silent`, `+exhaust`),
+`tb_gate_fail_counters` PASS.
+
+**Build** — `GPRJ=a2mega.gprj tools/build.sh a2mega`, gw_sh V1.9.12.01,
+GW5AT-LV60PG484AC1/I0, Gowin IDE closed, SecurityBit OFF (process config
+unchanged). TWO rolls of the identical source c478d26d:
+
+- Roll 1: **1 setup violation**, -0.157 ns clk_sym, `i_pixel_cdc_fifo mem
+  DO[0] → video_stream_packer ready_s0` — the known FIFO-DO cone
+  (timing_round2.md; build 3 had it at +0.105). Not a cone the port touches;
+  the port's own domain closed at clk100 **+0.303** (AUX `tx_rd_ptr →
+  esi_defer_cnt CE`), better than build 3's 0.056. fs sha256 `539079365a0b…`
+  (kept in the session scratchpad only, not a candidate).
+- Roll 2: **CLEAN** — 0 setup / 0 hold, TNS 0.000 every clock, Fmax ≥
+  constraint every clock.
+  - `impl/pnr/a2mega.fs` sha256 **adc6da31ca90de48ce6e735d177561096ec0a7a95de8c4772cbe9b828e2c515a**
+  - `impl/pnr/a2mega.bin` sha256 **b14a7984c94062259c89961792632efeefa0675b11d3d268f337b3f0422267e1**
+  - archived as `impl/archive/a2mega_60k_full_auxstack_adc6da31.{fs,bin}`
+  - Logic 20227/59904, Register 20751/60780, BSRAM 108/118 (build 3: 20179 /
+    20718 / 108 — the port costs ~50 LUTs).
+  - Fmax: clk 140.056/50; clk4x 2016/324; clk1x 104.835/80.998; **clk100
+    110.056/100** (build 3: 100.559); clk_sym 135.409/135.007; clk_pix
+    153.875/148.5; cm_life 141.723/66.667; clk_logic 57.820/54.0.
+  - Worst setup: **0.022 clk_sym packer `line_cycle → pf_prime`**, 0.102
+    `line_cycle → pf_vb RESET` (×3), 0.169 sdp_engine `inserting → db CE`,
+    0.235 clk_pix debug_overlay. No AUX/clk100 path in the top 13 (≥ 0.33).
+    Worst hold 0.044 clk_logic (fb wr_accum → wr_fifo, as build 3).
+
+Honest framing per the no-skating rule: the roll-1 miss and roll-2 close are
+the a2mega's pre-existing clk_sym knife-edge (packer/FIFO-DO cones) rolling
+either side of zero, exactly as build 3's "ONE roll of the final source"
+caveat. The structural fix for that cone (pixel_cdc_fifo output skid, PR #5
+b0480c76) is NOT on main — it lives on claude/timing-round2 and the
+gs-socket branches — and was deliberately not pulled in here so the A/B
+isolates the AUX stack. The port itself is not on the knife-edge: clk100
+gained ~10 MHz of Fmax headroom over build 3.
+
+**A/B plan (hardware, pending ed's flash go-ahead)** — B = this build
+(adc6da31), A = build 3 (32b86008, itself still unflashed; A must be
+measured in the same session, not assumed from the 10-11 notes). Per
+`acquisition_matrix_results.md` (08-25 protocol: plain board power cycles,
+HDMI actions are recovery steps only, n ≥ 5 per build per the 08-22 lesson,
+interleave A/B so hub history and temperature are not correlated with
+build):
+
+- Sinks: Anker hub, Mindorlan hub, Ugreen hub (each DP→HDMI to the Sceptre),
+  and the direct USB-C→DP cable to the DP monitor (the 09-02 4-lane PASS
+  path; here 2-lane HBR as always on the a2mega).
+- Per cycle: blinks-to-lock, elapsed time to stable picture, `L:` (D4
+  assertion count, expect blinks+1), `Y:`, `C:`, `K:`, `B:` teardown reason;
+  then the HUB-AUDIO row (DOC/mixer audio audible through the hub's HDMI
+  sink — the 10-11 regression check build 3 was for).
+- Also read `debug_caps`/the 16-byte cap profile if the ESP32 telemetry
+  exposes it: which sinks advertise 0x00E ≠ 0 decides where a delta is even
+  possible.
+- Expected: identical pass/fail and single-pass training everywhere; sinks
+  advertising 0x00E = 1 (4 ms; the a2p25 session saw the Sceptre at 0x81)
+  spend ~16 ms in EQ instead of 1.6 ms, i.e. ≈ 15 ms longer time-to-picture,
+  invisible against the second-scale hub bring-up. Any extra pass, blink
+  or hub-audio change is a finding, not noise.
+- Not expected but watch for: converters whose DEFER replies carry trailing
+  bytes (the a2p25 reason for `LATE_REPLY_DRAIN=1`) — on this build they hit
+  the legacy error path exactly as on build 3, so no regression, but a
+  `B:` short-reply teardown on a hub that was clean on A would be the cue
+  to retest with the drain on.
