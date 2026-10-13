@@ -1515,6 +1515,32 @@ module top #(
         .TRAIN_RECOVER    (1),          // paced retries, TX held
         .ERRCNT_READ      (1),          // 0x210-0x213 every check
         .HPD_DISCONNECT_RESETS(0),      // flap storms: no HPD teardown
+        // a2p25 AUX/training stack port (10-12, c7064c6e..e4f2e056 whole;
+        // see bringup_1_0a3_log.md). Every new knob is pinned EXPLICITLY at
+        // the value this board ran before, so the only behaviour change in
+        // this bitstream is the one the port carries at defaults: the EQ
+        // status-read dwell now follows the sink's DPCD 0x00E
+        // TRAINING_AUX_RD_INTERVAL (0 -> 400 us as before; n -> n x 4 ms,
+        // cap 16 ms) instead of a fixed 4 x 100 us, plus the 16-byte
+        // capability read that fetches it and the msg-0x00 engine fix.
+        .LINK_CHECK       (1),          // spec flow: periodic/hpd_irq status
+                                        // checks tear a failed link down
+                                        // (what the a2mega always ran;
+                                        // a2p25's 0/2 were AUX-RX bring-up aids)
+        .LINK_CHECK_CLKS  (27'd99999999), // ~1 s at 100 MHz, as before
+        .RETRY_WATCHDOG_CLKS(29'd49999999), // 0.5 s attach watchdog, as before
+        .EQ_WAIT_MULT     (6'd1),       // no extra EQ-dwell floor: the
+                                        // 0x00E-derived dwell alone
+        .TRAIN_ERRCNT     (0),          // no 0x210 reads inside the EQ loop
+        .LATE_REPLY_DRAIN (0),          // a2p25 drains converters' trailing
+                                        // DEFER bytes; NOT taken here unless
+                                        // an a2mega sink shows the need
+        // ECHO_SINK_ADJUST is an AFE-sequencer-OFF feature (a2p25: the
+        // SN75DP130 redriver snoops TRAINING_LANEx_SET). The a2mega's AFE
+        // policy is the M5 runtime sequencer below (ENABLE_AFE_ADJUST from
+        // the die pkg) which already declares the truthful lane-set byte,
+        // so the echo path stays off = byte-identical legacy.
+        .ECHO_SINK_ADJUST (0),
         // M5 runtime AFE: per-die verified bases from the die pkg
         .ENABLE_AFE_ADJUST(dp_test_die_pkg::ENABLE_AFE_ADJUST),
         .AFE_LANE_BASE0   (dp_test_die_pkg::AFE_LANE_BASE0),
@@ -1555,6 +1581,13 @@ module top #(
         .debug_drp_clk     (dp_drp_clk_w),
         .debug_errcnt0     (dp_errcnt0_w),
         .debug_errcnt1     (dp_errcnt1_w),
+        // a2p25-stack observe/liveness outputs (LINK_CHECK==2 counters are
+        // zero at LINK_CHECK=1; packer underrun/level unread here — the
+        // ESP32 telemetry map has no slot for them yet)
+        .debug_obs         (),
+        .debug_auxif       (),
+        .debug_underrun_cnt(),
+        .debug_fifo_level  (),
         // DRP register-readback debug bridge (used interactively by the
         // dp_test bitstream; idle here — index parked, outputs unread)
         .drp_dbg_idx       (5'd0),

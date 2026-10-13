@@ -71,8 +71,13 @@ module channel_management #(
     parameter LATE_REPLY_DRAIN = 0, // 0 = legacy error behavior
     parameter POLITE_ATTACH = 0,   // Mac-parity attach pacing (aux_channel.v)
     parameter [5:0] EDID_DEFER_CAP = 6'd40,
+    parameter [28:0] RETRY_WATCHDOG_CLKS = 29'd49999999,
+    parameter [5:0]  EQ_WAIT_MULT = 6'd1,
+    parameter        TRAIN_ERRCNT = 0,
     parameter TRAIN_RECOVER = 1,
     parameter ERRCNT_READ = 0,
+    parameter LINK_CHECK = 1,
+    parameter [26:0] LINK_CHECK_CLKS = 27'd99999999,
     parameter WEDGE_BIT = 30,
     parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000
 )(
@@ -99,6 +104,8 @@ module channel_management #(
         output [15:0] errcnt0,       // SYMBOL_ERROR_COUNT lane0 (raw, bit15=valid)
         output [15:0] errcnt1,       // SYMBOL_ERROR_COUNT lane1
         output [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
+        output [103:0] debug_obs,       // LINK_CHECK==2 observe counters (aux_channel)
+        output [23:0]  debug_auxif,     // AUX interface liveness (aux_channel)
         // ATOMIC FIRST-FAILURE SNAPSHOT (second-opinion instrumentation,
         // 08-24): latched in the same clock as the FIRST failing check_wait
         // evaluation since config. {raw 0x204, 0x203, 0x202 at that moment,
@@ -289,8 +296,13 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
               .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN),
               .POLITE_ATTACH(POLITE_ATTACH),
               .EDID_DEFER_CAP(EDID_DEFER_CAP),
+            .RETRY_WATCHDOG_CLKS (RETRY_WATCHDOG_CLKS),
+            .EQ_WAIT_MULT(EQ_WAIT_MULT),
+            .TRAIN_ERRCNT(TRAIN_ERRCNT),
               .TRAIN_RECOVER(TRAIN_RECOVER),
               .ERRCNT_READ(ERRCNT_READ),
+              .LINK_CHECK(LINK_CHECK),
+              .LINK_CHECK_CLKS(LINK_CHECK_CLKS),
               .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_aux_channel(
         .clk             (clk100),
         .train_set_byte  (train_set_byte),
@@ -305,6 +317,8 @@ aux_channel #(.LINK_RATE_MBPS(LINK_RATE_MBPS),
         .errcnt0_o       (errcnt0),
         .errcnt1_o       (errcnt1),
         .debug_err_detail(debug_err_detail),
+        .debug_obs       (debug_obs),
+        .debug_auxif     (debug_auxif),
         .gate_fail_evt   (gate_fail_evt_w),
         .status_seq      (status_seq_w),
         .debug_sink      (debug_sink),
