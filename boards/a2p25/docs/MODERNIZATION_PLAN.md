@@ -543,6 +543,45 @@ Consequences: 2-lane hubs cap the a2p25 at 720p (RBR×2); 1080p needs a
 (720p×2), Cable Matters 48G #1 = FAIL (no RBR symbol lock), #2 = FAIL
 (AUX replies undecodable; powered mode needs DR_Swap).
 
+### 6h.1 Recipe: qualifying a USB-C→HDMI adapter (RBR capability, lane count)
+
+Goal (ed, 10-12): two classes to sort — (i) 48 Gbps / 8K@60-branded
+adapters (HBR3-era receivers): do they decode RBR at all? (ii) 18 Gbps /
+4K@60-branded adapters: are they 4-lane? A 4-lane RBR-capable converter
+gives 1080p60; a 2-lane one caps the a2p25 at 720p. Lane count comes
+from two places: the PD census line (`pins=C` = 4-lane capable,
+`pins=D` = 2 lanes + USB3 — the mux cannot give it 4 lanes regardless)
+and DPCD 0x002 bits 4:0 in `PE` (0x?4 = 4 lanes, 0x?2 = 2 lanes).
+
+1. ESP32 on the DP_TEST=1 firmware (`make BOARD_REV=225 DP_TEST=1 upload`,
+   release the serial port first); persistent console `scratchpad/
+   console.py` (dtr=rts=False; `+++` = CLI, `exit` = forwarding).
+2. SRAM-load `a2p25_dp_test_hold` (2-lane 720p, LINK_CHECK=0,
+   LATE_REPLY_DRAIN=1, TRAIN_ERRCNT, automatic EQ dwell from 0x00E).
+   Confirm the `PF` stamp matches `boards/a2p25/hdl/datetime.svh`.
+3. Plug the adapter + HDMI monitor. `pd` must say `dp-active ... DFP`,
+   HPD 1, mux-DP 1 (if it says `state device`, the adapter is a PD
+   source: powered-adapter case → needs DR_Swap).
+4. Read 40 s of telemetry: `PE` = caps (byte 0x00E = interval, 0x002 =
+   lanes/TPS3/enhanced), `P1 D:`/`HLV:`, `P2 C:` (0x202 lane status),
+   `P6` (SYMBOL_ERROR_COUNT lanes 0/1; 0x8000 = valid+0 = clean,
+   0xFFFF = valid+saturated = the Cable Matters signature).
+   PASS = D:2E, HLV:111, C:xx77, colorbars. FAIL classes seen so far:
+   (a) CR on all lanes, never symbol lock, counters saturated → receiver
+   does not decode RBR (nothing to do on our side); (b) `D:02` forever,
+   `T:000F` timeouts, preamble-only reply capture → AUX replies not
+   decodable (AUX margin; AD3 capture at R41/R42 next); (c) `state
+   device` → powered adapter, DR_Swap.
+5. For PASS adapters also try the 4-lane 1080p build
+   (`a2p25_dp_test_4l`) — 4-lane converters would lift the 720p cap.
+
+**Production core a651e352 (LATE_REPLY_DRAIN=1, EQ dwell from 0x00E; ESP32
+production fw 40ad1064) with a NEW USB-C→HDMI adapter (10-12 evening,
+Anker USB-C to HDMI Adapter, 4K@60Hz / 18 Gbps class): trained first time at RBR ×4 1080p** — AUX state 2E,
+0x202/0x203 = 0x77/0x77 (all four lanes CR+EQ+symbol lock), 0x204 = 01,
+sink status 03, 8 DEFERs drained, 0 teardowns; monitor OSD 1920×1080.
+IIgs verified through it: Arkanoid SHR at 1080p and DOC audio on the HDMI side. Census: Anker USB-C→HDMI 4K@60 adapter = PASS (4-lane RBR → 1080p60 + audio through HDMI) — first data point for "4K@60-class adapters are 4-lane and RBR-capable".
+
 Bench traps recorded today: every SRAM load is a real reload (verify via
 `PF` stamp); `pd` shows "unattached" when the adapter is out — check
 HPD before reading a run; a powered adapter flips our port to sink/UFP.

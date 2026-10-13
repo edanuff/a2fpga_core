@@ -163,7 +163,8 @@ module aux_channel #(
     // 0x00E TRAINING_AUX_RD_INTERVAL = 0). Sinks advertising 4 ms+ (DP->HDMI
     // converters, a2p25 10-12) need the status read held off that long;
     // reading early and re-issuing TPS2 restarts their equalizer forever.
-    // Each wait state dwells EQ_WAIT_MULT x 100 us.
+    // Each wait state dwells max(EQ_WAIT_MULT, interval-derived) x 100 us;
+    // the interval is latched from DPCD 0x00E during the capability read.
     parameter [5:0] EQ_WAIT_MULT = 6'd1,
     // TRAINING RECOVERY (08-28, from the 60K bisect + AD3 capture of the
     // step-6b stall): a garbled/short/lost reply to a TRAINING-phase read
@@ -407,7 +408,27 @@ module aux_channel #(
     reg         link_check_now;
     reg [26:0]  link_check_count;
     reg [14:0]  count_100us;
-    reg [5:0]   eq_wait_rep = 6'd0;   // EQ_WAIT_MULT repeats taken in the current align_wait state
+    reg [6:0]   train_interval_r = 7'd0;   // DPCD 0x00E (latched per caps read)
+    // effective per-align_wait-state multiplier (x100 us, 4 states):
+    // the sink's interval (n x 4 ms -> n x 10 per state, capped at 16 ms)
+    // or the EQ_WAIT_MULT floor, whichever is larger
+    wire [5:0]  eq_int_mult_w = (train_interval_r == 7'd0) ? 6'd1 :
+                                (train_interval_r >= 7'd4) ? 6'd40 : {train_interval_r[1:0], 1'b0} + {train_interval_r[1:0], 3'b0};  // n*10
+    wire [5:0]  eq_mult_w     = (eq_int_mult_w > EQ_WAIT_MULT) ? eq_int_mult_w : EQ_WAIT_MULT;
+    // Registered (timing): the multiplier only changes at the capability
+    // read and blind_dwell counts cycles in state, so a one-cycle-late
+    // "more dwell needed" flag is exact where it is consumed and keeps
+    // the 7-bit compare out of the FSM's advance condition (-1.2 ns at
+    // clk100 when it was combinational, a2p25 10-12).
+    reg         is_align_wait_r   = 1'b0;   // state is align_wait0-3
+    reg  [23:0] eq_dwell_cycles_r = 24'd10000;
+    reg         eq_dwell_done_r   = 1'b0;   // blind_dwell reached the threshold
+    always @(posedge clk) begin
+        is_align_wait_r   <= (state == align_wait0 || state == align_wait1 ||
+                              state == align_wait2 || state == align_wait3);
+        eq_dwell_cycles_r <= {eq_mult_w, 4'd0} * 24'd625;   // mult x 10000 cycles (100 us @ 100 MHz)
+        eq_dwell_done_r   <= (blind_dwell >= eq_dwell_cycles_r);
+    end
     
     reg       adjust_de_active;
     reg       dp_reg_de_active;
@@ -1181,7 +1202,6 @@ always @(posedge clk) begin
         count_100us <= count_100us - 1;
     end else begin
         count_100us <= 15'd9999;                                        
-        eq_wait_rep <= 6'd0;
         if(reset_addr_on_change == 1'b1 && !afe_hold) begin
             aux_addr_i <= 8'h0;
         end                                       
@@ -1210,18 +1230,11 @@ always @(posedge clk) begin
     // instead of ~650 us.
     if(state == next_state && expected == 8'h00 && count_100us[14] == 1'b1 &&
        state != presence_wait && state != defer_wait && state != train_wait &&
+       !is_align_wait_r &&
        (POLITE_ATTACH == 0 ||
         !(state == clock_wait || state == clock_wait_after) ||
         blind_dwell[15] == 1'b1)) begin
-        if ((state == align_wait0 || state == align_wait1 ||
-             state == align_wait2 || state == align_wait3) &&
-            eq_wait_rep != EQ_WAIT_MULT - 6'd1) begin
-            // EQ dwell extension: re-arm the 100 us timer, stay put
-            eq_wait_rep <= eq_wait_rep + 6'd1;
-            count_100us <= 15'd9999;
-        end else begin
-            next_state <= state_on_success;
-        end
+        next_state <= state_on_success;
     end
     // presence_wait: ~21 ms between sink-count re-reads while the branch
     // reports no sink (blind_dwell counts cycles-in-state unconditionally)
@@ -1235,6 +1248,12 @@ always @(posedge clk) begin
     end
     // train_wait: same ~650 us pace before retrying a failed training read
     if(state == next_state && state == train_wait && blind_dwell[16] == 1'b1) begin
+        next_state <= state_on_success;
+    end
+    // align_wait0-3: EQ dwell = eq_mult_w x 100 us per state (the sink's
+    // TRAINING_AUX_RD_INTERVAL from DPCD 0x00E, or the EQ_WAIT_MULT floor);
+    // everything feeding the FSM here is a flop (timing, a2p25 10-12)
+    if(state == next_state && is_align_wait_r && eq_dwell_done_r) begin
         next_state <= state_on_success;
     end
 
@@ -1451,6 +1470,10 @@ always @(posedge clk) begin
                     esi_2005_r  <= aux_rx_data;
                     dbg_esi2005 <= dbg_esi2005 | aux_rx_data;
                 end
+                // TRAINING_AUX_RD_INTERVAL (DPCD 0x00E = caps read byte 15):
+                // bits 6:0, 0 = 400 us EQ interval, n = n x 4 ms
+                if(state == read_registers && rx_byte_count == 8'h0F)
+                    train_interval_r <= aux_rx_data[6:0];
                 // SYMBOL_ERROR_COUNT: bytes 1-4 = 0x210..0x213
                 if((state == errcnt_read || state == errcnt_train) && rx_byte_count == 8'h01)
                     err0_r[7:0]  <= aux_rx_data;

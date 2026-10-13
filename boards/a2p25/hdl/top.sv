@@ -1301,7 +1301,7 @@ module top #(
         .ENABLE_PHASE_DONE_GATE(1),
         .GATE_GRACE       (0),
         .GATE_KICK        (0),
-        .LATE_REPLY_DRAIN (0),
+        .LATE_REPLY_DRAIN (1),   // converter AUX_DEFER replies carry trailing bytes (10-12)
         .IRQ_SERVICE      (2),
         .POLITE_ATTACH    (1),
         .ERRCNT_READ      (1),
@@ -1465,11 +1465,11 @@ module top #(
     //   0x1C/0x1D/0x1E = DPCD 0x202/0x203/0x204   0x1F = training state
     //   0x7C = sink caps profile   0x7D = SINK_STATUS (0x205)
     //   0x20 = {edid_giveup, defer_cnt[6:0]}      0x21 = teardown[7:0]
-    //   0x22 = {locks[3:0], aux_err[3:0] (irq_services low nibble)}
+    //   0x22 = {locks[3:0], aux_err[7:4] (kicks)}
     wire [47:0] usb_dbg_desc_sync1 = {dp_dbg_sink_w, dp_dbg_caps_w, dp_dbg_state_w, dp_dbg_chstate_w};
     wire [7:0]  usb_dbg_flags_sync1 = {1'b0, dp_dbg_defer_w};
     wire [7:0]  usb_cnt_start_sync1 = dp_dbg_teardown_w[7:0];
-    wire [7:0]  usb_cnt_rdy_sync1   = {dp_dbg_locks_w, dp_dbg_aux_err_w[3:0]};
+    wire [7:0]  usb_cnt_rdy_sync1   = {dp_dbg_locks_w, dp_dbg_aux_err_w[7:4]};   // [7:4] = 'kicks' class (re-roll nudge 10-12)
 
 
     // DDR3 sequencer telemetry (clk 50 MHz -> clk_logic; quasi-static)

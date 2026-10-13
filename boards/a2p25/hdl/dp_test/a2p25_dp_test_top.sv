@@ -596,7 +596,6 @@ module a2p25_dp_test_top #(
         .ECHO_SINK_ADJUST (1),
         .RETRY_WATCHDOG_CLKS (29'd399999999),   // 4 s (10-12 adapter experiment; default 0.5 s)
         .TRAIN_ERRCNT     (1),                  // 10-12: SYMBOL_ERROR_COUNT read inside the EQ loop (P6)
-        .EQ_WAIT_MULT     (6'd45),              // 10-12: 4 x 4.5 ms = 18 ms EQ dwell (this converter's 0x00E = 4 -> 16 ms)
         .TX_PROBE         (0),
         // 720p60 (VIC 4, 74.25 MHz) or 1080p60 (VIC 16, 148.5 MHz);
         // pixel = 81 MHz * 11 / PIX_DIV via VCO 891
