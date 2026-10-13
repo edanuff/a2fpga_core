@@ -47,7 +47,7 @@ endif
 
 # Source files
 SKETCH = a2fpga_esp32.ino
-CPP_FILES = a2fpga_jtag.cpp usbc_glue.cpp
+CPP_FILES = a2fpga_jtag.cpp usbc_glue.cpp usbhost.cpp
 C_FILES = a2fpga_ospi_link.c a2fpga_spi_service.c fpga_link.c fpga_screen.c wedge_watch.c \
           osd_console.c menu.c settings.c disk.c gcr_dsk.c w5100.c \
           wifi_bridge.c fpga_jtag.c fpgaupdate.c fpgastream.c ftpd.c telnetd.c \
@@ -57,7 +57,7 @@ HEADER_FILES = a2fpga_jtag.h a2fpga_ospi_link.h a2fpga_spi_service.h wedge_watch
                net_status.h settings.h disk.h gcr_dsk.h w5100.h \
                wifi_bridge.h fpga_jtag.h fpgaupdate.h fpgastream.h ftpd.h telnetd.h \
                board_pins.h fusb302.h usb_pd.h usbc_port.h usbc_glue.h \
-               esp32s3_integration.h sn75dp130.h
+               esp32s3_integration.h sn75dp130.h usbhost.h
 ALL_SOURCES = $(SKETCH) $(CPP_FILES) $(C_FILES) $(HEADER_FILES)
 
 # Default target

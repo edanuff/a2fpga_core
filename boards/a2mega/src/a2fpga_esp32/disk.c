@@ -38,6 +38,9 @@
 #include "a2fpga_regs.h"
 #include "fpga_link.h"
 #include "gcr_dsk.h"      /* on-the-fly .dsk/.do <-> 6-and-2 GCR nibble codec */
+
+/* .ino: releases the ESP32-driven Apple /RES (no-op where the FPGA owns it) */
+void a2_reset_hold_release(const char *why);
 #include "settings.h"     /* persisted image overrides + slot map */
 #include "disk.h"
 
@@ -752,6 +755,8 @@ void disk_poll(void)
                 apply_slot_map();
 
                 fpga_reg_write(A2REG_A2_RST_RELEASE, 1);
+                /* boards where the ESP32 owns the /RES pin (a2p25 IO33) */
+                a2_reset_hold_release(any ? "media mounted" : "no media");
                 s_released = true;
                 DLOGI("A2: RESET RELEASED%s", any ? "" : " (NO MEDIA)");
             }

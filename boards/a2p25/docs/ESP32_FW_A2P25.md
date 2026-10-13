@@ -155,7 +155,8 @@ three parts are on the same bus. The FPGA is not on it.
 | FPGA debug UART | IO44 RX / IO43 TX | dp_test only: RX on IO11, no TX | `A2MEGA_HAS_FPGA_UART` |
 | OSPI link + menu/disk/W5100 tasks | yes | DP_TEST=0 only | `A2MEGA_HAS_OSPI_LINK` |
 | HPD wire to FPGA | IO33 (ESP_GPIO0) | dp_test: IO10; otherwise none | `PIN_DP_HPD_OUT` (−1 = record only) |
-| Apple /RES driver | FPGA | ESP32 IO33 | `PIN_A2_RESET_OUT` |
+| Apple /RES driver | FPGA | ESP32 IO33; production builds hold /RES from boot until the disk task reports the mounts done or a 15 s backstop (`a2_reset_hold_release`, 10-12); dp_test releases at once | `PIN_A2_RESET_OUT` |
+| USB host on the module's USB-C (USB1) | same hardware (1.0a3) — untested there | `usbhost.cpp`: device-first role policy (5 s window, BOOT held = device), then OTG host: XInput pads, HID keyboards/remotes → OSD menu buttons | `A2MEGA_HAS_OSPI_LINK` (production builds only) |
 | PPO bus, ESP_GPIO spares | IO5–10, IO33–38 | n/a | not defined for 225 |
 | LEDs | n/a | LED0 heartbeat, LED1 = HPD | `PIN_LED0/1` |
 
@@ -327,3 +328,19 @@ There is one known issue outside this work: `BOARD_REV=102` (a2mega 1.0a2x)
 fails to link at HEAD with an undefined `usbc_virtual_replug_fast`. The
 cause is that `wedge_watch.c` calls the USB-C glue, which 102 does not
 build. That failure was already there before these changes.
+
+## Bench traps (10-12)
+
+- **Mac-side DTR/RTS and the S3's auto-download logic.** The USB-Serial-JTAG
+  peripheral maps the host's DTR/RTS onto IO0/EN: a port opened (or left)
+  with DTR asserted and RTS released holds IO0 low, so the next reset — an
+  esptool hard reset, a console open, even a manual EN tap — lands in ROM
+  download mode (`rst:0x15 USB_UART_CHIP_RESET, boot:0x20 DOWNLOAD`). Seen
+  repeatedly on 10-12 after flashing; the only reliable recovery was to
+  unplug the Mac cable and power-cycle. Use telnet (WiFi) as the console
+  whenever possible and keep serial for flashing; `scratchpad/console.py`
+  parks both lines deasserted.
+- Once the firmware is in USB host mode the Mac sees no device at all; to
+  flash, reboot with the Mac attached (device-first window) or hold BOOT.
+- With a Mac on USB1 the board is back-powered through PTC F1: an IIgs
+  power cycle does not reboot the ESP32.

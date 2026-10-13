@@ -43,6 +43,7 @@
 #include "fpga_link.h"
 #include "fpga_screen.h"
 #include "osd_console.h"
+#include "usbhost.h"
 #include "settings.h"
 #include "wedge_watch.h"
 #include "disk.h"
@@ -109,6 +110,23 @@ static void a2_reset_drive(bool assert_reset) {
     digitalWrite(PIN_A2_RESET_OUT,
                  (assert_reset == (A2_RESET_ASSERT_LEVEL != 0)) ? HIGH : LOW);
 }
+// Reset hold (the BL616/a2mega contract, here in firmware because the
+// FPGA's reset-hold output has no pin on the a2p25): /RES stays asserted
+// from power-on (R1 holds the driver input high before we run) until the
+// disk task reports the mounts done — a2_reset_hold_release() from
+// disk.c — or until a 15 s backstop in loop(). Only when the OSPI link
+// exists (the dp_test bitstream has no Apple-bus logic: release at once).
+static bool     s_a2_held = false;
+static uint32_t s_a2_hold_deadline_ms = 0;
+extern "C" void a2_reset_hold_release(const char *why) {
+    if (!s_a2_held) return;
+    s_a2_held = false;
+    a2_reset_drive(false);
+    Serial.printf("[a2] /RES released (%s)\n", why ? why : "");
+    osd_log("A2: /RES RELEASED (%s)", why ? why : "");
+}
+#else
+extern "C" void a2_reset_hold_release(const char *why) { (void)why; }
 #endif
 
 // ============================================================================
@@ -1079,6 +1097,10 @@ static void start_subsystems() {
 
     osd_console_show();
 
+    // USB host on the module's USB-C (gamepads, HID remotes): device-first
+    // role decision, then the OTG host stack (usbhost.cpp)
+    usbhost_start();
+
     disk_init();
     menu_init();
     w5100_init();
@@ -1128,10 +1150,21 @@ void setup() {
     // works through the SRAM-load retry race regardless.
 #if PIN_A2_RESET_OUT >= 0
     // a2p25: R1 pulls the reset driver's input high, i.e. the Apple II has
-    // been held in /RES since power-on — release it before anything else
-    // (the bring-up bitstream has no Apple-bus logic; the card is passive).
+    // been held in /RES since power-on. Production (OSPI link): keep holding
+    // until the mounts are done (disk.c) or the 15 s backstop — the Apple's
+    // autoboot slot scan must not run before storage is up. dp_test: the
+    // bring-up bitstream has no Apple-bus logic, the card is passive —
+    // release at once.
     pinMode(PIN_A2_RESET_OUT, OUTPUT);     // output latch resets to 0 = released
+#if A2MEGA_HAS_OSPI_LINK
+    a2_reset_drive(true);
+    s_a2_held = true;
+    s_a2_hold_deadline_ms = millis() + 15000;
+    Serial.println("[a2] /RES held until media mounted (15 s backstop)");
+    osd_log("A2: /RES HELD UNTIL MEDIA MOUNTED");
+#else
     a2_reset_drive(false);
+#endif
 #endif
 #if PIN_LED0 >= 0
     pinMode(PIN_LED0, OUTPUT);
@@ -1205,6 +1238,12 @@ void setup() {
 }
 
 void loop() {
+#if PIN_A2_RESET_OUT >= 0
+    // reset-hold backstop: a machine with no media, or a link that never
+    // came up, still boots
+    if (s_a2_held && (int32_t)(millis() - s_a2_hold_deadline_ms) >= 0)
+        a2_reset_hold_release("backstop");
+#endif
     // One-shot debug-UART line diagnostic (2026-08-13: FPGA heartbeat up,
     // uart_tx placed on H13, yet zero bytes reach the telnet tee): raw-
     // sample the Serial1 RX pad for 400 ms ~8 s after boot. The GPIO in-

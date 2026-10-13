@@ -586,6 +586,10 @@ Bench traps recorded today: every SRAM load is a real reload (verify via
 `PF` stamp); `pd` shows "unattached" when the adapter is out — check
 HPD before reading a run; a powered adapter flips our port to sink/UFP.
 
+## 6i. ESP32 firmware: porting the Enhanced (BL616) feature set
+
+Plan and gap table: [ESP32_FEATURE_PORT.md](ESP32_FEATURE_PORT.md) (10-12). Key hardware facts: no USB host on either ESP32 board (USB1 is the device port, the video port has no D+/D−) → BLE HID for gamepads/keyboards/remotes; LittleFS 1.9 MB → network image serving for HDD images. P1 (reset hold on IO33 until media mounted, 15 s backstop) implemented 10-12.
+
 ## 7. Known risks
 
 - **D-PHY amplitude vs the DP130 input.** The DP130's minimum VID is

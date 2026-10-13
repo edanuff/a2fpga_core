@@ -33,6 +33,7 @@
 #include "fpgaupdate.h"
 #include "net_status.h"
 #include "menu.h"
+#include "usbhost.h"
 
 static const char *TAG = "menu";
 
@@ -741,7 +742,10 @@ static void status_build(void)
         fpga_pad_state_t pad;
         fpga_pad_poll(&pad);
         mi_add(MI_INFO, "GAMEPAD",
+               usbhost_pad_present() ? "USB HOST PAD" :
+               usbhost_hid_present() ? "USB HOST HID" :
                !pad.present ? "NONE" : pad.is_pad ? "PRESENT" : "OTHER HID");
+        mi_add(MI_INFO, "USB PORT", usbhost_status_str());
     }
     mi_add(MI_INFO, "WIFI", net_connected() ? "CONNECTED" : "OFFLINE");
     mi_add(MI_INFO, "", "");
@@ -1143,8 +1147,10 @@ void menu_tick(void)
     fpga_pad_state_t pad;
     fpga_pad_poll(&pad);
     /* Feed 0 when no gamepad is attached so releases are seen and held
-     * state clears; edge detection makes an unchanged word a no-op. */
-    menu_input((pad.present && pad.is_pad) ? pad.buttons : 0);
+     * state clears; edge detection makes an unchanged word a no-op.
+     * The ESP32's own USB host (usbhost.c: XInput pads, HID keyboards and
+     * remotes on the module's USB-C) is OR-ed in, same A2PAD layout. */
+    menu_input(((pad.present && pad.is_pad) ? pad.buttons : 0) | usbhost_buttons());
 }
 
 void menu_init(void)
