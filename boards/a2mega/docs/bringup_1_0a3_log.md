@@ -1488,3 +1488,8 @@ the direct cable. Expected delta per the a2p25 session: sinks with 0x00E =
 longer, still single-pass); hubs unchanged; the registered dwell form closed
 at 0 violations on the GW5A-25 (the nested form was -1.2 ns at clk100 — the
 a2mega's clk100 margin tonight is 0.056 ns, so watch it).
+Correction from the a2p25 session (10-12): "defaults byte-identical" holds
+for the PARAMETERS only — the 0x00E-derived EQ dwell is a behaviour change
+even at defaults, so the port's A/B must RE-MEASURE first-draw /
+time-to-picture rows (blinks-to-lock, L: counter, n ≥ 5 per build per the
+08-22 lesson), not assume them from the parameter defaults.
