@@ -947,3 +947,14 @@ is now fully WiFi-maintainable: ESP32 firmware (FTP + UPDATE MCU, OTA slots),
 gateware (FTP + UPDATE FPGA, or `tools/fpga_stream.py <ip> <bin>` on port
 2323), telemetry (telnet `z`). Bitstream `5e51b3d3…` (hold previous sample
 on a late fetch) is what the board runs from here.
+
+**Listening result on `5e51b3d3…` (ed, 2026-10-14):** on the previous image
+(0x80 on a late fetch) pops and crackles were audible during Arkanoid; with
+the previous sample held instead they are gone, while the telemetry shows the
+same ~0.4 late fetches/s (7 in 16 s, LATMAX 0x2D) and all video counters at 0.
+So the residual HyperRAM tail is now silent rather than removed; driving the
+rate itself to zero (shorter FB read burst, or issuing the DOC fetch earlier
+in the slot) is optional and only worth doing if a title still shows it.
+Further titles (POLY.SYNTH, synthLAB, Music Construction Set, 32-oscillator
+songs, swap/loop instruments) remain to be listened to; telnet `z` gives the
+counters per title.
