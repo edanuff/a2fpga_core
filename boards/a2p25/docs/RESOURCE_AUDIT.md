@@ -937,3 +937,13 @@ UPDATE FPGA can serve the a2p25 — uploaded as `a2fpga_esp32_gw5a25.bin`,
 (it works on GW5AT-60, is broken on a configured 138K), and a failed write
 would need the Mac on USB1 (stick removed) to recover. First use should be
 with that recovery at hand.
+
+**WiFi gateware update works on the GW5A-25 (2026-10-14, first use).** With the
+IDCODE gate opened, the FIRMWARE menu's UPDATE FPGA took `a2p25_hold.bin`
+(928,845 B, FTP-dropped onto the stick) through check → `READY` → `INSTALL
+NOW` → erase/program/verify → `FPGA: DONE, RELOADING` (printed only after the
+verify loop passes) → ESP32 restart, fabric back up, `z` answering. The a2p25
+is now fully WiFi-maintainable: ESP32 firmware (FTP + UPDATE MCU, OTA slots),
+gateware (FTP + UPDATE FPGA, or `tools/fpga_stream.py <ip> <bin>` on port
+2323), telemetry (telnet `z`). Bitstream `5e51b3d3…` (hold previous sample
+on a late fetch) is what the board runs from here.
