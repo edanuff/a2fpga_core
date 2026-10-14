@@ -881,3 +881,59 @@ clk100 101.4 vs 100, others ≥ +8%; logic 14,177 / FF 11,986 / BSRAM 51.
 4. Also glance at `vgc stale-word swaps/frame` and `shadow-write drops` in
    the same `viddbg` output: both must stay 0 with the DOC above the shadow
    ports.
+
+### 7.13 Second listening pass (2026-10-14): fix confirmed, WiFi telemetry, residual tail
+
+**Result.** Bitstream `bbd899c0…` (fetch filter + DOC on HyperRAM port 0,
+§7.12) flashed over USB: system beep and Arkanoid clean where the previous
+image was distorted — the stale-fetch cascade was the mechanism.
+
+**Telemetry over WiFi (no USB).** The a2p25's USB1 is normally in USB-host
+mode with the image stick attached, so the CDC console is not a monitoring
+path; the bench rule from the a2mega applies (WiFi only). Three facts learned
+the hard way, all fixed in the ESP32 firmware (`boards/a2mega/src/a2fpga_esp32`,
+BOARD_REV=225) and installed over WiFi via FTP → FIRMWARE menu → OTA:
+
+1. The telnet remote console is **single-key**: typing a CLI word into it
+   fires keys (`v` virtual DP replug, `g` FPGA reload …). Never send text to
+   it. New key **`z`** prints the video/DOC debug block (FPGA regs 0x70–0x78)
+   into the console tee; keys are listed in the banner.
+2. The OSPI link to the FPGA is shared with the disk-serving and menu tasks
+   under `fpga_link_lock()`. A burst of raw `a2spi_reg_read_status` calls
+   outside that lock (the CLI's `viddbg`, and the first `z` versions) collides
+   with disk streaming, panics the ESP32, and the reboot holds the Apple II in
+   reset — seen twice as "the read reset the Apple". `z` is now serviced in
+   `loop()` under the lock; the CLI `viddbg` takes the lock too.
+3. The telnet server is single-client and drops idle sessions after a few
+   seconds; read in short sessions.
+
+The `z` block on this board: `VIDDBG MODE .. FB .. OVFL .. RD ..`,
+`DOC TIMEOUTS n LATMAX n CLK (0x..)` (regs 0x71/0x72, wrapping / saturating),
+`VGC HSYNC n STALE n SHADOW DROPS n`. Reading it over telnet during Arkanoid
+with the fixed firmware: stable, no reboot.
+
+**Measured under Arkanoid (SHR + disk serving + DOC):** `DOC TIMEOUTS`
+advancing at **~0.4/s**, `LATMAX 0x2D` (= the ~830 ns budget, i.e. the
+completed-fetch maximum is pinned at the deadline), VGC hsync 0, stale 0,
+shadow drops 0. So with the DOC at port 0 the HyperRAM round trip still has a
+rare tail past the budget — consistent with a 2× latency refresh collision
+(RWDS-signalled, `hyperram_ctrl` header) landing behind an in-flight
+framebuffer burst — and each event still cost one 0x80 sample.
+
+**Change (built, not yet flashed): hold the previous sample on a late fetch.**
+`doc5503` now keeps `curr_wds_r` (the oscillator's own last sample, loaded
+from its wds register) instead of substituting 0x80 when a fetch misses the
+slot deadline: a repeated sample is inaudible, a jump to mid-level is a click.
+Zero-byte halt detection is unaffected; BSRAM boards never reach the branch.
+`run_fetch_late.sh` and `run_banks_equiv.sh` pass. Build `5e51b3d3…`:
+0 violations, worst +0.044 ns (`i_hr_ctrl` ck_en half-cycle stage — the
+known flapper), logic 14,113 / FF 11,986 / BSRAM 51.
+
+**Firmware staged for WiFi gateware updates:** `fpga_jtag.h` /
+`fpgastream.c` / `fpgaupdate.c` now accept the GW5A-25 IDCODE `0x0001281B`
+(image header and live chip), so `fpga_stream.py` and the FIRMWARE menu's
+UPDATE FPGA can serve the a2p25 — uploaded as `a2fpga_esp32_gw5a25.bin`,
+**not installed**: the native JTAG-SPI flash path is untested on this die
+(it works on GW5AT-60, is broken on a configured 138K), and a failed write
+would need the Mac on USB1 (stick removed) to recover. First use should be
+with that recovery at hand.

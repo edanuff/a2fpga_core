@@ -50,6 +50,8 @@
 #include "telnetd.h"
 #include "wedge_watch.h"
 
+extern volatile bool viddbg_request;   /* serviced by loop() in a2fpga_esp32.ino */
+
 #define TELNET_PORT     23
 #define TEE_LINES       32
 #define TEE_COLS        40
@@ -170,7 +172,7 @@ static void session(int fd)
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
     tn_puts(fd, "\r\nA2FPGA " A2_BOARD_NAME " remote console\r\n"
-                "keys: c=console m=menu p=pd d=census x=regs e=eq +/-=eqstep l=lanes v=replug f=flip r=retrain g=fpgareload u=fusb t=trace i=i2cscan"
+                "keys: c=console m=menu p=pd d=census x=regs z=viddbg e=eq +/-=eqstep l=lanes v=replug f=flip r=retrain g=fpgareload u=fusb t=trace i=i2cscan"
 #if A2MEGA_HAS_DP130
                 " n=dp130"
 #endif
@@ -342,6 +344,16 @@ static void session(int fd)
                 fpga_jtag_init_pins();
                 fpga_jtag_reload();
                 fpga_jtag_release_pins();
+                continue;
+            }
+            if (esc_st == 0 && ch == 'z' && !menu_mode) {
+                /* Video/DOC debug block (FPGA regs 0x70-0x78, the CLI's
+                 * viddbg) into the console tee — the WiFi-only bench must
+                 * not depend on the USB CDC console for these counters.
+                 * The OSPI register reads belong to the main task: raise a
+                 * flag that loop() services (reading from this task rebooted
+                 * the ESP32 and reset the Apple II, 2026-10-14). */
+                viddbg_request = true;
                 continue;
             }
             if (esc_st == 0 && ch == 'x' && !menu_mode) {

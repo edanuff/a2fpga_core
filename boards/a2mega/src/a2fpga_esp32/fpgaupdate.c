@@ -150,7 +150,7 @@ bool fpgaupdate_erase_bitstream_region(void)
     fpga_jtag_init_pins();
 
     uint32_t id = fpga_jtag_idcode();
-    if (id != FPGA_JTAG_IDCODE_GW5AT60 && id != FPGA_JTAG_IDCODE_GW5AST138) {
+    if (id != FPGA_JTAG_IDCODE_GW5AT60 && id != FPGA_JTAG_IDCODE_GW5AST138 && id != FPGA_JTAG_IDCODE_GW5A25) {
         ESP_LOGE(TAG, "erase: IDCODE %08lx not a known SOM — fabric not "
                       "alive; SRAM-load a bitstream first", (unsigned long)id);
         osd_log("FPGA ERASE: NO LIVE FABRIC");
@@ -268,7 +268,7 @@ static bool check_file(void)
         if (hdr[i] != 0x00 || hdr[i + 1] != 0x01 || hdr[i + 3] != 0x1B)
             continue;
         uint32_t w = 0x00010000u | ((uint32_t)hdr[i + 2] << 8) | 0x1Bu;
-        if (w == FPGA_JTAG_IDCODE_GW5AT60 || w == FPGA_JTAG_IDCODE_GW5AST138)
+        if (w == FPGA_JTAG_IDCODE_GW5AT60 || w == FPGA_JTAG_IDCODE_GW5AST138 || w == FPGA_JTAG_IDCODE_GW5A25)
             s_want_id = w;
     }
     if (!s_want_id) {

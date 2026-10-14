@@ -1207,8 +1207,14 @@ module doc5503 #(
                 osc_state_r <= OSC_OUT;
             end
         end else if (clk_count_r == 3'd7) begin
-            // If no data received, set default waveform data to 0x80
-            curr_wds_r <= 8'h80;
+            // Fetch missed the slot budget. Keep the oscillator's previous
+            // sample (curr_wds_r was loaded from its wds register in
+            // OSC_LOAD_REGISTERS) rather than substituting 0x80: a repeated
+            // sample is inaudible, a jump to mid-level is a click. Measured
+            // on the a2p25 HyperRAM at ~0.4 late fetches/s under SHR load
+            // (2026-10-14). Zero-byte halt detection is unaffected (a stored
+            // sample is never 0x00). Memories that always answer in time
+            // (BSRAM boards) never reach this branch.
             osc_state_r <= OSC_OUT;
             dbg_fetch_timeout_r <= dbg_fetch_timeout_r + 1'd1;
             fetch_outstanding_r <= 1'b0;

@@ -156,7 +156,7 @@ static const char *validate_hdr(const uint8_t *hdr, uint32_t n, uint32_t size,
         if (hdr[i] != 0x00 || hdr[i + 1] != 0x01 || hdr[i + 3] != 0x1B)
             continue;
         uint32_t w = 0x00010000u | ((uint32_t)hdr[i + 2] << 8) | 0x1Bu;
-        if (w == FPGA_JTAG_IDCODE_GW5AT60 || w == FPGA_JTAG_IDCODE_GW5AST138)
+        if (w == FPGA_JTAG_IDCODE_GW5AT60 || w == FPGA_JTAG_IDCODE_GW5AST138 || w == FPGA_JTAG_IDCODE_GW5A25)
             id = w;
     }
     if (!id)

@@ -327,14 +327,17 @@ static void cmd_process(String cmd) {
             }
         }
         uint8_t v[9];
+        fpga_link_lock();   // shared OSPI link (see viddbg_log)
         for (int i = 0; i < 9; i++) {
             uint8_t st = 0;
             esp_err_t err = a2spi_reg_read_status((uint8_t)(0x70 + i), &v[i], &st);
             if (err != ESP_OK) {
+                fpga_link_unlock();
                 Serial.printf("viddbg: read 0x%02X error: %s\n", 0x70 + i, esp_err_to_name(err));
                 return;
             }
         }
+        fpga_link_unlock();
         Serial.printf("mode 0x%02X: use_vgc=%d SHRG=%d LINEAR=%d STORE80=%d PAGE2=%d MIXED=%d HIRES=%d TEXT=%d\n",
                       v[0], !!(v[0] & 0x80), !!(v[0] & 0x40), !!(v[0] & 0x20), !!(v[0] & 0x10),
                       !!(v[0] & 0x08), !!(v[0] & 0x04), !!(v[0] & 0x02), !!(v[0] & 0x01));
@@ -1179,6 +1182,38 @@ static void start_subsystems() {
 // Arduino Setup and Loop
 // ============================================================================
 
+// Video/DOC debug block (FPGA regs 0x70-0x78) into the OSD/telnet console
+// log, so the counters are readable over WiFi (telnet key 'w'). Same
+// registers as the CLI's "viddbg"; on the a2p25 the two $C029 slots carry
+// the DOC fetch telemetry (timeouts, max latency in clk_logic cycles).
+volatile bool viddbg_request = false;   // telnet 'z' -> serviced in loop()
+extern "C" void viddbg_log(void)
+{
+    if (!a2spi_is_ready()) { osd_log("VIDDBG: SPI NOT READY"); return; }
+    uint8_t v[9];
+    // The OSPI link is shared with the disk/menu tasks: take the link mutex
+    // around the burst of register reads (an unlocked burst during disk
+    // streaming collided on the SPI driver and panicked the ESP32 — which
+    // holds the Apple II in reset while it reboots; 2026-10-14).
+    fpga_link_lock();
+    for (int i = 0; i < 9; i++) {
+        uint8_t st = 0;
+        if (a2spi_reg_read_status((uint8_t)(0x70 + i), &v[i], &st) != ESP_OK) {
+            fpga_link_unlock();
+            osd_log("VIDDBG: READ 0x%02X FAILED", 0x70 + i);
+            return;
+        }
+    }
+    fpga_link_unlock();
+    osd_log("VIDDBG MODE %02X FB %02X OVFL %02X RD %02X", v[0], v[5], v[6], v[7]);
+#if A2MEGA_BOARD_REV == 225
+    osd_log("DOC TIMEOUTS %u  LATMAX %u CLK (0x%02X)", v[1], v[2], v[2]);
+#else
+    osd_log("C029 WRITES %u LAST %02X", v[1], v[2]);
+#endif
+    osd_log("VGC HSYNC %u STALE %u  SHADOW DROPS %u", v[3], v[8], v[4]);
+}
+
 void setup() {
     // NOTE: do NOT route the USB JTAG bridge here. It was tried (early
     // rescue window for the MSPI-hang state, board #1 2026-08-11) and it
@@ -1279,6 +1314,7 @@ void setup() {
 }
 
 void loop() {
+    if (viddbg_request) { viddbg_request = false; viddbg_log(); }
 #if PIN_A2_RESET_OUT >= 0
     // reset-hold backstop: a machine with no media, or a link that never
     // came up, still boots
