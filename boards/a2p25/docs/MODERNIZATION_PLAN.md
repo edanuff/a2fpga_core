@@ -590,8 +590,9 @@ IIgs verified through it: Arkanoid SHR at 1080p and DOC audio on the HDMI side. 
   Cable Matters #2 — FAIL (AUX replies undecodable); Anker 4K@60 — PASS;
   Anker hub DP→HDMI — PASS (2-lane, 720p on dp_test).
 Reading: not a bandwidth class — a 48G UGREEN trains at RBR while both
-Cable Matters units fail; vendor/chipset-specific. Lane count of the
-UGREEN passes: TBD (monitor OSD 1080p = 4 lanes on this core). — first data point for "4K@60-class adapters are 4-lane and RBR-capable".
+Cable Matters units fail; vendor/chipset-specific. Both UGREENs came up at
+1080p = **4-lane RBR** on this core (the production core only runs
+1080p x4); with the Anker 4K@60 that is three 4-lane HDMI adapters. — first data point for "4K@60-class adapters are 4-lane and RBR-capable".
 
 Bench traps recorded today: every SRAM load is a real reload (verify via
 `PF` stamp); `pd` shows "unattached" when the adapter is out — check
