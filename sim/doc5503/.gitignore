@@ -7,3 +7,5 @@ cosim_run.log
 nodrain_*.log
 banks_equiv_*.log
 tb_banks_equiv.vvp
+fetch_late*.log
+tb_fetch_late.vvp

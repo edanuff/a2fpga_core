@@ -367,9 +367,15 @@ module top #(
     // the wavetable. Its traffic is rare and short (single word) outside
     // upload bursts. A dropped write is unrecoverable; a delayed FB line
     // is not.
-    localparam SHADOW_READ_PORT  = 0;
-    localparam SHADOW_WRITE_PORT = 1;
-    localparam DOC_MEM_PORT      = 2;
+    // 2026-10-13: DOC wavetable reads moved to the top-priority port. The
+    // baseline DOC has a hard ~840 ns budget per fetch (0x80 substituted and
+    // a late response discarded otherwise); at port 2 a fetch could wait
+    // behind an in-flight FB burst plus two queued shadow transactions and
+    // miss it under SHR load (audible). A DOC read is one word per ~1 us, so
+    // the shadow paths lose at most ~170 ns per microsecond to it.
+    localparam DOC_MEM_PORT      = 0;
+    localparam SHADOW_READ_PORT  = 1;
+    localparam SHADOW_WRITE_PORT = 2;
     localparam GLU_MEM_PORT      = 3;
     localparam FB_WRITE_PORT   = 4;
     localparam FB_READ_PORT    = 5;
@@ -1084,9 +1090,9 @@ module top #(
                             FB_WORD_BASE,        // [5] FB read
                             FB_WORD_BASE,        // [4] FB write
                             ENSONIQ_WORD_BASE,   // [3] GLU sound-RAM write
-                            ENSONIQ_WORD_BASE,   // [2] DOC wavetable read
-                            SHADOW_WORD_BASE,    // [1] shadow write
-                            SHADOW_WORD_BASE}),  // [0] shadow read
+                            SHADOW_WORD_BASE,    // [2] shadow write
+                            SHADOW_WORD_BASE,    // [1] shadow read
+                            ENSONIQ_WORD_BASE}), // [0] DOC wavetable read
         .PORT_BURST_WORDS ({5'd4, 5'd8, 5'd4, 5'd4, 5'd4, 5'd4, 5'd4}),
         .WIDE_WR_PORT     (FB_WRITE_PORT)
     ) u_hr_ports (
@@ -1848,8 +1854,10 @@ module top #(
         .key1_i(key1_sync1),
 
         .dbg_video_ss_i(dbg_video_ss_w),
-        .dbg_c029_cnt_i(dbg_c029_cnt_r),
-        .dbg_c029_last_i(dbg_c029_last_r),
+        // a2p25: viddbg 0x71 "C029 writes" = DOC fetch timeouts (wraps),
+        //        viddbg 0x72 "last"        = DOC max fetch latency (clk_logic cycles, 18.5 ns)
+        .dbg_c029_cnt_i(doc_dbg_stale_fetch_w),
+        .dbg_c029_last_i(doc_dbg_prime_miss_w),
         .dbg_vgc_hsync_i(vgc_dbg_missed_hsync_w),
         .dbg_shadow_drop_i(shadow_dbg_drop_w),
         .dbg_fb_flags_i(fb_dbg_flags_w),

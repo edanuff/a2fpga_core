@@ -789,3 +789,95 @@ beep, POLY.SYNTH set, 32-oscillator titles) with the DOC fetch-timeout
 behaviour watched (the baseline substitutes 0x80 on a late HyperRAM read —
 a stale/timeout counter on the baseline path is still worth adding), and
 the a2mega keeps `USE_DDR3_PIPELINED(1)` until it moves to PSRAM.
+
+### 7.12 First listening pass: mild distortion → stale-fetch cascade; fix + telemetry (2026-10-13 night)
+
+**Observed (ed):** bitstream `acb48491…` (baseline DOC, DPB banks, DOC on HyperRAM
+port 2) flashed and played; audibly distorted, but far less than the old
+pipelined-core distortion — "a few samples" wrong, not harmonics.
+
+**Diagnosis (by analysis and simulation; the machine was powered down before
+telemetry could be read):** the baseline DOC gives each wavetable fetch ~7/8 of
+the oscillator slot (≈840 ns at 7.159 MHz) and substitutes 0x80 when the read
+is late. At port 2 of `hyperram_ports` (static priority, non-preemptive grants)
+a DOC read could wait behind an in-flight framebuffer burst-8 (~290 ns), two
+queued shadow transactions (~200 ns each) and its own ~170 ns read — at or over
+the budget under SHR load. Each late read then costs **two** faults:
+
+1. the 0x80 substitute for that sample (a tick), and
+2. the "rev-1 stale hazard": the response is untagged, so when it arrives the
+   GLU hands it to the DOC, which is by then fetching for the *next*
+   oscillator and takes it as that oscillator's sample through the wrong byte
+   lane; that oscillator's own response is left pending for the one after,
+   and so on until a timeout happens to realign the stream. One late read
+   corrupts a run of following oscillators — exactly "a few wrong samples".
+   The pipelined core's line cache existed in part to sidestep this.
+
+**Fix (three parts, all in the committed tree):**
+
+- **`hdl/sound/doc_fetch_filter.sv` (new), used by `sound_glu`'s
+  `gen_doc_ext` branch.** Responses come back in request order, so the filter
+  keeps "accepted requests outstanding" and "of those, superseded": every DOC
+  request supersedes everything still outstanding (the DOC has moved on,
+  whether or not the arbiter took the request); only accepted requests
+  (`rd && available`) count as outstanding, because a request issued into a
+  full two-slot port queue is silently dropped and never answered. Superseded
+  responses are discarded and counted; the byte lane is that of the newest
+  request. No counter can saturate under real conditions (≤ 2 outstanding).
+- **`doc5503.sv`:** a response arriving in the cycle the DOC presents a new
+  request (`wave_rd_o` high) cannot be its own and is ignored — a one-cycle
+  window the filter cannot see (it learns of the request a cycle later); a
+  response landing exactly on the deadline edge is dropped rather than left
+  pending for the next oscillator. Plus telemetry: fetch timeouts (wrapping)
+  and max fetch latency (saturating, in 18.5 ns clk cycles).
+- **a2p25 top: DOC moved to HyperRAM port 0** (shadow read 1, shadow write 2,
+  GLU 3, FB 4/5, debug 6). Worst case before a DOC read is now one in-flight
+  grant plus its own read, ≈ 500 ns — inside the budget. A DOC read is one
+  word per ~1 µs, so the shadow paths lose at most ~170 ns per µs.
+
+**Telemetry on the ESP32 console, no firmware change:** on the a2p25 the two
+$C029 debug registers now carry DOC counters, so `viddbg` prints
+`C029 writes=<DOC fetch timeouts, wraps at 256> last=0x<max fetch latency in
+clk_logic cycles>`. 0x2D ≈ 45 cycles ≈ 840 ns is the budget; anything at or
+above it means timeouts. Timeouts of 0 and a latmax well under 0x2D after a
+POLY.SYNTH run is the pass condition. (The a2mega keeps $C029 on those
+registers.) The filter's discard count is on DebugOverlay hex 6 only.
+
+**Verification:**
+
+- `sim/doc5503/tb_fetch_late.sv` / `run_fetch_late.sh`: baseline DOC + filter
+  on a memory model with a two-slot acceptance queue, in-order service and
+  random latency swept from fast (2–20 clk) through realistic tail (10–80
+  clk, some fetches late) to pathological (50–120 clk, every fetch late,
+  requests dropped). Every consumed sample is checked against the address
+  requested for that slot. Result: **0 stale samples** across ~2,900
+  timeouts and 5 dropped requests; the filter's discard counter and the
+  DOC's timeout/latmax counters move as expected. Negative control (filter
+  accounting forced off): 1,541 stale samples. Two earlier guard designs
+  (DOC-side owed counter; filter superseding on accepted requests only) were
+  caught by this bench — saturation above 7 outstanding, and the
+  dropped-request case respectively — before reaching hardware.
+- `run_banks_equiv.sh` (FF vs DPB banks): 3 seeds pass unchanged.
+- `run.sh` (baseline vs pipelined, Verilator co-sim): see commit message.
+
+**Build (flash-ready, NOT flashed — machine powered down):**
+`boards/a2p25/impl/pnr/a2p25.fs`, sha256 `bbd899c0…` — 0 violations, worst
+slack +0.10 ns (`i_hr_ctrl` cycle counter, clk_mem), clk_mem 109.2 vs 108,
+clk100 101.4 vs 100, others ≥ +8%; logic 14,177 / FF 11,986 / BSRAM 51.
+
+**Morning checklist:**
+
+1. Mac on USB1, ESP32 in the application (not download mode — if `--detect`
+   reports a non-Gowin IDCODE, open the CDC port once to reset it, as
+   tonight), IIgs on. `GPRJ=a2p25.gprj tools/flash.sh a2p25` detached, no
+   caller timeout. Power-cycle the IIgs.
+2. Listening set: beep + Control Panel sliders, POLY.SYNTH, synthLAB, Music
+   Construction Set, a 32-oscillator title, swap/sync instruments.
+3. After each title: console `viddbg` → `C029 writes` (timeouts) and `last`
+   (latmax). Expected: timeouts 0 (or not advancing between reads), latmax
+   < 0x2D. If timeouts advance with the DOC at port 0, the HyperRAM round
+   trip itself is longer than estimated and the next lever is the DOC's
+   budget (request earlier in the slot) or burst length.
+4. Also glance at `vgc stale-word swaps/frame` and `shadow-write drops` in
+   the same `viddbg` output: both must stay 0 with the DOC above the shadow
+   ports.

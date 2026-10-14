@@ -295,6 +295,7 @@ module sound_glu #(
     reg [7:0] wave_data_r;
     reg [31:0] wave_data_word_r;   // rev-2 pipelined path: full-word response
     reg wave_data_ready_r;
+    wire [7:0] doc_filter_late_w;  // gen_doc_ext: stale responses discarded
 
     generate
         if (USE_BSRAM) begin : gen_doc_bsram
@@ -355,21 +356,36 @@ module sound_glu #(
                     wave_data_ready_r <= 1'b1;
                 end
             end
-        end else begin : gen_doc_ddr3
-            // Original DDR3 path (single outstanding read)
+        end else begin : gen_doc_ext
+            // Baseline DOC on external memory (HyperRAM / DDR3), single-word
+            // reads. Responses are untagged and in order; doc_fetch_filter
+            // discards any response that was still outstanding when a newer
+            // request was accepted, so a fetch that missed the DOC's slot
+            // budget (0x80 substituted) can never be consumed as the next
+            // oscillator's sample. Requests issued while the port queue is
+            // full are dropped by the arbiter and are not counted as pending.
             assign doc_mem_if.wr = '0;
             assign doc_mem_if.data = '0;
             assign doc_mem_if.byte_en = 4'b1111;
             assign doc_mem_if.addr = {7'b0, wave_addr_w[15:2]};
             assign doc_mem_if.rd = ENABLE && doc_mem_rd_w;
             assign doc_mem_if.burst = 1'b0;
-
+            wire       flt_valid_w;
+            wire [7:0] flt_data_w;
+            doc_fetch_filter u_fetch_filter (
+                .clk_i(a2bus_if.clk_logic),
+                .rst_n_i(a2bus_if.system_reset_n),
+                .req_i(doc_mem_if.rd),
+                .accept_i(doc_mem_if.rd && doc_mem_if.available),
+                .lane_i(wave_addr_w[1:0]),
+                .resp_i(doc_mem_if.ready),
+                .resp_data_i(doc_mem_if.q),
+                .valid_o(flt_valid_w),
+                .data_o(flt_data_w),
+                .dbg_late_o(doc_filter_late_w));
             always_ff @(posedge a2bus_if.clk_logic) begin
-                wave_data_ready_r <= 1'b0;
-                if (doc_mem_if.ready) begin
-                    wave_data_r <= doc_mem_if.q[8*doc_mem_offset_r +: 8];
-                    wave_data_ready_r <= 1'b1;
-                end
+                wave_data_ready_r <= flt_valid_w;
+                if (flt_valid_w) wave_data_r <= flt_data_w;
             end
         end
     endgenerate
@@ -453,11 +469,15 @@ module sound_glu #(
                 .dbg_frame_resync_o(dbg_doc_frame_resync_o)
             );
         end else begin : gen_doc_baseline
-            assign dbg_doc_prime_miss_o  = 8'd0;
-            assign dbg_doc_stale_fetch_o = 8'd0;
-            assign dbg_doc_fetch_drop_o  = 8'd0;
+            assign dbg_doc_prime_miss_o = doc_latmax_w;
+            assign dbg_doc_stale_fetch_o = doc_timeout_w;
+            assign dbg_doc_fetch_drop_o = doc_late_w;
             assign dbg_doc_fetch_count_o = 16'd0;
             assign dbg_doc_frame_resync_o = 8'd0;
+            // fetch telemetry: prime_miss = max fetch latency (clk), stale = budget
+            // timeouts (0x80 substituted), drop = stale responses discarded (filter)
+            wire [7:0] doc_timeout_w, doc_latmax_w;
+            wire [7:0] doc_late_w = USE_BSRAM ? 8'd0 : doc_filter_late_w;
             doc5503 #(
                 .BANKS_IN_BSRAM(DOC_BANKS_IN_BSRAM)
             ) doc5503 (
@@ -480,7 +500,9 @@ module sound_glu #(
                 .ready_o(),
                 .debug_osc_en_o(debug_doc_osc_en_w),
                 .debug_osc_mode_o(debug_osc_mode_w),
-                .debug_osc_halt_o(debug_osc_halt_w)
+                .debug_osc_halt_o(debug_osc_halt_w),
+                .dbg_fetch_timeout_o(doc_timeout_w),
+                .dbg_fetch_latmax_o(doc_latmax_w)
             );
         end
     endgenerate

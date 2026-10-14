@@ -234,8 +234,12 @@ module doc5503 #(
 
     output [7:0] debug_osc_en_o,   // Debug output for oscillator enable register
     output [1:0] debug_osc_mode_o[8], // Debug output for oscillator mode register;
-    output [7:0] debug_osc_halt_o // Debug output for oscillator halt register
+    output [7:0] debug_osc_halt_o, // Debug output for oscillator halt register
 
+    // Wavetable fetch telemetry (external-memory builds). All wrap at 8 bits
+    // except latmax, which saturates.
+    output [7:0] dbg_fetch_timeout_o,  // fetches that missed the slot budget (0x80 substituted)
+    output [7:0] dbg_fetch_latmax_o    // max clk_i cycles from wave_rd_o to wave_data_ready_i
 );
 
     reg [7:0] host_addr_r;         // Address register for host access
@@ -651,6 +655,17 @@ module doc5503 #(
     reg host_request_pending_r = 1'b0;
     reg device_response_pending_r = 1'b0;
     reg bank_wait_r = 1'b0;        // BANKS_IN_BSRAM: one-cycle read wait
+    // Fetch telemetry. Late/stale responses from an external memory are
+    // filtered upstream (sound_glu's doc_fetch_filter: a response still
+    // outstanding when a newer request is accepted is discarded), so this
+    // core only has to (a) substitute 0x80 at the slot deadline and (b) drop a
+    // response that lands exactly on the deadline edge.
+    reg       fetch_outstanding_r = 1'b0;
+    reg [7:0] fetch_lat_r = 8'd0;
+    reg [7:0] dbg_fetch_timeout_r = 8'd0;
+    reg [7:0] dbg_fetch_latmax_r = 8'd0;
+    assign dbg_fetch_timeout_o = dbg_fetch_timeout_r;
+    assign dbg_fetch_latmax_o  = dbg_fetch_latmax_r;
     reg prev_ctl_pend_r = 1'b0;    // BANKS_IN_BSRAM: latch prev control next cycle
 
     always_ff @(posedge clk_i) begin
@@ -699,6 +714,10 @@ module doc5503 #(
             hb_wr_last_r <= 1'b0;
             bank_wait_r <= 1'b0;
             prev_ctl_pend_r <= 1'b0;
+            fetch_outstanding_r <= 1'b0;
+            fetch_lat_r <= 8'd0;
+            dbg_fetch_timeout_r <= 8'd0;
+            dbg_fetch_latmax_r <= 8'd0;
 
         end else begin
 
@@ -740,8 +759,21 @@ module doc5503 #(
                 prev_ctl_pend_r <= 1'b0;
             end
 
-            if (wave_data_ready_i) begin
+            // Fetch latency tracking (from the request cycle to the response)
+            if (wave_rd_o) begin
+                fetch_outstanding_r <= 1'b1;
+                fetch_lat_r <= 8'd1;
+            end else if (fetch_outstanding_r && fetch_lat_r != 8'hFF) begin
+                fetch_lat_r <= fetch_lat_r + 1'd1;
+            end
+            // A response arriving in the cycle our own request is being
+            // presented (wave_rd_o high) cannot be ours: it is a late response
+            // to an earlier fetch that the upstream filter could not yet see
+            // as superseded. Ignore it.
+            if (wave_data_ready_i && !wave_rd_o) begin
                 loaded_wds_pending_r <= 1'b1;
+                fetch_outstanding_r <= 1'b0;
+                if (fetch_lat_r > dbg_fetch_latmax_r) dbg_fetch_latmax_r <= fetch_lat_r;
             end
 
             case (cycle_state_r)
@@ -1178,6 +1210,13 @@ module doc5503 #(
             // If no data received, set default waveform data to 0x80
             curr_wds_r <= 8'h80;
             osc_state_r <= OSC_OUT;
+            dbg_fetch_timeout_r <= dbg_fetch_timeout_r + 1'd1;
+            fetch_outstanding_r <= 1'b0;
+            if (wave_data_ready_i) begin
+                // arrived on the deadline edge: too late for this sample, and it
+                // must not become the next oscillator's — drop it here
+                loaded_wds_pending_r <= 1'b0;
+            end
         end
 
     endtask: osc_handle_data
