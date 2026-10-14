@@ -714,3 +714,78 @@ Consequences for the plan:
   documents the option as default False): the committed process configs pin
   the value explicitly, and a resource build after each toolchain change should
   confirm the BSRAM count did not move.
+
+### 7.11 Implementation: baseline DOC with DPB register banks (2026-10-13)
+
+Implemented in `hdl/sound/doc5503.sv` behind `BANKS_IN_BSRAM` (default 0 —
+the Enhanced/GS keep their SSRAM banks, byte-identical RTL path), selected by
+`sound_glu`'s existing `DOC_BANKS_IN_BSRAM`, and enabled in the a2p25 top
+together with `USE_DDR3_PIPELINED(0)`.
+
+Design:
+
+- **Five Gowin DPB blocks (true dual-port, 1K × 16, byte-lane enables),
+  instantiated directly** (`osc_reg_bank_dpb`), two banks per block:
+  fl|fh, vol|wds, wtp|control, rts|acc[7:0], acc[15:8]|acc[23:16]. Byte
+  lanes make every bank write a single cycle with no read-modify-write
+  (UG300 §3.1: for 16-bit DPB, `AD[0]`/`AD[1]` enable the two lanes, word
+  address in `AD[13:4]`). Bypass read mode (one-cycle registered read),
+  normal write mode (output holds on write; Arora V has no read-before-write).
+- **Port A = oscillator pipeline, port B = host.** Host register writes and
+  reads leave the pipeline's address registers entirely, so a host access can
+  never re-address a bank the pipeline is about to read. Port B is addressed
+  by the already-latched host address, so the existing `device_response`
+  timing holds unchanged. Pairs share one port-A address; the FSM already
+  keeps the two banks of a pair at the same address in every state (the only
+  re-addressed bank in a state is the one being read or written).
+- **Three timing fixes for the registered read:** one wait cycle each before
+  consuming the partner and next-oscillator control words (`bank_wait_r`);
+  the previous oscillator's control latched one cycle after
+  `OSC_REQUEST_DATA`, in whatever state follows (`prev_ctl_pend_r`); and a
+  one-cycle hold of `OSC_LOAD_REGISTERS` when a port-B write landed on the
+  previous edge (`hb_wr_last_r`) — the one case where a host write and the
+  pipeline's bank read meet on the same clock edge (a host access captured
+  just before the slot boundary executes in the forced-IDLE cycle). ~3 extra
+  cycles per oscillator slot out of ~60.
+- A `DOC_SIM_CHECKS` assertion in the bank wrapper flags any same-address,
+  same-lane write on both ports (the FSM never issues one).
+
+Verification — `sim/doc5503/tb_banks_equiv.sv` / `run_banks_equiv.sh`
+(iverilog + the Gowin GW5A `prim_sim.v`, so the simulated DPB is Gowin's own
+model, byte enables included). Two baseline cores, FF banks vs DPB banks,
+identical clocks, host traffic and a shared wavetable; compared: mixer
+outputs and all 16 channel sums every clock, the ordered fetch-address
+stream, every host read-back, debug taps at slot boundaries. Stimulus: 32
+oscillators in random modes/table sizes, 400 host writes/reads swept across
+every slot offset, 512 targeted writes to oscillator K timed to land in K's
+own forced-IDLE cycle, full register read-back, wavetable rewrite under
+playback, halt/one-shot/swap/sync paths, enable-count changes. **Three seeds
+pass with zero mismatches**; coverage shows the hold path taken 33 times for
+the loaded oscillator and the wait path ~48 k times. Negative controls that
+force the hold or the wait off fail with tens of thousands of mismatches, so
+the comparator detects each fix being removed. The existing `run.sh`
+differential suite (baseline vs pipelined) is the FF-path regression.
+
+**Measured (a2p25 full build, this implementation; fs `06e4c284…`, not
+flashed):**
+
+| | audited (rev 3) | §7.5 measurement (SP banks, FSM untimed) | **this** |
+|---|---|---|---|
+| Logic | 18,675 (82%) | 14,337 (63%) | **14,202 (62%)** |
+| Registers | 15,233 (67%) | 12,039 (53%) | **11,960 (52%)** |
+| CLS | 11,423 (99%) | 10,823 (94%) | **10,763 (94%)** |
+| BSRAM | 56 / 56 | 54 / 56 | **51 / 56** (banks = 5 DPB) |
+| `sg` block | 3,726 REG / 3,864 LUT / 14 blk | 570 / 798 / 12 | **451 REG / 551 LUT / 9 blk** |
+| Timing | 0 viol., margins < 1% | 0 viol., worst +0.10 | 0 viol., worst **+0.005** (clk_pix `aud_acc`, top-level audio accumulator — roll variance, not a DOC cone); clk_mem 122 vs 108, clk_sym 101.6 vs 81 |
+
+Against the audited build: **−4,473 logic, −3,273 FF, −5 BSRAM**, and the DOC
+block is now one eighth of its former size. Not durable yet by the project's
+bar (three clean rolls of the final source at ≥ +0.5 ns); the thin cones are
+the AUX channel on clk100 and the audio accumulator on clk_pix, neither in
+the changed logic.
+
+Still to do before this ships: hardware listening pass on the a2p25 (system
+beep, POLY.SYNTH set, 32-oscillator titles) with the DOC fetch-timeout
+behaviour watched (the baseline substitutes 0x80 on a late HyperRAM read —
+a stale/timeout counter on the baseline path is still worth adding), and
+the a2mega keeps `USE_DDR3_PIPELINED(1)` until it moves to PSRAM.

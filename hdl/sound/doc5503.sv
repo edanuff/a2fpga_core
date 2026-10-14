@@ -194,6 +194,17 @@
 // =============================================================================
 
 module doc5503 #(
+    // BANKS_IN_BSRAM: oscillator register banks in five Gowin DPB (true
+    // dual-port, x16, byte-lane enables) blocks instead of async-read
+    // SSRAM/FF banks. Port A serves the oscillator pipeline, port B the host
+    // (register reads and writes), so host traffic never disturbs the
+    // pipeline's bank addressing. The DPB read is registered (one cycle),
+    // so the pipeline inserts one wait cycle before consuming the partner
+    // and next-oscillator control words, latches the previous oscillator's
+    // control one state later, and holds OSC_LOAD_REGISTERS one cycle when a
+    // host write landed on the previous edge. Default 0 = original banks
+    // (GW2A: SSRAM; GW5A: ~2.3k FF).
+    parameter bit BANKS_IN_BSRAM = 1'b0,
     parameter int CLOCK_SPEED_HZ = 54_000_000,
     parameter int DOC_CLOCK_SPEED_HZ = 7_159_090 // 7.15909 MHz
 ) (
@@ -315,76 +326,162 @@ module doc5503 #(
     // Instantiate the RAMs for each oscillator register
 
     // $00-1F : Frequency Low Register
-    osc_reg_ram fl_ram (
-        .clk_i(clk_i),
-        .osc_i(ram_fl_osc_r),
-        .we_i(ram_fl_we_r),
-        .data_i(ram_fl_din_r),
-        .data_o(ram_fl_dout_w)
-    );
+    // Host-side bank port (BANKS_IN_BSRAM: DPB port B). Lane write enables
+    // are one-cycle pulses like ram_*_we_r; the read address is the latched
+    // host address, so port-B data is valid before device_response can run.
+    reg        hb_we_fl_r, hb_we_fh_r, hb_we_vol_r, hb_we_wds_r;
+    reg        hb_we_wtp_r, hb_we_control_r, hb_we_rts_r, hb_we_acc_r;
+    reg [7:0]  hb_din_r;
+    reg        hb_wr_last_r;       // a port-B write happened on the last edge
+    wire [7:0] hb_fl_dout_w, hb_fh_dout_w, hb_vol_dout_w, hb_wds_dout_w;
+    wire [7:0] hb_wtp_dout_w, hb_control_dout_w, hb_rts_dout_w;
+    wire [4:0] hb_addr_w = host_addr_r[4:0];
+    wire       hb_we_any_w = hb_we_fl_r | hb_we_fh_r | hb_we_vol_r | hb_we_wds_r |
+                             hb_we_wtp_r | hb_we_control_r | hb_we_rts_r | hb_we_acc_r;
 
-    // $20-3F : Frequency High Register
-    osc_reg_ram fh_ram (
-        .clk_i(clk_i),
-        .osc_i(ram_fh_osc_r),
-        .we_i(ram_fh_we_r),
-        .data_i(ram_fh_din_r),
-        .data_o(ram_fh_dout_w)
-    );
+    generate if (BANKS_IN_BSRAM) begin : gen_banks_dpb
+        // Pairs share one port-A address. Every pipeline path keeps the two
+        // banks of a pair at the same address (both default to the current
+        // oscillator; the re-addressed bank is the only one written or read
+        // in that state), so the address of the bank being written is used
+        // when one is, else the other bank's (equal) address.
+        wire [7:0]  hb_acc_lo_unused_w;
+        wire [15:0] hb_acc_hi_unused_w;
+        osc_reg_bank_dpb u_bank_fl_fh (
+            .clk_i(clk_i),
+            .a_addr_i(ram_fl_we_r ? ram_fl_osc_r : ram_fh_osc_r),
+            .a_we_lo_i(ram_fl_we_r), .a_we_hi_i(ram_fh_we_r),
+            .a_din_i({ram_fh_din_r, ram_fl_din_r}),
+            .a_dout_o({ram_fh_dout_w, ram_fl_dout_w}),
+            .b_addr_i(hb_addr_w),
+            .b_we_lo_i(hb_we_fl_r), .b_we_hi_i(hb_we_fh_r),
+            .b_din_i({hb_din_r, hb_din_r}),
+            .b_dout_o({hb_fh_dout_w, hb_fl_dout_w}));
+        osc_reg_bank_dpb u_bank_vol_wds (
+            .clk_i(clk_i),
+            .a_addr_i(ram_vol_we_r ? ram_vol_osc_r : ram_wds_osc_r),
+            .a_we_lo_i(ram_vol_we_r), .a_we_hi_i(ram_wds_we_r),
+            .a_din_i({ram_wds_din_r, ram_vol_din_r}),
+            .a_dout_o({ram_wds_dout_w, ram_vol_dout_w}),
+            .b_addr_i(hb_addr_w),
+            .b_we_lo_i(hb_we_vol_r), .b_we_hi_i(hb_we_wds_r),
+            .b_din_i({hb_din_r, hb_din_r}),
+            .b_dout_o({hb_wds_dout_w, hb_vol_dout_w}));
+        osc_reg_bank_dpb u_bank_wtp_control (
+            .clk_i(clk_i),
+            .a_addr_i(ram_wtp_we_r ? ram_wtp_osc_r : ram_control_osc_r),
+            .a_we_lo_i(ram_wtp_we_r), .a_we_hi_i(ram_control_we_r),
+            .a_din_i({ram_control_din_r, ram_wtp_din_r}),
+            .a_dout_o({ram_control_dout_w, ram_wtp_dout_w}),
+            .b_addr_i(hb_addr_w),
+            .b_we_lo_i(hb_we_wtp_r), .b_we_hi_i(hb_we_control_r),
+            .b_din_i({hb_din_r, hb_din_r}),
+            .b_dout_o({hb_control_dout_w, hb_wtp_dout_w}));
+        osc_reg_bank_dpb u_bank_rts_acc0 (
+            .clk_i(clk_i),
+            .a_addr_i(ram_rts_we_r ? ram_rts_osc_r : ram_acc_osc_r),
+            .a_we_lo_i(ram_rts_we_r), .a_we_hi_i(ram_acc_we_r),
+            .a_din_i({ram_acc_din_r[7:0], ram_rts_din_r}),
+            .a_dout_o({ram_acc_dout_w[7:0], ram_rts_dout_w}),
+            .b_addr_i(hb_addr_w),
+            .b_we_lo_i(hb_we_rts_r), .b_we_hi_i(hb_we_acc_r),
+            .b_din_i({8'h00, hb_din_r}),          // host acc write = clear
+            .b_dout_o({hb_acc_lo_unused_w, hb_rts_dout_w}));
+        osc_reg_bank_dpb u_bank_acc1_acc2 (
+            .clk_i(clk_i),
+            .a_addr_i(ram_acc_osc_r),
+            .a_we_lo_i(ram_acc_we_r), .a_we_hi_i(ram_acc_we_r),
+            .a_din_i(ram_acc_din_r[23:8]),
+            .a_dout_o(ram_acc_dout_w[23:8]),
+            .b_addr_i(hb_addr_w),
+            .b_we_lo_i(hb_we_acc_r), .b_we_hi_i(hb_we_acc_r),
+            .b_din_i(16'h0000),
+            .b_dout_o(hb_acc_hi_unused_w));
+    end else begin : gen_banks_ff
+        osc_reg_ram fl_ram (
+            .clk_i(clk_i),
+            .osc_i(ram_fl_osc_r),
+            .we_i(ram_fl_we_r),
+            .data_i(ram_fl_din_r),
+            .data_o(ram_fl_dout_w)
+        );
 
-    // $40-5F : Volume Register
-    osc_reg_ram vol_ram (
-        .clk_i(clk_i),
-        .osc_i(ram_vol_osc_r),
-        .we_i(ram_vol_we_r),
-        .data_i(ram_vol_din_r),
-        .data_o(ram_vol_dout_w)
-    );
+        // $20-3F : Frequency High Register
+        osc_reg_ram fh_ram (
+            .clk_i(clk_i),
+            .osc_i(ram_fh_osc_r),
+            .we_i(ram_fh_we_r),
+            .data_i(ram_fh_din_r),
+            .data_o(ram_fh_dout_w)
+        );
 
-    // $60-7F : Waveform Data Sample Register
-    osc_reg_ram wds_ram (
-        .clk_i(clk_i),
-        .osc_i(ram_wds_osc_r),
-        .we_i(ram_wds_we_r),
-        .data_i(ram_wds_din_r),
-        .data_o(ram_wds_dout_w)
-    );
+        // $40-5F : Volume Register
+        osc_reg_ram vol_ram (
+            .clk_i(clk_i),
+            .osc_i(ram_vol_osc_r),
+            .we_i(ram_vol_we_r),
+            .data_i(ram_vol_din_r),
+            .data_o(ram_vol_dout_w)
+        );
 
-    // $80-9F : Waveform Table Pointer Register
-    osc_reg_ram wtp_ram (
-        .clk_i(clk_i),
-        .osc_i(ram_wtp_osc_r),
-        .we_i(ram_wtp_we_r),
-        .data_i(ram_wtp_din_r),
-        .data_o(ram_wtp_dout_w)
-    );
+        // $60-7F : Waveform Data Sample Register
+        osc_reg_ram wds_ram (
+            .clk_i(clk_i),
+            .osc_i(ram_wds_osc_r),
+            .we_i(ram_wds_we_r),
+            .data_i(ram_wds_din_r),
+            .data_o(ram_wds_dout_w)
+        );
 
-    // $A0-BF : Control Register
-    osc_reg_ram control_ram (
-        .clk_i(clk_i),
-        .osc_i(ram_control_osc_r),
-        .we_i(ram_control_we_r),
-        .data_i(ram_control_din_r),
-        .data_o(ram_control_dout_w)
-    );
+        // $80-9F : Waveform Table Pointer Register
+        osc_reg_ram wtp_ram (
+            .clk_i(clk_i),
+            .osc_i(ram_wtp_osc_r),
+            .we_i(ram_wtp_we_r),
+            .data_i(ram_wtp_din_r),
+            .data_o(ram_wtp_dout_w)
+        );
 
-    // $C0-DF : Resolution Table Size Register
-    osc_reg_ram rts_ram (
-        .clk_i(clk_i),
-        .osc_i(ram_rts_osc_r),
-        .we_i(ram_rts_we_r),
-        .data_i(ram_rts_din_r),
-        .data_o(ram_rts_dout_w)
-    );
+        // $A0-BF : Control Register
+        osc_reg_ram control_ram (
+            .clk_i(clk_i),
+            .osc_i(ram_control_osc_r),
+            .we_i(ram_control_we_r),
+            .data_i(ram_control_din_r),
+            .data_o(ram_control_dout_w)
+        );
 
-    // $E0-FF : Oscillator Accumulator Register
-    osc_reg_ram #(.DATA_WIDTH(24)) acc_ram (
-        .clk_i(clk_i),
-        .osc_i(ram_acc_osc_r),
-        .we_i(ram_acc_we_r),
-        .data_i(ram_acc_din_r),
-        .data_o(ram_acc_dout_w)
-    );
+        // $C0-DF : Resolution Table Size Register
+        osc_reg_ram rts_ram (
+            .clk_i(clk_i),
+            .osc_i(ram_rts_osc_r),
+            .we_i(ram_rts_we_r),
+            .data_i(ram_rts_din_r),
+            .data_o(ram_rts_dout_w)
+        );
+
+        // $E0-FF : Oscillator Accumulator Register
+        osc_reg_ram #(.DATA_WIDTH(24)) acc_ram (
+            .clk_i(clk_i),
+            .osc_i(ram_acc_osc_r),
+            .we_i(ram_acc_we_r),
+            .data_i(ram_acc_din_r),
+            .data_o(ram_acc_dout_w)
+        );
+        assign hb_fl_dout_w = 8'h00;  assign hb_fh_dout_w = 8'h00;
+        assign hb_vol_dout_w = 8'h00; assign hb_wds_dout_w = 8'h00;
+        assign hb_wtp_dout_w = 8'h00; assign hb_control_dout_w = 8'h00;
+        assign hb_rts_dout_w = 8'h00;
+    end endgenerate
+
+    // Host read data source: port B (BSRAM) or the shared-port bank output (FF)
+    wire [7:0] hr_fl_w      = BANKS_IN_BSRAM ? hb_fl_dout_w      : ram_fl_dout_w;
+    wire [7:0] hr_fh_w      = BANKS_IN_BSRAM ? hb_fh_dout_w      : ram_fh_dout_w;
+    wire [7:0] hr_vol_w     = BANKS_IN_BSRAM ? hb_vol_dout_w     : ram_vol_dout_w;
+    wire [7:0] hr_wds_w     = BANKS_IN_BSRAM ? hb_wds_dout_w     : ram_wds_dout_w;
+    wire [7:0] hr_wtp_w     = BANKS_IN_BSRAM ? hb_wtp_dout_w     : ram_wtp_dout_w;
+    wire [7:0] hr_control_w = BANKS_IN_BSRAM ? hb_control_dout_w : ram_control_dout_w;
+    wire [7:0] hr_rts_w     = BANKS_IN_BSRAM ? hb_rts_dout_w     : ram_rts_dout_w;
 
     // Current oscillator state, copied from the register file at the start of each cycle
     reg [7:0] curr_fl_r;
@@ -553,6 +650,8 @@ module doc5503 #(
 
     reg host_request_pending_r = 1'b0;
     reg device_response_pending_r = 1'b0;
+    reg bank_wait_r = 1'b0;        // BANKS_IN_BSRAM: one-cycle read wait
+    reg prev_ctl_pend_r = 1'b0;    // BANKS_IN_BSRAM: latch prev control next cycle
 
     always_ff @(posedge clk_i) begin
         if (!reset_n_i) begin
@@ -594,6 +693,12 @@ module doc5503 #(
             ram_control_we_r <= 1'b0;
             ram_rts_we_r <= 1'b0;
             ram_acc_we_r <= 1'b0;
+            hb_we_fl_r <= 1'b0; hb_we_fh_r <= 1'b0; hb_we_vol_r <= 1'b0; hb_we_wds_r <= 1'b0;
+            hb_we_wtp_r <= 1'b0; hb_we_control_r <= 1'b0; hb_we_rts_r <= 1'b0; hb_we_acc_r <= 1'b0;
+            hb_din_r <= '0;
+            hb_wr_last_r <= 1'b0;
+            bank_wait_r <= 1'b0;
+            prev_ctl_pend_r <= 1'b0;
 
         end else begin
 
@@ -623,6 +728,17 @@ module doc5503 #(
             ram_control_we_r <= 1'b0;
             ram_rts_we_r <= 1'b0;
             ram_acc_we_r <= 1'b0;
+            hb_we_fl_r <= 1'b0; hb_we_fh_r <= 1'b0; hb_we_vol_r <= 1'b0; hb_we_wds_r <= 1'b0;
+            hb_we_wtp_r <= 1'b0; hb_we_control_r <= 1'b0; hb_we_rts_r <= 1'b0; hb_we_acc_r <= 1'b0;
+            hb_wr_last_r <= hb_we_any_w;
+
+            // BANKS_IN_BSRAM: the previous oscillator's control word was
+            // addressed in OSC_LOAD_NEXT_CONTROL; its registered read is
+            // valid the cycle after OSC_REQUEST_DATA, whatever state follows.
+            if (prev_ctl_pend_r) begin
+                prev_control_r <= ram_control_dout_w;
+                prev_ctl_pend_r <= 1'b0;
+            end
 
             if (wave_data_ready_i) begin
                 loaded_wds_pending_r <= 1'b1;
@@ -657,48 +773,66 @@ module doc5503 #(
                     osc_en_r <= host_data_r;
                 end else if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
                     // Oscillator Registers
-                    case (host_addr_r[7:5])
-                        3'b000: begin                               // $00-1F
-                            ram_fl_osc_r <= host_addr_r[4:0];
-                            ram_fl_din_r <= host_data_r;
-                            ram_fl_we_r <= 1'b1;
-                        end
-                        3'b001: begin                               // $20-3F
-                            ram_fh_osc_r <= host_addr_r[4:0];
-                            ram_fh_din_r <= host_data_r;
-                            ram_fh_we_r <= 1'b1;
-                        end
-                        3'b010: begin                               // $40-5F
-                            ram_vol_osc_r <= host_addr_r[4:0];
-                            ram_vol_din_r <= host_data_r;
-                            ram_vol_we_r <= 1'b1;
-                        end
-                        3'b011: begin                               // $60-7F
-                            ram_wds_osc_r <= host_addr_r[4:0];
-                            ram_wds_din_r <= host_data_r;
-                            ram_wds_we_r <= 1'b1;
-                        end
-                        3'b100: begin                               // $80-9F
-                            ram_wtp_osc_r <= host_addr_r[4:0];
-                            ram_wtp_din_r <= host_data_r;
-                            ram_wtp_we_r <= 1'b1;
-                        end
-                        3'b101: begin                               // $A0-BF
-                            ram_control_osc_r <= host_addr_r[4:0];
-                            ram_control_din_r <= host_data_r;
-                            ram_control_we_r <= 1'b1;
-                            if (!host_data_r[0]) begin
-                                ram_acc_osc_r <= host_addr_r[4:0];
-                                ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
-                                ram_acc_we_r <= 1'b1;
+                    if (BANKS_IN_BSRAM) begin
+                        // Port B write; lane select by register group
+                        hb_din_r <= host_data_r;
+                        case (host_addr_r[7:5])
+                            3'b000: hb_we_fl_r <= 1'b1;
+                            3'b001: hb_we_fh_r <= 1'b1;
+                            3'b010: hb_we_vol_r <= 1'b1;
+                            3'b011: hb_we_wds_r <= 1'b1;
+                            3'b100: hb_we_wtp_r <= 1'b1;
+                            3'b101: begin
+                                hb_we_control_r <= 1'b1;
+                                if (!host_data_r[0]) hb_we_acc_r <= 1'b1;  // halt cleared: acc = 0
                             end
-                        end
-                        3'b110: begin                               // $C0-DF
-                            ram_rts_osc_r <= host_addr_r[4:0];
-                            ram_rts_din_r <= host_data_r;
-                            ram_rts_we_r <= 1'b1;
-                        end
-                    endcase
+                            3'b110: hb_we_rts_r <= 1'b1;
+                            default: ;
+                        endcase
+                    end else begin
+                        case (host_addr_r[7:5])
+                            3'b000: begin                               // $00-1F
+                                ram_fl_osc_r <= host_addr_r[4:0];
+                                ram_fl_din_r <= host_data_r;
+                                ram_fl_we_r <= 1'b1;
+                            end
+                            3'b001: begin                               // $20-3F
+                                ram_fh_osc_r <= host_addr_r[4:0];
+                                ram_fh_din_r <= host_data_r;
+                                ram_fh_we_r <= 1'b1;
+                            end
+                            3'b010: begin                               // $40-5F
+                                ram_vol_osc_r <= host_addr_r[4:0];
+                                ram_vol_din_r <= host_data_r;
+                                ram_vol_we_r <= 1'b1;
+                            end
+                            3'b011: begin                               // $60-7F
+                                ram_wds_osc_r <= host_addr_r[4:0];
+                                ram_wds_din_r <= host_data_r;
+                                ram_wds_we_r <= 1'b1;
+                            end
+                            3'b100: begin                               // $80-9F
+                                ram_wtp_osc_r <= host_addr_r[4:0];
+                                ram_wtp_din_r <= host_data_r;
+                                ram_wtp_we_r <= 1'b1;
+                            end
+                            3'b101: begin                               // $A0-BF
+                                ram_control_osc_r <= host_addr_r[4:0];
+                                ram_control_din_r <= host_data_r;
+                                ram_control_we_r <= 1'b1;
+                                if (!host_data_r[0]) begin
+                                    ram_acc_osc_r <= host_addr_r[4:0];
+                                    ram_acc_din_r <= '0; // Reset the accumulator if halt bit is cleared
+                                    ram_acc_we_r <= 1'b1;
+                                end
+                            end
+                            3'b110: begin                               // $C0-DF
+                                ram_rts_osc_r <= host_addr_r[4:0];
+                                ram_rts_din_r <= host_data_r;
+                                ram_rts_we_r <= 1'b1;
+                            end
+                        endcase
+                    end
                 end
             end else begin
                 // Host read access to oscillator registers
@@ -707,7 +841,7 @@ module doc5503 #(
                 // for the next cycle
                 device_response_pending_r <= 1'b1;
 
-                if (host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
+                if (!BANKS_IN_BSRAM && host_addr_r >= 8'h00 && host_addr_r <= 8'hDF) begin
                     case (host_addr_r[7:5])
                         3'b000: ram_fl_osc_r <= host_addr_r[4:0];
                         3'b001: ram_fh_osc_r <= host_addr_r[4:0];
@@ -733,25 +867,25 @@ module doc5503 #(
                     // Read from oscillator registers
                     case (host_addr_r[7:5])
                         3'b000: begin                               // $00-1F
-                            data_o <= ram_fl_dout_w;
+                            data_o <= hr_fl_w;
                         end
                         3'b001: begin                               // $20-3F
-                            data_o <= ram_fh_dout_w;
+                            data_o <= hr_fh_w;
                         end
                         3'b010: begin                               // $40-5F
-                            data_o <= ram_vol_dout_w;
+                            data_o <= hr_vol_w;
                         end
                         3'b011: begin                               // $60-7F
-                            data_o <= ram_wds_dout_w;
+                            data_o <= hr_wds_w;
                         end
                         3'b100: begin                               // $80-9F
-                            data_o <= ram_wtp_dout_w;
+                            data_o <= hr_wtp_w;
                         end
                         3'b101: begin                               // $A0-BF
-                            data_o <= ram_control_dout_w;
+                            data_o <= hr_control_w;
                         end
                         3'b110: begin                               // $C0-DF
-                            data_o <= ram_rts_dout_w;
+                            data_o <= hr_rts_w;
                         end
                     endcase
                 end else if (host_addr_r == 8'hE0) begin
@@ -927,6 +1061,12 @@ module doc5503 #(
     task automatic osc_load_registers();
         // Load all current oscillator registers from register file RAM
         // Transitions to OSC_REQUEST_DATA state to begin oscillator processing
+        if (BANKS_IN_BSRAM && hb_wr_last_r) begin
+            // A host (port B) write landed on the last edge; the port-A read
+            // registered on that same edge predates it. Hold one cycle so the
+            // loaded registers include the write (FF banks see it directly).
+            osc_state_r <= OSC_LOAD_REGISTERS;
+        end else begin
         curr_fl_r <= ram_fl_dout_w;                  // Frequency low
         curr_fh_r <= ram_fh_dout_w;                  // Frequency high
         curr_vol_r <= ram_vol_dout_w;                // Volume
@@ -939,18 +1079,33 @@ module doc5503 #(
         ram_control_osc_r <= partner_osc_w;
 
         osc_state_r <= OSC_LOAD_PARTNER_CONTROL;             // Request data from memory
+        end
     endtask: osc_load_registers
 
     task automatic osc_load_partner_control();
-        partner_control_r <= ram_control_dout_w;
-        ram_control_osc_r <= curr_osc_r + 1'b1;
-        osc_state_r <= OSC_LOAD_NEXT_CONTROL;
+        if (BANKS_IN_BSRAM && !bank_wait_r) begin
+            // registered bank read: the partner address was presented last
+            // cycle, data arrives this edge — consume next cycle
+            bank_wait_r <= 1'b1;
+            ram_control_osc_r <= partner_osc_w;
+        end else begin
+            bank_wait_r <= 1'b0;
+            partner_control_r <= ram_control_dout_w;
+            ram_control_osc_r <= curr_osc_r + 1'b1;
+            osc_state_r <= OSC_LOAD_NEXT_CONTROL;
+        end
     endtask: osc_load_partner_control
 
     task automatic osc_load_next_control();
-        next_control_r <= ram_control_dout_w;
-        ram_control_osc_r <= curr_osc_r - 1'b1;
-        osc_state_r <= OSC_REQUEST_DATA;
+        if (BANKS_IN_BSRAM && !bank_wait_r) begin
+            bank_wait_r <= 1'b1;
+            ram_control_osc_r <= curr_osc_r + 1'b1;
+        end else begin
+            bank_wait_r <= 1'b0;
+            next_control_r <= ram_control_dout_w;
+            ram_control_osc_r <= curr_osc_r - 1'b1;
+            osc_state_r <= OSC_REQUEST_DATA;
+        end
     endtask: osc_load_next_control
 
     task automatic osc_request_data();
@@ -998,7 +1153,8 @@ module doc5503 #(
         end
 
         // load prev control register (needed later)
-        prev_control_r <= ram_control_dout_w;
+        if (BANKS_IN_BSRAM) prev_ctl_pend_r <= 1'b1;      // registered read: latch next cycle
+        else prev_control_r <= ram_control_dout_w;
     endtask: osc_request_data
 
     task automatic osc_handle_data();
@@ -1193,3 +1349,50 @@ module osc_reg_ram #(
 
 endmodule
 
+// Two 32-entry byte-wide oscillator register banks in one Gowin DPB (true
+// dual-port BSRAM, 1K x 16): lane 0 = bank "lo", lane 1 = bank "hi". Each
+// port writes either lane through the byte-enable address bits (UG300 §3.1:
+// for 16-bit DPB, AD[0] enables DI[7:0], AD[1] enables DI[15:8]; the word
+// address sits in AD[13:4]). Bypass read mode: DO is the location addressed
+// on the previous clock edge (one-cycle registered read); normal write mode:
+// DO holds during a write on that port (Arora V has no read-before-write).
+// Simultaneous writes to the same address from both ports are a design
+// error here (the FSM never issues one); DOC_SIM_CHECKS flags it in sim.
+module osc_reg_bank_dpb (
+    input  wire        clk_i,
+    input  wire [4:0]  a_addr_i,
+    input  wire        a_we_lo_i,
+    input  wire        a_we_hi_i,
+    input  wire [15:0] a_din_i,
+    output wire [15:0] a_dout_o,
+    input  wire [4:0]  b_addr_i,
+    input  wire        b_we_lo_i,
+    input  wire        b_we_hi_i,
+    input  wire [15:0] b_din_i,
+    output wire [15:0] b_dout_o
+);
+    DPB #(
+        .READ_MODE0  (1'b0),   .READ_MODE1  (1'b0),    // bypass: registered read, no output pipeline
+        .WRITE_MODE0 (2'b00),  .WRITE_MODE1 (2'b00),   // normal: output holds on write
+        .BIT_WIDTH_0 (16),     .BIT_WIDTH_1 (16),
+        .BLK_SEL_0   (3'b000), .BLK_SEL_1   (3'b000),
+        .RESET_MODE  ("SYNC")
+    ) u_dpb (
+        .DOA(a_dout_o), .DOB(b_dout_o),
+        .DIA(a_din_i),  .DIB(b_din_i),
+        .BLKSELA(3'b000), .BLKSELB(3'b000),
+        .ADA({5'b00000, a_addr_i, 2'b00, a_we_hi_i, a_we_lo_i}),
+        .ADB({5'b00000, b_addr_i, 2'b00, b_we_hi_i, b_we_lo_i}),
+        .WREA(a_we_lo_i | a_we_hi_i), .WREB(b_we_lo_i | b_we_hi_i),
+        .CLKA(clk_i), .CLKB(clk_i),
+        .CEA(1'b1), .CEB(1'b1),
+        .OCEA(1'b1), .OCEB(1'b1),
+        .RESETA(1'b0), .RESETB(1'b0)
+    );
+`ifdef DOC_SIM_CHECKS
+    always @(posedge clk_i)
+        if ((a_we_lo_i | a_we_hi_i) && (b_we_lo_i | b_we_hi_i) && (a_addr_i == b_addr_i) &&
+            ((a_we_lo_i & b_we_lo_i) | (a_we_hi_i & b_we_hi_i)))
+            $display("ERROR osc_reg_bank_dpb %m: same-address same-lane write on both ports, osc %0d at %0t", a_addr_i, $time);
+`endif
+endmodule

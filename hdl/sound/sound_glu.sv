@@ -459,6 +459,7 @@ module sound_glu #(
             assign dbg_doc_fetch_count_o = 16'd0;
             assign dbg_doc_frame_resync_o = 8'd0;
             doc5503 #(
+                .BANKS_IN_BSRAM(DOC_BANKS_IN_BSRAM)
             ) doc5503 (
                 .clk_i(a2bus_if.clk_logic),
                 .reset_n_i(a2bus_if.system_reset_n),
