@@ -1,0 +1,716 @@
+# a2p25 resource audit — where the GW5A-25 budget goes, and what is bloat
+
+Analysis only. No RTL was changed for this document; every proposal below
+needs ed's sign-off before implementation. Numbers marked **est.** are
+estimates derived from the RTL and the block-mapping rule in §2; everything
+else is read from the build reports listed in §1.
+
+## 1. Provenance
+
+**a2p25 (audited build)**
+
+| Item | Value |
+|---|---|
+| Source tree | branch `claude/a2p25-modernization-8a97cc`, commit `5b541a5f` (2026-10-12). The bitstream was committed in `e4f2e056` ("dp: EQ dwell from DPCD 0x00E, LATE_REPLY_DRAIN on the a2p25 core"). |
+| Project | `boards/a2p25/a2p25.gprj`, top `boards/a2p25/hdl/top.sv`, part GW5A-LV25MG121NC1/I0 |
+| Tool | GowinSynthesis / PnR V1.9.12.01; synthesis 2026-10-12 14:31, PnR 14:43 |
+| Bitstream | `boards/a2p25/impl/pnr/a2p25.fs`, sha256 `a651e352f38b6f2a805a3a5e50eda949762cf2a989cfcd7db614b63af91e3fe7` |
+| Reports | `boards/a2p25/impl/pnr/a2p25.rpt.txt` (flat PnR totals, tracked); `impl/gwsynthesis/a2p25_syn_rsc.xml` + `a2p25.vg` (per-instance hierarchy and primitive netlist, **untracked**, same timestamps as the PnR run, read from the build worktree) |
+| Timing | 0 setup / 0 hold violations; Fmax margin thin on clk100 (100.22 vs 100 MHz), clk_pix (149.11 vs 148.5) and clk_mem (108.85 vs 108); clk_hr 57.1 vs 54, clk_sym 82.9 vs 81. Single roll; not the +0.5 ns durability bar. |
+| Feature set | UTHERNET2_ENABLE=0, MOCKINGBOARD_ENABLE=0, SUPERSPRITE_ENABLE=0, SUPERSERIAL_ENABLE=0, DebugOverlay ENABLE=0, DOC_BANKS_IN_BSRAM=0, LANE_COUNT=4, FIFO_LINES=1, COLOR_BITS=18 with the line buffer stored as RGB565 |
+
+**a2n20v2-Enhanced (comparison builds, two months older)**
+
+| Variant | Report date / commit | fs sha256 (first 16) | Notes |
+|---|---|---|---|
+| `a2n20v2_enhanced` (base) | 2026-08-01, `15a5a2bd` | `f0a2afe37762a24b` | shadow in BSRAM, no framebuffer, Mockingboard + SuperSprite + SSC + Uthernet2 **in** |
+| `a2n20v2_enhanced_dualrate` | 2026-08-01, `15a5a2bd` | `78387c6f471cc94c` | 108 MHz SDRAM, VGC_IN_SDRAM, no framebuffer |
+| `a2n20v2_enhanced_fb` | 2026-08-09, `a57a50de` | `1d8662435c5f90a9` | dual-rate + SDRAM framebuffer — the closest counterpart to the a2p25 pipeline |
+
+Per-instance numbers for the Enhanced come from `impl/gwsynthesis/*_syn_rsc.xml`
+in the main checkout (untracked; same dates as the PnR reports).
+
+## 2. How the counts were made — and a block-mapping rule that matters
+
+Gowin's PnR report has only flat totals. The per-module tables below are the
+synthesis hierarchy (`*_syn_rsc.xml`: REG / LUT / ALU / BSRAM primitives per
+instance, children included). Synthesis totals are within 1% of PnR for logic
+and registers, so they are used as-is.
+
+**BSRAM is the exception.** Synthesis reports 42 BSRAM primitives for the
+a2p25; PnR places **56 blocks**. Cross-checking the a2p25 `.vg` netlist against
+the PnR block types of seven a2p25 builds (full core, five `dp_test` variants,
+`psram_test`) gives one consistent rule for this device:
+
+> On GW5A-25, a semi-dual-port primitive with a **32- or 36-bit** port
+> (`SDPB` x32, `SDPX9B` x36) occupies **two** 18 Kb blocks. Primitives of
+> x18 or narrower (x2, x8, x9, x16, x18), `DPB` and `pROM` occupy one.
+
+Evidence: `dp_test_fb` has 9 x2 + 5 x32 + 3 x32 SDPB primitives and PnR shows
+25 SDPB (9 + 2×8); `psram_test` has one x32 SDPB and PnR shows 2; the 11 x9 and
+6 x18 SDPX9B primitives of the other `dp_test` builds map 1:1. On the
+GW2AR-18 (Enhanced) synthesis and PnR BSRAM counts are identical, so this is
+a GW5A mapping effect (likely the 18 Kb block offering at most 18 bits per
+port in dual-port modes; the Gowin BSRAM user guide should be checked, the
+local datasheet volume was not reachable during this audit). The practical
+consequence: **a memory costs `ceil(width / 18)` blocks** regardless of depth
+until the depth exceeds 1024; shallow, wide arrays are the expensive ones.
+
+With that rule every one of the 56 blocks is accounted for:
+
+| Memory (instance) | Array | Primitives | Blocks | Bits used / capacity |
+|---|---|---|---|---|
+| `u_framebuffer` write FIFO `wr_fifo` | 64 × 149 | 5 × SDPB x32 | **10** | 9.5 Kb / 180 Kb (5%) |
+| `u_framebuffer` line buffer `line_buf` | 8192 × 16 | 8 × SDPB x2 | 8 | 128 Kb / 144 Kb |
+| `sg/doc5503/cache_ram` (wavetable line cache) | 64 × 140 | 4 × SDPX9B x36 | **8** | 9 Kb / 144 Kb (6%) |
+| `esp32_ospi` Disk II track lanes (4 × `lane_mem`) | 4 × 4096 × 8 | 8 × DPB x8 | 8 | 128 Kb / 144 Kb |
+| `i_dp/i_pixel_cdc_fifo` | 512 × 97 | 3 × SDPX9B x36 | **6** | 49 Kb / 108 Kb |
+| `sg` GLU write queue `gq_*` | 32 × 57 (data is one byte ×4) | 2 × SDPB x32 | **4** | 1.8 Kb / 72 Kb (2.5%) |
+| `sg/doc5503/lu_ram0,1` | 32 × 12, 32 × 16 | 2 × SDPB x16 | 2 | 0.9 Kb / 36 Kb |
+| `esp32_ospi/hdd_mem` | 512 × 32 | 2 × DPB x16 | 2 | 16 Kb / 36 Kb |
+| `i_sys_pll/u_pll_init`, `i_phy/u_dphy/u_pll_init` ROMs | 2 × (64 × 28) | 2 × pROM x32 | **2** | 3.5 Kb / 36 Kb |
+| `esp32_ospi/osd_vram` | 2048 × 8 | SDPB x8 | 1 | 16 Kb / 18 Kb |
+| `osd_overlay` font ROM | 4096 × 8 (folded) | pROM x8 | 1 | |
+| `apple_video_gen` video ROM | 4096 × 8 (folded) | pROM x8 | 1 | |
+| `diskii/diskrom` | 256 × 8 | pROM x16 | 1 | 2 Kb / 18 Kb |
+| `hdd/buf_mem` | 512 × 8 | DPB x8 | 1 | 4 Kb / 18 Kb |
+| `slotmaker/slot_cards` | 8 × 8 | DPB x8 | **1** | 64 b / 18 Kb |
+| **Total** | | 42 | **56** | |
+
+PnR breakdown check: SDPB 25 = 8 + 10 + 4 + 2 + 1; SDPX9B 14 = 8 + 6; DPB 12 =
+8 + 2 + 1 + 1; pROM 5. (TOP_INTEGRATION_PLAN §3 itemised the same memories by
+primitive count — "write FIFO 5", "DP pixel FIFO 3", "bank FIFO 3" — which is
+why that list never summed to the PnR total. The FIFO_LINES change saved 5
+blocks, not 8; the D-PHY bank FIFO would cost 5 blocks in BSRAM, not 3.)
+
+Device totals for the audited build:
+
+| | a2p25 (GW5A-25) | Enhanced base (GW2AR-18) | Enhanced fb |
+|---|---|---|---|
+| Logic (LUT+ALU+ROM16) | 18,675 / 23,040 (82%) | 12,820 / 20,736 (62%) incl. 202 SSRAM | 15,021 / 20,736 (73%) incl. 229 SSRAM |
+| Registers (FF) | 15,233 / 23,040 (67%) | 6,641 / 15,552 (43%) | 8,236 / 15,552 (53%) |
+| CLS | 11,423 / 11,520 (99%) | 8,770 / 10,368 (85%) | 8,982 / 10,368 (87%) |
+| BSRAM | 56 / 56 | 44 / 46 | 34 / 46 |
+| DSP | 3.5 / 28 | 14.75 / 24 | 14.75 / 24 |
+
+The a2p25 has 2.3× the registers of the Enhanced base for a smaller feature
+set. CLS at 99% with logic at 82% is partly placer spreading (ed's note in the
+plan), but the FF count is real: the register budget is where most of the
+non-BSRAM bloat sits.
+
+## 3. Per-block table
+
+REG / LUT / ALU from the synthesis hierarchy (children included). a2p25 BSRAM
+is the **physical** count from §2; Enhanced BSRAM/SSRAM from its synthesis
+report (identical to PnR on GW2A). The Enhanced column is the `_fb` variant
+unless marked (base). Classification: **ARCH** = inherent to the a2p25
+architecture (no SSRAM on GW5A, HyperRAM vs SDRAM, DP vs HDMI, 1080p vs 720p,
+ESP32 vs BL616), **BLOAT** = cost not required by the function.
+
+| Block | a2p25 REG / LUT / ALU | a2p25 BSRAM | Enhanced REG / LUT / ALU | Enh. BSRAM (+SSRAM) | Delta classification |
+|---|---|---|---|---|---|
+| `apple_bus` (+ `gs_detector`, timing CDC) | 82 / 55 / 33 | 0 | 146 / 363 / 27 | 0 | a2p25 smaller (a2mega bus); nothing to do |
+| `apple_memory` (shadow in HyperRAM; 16×57 write FIFO in regs, burst cache + VGC prefetch store) | 824 / 896 / 531 | 0 | 570 / 890 / 44 | 0 (base: 16 BSRAM aux) | ARCH for the SDRAM/HyperRAM shadow path; **BLOAT** candidate: FIFO depth 16 (≈460 FF of margin, §4 B9); 531 ALUs is high for this block (address/compare arithmetic) — worth a look but not costed here |
+| `slotmaker` | 6 / 17 / 0 | **1** | 14 / 18 / 0 | 0 (+2 SSRAM) | **BLOAT**: an 8-byte table in a BSRAM block (no SSRAM on GW5A) |
+| `apple_video_gen` + `apple_fb_writer` | 282 / 515 / 35 | 1 | 274 / 546 / 34 | 1 | same |
+| `vgc_gen` + `vgc_fb_writer` + `scan_timer` | 406 / 482 / 79 | 0 (1 DSP) | 194 / 308 / 48 | 0 (+3 SSRAM) | a2p25 `vgc_gen` carries 2.5× the registers (349 vs 136) with the same source file — parameterisation (`VGC_IN_SDRAM` prefetch) or missing SSRAM; **check**, not costed |
+| `framebuffer_1080p` (line buffer 8 banks × 1024 × 16; write FIFO 64 × 149; read FIFO 16 × 32 in regs) | 1,065 / 839 / 274 | **18** (8 + 10) | `sdram_framebuffer` 312 / 473 / 157 | 4 (+8 SSRAM) | ARCH: 1080p scanout, HyperRAM burst assembly. **BLOAT**: write FIFO 10 blocks for 64 entries (§4 B1); 8 line banks where the prefetch needs ≤ 4 (B3); 3.4× registers vs the SDRAM version (beat/overflow instrumentation, counters: `dbg_*` 8-bit counters, `completed_line_r[8]`) |
+| `sound_glu` + `doc5503_pipelined` (FF register banks 7 × 256 + 768; line cache; lookup RAMs; GLU write queue) | 3,726 / 3,864 / 352 | **14** (8 + 2 + 4) | 488 / 766 / 112 | 2 (+40 SSRAM) | ARCH: no SSRAM → 2,560 FF of banks; pipelined DOC for external wavetable RAM (+~1,000 REG / 1,500 LUT core). **BLOAT**: cache 8 blocks for 1.1 KB (B2), write queue 4 blocks for 32 entries whose data field is one byte replicated four times (B5), `debug_osc_mode_r[8]` etc. small |
+| `diskii` (2 drives) + `hdd` | 303 / 620 / 77 | 2 | 303 / 652 / 43 | 2 | same |
+| `esp32_ospi_connector` (+ proto, OSD VRAM, 16 KB Disk II lanes, 2 KB HDD buffer) vs `bl616_spi` (+ proto, SD-SPI, 32-deep write FIFO) | 1,070 / 1,318 / 48 | **11** (8 + 2 + 1) | 1,000 / 1,334 / 98 | 4 (+2 SSRAM) | Logic equal. BSRAM: 16 KB of track lanes is a **product/firmware decision** (plan: 4 → 2 lanes, −4, firmware-visible, B8); OSD and HDD buffers are fine |
+| `u_ddr3_dbg_reader` + HyperRAM port 6 | 34 / 7 / 0 (+ ≈120 FF in the arbiter queue) | 0 | — | — | **BLOAT (debug-only)**: ESP32 memory-peek instrument in the production top (B6) |
+| `hyperram_ctrl` + `hyperram_phy` | 752 / 1,007 / 257 | 0 | `sdram_ports/sdram_inst` 513 / 444 / 15 | 0 | ARCH (HyperBus PHY + calibration state machine) |
+| `hyperram_ports` (7 ports × 2-slot request queue, 155-bit slots) | 932 / 752 / 27 | 0 (2 DSP) | `mem_cdc[0..6]` 390 / 82 / 24 (+32 SSRAM) | 0 | ARCH mostly; the queues are FFs because there is no SSRAM. Port 6 is debug (B6). |
+| `dp_transmitter` total | 3,377 / 3,750 / 350 | **6** | `hdmi` 631 / 1,032 / 69 | 0 | ARCH: DP link = AUX protocol engine + training + MSA/SDP; HDMI has none of that |
+| ├ `pixel_cdc_fifo` (512 × 97) | 101 / 77 / 30 | 6 | — | — | **BLOAT**: 24-bit pixels through the CDC when the framebuffer is RGB565 (B4) |
+| ├ `video_stream_packer` | 232 / 621 / 0 | 0 | — | — | ARCH (4-lane TU packing) |
+| ├ `sdp_engine` (256-bit `db` + 256-bit `db_d` copy + 6×4×8 wire-byte precompute) | 586 / 961 / 0 | 0 | HDMI packet picker 480 / 342 | 0 | ARCH for the SDP; **BLOAT**: the `db_d` copy exists only for a stability check and a parity precompute (B10, 256 FF) |
+| ├ `msa_inserter_4ch`, `dp_video_timing`, `audio_sample_buffer`, `maud_measure` | 537 / 182 / 84 | 0 | — | — | ARCH |
+| ├ `main_stream_processing` (`insert_training_pattern` 420 REG = 6 × 80-bit delay line; `skew_channels` 111; idle/scrambler) | 797 / 330 / 26 | 0 | — | — | ARCH; the 480-FF training delay line is upstream-design heritage — worth a look, not costed |
+| ├ `channel_management` / `aux_channel` / `aux_interface` (two 32 × 8 FIFOs in FFs = 512 FF; LINK_CHECK, ERRCNT_READ, ESI, debug saturating counters ≈ 60 FF) | 1,081 / 1,470 / 210 | 0 (1 DSP) | — | — | ARCH (the AUX engine; the FIFOs are FFs for lack of SSRAM). The debug/observe counters, LINK_CHECK and ERRCNT_READ are small (**< 100 FF**) and are functional link-supervision, not bloat; AFE/EDID paths are already swept (`ENABLE_AFE_ADJUST=0`) |
+| `transceiver_bank_dphy` (16 × 80 async FIFO in registers = 1,280 FF; 4 × 8b10b encoders; shim) + Gowin D-PHY + PLL init | 1,789 / 1,506 / 84 | 1 (PLL ROM) | HDMI TMDS ×3 | 0 | ARCH (the BSRAM alternative is 5 blocks at x18, not 3); the PLL-init ROM block is **BLOAT** (B7) |
+| `i_sys_pll/u_pll_init` | 100 / 150 / 35 | 1 | — | — | GW5A PLL init machines are needed; the 64 × 28 ROM in a BSRAM block is **BLOAT** (B7) |
+| `osd_text_overlay` + `scanline_dim` | 99 / 142 / 47 | 1 | (part of BL616 OSD path) | — | same role |
+| `DebugOverlay` (ENABLE=0) + top-level `dbg_hex_sync0/1`, `dbg_bits*` sync regs | 149 / 0 / 0 (+160 FF in top) | 0 | 54 / 151 (enabled) | 0 | **BLOAT (debug-only)**: a disabled overlay still costs ≈ 310 FF and sits in the composite pipeline (B6) |
+| `apple_speaker`, `i_aux_pad`, `reset_sync`, top glue | ≈ 300 / 250 | 0 | `audio_out` + IIR 606 / 302 (+15 DSP) | 0 | Enhanced spends DSPs on the audio filter; a2p25 sends PCM over DP |
+| Mockingboard, SuperSprite, SuperSerial, Uthernet2 (disabled) | 0 (swept) | 0 | 774 / 1,292; 1,209 / 2,210; 159 / 207; 64 / 95 | 0; 10; 1; 9 | Disabled features are fully swept by synthesis (confirmed in the log: "swept in optimizing" for all four plus `via6522`, `YM2149`, `glb6551`, `uart_*`, `ssc_rom`, `hddrom`, `edid_decode`, `afe_adjust_seq`). No generate-guard gaps remain. |
+
+Uthernet2 on this device: `reg_mem` 2048 × 8 (1 block) + `buf_mem` 16384 × 8
+(8 blocks) = **9 blocks**, x8 so no doubling — the same 9 as on the Enhanced.
+
+## 4. Bloat items — proposals, savings, risk
+
+Ordered by savings ÷ risk. "Shared" = the file is used by the a2mega (and
+possibly other boards). Timing context: the audited build closes at 0
+violations on this roll with < 1% Fmax margin on clk100 / clk_pix / clk_mem;
+anything that adds logic to those cones is a timing risk, anything that only
+removes registers or narrows muxes is neutral-to-positive.
+
+| # | Item | Change | Savings (est.) | Risk | Shared HDL |
+|---|---|---|---|---|---|
+| **B4** | `pixel_cdc_fifo` carries 24-bit RGB | Add a `PIXEL_BITS` parameter to `dp_transmitter` (default 24 → a2mega unchanged); a2p25 passes 16 and converts RGB565↔888 at the FIFO boundary. Width 4×16+1 = 65 → 4 × x18 primitives. The framebuffer is already RGB565, so no picture change except OSD/scanline-dim quantisation to 565. | **−2 BSRAM**, −~30 LUT | Low. Symbol-clock side unchanged; the "level swings ±60 at prefill" behaviour is depth-related, not width. | `hdl/displayport/dp_transmitter.sv`, `pixel_cdc_fifo.v` (parameterised; a2mega default) |
+| **B7** | PLL-init ROMs (2 × 64 × 28) in BSRAM | `syn_romstyle = "logic"` (or `distributed_rom`) on `rRom` in `boards/a2p25/hdl/gowin/pll_init.v`; GW5A has no SSRAM so this becomes ≈ 28 × 4 LUT4 per ROM. | **−2 BSRAM**, +~220 LUT | Low (the init sequencer runs at 50 MHz, once at boot; LUT ROM is fine). CLS +~110. | a2p25 only (a2mega uses its own PLL wrappers) |
+| **B5a** | GLU write queue: 2 × x32 primitives for a 32 × 57 array whose data field is `{data,data,data,data}` | Store 8-bit data; split the entry into ≤ 18-bit arrays (`addr[17:0]`, `{addr[20:18], be, data}`) so synthesis emits x18 primitives. Same depth, same behaviour. | **−2 BSRAM** | Low (pure storage re-slicing; the drop counter `glu_wq_drops_o` verifies). | `hdl/sound/sound_glu.sv` (a2mega too — same saving there) |
+| **B5b** | …or shrink the queue to 8 entries in FFs | Depth 32 was chosen for arbiter starvation during uploads; 8 × 33 = 264 FF. | −4 BSRAM, +264 FF | Medium: a dropped write corrupts the wavetable permanently (the RTL comment). Needs the POLY.SYNTH upload soak with the drop counter. | shared |
+| **B6** | Debug-only logic in the production top | (a) `DebugOverlay` ENABLE=0 still instantiates 6 pipeline stages (149 FF) plus the top's `dbg_hex_sync0/1`, `dbg_bits*` (160 FF): generate-guard both and replace the overlay with a 6-stage register delay only if the composite alignment needs it (or re-tune `H_TRIGGER_LEAD` from 11 to 5, see MODERNIZATION §6g.1). (b) `ddr3_debug_reader` + HyperRAM port 6: remove, `NUM_DDR3_PORTS` 7 → 6 (−34 FF reader, −≈120 FF arbiter queue, smaller 7:1 muxes). | **−≈430 FF, −≈150 LUT** | Low–medium: (a) changes composite latency (scanout trigger lead must be re-verified against the SHR left-edge test); (b) removes the ESP32 memory-peek used for SHR dumps — firmware-visible; keep behind a parameter. | top.sv only |
+| **B7b** | `slotmaker/slot_cards` 8 × 8 in a DPB block | `syn_ramstyle = "registers"` (64 FF, 8:1 mux). On GW2A it is already SSRAM; the attribute can be made conditional or simply applied (64 FF is nothing on any board). | **−1 BSRAM**, +64 FF | Low | `hdl/slots/slotmaker.sv` (all boards) |
+| **B1a** | Framebuffer write FIFO 64 × 149 → 10 blocks | Minimal variant: split the 149-bit entry into nine ≤ 18-bit arrays so x18 primitives are inferred (9 blocks). | **−1 BSRAM** | Low | `hdl/video/framebuffer_1080p.sv` (a2mega: DDR3 port is 128-bit, same saving) |
+| **B1b** | …structural variant | The HyperRAM port is 32-bit (`hyperram_ports` takes a 32-bit beat plus `wide_wr_data_hi` for the 4-beat burst). Queue 32-bit beats in a 256 × 32 FIFO built from two x16 primitives (2 blocks) plus a 64 × 21 address FIFO (2 blocks, or 1 if the address is ≤ 18 bits after the base is folded in), and assemble the burst at the arbiter side — or push beats one at a time and drop `WIDE_WR_PORT`. | **−6 BSRAM** (10 → 4), −~100 FF | Medium: touches the FIFO contract (`fifo_busy`/yield thresholds in entries → beats), the HyperRAM wide-write path and the a2mega DDR3 path; framebuffer write timing is one of the thin cones. Needs the beat/overflow counters (`dbg_fifo_overflow`, PC line) clean on hardware. | shared (`framebuffer_1080p.sv`, `hyperram_ports.sv`) |
+| **B3** | Line buffer 8 banks × 1024 × 16 | The scanout repeats each source line 5× (192 → 960, 200 → 1000 raster lines) and prefetches line N+1 while N is displayed; the fetch logic already limits itself to ≤ 7 banks ahead during active video. Reduce to 4 banks (`fetch_bank_r` 3 → 2 bits, `completed_line_r[8]` → 4, "stay ≤ 3 ahead"). | **−4 BSRAM** | Medium: changes the prefetch/vblank fill schedule; must re-verify with the beat/line-not-ready counters and the SHR left-edge test. Read side is on the thin clk_pix cone, but the change removes address bits rather than adding logic. | shared (a2mega also saves 4 blocks of its 118) |
+| **B2** | DOC line cache 64 × 140 → 8 blocks for 1.1 KB | Reorganise by beat: lines arrive as 4-beat bursts, so store 256 × 32 (two x16 primitives, 2 blocks) and read the single 32-bit beat selected by `addr[3:2]`; keep the 12-bit tag in a 64 × 12 array (1 block). The 140-bit read mux becomes a 32-bit one. | **−5 BSRAM** (8 → 3), −~150 LUT | Medium–high: the DOC fetch/prime pipeline is the most timing-sensitive cone on both GW5A boards (named in every a2p25 violation list). The narrower mux should help, but the slot schedule must be re-simulated (`hdl/sound` DOC testbenches) and listened to (POLY.SYNTH cases). | shared (`hdl/sound/doc5503_pipelined.sv`; a2mega same saving) |
+| **B8** | Disk II track lanes 4 × 4 KB | 2 lanes (8 KB: one track per drive) per the plan's note. | −4 BSRAM | Medium: ESP32 firmware protocol change (`SPACE_DISK` layout), serving latency for two-drive access. Product decision. | `boards/a2mega/hdl/esp32/esp32_ospi_connector.sv` + ESP32 fw |
+| **B9** | `apple_memory` shadow write FIFO depth 16 in registers (≈ 912 FF) | Depth 8 (the RTL says 8 overflowed before the arbiter priority fix; now "margin"). | −456 FF | Medium: a live overflow corrupts shadow video; `dbg_shadow_drop` must stay 0 through the TransWarp GS splash case that found the original overflow. | shared |
+| **B10** | `sdp_engine` `db_d` 256-bit copy | Replace the `db_d === db` stability check with a one-bit "db written this cycle" flag and feed the parity precompute from `db` one cycle later (or register only the 16-bit slices the precompute reads). | −~256 FF | Medium: `db_d` was introduced for timing on the symbol clock (the a2mega 138B campaign); re-roll both boards. | shared (`hdl/displayport/audio/sdp_engine.v`) |
+| **B11** | `framebuffer_1080p` instrumentation (beat/timeout detectors, 8-bit saturating counters, `completed_line_r`) and `doc5503` debug counters (`dbg_doc_*`, `debug_osc_mode_r[8]`) | Generate-guard behind a `DEBUG_COUNTERS` parameter once the PC-line telemetry is no longer needed day-to-day. | −~200–300 FF (est., not itemised) | Low, but removes the counters that verify B1/B3/B9 — do last. | shared |
+
+Not bloat, but worth knowing:
+
+- `aux_interface` tx/rx FIFOs (2 × 32 × 8 = 512 FF) and the D-PHY bank FIFO
+  (16 × 80 = 1,280 FF) are FFs because the GW5A has no SSRAM. Each could move
+  to BSRAM (1 block for both AUX FIFOs via address split; 5 blocks for the
+  bank FIFO at x18) **only if** blocks are freed first — a trade, not a saving.
+- `DOC_BANKS_IN_BSRAM=1` (plan: −2 k logic, +6 BSRAM) is the lever to relieve
+  CLS once BSRAM is freed. Note the §2 rule: the banks must be sliced ≤ 18 bits
+  wide or the cost is higher than the plan's +6 (seven 32 × 8 banks = 7
+  blocks, the 32 × 24 accumulator bank = 2 blocks at x18 — **+9**, unless
+  banks are paired into 16-bit arrays: 4–5 blocks). Re-estimate before relying
+  on +6.
+- `transceiver_bank_dphy` lane FIFO "3 blocks otherwise" in its comment is 5
+  blocks under the §2 rule.
+
+## 5. Recommended order and the target for Uthernet2 + Mockingboard
+
+**Requirements:** Uthernet2 = 9 BSRAM + ≈ 65 REG / 100 LUT; Mockingboard =
+0 BSRAM + ≈ 775 REG / 1,300 LUT / 40 ALU (Enhanced numbers; identical source).
+
+**BSRAM target:** ≤ 46 / 56 used before Uthernet2 goes back in (9 blocks + 1
+spare). **Logic target:** ≤ 17,000 logic cells (74%) and ≤ 13,500 FF (59%)
+before Mockingboard, so that the post-add build sits near today's 82% / 67%
+rather than above it (today's 99% CLS is already a placement-time cost).
+
+Suggested sequence (each step = one build for resource measurement, timing
+checked per the no-skating rule — a step that re-opens violations is not
+"done"):
+
+1. **Low-risk BSRAM pass (−8 blocks, 56 → 48):** B4 (−2), B7 (−2), B5a (−2),
+   B7b (−1), B1a (−1). Storage re-slicing and attributes only; no behavioural
+   change. One build.
+2. **Debug trim (−≈430 FF):** B6 a+b behind parameters. Re-verify the SHR
+   left-edge alignment if the overlay stages come out.
+3. **Line buffer 8 → 4 banks (−4 blocks, → 44):** B3. Hardware check with
+   the framebuffer counters and SHR scanout. This alone clears the Uthernet2
+   BSRAM target.
+4. **Uthernet2 back in** (`UTHERNET2_ENABLE=1`): 44 + 9 = 53 / 56. Resource
+   measurement build, then DHCP test (W5100 bridge via the ESP32).
+5. **Write FIFO restructure (−6 blocks)** B1b, and/or **DOC cache (−5)** B2,
+   as the schedule allows — these are the medium/high-risk structural items;
+   each is also worth 5–6 blocks on the a2mega. Either one brings the a2p25
+   back to ≈ 47–48 / 56 with Uthernet2 in and opens the door to
+   `DOC_BANKS_IN_BSRAM=1`.
+6. **Logic for Mockingboard:** §7.4 (banks → BSRAM, DOC fetch path; the dominant lever), then B9 (−456 FF), B10 (−256 FF), B11 (−~250 FF)
+   plus `DOC_BANKS_IN_BSRAM=1` (−~2 k logic for +5–9 blocks, affordable only
+   after step 5). Expected position before enabling Mockingboard: ≈ 16.5 k
+   logic / ≈ 12.5 k FF. Then `MOCKINGBOARD_ENABLE=1` and three timing rolls
+   of the final source.
+
+If only steps 1–4 are done, Uthernet2 fits and Mockingboard does not; the
+Mockingboard needs the DOC banks moved to BSRAM, which in turn needs step 5.
+
+## 6. Caveats
+
+- Per-module REG/LUT are synthesis counts; PnR totals differ by < 1%
+  (logic 18,675 vs 18,503; FF 15,233 vs 15,264).
+- Physical BSRAM per memory is derived from the primitive netlist and the
+  empirical mapping rule in §2, because Gowin's placement files are
+  encrypted. The rule reproduces the PnR block type counts of seven builds
+  exactly, but the underlying device reason should be confirmed in the GW5A
+  BSRAM user guide.
+- All savings are estimates from the RTL; they need a resource-measurement
+  build each. None of the proposals has been built.
+- The Enhanced reports are from 2026-08-01/09; the Enhanced source has moved
+  since (GS auto-detect, HDD boot wait). The comparison is architectural, not
+  a like-for-like snapshot.
+
+## 7. Follow-up from review (ed, 2026-10-13)
+
+### 7.1 DDR3-era sizing is not a requirement on PSRAM
+
+Several structures flagged in §4 were sized for the a2mega's DDR3 latency, not
+for the HyperRAM: the 64-entry × 128-bit write FIFO ("one full DDR3 128-bit
+write per entry"), the 64-line DOC cache fetched as 4-beat bursts, the 8-bank
+line-buffer prefetch, and the 16-deep shadow write FIFO (depth 8 overflowed
+under DDR3 arbitration before the port-priority fix). The HyperRAM port is a
+32-bit-beat port with a short, deterministic round trip (`hyperram_ports`
+already splits the 128-bit framebuffer write into beats via
+`wide_wr_data_hi`), so the beat-oriented restructures B1b and B2 are the
+natural shape for this memory rather than a workaround. The next a2mega rev is
+planned to carry the same PSRAM; once it does, the DDR3 path stops
+constraining the shared HDL and both boards converge on the beat shape.
+Depths (FIFO 64, cache 64 lines, 8 banks, shadow FIFO 16) should be re-sized
+against measured PSRAM latency using the existing counters
+(`dbg_fifo_overflow`, `dbg_line_not_ready`, `dbg_shadow_drop`,
+`glu_wq_drops`, DOC `prime_miss`/`fetch_drop`) rather than inherited.
+
+### 7.2 Uthernet2 socket buffer in PSRAM (−8 BSRAM, est.)
+
+The W5100 emulation is prefetch-friendly: every Apple-side access is indirect
+(address register, then data-port read/write with `MR.AI` auto-increment and
+8 KB window wrap), so after each data-port access the next byte's address is
+known. Apple accesses are ≥ ~1 µs apart; a HyperRAM read through the arbiter
+is a few hundred ns at 54 MHz, so a byte prefetch after every access fits with
+margin and needs no wait state (the Apple II bus has none we drive).
+
+Proposal: keep `reg_mem` (2 KB, 1 block) in BSRAM; move `buf_mem` (16 KB,
+8 blocks) to a HyperRAM region behind one more `hyperram_ports` port (or a
+shared one with the GLU write port). Both the Apple data port and the ESP32
+MACRAW bridge (`SPACE_W5100` writes in `esp32_ospi_connector`) go through that
+port; writes are posted, reads are the prefetched byte, with a one-entry
+write-forward for a read that follows a write to the same address.
+Cost: ≈ 120 FF of arbiter queue + a small prefetch FSM (~60 FF / 80 LUT).
+Result: Uthernet2 becomes a **1-block** feature, and with §5 step 1 alone
+(56 → 48) it fits without the line-buffer change. Risk: medium (new port
+in the arbiter, ESP32 bridge write path, DHCP/W5100 regression test);
+`hdl/uthernet2/uthernet2.sv` is shared, so the PSRAM backing must be a
+parameter with the BSRAM path as default for the Enhanced.
+
+Rejected alternative: holding the socket buffer in the ESP32 and fetching
+bytes over OSPI. A per-byte round trip cannot be served in the ~1 µs budget
+from a FreeRTOS task, so it would need an FPGA-side window cache streamed by
+the ESP32, and a window miss has no wait state to hide behind. More protocol
+and a hard real-time dependency for a result the PSRAM path gives
+deterministically.
+
+### 7.3 `esp32_ospi_connector` size
+
+At ≈ 1,070 REG / 1,318 LUT it matches the BL616 connector (1,000 / 1,334), so
+it is not out of line with its counterpart, but half of its own flip-flops are
+one item: `mem0`, the 64-byte SPACE 0 "test memory", kept in flip-flops to
+avoid spending a BSRAM block — **512 FF** for a bring-up aid. Shrinking it to
+a few bytes or generate-guarding it is a free ≈ 500 FF (low risk; the ESP32
+firmware's link self-test uses SPACE 0 — check before removing). The rest is
+legitimate: volume/HDD size and status registers (~160 FF), the two 32-bit HDD
+access queues, GPU/video control registers, the 8-way read mux over the memory
+spaces, and the protocol processor (194 FF / 588 LUT, same as the BL616's).
+Add `mem0` to §5 step 2 (debug trim).
+
+### 7.4 `sound_glu` + `doc5503_pipelined` — two separate causes
+
+`sg` is 3,726 REG / 3,864 LUT / 14 physical BSRAM against 488 / 766 / 2 (+40
+SSRAM) on the Enhanced. `sound_glu` itself is small (133 REG / 115 LUT; its
+4-block write queue is B5). The rest splits into two unrelated causes:
+
+| Part | a2p25 | Enhanced | Cause |
+|---|---|---|---|
+| DOC register banks (7 × 32×8 + 32×24 acc, each with a 32:1 read mux) | **2,560 REG / ~1,570 LUT** | 40 SSRAM | GW5A has no SSRAM → flip-flops. Independent of DDR3. |
+| DOC core | **1,033 REG / 2,180 LUT**, 10 blocks (cache 8 + lookup 2) | 360 REG / 659 LUT, 0 | Rev-3 "service-tail latency" machinery for the DDR3 arbiter: 16-byte cache lines as 4-beat bursts (two 140-bit line registers, 64-entry tag/valid/run vectors, 140-bit byte-select mux), two-line-per-oscillator store with lookahead issue, FB-aware issue gating, 8-deep fetch FIFO, prime-pending tracking. |
+
+**Banks → BSRAM (biggest logic lever on the device).** `DOC_BANKS_IN_BSRAM=1`
+exists; under the §2 rule it must be sliced ≤ 18 bits wide: pair fl+fh,
+vol+wds, wtp+control into 32 × 16 arrays (3 blocks), rts alone (1), acc as
+2 × 32×12 (2) → **≈ 6 blocks for −2,560 FF / −1,570 LUT (est.)**. Not
+DDR3-related; blocked only by BSRAM headroom, which §5 step 1 (−8) provides.
+
+**DOC core → PSRAM-appropriate fetch path.** The rev-3 design hides
+tens-of-microsecond DDR3 service tails. The HyperRAM round trip is short and
+deterministic; the a2p25 keeps the same static-priority arbiter and the
+framebuffer line fetch, so contention is not zero, but the existing counters
+(`dbg_doc_prime_miss`, `dbg_doc_stale_fetch`, `dbg_doc_fetch_drop`,
+`dbg_doc_req_mingap`) can measure it directly. Proposal: build a
+`DOC_FETCH_MODE` parameter selecting a rev-2-style per-oscillator 32-bit word
+cache with next-word prefetch (no line cache, no lookahead/gating), run the
+POLY.SYNTH listening set with all 32 oscillators and the counters on the PC
+line, and keep rev 3 only if the counters say so. Estimated **−500 REG /
+−1,200 LUT / −8 BSRAM** (the line cache goes; the lookup RAMs shrink or go).
+Risk: medium — it is a return to a known-simpler design, but the DOC fetch
+cone is the usual timing offender and audio must be re-listened; shared with
+the a2mega, where the DDR3 path keeps rev 3 until that board moves to PSRAM
+too (then the same simplification applies there).
+
+Taken together with B5, the `sg` block could come down from 3,726 / 3,864 /
+14 to roughly **650 REG / 1,100 LUT / 10 BSRAM** (est.): the DOC stops being
+the dominant logic consumer and the Mockingboard's ~775 REG / 1,300 LUT fits
+in the recovered logic alone.
+
+### 7.5 Preferred route: the a2n20 DOC on PSRAM, not a trimmed rev 3 (ed)
+
+Rather than carve the latency machinery out of `doc5503_pipelined`, go back to
+the baseline `doc5503.sv` (the a2n20v2 / Enhanced DOC) and adapt it to the
+HyperRAM. Most of that adaptation already exists:
+
+- `doc5503.sv` fetches through a request/ready interface (`wave_rd_o`,
+  `wave_data_ready_i`) with a hard budget: the byte must return before
+  `clk_count_r == 7`, i.e. ~7/8 of the oscillator cycle, **~838–978 ns**,
+  otherwise it substitutes 0x80 (silence) for that sample. The real DOC's DRAM
+  took 300–400 ns.
+- `sound_glu` already has the external-memory path for it:
+  `USE_BSRAM=0, USE_DDR3_PIPELINED=0` → `gen_glu_ddr3` with the baseline core
+  (this was "rev 1" on the a2mega). The a2p25 top only has to flip
+  `USE_DDR3_PIPELINED` from 1 to 0 — **a one-parameter build gives the
+  resource measurement immediately.**
+
+Why rev 1 failed on DDR3 and why PSRAM is different: the DDR3 arbiter showed
+service tails of tens of µs for the lowest-priority port (header of
+`doc5503_pipelined.sv`), so rev 1 hit the 0x80 timeout constantly (the
+"stale-0x00 hazard" and 50–90% arbiter time). On the a2p25, `hyperram_ports`
+is static-priority (port 0 highest) with non-preemptive grants, and the DOC
+sits on port 2: above both framebuffer ports (4/5), below the two shadow
+ports (0/1). Worst case before a DOC read is served ≈ one in-flight
+framebuffer burst-8 (~370 ns at 108 MHz incl. latency) + up to two queued
+shadow requests (~250 ns each) + its own burst-4 read (~250 ns) ≈ **1.1 µs
+(est.)**; typical ≈ 400–600 ns. That is inside the budget typically and
+marginal only at the tail. Mitigations, if the counters show timeouts:
+move the DOC above the shadow ports (the shadow writes have their own FIFO
+and the shadow reads a burst cache), shorten the FB read burst to 4, or
+replace the 0x80 fallback by "hold the previous sample" (one 8-bit register
+per oscillator, in the existing banks).
+
+What it needs:
+
+1. A build with `USE_DDR3_PIPELINED(0)` on the a2p25 (resource measurement;
+   expected `sg` ≈ 3,050 REG / 2,350 LUT / 4 BSRAM with the banks still in
+   FFs, i.e. **−~670 REG / −~1,500 LUT / −10 BSRAM** vs today; with the banks
+   in BSRAM per §7.4 ≈ 500 REG / 800 LUT / ~10 BSRAM total, and the GLU queue
+   fix B5a takes 2 more blocks back).
+2. A timeout/stale counter on the baseline path (the `dbg_doc_*` counters
+   exist only in the pipelined core) on the PC line, plus the POLY.SYNTH
+   listening set with all 32 oscillators and the framebuffer in SHR mode
+   (the worst arbiter load).
+3. Shared-HDL note: `doc5503.sv` is the Enhanced/GS DOC; the PSRAM-specific
+   part lives in `sound_glu`'s `gen_glu_ddr3` branch and the a2p25 top, so
+   the Enhanced is unaffected. The a2mega keeps rev 3 on DDR3 and inherits
+   this path when it moves to the same PSRAM.
+
+This supersedes the "trim rev 3 / `DOC_FETCH_MODE`" proposal in §7.4 as the
+first thing to try; rev 3 stays available behind the existing parameter if
+the measurements say the HyperRAM tail is worse than estimated. Recommended
+position in §5: run step 1 of this section **before** the §5 sequence — it is
+one parameter, and its result (−10 BSRAM, −1.5 k LUT) changes how much of the
+rest is needed.
+
+**Measured (2026-10-13, resource build, `USE_DDR3_PIPELINED(0)`, otherwise
+the audited tree; fs sha256 `c0a5d876…`, not flashed, not kept):**
+
+| | audited (rev 3) | baseline DOC | delta |
+|---|---|---|---|
+| Logic | 18,675 (82%) | **15,706 (69%)** | **−2,969** |
+| Registers (FF) | 15,233 (67%) | **14,277 (62%)** | −956 |
+| CLS | 11,423 (99%) | 11,303 (99%) | placer spreading, unchanged |
+| BSRAM | 56 / 56 | **46 / 56** | **−10** (SDPB 25 → 23, SDPX9B 14 → 6) |
+| `sg` block | 3,726 REG / 3,864 LUT / 14 blk | **2,808 REG / 2,147 LUT / 4 blk** | −918 REG / −1,717 LUT / −10 blk |
+| of which `doc5503` core (self) | 1,033 / 2,180 | **361 / 568** | the rev-3 machinery: −672 REG / −1,612 LUT |
+| of which register banks (FF) | 2,560 / 1,568 | 2,336 / 1,456 | still flip-flops (§7.4 lever untouched) |
+| Timing | 0 violations, thin | 4 setup violations: `i_hr_ctrl` `ck_en` half-cycle stage on clk_mem (−0.62, the known flapper), 3 AUX-channel paths on clk100 (−0.24 / −0.11 / −0.11) | not DOC-related; single roll, no closure attempted |
+
+The logic saving (−3 k, −13 points) is larger than the §7.5 estimate because
+the baseline core is lighter than the pipelined core's self figure suggested.
+The remaining `sg` cost is almost entirely the FF register banks (2,336 of
+2,808 REG), so §7.4 (banks → ≈ 6 BSRAM, now affordable at 46/56) would take
+the block to ≈ 470 REG / 700 LUT. Functional verification of the baseline
+DOC on HyperRAM (timeout counter, POLY.SYNTH set under SHR load) is still to
+do; this build measured resources only.
+
+**Measured (2026-10-13, second resource build: baseline DOC + banks in BSRAM;
+fs sha256 `0156a6d0…`, not flashed, not kept):**
+
+| | audited (rev 3) | baseline DOC | + banks in BSRAM | delta vs audited |
+|---|---|---|---|---|
+| Logic | 18,675 (82%) | 15,706 (69%) | **14,337 (63%)** | **−4,338** |
+| Registers (FF) | 15,233 (67%) | 14,277 (62%) | **12,039 (53%)** | **−3,194** |
+| CLS | 11,423 (99%) | 11,303 (99%) | **10,823 (94%)** | −600 |
+| BSRAM | 56 / 56 | 46 / 56 | **54 / 56** | −2 (banks = 8 blocks, as `SP` primitives) |
+| `sg` block | 3,726 REG / 3,864 LUT / 14 blk | 2,808 / 2,147 / 4 | **570 REG / 798 LUT / 12 blk** | −3,156 REG / −3,066 LUT |
+| Timing | 0 viol., margins < 1% | 4 violations | **0 violations; worst slack +0.10 ns (AUX `dbg_sink_status`, clk100); clk_mem 128 vs 108 MHz, clk_pix 161 vs 148.5, clk_hr 60.4 vs 54, clk100 101.0 vs 100** | first build with real margin on clk_mem / clk_pix |
+
+Single roll; the clk100 AUX cone is still the thin one (+0.10), the rest is
+comfortable. Mockingboard (≈ 775 REG / 1,300 LUT) now fits in the recovered
+logic with room to spare; Uthernet2's 9 blocks do not yet (54/56) — §5 step 1
+(−8) or the §7.2 PSRAM buffer is still needed for that.
+
+Refinement of the §2 rule from this build: the banks inferred as **single-port
+`SP` primitives**, and the 24-bit accumulator bank took **one** block (SP x24
+did not double). The two-blocks rule is therefore specific to the
+semi-dual-port x32/x36 primitives; single-port wide memories are one block.
+Banks 32 × 8 / 32 × 4 / 32 × 6 at one block each are depth-wasteful (2% fill),
+so pairing banks into 16-bit records would still take 8 → 5 blocks if those
+blocks are needed later.
+
+**What this build is not.** The FSM was left untouched, so the BSRAM banks
+return data one cycle late in four places: `OSC_LOAD_PARTNER_CONTROL` and
+`OSC_LOAD_NEXT_CONTROL` (control bank re-addressed the cycle before),
+`prev_control_r` in `OSC_REQUEST_DATA` (address reverts to the current
+oscillator by default, so the read must be re-asserted and consumed one state
+later), and the host read-back in `device_response` (one cycle after
+`host_request` sets the address). `OSC_LOAD_REGISTERS` is already safe (all
+addresses have been at the current oscillator for ≥ 1 cycle). A correct
+implementation adds a one-cycle wait to those four points behind the same
+parameter (~15 FF, no BSRAM change); the host read-back also needs the
+write-forward register (already in the bank module) so a read following a
+write to the same register returns the new value. The pipelined DOC's BSRAM
+banks hit a GW5A placement rejection (PA2122, read-before-write SP mode) —
+the new `osc_reg_ram` BSRAM branch disables the read during a write and
+forwards the written value instead, and placed cleanly here. There is no
+baseline-DOC testbench in the repo; a simulation of the four consume points
+against the FF-bank reference is the verification step before hardware.
+
+RTL touched for this measurement (left uncommitted in the working tree for
+review, all default-off so the Enhanced/GS builds are unchanged):
+`hdl/sound/doc5503.sv` (`BANKS_IN_BSRAM` parameter + BSRAM branch in
+`osc_reg_ram`), `hdl/sound/sound_glu.sv` (passes `DOC_BANKS_IN_BSRAM` to the
+baseline core), `boards/a2p25/hdl/top.sv` (`USE_DDR3_PIPELINED(0)`,
+`DOC_BANKS_IN_BSRAM(1)`).
+
+### 7.6 UG300 (Arora V BSRAM & SSRAM User Guide, 1.3.6E) — byte enables and a correction to §2
+
+Read 2026-10-13 from ed's copy of UG300E.pdf. Two consequences.
+
+**Correction to the §2 rule.** Table 2-1 / 2-4 / 3-7 list 512 × 32 (SDPB) and
+512 × 36 (SDPX9B) as single 16 / 18 Kbit configurations of one block, with
+address bits [13:5]. The device does **not** need two blocks for an x32/x36
+semi-dual-port memory. The 2-blocks-per-primitive mapping measured in §2 is
+therefore what the toolchain did with *inferred* x32/x36 SDP memories in these
+builds, not a device limit; an explicitly instantiated `SDPB`/`SDPX9B` with
+`BIT_WIDTH 32/36` may well place in one block. The empirical cost model in §2
+still describes the audited build exactly and remains the right planning
+number for inferred memories, but a micro-test (one instantiated 512 × 36
+SDPX9B, synth + PnR, ~5 min) should settle whether B1/B2/B4/B5 can be had by
+instantiation alone. Single-port x24/x32/x36 placed in one block in the
+§7.5 build, consistent with the tables.
+
+**Byte enables (UG300 §3.1–3.3).** In SP x16/x32, SPX9 x18/x36, SDPB x16/x32,
+SDPX9B x18/x36 and DPB x16 / DPX9B x18, the low address bits of the write
+port are byte (8-bit) or 9-bit lane enables: `AD[0]` → lane 0 (`DI[7:0]` /
+`DI[8:0]`), `AD[1]` → lane 1, `AD[2]` → lane 2, `AD[3]` → lane 3, active high,
+with the word address in `AD[13:5]` (x32/x36) or `AD[13:4]` (x16/x18). Partial
+writes into a packed record are therefore **single-cycle, no read-modify-write**.
+Write modes on the 25K: normal and write-through; read-before-write is not
+supported on any Arora V 25K/60K/75K/138K device (so same-address
+read-during-write must be handled as in the §7.5 bank module: read disabled
+during the write, value forwarded).
+
+**Packed DOC register file with byte lanes.** The DOC's per-oscillator state is
+fl 8, fh 8, vol 8, wds 8, wtp 8, control 4, rts 6, acc 24 = 74 bits used of
+8 × 9-bit lanes = 72 — one lane short of two blocks, so the clean layout is
+three x36 single-port blocks (or SDP, write port A with lanes, read port B):
+
+| Block | Lane 0 | Lane 1 | Lane 2 | Lane 3 | Fill (32 of 512 words) |
+|---|---|---|---|---|---|
+| A (SPX9 512 × 36) | fl | fh | vol | wds | 6% |
+| B (SPX9 512 × 36) | wtp | control (4 of 9) | rts (6 of 9) | acc[7:0] | 6% |
+| C (SPX9 1K × 18, 2 lanes) | acc[15:8] | acc[23:16] | — | — | 3% |
+
+**3 blocks instead of 8**, every bank write stays a single cycle (the lane
+enables replace the per-bank write ports), and `OSC_LOAD_REGISTERS` reads all
+eight banks in one access as before. Two blocks is possible only if acc shares
+lanes with control/rts and the halt-time control write is folded into the acc
+write, which changes the FSM's write sequence — not worth the block.
+
+What a packed file changes in the baseline FSM (on top of the §7.5 wait
+states, which apply unchanged):
+
+1. **One read address instead of eight.** The FSM already reads sequentially
+   (all banks at the current oscillator in `OSC_LOAD_REGISTERS`, then the
+   control bank at partner / next / previous, then host reads), so the eight
+   `ram_*_osc_r` address registers collapse to one. The control-bank reads at
+   other oscillators return the whole record; the FSM takes the control lane.
+2. **One write port shared by host and pipeline.** Today a host write (any
+   bank) and a pipeline write (acc, wds, control) can land in the same cycle
+   because the banks are separate. With one write port and one address, two
+   writes to different oscillators collide; a host write must be held for one
+   cycle when a pipeline write fires (the pipelined DOC does the equivalent by
+   barring host processing from the `cycle_start` boundary cycle). The 6502
+   bus leaves ample time for a one-cycle hold.
+3. **Reset / `cycle_reset` writes** all eight banks per oscillator: one
+   full-lane write per block, as now.
+4. **Write-through semantics** for a host read following its own write: the
+   forward register from §7.5 (one record wide).
+
+Estimate: 3 BSRAM (−5 vs the §7.5 build, −2 vs the DPB pairing of §7.4),
+≈ −40 FF (seven address registers and seven write-enable paths go away),
+same read timing requirement as §7.5. Shared `doc5503.sv`, behind the same
+`BANKS_IN_BSRAM` parameter; the Enhanced/GS keep the SSRAM banks. Simulation
+of the four consume points and of a host-write/pipeline-write collision is the
+verification step; there is no baseline DOC testbench yet, so that is the
+first deliverable of the real implementation.
+
+### 7.7 The x32/x36 doubling is a project option: `Convert_SDP32_36_to_SDP16_18`
+
+Found while preparing the §7.6 micro-test: every process config in the repo
+(a2p25, all dp_test/psram_test variants, a2mega 60K/138B, Enhanced, GS) carries
+`"Convert_SDP32_36_to_SDP16_18" : true`. Gowin documents it (SUG100 §4
+"Place & Route options", SUG1220 `set_option -convert_sdp32_36_to_sdp16_18`)
+as "convert a 32/36-bit SDPB/SDPX9B into two 16/18-bit wide SDPB/SDPX9B,
+Arora V devices only", with no stated reason; the IDE's option table
+(`rtlplacerouteoptions5at.xml`, id PNR30) defaults it to **True** for GW5A, so
+every project created in the IDE inherits it. UG300 lists 512 × 32 / 512 × 36
+as native single-block SDP configurations. Nothing in UG300, the 1.9.12.01
+release notes or the bundled manuals describes it as an erratum workaround.
+
+**Measured (2026-10-13, third resource build: §7.5 tree + option `false`;
+fs sha256 `f68bd4ae…`, not flashed, not kept):**
+
+| | §7.5 build (option true) | option false | delta |
+|---|---|---|---|
+| BSRAM | 54 / 56 | **44 / 56** | **−10** (SDPB 23 → 16, SDPX9B 6 → 3) |
+| Logic / FF / CLS | 14,337 / 12,039 / 10,823 | 14,338 / 12,079 / 10,821 | unchanged |
+| Timing | 0 viol., worst +0.10 | **0 viol., worst +0.21** (`i_hr_ctrl` ck_cnt → gap_cnt, clk_mem) | clk_mem 110.5 vs 108, clk100 102.9 vs 100, others ≥ +8% |
+
+Exactly the §2 prediction: write FIFO 10 → 5, GLU queue 4 → 2, pixel CDC FIFO
+6 → 3. Against the audited build this tree is now **−4.3 k logic, −3.2 k FF,
+−12 BSRAM** with three parameter/option changes and one default-off RTL branch.
+
+Consequences:
+
+- §2's "two blocks per x32/x36 SDP primitive" is **a toolchain setting, not
+  the device**. The cost model stays correct for any project that keeps the
+  option (all of ours today). §4 items B1a (write FIFO re-slicing) and B5a
+  (GLU queue re-slicing) are moot with the option off; B4 (16-bit pixels in
+  the CDC FIFO) would still take 3 → 2.
+- The a2mega carries the same option on GW5AT-60 (108/118 BSRAM) and 138B; its
+  x32/x36 SDP memories (framebuffer write FIFO, DOC cache, GLU queue, pixel
+  FIFO at FIFO_LINES 11, D-PHY-less) are the same files, so turning it off
+  there is worth a resource build too.
+- **Open question before relying on it: why does Gowin default it on for
+  Arora V?** A plausible reason is a silicon or timing limitation of the
+  native x32/x36 SDP mode on some GW5A dies, in which case the split is a
+  silent workaround. The three affected memories here (framebuffer write
+  FIFO, GLU write queue, DP pixel CDC FIFO) are all exercised visibly —
+  picture, DOC audio, DP video — so a hardware soak of this bitstream
+  configuration (SHR + POLY.SYNTH + the framebuffer/underrun counters at
+  zero over an hour) is the verification, plus a question to Gowin support
+  / the GW5A-25 errata (DS1103) about the option's purpose. Until then the
+  option stays `true` in the committed configs; the doc records the saving
+  as available, not banked.
+
+### 7.8 Why the option exists: Gowin Design Advisory 202409001
+
+Primary source: Gowin **Design Advisory No. 202409001**, 1.0E, 2024-09-20
+(English edition; the Chinese edition is ADV-SW-20240920 — same text; both
+in ed's downloads, customer-restricted so not reproduced here). Verbatim on
+the purpose: the option was added "to enhance the power supply noise tolerance
+of 32/36-bit SDP under certain extreme power conditions (e.g., VCC ≤ 0.85V)",
+for Gowin Software V1.9.10 and above (August 23, 2024), released 22 nm
+devices. It is added to
+Configuration → Place & Route → General with **default True**. Affected
+devices include **GW5A-25 versions A and B** (the a2p25 part is GW5A-25A),
+GW5AT-60 ES/B and GW5A(S)(T)-138 B/C (both a2mega SOMs), GW5AT-75 B/C and the
+15K family. Customer impact: BSRAM usage of 32/36-bit SDP doubles, and
+BSRAM-heavy designs may fail with PA2017 (BSRAM over the device limit). **When
+that happens, verbatim: customers "can disable the conversion function by
+setting 'Convert SDP32/36 to SDP16/18' to 'False' and ensure that the power
+supply VCC is not below 0.9V."** Later SUG100 editions (4.4.7E, 09/2026) list
+the option as also covering pROM/pROMX9 and state the default as False, so the
+default may have been relaxed in a newer EDA release than our 1.9.12.01.
+
+Assessment of the summary ed found: the first point (a silicon tolerance
+limitation worked around in software) is correct in substance, although the
+advisory describes it as power-noise margin at low VCC, not "instability in
+early steppings". The second and third points (Fmax and routing-congestion
+benefits) are not in the advisory, SUG100, SUG1220 or UG300; the measured
+builds show no timing effect from the option either way (§7.7: logic and CLS
+identical, worst slack +0.21 vs +0.10 on an unrelated cone). Treat those two
+as unsupported.
+
+**What it means for us.** The GW5A-25 LV recommended VCC range is 0.87–1.03 V
+(DS1103 Table 3-6); the process configs set VCC = 0.9 V. The advisory's
+condition for disabling the conversion is VCC ≥ 0.9 V at the die, i.e. the
+nominal with no droop allowance, while the problem regime is ≤ 0.85 V, below
+the device's own recommended minimum. On both boards the core rail is
+generated on the Sipeed SOM (a2-p25 `fpga_som_btb0/1`, a2mega Tang Mega SOM),
+so the margin is the SOM regulator's set point and load regulation, which we
+do not control. Options, in order:
+
+1. **Measure VCC on the SOM** under the worst load (full core, SHR, DOC,
+   DP running) with a scope on the core rail — if it sits at ≥ 0.9 V with
+   ripple staying well above 0.87 V, the advisory's condition is met and the
+   option can be turned off, worth −10 BSRAM on the a2p25 and a similar count
+   on the a2mega. Record the measurement in this doc.
+2. If the rail is marginal, the SOM's regulator set point may be adjustable
+   (feedback divider) — a board/SOM question, not a gateware one.
+3. Otherwise keep the option on and take the width out of the memories
+   instead (B1b, B2, B4, B5b): the §2 cost model stays in force.
+
+Either way the conversion is a **supply-margin workaround**, not a functional
+or timing requirement, and the §7.7 bitstream is a valid design; what needs
+verification is the board's VCC, not the netlist.
+
+### 7.9 The a2p25 core rail: Tang Primer 25K SOM (schematic 52300, 2023-05-19)
+
+The GW5A-25 core supply `VDD_0V9` is generated on the Sipeed SOM by U1302, a
+Silergy SY8089A-class 1.5 MHz buck (SOT23-5, 2.2 µH, 10 µF in, 2 × 22 µF +
+100 nF out), fed from `VCC_5V`. Feedback divider: R1310 = 51 kΩ (top), R1311 =
+100 kΩ (bottom), both 1%. The same 0.6 V reference reproduces the TMI7003C's
+1.8 / 3.3 / 2.5 V rails from their dividers, so the reading is consistent.
+
+| | Value |
+|---|---|
+| Set point | 0.6 V × (1 + 51/100) = **0.906 V** nominal |
+| VREF (SY8089A1 datasheet, 0.5 A CCM) | 591 / 600 / 609 mV (±1.5%) |
+| Static worst case incl. 1% resistors | **0.886 – 0.926 V** |
+| GW5A-25 LV recommended VCC (DS1103 Table 3-6) | 0.87 – 1.03 V |
+| Advisory condition for disabling the SDP conversion | VCC ≥ 0.9 V |
+| Advisory problem regime | VCC ≤ 0.85 V |
+
+So, by design: the rail meets the device's recommended range with 16 mV of
+static margin at the low corner, sits inside the advisory's problem regime by
+no less than 36 mV even at the worst static corner, but **does not guarantee
+the advisory's ≥ 0.9 V condition** (nominal 0.906 V, worst-case low 0.886 V,
+before load-step droop and ripple). Turning the conversion off on an
+unmodified SOM is therefore a judgement call with a thin paper margin, not a
+clean pass. It is likely fine on a given board (the low corner needs a
+−1.5% reference and both resistors at their 1% extremes in the same
+direction), but it is not something to ship on.
+
+Two ways to make it clean:
+
+1. **Measure first.** Scope `VDD_0V9` at the SOM output capacitors under the
+   full core (SHR scrolling, DOC playing, DP up) and record min/mean/ripple;
+   if it is ≥ 0.9 V with droop clear of 0.87 V, note the board serial and the
+   value here. This is a one-evening check and also tells us whether the rail
+   is quiet enough that the advisory's concern is academic for this load.
+2. **Raise the set point (one 0402 on the SOM).** The LV part is specified for
+   0.9 V or 1.0 V core (DS1103 §1: "Core Power (LV version): 0.9V / 1.0V").
+   Replacing R1311 100 kΩ with 86.6 kΩ gives 0.953 V (worst case 0.93 – 0.98 V,
+   centred in the 0.87 – 1.03 V window, satisfies the advisory with ≥ 30 mV
+   to spare); 76.8 kΩ gives 0.998 V (worst case 0.975 – 1.022 V, inside the
+   1.03 V max) for the 1.0 V operating point at roughly 20 % more core power.
+   Either way set `"VCC"` in the process config to match, since the timing and
+   power models take it from there. This is a SOM modification, so it belongs
+   with the board-rev notes, not the gateware.
+
+With either (1) confirmed or (2) done, `Convert_SDP32_36_to_SDP16_18 = false`
+is the cheapest −10 BSRAM in this document. Without them, keep the option on
+and recover the blocks through B1b / B2 / B4 / B5b.
+
+The a2mega's SOMs (Tang Mega 60K / 138K) have their own core regulators; the
+same measurement applies there before the option is changed in its configs.
+
+### 7.10 Decision (ed, 2026-10-13): leave `Convert_SDP32_36_to_SDP16_18` on
+
+Gowin defaults the conversion on for every released 22 nm device precisely so
+that customers get the low-VCC margin without reading the advisory; our core
+rail (§7.9) does not guarantee the ≥ 0.9 V condition Gowin attaches to turning
+it off. The −10 BSRAM of §7.7 is therefore **not banked**: the option stays
+`true` in every process config (a2p25 and a2mega), and the §2 cost model —
+two blocks per x32/x36 semi-dual-port primitive, i.e. `ceil(width/18)` blocks
+per memory — is the planning rule for this project. The §7.7 build remains
+useful only as proof that the netlist itself is sound at 44 blocks.
+
+Consequences for the plan:
+
+- BSRAM is recovered by taking width out of the memories, not by the option:
+  B4 (16-bit pixels in the CDC FIFO, −2), B5a (GLU queue as ≤ 18-bit slices,
+  −2), B1a/B1b (framebuffer write FIFO re-sliced −1, or beat-organised −6),
+  B2 (DOC cache by beat, −5; moot once the baseline DOC of §7.5 is adopted,
+  which removes the cache altogether), §7.6 packed DOC register file (−5 vs
+  the §7.5 banks). Any new memory on GW5A should be written as x18-or-narrower
+  primitives from the start.
+- Position after the measured §7.5 tree (baseline DOC, banks in BSRAM, option
+  on): 54 / 56 BSRAM, 14.3 k logic, 12.0 k FF. Uthernet2 (9 blocks) needs
+  ≥ 9 freed: §7.6 packed banks (−5) + B4 (−2) + B5a (−2) + B7 PLL ROMs (−2) +
+  B7b slotmaker (−1) = −12 → 42 + 9 = 51 / 56 with Uthernet2 in, none of it
+  touching the write FIFO or the HyperRAM path. The §7.2 PSRAM socket buffer
+  (−8 more) stays as the next step if blocks get tight again.
+- Any EDA upgrade must be checked for a changed default (SUG100 4.4.7E already
+  documents the option as default False): the committed process configs pin
+  the value explicitly, and a resource build after each toolchain change should
+  confirm the BSRAM count did not move.
