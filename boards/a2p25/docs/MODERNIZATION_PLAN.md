@@ -580,7 +580,18 @@ production fw 40ad1064) with a NEW USB-C→HDMI adapter (10-12 evening,
 Anker USB-C to HDMI Adapter, 4K@60Hz / 18 Gbps class): trained first time at RBR ×4 1080p** — AUX state 2E,
 0x202/0x203 = 0x77/0x77 (all four lanes CR+EQ+symbol lock), 0x204 = 01,
 sink status 03, 8 DEFERs drained, 0 teardowns; monitor OSD 1920×1080.
-IIgs verified through it: Arkanoid SHR at 1080p and DOC audio on the HDMI side. Census: Anker USB-C→HDMI 4K@60 adapter = PASS (4-lane RBR → 1080p60 + audio through HDMI) — first data point for "4K@60-class adapters are 4-lane and RBR-capable".
+IIgs verified through it: Arkanoid SHR at 1080p and DOC audio on the HDMI side. Census: Anker USB-C→HDMI 4K@60 adapter = PASS (4-lane RBR → 1080p60 + audio through HDMI)
+
+**Adapter census, 2026-10-13 (production core a651e352, plug-and-look):**
+- Cable Matters Braided Aluminum USB-C→HDMI 4K — **FAIL**
+- UGREEN Unidirectional USB-C→HDMI 4K@60 (TB5/4/3) — **PASS**, comes up fast
+- UGREEN 48 Gbps Unidirectional USB-C→HDMI 2.1 8K@60 — **PASS**, ~5 s to picture
+- (10-12) Cable Matters 48 Gbps 8K "for macOS" — FAIL (no RBR symbol lock);
+  Cable Matters #2 — FAIL (AUX replies undecodable); Anker 4K@60 — PASS;
+  Anker hub DP→HDMI — PASS (2-lane, 720p on dp_test).
+Reading: not a bandwidth class — a 48G UGREEN trains at RBR while both
+Cable Matters units fail; vendor/chipset-specific. Lane count of the
+UGREEN passes: TBD (monitor OSD 1080p = 4 lanes on this core). — first data point for "4K@60-class adapters are 4-lane and RBR-capable".
 
 Bench traps recorded today: every SRAM load is a real reload (verify via
 `PF` stamp); `pd` shows "unattached" when the adapter is out — check
