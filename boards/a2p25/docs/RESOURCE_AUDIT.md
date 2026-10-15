@@ -1109,3 +1109,12 @@ cache absorbing the latency.
 hold-last-sample rate and the occasional overflow frame are below the
 perception threshold here; MCS passes on `cf0d626a…`. The levers above stay
 on the shelf unless a later title shows them.
+
+### 7.18 NinjaTracker on `cf0d626a…` (2026-10-15)
+
+Three per-frame samples, text/non-SHR video mode (`MODE 0x31`):
+`REQ 2023 / 1813 / 1359`, `MEMRD 274 / 224 / 85` (6–14 % miss),
+`LATE 6 / 4 / 1` (≤ 0.3 % of fetches), `LATMAX 46 clk`, FB flags `0x14`
+(overflow clear), `VGC STALE 0`, `SHADOW DROPS 0`. The lightest title so far:
+a few oscillators, short loops that live in the cache. Listening verdict
+pending.
