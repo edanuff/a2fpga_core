@@ -1049,3 +1049,6 @@ Build `149ea423…` (stamp 20261015092235): 0 violations, worst +0.057, 52/56
 BSRAM, logic 15,351 — awaiting the board (powered down). What the board boots
 today is `edfc20fa…` (prefetch build, commit a3ad0704), verified-written over
 WiFi before the shutdown; its Marble Madness per-frame read is still pending.
+**Installed 2026-10-15 (WiFi, firmware then gateware):** FIRMWARE page now
+reads `CORE OCT 15 2026 09:22:35` (= `149ea423…`). From here on "which image
+is running" is a menu glance: telnet `m`, FIRMWARE, or the main-menu footer.
