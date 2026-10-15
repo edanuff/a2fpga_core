@@ -1052,3 +1052,31 @@ WiFi before the shutdown; its Marble Madness per-frame read is still pending.
 **Installed 2026-10-15 (WiFi, firmware then gateware):** FIRMWARE page now
 reads `CORE OCT 15 2026 09:22:35` (= `149ea423…`). From here on "which image
 is running" is a menu glance: telnet `m`, FIRMWARE, or the main-menu footer.
+
+### 7.16 Prefetch measured and withdrawn; per-word invalidation (2026-10-15)
+
+Marble Madness on `edfc20fa…` (prefetch word+1 on every miss), eight
+per-frame samples over 40 s: `REQ 7028`, `MEMRD 1500–2000` (vs 212–377
+without prefetch), `LATE 70–100` (vs 15–33), one `FB 0x32` (write-FIFO
+overflow bit) — and in a quieter passage `REQ 1758 / MEMRD 1758`: every fetch
+a miss, i.e. those instruments step a whole word or more per sample, so
+word+1 is never the next fetch. The prefetch multiplied traffic by ~5 and the
+extra queue depth made real misses later. **Withdrawn**: `PREFETCH` parameter
+on `doc_fetch_cache`, default 0.
+
+Kept and added: **per-word invalidation**. Every DOC-RAM write (and its
+commit from the GLU queue) used to clear all 64 valid bits; on a title that
+streams into sound RAM that wipes every oscillator's line per write. The GLU
+now passes the written word address and only the matching line is
+invalidated (outstanding reads for that line are flagged so their returned
+word is not validated). Bench: 0 stale samples through 3,000 writes under
+playback; the no-invalidate control still fails.
+
+Build `cf0d626a…` (stamp `20261015153750`, installed over WiFi via the
+FIRMWARE menu; 0 violations, worst +0.002 ns, 52/56 BSRAM, logic 15,047).
+Marble Madness, three per-frame samples at `REQ 7028` (12–13 oscillators,
+a busier passage than the 11-oscillator `REQ 6150` samples of §7.14):
+`MEMRD 477 / 463 / 503` (6.6–7.2% of fetches reach memory), `LATE 28 / 38 / 27`,
+`LATMAX 46 clk`, FB overflow bit clear, `VGC STALE 0`, `SHADOW DROPS 0`.
+The prefetch regression (MEMRD 1500–2000, LATE 70–100) is gone; miss and
+late rates are back in the §7.14 family. No visible smear, audio clean (ed).

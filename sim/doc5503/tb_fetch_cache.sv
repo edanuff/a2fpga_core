@@ -46,11 +46,11 @@ module tb_fetch_cache;
 
     // ---- DUT: DOC + cache ----
     wire [15:0] d_addr; wire d_rd; wire d_ready; wire [7:0] d_q;
-    reg flush = 0;
+    reg flush = 0; reg [13:0] flush_waddr = 0;
     wire [15:0] c_hits, c_miss; wire [7:0] c_late;
     doc_fetch_cache u_cache (
         .clk_i(clk), .rst_n_i(reset_n),
-        .req_i(d_rd), .addr_i(d_addr), .flush_i(flush), .valid_o(d_ready), .data_o(d_q),
+        .req_i(d_rd), .addr_i(d_addr), .flush_i(flush), .flush_waddr_i(flush_waddr), .valid_o(d_ready), .data_o(d_q),
         .mem_rd_o(m_rd), .mem_addr_o(m_waddr), .mem_available_i(m_available), .mem_ready_i(m_ready), .mem_q_i(m_q),
         .dbg_hits_o(c_hits), .dbg_misses_o(c_miss), .dbg_late_o(c_late));
     wire signed [15:0] mono, left, right; wire signed [15:0] chan[16];
@@ -89,7 +89,7 @@ module tb_fetch_cache;
     task wait_slots(input integer n); integer i; for (i = 0; i < n; i = i + 1) begin @(posedge clk); while (!dut.cycle_start_r) @(posedge clk); end endtask
     // GLU-style wavetable write: memory changes, flush pulses (unless +noflush)
     task wav_wr(input [15:0] a, input [7:0] d);
-        begin @(negedge clk); wav[a] = d; if (!noflush) flush = 1; @(negedge clk); flush = 0; end
+        begin @(negedge clk); wav[a] = d; flush_waddr = a[15:2]; if (!noflush) flush = 1; @(negedge clk); flush = 0; end
     endtask
 
     integer o, r, h1, m1, r1;

@@ -24,13 +24,21 @@
 //
 // Storage: data 64 x 32 in one single-port BSRAM (SP x32 = one 18 Kb block on
 // GW5A, measured); fills yield to a same-cycle hit read and retry next cycle.
-module doc_fetch_cache (
+module doc_fetch_cache #(
+    // Prefetch word+1 after a miss. Measured on the a2p25 (Marble Madness,
+    // 2026-10-15): 5x the memory reads and more late fetches — real
+    // instruments often step a whole word or more per sample, so word+1 is
+    // rarely the next fetch. Off by default; kept for titles that prove
+    // sequential (per-frame telemetry decides).
+    parameter bit PREFETCH = 1'b0
+) (
     input  wire        clk_i,
     input  wire        rst_n_i,
     // DOC side
     input  wire        req_i,          // DOC wave_rd (one-cycle pulse)
     input  wire [15:0] addr_i,         // byte address
-    input  wire        flush_i,        // GLU wavetable write (or its commit): invalidate all
+    input  wire        flush_i,        // a sound-RAM word was written (or that write was issued to memory)
+    input  wire [13:0] flush_waddr_i,  // ... its word address: only the matching line is invalidated
     output reg         valid_o,        // byte for the DOC's current request
     output reg  [7:0]  data_o,
     // memory port (single-word reads, in-order responses)
@@ -78,6 +86,7 @@ module doc_fetch_cache (
     reg  [7:0] q_tag  [0:3];
     reg  [1:0] q_lane [0:3];
     reg        q_stale[0:3];
+    reg        q_flushed[0:3];   // line written after the request: do not validate the returned word
     reg  [2:0] q_wp, q_rp;
     wire       q_empty_w = (q_wp == q_rp);
     wire       q_full_w  = (q_wp[1:0] == q_rp[1:0]) && (q_wp[2] != q_rp[2]);
@@ -95,8 +104,9 @@ module doc_fetch_cache (
     wire [5:0] pf_idx_w = pf_waddr_r[5:0] ^ pf_waddr_r[11:6];
     wire [7:0] pf_tag_w = pf_waddr_r[13:6];
     wire       pf_hit_w = valid_r[pf_idx_w] && (tag_r[pf_idx_w] == pf_tag_w);
+    wire [5:0] fl_idx_w = flush_waddr_i[5:0] ^ flush_waddr_i[11:6];   // index of the written word
     wire miss_issue_w = req_i && !hit_w && mem_available_i && !q_full_w;
-    wire pf_issue_w   = !req_i && pf_pend_r && !pf_hit_w && mem_available_i && !q_full_w;
+    wire pf_issue_w   = PREFETCH && !req_i && pf_pend_r && !pf_hit_w && mem_available_i && !q_full_w;
     assign mem_rd_o   = miss_issue_w | pf_issue_w;
     assign mem_addr_o = req_i ? addr_i[15:2] : pf_waddr_r;
 
@@ -122,9 +132,13 @@ module doc_fetch_cache (
                 // then the word is parked and written next cycle (valid is set
                 // now; a hit on that index next cycle reads the parked write, so
                 // mark valid only once the data is in the array)
+                // a response for a line written since it was requested (q_stale set by
+                // the flush path, or superseded) still carries pre-write data if the
+                // write raced it: only validate lines whose request was never marked.
                 if (hit_rd_w) begin
-                    fill_pend_r <= 1'b1; fill_idx_r <= q_idx[q_rp[1:0]]; fill_word_r <= mem_q_i;
-                end else begin
+                    fill_pend_r <= !q_flushed[q_rp[1:0]];
+                    fill_idx_r <= q_idx[q_rp[1:0]]; fill_word_r <= mem_q_i;
+                end else if (!q_flushed[q_rp[1:0]]) begin
                     valid_r[q_idx[q_rp[1:0]]] <= 1'b1;
                 end
                 tag_r[q_idx[q_rp[1:0]]] <= q_tag[q_rp[1:0]];
@@ -154,9 +168,10 @@ module doc_fetch_cache (
                     q_tag[q_wp[1:0]]   <= tag_w;
                     q_lane[q_wp[1:0]]  <= addr_i[1:0];
                     q_stale[q_wp[1:0]] <= 1'b0;
+                    q_flushed[q_wp[1:0]] <= 1'b0;
                     q_wp <= q_wp + 3'd1;
                     dbg_misses_o <= dbg_misses_o + 1'd1;
-                    pf_pend_r  <= 1'b1;                 // prefetch the next word
+                    pf_pend_r  <= PREFETCH;             // prefetch the next word (parameter)
                     pf_waddr_r <= addr_i[15:2] + 14'd1;
                 end
                 if (!miss_issue_w) pf_pend_r <= 1'b0;   // a new request cancels a pending prefetch
@@ -166,6 +181,7 @@ module doc_fetch_cache (
                     q_tag[q_wp[1:0]]   <= pf_tag_w;
                     q_lane[q_wp[1:0]]  <= 2'd0;
                     q_stale[q_wp[1:0]] <= 1'b1;         // fill only
+                    q_flushed[q_wp[1:0]] <= 1'b0;
                     q_wp <= q_wp + 3'd1;
                     dbg_misses_o <= dbg_misses_o + 1'd1;
                 end
@@ -173,9 +189,18 @@ module doc_fetch_cache (
                 // (miss with port unavailable: dropped by the arbiter, DOC times out)
             end
 
-            // 4. coherency (a parked fill completing after a flush would
-            // resurrect a stale word: drop it)
-            if (flush_i) begin valid_r <= '0; fill_pend_r <= 1'b0; end
+            // 4. coherency: invalidate the written word's line only (a whole-cache
+            // flush per write wiped every oscillator's line on streaming titles).
+            // A parked fill or a queued memory read for that same line would
+            // resurrect the pre-write word: drop the fill, and mark matching
+            // outstanding reads stale (filled but then re-invalidated below is
+            // not possible, so they are simply not delivered / not validated).
+            if (flush_i) begin
+                valid_r[fl_idx_w] <= 1'b0;
+                if (fill_pend_r && fill_idx_r == fl_idx_w) fill_pend_r <= 1'b0;
+                for (i = 0; i < 4; i = i + 1)
+                    if (q_idx[i] == fl_idx_w) q_flushed[i] <= 1'b1;
+            end
         end
     end
 endmodule

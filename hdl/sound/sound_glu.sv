@@ -149,6 +149,7 @@ module sound_glu #(
         if (USE_BSRAM) begin : gen_glu_idle
             assign glu_wq_drops_o = 8'd0;
             assign glu_wq_pop_w = 1'b0;
+            assign glu_wq_pop_waddr_w = 14'd0;
             assign glu_mem_if.rd = '0;
             assign glu_mem_if.wr = '0;
             assign glu_mem_if.addr = '0;
@@ -186,6 +187,7 @@ module sound_glu #(
                                              : glu_mem_if.ready;
             wire gq_pop_w = gq_wr_r && gq_ack_w;
             assign glu_wq_pop_w = gq_pop_w;
+            assign glu_wq_pop_waddr_w = gq_addr_r[gq_rp_r][13:0];
 
             always_ff @(posedge a2bus_if.clk_logic) begin
                 if (!a2bus_if.system_reset_n) begin
@@ -300,7 +302,8 @@ module sound_glu #(
     reg wave_data_ready_r;
     wire [7:0] doc_filter_late_w;  // gen_doc_ext: superseded responses discarded
     wire [15:0] doc_cache_hits_w, doc_cache_miss_w;  // gen_doc_ext word cache (free-running)
-    wire       glu_wq_pop_w;       // a queued sound-RAM write left for memory (cache flush)
+    wire       glu_wq_pop_w;       // a queued sound-RAM write left for memory (cache invalidate)
+    wire [13:0] glu_wq_pop_waddr_w;  // ... its word address (sound-RAM relative)
 
     generate
         if (USE_BSRAM) begin : gen_doc_bsram
@@ -387,6 +390,7 @@ module sound_glu #(
                 .req_i(ENABLE && doc_mem_rd_w),
                 .addr_i(wave_addr_w),
                 .flush_i(glu_mem_wr_r | glu_wq_pop_w),
+                .flush_waddr_i(glu_mem_wr_r ? glu_mem_addr_r[13:0] : glu_wq_pop_waddr_w),
                 .valid_o(cache_valid_w),
                 .data_o(cache_data_w),
                 .mem_rd_o(cache_rd_w),
