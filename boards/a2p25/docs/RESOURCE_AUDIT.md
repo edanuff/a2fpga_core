@@ -1026,3 +1026,11 @@ Expected on Marble Madness: REQ ≈ (active oscillators) × 557 per frame
 (32 slots per 35.7 µs scan, 16.7 ms frame), MEMRD a fraction of REQ equal to
 the miss rate, LATE a small number — all unambiguous.
 **Ed, Marble Madness on `651bf82d…`:** smear gone, audio clean.
+
+**Per-frame telemetry, `add13bfb…`, Marble Madness (2026-10-14):**
+`REQ 6150` (11 oscillators), `MEMRD 212 / 377 / 245` (3–6% of fetches reach
+the HyperRAM: the cache cuts DOC traffic 16–29×), `LATE 17 / 33 / 15` (6–9% of
+misses cross the deadline — held samples, inaudible), FB bit 1 clear, VGC
+stale 0, shadow drops 0. Next: prefetch word+1 on every miss (sequential
+walks), which converts most of those late misses into early hits at no extra
+bus traffic.

@@ -86,15 +86,25 @@ module doc_fetch_cache (
     // a hit is only taken when there is none (the DOC asks one at a time, so a
     // live request means the DOC's previous fetch is still in flight — which
     // this new request supersedes anyway).
+    // Next-word prefetch: wavetable walks are sequential, so the word after a
+    // miss is the next miss. Issue it one cycle after the miss (fill-only,
+    // never delivered); on hardware 6-9% of misses crossed the ~840 ns
+    // deadline (Marble Madness, 2026-10-14) — this makes them early hits.
+    reg        pf_pend_r;
+    reg [13:0] pf_waddr_r;
+    wire [5:0] pf_idx_w = pf_waddr_r[5:0] ^ pf_waddr_r[11:6];
+    wire [7:0] pf_tag_w = pf_waddr_r[13:6];
+    wire       pf_hit_w = valid_r[pf_idx_w] && (tag_r[pf_idx_w] == pf_tag_w);
     wire miss_issue_w = req_i && !hit_w && mem_available_i && !q_full_w;
-    assign mem_rd_o   = miss_issue_w;
-    assign mem_addr_o = addr_i[15:2];
+    wire pf_issue_w   = !req_i && pf_pend_r && !pf_hit_w && mem_available_i && !q_full_w;
+    assign mem_rd_o   = miss_issue_w | pf_issue_w;
+    assign mem_addr_o = req_i ? addr_i[15:2] : pf_waddr_r;
 
     integer i;
     always_ff @(posedge clk_i) begin
         if (!rst_n_i) begin
             valid_r <= '0; valid_o <= 1'b0; data_o <= '0;
-            rd_pend_r <= 1'b0; rd_lane_r <= '0; fill_pend_r <= 1'b0;
+            rd_pend_r <= 1'b0; rd_lane_r <= '0; fill_pend_r <= 1'b0; pf_pend_r <= 1'b0;
             q_wp <= '0; q_rp <= '0;
             dbg_hits_o <= '0; dbg_misses_o <= '0; dbg_late_o <= '0;
         end else begin
@@ -146,7 +156,20 @@ module doc_fetch_cache (
                     q_stale[q_wp[1:0]] <= 1'b0;
                     q_wp <= q_wp + 3'd1;
                     dbg_misses_o <= dbg_misses_o + 1'd1;
+                    pf_pend_r  <= 1'b1;                 // prefetch the next word
+                    pf_waddr_r <= addr_i[15:2] + 14'd1;
                 end
+                if (!miss_issue_w) pf_pend_r <= 1'b0;   // a new request cancels a pending prefetch
+            end else if (pf_pend_r) begin
+                if (pf_issue_w) begin
+                    q_idx[q_wp[1:0]]   <= pf_idx_w;
+                    q_tag[q_wp[1:0]]   <= pf_tag_w;
+                    q_lane[q_wp[1:0]]  <= 2'd0;
+                    q_stale[q_wp[1:0]] <= 1'b1;         // fill only
+                    q_wp <= q_wp + 3'd1;
+                    dbg_misses_o <= dbg_misses_o + 1'd1;
+                end
+                if (pf_issue_w || pf_hit_w) pf_pend_r <= 1'b0;   // issued, or already cached; else retry while the port is busy
                 // (miss with port unavailable: dropped by the arbiter, DOC times out)
             end
 

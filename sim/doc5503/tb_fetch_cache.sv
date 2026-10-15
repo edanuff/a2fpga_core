@@ -64,9 +64,9 @@ module tb_fetch_cache;
         .dbg_fetch_timeout_o(dbg_to), .dbg_fetch_latmax_o(dbg_lat));
 
     // ---- checker ----
-    reg [15:0] req_addr_r = 0; integer consumed = 0, stale = 0, timeouts = 0, hits = 0, misses = 0;
+    reg [15:0] req_addr_r = 0; integer consumed = 0, stale = 0, timeouts = 0, hits = 0, misses = 0, reqs = 0;
     always @(posedge clk) if (reset_n) begin
-        if (d_rd) req_addr_r <= d_addr;
+        if (d_rd) begin req_addr_r <= d_addr; reqs <= reqs + 1; end
         if (dut.osc_state_r == dut.OSC_HANDLE_DATA && dut.loaded_wds_pending_r) begin
             consumed <= consumed + 1;
             if (dut.loaded_wds_r !== wav[req_addr_r]) begin
@@ -92,7 +92,7 @@ module tb_fetch_cache;
         begin @(negedge clk); wav[a] = d; if (!noflush) flush = 1; @(negedge clk); flush = 0; end
     endtask
 
-    integer o, r, h1, m1;
+    integer o, r, h1, m1, r1;
     initial begin
         if ($value$plusargs("seed=%d", seed)) $display("seed %0d", seed);
         if ($test$plusargs("noflush")) begin noflush = 1; $display("NEGATIVE: coherency flush suppressed"); end
@@ -106,8 +106,8 @@ module tb_fetch_cache;
         end
         doc_wr(8'hE1, 8'h3E);
         // P1 fast memory: hit rate + no stale
-        lat_lo = 2; lat_hi = 20; wait_slots(2000); h1 = hits; m1 = misses;
-        $display("P1 hits=%0d misses=%0d (hit rate %0d%%) timeouts=%0d", h1, m1, (100*h1)/(h1+m1+1), timeouts);
+        lat_lo = 2; lat_hi = 20; wait_slots(2000); h1 = hits; m1 = misses; r1 = reqs;
+        $display("P1 requests=%0d hits=%0d (hit rate %0d%%) memreads=%0d (incl. prefetch) timeouts=%0d", r1, h1, (100*h1)/(r1+1), m1, timeouts);
         // P2 tail latency
         lat_lo = 10; lat_hi = 80; wait_slots(2500);
         // P3 wavetable rewrite under playback (coherency), with tail latency
@@ -118,7 +118,7 @@ module tb_fetch_cache;
         lat_lo = 2; lat_hi = 6; wait_slots(800);
         $display("FINAL consumed=%0d served=%0d dropped=%0d hits=%0d misses=%0d timeouts=%0d stale=%0d dbg: to=%0d latmax=%0d hits=%0d miss=%0d late=%0d",
                  consumed, served, dropped, hits, misses, timeouts, stale, dbg_to, dbg_lat, c_hits, c_miss, c_late);
-        if (stale == 0 && consumed > 3000 && (100*h1)/(h1+m1+1) >= 40)
+        if (stale == 0 && consumed > 3000 && (100*h1)/(r1+1) >= 40)
             $display("FETCH CACHE RESULT: PASS");
         else
             $display("FETCH CACHE RESULT: FAIL");
