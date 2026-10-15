@@ -1104,3 +1104,8 @@ visible is ed's call from the listening pass; levers if they are: the DOC
 fetch budget (§7.13), a wider cache line (16-byte lines cost no extra
 BSRAM in the SP block), or moving the DOC port below FB write with the
 cache absorbing the latency.
+
+**Verdict (ed, 2026-10-15): nothing audible or visible on MCS.** The 3 %
+hold-last-sample rate and the occasional overflow frame are below the
+perception threshold here; MCS passes on `cf0d626a…`. The levers above stay
+on the shelf unless a later title shows them.
