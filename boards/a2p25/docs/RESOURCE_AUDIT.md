@@ -1116,5 +1116,9 @@ Three per-frame samples, text/non-SHR video mode (`MODE 0x31`):
 `REQ 2023 / 1813 / 1359`, `MEMRD 274 / 224 / 85` (6–14 % miss),
 `LATE 6 / 4 / 1` (≤ 0.3 % of fetches), `LATMAX 46 clk`, FB flags `0x14`
 (overflow clear), `VGC STALE 0`, `SHADOW DROPS 0`. The lightest title so far:
-a few oscillators, short loops that live in the cache. Listening verdict
-pending.
+a few oscillators, short loops that live in the cache.
+
+Second song: `REQ 1812 / 2137 / 1934`, `MEMRD 274 / 314 / 367` (13–19 %
+miss), `LATE 6 / 14 / 15` (≤ 0.8 %), FB overflow clear on all three
+(`0x30` = fetch active at sample time only), `VGC STALE 0`,
+`SHADOW DROPS 0`. Listening verdict pending.
