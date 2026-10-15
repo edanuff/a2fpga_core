@@ -1080,3 +1080,27 @@ a busier passage than the 11-oscillator `REQ 6150` samples of §7.14):
 `LATMAX 46 clk`, FB overflow bit clear, `VGC STALE 0`, `SHADOW DROPS 0`.
 The prefetch regression (MEMRD 1500–2000, LATE 70–100) is gone; miss and
 late rates are back in the §7.14 family. No visible smear, audio clean (ed).
+
+### 7.17 Music Construction Set on `cf0d626a…` (2026-10-15)
+
+Three per-frame samples while MCS plays:
+
+- `REQ 6149 / 4832 / 5710`, `MEMRD 2491 / 2196 / 2169` — a **38–45 % miss
+  rate** (Marble Madness: 7 %). MCS instruments step a word or more per
+  sample, so the 4-byte line rarely serves a second fetch (the same
+  behaviour that made the word+1 prefetch useless in §7.16).
+- `LATE 186 / 156 / 165` per frame ≈ 3 % of fetches hold the previous
+  sample (Marble Madness: 0.4–0.5 %). `LATMAX 46 clk` unchanged, so the tail
+  is the same length; there is just far more of it.
+- FB flags `0x36` on one sample: bit 1 = write-FIFO overflow count non-zero
+  in that frame (bit 5 is merely "fetch active" at sample time). The other
+  two samples read `0x30`, overflow clear. `VGC STALE 0`, `SHADOW DROPS 0`.
+
+Reading: with the DOC port at priority 1 ahead of the FB write port, a
+40 %-miss title puts ~2,300 extra word reads per frame on the HyperRAM
+arbiter and the FB write accumulator occasionally overflows. Whether the
+3 % hold-last-sample rate and the occasional overflow frame are audible or
+visible is ed's call from the listening pass; levers if they are: the DOC
+fetch budget (§7.13), a wider cache line (16-byte lines cost no extra
+BSRAM in the SP block), or moving the DOC port below FB write with the
+cache absorbing the latency.
