@@ -12,27 +12,27 @@
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
   <Device Version>: A
-  <Created Time>:Wed Oct 14 14:19:27 2026
+  <Created Time>:Wed Oct 14 21:36:19 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 11s, Elapsed time = 0h 0m 13s
+    Placement Phase 0: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 11s
     Placement Phase 1: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-    Placement Phase 2: CPU time = 0h 0m 43s, Elapsed time = 0h 0m 47s
-    Placement Phase 3: CPU time = 0h 0m 23s, Elapsed time = 0h 0m 26s
-    Total Placement: CPU time = 0h 1m 20s, Elapsed time = 0h 1m 28s
+    Placement Phase 2: CPU time = 0h 0m 36s, Elapsed time = 0h 0m 42s
+    Placement Phase 3: CPU time = 0h 0m 27s, Elapsed time = 0h 0m 30s
+    Total Placement: CPU time = 0h 1m 14s, Elapsed time = 0h 1m 26s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.023s, Elapsed time = 0h 0m 0.055s
-    Routing Phase 1: CPU time = 0h 0m 44s, Elapsed time = 0h 0m 51s
-    Routing Phase 2: CPU time = 0h 0m 0.477s, Elapsed time = 0h 0m 0.559s
+    Routing Phase 0: CPU time = 0h 0m 0.022s, Elapsed time = 0h 0m 0.024s
+    Routing Phase 1: CPU time = 0h 0m 45s, Elapsed time = 0h 0m 51s
+    Routing Phase 2: CPU time = 0h 0m 0.529s, Elapsed time = 0h 0m 0.581s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 45s, Elapsed time = 0h 0m 52s
+    Total Routing: CPU time = 0h 0m 46s, Elapsed time = 0h 0m 51s
  Generate output files:
-    CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
+    CPU time = 0h 0m 6s, Elapsed time = 0h 0m 7s
 
- Total Time and Memory Usage: CPU time = 0h 2m 10s, Elapsed time = 0h 2m 26s, Peak memory usage = 867MB
+ Total Time and Memory Usage: CPU time = 0h 2m 6s, Elapsed time = 0h 2m 23s, Peak memory usage = 909MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 14113/23040                         |  62%
-    --LUT,ALU,ROM16           | 14113(12385 LUT, 1704 ALU, 24 ROM16)| -
+  Logic                       | 14824/23040                         |  65%
+    --LUT,ALU,ROM16           | 14824(13007 LUT, 1793 ALU, 24 ROM16)| -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 11986/23280                         |  52%
+  Register                    | 12804/23280                         |  55%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 11946/23040                         |  52%
+    --Logic Register as FF    | 12764/23040                         |  56%
     --I/O Register as Latch   | 0/240                               |  0%
     --I/O Register as FF      | 40/240                              |  17%
-  CLS                         | 10848/11520                         |  95%
+  CLS                         | 11062/11520                         |  97%
   I/O Port                    | 75/86                               |  88%
   I/O Buf                     | 59                                  | -
     --Input Buf               | 26                                  | -
@@ -58,7 +58,8 @@
     --IDDR                    | 9
     --ODDR                    | 11
     --IODELAY                 | 9
-  BSRAM                       | 51/56                               | 92%
+  BSRAM                       | 52/56                               | 93%
+    --SP                      | 1
     --SDPB                    | 23
     --SDPX9B                  | 6
     --DPB                     | 17
@@ -106,19 +107,19 @@
   -------------------------------------------
   clk54_pll_w    | PRIMARY        |  TL BL
   a2bus_if.clk_logic| PRIMARY        |  TR TL BR BL
-  clk_mem_w      | PRIMARY        |  TL BR
+  clk_mem_w      | PRIMARY        |  BR
   clk_mem_90_w   | PRIMARY        |  TL
   clk100_w       | PRIMARY        |  TR TL BL
   clk_pixel_w    | PRIMARY        |  TR TL BR BL
   dp_clk_sym_w   | PRIMARY        |  TR TL BR BL
-  i_phy/tx_clk   | PRIMARY        |  BR BL
+  i_phy/tx_clk   | PRIMARY        |  TL BL
   clk_d          | LW             |  -
   a2bus_if.device_reset_n| LW             |  -
   n41_7          | LW             |  -
+  sg/gen_doc_ext.u_fetch_cache/n2240_6| LW             |  -
   u_framebuffer/rstn_clk_sync_r[1]| LW             |  -
   i_dp/i_sdp_engine/inserting| LW             |  -
   i_dp/i_main_stream_processing/i_idle_pattern_inserter/count_to_switch[16]| LW             |  -
-  i_phy/enc_run  | LW             |  -
   i_phy/u_dphy/u_mipi_dphy/rx_clk_o| LW             |  -
   ===========================================
 

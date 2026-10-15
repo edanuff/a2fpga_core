@@ -81,6 +81,9 @@ module esp32_ospi_connector #(
     input  wire [7:0]  dbg_usb_cnt_rdy_i,   // received-data-packet counter (wraps)
     input  wire [7:0]  dbg_ddr3_retry_i,    // DDR3 calib watchdog retries (saturating)
     input  wire [7:0]  dbg_ddr3_seq_i,      // {3'b0,rst_n,pll_lock,calib,state[1:0]}
+    input  wire [15:0] dbg_doc_reqf_i,      // DOC requests per frame
+    input  wire [15:0] dbg_doc_missf_i,     // DOC memory reads per frame
+    input  wire [15:0] dbg_doc_tof_i,       // DOC late fetches per frame
     output reg         ddr3_reinit_tgl_o,   // toggles on REG_DDR3_REINIT write (CDC as toggle)
 
     // DDR3 debug read window (ddr3_debug_reader on idle port 4)
@@ -258,6 +261,13 @@ module esp32_ospi_connector #(
     localparam REG_DBG_USB_PID_H = 7'h1F;
     localparam REG_DBG_USB_CLASS = 7'h7C;   // interface class
     localparam REG_DBG_USB_SUBCL = 7'h7D;   // interface subclass
+    // DOC fetch telemetry, latched per video frame in the top (16-bit, L/H):
+    localparam REG_DBG_DOC_REQF_L  = 7'h3C;  // wavetable requests per frame
+    localparam REG_DBG_DOC_REQF_H  = 7'h3D;
+    localparam REG_DBG_DOC_MISSF_L = 7'h3E;  // memory reads per frame (word-cache misses)
+    localparam REG_DBG_DOC_MISSF_H = 7'h3F;
+    localparam REG_DBG_DOC_TOF_L   = 7'h2F;  // fetches past the slot deadline per frame
+    localparam REG_DBG_DOC_TOF_H   = 7'h4F;
     localparam REG_DBG_USB_FLAGS = 7'h20;   // {connerr,x_input,fs,connected,start,rdy,stb,busy}
     localparam REG_DBG_USB_TXNS  = 7'h21;   // transaction-start counter
     localparam REG_DBG_USB_DATA  = 7'h22;   // received-data-packet counter
@@ -577,6 +587,12 @@ module esp32_ospi_connector #(
             REG_DBG_USB_DATA:   reg_rdata = dbg_usb_cnt_rdy_i;
             REG_DBG_DDR3_RETRY: reg_rdata = dbg_ddr3_retry_i;
             REG_DBG_DDR3_SEQ:   reg_rdata = dbg_ddr3_seq_i;
+            REG_DBG_DOC_REQF_L:  reg_rdata = dbg_doc_reqf_i[7:0];
+            REG_DBG_DOC_REQF_H:  reg_rdata = dbg_doc_reqf_i[15:8];
+            REG_DBG_DOC_MISSF_L: reg_rdata = dbg_doc_missf_i[7:0];
+            REG_DBG_DOC_MISSF_H: reg_rdata = dbg_doc_missf_i[15:8];
+            REG_DBG_DOC_TOF_L:   reg_rdata = dbg_doc_tof_i[7:0];
+            REG_DBG_DOC_TOF_H:   reg_rdata = dbg_doc_tof_i[15:8];
 
             // ProDOS HDD compact bank
             REG_HDD0_REQ_CTL: reg_rdata = {6'b0, hdd_volumes[0].wr, hdd_volumes[0].rd};

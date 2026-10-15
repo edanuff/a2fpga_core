@@ -373,8 +373,14 @@ module top #(
     // behind an in-flight FB burst plus two queued shadow transactions and
     // miss it under SHR load (audible). A DOC read is one word per ~1 us, so
     // the shadow paths lose at most ~170 ns per microsecond to it.
-    localparam DOC_MEM_PORT      = 0;
-    localparam SHADOW_READ_PORT  = 1;
+    // 2026-10-14 (Marble Madness): with the DOC at port 0 the VGC's shadow
+    // reads starved under SHR + heavy DOC load (stale-word swaps 6-32/frame =
+    // visible smear) while DOC late fetches ran ~7/s. A late DOC fetch is now
+    // silent (doc5503 holds the previous sample), a late VGC word is visible,
+    // so the shadow READ goes back on top and the DOC sits at 1 — still above
+    // the shadow write FIFO (16 deep, drop counter) and the framebuffer.
+    localparam SHADOW_READ_PORT  = 0;
+    localparam DOC_MEM_PORT      = 1;
     localparam SHADOW_WRITE_PORT = 2;
     localparam GLU_MEM_PORT      = 3;
     localparam FB_WRITE_PORT   = 4;
@@ -622,6 +628,9 @@ module top #(
     wire [7:0] doc_dbg_stale_fetch_w;
     wire [7:0] doc_dbg_fetch_drop_w;
     wire [15:0] doc_dbg_fetch_count_w;
+    wire [15:0] doc_dbg_timeouts_w;
+    // per-frame latches of the baseline-DOC fetch telemetry (memory reads = word-cache misses, late fetches)
+    reg  [15:0] doc_dbg_miss_prev_r, doc_dbg_miss_frame_r, doc_dbg_to_prev_r, doc_dbg_to_frame_r;
     wire fb_fetch_active_w;   // from u_framebuffer: line fetch issuing bursts
     // Request instrumentation (declare BEFORE the sg instantiation —
     // referencing these in port connections first creates disconnected
@@ -677,6 +686,7 @@ module top #(
         .dbg_doc_stale_fetch_o(doc_dbg_stale_fetch_w),
         .dbg_doc_fetch_drop_o(doc_dbg_fetch_drop_w),
         .dbg_doc_fetch_count_o(doc_dbg_fetch_count_w),
+        .dbg_doc_timeouts_o(doc_dbg_timeouts_w),
         .dbg_frame_tick_i(doc_dbg_frame_tick_w),
         .dbg_doc_req_count_o(doc_dbg_req_count_w),
         .dbg_doc_req_mingap_o(doc_dbg_req_mingap_w)
@@ -691,6 +701,10 @@ module top #(
         if (doc_dbg_frame_tick_w) begin
             doc_dbg_req_frame_r    <= doc_dbg_req_count_w - doc_dbg_req_prev_r;
             doc_dbg_req_prev_r     <= doc_dbg_req_count_w;
+            doc_dbg_miss_frame_r   <= doc_dbg_fetch_count_w - doc_dbg_miss_prev_r;
+            doc_dbg_miss_prev_r    <= doc_dbg_fetch_count_w;
+            doc_dbg_to_frame_r     <= doc_dbg_timeouts_w - doc_dbg_to_prev_r;
+            doc_dbg_to_prev_r      <= doc_dbg_timeouts_w;
             doc_dbg_mingap_frame_r <= doc_dbg_req_mingap_w; // pre-reset value
         end
     end
@@ -1091,8 +1105,8 @@ module top #(
                             FB_WORD_BASE,        // [4] FB write
                             ENSONIQ_WORD_BASE,   // [3] GLU sound-RAM write
                             SHADOW_WORD_BASE,    // [2] shadow write
-                            SHADOW_WORD_BASE,    // [1] shadow read
-                            ENSONIQ_WORD_BASE}), // [0] DOC wavetable read
+                            ENSONIQ_WORD_BASE,   // [1] DOC wavetable read
+                            SHADOW_WORD_BASE}),  // [0] shadow read
         .PORT_BURST_WORDS ({5'd4, 5'd8, 5'd4, 5'd4, 5'd4, 5'd4, 5'd4}),
         .WIDE_WR_PORT     (FB_WRITE_PORT)
     ) u_hr_ports (
@@ -1872,6 +1886,9 @@ module top #(
         .dbg_usb_cnt_rdy_i(usb_cnt_rdy_sync1),
         .dbg_ddr3_retry_i(ddr3_retry_sync1),
         .dbg_ddr3_seq_i({3'b0, ddr3_seq_sync1}),
+        .dbg_doc_reqf_i(doc_dbg_req_frame_r),
+        .dbg_doc_missf_i(doc_dbg_miss_frame_r),
+        .dbg_doc_tof_i(doc_dbg_to_frame_r),
         .ddr3_reinit_tgl_o(ddr3_reinit_tgl_w),
 
         .dbg_mem_addr_o(dbg_mem_addr_w),

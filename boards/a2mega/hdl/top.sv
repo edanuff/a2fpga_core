@@ -1981,6 +1981,9 @@ module top #(
         .dbg_usb_cnt_rdy_i(usb_cnt_rdy_sync1),
         .dbg_ddr3_retry_i(ddr3_retry_sync1),
         .dbg_ddr3_seq_i({3'b0, ddr3_seq_sync1}),
+        .dbg_doc_reqf_i(doc_dbg_req_frame_r),
+        .dbg_doc_missf_i(16'd0),
+        .dbg_doc_tof_i(16'd0),
         .ddr3_reinit_tgl_o(ddr3_reinit_tgl_w),
 
         .dbg_mem_addr_o(dbg_mem_addr_w),

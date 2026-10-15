@@ -238,7 +238,7 @@ module doc5503 #(
 
     // Wavetable fetch telemetry (external-memory builds). All wrap at 8 bits
     // except latmax, which saturates.
-    output [7:0] dbg_fetch_timeout_o,  // fetches that missed the slot budget (0x80 substituted)
+    output [15:0] dbg_fetch_timeout_o, // fetches that missed the slot budget (previous sample held)
     output [7:0] dbg_fetch_latmax_o    // max clk_i cycles from wave_rd_o to wave_data_ready_i
 );
 
@@ -662,7 +662,7 @@ module doc5503 #(
     // response that lands exactly on the deadline edge.
     reg       fetch_outstanding_r = 1'b0;
     reg [7:0] fetch_lat_r = 8'd0;
-    reg [7:0] dbg_fetch_timeout_r = 8'd0;
+    reg [15:0] dbg_fetch_timeout_r = 16'd0;
     reg [7:0] dbg_fetch_latmax_r = 8'd0;
     assign dbg_fetch_timeout_o = dbg_fetch_timeout_r;
     assign dbg_fetch_latmax_o  = dbg_fetch_latmax_r;
@@ -716,7 +716,7 @@ module doc5503 #(
             prev_ctl_pend_r <= 1'b0;
             fetch_outstanding_r <= 1'b0;
             fetch_lat_r <= 8'd0;
-            dbg_fetch_timeout_r <= 8'd0;
+            dbg_fetch_timeout_r <= 16'd0;
             dbg_fetch_latmax_r <= 8'd0;
 
         end else begin

@@ -958,3 +958,71 @@ in the slot) is optional and only worth doing if a title still shows it.
 Further titles (POLY.SYNTH, synthLAB, Music Construction Set, 32-oscillator
 songs, swap/loop instruments) remain to be listened to; telnet `z` gives the
 counters per title.
+
+### 7.14 Marble Madness: bandwidth, not latency — DOC word cache (2026-10-14)
+
+**Observed (ed):** vertical displaced smearing on screen, audio fine.
+`z` readings during play: `FB 0x16 / 0x32` (bit 1 = **framebuffer write FIFO
+overflow**, sticky — clear in every previous read), `VGC STALE 32 / 13 / 6`
+per frame (0 before), DOC late fetches **~7/s** (0.4/s under Arkanoid). All
+three are one symptom: with the baseline DOC fetching one byte per oscillator
+per slot, a title that drives the Ensoniq hard puts ~15% of the HyperRAM bus
+under DOC reads at top priority, and the renderer's write port (priority 4,
+64-entry FIFO) and the VGC's shadow reads both starve. Dropped renderer writes
+leave pixels from the previous frame behind — the displaced smear. This is the
+cost the pipelined core's 16-byte line cache was paying for; the baseline's
+~4× higher fetch rate is the one thing §7.5 did not weigh.
+
+**Two fixes, both in the next build:**
+
+1. **Priority order:** shadow read 0, **DOC 1**, shadow write 2, GLU 3, FB
+   write 4, FB read 5, debug 6. A late DOC fetch is now silent (§7.13 hold),
+   a late VGC word is visible, so the VGC goes back above the DOC; the DOC
+   stays above the shadow write FIFO and the framebuffer (the cascade fix of
+   §7.12 does not depend on being at 0).
+2. **`hdl/sound/doc_fetch_cache.sv`** (replaces `doc_fetch_filter.sv`, in
+   every gprj that lists `sound_glu.sv`): a 64-word direct-mapped cache
+   between the DOC and the HyperRAM port. Sequential wavetable walks at
+   ≤ 1 byte/sample hit the same 32-bit word up to four times, so the DOC's
+   bus share drops ~4× and hits are answered in two cycles (no deadline
+   exposure). Index = `addr[7:2] ^ addr[13:8]` (oscillators parked at the same
+   offset of different 256-byte tables do not evict each other), tag
+   `addr[15:8]`; data in one single-port BSRAM (64 × 32, SP x32 = 1 block),
+   tags/valid in ~600 FF. It also owns request ordering (the filter's job:
+   anything outstanding is superseded by the next DOC request; only
+   port-accepted reads are tracked). Coherency: all valid bits cleared on
+   every GLU sound-RAM write and again when that write leaves the 32-deep
+   queue for memory. Counters: hits/misses on connector regs 0x7E/0x7F
+   (`viddbg`/`z` line `DOC CACHE HITS n MISS n`), superseded on the overlay.
+
+**Verification:** `sim/doc5503/tb_fetch_cache.sv` / `run_fetch_cache.sh`:
+DOC + cache on the two-slot in-order memory model, fast → tail → rewrite-
+under-playback (3,000 wavetable writes with flush) → pathological phases;
+every consumed byte checked against the current memory content of its
+request address. **0 stale samples**; hit rate 40% on the bench's
+deliberately fast walks (half the oscillators step 1–4.5 bytes/sample);
+`+noflush` negative control: stale cached words. The equivalence suite and
+`run.sh` are the regressions for the DOC core itself.
+
+**Expectation on hardware:** Marble Madness with `FB` bit 1 clear, `VGC STALE`
+0, `SHADOW DROPS` 0, DOC late fetches well under 1/s, and a hit/miss ratio
+that tells us the real-world traffic reduction. If the write FIFO still
+overflows with the DOC's traffic cut, the remaining lever is the framebuffer
+write port's priority relative to the GLU write queue (both are "must not
+drop" paths; the GLU queue is 32 deep with its own drop counter).
+
+**Hardware, cache build `651bf82d…` (shadow read 0 / DOC 1 / 64-word cache),
+Marble Madness, 2026-10-14:** `FB` bit 1 (write-FIFO overflow) **clear** in
+every read (0x30 / 0x14 / 0x34 — was 0x16 / 0x32), `VGC STALE` 0 / 2 / 0 per
+frame (was 6–32), `SHADOW DROPS` 0. The bandwidth symptom is gone. Two
+telemetry lessons from the same session: (1) connector register 0x7F reads
+as 0 through the OSPI protocol (not investigated; 0x7E worked) — the pair is
+removed; (2) 8-bit wrapping counters cannot resolve rates of hundreds to
+hundreds of thousands per second between reads seconds apart, so the DOC
+fetch telemetry is now **latched per video frame** in the top (16-bit:
+requests, memory reads = cache misses, late fetches) on connector regs
+0x3C/3D, 0x3E/3F, 0x2F/0x4F, printed by `z` as `DOC/FRAME REQ n MEMRD n LATE n`.
+Expected on Marble Madness: REQ ≈ (active oscillators) × 557 per frame
+(32 slots per 35.7 µs scan, 16.7 ms frame), MEMRD a fraction of REQ equal to
+the miss rate, LATE a small number — all unambiguous.
+**Ed, Marble Madness on `651bf82d…`:** smear gone, audio clean.
