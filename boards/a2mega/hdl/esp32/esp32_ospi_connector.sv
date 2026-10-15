@@ -22,6 +22,10 @@
 // the register map and protocol details.
 //
 module esp32_ospi_connector #(
+    // 14-char gateware build stamp (YYYYMMDDHHMMSS), read a digit at a time
+    // through reg 0x3F (write the index, read the ASCII digit) — the menu's
+    // CORE: line and the same convention as the BL616 connector.
+    parameter [8*14-1:0] VERSION_STR = "00000000000000",
     parameter USE_SYNC    = 1,
     parameter USE_CRC     = 0,
     parameter IDLE_TO_CYC = 5_400_000,
@@ -265,7 +269,8 @@ module esp32_ospi_connector #(
     localparam REG_DBG_DOC_REQF_L  = 7'h3C;  // wavetable requests per frame
     localparam REG_DBG_DOC_REQF_H  = 7'h3D;
     localparam REG_DBG_DOC_MISSF_L = 7'h3E;  // memory reads per frame (word-cache misses)
-    localparam REG_DBG_DOC_MISSF_H = 7'h3F;
+    localparam REG_DBG_DOC_MISSF_H = 7'h5F;
+    localparam REG_CORE_BUILD      = 7'h3F;  // W: digit index 0-13; R: ASCII digit of VERSION_STR
     localparam REG_DBG_DOC_TOF_L   = 7'h2F;  // fetches past the slot deadline per frame
     localparam REG_DBG_DOC_TOF_H   = 7'h4F;
     localparam REG_DBG_USB_FLAGS = 7'h20;   // {connerr,x_input,fs,connected,start,rdy,stb,busy}
@@ -309,6 +314,7 @@ module esp32_ospi_connector #(
 
     // System
     reg [7:0] scratch_r;
+    reg [3:0] ver_idx_r;             // REG_CORE_BUILD digit index
     reg [7:0] scratch1_r, scratch2_r, scratch3_r, scratch4_r;
     reg [31:0] sys_time_r;
 
@@ -528,6 +534,7 @@ module esp32_ospi_connector #(
             REG_PROTO_VER:    reg_rdata = PROTO_VER;
             REG_CAPABILITIES: reg_rdata = CAP0;
             REG_SCRATCH:      reg_rdata = scratch_r;
+            REG_CORE_BUILD:   reg_rdata = VERSION_STR[8*(13-ver_idx_r) +: 8];
             REG_STATUS:       reg_rdata = status_w;
             REG_SYSTIME_0:    reg_rdata = sys_time_r[7:0];
             REG_SYSTIME_1:    reg_rdata = sys_time_r[15:8];
@@ -675,6 +682,7 @@ module esp32_ospi_connector #(
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             scratch_r <= 8'h00;
+            ver_idx_r <= 4'd0;
             scratch1_r <= 8'h00;
             scratch2_r <= 8'h00;
             scratch3_r <= 8'h00;
@@ -750,6 +758,7 @@ module esp32_ospi_connector #(
             if (reg_wr_req) begin
                 case (reg_idx)
                     REG_SCRATCH:      scratch_r <= reg_wdata;
+                    REG_CORE_BUILD:   ver_idx_r <= reg_wdata[3:0];
                     REG_DDR3_REINIT:  ddr3_reinit_tgl_o <= ~ddr3_reinit_tgl_o;
                     REG_SCRATCH1:     scratch1_r <= reg_wdata;
                     REG_SCRATCH2:     scratch2_r <= reg_wdata;

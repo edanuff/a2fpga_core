@@ -12,27 +12,27 @@
   <Part Number>: GW5A-LV25MG121NC1/I0
   <Device>: GW5A-25
   <Device Version>: A
-  <Created Time>:Wed Oct 14 21:54:59 2026
+  <Created Time>:Thu Oct 15 09:26:27 2026
 
 
 2. PnR Details
 
   Running placement:
-    Placement Phase 0: CPU time = 0h 0m 14s, Elapsed time = 0h 0m 16s
+    Placement Phase 0: CPU time = 0h 0m 10s, Elapsed time = 0h 0m 12s
     Placement Phase 1: CPU time = 0h 0m 2s, Elapsed time = 0h 0m 2s
-    Placement Phase 2: CPU time = 0h 0m 42s, Elapsed time = 0h 0m 46s
-    Placement Phase 3: CPU time = 0h 0m 31s, Elapsed time = 0h 0m 34s
-    Total Placement: CPU time = 0h 1m 28s, Elapsed time = 0h 1m 39s
+    Placement Phase 2: CPU time = 0h 0m 40s, Elapsed time = 0h 0m 50s
+    Placement Phase 3: CPU time = 0h 0m 25s, Elapsed time = 0h 0m 32s
+    Total Placement: CPU time = 0h 1m 17s, Elapsed time = 0h 1m 36s
  Running routing:
-    Routing Phase 0: CPU time = 0h 0m 0.02s, Elapsed time = 0h 0m 0.022s
-    Routing Phase 1: CPU time = 0h 0m 40s, Elapsed time = 0h 0m 46s
-    Routing Phase 2: CPU time = 0h 0m 0.578s, Elapsed time = 0h 0m 0.636s
+    Routing Phase 0: CPU time = 0h 0m 0.019s, Elapsed time = 0h 0m 0.021s
+    Routing Phase 1: CPU time = 0h 0m 46s, Elapsed time = 0h 0m 58s
+    Routing Phase 2: CPU time = 0h 0m 0.499s, Elapsed time = 0h 0m 0.607s
     Routing Phase 3: CPU time = 0h 0m 0s, Elapsed time = 0h 0m 0s
-    Total Routing: CPU time = 0h 0m 41s, Elapsed time = 0h 0m 46s
+    Total Routing: CPU time = 0h 0m 46s, Elapsed time = 0h 0m 59s
  Generate output files:
-    CPU time = 0h 0m 6s, Elapsed time = 0h 0m 6s
+    CPU time = 0h 0m 5s, Elapsed time = 0h 0m 6s
 
- Total Time and Memory Usage: CPU time = 0h 2m 15s, Elapsed time = 0h 2m 32s, Peak memory usage = 896MB
+ Total Time and Memory Usage: CPU time = 0h 2m 8s, Elapsed time = 0h 2m 41s, Peak memory usage = 867MB
 
 
 3. Resource Usage Summary
@@ -40,15 +40,15 @@
   --------------------------------------------------------------------------------
   Resources                   | Usage                               | Utilization
   --------------------------------------------------------------------------------
-  Logic                       | 15323/23040                         |  67%
-    --LUT,ALU,ROM16           | 15323(13476 LUT, 1823 ALU, 24 ROM16)| -
+  Logic                       | 15351/23040                         |  67%
+    --LUT,ALU,ROM16           | 15351(13502 LUT, 1825 ALU, 24 ROM16)| -
     --SSRAM(RAM16)            | 0                                   | -
-  Register                    | 12819/23280                         |  56%
+  Register                    | 12823/23280                         |  56%
     --Logic Register as Latch | 0/23040                             |  0%
-    --Logic Register as FF    | 12779/23040                         |  56%
+    --Logic Register as FF    | 12783/23040                         |  56%
     --I/O Register as Latch   | 0/240                               |  0%
     --I/O Register as FF      | 40/240                              |  17%
-  CLS                         | 11076/11520                         |  97%
+  CLS                         | 11067/11520                         |  97%
   I/O Port                    | 75/86                               |  88%
   I/O Buf                     | 59                                  | -
     --Input Buf               | 26                                  | -
@@ -107,12 +107,12 @@
   -------------------------------------------
   clk54_pll_w    | PRIMARY        |  TL BL
   a2bus_if.clk_logic| PRIMARY        |  TR TL BR BL
-  clk_mem_w      | PRIMARY        |  TR BR
+  clk_mem_w      | PRIMARY        |  TL BR
   clk_mem_90_w   | PRIMARY        |  TL
   clk100_w       | PRIMARY        |  TR TL BL
-  clk_pixel_w    | PRIMARY        |  TR TL BR BL
+  clk_pixel_w    | PRIMARY        |  TR TL BL
   dp_clk_sym_w   | PRIMARY        |  TR TL BR BL
-  i_phy/tx_clk   | PRIMARY        |  TL BR BL
+  i_phy/tx_clk   | PRIMARY        |  BR BL
   clk_d          | LW             |  -
   a2bus_if.device_reset_n| LW             |  -
   n41_7          | LW             |  -

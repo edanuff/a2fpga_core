@@ -1034,3 +1034,18 @@ misses cross the deadline — held samples, inaudible), FB bit 1 clear, VGC
 stale 0, shadow drops 0. Next: prefetch word+1 on every miss (sequential
 walks), which converts most of those late misses into early hits at no extra
 bus traffic.
+
+### 7.15 Core build stamp in the OSD (2026-10-15)
+
+The ESP32 menu reads the gateware build stamp through register 0x3F (write a
+digit index 0–13, read the ASCII digit; 14 digits YYYYMMDDHHMMSS — the BL616
+connector's convention, `fpga_core_version()` in menu.c). The ESP32 connector
+never implemented it, so every a2mega/a2p25 core showed "CORE: (NO VERSION
+REG)" and last night's "which image is running?" had to be answered from
+install logs. `esp32_ospi_connector` now has `VERSION_STR` + `REG_CORE_BUILD`
+(0x3F) and both tops pass `BUILD_DATETIME` (stamped by the build). The
+telemetry byte that had landed on 0x3F moved to 0x5F (firmware follows).
+Build `149ea423…` (stamp 20261015092235): 0 violations, worst +0.057, 52/56
+BSRAM, logic 15,351 — awaiting the board (powered down). What the board boots
+today is `edfc20fa…` (prefetch build, commit a3ad0704), verified-written over
+WiFi before the shutdown; its Marble Madness per-frame read is still pending.

@@ -1930,6 +1930,7 @@ module top #(
 
     // Octal SPI connector instance
     esp32_ospi_connector #(
+        .VERSION_STR(`BUILD_DATETIME),
         .USE_SYNC(1),
         .USE_CRC(0),
         .IDLE_TO_CYC(5_400_000),  // ~100ms at 54MHz

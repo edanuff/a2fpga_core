@@ -1190,7 +1190,7 @@ volatile bool viddbg_request = false;   // telnet 'z' -> serviced in loop()
 extern "C" void viddbg_log(void)
 {
     if (!a2spi_is_ready()) { osd_log("VIDDBG: SPI NOT READY"); return; }
-    uint8_t v[9], pf[6], st2 = 0;   // pf: 0x3C,0x3D,0x3E,0x3F,0x2F,0x4F
+    uint8_t v[9], pf[6], st2 = 0;   // pf: 0x3C,0x3D,0x3E,0x5F,0x2F,0x4F
     // The OSPI link is shared with the disk/menu tasks: take the link mutex
     // around the burst of register reads (an unlocked burst during disk
     // streaming collided on the SPI driver and panicked the ESP32 — which
@@ -1204,7 +1204,7 @@ extern "C" void viddbg_log(void)
             return;
         }
     }
-    { const uint8_t pfr[6] = {0x3C, 0x3D, 0x3E, 0x3F, 0x2F, 0x4F};
+    { const uint8_t pfr[6] = {0x3C, 0x3D, 0x3E, 0x5F, 0x2F, 0x4F};
       for (int i = 0; i < 6; i++) a2spi_reg_read_status(pfr[i], &pf[i], &st2); }
     fpga_link_unlock();
     osd_log("VIDDBG MODE %02X FB %02X OVFL %02X RD %02X", v[0], v[5], v[6], v[7]);
