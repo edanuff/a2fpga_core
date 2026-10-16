@@ -1148,3 +1148,38 @@ wrong. Re-derived counts for the readings so far:
 So the heaviest titles seen run about half the DOC; a true 32-oscillator
 load would be `REQ ≈ 14,000` per frame, and at the MCS miss rate that is
 ≈ 5,600 word reads per frame on the HyperRAM — the case synthLAB should show.
+
+### 7.20 Arkanoid pops on `cf0d626a…` — differential test in progress (2026-10-15)
+
+Ed, replaying Arkanoid on the current build after the §7.19 read: **pops that
+were not there on the hold-last-sample build** (`5e51b3d3…`, no cache). The
+drop handling itself has not changed since that build; the two changes since
+the last clean Arkanoid listen are the word cache (§7.14) and the per-word
+invalidation (§7.16). Arkanoid had not been replayed on any cache build
+before this. Telemetry on the pop run was unremarkable (effect frame
+`REQ 5710 / MEMRD 280 / LATE 20`, idle frames `REQ 439 / MEMRD 0 / LATE 0`),
+which argues against the hold path and for a wrong *value* — a stale cached
+word or a hit-path fault.
+
+Attempted control with the two-day-old `a2p25_cache.bin` (`651bf82d…`):
+**that core no longer boots the Arkanoid `.PO` image** ("unable to load
+ProDOS", twice, image mounted and the Apple released after the mount). Its
+provenance relative to the shadow-read/port-priority changes is uncertain,
+so it was abandoned rather than debugged; the current build was reinstalled
+(boot pending ed's confirmation). Two tooling notes from the detour:
+
+- The UPDATE FPGA picker lists only the first 24 directory entries; a stick
+  with many test images silently hides the rest. Twelve superseded images
+  were deleted (ed's instruction).
+- `.fs` → `.bin` is a straight pack of the bit lines (comments stripped);
+  verified byte-identical against the IDE's `.bin` for the current build, so
+  any committed `.fs` can be reinstalled over WiFi.
+
+**Proper control built**: current source with `PER_WORD_INVALIDATE = 0`
+(whole-cache flush on every write, the §7.14 behaviour) — a parameter on
+`doc_fetch_cache` / `DOC_CACHE_PER_WORD_INVALIDATE` on `sound_glu`, default
+1; only the a2p25 top is set to 0 for this build (not committed that way).
+Build `f26cfbb5…`, stamp `20261015211207`, 0 violations (worst +0.040 ns),
+logic 14,773, BSRAM 52/56. Staged as `a2p25_wholeflush.bin` for the stick
+(board was powered down at upload time). Decision table: pops on it → the
+cache hit/fill path; clean → the per-word invalidation.

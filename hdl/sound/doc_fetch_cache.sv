@@ -30,7 +30,11 @@ module doc_fetch_cache #(
     // instruments often step a whole word or more per sample, so word+1 is
     // rarely the next fetch. Off by default; kept for titles that prove
     // sequential (per-frame telemetry decides).
-    parameter bit PREFETCH = 1'b0
+    parameter bit PREFETCH = 1'b0,
+    // 1 = invalidate only the written word's line (default). 0 = the earlier
+    // behaviour: every sound-RAM write clears all 64 valid bits. Kept as a
+    // hardware control for the Arkanoid pop investigation (2026-10-15).
+    parameter bit PER_WORD_INVALIDATE = 1'b1
 ) (
     input  wire        clk_i,
     input  wire        rst_n_i,
@@ -195,7 +199,9 @@ module doc_fetch_cache #(
             // resurrect the pre-write word: drop the fill, and mark matching
             // outstanding reads stale (filled but then re-invalidated below is
             // not possible, so they are simply not delivered / not validated).
-            if (flush_i) begin
+            if (flush_i && !PER_WORD_INVALIDATE) begin
+                valid_r <= '0; fill_pend_r <= 1'b0;
+            end else if (flush_i) begin
                 valid_r[fl_idx_w] <= 1'b0;
                 if (fill_pend_r && fill_idx_r == fl_idx_w) fill_pend_r <= 1'b0;
                 for (i = 0; i < 4; i = i + 1)
