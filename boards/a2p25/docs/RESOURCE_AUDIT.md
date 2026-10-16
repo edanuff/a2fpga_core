@@ -1183,3 +1183,17 @@ Build `f26cfbb5…`, stamp `20261015211207`, 0 violations (worst +0.040 ns),
 logic 14,773, BSRAM 52/56. Staged as `a2p25_wholeflush.bin` for the stick
 (board was powered down at upload time). Decision table: pops on it → the
 cache hit/fill path; clean → the per-word invalidation.
+
+**Update (ed, 2026-10-15 evening): the Arkanoid `.PO` image on the stick was
+corrupted** — recopying it fixed the boot. So the "old core won't boot
+ProDOS" verdict above was the image, not the `651bf82d…` core, and the pops
+are now suspected to be corrupted wavetable data loaded from that image
+(Arkanoid streams its samples from disk into sound RAM; bad bytes there pop
+with perfectly clean fetch telemetry — which is exactly what §7.19 showed).
+Listening verdict on the fresh copy pending. **Open issue: how the image was
+corrupted.** Timeline: FTP uploads (three ~930 KB images) and twelve deletes
+on the stick while the `.PO` was mounted and being served by the ESP32 —
+FATFS/USB-MSC concurrency between the FTP task and the disk-serving task is
+the prime suspect. Rule until understood: no FTP writes to the stick while
+an image is mounted (unmount or power down first), and the control build
+`f26cfbb5…` stays in the scratchpad.

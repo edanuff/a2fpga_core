@@ -661,6 +661,7 @@ module top #(
         // every suite run (both modes). See ensoniq_ddr3_pipelined_design.md
         // for the 1-block scheduled-SDPB endpoint if BSRAM pressure returns.
         .DOC_BANKS_IN_BSRAM(1),   // RESOURCE AUDIT §7.5 measurement build: banks in BSRAM
+        .DOC_CACHE_PER_WORD_INVALIDATE(0),   // CONTROL BUILD (Arkanoid pops, 2026-10-15): whole-cache flush — do not commit as 0
         .GLU_WR_ACK_AVAIL(1)   // DDR3 CDC never pulses ready on writes
     ) sg (
         .a2bus_if(a2bus_if),
