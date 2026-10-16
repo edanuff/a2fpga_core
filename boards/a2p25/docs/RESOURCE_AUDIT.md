@@ -1197,3 +1197,24 @@ FATFS/USB-MSC concurrency between the FTP task and the disk-serving task is
 the prime suspect. Rule until understood: no FTP writes to the stick while
 an image is mounted (unmount or power down first), and the control build
 `f26cfbb5…` stays in the scratchpad.
+
+**Update 2 (ed, 2026-10-15 late):** the hold-last-sample build (`5e51b3d3…`,
+no cache) **has no pops** on the same fresh Arkanoid copy — the pops are a
+cache-era regression (word cache or per-word invalidation), not the drop
+handling and not the image. Fresh-copy telemetry on the current build was
+normal (effect frames `REQ 3073 / MEMRD 204 / LATE 14`, idle `439 / 0 / 0`),
+so the fault is a wrong sample *value*. Next discriminator: `a2p25_oldcache.bin`
+(`add13bfb…` = cache + whole-cache flush + per-frame telemetry, already on
+the stick, no upload needed).
+
+**The image was corrupted a second time by the hold-build install alone (no
+FTP).** Firmware reading: the menu/telnet install runs `fpgaupdate_poll()`
+inside `disk_task`, the same task as `disk_poll()`, so serving is blocked
+for the whole install and cannot write garbage blocks while the fabric is
+dark; `hdd.sv` request flags reset clean; `esp_restart()` follows a
+`fpga_jtag_reload()` + 2 s, with the image `fopen`ed `r+b` and every HDD
+write `fflush`+`fsync`ed. Unexplained. Needs the damaged file (keep it next
+time, diff against the good copy: random blocks / boot blocks / FAT chain).
+Still-open suspects: the telnet `g` reload and `fpgastream` paths DO leave
+`disk_poll` running while the fabric reconfigures (garbage `HDD_REQ` reads
+→ garbage block writes) — a quiesce is warranted there regardless.
