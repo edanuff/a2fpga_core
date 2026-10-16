@@ -34,7 +34,12 @@ module doc_fetch_cache #(
     // 1 = invalidate only the written word's line (default). 0 = the earlier
     // behaviour: every sound-RAM write clears all 64 valid bits. Kept as a
     // hardware control for the Arkanoid pop investigation (2026-10-15).
-    parameter bit PER_WORD_INVALIDATE = 1'b1
+    parameter bit PER_WORD_INVALIDATE = 1'b1,
+    // Diagnostic: 1 = never report a hit (every fetch goes to memory through
+    // the response path; the data RAM is still filled). Hardware bisect of
+    // the Arkanoid pops (2026-10-15): pops with hits disabled = response /
+    // ordering path, clean = hit path.
+    parameter bit HIT_DISABLE = 1'b0
 ) (
     input  wire        clk_i,
     input  wire        rst_n_i,
@@ -61,7 +66,7 @@ module doc_fetch_cache #(
     wire [7:0] tag_w = addr_i[15:8];
     reg  [7:0] tag_r   [0:63];
     reg  [63:0] valid_r;
-    wire hit_w = valid_r[idx_w] && (tag_r[idx_w] == tag_w);
+    wire hit_w = !HIT_DISABLE && valid_r[idx_w] && (tag_r[idx_w] == tag_w);
 
     // ---- data (one single-port BSRAM, registered read; see doc_cache_data_sp) ----
     // The port is shared: a hit read has priority, a fill that loses the cycle

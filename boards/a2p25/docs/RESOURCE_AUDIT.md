@@ -1218,3 +1218,18 @@ time, diff against the good copy: random blocks / boot blocks / FAT chain).
 Still-open suspects: the telnet `g` reload and `fpgastream` paths DO leave
 `disk_poll` running while the fabric reconfigures (garbage `HDD_REQ` reads
 → garbage block writes) — a quiesce is warranted there regardless.
+
+**Update 3 (ed, 2026-10-15 late): `a2p25_oldcache.bin` (`add13bfb…`,
+cache + whole-cache flush) pops too** (identified on the wire by its
+telemetry shape: REQ valid, MEMRD high byte 0xFF from the then-unmapped
+0x5F). Per-word invalidation is cleared; the fault is in the cache's own
+request/fill/hit logic, which the bench (behavioural memory + behavioural
+RAM) passes. Inspection notes, all negative: supersede is applied on hits
+too; the port contract (2-slot queue, in-order single-beat reads, `q` aligned
+with `ready`) is the same one the clean filter build used with `burst=0`;
+the data RAM idiom is write-else-read with no same-cycle read/write; the
+DOC's generic capture precedes the request-cycle clear in the always block
+(request wins). Next: hardware bisect with `HIT_DISABLE=1` (all fetches via
+the response path, RAM filled but never read) — pops ⇒ response/ordering
+path, clean ⇒ hit path (then a hit-verify build that compares every N-th
+hit against memory).

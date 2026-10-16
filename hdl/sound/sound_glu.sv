@@ -35,6 +35,7 @@ module sound_glu #(
     // gen_doc_ext word cache: 0 = whole-cache flush on every sound-RAM write
     // (hardware control build), 1 = per-word invalidation.
     parameter bit DOC_CACHE_PER_WORD_INVALIDATE = 1'b1,
+    parameter bit DOC_CACHE_HIT_DISABLE = 1'b0,   // diagnostic, see doc_fetch_cache
     // Output stage gain: audio = sat16(mix <<< OUTPUT_BOOST_SHIFT).
     // Default 1 preserves the field-validated GS x2 loudness — but now
     // CLAMPED instead of wrapping (tracker-class music with 8-14 voices
@@ -387,7 +388,8 @@ module sound_glu #(
             wire [7:0]  cache_data_w;
             assign doc_mem_if.rd   = ENABLE && cache_rd_w;
             assign doc_mem_if.addr = {7'b0, cache_waddr_w};
-            doc_fetch_cache #(.PER_WORD_INVALIDATE(DOC_CACHE_PER_WORD_INVALIDATE)) u_fetch_cache (
+            doc_fetch_cache #(.PER_WORD_INVALIDATE(DOC_CACHE_PER_WORD_INVALIDATE),
+                              .HIT_DISABLE(DOC_CACHE_HIT_DISABLE)) u_fetch_cache (
                 .clk_i(a2bus_if.clk_logic),
                 .rst_n_i(a2bus_if.system_reset_n),
                 .req_i(ENABLE && doc_mem_rd_w),
