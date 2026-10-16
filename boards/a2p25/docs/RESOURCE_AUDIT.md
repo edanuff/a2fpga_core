@@ -1028,7 +1028,8 @@ the miss rate, LATE a small number — all unambiguous.
 **Ed, Marble Madness on `651bf82d…`:** smear gone, audio clean.
 
 **Per-frame telemetry, `add13bfb…`, Marble Madness (2026-10-14):**
-`REQ 6150` (11 oscillators), `MEMRD 212 / 377 / 245` (3–6% of fetches reach
+`REQ 6150` (14 oscillators — see the §7.19 calibration; the 557/oscillator
+figure above was wrong), `MEMRD 212 / 377 / 245` (3–6% of fetches reach
 the HyperRAM: the cache cuts DOC traffic 16–29×), `LATE 17 / 33 / 15` (6–9% of
 misses cross the deadline — held samples, inaudible), FB bit 1 clear, VGC
 stale 0, shadow drops 0. Next: prefetch word+1 on every miss (sequential
@@ -1122,3 +1123,28 @@ Second song: `REQ 1812 / 2137 / 1934`, `MEMRD 274 / 314 / 367` (13–19 %
 miss), `LATE 6 / 14 / 15` (≤ 0.8 %), FB overflow clear on all three
 (`0x30` = fetch active at sample time only), `VGC STALE 0`,
 `SHADOW DROPS 0`. Listening verdict pending.
+
+### 7.19 Arkanoid read and the oscillator calibration (2026-10-15)
+
+Three per-frame samples on `cf0d626a…`, SHR (`MODE 0xF1`):
+`REQ 439 / 5710 / 439`, `MEMRD 0 / 280 / 0`, `LATE 0 / 20 / 0`, FB overflow
+clear, `VGC STALE 0`, `SHADOW DROPS 0`. Two of the three frames caught the
+game between sound effects with a single oscillator running; the middle one
+caught an effect.
+
+**Calibration.** `REQ 439` with one oscillator running pins the scan:
+894,886 Hz / 34 slots (32 oscillators + the two idle slots the 5503 inserts
+when $E1 enables all 32) / 60 Hz = **438.7 fetches per running oscillator per
+frame**. Halted oscillators do not fetch, so REQ / 439 is the number of
+oscillators running during the frame (fractions = oscillators that stopped
+or started mid-frame). The earlier "557 per oscillator" estimate in §7.14 was
+wrong. Re-derived counts for the readings so far:
+
+- Arkanoid: 1 oscillator between effects, **13** during the effect sampled.
+- Marble Madness (§7.14 / §7.16): `6150` → 14, `7028` → **16** oscillators.
+- Music Construction Set (§7.17): `6149 / 4832 / 5710` → 14 / 11 / 13.
+- NinjaTracker (§7.18): `1359`–`2137` → 3–5 oscillators.
+
+So the heaviest titles seen run about half the DOC; a true 32-oscillator
+load would be `REQ ≈ 14,000` per frame, and at the MCS miss rate that is
+≈ 5,600 word reads per frame on the HyperRAM — the case synthLAB should show.
