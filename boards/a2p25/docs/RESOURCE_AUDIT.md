@@ -1278,5 +1278,5 @@ per-frame samples across idle and effects: `REQ 439 / 1318 / 3952 / 1318 /
 439`, `MEMRD 26 / 100 / 230 / 122 / 0`, **`LATE 0` on every sample**
 (failing build: 14–15 per effect frame, 29–34 with hits off). Cumulative
 timeouts stuck at 5 across the whole run (boot transients). `VGC STALE 0`,
-`SHADOW DROPS 0`, FB overflow clear. Listening verdict + Marble Madness
-smear check pending.
+`SHADOW DROPS 0`, FB overflow clear. **Ed: no pops or crackles on this run.**
+Marble Madness smear check pending.

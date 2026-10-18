@@ -379,8 +379,18 @@ module top #(
     // silent (doc5503 holds the previous sample), a late VGC word is visible,
     // so the shadow READ goes back on top and the DOC sits at 1 — still above
     // the shadow write FIFO (16 deep, drop counter) and the framebuffer.
-    localparam SHADOW_READ_PORT  = 0;
-    localparam DOC_MEM_PORT      = 1;
+    // 2026-10-15 (Arkanoid pops, RESOURCE_AUDIT §7.21): that swap was the
+    // regression. Under SHR the VGC's shadow reads are continuous during the
+    // active line, so a static-priority arbiter starves port 1 behind them:
+    // 7% of DOC fetches (1 oscillator, no DOC-side contention) missed the
+    // 840 ns budget and the hold-last-sample path ran at ~1800/s — audible
+    // crackle, vs 0.4/s with the DOC on top. Repeating a sample is only
+    // inaudible when it is rare. The DOC goes back to port 0; the word cache
+    // (doc_fetch_cache) has since cut DOC traffic 10-16x, so the VGC loses at
+    // most one single-word read (~300 ns) per DOC miss, not the 2026-10-14
+    // uncached stream that starved it. Verify: VGC STALE 0 on Marble Madness.
+    localparam DOC_MEM_PORT      = 0;
+    localparam SHADOW_READ_PORT  = 1;
     localparam SHADOW_WRITE_PORT = 2;
     localparam GLU_MEM_PORT      = 3;
     localparam FB_WRITE_PORT   = 4;
@@ -661,7 +671,6 @@ module top #(
         // every suite run (both modes). See ensoniq_ddr3_pipelined_design.md
         // for the 1-block scheduled-SDPB endpoint if BSRAM pressure returns.
         .DOC_BANKS_IN_BSRAM(1),   // RESOURCE AUDIT §7.5 measurement build: banks in BSRAM
-        .DOC_CACHE_PER_WORD_INVALIDATE(0),   // CONTROL BUILD (Arkanoid pops, 2026-10-15): whole-cache flush — do not commit as 0
         .GLU_WR_ACK_AVAIL(1)   // DDR3 CDC never pulses ready on writes
     ) sg (
         .a2bus_if(a2bus_if),
@@ -1106,8 +1115,8 @@ module top #(
                             FB_WORD_BASE,        // [4] FB write
                             ENSONIQ_WORD_BASE,   // [3] GLU sound-RAM write
                             SHADOW_WORD_BASE,    // [2] shadow write
-                            ENSONIQ_WORD_BASE,   // [1] DOC wavetable read
-                            SHADOW_WORD_BASE}),  // [0] shadow read
+                            SHADOW_WORD_BASE,    // [1] shadow read
+                            ENSONIQ_WORD_BASE}), // [0] DOC wavetable read
         .PORT_BURST_WORDS ({5'd4, 5'd8, 5'd4, 5'd4, 5'd4, 5'd4, 5'd4}),
         .WIDE_WR_PORT     (FB_WRITE_PORT)
     ) u_hr_ports (
