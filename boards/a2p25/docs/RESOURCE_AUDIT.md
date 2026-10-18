@@ -1271,3 +1271,12 @@ per-frame LATE counter is the audio quality metric and must stay near zero,
 not merely "silent"; (2) a bisect must list *every* change in the commit —
 the priority swap rode in with the cache and nearly got the cache blamed;
 (3) `DOC TIMEOUTS` (8-bit cumulative) is useless above ~100/s; read LATE.
+
+**Fix build `92f164d6…`** (stamp `20261018145658`, DOC back at port 0; 0
+violations, worst +0.010 ns; installed over WiFi 2026-10-18). Arkanoid, five
+per-frame samples across idle and effects: `REQ 439 / 1318 / 3952 / 1318 /
+439`, `MEMRD 26 / 100 / 230 / 122 / 0`, **`LATE 0` on every sample**
+(failing build: 14–15 per effect frame, 29–34 with hits off). Cumulative
+timeouts stuck at 5 across the whole run (boot transients). `VGC STALE 0`,
+`SHADOW DROPS 0`, FB overflow clear. Listening verdict + Marble Madness
+smear check pending.
