@@ -1233,3 +1233,41 @@ DOC's generic capture precedes the request-cycle clear in the always block
 the response path, RAM filled but never read) — pops ⇒ response/ordering
 path, clean ⇒ hit path (then a hit-verify build that compares every N-th
 hit against memory).
+
+### 7.21 Arkanoid pops — ROOT CAUSE: DOC port priority, not the cache (2026-10-15)
+
+Bisect result with `HIT_DISABLE=1` (`cc8bf554…`, every fetch through the
+response path): **much more crackling**, and the telemetry explains it. With
+Arkanoid idle — one oscillator, `REQ 439 = MEMRD 439`, no DOC-side
+contention at all — `LATE 29–34` per frame. LATE is the DOC's own timeout
+counter (`doc_dbg_to_frame_r`), i.e. **7 % of single-oscillator fetches miss
+the 840 ns budget**, and each one runs the hold-last-sample path. At
+~1,800 holds/s a repeated sample is no longer inaudible: it is the crackle.
+With hits on, the same mechanism hits 6–9 % of the *misses* (≈ 28/frame on
+Arkanoid and Marble Madness) — "some pops". The clean hold build ran at
+0.4 holds/s.
+
+The regression is the **port priority swap** that went in with the cache
+commit (`63192a48`, §7.14 "shadow read back at port 0"): the hold build had
+the DOC at port 0 and shadow reads at 1. Under SHR the VGC's shadow reads
+are pending continuously through the active line, and `hyperram_ports` is a
+static-priority arbiter — port 1 waits for the whole line. The 2026-10-14
+reasoning ("a late DOC fetch is silent") was wrong at this rate.
+
+Everything else is exonerated: per-word invalidation (whole-flush control
+pops), the hit path (hits-off is worse, not better), the data RAM, the port
+protocol. The cache itself masked the problem by turning 93 % of fetches
+into hits.
+
+Fix: DOC back to port 0, shadow read to 1 (`top.sv`, with the 2026-10-14
+note kept and answered). The VGC-starvation case that motivated the swap was
+the *uncached* DOC stream (6,000–7,000 single-word reads/frame); the cache
+leaves 200–500 misses/frame, each costing the VGC one ~300 ns read. Verify
+on hardware: Arkanoid `LATE` → ~0 and no pops; Marble Madness `VGC STALE 0`
+and no smear; MCS (40 % miss) `VGC STALE` stays 0.
+
+Lessons recorded: (1) **hold-last-sample is a rate-limited remedy** — the
+per-frame LATE counter is the audio quality metric and must stay near zero,
+not merely "silent"; (2) a bisect must list *every* change in the commit —
+the priority swap rode in with the cache and nearly got the cache blamed;
+(3) `DOC TIMEOUTS` (8-bit cumulative) is useless above ~100/s; read LATE.
