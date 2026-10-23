@@ -36,6 +36,7 @@
 #include "esp_timer.h"    /* esp_timer_get_time — us since boot */
 
 #include "a2fpga_regs.h"
+#include "board_pins.h"   /* A2MEGA_BOARD_REV — console policy below */
 #include "fpga_link.h"
 #include "gcr_dsk.h"      /* on-the-fly .dsk/.do <-> 6-and-2 GCR nibble codec */
 #include "settings.h"     /* persisted image overrides + slot map */
@@ -440,6 +441,25 @@ static volatile bool g_remounting  = false;   /* disk_remount() running */
  * serving for the whole delay and hangs a boot that seeks into it.
  * 0 = nothing scheduled. */
 static int64_t g_hide_console_at_us = 0;
+#define HIDE_CONSOLE_DELAY_US 1500000   /* readable delay before the hide */
+
+/* Console policy when the Apple II is released with NO media found.
+ * a2mega (SD card slot): leave the console up so the "NO DISK IMAGES" /
+ * "NO SD CARD" message is visible — the user is expected to fix the card.
+ * a2p25 (BOARD_REV 225): there is no SD slot; images arrive later over the
+ * ESP32 link, so an empty flash FS is the normal power-on state and the
+ * console would otherwise cover the Apple II display indefinitely (it had
+ * to be hidden by hand with `spireg 0x10 0`). Hide it after the same
+ * readable delay once the reset is released. The menu's manual console
+ * view (menu.c VIEW_CONSOLE) is unaffected: it re-shows on demand, and a
+ * hide never fires while the menu owns the screen (osd_console lockout). */
+#ifndef DISK_HIDE_CONSOLE_ON_NO_MEDIA
+#if A2MEGA_BOARD_REV == 225
+#define DISK_HIDE_CONSOLE_ON_NO_MEDIA 1
+#else
+#define DISK_HIDE_CONSOLE_ON_NO_MEDIA 0
+#endif
+#endif
 
 void disk_request_remount(void)
 {
@@ -512,7 +532,7 @@ static void disk_remount(void)
         /* Hand the screen back after a readable delay, WITHOUT blocking: a
          * sleep here would freeze the 2 ms disk task and hang a boot that
          * seeks during the delay (observed on the BL616 as a ~1.54 s gap). */
-        g_hide_console_at_us = esp_timer_get_time() + 1500000;
+        g_hide_console_at_us = esp_timer_get_time() + HIDE_CONSOLE_DELAY_US;
     } else {
         DLOGI("DISK II: NO DISK IMAGES ON SD CARD");
         /* leave the console up so the message is visible */
@@ -725,7 +745,8 @@ void disk_poll(void)
         g_remounting  = false;
     }
 
-    /* Non-blocking console hide (scheduled by disk_remount on a good mount). */
+    /* Non-blocking console hide (scheduled by disk_remount on a good mount, or
+     * by the no-media reset release below on boards without an SD slot). */
     if (g_hide_console_at_us &&
         esp_timer_get_time() >= g_hide_console_at_us) {
         g_hide_console_at_us = 0;
@@ -754,6 +775,13 @@ void disk_poll(void)
                 fpga_reg_write(A2REG_A2_RST_RELEASE, 1);
                 s_released = true;
                 DLOGI("A2: RESET RELEASED%s", any ? "" : " (NO MEDIA)");
+                if (!any && DISK_HIDE_CONSOLE_ON_NO_MEDIA) {
+                    /* No-media boards: hand the screen back to the running
+                     * Apple II after the readable delay (non-blocking, same
+                     * mechanism as the good-mount path above). */
+                    g_hide_console_at_us =
+                        esp_timer_get_time() + HIDE_CONSOLE_DELAY_US;
+                }
             }
         }
     }

@@ -403,9 +403,21 @@ Console lessons (cost an hour): opening the USB console with DTR/RTS
 asserted resets the ESP32 → it re-holds Apple RESET (beep) and drops HPD
 (dark monitor, alt-mode session lost → replug). Use one persistent session
 with dtr=rts=False (`scratchpad/console.py`), `+++` enters the CLI. With no
-disk images the firmware deliberately leaves the OSD console up
+disk images the firmware deliberately left the OSD console up
 (`disk.c`: hide only scheduled after a good mount) — `spireg 0x10 0`
-hides it; the SD-less a2p25 needs a policy change (hide at reset-release).
+hides it by hand.
+
+**Console policy changed (2026-10-11, `disk.c`):** on BOARD_REV 225 the
+"A2: RESET RELEASED (NO MEDIA)" path in `disk_poll()` now schedules the
+same non-blocking console hide the good-mount path uses (1.5 s readable
+delay via `g_hide_console_at_us`; the 2 ms disk task never sleeps), so an
+image-less power-on hands the screen to the Apple II ~8.5 s after boot
+(7 s release deadline + 1.5 s). Gated by `DISK_HIDE_CONSOLE_ON_NO_MEDIA`,
+which is 1 only for 225 — the a2mega keeps the console up on a missing /
+empty SD card, where the message is actionable. The menu's manual console
+view is unaffected (re-shows on demand; a scheduled hide never fires while
+the menu holds the osd_console lockout). When images arrive over the
+ESP32 link, the resulting remount schedules its own hide as before.
 
 ## 7. Known risks
 
@@ -445,6 +457,7 @@ hides it; the SD-less a2p25 needs a policy change (hide at reset-release).
 | 2026-10-10 | `a2p25_psram_test_ck81` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 107.6 vs 81 | `386e1a36924867884278341b70459381f03216e377b205644c500647bc673851` |
 | 2026-10-10 | `a2p25_psram_test_ck54` | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 85.6 vs 54 | `1ba81136659674a716ca84982b8feac7a21754972bcfddbdf0d5b5c2f0ac272e` |
 | 2026-10-10 | ESP32 fw `make BOARD_REV=225` (DP_TEST=1) | this commit | arduino-cli 1.2.2 / esp32 3.3.5 | builds | `1ea60d8aa9ba5ef93ae1f339f1db6ad32acfb9ea8075a6520f9612ce4e1e5816` |
+| 2026-10-11 | ESP32 fw `make BOARD_REV=225 DP_TEST=0` (production, OSPI core) — **no-media console hide** | 24df5029 + disk.c policy change (this commit) | arduino-cli 1.2.2 / esp32 3.3.5 | builds; 1025539 B app (48 %) | `.ino.bin` `5f749c971b45c7f53706504a044ab0a029cdc912ab3d7057ceef5c4df1638450`; merged `e53a4b874d0c501bb0f6b48f7cfdf15a9cd0b7fb3105007a3e4c6a05adbf8d02` |
 | 2026-10-10 | **`a2p25_dp_test` — FIRST COLORBARS** (hold-link, P7/P8 telemetry) | 6d0b148d | Gowin V1.9.12.01 | 0/0 | `4257f701389f46809ab3f27eab356b95223a39344fed51d0ef4df28b0e09a373` |
 | 2026-10-11 | `a2p25_dp_test_auxobs` (LINK_CHECK=2 observe; P9/PA) — **AUX soak clean on 3 sinks** | c7064c6e | Gowin V1.9.12.01 | 0/0; worst setup +0.33 | `d758d1c8b1edc3690a0738b19900e4501165c260b35c5723a1b91932498ce9ec` |
 | 2026-10-11 | **`a2p25_dp_test_4l` 1080p ×4 — COLORBARS, OSD 1920×1080@60** (MSA 4ch + AUX hang fixes) | 84b65c72 | Gowin V1.9.12.01 | 0/0 | `b0d9b84f7f666f5a530c48672838c58cf3a6765e3d8a94be75c325cd750f1885` |
