@@ -824,3 +824,81 @@ cleanly again. Consequences to keep in mind:
 - ARCHIVE every bitstream that reaches hardware. PnR here is deterministic
   for a given source, but a source that no longer exists cannot be rebuilt
   (48576c12), and placement is fragile enough that small edits move it.
+
+---
+
+## 2026-08-31: first-attempt failure ROOT-CAUSED — eraseSRAM re-arms the scanner against a VALID image (a2mega3 fix built, bench validation pending)
+
+**Symptom (60K, 4-for-4 in the 08-30/31 session):** every flash of the full core
+fails on attempt 1 (erase "write to flash failed" once; verify fail at byte
+131072/131073/131075 — the 128 KiB boundary — three times) and succeeds cleanly
+on flash.sh's single retry.
+
+**The discriminating evidence is in the `displayReadReg` blocks:**
+
+- Attempt 1 always starts `0x70022020` = **Done Final + Init Done + Wakeup
+  Done**: the device is configured and running the previously-flashed image.
+  The auto-boot scanner is FINISHED — quiescent.
+- Attempt 2 always starts `0x1x02023x` = **auto_boot_1st_fail +
+  auto_boot_2nd_fail (+ CRC Error/Timeout), no Done**: the scanner has
+  double-failed and GIVEN UP for the rest of the power window.
+
+**Mechanism (composition of two already-proven facts):**
+
+1. Stock `prepare_flash_access()` (still used on the flash.sh default
+   no-preload path) does `reset()` → `eraseSRAM()` → settle → `gw5a_enable_spi()`.
+   Per the 08-15 forensics, **eraseSRAM re-arms the MSPI auto-boot scanner**.
+2. At attempt-1 entry the flash still holds a VALID image, so the re-armed
+   scanner starts a full reload: 2.56 MB at LoadingRate 2.5 MHz ≈ **8.4 s**,
+   far beyond the 3.5 s `OFL_GW5A_SETTLE_MS`. `gw5a_enable_spi()` seizes the
+   pins mid-reload; the interrupted scanner retries, and its retries collide
+   with erase/write/verify (hence failures in different phases, and the
+   recurring verify mismatch right at the 3rd 64 KiB chunk).
+3. Attempt 1's collateral damage (boot attempted against half-erased flash →
+   CRC error ×2) latches the double-fail, permanently quiescing the scanner —
+   which is exactly why attempt 2 is 100% reliable. Self-perpetuating: the
+   successful attempt 2 writes a bootable image, so the NEXT session's attempt
+   1 fails again.
+
+This also explains the historical numbers: the 08-17 "5/6 first-attempt with
+settle=3500" was measured with small dp_test-class images whose reload fits
+inside the settle window (scanner completes → DONE held → quiescent → clean
+session). The full core blew past it → 0-for-4. SecurityBit is NOT the live
+variable (epic-lovelace builds are `SecurityBit: OFF`, verified in the .fs
+header); the re-arm race is independent of it. JTAG clock rate is also
+exonerated as the attempt-1/attempt-2 differential — both attempts run
+identical 6 MHz parse / 2.5 MHz flash phases.
+
+**Fix (tools/openfpgaloader-a2mega3.patch + tools/bin/openFPGALoader-a2mega3):**
+in `programExtFlash()`, when the status register shows the device already
+configured (bit 13 Done Final + bit 30 Wakeup Done), set `_gw5a_cfg_loaded`
+so `prepare_flash_access()` takes the existing straight-to-SPI path — no
+reset, no eraseSRAM, **no re-arm ever**. This is structurally identical to
+the proven SRAM-preload path, minus the preload (the device is already in
+the goal state). Opt out with `OFL_GW5A_NO_CFG_KEEP=1`. Unconfigured/
+double-failed chips fall through to the stock path, which is the case that
+already works. ⚠️ Caveat: if the RUNNING design uses MSPI pins as user I/O
+(flash_rescue does; the main core does not — `"MSPI": false`), keeping it
+configured would leave the fabric driving the flash bus against the
+passthrough — set `OFL_GW5A_NO_CFG_KEEP=1` there. The documented
+flash_rescue workflow replugs (de-configures) before flashing, so the
+normal recovery path never hits this. Provenance: openFPGALoader v1.1.1 (85be4fa) + a2mega2 patch +
+cfg-keep hunk, AppleClang Release build, sha256
+088eb4e3d402de2a20310c9256bc69d06b503883133d5e3d6a9644ef239884ef.
+
+**Bench protocol (board on bench, Apple II OFF, in this order):**
+
+1. Mechanism discriminator, zero code change:
+   `OFL_GW5A_SETTLE_MS=12000 tools/flash.sh a2mega` — lets the re-armed
+   scanner FINISH its reload before `gw5a_enable_spi()`. Prediction: attempt 1
+   succeeds. (Confirms the reload-collision mechanism AND independently
+   validates the enable-spi-from-configured-device premise of the fix.)
+2. The fix: `LOADER=tools/bin/openFPGALoader-a2mega3 tools/flash.sh a2mega`
+   (normal settle). Expect "GW5A: device configured (DONE held)" in the log
+   and a clean attempt 1. Run 3+ consecutive flash cycles (each one leaves a
+   bootable image, i.e. each is a fresh instance of the failing case).
+3. Regression: one flash from a blank/auto-boot-failed state (e.g. right
+   after a failed session or a flash_rescue erase) to confirm the fallback
+   path still works.
+4. On success: switch flash.sh's preferred loader to a2mega3 and demote the
+   retry loop to safety-net status.
