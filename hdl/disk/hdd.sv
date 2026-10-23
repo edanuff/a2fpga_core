@@ -46,7 +46,13 @@ module HDD #(
 
     mem_port_if.client ram_hdd_if,
 
-    drive_volume_if.drive volumes[2]
+    drive_volume_if.drive volumes[2],
+
+    // MCU has finished its storage bring-up (or no MCU came): an unmounted
+    // unit then answers NO_DEVICE and the boot ROM moves on to the floppy.
+    // Until then it answers NOT_READY and the boot ROM keeps polling, the
+    // way a hard disk card waits for spin-up — no reset hold needed.
+    input storage_settled_i
 );
 
     // ProDOS result codes
@@ -54,6 +60,10 @@ module HDD #(
     localparam [7:0] PRODOS_IO_ERROR  = 8'h27;
     localparam [7:0] PRODOS_NO_DEVICE = 8'h28;
     localparam [7:0] PRODOS_PROTECT   = 8'h2B;
+    localparam [7:0] PRODOS_NOT_READY = 8'h2F;   // device off-line: storage still coming up
+
+    // Result for a unit that has no mounted+ready volume right now
+    wire [7:0] absent_code_w = storage_settled_i ? PRODOS_NO_DEVICE : PRODOS_NOT_READY;
 
     // -------------------------------------------------------------------
     // Card select (same conventions as DiskII in apple_disk.sv)
@@ -319,11 +329,11 @@ module HDD #(
                             8'h00: begin   // STATUS: immediate
                                 err_r    <= ~(vol_mounted_w & vol_ready_w);
                                 result_r <= (vol_mounted_w & vol_ready_w) ?
-                                            PRODOS_OK : PRODOS_NO_DEVICE;
+                                            PRODOS_OK : absent_code_w;
                             end
                             8'h01: begin   // READ
                                 if (!(vol_mounted_w & vol_ready_w)) begin
-                                    err_r <= 1'b1; result_r <= PRODOS_NO_DEVICE;
+                                    err_r <= 1'b1; result_r <= absent_code_w;
                                 end else begin
                                     busy_r   <= 1'b1;
                                     vol_rd_r <= 1'b1;
@@ -332,7 +342,7 @@ module HDD #(
                             end
                             8'h02: begin   // WRITE (buffer already CPU-filled)
                                 if (!(vol_mounted_w & vol_ready_w)) begin
-                                    err_r <= 1'b1; result_r <= PRODOS_NO_DEVICE;
+                                    err_r <= 1'b1; result_r <= absent_code_w;
                                 end else if (vol_readonly_w) begin
                                     err_r <= 1'b1; result_r <= PRODOS_PROTECT;
                                 end else begin
@@ -343,7 +353,7 @@ module HDD #(
                             end
                             8'h03: begin   // FORMAT: accept as a no-op
                                 if (!(vol_mounted_w & vol_ready_w)) begin
-                                    err_r <= 1'b1; result_r <= PRODOS_NO_DEVICE;
+                                    err_r <= 1'b1; result_r <= absent_code_w;
                                 end else if (vol_readonly_w) begin
                                     err_r <= 1'b1; result_r <= PRODOS_PROTECT;
                                 end else begin

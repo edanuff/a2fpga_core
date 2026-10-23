@@ -686,6 +686,7 @@ module top #(
     // serves it from a .hdv/.po image into the HDD_MEM_PORT SDRAM window via
     // XFER SPACE 1, then pulses ack and the card streams it to the 6502
     // through its sector buffer.
+    wire storage_settled_w;     // from the connector: MCU mount pass over (or no MCU)
     HDD #(
         .ENABLE(HDD_ENABLE),
         .ID(HDD_ID)
@@ -699,7 +700,8 @@ module top #(
 `else
         .ram_hdd_if(mem_ports[HDD_MEM_PORT]),
 `endif
-        .volumes(hdd_volumes)
+        .volumes(hdd_volumes),
+        .storage_settled_i(storage_settled_w)
     );
 
     // Bus event FIFO
@@ -780,6 +782,7 @@ module top #(
         .mcu_ready_o(mcu_ready_w),
         .standalone_o(standalone_w),
         .mcu_access_stb_o(mcu_access_stb_w),
+        .storage_settled_o(storage_settled_w),
         .scratch_o(mcu_scratch_w),
         .cardrom_active_i(1'b0),        // CardROM excised
         .cardrom_release_o(),           // CardROM excised

@@ -58,6 +58,8 @@ floppy_slot = $C500   ; Disk II boot ROM (slot 5 on a2n20v2-Enhanced;
 OS      = $0801
 BUTTON0 = $C061
 
+PRODOS_NOT_READY = $2F   ; card result: device off-line, storage still coming up
+
 ;======================================
 
 !zone code
@@ -86,10 +88,29 @@ Bootstrap
 Bootstrap2
  lda #$00
  sta hd_unitnum,x     ; b7=0 => disk 1
- sta hd_command,x
+ sta hd_command,x     ; STATUS; stays latched across the retries below
+ sta diskblock        ; 16-bit retry budget: 65536 polls x ~236 cycles
+ sta diskblock+1      ;   = ~15 s at 1 MHz (hdboot re-zeroes $46/$47)
+statwait
  lda hd_execute,x     ; STATUS is immediate (no busy)
- ror hd_status,x      ; C = error (no device)
+ ror hd_status,x      ; C = error
  bcc hdboot
+; Error. NO_DEVICE ($28): the MCU has finished bringing storage up (or none
+; came) and this unit has nothing -> boot the floppy now. NOT_READY ($2F):
+; storage is still coming up -> keep polling, the way a hard disk card waits
+; for spin-up, unless button 0 (open-apple) is held or the budget runs out.
+ lda hd_result,x
+ cmp #PRODOS_NOT_READY
+ bne BootFloppy
+ bit BUTTON0
+ bmi BootFloppy
+ ldy #40              ; ~200 cycle pause between polls
+- dey
+ bne -
+ dec diskblock
+ bne statwait
+ dec diskblock+1
+ bne statwait
 
 ; no image ready, boot the floppy instead
 BootFloppy
