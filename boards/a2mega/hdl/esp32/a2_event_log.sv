@@ -29,7 +29,13 @@ module a2_event_log #(
     localparam [7:0] EV_RST_WR  = 8'd7;   // strobe index 6
     localparam [7:0] EV_CTRL_WR = 8'd8;   // strobe index 7
 
-    reg [47:0] mem [0:DEPTH-1] /* synthesis syn_ramstyle = "distributed_ram" */;
+    // Block RAM, not distributed: "distributed_ram" made Gowin build the
+    // 128 x 48 array as ~5.8k flops + 3.3k LUTs (no SSRAM inferred), which
+    // on the 138B pushed register use from 23.8k to 31.4k and reopened the
+    // clk100/clk_sym cones round 2 had closed (2026-10-22 merge build). The
+    // write and the read are both synchronous, so a BSRAM fits as-is: three
+    // blocks at 18 bits wide with the SDP16/18 conversion on.
+    reg [47:0] mem [0:DEPTH-1] /* synthesis syn_ramstyle = "block_ram" */;
     reg [DEPTH_LOG2:0] wptr_r;          // MSB = full (log stopped)
     reg [23:0] pend_r;
     reg [7:0]  rst_wdata_r, ctrl_wdata_r;
