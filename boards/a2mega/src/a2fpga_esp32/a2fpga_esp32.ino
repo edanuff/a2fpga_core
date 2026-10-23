@@ -49,6 +49,7 @@
 #include "settings.h"
 #include "wedge_watch.h"
 #include "disk.h"
+#include "gs_socket.h"
 #include "menu.h"
 #include "w5100.h"
 #include "wifi_bridge.h"
@@ -1044,6 +1045,7 @@ static void load_wifi_credentials() {
 static void disk_task(void *arg) {
     (void)arg;
     for (;;) {
+        gs_socket_poll();      /* in-socket 65816 auto-arm (no-op without the ribbon) */
         disk_poll();
         fpgaupdate_poll();
         fwupdate_poll();
@@ -1205,11 +1207,12 @@ extern "C" void viddbg_log(void)
         }
     }
     /* DOC per-frame telemetry lives in the indexed debug window (select
-     * 0x5F, data 0x4F; indices 32-37 = REQ lo/hi, MEMRD lo/hi, LATE lo/hi).
+     * 0x5F, data 0x4F; indices 40-45 = REQ lo/hi, MEMRD lo/hi, LATE lo/hi;
+     * 32-39 is the socket module's event log).
      * The plain registers it used until 2026-10-22 (0x3C-0x3F, 0x2F, 0x4F,
      * 0x5F) are the DP readback and the GS-socket window on the a2mega. */
     for (int i = 0; i < 6; i++) {
-        fpga_reg_write(0x5F, (uint8_t)(32 + i));
+        fpga_reg_write(0x5F, (uint8_t)(40 + i));
         a2spi_reg_read_status(0x4F, &pf[i], &st2);
     }
     fpga_link_unlock();

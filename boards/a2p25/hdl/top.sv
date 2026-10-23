@@ -1914,6 +1914,8 @@ module top #(
         .gs_trig_addr_o(),
         .gs_trace_i(48'd0),
         .gs_tele_i(160'd0),
+        .a2_alive_i(~sleep_w),       // slot PHI1 running (same as the a2mega)
+        .gs_res_n_i(1'b1),           // no CPU socket on the a2p25
         .ddr3_reinit_tgl_o(ddr3_reinit_tgl_w),
 
         .dbg_mem_addr_o(dbg_mem_addr_w),

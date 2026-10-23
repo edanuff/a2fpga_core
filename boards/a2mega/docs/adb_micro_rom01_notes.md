@@ -1,0 +1,272 @@
+# IIgs ADB microcontroller firmware (ROM 01, M50740, 341s0345) — reading notes
+
+Why: the a2mega socket bench (test_log.md G45–G63) shows this IIgs re-asserting
+its /RESET 9.95 ms after its own power-on release, permanently, on about half
+of power-ups — only when the a2mega is in the slot and no real 65816 is
+executing. The two drivers on the RESET.L net are the M50740 (P2 bit 5) and
+the Mega II. These notes are what the micro's firmware says about that.
+
+Source: MAME ROM set `apple2gsr1`, file `341s0345.bin` (3 KB, SHA1
+97e421f5…), loaded at $1400–$1FFF (MAME `ROM_REGION(0xc00, "adbmicro")`).
+Disassembled with `tools/dis740.py` (MELPS 740 table after Neil Parker's
+page, https://llx.com/Neil/a2/adb.html). The ROM image and the listing are
+Apple's; they stay out of the repo — regenerate with the tool.
+
+Port map (Parker): P0 = GLU data; P2: bit 7 ADB data in, bit 6 IIe-keyboard
+/KRESET (ROM 0/1), **bit 5 = IIgs /RESET**, bit 4 GLU strobe, bits 3–0 GLU
+register select; P3: bit 5/4 button 0/1 lines, bit 3 ADB data out, bit 2/1/0
+IIe-keyboard CAPLOCK/CNTRL/SHIFT. Vectors $1FF4–$1FFF: **every interrupt
+(INT/VBL, Timer 1, Timer 2, Timer X, CNTR) → $14DC; RESET → $1400.**
+
+## What the code does with the reset line
+
+1. **At power-on the micro does not hold /RESET.** `$1433` (port init, run
+   from the reset vector) sets `P2 = $14`, `P2DIR = $1F` — bit 5 is an
+   **input**. The only way the firmware drives the line is the routine at
+   `$147E`: `LDM #$3F,P2DIR` (make bit 5 an output) with `P2 = $DF` (bit 5
+   low) — open-drain style; `$148B` `LDM #$1F,P2DIR` releases it (back to
+   input). A second copy of assert/(delay $1F5F)/release lives at
+   `$15BC–$15C7` (the ADB "reset" command path, `$154E` dispatcher, command
+   ≥ $10 → `$15BA`).
+   → **The machine's 333 ms power-on release cannot be the micro letting go
+   of P25; it is the Mega II's internal power-on reset ending.** The micro
+   is not driving the line at that time at all.
+
+2. **Reset entry `$1400`**: SEI, port init, then a wait loop
+   `$140A–$1413`: `INY; BEQ $1457 (cold init); JSR \$1F3A (wait ≤ 210 polls
+   for a CPU command via the GLU); BCC $140A (timeout → INY, retry); CMP
+   #$07; BNE $140B (a non-SYNC command: consume it, retry WITHOUT INY);
+   JSR $15D3 (SYNC: read 3 parameter bytes, `$141A` clears vars $07–$0B and
+   programs the timers, `$16C9` ADB bus init); BRA $1469`. Cold init
+   `$1457` (Y wrapped after ~238 timeouts ≈ 2 s): defaults into $0C/$01/
+   $00/$03, `$141A`, `$16C9`. Both paths → `$1469`: **`$144A` arms Timer X
+   as the watchdog** (TXPRE = TX = $FA, TIMCTL = $40 → period 252×252 /
+   223.72 kHz = **283.8 ms**), CLI, then the main loop `$146C`.
+
+3. **Main loop reset decision `$146C`**:
+   `BBS 2,$0A → ASSERT ($147E)`; else `BBC 6,P2 (IIe /KRESET low) → $1475`
+   else `BBC 3,$0A → RELEASE ($148B)`; `$1475: BBS 7,$03 → ASSERT; BBC 1,P3
+   (IIe CNTRL low) → ASSERT; BBC 0,$0B → RELEASE; else ASSERT`.
+   Flag sources: `$0A.2` set at `$1524` in the ADB-keyboard data handler
+   (`$14FF`: after a Talk to the keyboard, `LDA #$10 [ORA #$08 unless
+   $03.7]; AND $44; BNE $153E (CLB 3,$0A); SEB 2,$0A` — $44 = keyboard
+   register 2 high byte, bit 4 = Reset key, bit 3 = Control, 0 = pressed:
+   **Control-Reset from the ADB keyboard → assert**), cleared at `$1502`
+   when that handler runs again. `$0A.3` set/cleared at `$1536/$153E` on
+   $44 == $7F / $FF (keyboard reset-key states). `$03` = SYNC parameter
+   byte 1 (`$15FC`) or a mode command. `$0B` written at `$1A8D/$1F8D`
+   (keyboard/mouse processing). So **every assert path is keyboard-state
+   driven**: the ADB keyboard's reset/control bits ($44), or the IIe
+   keyboard connector's /KRESET (P2.6) and CNTRL (P3.1) inputs read low.
+
+4. **Watchdog / interrupts `$14DC`**: `LDY #$40; JSR \$1F47 (offer byte $40
+   to the CPU through the GLU data register, ≤ 200 polls); BCC $14DE
+   (repeat); JMP $1400` — a Timer X expiry (or any enabled interrupt)
+   **restarts the firmware from $1400**, which *releases* the reset line
+   (port init → P2DIR = $1F) and goes back to waiting for a SYNC. **A
+   watchdog restart does not assert /RESET.** The main loop re-arms Timer X
+   (`$14A9`: `LDA TX; CMP #$F4; BCS skip; STA TIMCTL #0; JSR $144A`) each
+   pass. Timers 1/2 (`T12PRE = $33`, `T1 = T2 = $24` → 4221 Hz prescaler,
+   9.0 ms period) are read as a software timebase in the release path
+   (`$148E`) and reloaded (`$149C` T2 = $A3) for the ADB poll cadence;
+   their interrupts are off (INTCTL = 0).
+
+## What this means for the bench observation
+
+- The 333 ms release = Mega II POR end. The 9.95 ms pull is either the
+  Mega II re-asserting or the micro's `$147E`. The micro reaches `$147E`
+  only through the keyboard-state paths above; the fastest plausible route
+  after a release is: the micro leaves its SYNC-wait (a SYNC from the ROM
+  ~10 ms after a real CPU starts, or a spurious command when the bus is
+  driven by nobody), initialises the ADB bus (`$16C9`, ~ms), polls the
+  keyboard (Talk R2, ~3.5 ms), and evaluates $44 — a phantom "Reset key
+  down" (bits 4/3 clear) would assert and hold until a later poll returns
+  them set. Timing-wise that lands near 10 ms; it is not proven.
+- A parked line with no CPU present fits either party: the micro holding
+  `$147E` waiting for keyboard state that never changes, or the Mega II.
+- The "watchdog race" reading is not supported: Timer X only restarts the
+  firmware into the released state.
+
+## Discriminating measurements (no board handling)
+
+1. **AD3 on the ADB data line at the keyboard port** (DIN pin 1 vs GND),
+   alongside slot /RESET: if the micro issues ADB traffic (attention +
+   Talk) in the 10 ms before the pull, the micro's keyboard path is live;
+   if the bus is silent, look at the Mega II.
+2. **AD3 on M50740 pin 49 (P25)** directly: low at the pull = micro; high
+   while RESET.L is low = Mega II. Needs a probe on the motherboard.
+3. MAME (`apple2gsr1` is on disk) with the debugger on the `adbmicro` CPU:
+   breakpoint at `$147E` and `$1400`, trace the normal boot's timeline
+   (when the main loop starts, when the first keyboard poll happens) to
+   calibrate the 10 ms.
+
+## Bench specifics (ed, 2026-09-12)
+
+- **This ROM 01 machine uses a classic IIe keyboard on J13, not ADB.** So the
+  live inputs to the reset logic are the IIe-connector lines: P2.6 /KRESET
+  (the keyboard's RESET key line) and P3.1 CNTRL (the Control key line),
+  plus the matrix scan through P1 / the GLU select lines (`$18AC`). On the
+  ROM 3 netlist those port pins are grounded (Parker: "always 0 on ROM 3");
+  on ROM 01 they come from J13. The Control-Reset path in the main loop is
+  therefore: `/KRESET low` and (`CNTRL low` or `$03.7` or `$0B.0`) → assert
+  at `$147E`; release when /KRESET reads high again. **A /KRESET that reads
+  low persistently parks the machine in reset** — the same symptom as the
+  bench wedge. The ADB-keyboard paths (`$0A.2/$0A.3` via `$44`) are inert
+  without ADB devices: a Talk with no response leaves them clear.
+- **The ADB GLU (KEYGLU, UI12) sits on RESET.L too**, as an input (pin 33):
+  it is the register file between the CPU ($C000/$C010/$C024–$C027) and the
+  micro (P0 data, P2.0–3 select, P2.4 strobe), reset by the line, with no
+  reason or means to drive it. It matters only as the path by which
+  spurious bus writes could reach the micro's command register.
+
+Measurements that follow from this (all digital, AD3, no board handling
+beyond a clip on the keyboard cable):
+1. **J13 /KRESET and CNTRL** alongside slot /RESET: if either reads low
+   at, or in the 10 ms before, the pull, the micro is asserting via its
+   Control-Reset logic and the question becomes why the line dips
+   (pull-up value on this board, keyboard cable, coupling from the bus
+   starting up).
+2. **ADB data line at the ADB port**: traffic before the pull = the micro
+   is out of its SYNC-wait and polling; silence = still waiting.
+3. Micro P25 (pin 49) vs the line, if the above are inconclusive.
+
+## Mega II reset behaviour — what the Mega-IIe project shows (rev3b, `/Users/edanuff/GitHub/Mega-IIe`)
+
+A working Apple II built around an extracted Mega II (no FPI, no ADB micro,
+a 65C02 and an RP2040 keyboard/power controller). Netlist (kicad-cli):
+- `/IWM/~{RESET}`: Mega II pin 35, the 65C02 RESB, the IWM, the Slotmaker,
+  the slot connector pin 31, **two 4k7 pull-ups**, the front-panel reset
+  switch to ground, an **NPN open-collector driver (Q3 BC817) from the RP2040's
+  RESET_CTL**, and two read-backs into the RP2040s (74LVC2G04 → GPIO11
+  `RESET_STATUS`, 74HCT245 → the video RP2040). Nothing drives the line
+  push-pull: they treat it as a shared open-drain net, i.e. consistent with
+  the Mega II being able to drive it itself.
+- Firmware `power_sequence.c`: on power-on the RP2040 **asserts reset before
+  enabling the supplies, waits 50 ms after they are on, then releases**;
+  its power-cycle and Control-Reset paths hold for 250 ms. It never waits on
+  or relies on the Mega II's own power-on reset; `RESET_STATUS` is only read
+  once at start-up (no monitoring for a Mega II-originated reset).
+- No comment or code in the project describes the Mega II re-asserting
+  reset after release. Their design choice — always give the Mega II an
+  externally-held reset that outlasts the supply ramp by 50 ms — is the same
+  posture the a2mega's 2G06 hold gives it in slot-powered use.
+
+## Emulator / FPGA-core survey (2026-09-12; clones under the session scratchpad)
+
+MAME (`apple2gs.cpp` + `m5074x.cpp`), KEGS (a2kegs mirror), GSplus, Clemens,
+MiSTer `Apple-IIgs_MiSTer`. **None models the Mega II as a reset source,
+holder or watchdog; none has a "Mega II re-resets when pulled low" comment;
+none has a power-on timing constant.** Only MAME models the real topology:
+the micro runs its real firmware, `set_pullups<2>(0x20)` puts a pull-up on
+P25, the M5074x ports reset to inputs, so the line is released until the
+firmware drives it; a P25 1→0 asserts the 65816 reset and resets the bus
+and the Mega II soft-switch state as a side effect (`adbmicro_p2_out`,
+3424–3461). MAME's only ordering note: "the 65816 loses a race to the
+microcontroller on reset" (modifier snapshot frozen for two $C061 reads).
+KEGS/GSplus: `do_reset()` at start, on host Ctrl-Reset, and on ADB command
+$10 — instantaneous. Clemens: RESB held 3 CPU cycles at power-on, 2 on
+Ctrl-Reset; its GLU is explicitly "not an accurate emulation". MiSTer:
+reset = OR of PLL-lock/buttons/host events, CPU `.RST_N(~reset)`; the ADB
+micro is behavioural; the only micro-power note is that the real micro
+keeps its RAM power-up flag ($51 = $A5) across a Ctrl-Reset. So the
+10 ms re-assert and the Mega II's power-on behaviour are not documented
+anywhere in software; they have to come from the bench.
+
+
+## Closure pass (2026-09-12, after the keyboard in/out ladder)
+
+**IIe keyboard is passive** (IIe schematic fig. 7.4, keyboard block, and the
+papodaca pinout gist): RESET' (pin 15) reaches ground only through the RESET
+switch in series with the CTRL switch (standard jumper), CTRL'/SHIFT'/CAPLOCK'
+are bare switches to ground, no pull-ups, no RC, no active parts on the
+keyboard side. On the ROM 01 (schematic part 5) those lines go straight to the
+micro: KRESET.L → P26 with R125 4.7 k to +5 V, CNTRL → P31 (R126), CAPLOCK →
+P32 (R127), SHIFT → P30, KSW0/1 → P36/P37; X0–7 → P10–17; Y0–9 ← KEYGLU
+SC0–SC9. Also from part 5: **micro CLK = CREF.H (3.579545 MHz → 894.9 kHz
+instruction rate)**, micro RESET (pin 16) = its own R105 200 k / C39 1 µF /
+CR3 network (TP74), independent of the system RESET.L; micro INT.L = VBL.L.
+
+**Every write to P2 / P2DIR in 341s0345** (grep of the listing): P2DIR is
+written at $143C ($1F, init), $147E/$148B and $15BC/$15C4 only. So the reset
+pin (P25) can be driven low from exactly two places: `$147E` (main-loop
+decision) and `$15BC` (GLU command $10 from the CPU side — a 3.4 ms pulse,
+then release). The whole-byte P2 writes ($1439 `LDM #$14`, $18AC/$18BE matrix
+scan, $1F13/$1F15/$1F24/$1F2D GLU access) do put 0 in latch bit 5 but the bit
+is an input then. **Right after cold init** ($0A/$0B/$03 all zero) the `$146C`
+decision asserts only if **/KRESET (P26) reads low AND CNTRL (P31) reads low**
+— i.e. a real Control-Reset; a single line reading low releases. A pure
+firmware path that asserts with the inputs idle does not exist.
+
+**Timing coincidence.** With the GLU held in reset by RESET.L, the micro (which
+started earlier on its own RC) sits in the SYNC wait. From the moment the GLU
+comes out of reset the poll `\$1F3A` runs 209 iterations of ≈42 cycles
+(6502-family counts: DEX 2, BEQ 2, JSR sp 5, LDA# 2, LDM 4, CLC 2, CLB 5,
+AND 3, SEB 5, BNE 2, RTS 6, BCC 4) ≈ 8.8 k cycles = **9.84 ms** at 894.9 kHz;
+if Y wraps on that INY (Y powered up as $00: `$1446 DEY` then `$140A INY`),
+cold init `$1457` → `$141A` → `$1433` reaches its first GLU write ≈115 cycles
+later, ≈ **9.97 ms** after the RESET.L rise. The bench pull sits at 9.95–9.98
+ms after the rise with ~30 µs spread over 13 events. So the micro is, to
+within the count uncertainty (~2 %), starting its cold init (GLU reg 3 ← 0,
+reg 0 ← 0, P3 outputs, then the ~5 ms ADB reset pulse of `$16C9`) at the
+instant of the pull — but none of those actions touches P25, and the decision
+that could (`$146C`) comes only after `$16C9` (~8 ms later). The coincidence
+places the micro at a schedule boundary; it does not, by the code, make it
+the puller. Caveats: MELPS 740 cycle counts taken as 6502-equivalent; the
+edge-synchronisation needs the reset GLU to keep the poll returning early
+(or the micro to start with the edge), and Y = $00 at power-up.
+
+Two cheap facts that would settle the timing model, if the ADB port can be
+reached: the `$16C9` ADB reset pulse (~5 ms low on the ADB data line) should
+start ≈10 ms after every RESET.L rise, pull or no pull; and TP74 gives the
+micro's own start time.
+
+## Die-photo findings (separate session, 2026-09-13; Mega II tiles + siliconpr0n KEYGLU 344S0048)
+
+- **Mega II pin 35 (~RESET) has no output device: the Mega II is a listener on
+  RESET.L.** Nothing on that die can hold the line low, so the 282.78 ms
+  power-on hold is not the Mega II's; by function (the CPU-side controller)
+  and by the Mega-IIe argument (their firmware releases reset 50 ms after
+  power and reads the line back once, never seeing a long hold, on a board
+  with a Mega II but no FPI) the **FPI (pin 23) is the likely POR owner**;
+  KEYGLU remained the other candidate pending its pad structure at pin 33.
+- **CREF (pin 79) is a plain push-pull output** with one data line into the
+  core, never tri-stated. Whether the core stops it during reset is not
+  visible on the die; the reset the core sees arrives through pin 35's input
+  cell and is distributed, not generated.
+- **RESET.L therefore has: no motherboard pull-up (both revisions), a
+  listener in the Mega II, a firmware-controlled push-pull driver in the
+  M50740's P25 (clocked by CREF, its own 200 k/1 µF reset RC), and a
+  crystal-timed pull-down somewhere else — presumably the FPI.** The pull-up
+  that gives the line its idle high is still unlocated: a mask-option port
+  pull-up on P25 (MAME's model) or inside the FPI.
+- Consequences for the bench: (1) the FPI is the one chip on the net that
+  watches the 65816 socket pins (E, M/X, VDA, VPA, RDY, ABORT), which is the
+  first mechanism with a reason to care whether a real 65816 is present;
+  (2) the micro-timing reading of the 9.97 ms pull needs CREF to be stopped
+  during the hold, which only a slot-7 pin 35 measurement across a power-up
+  can settle; (3) the firmware still has no P25 action at +9.97 ms after a
+  cold clock start (cold-init start; the assert needs /KRESET and CNTRL both
+  low and comes ~8 ms later).
+
+## Bench closure (2026-09-13, slot-7 AD3 records G71–G74)
+
+- **CREF runs from the same instant as 7M and Φ0 and never stops**, through the
+  whole 283 ms hold and through the pull. The micro is clocked throughout; its
+  start is its own RC. The "clock gated by reset" synchroniser is dead.
+- **The power-on hold is 4442 lines = 256 + 16 × 262 after the clock start**,
+  the 17th wrap of the vertical counter (video counter starts at $100, first
+  frame 256 lines, vsync 224 lines in). POR owner = a frame-counting chip on
+  RESET.L: the VGC or the KEYGLU. Not the Mega II (die), not the FPI (no frame
+  input).
+- **The 10 ms pull follows whichever edge releases the line**, ours included,
+  by 9.952–9.990 ms, and only when that edge lands within ~10–20 ms of the
+  machine's own release (2/6 for our edges at 284–293 ms after the clock start,
+  0/27 at ≥ 306 ms). The 38 µs spread of the delay is the size of the SYNC-wait
+  poll iteration (≈42 cycles at CREF/4), which is the strongest remaining hint
+  that the micro's cold init is in the causal chain, re-timed by the KEYGLU
+  leaving reset at the edge. Which chip sinks the line and why the IIe keyboard
+  on J13 gates it remain open; the firmware's own assert path does not fit
+  the time, so either an input we cannot see is low or the KEYGLU drives it.
+- **Card rule adopted:** never release inside that window and never arm at the
+  edge (firmware mode 4: socket-off release + 20 ms arm; card-first hold 300 ms
+  after the clock).

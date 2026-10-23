@@ -56,6 +56,8 @@ module esp32_ospi_connector #(
     // System status inputs (clk domain)
     input  wire        ddr3_ready_i,
     input  wire        a2_reset_n_i,
+    input  wire        a2_alive_i,         // slot PHI1 running (apple_bus sleep_o inverted): the machine is powered
+    input  wire        gs_res_n_i,         // GS CPU-socket /RES pad, raw (synchronised here; bring-up event log only)
 
     // USB HID readback (already synchronized into clk domain)
     input  wire [1:0]  pad_typ_i,        // 0 none, 1 kbd, 2 mouse, 3 gamepad
@@ -102,7 +104,7 @@ module esp32_ospi_connector #(
     input  wire [159:0] gs_tele_i,          // {last_addr[23:0], high[15:0], period[15:0], hold_samples[15:0],
                                             //  hold_mismatch[15:0], be[15:0], stall[15:0], cycle[31:0], status[7:0]}
     // DOC fetch telemetry per frame (a2p25 HyperRAM DOC; read through the
-    // indexed window at REG_GS_SEL/REG_GS_DATA, indices 32-37)
+    // indexed window at REG_GS_SEL/REG_GS_DATA, indices 40-45)
     input  wire [15:0] dbg_doc_reqf_i,      // DOC requests per frame
     input  wire [15:0] dbg_doc_missf_i,     // DOC memory reads per frame
     input  wire [15:0] dbg_doc_tof_i,       // DOC late fetches per frame
@@ -347,30 +349,44 @@ module esp32_ospi_connector #(
 
     // System
     reg [7:0] scratch_r;
-    reg [5:0] gs_sel_r;    // 0-31: IIgs socket window; 32-37: DOC telemetry
+    reg [5:0] gs_sel_r;    // 0-31: IIgs socket window; 32-39: event log; 40-45: DOC telemetry
     reg [7:0] gs_ctrl_r;
+    reg       a2_rst_arm_early_r;  // 0x2E write bit 4 (read bit 6): hardware-arm the socket while we still hold
+    reg [6:0] evt_idx_r;           // bring-up event log read index (window reg 33)
+    wire [47:0] evt_rd_w;
+    wire [6:0]  evt_wptr_w;
+    wire        evt_full_w;
+    wire evt_clear_w  = reg_wr_req && reg_idx == REG_GS_DATA && gs_sel_r == 6'd32 && reg_wdata[7];
+    wire gs_ctrl_wr_w = reg_wr_req && reg_idx == REG_GS_DATA && gs_sel_r == 6'd0;
+    wire rst_reg_wr_w = reg_wr_req && reg_idx == REG_A2_RST_RELEASE;
+    // hardware arm: at the machine's own reset end (por_done), or - ARM_EARLY - already
+    // while we hold after storage-ready, so the core sits in reset on a driven bus like
+    // a real 65816 and starts on the /RES rise (TransWarp model, scoping §8b, log 09-11)
+    wire gs_hw_arm_w = a2_rst_autoarm_r &
+                       (a2_por_done_r | (a2_rst_arm_early_r & a2_rst_assert_r & rst_released_r));
+    wire a2_rst_assert_set_w = reg_wr_req && reg_idx == REG_A2_RST_RELEASE && reg_wdata[1] && !a2_rst_assert_r;
     reg [3:0] gs_out_extra_r;
     reg [4:0] gs_hold_tap_r;
     reg [5:0] gs_trace_idx_r;
     assign gs_trace_idx_o = gs_trace_idx_r;
     reg [23:0] gs_trig_addr_r;
     assign gs_trig_addr_o = gs_trig_addr_r;
-    assign gs_ctrl_o      = gs_ctrl_r;
+    assign gs_ctrl_o      = gs_ctrl_r | (gs_hw_arm_w ? 8'h05 : 8'h00);   // hardware auto-arm
     assign gs_out_extra_o = gs_out_extra_r;
     assign gs_hold_tap_o  = gs_hold_tap_r;
     reg [7:0] gs_rdata;
     always @* begin
         case (gs_sel_r)
-            6'd0: gs_rdata = gs_ctrl_r;
-            6'd1: gs_rdata = gs_tele_i[7:0];
-            6'd2: gs_rdata = {4'b0, gs_out_extra_r};
-            6'd3: gs_rdata = {3'b0, gs_hold_tap_r};
-            6'd4: gs_rdata = gs_tele_i[15:8];
-            6'd5: gs_rdata = gs_tele_i[23:16];
-            6'd6: gs_rdata = gs_tele_i[31:24];
-            6'd7: gs_rdata = gs_tele_i[39:32];
-            6'd8: gs_rdata = gs_tele_i[47:40];
-            6'd9: gs_rdata = gs_tele_i[55:48];
+            6'd0:  gs_rdata = gs_ctrl_r | (gs_hw_arm_w ? 8'h05 : 8'h00);
+            6'd1:  gs_rdata = gs_tele_i[7:0];
+            6'd2:  gs_rdata = {4'b0, gs_out_extra_r};
+            6'd3:  gs_rdata = {3'b0, gs_hold_tap_r};
+            6'd4:  gs_rdata = gs_tele_i[15:8];
+            6'd5:  gs_rdata = gs_tele_i[23:16];
+            6'd6:  gs_rdata = gs_tele_i[31:24];
+            6'd7:  gs_rdata = gs_tele_i[39:32];
+            6'd8:  gs_rdata = gs_tele_i[47:40];
+            6'd9:  gs_rdata = gs_tele_i[55:48];
             6'd10: gs_rdata = gs_tele_i[63:56];
             6'd11: gs_rdata = gs_tele_i[71:64];
             6'd12: gs_rdata = gs_tele_i[79:72];
@@ -393,15 +409,23 @@ module esp32_ospi_connector #(
             6'd29: gs_rdata = gs_trig_addr_r[7:0];
             6'd30: gs_rdata = gs_trig_addr_r[15:8];
             6'd31: gs_rdata = gs_trig_addr_r[23:16];
+            6'd32: gs_rdata = {evt_full_w, evt_wptr_w};     // event log: {full, count}; write 0x80 = clear
+            6'd33: gs_rdata = {1'b0, evt_idx_r};            // event log read index
+            6'd34: gs_rdata = evt_rd_w[23:16];              // time[7:0]   (clk ticks, 54 MHz)
+            6'd35: gs_rdata = evt_rd_w[31:24];              // time[15:8]
+            6'd36: gs_rdata = evt_rd_w[39:32];              // time[23:16]
+            6'd37: gs_rdata = evt_rd_w[47:40];              // time[31:24]
+            6'd38: gs_rdata = evt_rd_w[15:8];               // event code (a2_event_log.sv)
+            6'd39: gs_rdata = evt_rd_w[7:0];                // context byte / register value
             // DOC fetch telemetry per frame (a2p25; 2026-10-22 register-map
             // merge: 0x3C-0x3F/0x2F/0x4F/0x5F were already the DP readback
-            // and this window on the a2mega side)
-            6'd32: gs_rdata = dbg_doc_reqf_i[7:0];     // wavetable requests
-            6'd33: gs_rdata = dbg_doc_reqf_i[15:8];
-            6'd34: gs_rdata = dbg_doc_missf_i[7:0];    // memory reads (cache misses)
-            6'd35: gs_rdata = dbg_doc_missf_i[15:8];
-            6'd36: gs_rdata = dbg_doc_tof_i[7:0];      // fetches past the slot deadline
-            6'd37: gs_rdata = dbg_doc_tof_i[15:8];
+            // and this window on the a2mega side; 32-39 is PR #34's event log)
+            6'd40: gs_rdata = dbg_doc_reqf_i[7:0];     // wavetable requests
+            6'd41: gs_rdata = dbg_doc_reqf_i[15:8];
+            6'd42: gs_rdata = dbg_doc_missf_i[7:0];    // memory reads (cache misses)
+            6'd43: gs_rdata = dbg_doc_missf_i[15:8];
+            6'd44: gs_rdata = dbg_doc_tof_i[7:0];      // fetches past the slot deadline
+            6'd45: gs_rdata = dbg_doc_tof_i[15:8];
             default: gs_rdata = 8'h00;
         endcase
     end
@@ -446,6 +470,12 @@ module esp32_ospi_connector #(
 
     // Apple II reset release
     reg        a2_rst_release_r;
+    reg        a2_rst_assert_r;    // 0x2E bit 1: hold the Apple II in reset while set (socket arm sequence)
+    reg        a2_rst_probe_r;     // 0x2E bit 2: while holding, let the line go for PROBE_WINDOW every
+                                   //   PROBE_PERIOD and sample it: the moment the machine's own
+                                   //   power-on reset stops pulling it low, stay released (por_done)
+    reg        a2_rst_autoarm_r;   // 0x2E bit 3: on por_done, arm the GS socket in the same clock
+    reg        a2_por_done_r;      // read 0x2E bit 5: machine's reset released by the probe
 
     // W5100 doorbell clear
     reg [3:0]  w5100_cmd_clr_r;
@@ -506,10 +536,128 @@ module esp32_ospi_connector #(
     end
     wire rst_mcu_absent_w = !mcu_ready_r &&
                             (rst_hold_cnt_r >= RST_MCU_ALIVE_WAIT[RST_CW-1:0]);
+    // Any release is final: once the hold has dropped (MCU write, no-MCU
+    // fallback, or backstop) it must never re-assert — the no-MCU fallback
+    // used to un-release when the MCU's first STATUS read arrived later,
+    // resetting a machine that had already booted (bench G32).
+    reg rst_released_r;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            rst_released_r <= 1'b0;
+        else if (a2_rst_release_r || rst_mcu_absent_w ||
+                 rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0])
+            rst_released_r <= 1'b1;
+    end
+    // --- POR probe -----------------------------------------------------------
+    // The IIgs (ROM 01 bench, G31-G40) wedges if the socket is driven during
+    // its own power-on reset, and again if it comes out of reset with no CPU
+    // present for long. So: hold the slot reset from the card, probe the line
+    // every ms with a short release, and the first time it floats high keep
+    // it released and arm the socket at once (microseconds, not a timer).
+    // Only meaningful once the storage-ready release (rst_released_r) is in.
+    localparam PROBE_PERIOD = CLOCK_SPEED_HZ / 1000;        // 1 ms
+    localparam PROBE_WINDOW = CLOCK_SPEED_HZ / 25000;       // 40 us
+    reg [$clog2(PROBE_PERIOD+1)-1:0] probe_cnt_r;
+    reg        probe_window_r;
+    reg [1:0]  a2_reset_n_s;                                // sync
+    wire       probe_active = a2_rst_probe_r & a2_rst_assert_r & rst_released_r & ~a2_por_done_r;
+    wire       por_done_set = probe_active & probe_window_r &
+                              (probe_cnt_r == PROBE_PERIOD - 1) & a2_reset_n_s[1];
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            probe_cnt_r    <= '0;
+            probe_window_r <= 1'b0;
+            a2_reset_n_s   <= 2'b00;
+            a2_por_done_r  <= 1'b0;
+        end else begin
+            a2_reset_n_s <= {a2_reset_n_s[0], a2_reset_n_i};
+            if (!probe_active) begin
+                probe_cnt_r    <= '0;
+                probe_window_r <= 1'b0;
+            end else begin
+                probe_cnt_r    <= (probe_cnt_r == PROBE_PERIOD - 1) ? '0 : probe_cnt_r + 1'b1;
+                probe_window_r <= (probe_cnt_r >= PROBE_PERIOD - PROBE_WINDOW - 1) &&
+                                  (probe_cnt_r != PROBE_PERIOD - 1);
+            end
+            if (por_done_set)
+                a2_por_done_r <= 1'b1;
+            else if (a2_rst_assert_set_w)
+                a2_por_done_r <= 1'b0;                      // a new hold starts a new sequence
+        end
+    end
+
     assign a2bus_control_if.reset_hold =
-        !(a2_rst_release_r || rst_mcu_absent_w ||
-          rst_hold_cnt_r >= RST_HOLD_BACKSTOP[RST_CW-1:0]);
+        (a2_rst_assert_r & ~probe_window_r & ~a2_por_done_r) | !rst_released_r;
     assign a2bus_control_if.ready = 1'b1;
+
+    // --- bring-up event log (window regs 32-39; hdl/esp32/a2_event_log.sv) ------
+    // Timestamped edges of everything that touches the Apple II reset and the
+    // GS socket enables, so a bench power-up can be reconstructed after the
+    // fact (which lever pulsed /RES, when the core started, when the machine
+    // let go). Codes: 1 slot /RESET fall, 2 rise, 3 socket /RES fall, 4 rise,
+    // 5 our hold on, 6 off (probe windows excluded), 7 0x2E write (data =
+    // value), 8 CTRL write (data = value), 9 por_done, 10 clock alive, 11 clock
+    // lost, 12 storage/backstop release, 13 MCU ready, 14 core running, 15 core
+    // reset, 16 trace trigger, 17 socket pins ours, 18 pins released, 19 probe
+    // start, 20 hardware arm. Data (unless a register value) = context
+    // {hold, released, por_done, alive, listen, arm, pins_ours, running}.
+    reg [1:0] gs_res_n_s;
+    reg a2_reset_n_d, gs_res_n_d, hold_core_d, alive_d, released_d, mcu_ready_d,
+        running_d, enabled_d, trigd_d, probe_d, hwarm_d, por_done_d;
+    wire hold_core_w = (a2_rst_assert_r & ~a2_por_done_r) | !rst_released_r;   // our hold, probe windows excluded
+    wire running_w = gs_tele_i[6];      // socket status bit 6 (top synchronises gs_tele)
+    wire enabled_w = gs_tele_i[5];      // socket status bit 5: pins are ours
+    wire trigd_w   = gs_trace_i[46];    // trace trigger fired
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            gs_res_n_s <= 2'b11;
+            {a2_reset_n_d, gs_res_n_d, hold_core_d, alive_d, released_d, mcu_ready_d,
+             running_d, enabled_d, trigd_d, probe_d, hwarm_d, por_done_d} <= 12'b1100_0000_0000;
+        end else begin
+            gs_res_n_s   <= {gs_res_n_s[0], gs_res_n_i};
+            a2_reset_n_d <= a2_reset_n_s[1];
+            gs_res_n_d   <= gs_res_n_s[1];
+            hold_core_d  <= hold_core_w;
+            alive_d      <= a2_alive_f_r;
+            released_d   <= rst_released_r;
+            mcu_ready_d  <= mcu_ready_r;
+            running_d    <= running_w;
+            enabled_d    <= enabled_w;
+            trigd_d      <= trigd_w;
+            probe_d      <= probe_active;
+            hwarm_d      <= gs_hw_arm_w;
+            por_done_d   <= a2_por_done_r;
+        end
+    end
+    wire [23:0] evt_w = {
+        4'b0,
+        gs_hw_arm_w & ~hwarm_d,             // 20 hardware arm
+        probe_active & ~probe_d,            // 19 probe start
+        ~enabled_w & enabled_d,             // 18 socket pins released
+        enabled_w & ~enabled_d,             // 17 socket pins ours
+        trigd_w & ~trigd_d,                 // 16 trace trigger
+        ~running_w & running_d,             // 15 core reset
+        running_w & ~running_d,             // 14 core running
+        mcu_ready_r & ~mcu_ready_d,         // 13 MCU ready
+        rst_released_r & ~released_d,       // 12 storage/backstop release
+        ~a2_alive_f_r & alive_d,            // 11 clock lost
+        a2_alive_f_r & ~alive_d,            // 10 clock alive
+        a2_por_done_r & ~por_done_d,        //  9 por_done
+        gs_ctrl_wr_w,                       //  8 CTRL write
+        rst_reg_wr_w,                       //  7 0x2E write
+        ~hold_core_w & hold_core_d,         //  6 our hold off
+        hold_core_w & ~hold_core_d,         //  5 our hold on
+        gs_res_n_s[1] & ~gs_res_n_d,        //  4 socket /RES rise
+        ~gs_res_n_s[1] & gs_res_n_d,        //  3 socket /RES fall
+        a2_reset_n_s[1] & ~a2_reset_n_d,    //  2 slot /RESET rise
+        ~a2_reset_n_s[1] & a2_reset_n_d};   //  1 slot /RESET fall
+    wire [7:0] evt_ctx_w = {a2bus_control_if.reset_hold, rst_released_r, a2_por_done_r, a2_alive_f_r,
+                            gs_ctrl_o[2], gs_ctrl_o[0], enabled_w, running_w};
+    a2_event_log #(.DEPTH_LOG2(7)) i_evt_log (
+        .clk(clk), .rst_n(rst_n), .clear_i(evt_clear_w), .ev_i(evt_w), .ctx_i(evt_ctx_w),
+        .rst_wdata_i(reg_wdata), .ctrl_wdata_i(reg_wdata), .time_i(sys_time_r),
+        .rd_idx_i(evt_idx_r), .rd_data_o(evt_rd_w), .wptr_o(evt_wptr_w), .full_o(evt_full_w)
+    );
 
     // =========================================================================
     // Memory Spaces — using Gowin BSRAM inference pattern
@@ -601,8 +749,27 @@ module esp32_ospi_connector #(
     wire vol_pending_w = volumes[0].rd | volumes[0].wr | volumes[1].rd | volumes[1].wr;
     wire hdd_pending_w = hdd_volumes[0].rd | hdd_volumes[0].wr |
                          hdd_volumes[1].rd | hdd_volumes[1].wr;
+    // Apple II alive = slot PHI1 running. sleep_o drops out between edges only
+    // if the clock stops for >1 us, so a short filter makes a clean level:
+    // alive after ~100 us of clock, dead as soon as sleep is reported.
+    reg [12:0] alive_cnt_r;
+    reg        a2_alive_f_r;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            alive_cnt_r  <= '0;
+            a2_alive_f_r <= 1'b0;
+        end else if (!a2_alive_i) begin
+            alive_cnt_r  <= '0;
+            a2_alive_f_r <= 1'b0;
+        end else if (&alive_cnt_r) begin
+            a2_alive_f_r <= 1'b1;
+        end else begin
+            alive_cnt_r  <= alive_cnt_r + 1'b1;
+        end
+    end
+
     wire [7:0] status_w = {
-        1'b0,
+        a2_alive_f_r,               // [7] Apple II alive (slot PHI1 running)
         pad_typ_i != 2'd0,          // [6] HID device present
         |w5100_cmd_pending,         // [5] W5100 doorbell pending
         hdd_pending_w,              // [4] HDD request pending
@@ -702,7 +869,7 @@ module esp32_ospi_connector #(
             REG_HDD1_LBA_L:   reg_rdata = hdd_volumes[1].lba[7:0];
             REG_HDD1_LBA_H:   reg_rdata = hdd_volumes[1].lba[15:8];
 
-            REG_A2_RST_RELEASE: reg_rdata = {7'b0, a2_rst_release_r};
+            REG_A2_RST_RELEASE: reg_rdata = {1'b0, a2_rst_arm_early_r, a2_por_done_r, a2bus_control_if.reset_hold, a2_rst_autoarm_r, a2_rst_probe_r, a2_rst_assert_r, a2_rst_release_r};
 
             // Slot configuration
             REG_SLOT_SELECT:  reg_rdata = {5'b0, slot_select_r};
@@ -781,6 +948,7 @@ module esp32_ospi_connector #(
             scratch3_r <= 8'h00;
             scratch4_r <= 8'h00;
             gs_sel_r <= 6'd0;
+            evt_idx_r <= 7'd0;
             gs_trace_idx_r <= 6'd0;
             gs_trig_addr_r <= 24'd0;
             gs_ctrl_r <= 8'h00;
@@ -817,6 +985,10 @@ module esp32_ospi_connector #(
             hdd_ack_r[0] <= 1'b0;
             hdd_ack_r[1] <= 1'b0;
             a2_rst_release_r <= 1'b0;
+            a2_rst_assert_r  <= 1'b0;
+            a2_rst_probe_r   <= 1'b0;
+            a2_rst_autoarm_r <= 1'b0;
+            a2_rst_arm_early_r <= 1'b0;
             w5100_cmd_clr_r <= 4'b0;
             gpu_trigger_r <= 1'b0;
             gpu_pause_r <= 1'b0;
@@ -873,6 +1045,7 @@ module esp32_ospi_connector #(
                             6'd29: gs_trig_addr_r[7:0]   <= reg_wdata;
                             6'd30: gs_trig_addr_r[15:8]  <= reg_wdata;
                             6'd31: gs_trig_addr_r[23:16] <= reg_wdata;
+                            6'd33: evt_idx_r <= reg_wdata[6:0];
                             default: ;
                         endcase
                     end
@@ -901,7 +1074,13 @@ module esp32_ospi_connector #(
                     REG_HDD1_LBA_H:   hdd_size_r[1][15:8] <= reg_wdata;
                     REG_HDD1_ACK:     hdd_ack_r[1] <= 1'b1;
 
-                    REG_A2_RST_RELEASE: a2_rst_release_r <= reg_wdata[0];
+                    REG_A2_RST_RELEASE: begin
+                        a2_rst_release_r <= reg_wdata[0];
+                        a2_rst_assert_r  <= reg_wdata[1];
+                        a2_rst_probe_r   <= reg_wdata[2];
+                        a2_rst_autoarm_r <= reg_wdata[3];
+                        a2_rst_arm_early_r <= reg_wdata[4];
+                    end
 
                     REG_SLOT_SELECT:  slot_select_r <= reg_wdata[2:0];
                     REG_SLOT_CARD: begin

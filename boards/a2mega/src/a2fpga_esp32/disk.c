@@ -44,6 +44,7 @@ void a2_reset_hold_release(const char *why);
 #include "usbstorage.h"   /* USB stick as the image volume (backend switch) */
 #include "settings.h"     /* persisted image overrides + slot map */
 #include "disk.h"
+#include "gs_socket.h"
 
 static const char *TAG = "disk";
 
@@ -766,8 +767,10 @@ void disk_poll(void)
             for (int v = 0; v < NDRV; v++) any = any || g_mounted[v];
             for (int u = 0; u < NHDD; u++) any = any || g_hdd_mounted[u];
             /* 10 s (was 7): the USB host role decision takes 5 s and a stick
-             * needs a moment to enumerate and mount before the Apple scans. */
-            if ((any && !g_remount_req) ||
+             * needs a moment to enumerate and mount before the Apple scans.
+             * gs_socket_ready(): the in-socket 65C816 auto-arm must have
+             * settled before /RES rises (bench G30; PR #34). */
+            if ((any && !g_remount_req && gs_socket_ready()) ||
                 esp_timer_get_time() > 10000000) {
                 /* Program the slot map JUST before the release — this late in
                  * boot the link is proven good (the mounts above ran over it),
@@ -775,7 +778,7 @@ void disk_poll(void)
                  * race-free. */
                 apply_slot_map();
 
-                fpga_reg_write(A2REG_A2_RST_RELEASE, 1);
+                gs_socket_a2_release();              /* 0x2E.0, via the socket module (keeps its assert bit) */
                 /* boards where the ESP32 owns the /RES pin (a2p25 IO33) */
                 a2_reset_hold_release(any ? "media mounted" : "no media");
                 s_released = true;
