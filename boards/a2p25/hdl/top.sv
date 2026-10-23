@@ -1847,7 +1847,8 @@ module top #(
         .USE_SYNC(1),
         .USE_CRC(0),
         .IDLE_TO_CYC(5_400_000),  // ~100ms at 54MHz
-        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ)
+        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
+        .EVT_LOG(0)               // no CPU socket, no room: GW5A-25 failed to place with it
     ) esp32_ospi (
         .clk(clk_logic_w),
         .rst_n(device_reset_n_w),

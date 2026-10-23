@@ -29,7 +29,13 @@ module esp32_ospi_connector #(
     parameter USE_SYNC    = 1,
     parameter USE_CRC     = 0,
     parameter IDLE_TO_CYC = 5_400_000,
-    parameter CLOCK_SPEED_HZ = 54_000_000
+    parameter CLOCK_SPEED_HZ = 54_000_000,
+    // Bring-up event log behind window regs 32-39 (hdl/esp32/a2_event_log.sv).
+    // 128 x 48 bits that Gowin builds as ~5.8k flops + 3.3k LUTs: an
+    // instrument for the 138B socket bring-up (PR #34), not something the
+    // 60K core or the GW5A-25 a2p25 can carry (the a2p25 failed to place
+    // with it, 2026-10-22). 0 = no log; the window reads back zeros.
+    parameter EVT_LOG = 0
 )(
     input  wire        clk,
     input  wire        rst_n,
@@ -658,11 +664,17 @@ module esp32_ospi_connector #(
         ~a2_reset_n_s[1] & a2_reset_n_d};   //  1 slot /RESET fall
     wire [7:0] evt_ctx_w = {a2bus_control_if.reset_hold, rst_released_r, a2_por_done_r, a2_alive_f_r,
                             gs_ctrl_o[2], gs_ctrl_o[0], enabled_w, running_w};
-    a2_event_log #(.DEPTH_LOG2(7)) i_evt_log (
-        .clk(clk), .rst_n(rst_n), .clear_i(evt_clear_w), .ev_i(evt_w), .ctx_i(evt_ctx_w),
-        .rst_wdata_i(reg_wdata), .ctrl_wdata_i(reg_wdata), .time_i(sys_time_r),
-        .rd_idx_i(evt_idx_r), .rd_data_o(evt_rd_w), .wptr_o(evt_wptr_w), .full_o(evt_full_w)
-    );
+    generate if (EVT_LOG != 0) begin : gen_evt_log
+        a2_event_log #(.DEPTH_LOG2(7)) i_evt_log (
+            .clk(clk), .rst_n(rst_n), .clear_i(evt_clear_w), .ev_i(evt_w), .ctx_i(evt_ctx_w),
+            .rst_wdata_i(reg_wdata), .ctrl_wdata_i(reg_wdata), .time_i(sys_time_r),
+            .rd_idx_i(evt_idx_r), .rd_data_o(evt_rd_w), .wptr_o(evt_wptr_w), .full_o(evt_full_w)
+        );
+    end else begin : gen_no_evt_log
+        assign evt_rd_w   = 48'd0;
+        assign evt_wptr_w = 7'd0;
+        assign evt_full_w = 1'b0;
+    end endgenerate
 
     // =========================================================================
     // Memory Spaces — using Gowin BSRAM inference pattern

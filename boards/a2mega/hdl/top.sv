@@ -2029,7 +2029,12 @@ module top #(
         .USE_SYNC(1),
         .USE_CRC(0),
         .IDLE_TO_CYC(5_400_000),  // ~100ms at 54MHz
-        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ)
+        .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
+`ifdef GS_SOCKET
+        .EVT_LOG(1)               // socket bring-up event log (138B only; ~5.8k flops)
+`else
+        .EVT_LOG(0)
+`endif
     ) esp32_ospi (
         .clk(clk_logic_w),
         .rst_n(device_reset_n_w),
