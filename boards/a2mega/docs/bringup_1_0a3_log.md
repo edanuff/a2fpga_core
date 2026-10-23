@@ -1318,3 +1318,282 @@ Tooling shipped today and load-bearing throughout: fpgastream WiFi
 flashing, telnet 'g' reload, .fs->.bin converter (validated byte-exact),
 HDMI capture eyes (imagesnap loop in user Terminal; Claude Code app
 lacks camera TCC — workaround documented), automated boot classifier.
+
+## 2026-10-11 night — 60K regression build with the a2p25's two shared-HDL fixes (SHR scanout trigger + sdp_engine 4-lane)
+
+Context: the a2p25 bring-up (branch `claude/a2p25-modernization-8a97cc`,
+commit 24df5029) found two bugs in shared HDL that the a2mega inherits:
+
+- `hdl/video/framebuffer_1080p.sv` — the left-border scanout trigger
+  `cx0_r + 5 == h_border_px_r` can never match for a 640-wide IIgs SHR
+  frame (h_border = 0, cx wraps at 2200). SHR scans out black while the
+  framebuffer holds the image. The `+5` form came in with the 1.0a3 epic
+  squash 0a62d8ca (08-28) ⇒ **a2mega SHR has very likely been black since
+  08-28**. Fix: trigger X computed modulo the raster line (2195 for SHR,
+  115 for 560-wide Apple modes — unchanged for the modes we have been
+  testing, which is why nothing noticed).
+- `hdl/displayport/audio/sdp_engine.v` — no 4-lane mode existed (with
+  LANE_COUNT=4 it emitted the 1-lane byte table on lane 0 only). DP 1.1a
+  4-lane packet-to-lane mapping added; `hdl/displayport/sim/tb_sdp_4lane.v`
+  self-check PASS for 4 and 2 lanes (re-run here under iverilog: PASS/PASS).
+  **a2mega note:** `boards/a2mega/hdl/top.sv` instantiates `dp_transmitter`
+  with `LANE_COUNT(2)` (two die lanes on the 60K SOM), so the 4-lane path is
+  pruned in this build. A direct USB-C→DP cable to a 4-lane-capable monitor
+  (census second gate, 09-02) still trains as a 2-lane link on the a2mega
+  side; the "4-lane audio was silent" finding is an a2p25 fact, carried here
+  for parity only. 2-lane audio behaviour should be unchanged.
+
+Cherry-pick: the three files only (`git format-patch -1 24df5029 -- <3 files>`
+applied onto main ce4a0595), commit **ad88e341** on
+`claude/quirky-hellman-d19038`. No a2p25 files touched.
+
+**Build provenance (the binary hash is ground truth):**
+- Base: main ce4a0595 + ad88e341 (the cherry-pick); worktree clean.
+- Toolchain: gw_sh V1.9.12.01 (84072), pipe method via `tools/build.sh`,
+  `GPRJ=a2mega.gprj` (60K SOM, GW5AT-LV60PG484AC1/I0), Gowin IDE GUI not
+  running; waited for another session's a2p25 gw_sh to exit first (license).
+- `impl/pnr/a2mega.fs` sha256 **77dcb9dfd0f9e05539577b8ae187eaa005bb41b55d753c3b4778f45dd3831d37**
+  (20,723,670 bytes; header: SecurityBit OFF, CRCCheck ON, Created Sun Oct 11 22:07:51 2026)
+- `impl/pnr/a2mega.bin` sha256 **d0b15355eca734fa294eb704c0ef128f8f0b0f035d416e74b0cd7c57013349be** (2,586,632 bytes)
+- Resources: Logic 20304/59904 (34%), Register 20714/60780 (35%), BSRAM 108/118 (92%), DSP 2/118.
+- Build wall time 14 min 52 s (21:53:10 → 22:08:02).
+
+**Timing (single roll of the committed source — not yet "durable" per the
+no-skating rule, which wants ≥3 rolls of the final source):** 0 setup / 0
+hold violated endpoints, TNS 0.000 on every clock, Actual Fmax ≥ constraint
+on every clock:
+
+- clk 50.000 → 158.306 MHz
+- clk4x 324.044 → 2016.128 MHz
+- clk1x 80.998 → 118.888 MHz
+- clk100 100.000 → 103.855 MHz
+- clk_sym 135.007 → 135.869 MHz (worst slack 0.047 ns)
+- clk_pix 148.500 → 151.185 MHz
+- cm_life 66.667 → 154.114 MHz
+- clk_logic 54.000 → 54.928 MHz
+- clk_pixel: no timing paths reported (as before)
+
+Worst setup paths (margins are the a2mega's usual knife-edge, not new):
+1. 0.047 ns clk_sym `i_pixel_cdc_fifo mem DO → video_stream_packer data` (the
+   known FIFO-DO cone, cf. timing_round2.md)
+2. 0.051 ns clk_sym `i_sdp_engine wb_idx_b_r → wb_b_r[1]/wb_b_r[0]` (x3 in the
+   top 11) — the sdp wire-byte precompute. This cone exists in the 2-lane
+   form too (the 4-lane case prunes), but the loop rewrite is the change
+   under test; no pre-change baseline roll was done tonight, so whether it
+   tightened is unknown. Watch item.
+3. 0.120 ns clk_pix `debug_overlay s2_x_bit → r_o/g_o/b_o SET` (overlay decodes)
+4. 0.150 ns clk_sym `video_stream_packer line_cycle → pf_vb0` (packer fanout)
+5. 0.313 ns clk_logic DOC pipelined `curr_rts_r → ram_wds_din_r`
+6. 0.371 ns clk100 AUX `tx_rd_ptr → esi_off CE`
+
+No `framebuffer_1080p` / `h_trigger` path appears in the 25 worst setup paths
+(the trigger compare is now a registered 12-bit equality, as intended).
+
+Archived copy: `a2mega_60k_ad88e341_77dcb9df.fs` (session scratchpad; the
+`.fs`/`.bin` are gitignored — rebuild from ad88e341 reproduces, cf. the
+08-22 determinism finding).
+
+**Hardware status at time of writing:** NOT flashed. The ESP32-S3 JTAG chain
+on this Mac reports a GW5A-25 (the a2p25), i.e. the a2mega is not attached.
+Pending (needs the bench): attach the a2mega to the Mac (Apple II OFF) →
+`GPRJ=a2mega.gprj tools/flash.sh a2mega` → power-cycle → on the IIgs:
+(a) Arkanoid (SHR) shows its SHR screen (expected: was black on every
+build since 08-28); (b) hub (2-lane) DOC/speaker audio still works;
+(c) direct USB-C→DP cable to a DP monitor: audio over the 2-lane link the
+a2mega trains there (the 4-lane case does not arise on this SOM).
+
+### 10-11 night, addendum — trigger lead 5 → 11 (a9d19c90) + vertical-tracker pipelining (d15af6fd); builds 2 and 3
+
+The a2p25 session reported a second shared-HDL fix after the entry above:
+**a9d19c90** — `H_TRIGGER_LEAD` 5 → 11. The lead must cover every register
+between hdmi_cx and the DP transmitter's rgb input less RGB_LATENCY (2):
+framebuffer 5 + the top's composite chain 8 = 13 → 11. With 5, every 1080p
+frame scanned out 6 raster px late — hidden inside the Apple modes' 120-px
+borders, but on the borderless 640-wide SHR frame it is one 320-mode pixel
+of border colour at the left edge (visible until the game sets the border
+black). The a2mega top's chain was counted here and is identical to the
+a2p25's (`fb_rgb_osd_r` 1, `osd_text_overlay` 1, `scanline_dim` 0,
+`DebugOverlay` 6 with ENABLE=1 — its stages are unconditional, ENABLE only
+gates the pixel colour; `overlay_en_w = 1`), so 11 holds. Apple modes move
+6 px left to true centre; the ESP32 OSD text keeps its own coordinate path.
+
+- **Build 2 = 9c703ba0** (ad88e341 + lead 11): **NOT CLEAN** — 4 setup /
+  1 hold. clk_pix 145.878 < 148.5, clk_logic 53.897 < 54.0, clk1x hold
+  -0.009. Violators: framebuffer vertical tracker `cy0_r → v_approach_px_r
+  RESET` (-0.121) and `→ v_active_px_r CE` (-0.027), `ovl_cy_q →
+  scanline_dim phase_r RESET` (-0.057), DOC `curr_rts_r → osc_state_r`
+  (-0.035), DDR3 PHY cmd oserdes hold (-0.009). None is in the changed
+  logic (a constant in the h_trigger subtractor) — the a2mega 60K
+  knife-edge re-rolling under a changed `BUILD_DATETIME`. fs sha256
+  225d019f4884f49a790af34977e3be64366136cbb889a2544574dc82e879ab46
+  (archived, NOT for flashing).
+- Rather than re-roll, took the a2p25's structural fix for exactly the
+  worst cone: **d15af6fd** registers the vertical tracker's decision inputs
+  (line-changed / cy==0 / at-border / at-lead flags), one more
+  blanking-time cycle; its commit message already said "a2mega inherits
+  (regression build pending)". Applied in isolation (19 lines; the module's
+  port list is unchanged between main and the a2p25 tip). = **50eae999**.
+- **Build 3 = 50eae999** (main ce4a0595 + ad88e341 + 9c703ba0 + 50eae999):
+  **CLEAN** — 0 setup / 0 hold, TNS 0.000 every clock, Fmax ≥ constraint
+  every clock. gw_sh V1.9.12.01 (84072), `GPRJ=a2mega.gprj`, SecurityBit OFF.
+  - `impl/pnr/a2mega.fs` sha256 **32b860082d1469d62e18d3b814d2ad8c5d5e525eb3b071cc0a524b50014e7a5f**
+  - `impl/pnr/a2mega.bin` sha256 **a43dfe4cc6ff8aafd65cd83e6db472f657f3f1632213bd1c9dc5b806ee23e846**
+  - Logic 20179/59904, Register 20718/60780, BSRAM 108/118.
+  - Fmax: clk 123.105/50; clk4x 2016/324; clk1x 123.058/80.998; clk100
+    100.559/100; clk_sym 136.752/135.007; clk_pix 149.896/148.5; cm_life
+    160.114/66.667; clk_logic 54.033/54.0.
+  - Worst setup: 0.012 clk_logic DOC `curr_rts_r → ram_wds_din_r` (×2);
+    0.056 clk100 AUX `next_state`; 0.063 clk_pix framebuffer `fb_width_px_r
+    → lb_rd_addr CE` (×3); **0.086 clk_pix `cx0_r → h_trigger_r`** (the new
+    registered 12-bit equality — now in the top 10, was absent in build 1);
+    0.095 clk_sym packer `line_cycle → pf_vb0`; 0.105 clk_sym FIFO-DO →
+    packer `ready`. Worst hold 0.052 clk_logic (fb wr_accum → wr_fifo).
+  - Still ONE roll of the final source — same caveat as the first entry.
+
+**Flash candidate = build 3 (50eae999, fs 32b86008…).** Still UNFLASHED:
+the a2mega has not been on the Mac's JTAG chain tonight. Pending bench
+list unchanged, plus: during the transition INTO SHR (before the game
+blacks the border) the left edge should be flush with no border-colour
+stripe; Apple modes sit 6 px further left than before.
+
+### 10-12 — FOLLOW-UP (not in build 3): a2p25 AUX/training stack port
+
+The a2p25 session asked for e4f2e056 (EQ status-read dwell from DPCD 0x00E
+TRAINING_AUX_RD_INTERVAL: 0 → 400 µs as before, n → n × 4 ms, cap 16 ms, as
+a registered advance; 16-byte capability read; default-off
+RETRY_WATCHDOG_CLKS / EQ_WAIT_MULT / TRAIN_ERRCNT) plus the shared parts of
+999a7492. **Declined for build 3** — it is not a cherry-pick on main:
+
+- main's `hdl/displayport/auxch/aux_channel.v`, `channel_managemnt.v`,
+  `dp_aux_messages.v`, `dp_transmitter.sv` are SEVEN commits behind the
+  a2p25 branch (6d0b148d, c7064c6e, 84b65c72, 77cc1b60, 1ea23fc7,
+  999a7492, e4f2e056). e4f2e056 alone does not apply.
+- The stack changes `dp_transmitter`'s interface: new params FIFO_LINES,
+  PREFILL_WORDS, RETRY_WATCHDOG_CLKS, EQ_WAIT_MULT, TRAIN_ERRCNT,
+  LINK_CHECK, LINK_CHECK_CLKS, ECHO_SINK_ADJUST; new ports `debug_obs[103:0]`,
+  `debug_auxif[23:0]`, `debug_underrun_cnt`, `debug_fifo_level`,
+  `ext_symbol_clk` (in), `ext_tx_running[3:0]` (in), `ext_tx_symbols[79:0]`,
+  `ext_powerup_channel[3:0]` (the D-PHY external-SerDes hooks). The a2mega
+  top would need wiring for the inputs at minimum.
+- It touches the closed-loop training ladder that was soak-proven on both
+  dies (08-30 port) and census-validated (09-02). Changing it in the same
+  bitstream as the SHR/audio regression check would confound the hub-audio
+  result.
+
+If wanted: a separate a2mega branch porting c7064c6e..e4f2e056 whole, top
+wired for the new ports (a2p25's `LATE_REPLY_DRAIN=1` NOT taken unless on
+the a2mega's own merits), built and A/B'd against build 3 on both hubs and
+the direct cable. Expected delta per the a2p25 session: sinks with 0x00E =
+0x81 (4 ms, e.g. the Sceptre) wait 16 ms in EQ instead of 1.6 ms (~15 ms
+longer, still single-pass); hubs unchanged; the registered dwell form closed
+at 0 violations on the GW5A-25 (the nested form was -1.2 ns at clk100 — the
+a2mega's clk100 margin tonight is 0.056 ns, so watch it).
+Correction from the a2p25 session (10-12): "defaults byte-identical" holds
+for the PARAMETERS only — the 0x00E-derived EQ dwell is a behaviour change
+even at defaults, so the port's A/B must RE-MEASURE first-draw /
+time-to-picture rows (blinks-to-lock, L: counter, n ≥ 5 per build per the
+08-22 lesson), not assume them from the parameter defaults.
+
+### 10-12 — AUX/training stack port BUILT (branch `claude/a2mega-aux-stack-port`, UNFLASHED)
+
+The follow-up above, done as its own branch off the build-3 state
+(c3142418 = 50eae999 HDL + the log notes). Port commit **c478d26d**.
+
+**What was ported** — the a2p25 stack c7064c6e..e4f2e056 taken WHOLE, files
+verbatim from e4f2e056 (`git diff e4f2e056 -- <file>` empty for each):
+`hdl/displayport/auxch/aux_channel.v`, `channel_managemnt.v`,
+`dp_aux_messages.v`, `dp_transmitter.sv`, plus **`aux_interface.v`** — a 5th
+file the 10-12 note did not list: it grows a `debug_state` port that the new
+`aux_channel` connects, so the four alone do not elaborate. NOT taken:
+`video/msa_inserter_4ch.v` (84b65c72's three 4-lane width fixes; the a2mega
+is LANE_COUNT=2 and the 2-lane rows are untouched). The D-PHY `ext_*` ports
+sit inside `` `ifdef DP_VENDOR_DPHY `` and do not exist on this build
+(`dp_gowin_defines.v` = DP_VENDOR_GOWIN), so nothing to tie off.
+
+**Top wiring (`boards/a2mega/hdl/top.sv`)** — every new knob pinned
+EXPLICITLY at what the board ran before, with the reasoning in comments:
+`LINK_CHECK=1` (spec flow — a2p25's 0/2 were AUX-RX bring-up aids),
+`LINK_CHECK_CLKS` ~1 s, `RETRY_WATCHDOG_CLKS` 0.5 s, `EQ_WAIT_MULT=1`,
+`TRAIN_ERRCNT=0`, `LATE_REPLY_DRAIN=0` (a2p25's 1 not taken), and
+`ECHO_SINK_ADJUST=0`: it is an AFE-sequencer-OFF feature (the a2p25's
+SN75DP130 snoops TRAINING_LANEx_SET); the a2mega's AFE policy is the M5
+runtime sequencer (`ENABLE_AFE_ADJUST=1` from the die pkg,
+`AFE_APPLY_ON_START=0` / trust boot csr) which already declares the truthful
+lane-set byte, and the echo path is gated off when the sequencer is on
+anyway. New outputs `debug_obs`, `debug_auxif`, `debug_underrun_cnt`,
+`debug_fifo_level` connected open (no ESP32 telemetry slot yet).
+
+**The ONLY intended behaviour change at these values**: the EQ status-read
+dwell follows DPCD 0x00E (0 → 4 × 100 µs as before; n → n × 4 ms per pass,
+cap 16 ms; registered advance), fetched by the now-16-byte capability read;
+plus the `dp_aux_messages` msg-0x00 fix (an empty message no longer occupies
+the engine for 15 clocks, so a check_link request landing in that window is
+no longer dropped — on the a2mega that window was a latent hang, not an
+observed one).
+
+**Sim on the ported files (iverilog)**: `tb_polite_attach` PASS (default +
+`+giveup`), `tb_train_recover` PASS (default, `+silent`, `+exhaust`),
+`tb_gate_fail_counters` PASS.
+
+**Build** — `GPRJ=a2mega.gprj tools/build.sh a2mega`, gw_sh V1.9.12.01,
+GW5AT-LV60PG484AC1/I0, Gowin IDE closed, SecurityBit OFF (process config
+unchanged). TWO rolls of the identical source c478d26d:
+
+- Roll 1: **1 setup violation**, -0.157 ns clk_sym, `i_pixel_cdc_fifo mem
+  DO[0] → video_stream_packer ready_s0` — the known FIFO-DO cone
+  (timing_round2.md; build 3 had it at +0.105). Not a cone the port touches;
+  the port's own domain closed at clk100 **+0.303** (AUX `tx_rd_ptr →
+  esi_defer_cnt CE`), better than build 3's 0.056. fs sha256 `539079365a0b…`
+  (kept in the session scratchpad only, not a candidate).
+- Roll 2: **CLEAN** — 0 setup / 0 hold, TNS 0.000 every clock, Fmax ≥
+  constraint every clock.
+  - `impl/pnr/a2mega.fs` sha256 **adc6da31ca90de48ce6e735d177561096ec0a7a95de8c4772cbe9b828e2c515a**
+  - `impl/pnr/a2mega.bin` sha256 **b14a7984c94062259c89961792632efeefa0675b11d3d268f337b3f0422267e1**
+  - archived as `impl/archive/a2mega_60k_full_auxstack_adc6da31.{fs,bin}`
+  - Logic 20227/59904, Register 20751/60780, BSRAM 108/118 (build 3: 20179 /
+    20718 / 108 — the port costs ~50 LUTs).
+  - Fmax: clk 140.056/50; clk4x 2016/324; clk1x 104.835/80.998; **clk100
+    110.056/100** (build 3: 100.559); clk_sym 135.409/135.007; clk_pix
+    153.875/148.5; cm_life 141.723/66.667; clk_logic 57.820/54.0.
+  - Worst setup: **0.022 clk_sym packer `line_cycle → pf_prime`**, 0.102
+    `line_cycle → pf_vb RESET` (×3), 0.169 sdp_engine `inserting → db CE`,
+    0.235 clk_pix debug_overlay. No AUX/clk100 path in the top 13 (≥ 0.33).
+    Worst hold 0.044 clk_logic (fb wr_accum → wr_fifo, as build 3).
+
+Honest framing per the no-skating rule: the roll-1 miss and roll-2 close are
+the a2mega's pre-existing clk_sym knife-edge (packer/FIFO-DO cones) rolling
+either side of zero, exactly as build 3's "ONE roll of the final source"
+caveat. The structural fix for that cone (pixel_cdc_fifo output skid, PR #5
+b0480c76) is NOT on main — it lives on claude/timing-round2 and the
+gs-socket branches — and was deliberately not pulled in here so the A/B
+isolates the AUX stack. The port itself is not on the knife-edge: clk100
+gained ~10 MHz of Fmax headroom over build 3.
+
+**A/B plan (hardware, pending ed's flash go-ahead)** — B = this build
+(adc6da31), A = build 3 (32b86008, itself still unflashed; A must be
+measured in the same session, not assumed from the 10-11 notes). Per
+`acquisition_matrix_results.md` (08-25 protocol: plain board power cycles,
+HDMI actions are recovery steps only, n ≥ 5 per build per the 08-22 lesson,
+interleave A/B so hub history and temperature are not correlated with
+build):
+
+- Sinks: Anker hub, Mindorlan hub, Ugreen hub (each DP→HDMI to the Sceptre),
+  and the direct USB-C→DP cable to the DP monitor (the 09-02 4-lane PASS
+  path; here 2-lane HBR as always on the a2mega).
+- Per cycle: blinks-to-lock, elapsed time to stable picture, `L:` (D4
+  assertion count, expect blinks+1), `Y:`, `C:`, `K:`, `B:` teardown reason;
+  then the HUB-AUDIO row (DOC/mixer audio audible through the hub's HDMI
+  sink — the 10-11 regression check build 3 was for).
+- Also read `debug_caps`/the 16-byte cap profile if the ESP32 telemetry
+  exposes it: which sinks advertise 0x00E ≠ 0 decides where a delta is even
+  possible.
+- Expected: identical pass/fail and single-pass training everywhere; sinks
+  advertising 0x00E = 1 (4 ms; the a2p25 session saw the Sceptre at 0x81)
+  spend ~16 ms in EQ instead of 1.6 ms, i.e. ≈ 15 ms longer time-to-picture,
+  invisible against the second-scale hub bring-up. Any extra pass, blink
+  or hub-audio change is a finding, not noise.
+- Not expected but watch for: converters whose DEFER replies carry trailing
+  bytes (the a2p25 reason for `LATE_REPLY_DRAIN=1`) — on this build they hit
+  the legacy error path exactly as on build 3, so no regression, but a
+  `B:` short-reply teardown on a hub that was clean on A would be the cue
+  to retest with the drain on.
