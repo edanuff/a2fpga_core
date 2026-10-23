@@ -146,7 +146,15 @@ module video_stream_packer #(
     // line_cycle comparisons (timing: the slot chain is the critical
     // path at HBR rates)
     // ------------------------------------------------------------------
-    wire at_eol = (line_cycle == CYCLES_PER_LINE-1);
+    // at_eol is a REGISTERED one-cycle lookahead (timing campaign round 2,
+    // 138B durability): the live 13-bit compare headed lc_zero -> the
+    // line_cycle / nc2_r RESET arcs (+0.11 ns at 135 MHz on the 138B).
+    // Its next value follows line_cycle's own next-value control exactly:
+    // zero on lc_zero, (line_cycle == CYCLES_PER_LINE-2) on lc_inc, hold
+    // otherwise — the same shared terms the nc2_r lookahead is built on,
+    // with the same style of sim mirror check below.
+    reg at_eol = 1'b0;
+    wire at_eol_live = (line_cycle == CYCLES_PER_LINE-1);   // sim mirror only
     wire [$clog2(CYCLES_PER_LINE)-1:0] nc =
         at_eol ? {$clog2(CYCLES_PER_LINE){1'b0}} : line_cycle + 1'b1;
     wire nl_active = at_eol ? ((line_num == V_TOTAL-1) || (line_num < V_VISIBLE-1))
@@ -353,6 +361,39 @@ module video_stream_packer #(
     wire [13:0] s0n2 = {nc2, 1'b0};
     wire [13:0] s1n2 = s0n2 + 1'b1;
 
+    // ------------------------------------------------------------------
+    // REGISTERED two-step lookahead (timing campaign round 2, cone #2).
+    // nc2/s0n2/s1n2 above are two adders and two wrap muxes deep off the
+    // line_cycle flops, and they fed BOTH the schedule-ROM address
+    // (BSRAM address setup) and the pf_* precompute compares directly:
+    // "line_cycle -> sched_rom AD[13]" (-0.060) and "line_cycle ->
+    // pf_vb1/RESET" (+0.016) were the two worst clk_sym paths left in the
+    // 60K after the FIFO skid. nc2_r below is the SAME value held in a
+    // flop: a COUNTER in its own right that shares line_cycle's
+    // zero/increment control (lc_zero / lc_inc — the very terms that
+    // already drive line_cycle's own reset, so no deeper than a cone that
+    // meets timing), wraps on its own shallow equality compare, and
+    // reloads to 2 whenever line_cycle reloads to 0. No adders in the
+    // control cone (a first formulation that recomputed nc2 from
+    // line_cycle's next value put a five-way mux + two wrap-adders on this
+    // flop's reset pin and drew -0.055). s0n2/s1n2 are pure wiring off
+    // nc2_r. Proven equal to the combinational nc2 at every clock by the
+    // simulation-only $fatal further down (alongside the shadow-walk
+    // checks); functionally invisible by construction.
+    // ------------------------------------------------------------------
+    wire lc_zero, lc_inc;                       // assigned after sof_mismatch/fetch_starved
+    reg  [$clog2(CYCLES_PER_LINE)-1:0] nc2_r;
+    initial nc2_r = 2;
+    always @(posedge clk) begin
+        if (lc_zero)
+            nc2_r <= 2;
+        else if (lc_inc)
+            nc2_r <= (nc2_r == CYCLES_PER_LINE-1) ? {$clog2(CYCLES_PER_LINE){1'b0}}
+                                                  : nc2_r + 1'b1;
+    end
+    wire [13:0] s0n2_r = {nc2_r, 1'b0};
+    wire [13:0] s1n2_r = {nc2_r, 1'b1};
+
     reg [1:0] pf_ftu, pf_fnl;
     reg       pf_prime;
     reg [1:0] pf_vb0, pf_vb1;   // vsel() range compares, precomputed like pf_ftu
@@ -368,14 +409,16 @@ module video_stream_packer #(
             pf_vb0   <= 2'd0;
             pf_vb1   <= 2'd0;
         end else begin
-            pf_ftu[0] <= nl2 && (s0n2 >= DATA_START) && (s0n2 < BS_POS);
-            pf_ftu[1] <= nl2 && (s1n2 >= DATA_START) && (s1n2 < BS_POS);
-            pf_fnl[0] <= (s0n2 != BS_POS-1);
-            pf_fnl[1] <= (s1n2 != BS_POS-1);
+            // all lookahead-counter terms from the REGISTERED copies
+            // (nc2_r/s0n2_r/s1n2_r == nc2/s0n2/s1n2, asserted in sim)
+            pf_ftu[0] <= nl2 && (s0n2_r >= DATA_START) && (s0n2_r < BS_POS);
+            pf_ftu[1] <= nl2 && (s1n2_r >= DATA_START) && (s1n2_r < BS_POS);
+            pf_fnl[0] <= (s0n2_r != BS_POS-1);
+            pf_fnl[1] <= (s1n2_r != BS_POS-1);
             pf_prime  <= (running || start_ok) && nl2 &&
-                         (nc2 == (DATA_START/2)-1);
-            pf_vb0    <= vsel(s0n2);
-            pf_vb1    <= vsel(s1n2);
+                         (nc2_r == (DATA_START/2)-1);
+            pf_vb0    <= vsel(s0n2_r);
+            pf_vb1    <= vsel(s1n2_r);
         end
     end
 
@@ -489,7 +532,13 @@ module video_stream_packer #(
     // rendering a permanently rotated image. Presents downstream as a
     // normal source_ready-drop video restart.
     // ------------------------------------------------------------------
-    wire frame_first_fetch = prime_r && (line_num == {$clog2(V_TOTAL){1'b0}});
+    // line_num == 0 as a registered lookahead (138B durability): the live
+    // zero-detect sat in sof_mismatch -> lc_zero -> the nc2_r SET arcs
+    // (+0.09 ns at 135 MHz on the 138B). Follows line_num's own writes:
+    // zero on reset / start / slip, wrap test on an eol advance, hold
+    // otherwise (mirror-checked below).
+    reg ln0_r = 1'b1;
+    wire frame_first_fetch = prime_r && ln0_r;
     wire sof_mismatch = fifo_rvalid &&
                         ((frame_first_fetch && !fifo_rsof) ||
                          (fetch_r && !frame_first_fetch && fifo_rsof));
@@ -500,6 +549,63 @@ module video_stream_packer #(
     // such state exhibits starved fetches, so restarting on the first
     // one heals it too.
     wire fetch_starved = fetch_r && !fifo_rvalid;
+
+    // ln0_r next value: the slip branch zeroes line_num and wins over the
+    // eol increment (same ordering as the sequential block)
+    always @(posedge clk) begin
+        if (reset || (!running && start_ok) ||
+            (running && (sof_mismatch || fetch_starved)))
+            ln0_r <= 1'b1;
+        else if (running && at_eol)
+            ln0_r <= (line_num == V_TOTAL-1);
+    end
+    // synthesis translate_off
+    reg [1:0] ln0_chk_en = 2'b00;
+    always @(posedge clk) begin
+        ln0_chk_en <= {ln0_chk_en[0], !reset};
+        if (ln0_chk_en[1] && (ln0_r !== (line_num == {$clog2(V_TOTAL){1'b0}}))) begin
+            $display("FATAL: packer ln0_r lookahead diverged (reg=%b line_num=%0d)", ln0_r, line_num);
+            $fatal(1);
+        end
+    end
+    // synthesis translate_on
+
+    // line_cycle's own next-value control, shared with the nc2_r counter:
+    // zero on reset / start_ok (while !running) / slip / eol; increment
+    // while running otherwise; hold while !running. These are exactly the
+    // terms behind line_cycle's own writes in the main block below.
+    assign lc_zero = reset || (!running && start_ok) ||
+                     (running && (sof_mismatch || fetch_starved || at_eol));
+    assign lc_inc  = running && !lc_zero;
+
+    always @(posedge clk) begin
+        if (lc_zero)      at_eol <= 1'b0;
+        else if (lc_inc)  at_eol <= (line_cycle == CYCLES_PER_LINE-2);
+    end
+    // synthesis translate_off
+    reg [1:0] eol_chk_en = 2'b00;
+    always @(posedge clk) begin
+        eol_chk_en <= {eol_chk_en[0], !reset};
+        if (eol_chk_en[1] && (at_eol !== at_eol_live)) begin
+            $display("FATAL: packer at_eol lookahead diverged (reg=%b live=%b line_cycle=%0d)",
+                     at_eol, at_eol_live, line_cycle);
+            $fatal(1);
+        end
+    end
+    // synthesis translate_on
+
+    // synthesis translate_off
+    // Equivalence proof for the registered lookahead (cone #2): nc2_r (and
+    // the s0n2/s1n2 wiring off it) must equal the combinational values at
+    // every clock after reset. Any residue is a $fatal.
+    reg [1:0] lc_chk_en = 2'b00;
+    always @(posedge clk) begin
+        lc_chk_en <= reset ? 2'b00 : {lc_chk_en[0], 1'b1};
+        if (lc_chk_en[1] && (nc2_r !== nc2 || s0n2_r !== s0n2 || s1n2_r !== s1n2))
+            $fatal(1, "packer: registered lookahead diverged (nc2_r=%0d nc2=%0d line_cycle=%0d)",
+                   nc2_r, nc2, line_cycle);
+    end
+    // synthesis translate_on
     reg [1:0] dec_px_r, dec_fs_r, dec_fe_r;
     reg [1:0] dec_ph_r [0:1];
     initial begin
@@ -565,7 +671,7 @@ module video_stream_packer #(
     reg [11:0] sched_q;
     reg        sched_act_q;   // active-line factor (pf_ftu's nl2 term)
     always @(posedge clk) begin
-        sched_q     <= sched_rom_r[11'(nc2)];
+        sched_q     <= sched_rom_r[11'(nc2_r)];   // registered lookahead (cone #2)
         sched_act_q <= nl2;
     end
 
@@ -741,9 +847,20 @@ module video_stream_packer #(
             f_vb[1] <= pf_vb1;   //   from the exact two-step-ahead counters
             f_prime <= running && nl_active && (nc == (DATA_START/2)-1);
 
+            // ready (source_ready to the idle inserter) is a one-cycle
+            // delayed copy of running — timing campaign round 2, cone (j'):
+            // the previous in-line assignments gave ready's D input the
+            // full sof_mismatch/fetch_starved cone (line_num compares +
+            // FIFO flags; -0.107 ns in a 60K roll) and the replicated
+            // ready flop sits mid-die on the way to the inserter. The rise
+            // is unchanged (ready always followed running by a cycle); the
+            // drop now trails running by a cycle instead of coinciding,
+            // which the inserter cannot distinguish (ready already leads
+            // the data by the sdp/msa pipeline depth). Verified with the
+            // full-chain harness (sim/run_full_chain.sh).
+            ready <= running;
             if (!running) begin
                 data    <= {1'b0, {4{DUMMY, DUMMY}}};
-                ready   <= 1'b0;
                 sdp_gap <= 1'b0;
                 // conditions are stable until the head word is popped, so
                 // acting one cycle late keeps frame alignment intact
@@ -766,7 +883,6 @@ module video_stream_packer #(
                 sdp_gap <= ({line_cycle, 1'b0} >= GAP_START) &&
                            ({line_cycle, 1'b0} <  GAP_END);
 
-                ready <= 1'b1;
                 if (fetch_r && !fifo_rvalid)
                     underrun <= 1'b1;
                 // c_word ends the cycle as (c_fetch ? fifo_rdata : cur_word)
@@ -794,7 +910,6 @@ module video_stream_packer #(
                 // counter increment so the zeroing wins.
                 if (sof_mismatch || fetch_starved) begin
                     running    <= 1'b0;
-                    ready      <= 1'b0;
                     start_ok   <= 1'b0;
                     line_cycle <= 0;
                     line_num   <= 0;

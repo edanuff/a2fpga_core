@@ -125,6 +125,20 @@ module osd_text_overlay #(
 
     reg [7:0] row_byte_r;  // glyph row currently being displayed
 
+    // TIMING ROUND 2 CONE (e): the two equality compares that gate every
+    // tracker register's CE/reset (screen_x == X_START, screen_y == Y_OFFSET)
+    // were the clk_pix paths "ovl_cx_q -> glyph_line_r/CE" and "ovl_cy_q ->
+    // phase_r/RESET" in the 60K. Pre-registered one cycle early: screen_x
+    // is strictly sequential, so (x+1 == X_START) now is exactly (x ==
+    // X_START) next cycle; screen_y only changes at the x wrap (x=0, far
+    // from X_START), so registering its compare is exact too. No offset
+    // shift; the trackers now gate on two flop bits.
+    reg x_start_r = 1'b0, y_off_r = 1'b0;
+    always @(posedge clk_i) begin
+        x_start_r <= (screen_x_i + 12'd1 == X_START);
+        y_off_r   <= (screen_y_i == 11'(Y_OFFSET));
+    end
+
     always @(posedge clk_i or negedge reset_n) begin
         if (!reset_n) begin
             hrep_r <= 3'd0;
@@ -139,12 +153,12 @@ module osd_text_overlay #(
             viderom_a_r <= 12'd0;
             row_byte_r <= 8'd0;
         end else begin
-            if (screen_x_i == X_START) begin
+            if (x_start_r) begin
                 hrep_r <= 3'd0;
                 gpx_r <= 3'd0;
                 cell_r <= 6'd0;
                 // vertical advance happens once per line, here
-                if (screen_y_i == 11'(Y_OFFSET)) begin
+                if (y_off_r) begin
                     vrep_r <= 3'd0;
                     glyph_line_r <= 3'd0;
                     char_row_r <= 5'd0;

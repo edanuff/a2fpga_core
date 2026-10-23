@@ -105,3 +105,39 @@ set_multicycle_path 2 -setup -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/
 set_multicycle_path 1 -hold  -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_strb_o_*_s1/D}]
 set_multicycle_path 2 -setup -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_wrdata_o_*_s1/D}]
 set_multicycle_path 1 -hold  -to [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/i_dp_serdes_138b/upar_arbiter_wrap_dp_serdes_inst/u_upar_arbiter/upar_wrdata_o_*_s1/D}]
+
+// ---------------------------------------------------------------------
+// Durability margin (timing campaign round 2, 2026-09-05). Setup
+// uncertainty of 0.5 ns on the fabric clocks makes the durability bar a
+// property of the build: "0 setup violations" now means every path has
+// at least 0.5 ns of real margin, and the timing-driven placer optimises
+// against that target (diagnostic builds with a clock tightened by 1 ns
+// closed clean on the 138B, so the margin is there to be found). This is
+// a STRICTER requirement, not an exception; reported slack is after the
+// uncertainty. Do not remove to "fix" a violation.
+// ---------------------------------------------------------------------
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk100}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_sym}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_pix}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_logic}]
+
+// ---------------------------------------------------------------------
+// IIgs CPU socket (hdl/twgs/gs_socket.sdc is the reference copy).
+// gs_ph2 = the FPI's PHI2 at the socket: 2.86 MHz fast cycle, ~140 ns
+// low / ~209 ns high; the 65C816 core is clocked by its inversion (active
+// edge = the fall).  Period = the FAST cycle; sync/slow cycles only add
+// slack.  AB17 is not a dedicated clock ball on 1.0a3 - PnR routes the
+// clock generically, which is expected and harmless at 2.86 MHz.
+// clk_gs = the socket's own ~110 MHz sequencer PLL (kept off clk100,
+// whose AUX ladder is on the knife edge).  With it the 8 PRIMARY clock
+// nets are all used and gs_ph2 takes a long-wire net - fine at 2.86 MHz.
+// Both are asynchronous to everything else: the crossings are a two-flop
+// toggle sync, quasi-static control/telemetry, and the core's quasi-static
+// outputs sampled >= 2 clk_gs after the fall by design (gs_socket_phy
+// OUT_DELAY; the core's longest path bounds its output settle at ~27 ns -
+// keep OUT_DELAY >= 2).
+// ---------------------------------------------------------------------
+create_clock -name gs_ph2 -period 349.0 -waveform {209.4 349.0} [get_ports {gs_ph2}]
+create_clock -name clk_gs -period 9.091 -waveform {0 4.545} [get_pins {i_gs_pll/u_pll/PLL_inst/CLKOUT0}]
+set_clock_groups -asynchronous -group [get_clocks {gs_ph2}] -group [get_clocks {clk_gs}] -group [get_clocks {clk100}] -group [get_clocks {clk}] -group [get_clocks {clk_logic}] -group [get_clocks {clk_pixel}] -group [get_clocks {clk_pix}] -group [get_clocks {clk_sym}] -group [get_clocks {cm_life}] -group [get_clocks {clk4x}] -group [get_clocks {clk1x}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_gs}]

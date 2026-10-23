@@ -80,7 +80,11 @@ no rev until the OPEN items that could change the netlist are closed.
    (b) **Receiver-bias divider on the PAD side** (between series R and
    cap), fitted always — this is THE critical fix; the bare on-die-pull
    configuration is the one proven offset-marginal for monitor-class
-   replies. Final values: **AUX_P: 100 k→3V3 / 43 k→GND (parks
+   replies — re-confirmed 2026-09-02 by the adapter census: a known-good
+   USB-C->HDMI dongle (works on Mac/iPhone) gets PD/mux/HPD but ZERO AUX
+   reply edges on 1.0a3, so its DPCD caps (the census second gate) are
+   unreadable; only hub-class sinks census on this rev
+   (adapter_census_results.md). Final values: **AUX_P: 100 k→3V3 / 43 k→GND (parks
    ≈0.99 V); AUX_N: 100 k→3V3 / 47 k→GND (parks ≈1.05 V)** ⇒ common
    mode ≈1.0 V (mid-window of the Gowin TLVDS input CM range — confirm
    the DS window at layout review as a check), per-leg Thevenin ≈30 k

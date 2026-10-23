@@ -55,8 +55,20 @@ working in these areas. **When you discover a new one, add it here** — that's 
 
 - **Power-cycle between flashes.** Reprogramming without a power cycle can fail DDR3 init,
   producing a black screen that looks like a logic bug but isn't.
-- **PnR variance:** identical designs can yield 0–198 timing violations between runs on GW5AT.
-  Re-run before assuming a regression.
+- **PnR variance is real, but re-running is not closure.** Identical source reseeds placement
+  every full-core build (`datetime.svh`), and marginal paths swing by ±0.5 ns between rolls.
+  A path that passes on one roll and fails on the next is a future heisenbug: fix the cone
+  structurally (register the compare, pre-compute the flag one cycle early, split the mux,
+  replicate the fanout), never by re-rolling or by loosening the SDC. The deterministic
+  `a2mega_dp_test` project is the gate for every DP-core change; the full core is rolled
+  three times on the final source. Method and case history: `boards/a2mega/docs/timing_round2.md`.
+- **a2mega SDCs carry a 0.5 ns setup margin** (`set_clock_uncertainty 0.5 -setup` on clk100,
+  clk_sym, clk_pix and clk_logic, in all five a2mega SDCs since 2026-09-05). "0 setup
+  violations" therefore means every path has at least 0.5 ns of *real* margin, and the
+  reported slack is the real slack minus 0.5 (a reported +0.01 is a real +0.51). This is a
+  stricter target, not an exception: the timing-driven placer finds the margin when asked
+  (builds with a clock tightened by 1 ns closed clean on the 138B). Do not remove or reduce
+  it to "fix" a violation; if the number is ever changed, record it in the timing log.
 - Two distinct display-defect classes have been seen — *slow/stale updates* (port contention,
   fixed with wide 128-bit writes + write port priority) vs. *moving distortion* (timing margin
   at 432 MHz). Diagnose which class before chasing a fix.

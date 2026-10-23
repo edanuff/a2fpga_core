@@ -78,9 +78,15 @@ A healthy build has:
 - Actual **Fmax ≥ Constraint** for every clock
 - **TNS = 0.000** for every clock domain
 
-> Note: on the GW5AT, identical designs can yield 0–198 violations between PnR runs.
-> If a clean design suddenly violates, re-run before assuming a logic regression.
-> See [gotchas.md](gotchas.md).
+> Note: on the GW5A parts every full-core build reseeds placement, so marginal paths move
+> by ±0.5 ns between runs. That is a reason to fix the cone, not to re-run until it passes —
+> see [gotchas.md](gotchas.md) and `boards/a2mega/docs/timing_round2.md`.
+>
+> **a2mega reports include a 0.5 ns margin.** The a2mega SDCs apply
+> `set_clock_uncertainty 0.5 -setup` to the fabric clocks, so "0 violations" means ≥ 0.5 ns
+> of real margin on every path and the reported slack is real slack − 0.5 ns. A reported
+> +0.01 is healthy; a violation means the real margin dropped below 0.5 ns and the cone
+> needs a structural fix.
 
 ## 6. Key output files (under `boards/<board>/impl/`)
 

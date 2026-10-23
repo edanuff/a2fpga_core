@@ -106,7 +106,14 @@ module aux_interface #(
 
     reg [15:0] timeout_count;
 
-    wire tx_empty;
+    // FIFO empty flags are REGISTERS updated from the same push/pop
+    // strobes as the pointers (timing campaign round 2, cone (a)): the
+    // combinational pointer compare was a 5-stage carry chain hanging off
+    // tx_rd_ptr (fanout 131) at the head of every reply-byte enable in
+    // aux_channel (+0.07..+0.25 ns at 100 MHz). Bit-identical: the flag
+    // registered from the next pointer values equals the compare of the
+    // registered pointers on every cycle.
+    reg  tx_empty = 1'b1;
     wire tx_full_i;
     reg  [7:0] tx_rd_data;
     reg  tx_rd_en;
@@ -128,7 +135,7 @@ module aux_interface #(
     wire [4:0] rx_wr_ptr_plus_1;
     reg  [4:0] rx_rd_ptr;
     reg  rx_reset;
-    wire rx_empty_i;
+    reg  rx_empty_i = 1'b1;   // registered, see tx_empty
     wire rx_full;
     reg [7:0] rx_wr_data;
     reg rx_wr_en;
@@ -209,10 +216,13 @@ end
     //--------------------------------------------
     assign rx_wr_ptr_plus_1 = rx_wr_ptr + 5'b00001;
     assign tx_wr_ptr_plus_1 = tx_wr_ptr + 5'b00001;
-    assign rx_empty_i   = ((rx_wr_ptr        == rx_rd_ptr) ? 1'b1 : 1'b0);
     assign rx_full      = ((rx_wr_ptr_plus_1 == rx_rd_ptr) ? 1'b1 : 1'b0);
-    assign tx_empty     = ((tx_wr_ptr        == tx_rd_ptr) ? 1'b1 : 1'b0);
     assign tx_full_i    = ((tx_wr_ptr_plus_1 == tx_rd_ptr) ? 1'b1 : 1'b0);
+    // push/pop strobes shared by the pointer updates and the empty flags
+    wire tx_push = (tx_full_i == 1'b0 && tx_wr_en == 1'b1);
+    wire tx_pop  = (tx_empty  == 1'b0 && tx_rd_en == 1'b1);
+    wire rx_push = (rx_full   == 1'b0 && rx_wr_en == 1'b1);
+    wire rx_pop  = (rx_empty_i == 1'b0 && rx_rd_en == 1'b1);
     assign rx_empty     = rx_empty_i;
     assign tx_full      = tx_full_i;
     assign busy         = ((tx_empty == 1'b1 && tx_state == tx_idle) ? 1'b0 : 1'b1);
@@ -381,7 +391,12 @@ always @(posedge clk) begin
            rx_rd_ptr <= rx_rd_ptr + 1;
         end
     end
-    
+
+    // registered empty flags (next pointer values; see declaration)
+    tx_empty   <= ((tx_wr_ptr + {4'b0, tx_push}) == (tx_rd_ptr + {4'b0, tx_pop}));
+    rx_empty_i <= (rx_reset == 1'b1) ? 1'b1 :
+                  ((rx_wr_ptr + {4'b0, rx_push}) == (rx_rd_ptr + {4'b0, rx_pop}));
+
     //----------------------------------------
     // Manage the timeout. If it is 
     // waiting for a reply for over 400us) begin

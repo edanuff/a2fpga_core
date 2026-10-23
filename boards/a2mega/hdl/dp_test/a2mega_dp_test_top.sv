@@ -25,7 +25,14 @@
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1ns / 1ps
 
-module a2mega_dp_test_top (
+module a2mega_dp_test_top #(
+    // BLIND=1 builds the open-loop (BLIND_SINK) variant for sinks whose AUX
+    // replies the 1.0a3 receiver cannot decode (Fangor, generic dongles,
+    // VMM7100 header-only). Kept as a SEPARATE project
+    // (a2mega_dp_test_blind.gprj -> a2mega_dp_test_blind_top) per ed
+    // 2026-09-02 so the closed-loop test bin stays the default.
+    parameter int BLIND = 0
+) (
     input  logic clk50_in,          // 50 MHz SOM oscillator (V22)
     input  logic button,            // SOM pushbutton, active low (AB13)
 
@@ -65,7 +72,7 @@ module a2mega_dp_test_top (
     //   the AC-coupled DC point + defined idle polarity.
     // ------------------------------------------------------------------
     localparam AUX_TLVDS = 1;   // experiment ON; set 0 to restore proven path
-    localparam AUX_BLIND = (AUX_TLVDS != 0) ? 0 : 1;
+    localparam AUX_BLIND = (BLIND != 0) ? 1 : ((AUX_TLVDS != 0) ? 0 : 1);
 
     logic auxch_in, auxch_out, auxch_tri;
     // AUX pad cell EXTRACTED to the shared dp_aux_pad module (08-30) —
@@ -91,41 +98,57 @@ module a2mega_dp_test_top (
     logic [11:0] cx;
     logic [10:0] cy;
     logic [23:0] rgb;
-    logic [23:0] bar;
 
-    always_comb begin
-        if      (cx < 12'd240)  bar = 24'hFFFFFF;   // white
-        else if (cx < 12'd480)  bar = 24'hFFFF00;   // yellow
-        else if (cx < 12'd720)  bar = 24'h00FFFF;   // cyan
-        else if (cx < 12'd960)  bar = 24'h00FF00;   // green
-        else if (cx < 12'd1200) bar = 24'hFF00FF;   // magenta
-        else if (cx < 12'd1440) bar = 24'hFF0000;   // red
-        else if (cx < 12'd1680) bar = 24'h0000FF;   // blue
-        else                    bar = 24'h000000;   // black
-    end
+    // Timing campaign round 2, cone (b3): the bar/border compares on the
+    // transmitter's cx fed the rgb flops (SET arcs) straight across the
+    // die — the gate's clk_pix floor (+0.34) once the core cones were
+    // gone. Exact restructure: cx is registered locally (cx_q = cx one
+    // cycle ago; syn_keep so it is not merged with the transmitter's
+    // own copy), the bar and x-border decisions are registered from
+    // cx_q with a TWO-pixel lookahead (constants - 2, wrap folded in:
+    // cx_q >= 2198 -> cx+2 wraps to 0/1), and rgb is a 2:1 mux of flops.
+    // rgb(t) = f(cx(t-1)) exactly as before. The y-border flag lags two
+    // cycles, which is invisible: the first two pixels of every line are
+    // x-border white regardless of cy.
+    (* syn_keep = 1, syn_preserve = 1 *) logic [11:0] cx_q = '0;
+    logic [23:0] bar_r = '0;
+    logic        bx_r = 1'b0, by_r = 1'b0;
 
     always_ff @(posedge clk_pixel) begin
-        if (cx < 12'd2 || cx >= 12'd1918 || cy < 11'd2 || cy >= 11'd1078)
-            rgb <= 24'hFFFFFF;                      // frame border
-        else
-            rgb <= bar;
+        cx_q <= cx;
+        if      (cx_q < 12'd238 || cx_q >= 12'd2198) bar_r <= 24'hFFFFFF;   // white
+        else if (cx_q < 12'd478)  bar_r <= 24'hFFFF00;   // yellow
+        else if (cx_q < 12'd718)  bar_r <= 24'h00FFFF;   // cyan
+        else if (cx_q < 12'd958)  bar_r <= 24'h00FF00;   // green
+        else if (cx_q < 12'd1198) bar_r <= 24'hFF00FF;   // magenta
+        else if (cx_q < 12'd1438) bar_r <= 24'hFF0000;   // red
+        else if (cx_q < 12'd1678) bar_r <= 24'h0000FF;   // blue
+        else                      bar_r <= 24'h000000;   // black
+        bx_r <= (cx_q >= 12'd1916);                      // cx+2 < 2 or >= 1918
+        by_r <= (cy < 11'd2 || cy >= 11'd1078);
+        rgb  <= (bx_r || by_r) ? 24'hFFFFFF : bar_r;     // frame border / bars
     end
 
     // ------------------------------------------------------------------
     // Audio: 48 kHz strobe with a quiet ~1 kHz sawtooth so the DP audio
     // path is verifiable on the monitor without being obnoxious
     // ------------------------------------------------------------------
+    // Phase accumulator in the exact reduced fraction: 48 000 / 148 500 000
+    // = 4 / 12 375, so a 15-bit signed accumulator produces the identical
+    // strobe sequence the old 29-bit one did (same arithmetic, divided by
+    // the common factor 12 000). The 29-bit adder was the 138B gate's
+    // clk_pix floor (+0.03 ns, timing campaign round 2).
     logic        clk_audio;
-    logic signed [28:0] aud_acc = -29'sd148_500_000;
+    logic signed [14:0] aud_acc = -15'sd12_375;
     logic [15:0] tone;
     always_ff @(posedge clk_pixel) begin
         clk_audio <= 1'b0;
-        if (!aud_acc[28]) begin
-            aud_acc   <= aud_acc + 29'sd48_000 - 29'sd148_500_000;
+        if (!aud_acc[14]) begin
+            aud_acc   <= aud_acc + 15'sd4 - 15'sd12_375;
             clk_audio <= 1'b1;
             tone      <= tone + 16'd1365;
         end else
-            aud_acc <= aud_acc + 29'sd48_000;
+            aud_acc <= aud_acc + 15'sd4;
     end
     logic [15:0] audio_sample_word [1:0];
     assign audio_sample_word[0] = {{3{tone[15]}}, tone[15:3]};  // -18 dB
@@ -156,6 +179,9 @@ module a2mega_dp_test_top (
     logic [31:0] aux_dbg_snap;   // first-failure snapshot (Z:)
     logic [7:0]  aux_dbg_sink;
     logic [7:0]  aux_dbg_caps;
+    // raw {DPCD 0x001 MAX_LINK_RATE, DPCD 0x002 MAX_LANE_COUNT byte} —
+    // the adapter census's second gate (X: above is the LOSSY decode)
+    logic [15:0] aux_sink_caps;
     logic       hpd_present_w;
     logic [4:0]  drp_idx;
     logic [31:0] drp_data;
@@ -165,6 +191,11 @@ module a2mega_dp_test_top (
     dp_transmitter #(
         .LANE_COUNT     (2),
         .LINK_RATE_MBPS (2700),
+        // same packer schedule as the shipping a2mega core (top.sv sets
+        // SCHED_ROM=1); the default (0, legacy walk) meant this timing
+        // gate was building a packer path the core never uses
+        // (timing campaign round 2)
+        .SCHED_ROM      (1),
         // 1.0a3: AUX receive is electrically dead (AC caps, no FPGA-side
         // bias, LVCMOS thresholds unreachable by a <=1.38 Vpp reply; board
         // not field-modifiable). TX works — run the link policy open-loop.
@@ -268,6 +299,7 @@ module a2mega_dp_test_top (
         .debug_snapshot    (aux_dbg_snap),
         .debug_sink        (aux_dbg_sink),
         .debug_caps        (aux_dbg_caps),
+        .debug_sink_caps   (aux_sink_caps),
         .clk_symbol_out    (clk_sym_w),
         .serdes_status     (serdes_status),
         .hpd_present_out   (hpd_present_w),
@@ -359,6 +391,7 @@ module a2mega_dp_test_top (
     logic [23:0] chst_s0, chst_s;
     logic [27:0] symd_s0, symd_s;
     logic [7:0] snk_s0, snk_s, cap_s0, cap_s;
+    logic [15:0] scap_s0, scap_s;  // raw sink caps {0x001, 0x002}
     logic [5:0] afe_s0, afe_s;
     logic [15:0] ec0_s0, ec0_s, ec1_s0, ec1_s;  // symbol-error counters
     logic [3:0] afe1_s0, afe1_s;   // lane 1 {pe, vs}
@@ -390,6 +423,7 @@ module a2mega_dp_test_top (
         symd_s0 <= sym_delta;       symd_s <= symd_s0;
         snk_s0 <= aux_dbg_sink;     snk_s <= snk_s0;
         cap_s0 <= aux_dbg_caps;     cap_s <= cap_s0;
+        scap_s0 <= aux_sink_caps;   scap_s <= scap_s0;
         afe_s0 <= aux_dbg_afe;      afe_s <= afe_s0;
         afe1_s0 <= aux_dbg_afe1;    afe1_s <= afe1_s0;
         ec0_s0  <= aux_errcnt0;     ec0_s  <= ec0_s0;
@@ -423,7 +457,7 @@ module a2mega_dp_test_top (
         hexch = (n < 4'd10) ? (8'h30 + 8'(n)) : (8'h37 + 8'(n));
     endfunction
 
-    localparam int MSG_LEN = 192;  // six lines; msg_idx is [7:0]
+    localparam int MSG_LEN = 200;  // six lines; msg_idx is [7:0]
     logic [7:0] msg [0:MSG_LEN-1];
     // DRP register-dump interleave: every message slot alternates between
     // the status line and one "CR ii aaaaaa dddddddd" register line (idx
@@ -492,7 +526,9 @@ module a2mega_dp_test_top (
             msg[179]=" "; msg[180]=" "; msg[181]=" "; msg[182]=" ";
             msg[183]=" "; msg[184]=" "; msg[185]=" "; msg[186]=" ";
             msg[187]=" "; msg[188]=" "; msg[189]=" "; msg[190]=" ";
-            msg[191]=8'h0A;
+            msg[191]=" "; msg[192]=" "; msg[193]=" "; msg[194]=" ";
+            msg[195]=" "; msg[196]=" "; msg[197]=" "; msg[198]=" ";
+            msg[199]=8'h0A;
         end else begin
         // ---------------------------------------------------------------
         // FIVE SHORT LINES, each <= 39 printable chars (39-col console
@@ -562,7 +598,13 @@ module a2mega_dp_test_top (
         msg[182]=" "; msg[183]="S"; msg[184]="E"; msg[185]="1"; msg[186]=":";
         msg[187]=hexch(ec1_s[15:12]); msg[188]=hexch(ec1_s[11:8]);
         msg[189]=hexch(ec1_s[7:4]);   msg[190]=hexch(ec1_s[3:0]);
-        msg[191]=8'h0A;
+        // O: raw sink caps {DPCD 0x001 MAX_LINK_RATE, 0x002 lane byte} —
+        // the census second gate (0000 = no DPCD read this HPD session)
+        msg[191]=" "; msg[192]="O"; msg[193]=":";
+        msg[194]=hexch(scap_s[15:12]); msg[195]=hexch(scap_s[11:8]);
+        msg[196]=hexch(scap_s[7:4]);   msg[197]=hexch(scap_s[3:0]);
+        msg[198]=" ";
+        msg[199]=8'h0A;
         end
     end
 
@@ -625,6 +667,27 @@ module a2mega_dp_test_top (
     logic [27:0] sym_cnt = '0, sym_last = '0, sym_delta = '0;
     logic [2:0]  tgl_sync = '0;
     logic        freq_ok = 1'b0;
+    // TIMING ROUND 2 CONE (b): the two 28-bit magnitude compares below
+    // were dp_test's last violating family (-0.52 .. -1.62 across draws).
+    // Each compare is split into registered 14-bit half results
+    // (A > B  <=>  Ah > Bh || (Ah == Bh && Al > Bl)) and combined a cycle
+    // later — three cycles of latency on a 1 Hz instrument, zero behavior
+    // change. 135 M ± ~2%: 132.3M .. 137.7M
+    localparam logic [27:0] FREQ_LO = 28'd132_300_000;
+    localparam logic [27:0] FREQ_HI = 28'd137_700_000;
+    // 7-bit slices of the four 14-bit compares (round 2 cone (b), second
+    // cut: the 14-bit slice compare still landed on the fq_gt_lo flop's
+    // reset pin at +0.07 ns; sym_delta is static for a full second so one
+    // more stage costs nothing)
+    logic fq_gt_hi_h = 1'b0, fq_gt_hi_l = 1'b0;         // [27:21] > / [20:14] >  FREQ_LO
+    logic fq_eq_lo_h = 1'b0, fq_eq_lo_l = 1'b0;         // [27:21] == / [20:14] == FREQ_LO
+    logic fq_gt_lo_h = 1'b0, fq_gt_lo_e = 1'b0, fq_gt_lo_l = 1'b0;   // [13:7] > / == , [6:0] > FREQ_LO
+    logic fq_lt_hi_h = 1'b0, fq_lt_hi_l = 1'b0;         // [27:21] < / [20:14] <  FREQ_HI
+    logic fq_eq_hi_h = 1'b0, fq_eq_hi_l = 1'b0;         // [27:21] == / [20:14] == FREQ_HI
+    logic fq_lt_lo_h = 1'b0, fq_lt_lo_e = 1'b0, fq_lt_lo_l = 1'b0;   // [13:7] < / == , [6:0] < FREQ_HI
+    logic fq_gt_hi = 1'b0, fq_eq_lo_hi = 1'b0, fq_gt_lo = 1'b0;
+    logic fq_lt_hi = 1'b0, fq_eq_hi_hi = 1'b0, fq_lt_lo = 1'b0;
+    logic fq_gt_r = 1'b0, fq_lt_r = 1'b0;
     logic        clk_sym_w;
     always_ff @(posedge clk_sym_w) begin
         sym_cnt  <= sym_cnt + 28'd1;
@@ -634,11 +697,34 @@ module a2mega_dp_test_top (
             sym_last  <= sym_cnt;
         end
         // pipelined vs the snapshot: sym_delta is static for a full 1 s
-        // window, so comparing it a cycle later costs nothing and keeps
-        // the wide subtract-compare off the single-cycle 135 MHz path.
-        // 135 M ± ~2%: 132.3M .. 137.7M
-        freq_ok <= (sym_delta > 28'd132_300_000) &&
-                   (sym_delta < 28'd137_700_000);
+        // window, so comparing it later costs nothing (cone (b): see the
+        // declaration block above for the half-compare split).
+        // stage 1: 7-bit slice compares
+        fq_gt_hi_h  <= (sym_delta[27:21] >  FREQ_LO[27:21]);
+        fq_gt_hi_l  <= (sym_delta[20:14] >  FREQ_LO[20:14]);
+        fq_eq_lo_h  <= (sym_delta[27:21] == FREQ_LO[27:21]);
+        fq_eq_lo_l  <= (sym_delta[20:14] == FREQ_LO[20:14]);
+        fq_gt_lo_h  <= (sym_delta[13:7]  >  FREQ_LO[13:7]);
+        fq_gt_lo_e  <= (sym_delta[13:7]  == FREQ_LO[13:7]);
+        fq_gt_lo_l  <= (sym_delta[6:0]   >  FREQ_LO[6:0]);
+        fq_lt_hi_h  <= (sym_delta[27:21] <  FREQ_HI[27:21]);
+        fq_lt_hi_l  <= (sym_delta[20:14] <  FREQ_HI[20:14]);
+        fq_eq_hi_h  <= (sym_delta[27:21] == FREQ_HI[27:21]);
+        fq_eq_hi_l  <= (sym_delta[20:14] == FREQ_HI[20:14]);
+        fq_lt_lo_h  <= (sym_delta[13:7]  <  FREQ_HI[13:7]);
+        fq_lt_lo_e  <= (sym_delta[13:7]  == FREQ_HI[13:7]);
+        fq_lt_lo_l  <= (sym_delta[6:0]   <  FREQ_HI[6:0]);
+        // stage 2: 14-bit results
+        fq_gt_hi    <= fq_gt_hi_h || (fq_eq_lo_h && fq_gt_hi_l);
+        fq_eq_lo_hi <= fq_eq_lo_h && fq_eq_lo_l;
+        fq_gt_lo    <= fq_gt_lo_h || (fq_gt_lo_e && fq_gt_lo_l);
+        fq_lt_hi    <= fq_lt_hi_h || (fq_eq_hi_h && fq_lt_hi_l);
+        fq_eq_hi_hi <= fq_eq_hi_h && fq_eq_hi_l;
+        fq_lt_lo    <= fq_lt_lo_h || (fq_lt_lo_e && fq_lt_lo_l);
+        // stage 3/4: 28-bit results, window
+        fq_gt_r     <= fq_gt_hi || (fq_eq_lo_hi && fq_gt_lo);
+        fq_lt_r     <= fq_lt_hi || (fq_eq_hi_hi && fq_lt_lo);
+        freq_ok     <= fq_gt_r && fq_lt_r;
     end
 
     // ------------------------------------------------------------------

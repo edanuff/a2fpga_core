@@ -67,9 +67,35 @@ module scanline_dim #(
     wire [10:0] y_next_w = (screen_y_i == V_TOTAL - 11'd1) ? 11'd0
                                                            : screen_y_i + 11'd1;
 
+    // Timing campaign round 2, cone (m): both trigger terms are
+    // pre-registered, exactly. screen_x_i is sequential, so
+    // x_trig_r <= (x + 1 == H_TRIGGER) is true precisely in the cycle
+    // where screen_x_i == H_TRIGGER (2199 + 1 never matches); screen_y_i
+    // is constant for the whole line at the trigger column, so y_lock_r
+    // registered from y_next_w one cycle earlier equals the live compare
+    // there. The compare tree used to run straight from the overlay's cy
+    // copy into phase_r's reset (+0.51 ns at 148.5 MHz in a 60K roll).
+    // (138B follow-up) y_lock_r's own input cone — 11-bit increment, wrap
+    // mux, then the compare — was the clk_pix floor on the 138B die
+    // (+0.08 ns, longer route from the shared line counter). Same test,
+    // rewritten as an equality against a registered v_border-1 plus the
+    // explicit wrap case (y == V_TOTAL-1 locks iff v_border == 0):
+    // y_next == v_border  <=>  y == v_border-1  or  (y == V_TOTAL-1 and
+    // v_border == 0). v_border is quasi-static (mode switches only), so
+    // the one-cycle-old copy is equal to the live value at every trigger.
+    reg x_trig_r = 1'b0;
+    reg y_lock_r = 1'b0;
+    reg [10:0] v_border_m1_r = 11'h7FF;
     always @(posedge clk_i) begin
-        if (screen_x_i == H_TRIGGER) begin
-            if (y_next_w == v_border_i)
+        x_trig_r      <= (screen_x_i + 12'd1 == H_TRIGGER);
+        v_border_m1_r <= v_border_i - 11'd1;
+        y_lock_r      <= (screen_y_i == v_border_m1_r) ||
+                         ((screen_y_i == V_TOTAL - 11'd1) && (v_border_i == 11'd0));
+    end
+
+    always @(posedge clk_i) begin
+        if (x_trig_r) begin                 // screen_x_i == H_TRIGGER
+            if (y_lock_r)                   // y_next_w == v_border_i
                 phase_r <= 3'd0;   // lock to the source-line grid
             else
                 phase_r <= (phase_r >= v_scale_i - 3'd1) ? 3'd0

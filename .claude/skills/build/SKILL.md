@@ -39,6 +39,10 @@ same script directly).
 - Never invoke `gw_sh` with `-exit -e` or from `~/bin/` — only the pipe method (the script
   uses it). Toolchain setup: [docs/setup-gowin-cli.md](../../../docs/setup-gowin-cli.md).
 - macOS gw_sh path is the default; override with `GW_SH=/path/to/gw_sh` if needed.
-- GW5AT (a2mega) PnR has run-to-run variance — a clean design can occasionally show
-  violations; re-run before assuming a regression. See [docs/gotchas.md](../../../docs/gotchas.md).
+- GW5A (a2mega) PnR has run-to-run variance (placement reseeds every full-core build). A
+  violation that appears on one roll is a marginal cone to fix structurally, not a reason to
+  re-run until it passes. See [docs/gotchas.md](../../../docs/gotchas.md).
+- a2mega SDCs carry a 0.5 ns setup margin (`set_clock_uncertainty`): "0 violations" means
+  ≥ 0.5 ns of real margin on every path, and reported slack is real slack − 0.5 ns. Report
+  the numbers as printed; do not suggest removing the margin to clear a violation.
 - Power-cycling is a *flashing* concern (see the `flash` skill), not a build concern.

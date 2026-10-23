@@ -521,26 +521,58 @@ module framebuffer_1080p #(
         fb_line_last_r  <= (fb_line_px_r == fb_height_px_r[8:0] - 9'd1);
     end
 
+    // TIMING ROUND 2 CONE (g): the tracker used the RAW 11-bit compares
+    // (cy0_r != cy_prev_px_r, cy0_r == 0) as its CE/reset cone — the
+    // clk_pix path "cy_prev_px_r -> v_approach_px_r/RESET" (-0.205 in a
+    // 60K roll). Both compares are registered (cy_changed_px_r already
+    // existed; cy_zero_px_r is new) and the tracker acts one cycle later.
+    // Exact: all tracker events fire in blanking with hundreds of cycles
+    // of slack, and the at_border/at_lead/fb_line_last flags are stable
+    // across the line, so they read the same value a cycle on.
+    reg cy_zero_px_r;
+    // Timing campaign round 2, cone (o): even with registered event flags
+    // the tracker's enables combined seven of them plus the phase compare
+    // in one cycle, and "v_active_px_r -> v_active_px_r/CE" (a flop
+    // clearing itself through that cone) landed at +0.00 ns in a 60K roll.
+    // One more stage: the decision (zero / border / lead / step, phase
+    // last, line last) is registered at the event cycle and applied the
+    // cycle after, so every tracker enable is a one-level function of
+    // flops. Exact by the same argument as above: every input is stable
+    // for the whole line, the tracker itself is the only writer of the
+    // state it reads, and events fire in blanking hundreds of cycles
+    // before any consumer. The export toggle keeps its original timing.
+    reg evt_q = 1'b0;
+    reg d_zero_q = 1'b0, d_border_q = 1'b0, d_lead_q = 1'b0, d_step_q = 1'b0;
+    reg d_phlast_q = 1'b0, d_linelast_q = 1'b0;
     always @(posedge clk_pixel) begin
         cy_prev_px_r    <= cy0_r;
         cy_changed_px_r <= (cy0_r != cy_prev_px_r);
-        if (cy0_r != cy_prev_px_r) begin
-            if (cy0_r == 11'd0) begin
+        cy_zero_px_r    <= (cy0_r == 11'd0);
+        // decision stage (values as the tracker used to read them)
+        evt_q        <= cy_changed_px_r;
+        d_zero_q     <= cy_zero_px_r;
+        d_border_q   <= !cy_zero_px_r && at_border_nxt_r;
+        d_lead_q     <= !cy_zero_px_r && !at_border_nxt_r && at_lead_nxt_r;
+        d_step_q     <= !cy_zero_px_r && !at_border_nxt_r && !at_lead_nxt_r && v_active_px_r;
+        d_phlast_q   <= (v_phase_px_r == 3'(V_SCALE-1));
+        d_linelast_q <= fb_line_last_r;
+        if (evt_q) begin
+            if (d_zero_q) begin
                 v_active_px_r   <= 1'b0;
                 v_approach_px_r <= 1'b0;
                 v_phase_px_r    <= 3'd0;
                 fb_line_px_r    <= 9'd0;
-            end else if (at_border_nxt_r) begin
+            end else if (d_border_q) begin
                 v_active_px_r   <= 1'b1;
                 v_approach_px_r <= 1'b0;
                 v_phase_px_r    <= 3'd0;
                 fb_line_px_r    <= 9'd0;
-            end else if (at_lead_nxt_r) begin
+            end else if (d_lead_q) begin
                 v_approach_px_r <= 1'b1;
-            end else if (v_active_px_r) begin
-                if (v_phase_px_r == 3'(V_SCALE-1)) begin
+            end else if (d_step_q) begin
+                if (d_phlast_q) begin
                     v_phase_px_r <= 3'd0;
-                    if (fb_line_last_r)
+                    if (d_linelast_q)
                         v_active_px_r <= 1'b0;
                     else
                         fb_line_px_r <= fb_line_px_r + 9'd1;
@@ -1265,17 +1297,18 @@ module framebuffer_1080p #(
     // Fix: explicitly register the BSRAM read output on clk_pixel, and delay
     // the control signals to match.
 
-    // Horizontal tracker for the pixel at cx+3 (the 3-cycle read pipeline
-    // lookahead): H_SCALE phase + source-x advance incrementally from the
+    // Horizontal tracker for the pixel at cx+4 (the 4-cycle read pipeline
+    // lookahead — timing round 2 cone (i) added the address-copy stage
+    // 1b below): H_SCALE phase + source-x advance incrementally from the
     // one-shot equality trigger at the left border — no divider, no wide
     // subtract in the address path.
-    // Trigger pre-registered one cycle earlier (+5 == border at cycle N
-    // implies +4 == border at N+1; cx is monotonic and the border is far
+    // Trigger pre-registered one cycle earlier (+6 == border at cycle N
+    // implies +5 == border at N+1; cx is monotonic and the border is far
     // from the line wrap, so the identity is exact). The 12-bit equality
     // then never appears in the address/CE cone.
     reg h_trigger_r;
     always @(posedge clk_pixel)
-        h_trigger_r <= (cx0_r + 12'd5 == h_border_px_r);
+        h_trigger_r <= (cx0_r + 12'd6 == h_border_px_r);
     wire        h_trigger_w = h_trigger_r;
 
     reg        h_act_r;
@@ -1284,6 +1317,15 @@ module framebuffer_1080p #(
     reg        h_act_n;
     reg [1:0]  h_phase_n;
     reg [9:0]  fb_x_n;
+
+    // Timing round 2 cone (i2): the end-of-line test "fb_x_r ==
+    // fb_width - 1" (subtract + 10-bit compare) sat inside lb_rd_addr's
+    // CE cone (fb_width_px_r -> lb_rd_addr CE, +0.45 ns at 148.5 MHz).
+    // fb_x_r takes fb_x_n every cycle, so the flag is registered from the
+    // next value and is exact; fb_width is quasi-static (mode change).
+    reg [9:0]  fb_width_m1_px_r = 10'd0;
+    reg [9:0]  fb_width_m2_px_r = 10'd0;
+    reg        x_last_r = 1'b0;
 
     always @* begin
         h_act_n   = h_act_r;
@@ -1296,7 +1338,7 @@ module framebuffer_1080p #(
         end else if (h_act_r) begin
             if (h_phase_r == 2'(H_SCALE-1)) begin
                 h_phase_n = 2'd0;
-                if (fb_x_r == fb_width_px_r[9:0] - 10'd1)
+                if (x_last_r)
                     h_act_n = 1'b0;
                 else
                     fb_x_n = fb_x_r + 10'd1;
@@ -1314,6 +1356,18 @@ module framebuffer_1080p #(
         h_act_r   <= h_act_n;
         h_phase_r <= h_phase_n;
         fb_x_r    <= fb_x_n;
+        fb_width_m1_px_r <= fb_width_px_r[9:0] - 10'd1;
+        fb_width_m2_px_r <= fb_width_px_r[9:0] - 10'd2;
+        // 138B durability: the same next-value test written on the flag's
+        // own algebra instead of on the fb_x_n mux — trigger: x becomes 0
+        // (last iff width == 1); advance: x becomes x+1 (last iff x ==
+        // width-2); otherwise x holds and so does the flag. Identical to
+        // (fb_x_n == width-1) except during the one line in which the
+        // width itself changes (mode switch), which the next trigger
+        // reloads. Removes the mux from the compare cone (+0.07 on 138B).
+        x_last_r <= h_trigger_w ? (fb_width_m1_px_r == 10'd0) :
+                    (h_act_r && (h_phase_r == 2'(H_SCALE-1)) && !x_last_r)
+                        ? (fb_x_r == fb_width_m2_px_r) : x_last_r;
         // No else-zero: the address is a don't-care outside the active
         // window (output muxes on in_active_px_r), and the zeroing put a
         // RESET arc on 13 flops at the end of the trigger cone.
@@ -1322,7 +1376,22 @@ module framebuffer_1080p #(
         in_active_s1_r <= h_act_n && in_v_active_px_w;
     end
 
-    // Pipeline stage 2: BSRAM read register + delayed control (posedge N+1)
+    // Pipeline stage 1b (timing round 2 cone (i)): a plain, CE-free copy of
+    // the read address right before the BSRAM. lb_rd_addr carries a CE cone
+    // (h_act_n && in_v_active), so the placer parks it by the walker logic —
+    // far from the several BSRAM blocks the 8192-entry line buffer spans —
+    // and "lb_rd_addr -> line_buf ADB" (routing + BSRAM address setup) sat
+    // at +0.004..+0.303 across 60K rolls. This copy has no logic on either
+    // side and can be placed at the blocks. +1 read latency, compensated by
+    // the cx+4 lookahead / +6 trigger above and the extra active-flag stage.
+    (* syn_keep = 1, syn_preserve = 1 *) reg [12:0] lb_rd_addr_q;
+    reg in_active_s1b_r;
+    always @(posedge clk_pixel) begin
+        lb_rd_addr_q    <= lb_rd_addr;
+        in_active_s1b_r <= in_active_s1_r;
+    end
+
+    // Pipeline stage 2: BSRAM read register + delayed control (posedge N+2)
     // This gives the synthesizer a clear clk_pixel read clock for the BSRAM
     // and ensures deterministic 1-cycle read latency.
     reg [COLOR_BITS-1:0] lb_rd_data_r;
@@ -1330,8 +1399,8 @@ module framebuffer_1080p #(
 
     always @(posedge clk_pixel) begin
         lb_rd_data_r <= (TEST_PATTERN == 2) ?
-            test_pixel(lb_rd_addr[9:0]) : line_buf[lb_rd_addr];
-        in_active_px_r <= in_active_s1_r;
+            test_pixel(lb_rd_addr_q[9:0]) : line_buf[lb_rd_addr_q];
+        in_active_px_r <= in_active_s1b_r;
     end
 
     // Pipeline stage 3 (08-30 structural timing): register the BSRAM

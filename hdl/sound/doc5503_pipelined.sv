@@ -936,6 +936,16 @@ module doc5503_pipelined #(
     reg [23:0] la_acc_r;
     reg [15:0] w1_addr_r;
     reg [15:0] la_addr_r;
+    // Timing campaign round 2, cone (h): the consume-side expected address
+    // (barrel shift + mask of curr_acc_r by the curr_rts_r-derived shift)
+    // was recomputed inside OSC_CONSUME in series with the 16:1 lane mux,
+    // tag compare and consume rules — "curr_rts_r -> ram_wds_din_r /
+    // osc_state_r" at 17 ns of a 18.5 ns clk_logic period (+0.29 ns in a
+    // 60K roll). curr_* are stable from OSC_LOAD_REGISTERS, so the same
+    // value (consume_pre_addr_w, already used for the cache-RAM read
+    // address) is registered at OSC_LOAD_NEXT_CONTROL and consumed a state
+    // later. Exact (sim mirror check in osc_consume).
+    reg [15:0] exp_addr_r;
 
     reg host_request_pending_r = 1'b0;
     reg device_response_pending_r = 1'b0;
@@ -1597,6 +1607,14 @@ module doc5503_pipelined #(
         // (masking once after both adds is exact — see osc_acc's original
         // note: the sum cannot cross the wrap boundary twice)
         w1_addr_r <= wave_addr_f(acc_next_r);
+        // cone (h): this slot's expected address. Called directly rather
+        // than via consume_pre_addr_w: wave_addr_f reads curr_rts_r /
+        // curr_wtp_r as module globals, so a continuous assignment with
+        // only curr_acc_r as the argument is NOT re-evaluated by event
+        // simulators when the other two change (same acc, different
+        // oscillator) — synthesis is unaffected, but the sim mirror check
+        // in osc_consume caught the stale wire value.
+        exp_addr_r <= wave_addr_f(curr_acc_r);
         la_acc_r <= 24'(acc_next_r + {curr_fh_r, curr_fl_r} + {curr_fh_r, curr_fl_r})
                     & curr_acc_mask_w;
         osc_state_r <= OSC_CONSUME;
@@ -1611,7 +1629,7 @@ module doc5503_pipelined #(
         // {curr_osc_r, expected_line_w[0]} — the synchronous RAM read was
         // addressed via cram_raddr_w and sampled on the way into this
         // state (see the cache-RAM wiring comment).
-        automatic logic [15:0] expected_addr_w = wave_addr_f(curr_acc_r);
+        automatic logic [15:0] expected_addr_w = exp_addr_r;   // registered at LOAD_NEXT (cone h)
         automatic logic [11:0] expected_line_w = expected_addr_w[15:4];
         automatic logic [3:0]  lane_w = expected_addr_w[3:0];
         automatic logic [5:0]  entry_idx_w = {curr_osc_r, expected_line_w[0]};
@@ -1620,6 +1638,15 @@ module doc5503_pipelined #(
         automatic logic entry_run_w = cache_src_run_r[entry_idx_w];
         automatic logic entry_match_w = (entry_tag_w == expected_line_w);
         automatic logic [7:0] entry_data_w = cram_rdata_r[8*lane_w +: 8];
+
+        // synthesis translate_off
+        // cone (h): the registered expected address must equal the live
+        // derivation (curr_* are stable from OSC_LOAD_REGISTERS)
+        if (exp_addr_r !== wave_addr_f(curr_acc_r)) begin
+            $display("FATAL: doc5503_pipelined exp_addr_r diverged from wave_addr_f(curr_acc_r) osc=%0d", curr_osc_r);
+            $fatal(1);
+        end
+        // synthesis translate_on
 
         // Issue-decision stage 3: lookahead address (barrel shift of the
         // staged lookahead accumulator). Unconditional — inputs stable.

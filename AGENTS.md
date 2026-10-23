@@ -17,7 +17,10 @@ build environment") — it detects what's installed and guides the rest. Referen
    from `~/bin/`. Before your first build, **read [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md)**.
 2. **Always check timing after every place & route.** A build is not "done" until you
    confirm 0 violated endpoints, Fmax ≥ constraint, and TNS = 0.000. See
-   [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md#checking-timing).
+   [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md#checking-timing). A violation is a
+   cone to fix structurally, never something to re-roll away or to clear by loosening the
+   SDC; on a2mega the SDCs already include a 0.5 ns setup margin, so reported slack is
+   real slack − 0.5 ns (see [docs/gotchas.md](docs/gotchas.md)).
 3. **New HDL is SystemVerilog (`.sv`)**, 4-space indent, `lower_snake_case` files/modules,
    `UPPER_SNAKE_CASE` params. Full rules: [docs/conventions.md](docs/conventions.md).
 4. **`.gprj` paths must be relative**, never absolute. New files must be added to the

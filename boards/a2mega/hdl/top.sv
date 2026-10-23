@@ -137,6 +137,28 @@ module top #(
     input         esp_sclk,
     inout  [7:0]  esp_data
 
+`ifdef GS_SOCKET
+    // IIgs CPU socket: 65C816 drop-in through the 1.0a3 level shifters
+    // (138B builds only - hdl/twgs/gs_socket_defines.v; see
+    // docs/gs_socket_65816_scoping.md and hdl/twgs/gs_socket_phy.sv)
+    ,
+    input         gs_ph2,
+    input         gs_rdy,
+    input         gs_irq_n,
+    input         gs_nmi_n,
+    input         gs_res_n,
+    input         gs_abort_n,
+    input         gs_be,
+    inout  [7:0]  gs_d,
+    output [15:0] gs_a,
+    output        gs_rw,
+    output        gs_vp,
+    output        gs_rdy_out,
+    output        gs_d_dir,
+    output        gs_data_oe_n,
+    output        gs_addr_oe_n,
+    output        gs_oe_n
+`endif
 );
 
     // Clocks — all PLLs live in board_plls, a per-SOM-variant module:
@@ -1416,15 +1438,20 @@ module top #(
     // 48 kHz strobe from the 148.5 MHz pixel clock via a sign-bit phase
     // accumulator (exact for any ratio; 148.5M/48k = 3093.75 is not an
     // integer, so the old divider+frac scheme no longer applies)
+    // Kept in the exact reduced fraction 48 000 / 148 500 000 = 4 / 12 375
+    // (timing campaign round 2, 138B durability): a 15-bit signed
+    // accumulator produces the identical strobe sequence the 29-bit one
+    // did (same arithmetic divided by the common factor 12 000); the
+    // 29-bit adder was a clk_pix floor on the 138B (+0.02 ns).
     logic clk_audio;
-    logic signed [28:0] aud_acc = -29'sd148_500_000;
+    logic signed [14:0] aud_acc = -15'sd12_375;
     always_ff @(posedge clk_pixel_w) begin
         clk_audio <= 1'b0;
-        if (!aud_acc[28]) begin
-            aud_acc   <= aud_acc + 29'sd48_000 - 29'sd148_500_000;
+        if (!aud_acc[14]) begin
+            aud_acc   <= aud_acc + 15'sd4 - 15'sd12_375;
             clk_audio <= 1'b1;
         end else begin
-            aud_acc <= aud_acc + 29'sd48_000;
+            aud_acc <= aud_acc + 15'sd4;
         end
     end
 
@@ -1494,6 +1521,9 @@ module top #(
     wire [15:0] dp_errcnt0_w, dp_errcnt1_w;
     wire        dp_drp_clk_w;   // cm_life/DRP clock tap (freq-meter diag)
     wire [7:0]  dp_serdes_status_w;
+    // raw {DPCD 0x001 MAX_LINK_RATE, DPCD 0x002 MAX_LANE_COUNT byte} from
+    // the AUX caps read — the adapter census's second gate (telnet 'd')
+    wire [15:0] dp_sink_caps_w;
 
     dp_transmitter #(
         .LANE_COUNT     (2),
@@ -1555,6 +1585,7 @@ module top #(
         .debug_drp_clk     (dp_drp_clk_w),
         .debug_errcnt0     (dp_errcnt0_w),
         .debug_errcnt1     (dp_errcnt1_w),
+        .debug_sink_caps   (dp_sink_caps_w),
         // DRP register-readback debug bridge (used interactively by the
         // dp_test bitstream; idle here — index parked, outputs unread)
         .drp_dbg_idx       (5'd0),
@@ -1601,6 +1632,19 @@ module top #(
         ddr3_retry_sync0 <= ddr3_retry_cnt_r;  ddr3_retry_sync1 <= ddr3_retry_sync0;
         ddr3_seq_sync0   <= {ddr3_rst_n_r, pll_lock_w, init_calib_complete_w, ddr3_seq_state_r};
         ddr3_seq_sync1   <= ddr3_seq_sync0;
+    end
+
+    // DP link telemetry for the ESP32 census/debug regs 0x3C-0x3F
+    // (clk100 -> clk_logic; all quasi-static — caps latch once per attach,
+    // status/serdes bits change on human timescales)
+    reg [15:0] dp_caps_sync0, dp_caps_sync1;
+    reg [7:0]  dp_serdes_sync0, dp_serdes_sync1;
+    reg [2:0]  dp_stat_sync0, dp_stat_sync1;
+    always @(posedge clk_logic_w) begin
+        dp_caps_sync0   <= dp_sink_caps_w;      dp_caps_sync1   <= dp_caps_sync0;
+        dp_serdes_sync0 <= dp_serdes_status_w;  dp_serdes_sync1 <= dp_serdes_sync0;
+        dp_stat_sync0   <= {dp_wedge_w, dp_video_live_w, dp_link_established_w};
+        dp_stat_sync1   <= dp_stat_sync0;
     end
 
     // =========================================================================
@@ -1841,7 +1885,14 @@ module top #(
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),
         .ENABLE(1'b1),
-        .X_OFFSET(16),
+        // timing round 2 cones (e)+(k)+(k2): three extra pipeline stages
+        // (offset subtracts registered ahead of the region compares; font
+        // ROM read split into glyph/row selects; font-row bit select
+        // registered before the output muxes); X_OFFSET 16 -> 13
+        // compensates their three pixels of shift so the overlay stays
+        // where it was
+        .OUT_PIPE(1),
+        .X_OFFSET(13),
         .Y_OFFSET(24)
     ) debug_overlay (
         .clk_i          (clk_pixel_w),
@@ -1928,6 +1979,15 @@ module top #(
         dbg_resp_ovfl_sync1 <= dbg_resp_ovfl_sync0;
     end
 
+    // IIgs CPU-socket control/telemetry window (regs 0x5F index / 0x4F data)
+    wire [7:0]   gs_ctrl_w;        // {clear,0,0,0,0,listen,sweep_en,arm}
+    wire [3:0]   gs_out_extra_w;   // address-delay sweep
+    wire [4:0]   gs_hold_tap_w;    // data-hold sweep
+    wire [159:0] gs_tele_w;        // telemetry, connector domain
+    wire [5:0]   gs_trace_idx_w;   // bus-trace read index
+    wire [23:0]  gs_trig_addr_w;   // trace trigger address
+    wire [47:0]  gs_trace_w;       // {frozen, 0, wptr, entry}
+
     // Octal SPI connector instance
     esp32_ospi_connector #(
         .USE_SYNC(1),
@@ -1981,7 +2041,18 @@ module top #(
         .dbg_usb_cnt_rdy_i(usb_cnt_rdy_sync1),
         .dbg_ddr3_retry_i(ddr3_retry_sync1),
         .dbg_ddr3_seq_i({3'b0, ddr3_seq_sync1}),
+        .dbg_dp_caps_i(dp_caps_sync1),
+        .dbg_dp_status_i({5'b0, dp_stat_sync1}),
+        .dbg_dp_serdes_i(dp_serdes_sync1),
         .ddr3_reinit_tgl_o(ddr3_reinit_tgl_w),
+
+        .gs_ctrl_o(gs_ctrl_w),
+        .gs_out_extra_o(gs_out_extra_w),
+        .gs_hold_tap_o(gs_hold_tap_w),
+        .gs_tele_i(gs_tele_w),
+        .gs_trace_idx_o(gs_trace_idx_w),
+        .gs_trig_addr_o(gs_trig_addr_w),
+        .gs_trace_i(gs_trace_w),
 
         .dbg_mem_addr_o(dbg_mem_addr_w),
         .dbg_mem_go_o(dbg_mem_go_w),
@@ -2002,6 +2073,96 @@ module top #(
         .osd_addr_i(osd_vram_addr_w),
         .osd_data_o(osd_vram_data_w)
     );
+
+    // =========================================================================
+    // IIgs CPU-socket 65C816 (drop-in iteration) - 138B builds only
+    // =========================================================================
+`ifdef GS_SOCKET
+    // Sequencer clock: a ~110 MHz PLL of its own (gowin_gs_pll), so the
+    // socket adds nothing to clk100, whose AUX ladder sits on the timing
+    // knife edge (sharing clk100 cost a roll: AUX at -1.07 ns).  The die's 8
+    // PRIMARY clock nets are then all taken and the fabric-routed PHI2 clock
+    // lands on a long-wire net; that is acceptable at 2.86 MHz - the routing
+    // thrash first blamed on it was the core's inferred latch (see
+    // hdl/twgs/65C816/README.md).  The core itself runs on PHI2.
+    wire clk_gs_w, gs_pll_lock_w;
+    gowin_gs_pll i_gs_pll (.lock(gs_pll_lock_w), .clkout(clk_gs_w), .clkin(clk));
+
+    // control: connector (clk_logic) -> sequencer domain, quasi-static
+    reg [7:0] gs_ctrl_s0, gs_ctrl_s1;
+    reg [3:0] gs_oe_s0, gs_oe_s1;
+    reg [4:0] gs_ht_s0, gs_ht_s1;
+    reg [23:0] gs_ta_s0, gs_ta_s1;
+    always @(posedge clk_gs_w) begin
+        gs_ctrl_s0 <= gs_ctrl_w;      gs_ctrl_s1 <= gs_ctrl_s0;
+        gs_oe_s0   <= gs_out_extra_w; gs_oe_s1   <= gs_oe_s0;
+        gs_ht_s0   <= gs_hold_tap_w;  gs_ht_s1   <= gs_ht_s0;
+        gs_ta_s0   <= gs_trig_addr_w; gs_ta_s1   <= gs_ta_s0;
+    end
+
+    wire [7:0]  gs_d_o_w;
+    wire        gs_d_oe_w;
+    assign gs_d = gs_d_oe_w ? gs_d_o_w : 8'bz;
+
+    wire [7:0]  gs_status_w;
+    wire [31:0] gs_cycle_w;
+    wire [15:0] gs_stall_w, gs_be_w, gs_hmis_w, gs_hsmp_w, gs_per_w, gs_high_w;
+    wire [23:0] gs_last_w;
+    wire [39:0] gs_trace_data_w;
+    wire [5:0]  gs_trace_wptr_w;
+    wire        gs_trace_frozen_w, gs_trace_trigd_w;
+
+    gs_socket_ctl i_gs_socket (
+        .clk(clk_gs_w),
+        .rst_n(device_reset_n_w & gs_pll_lock_w),
+        .arm_i(gs_ctrl_s1[0]),
+        .listen_i(gs_ctrl_s1[2]),
+        .sweep_en_i(gs_ctrl_s1[1]),
+        .out_extra_i(gs_oe_s1),
+        .hold_tap_i(gs_ht_s1),
+        .clear_i(gs_ctrl_s1[7]),
+        .force_slow_i(gs_ctrl_s1[5]),
+        .trace_freeze_i(gs_ctrl_s1[3]),
+        .trace_trig_en_i(gs_ctrl_s1[4]),
+        .trace_trig_mode_i(gs_ctrl_s1[6]), .trace_trig_addr_i(gs_ta_s1),
+        .rd_clk(clk_logic_w), .trace_idx_i(gs_trace_idx_w),
+        .trace_data_o(gs_trace_data_w), .trace_wptr_o(gs_trace_wptr_w),
+        .trace_frozen_o(gs_trace_frozen_w), .trace_trigd_o(gs_trace_trigd_w),
+        .gs_ph2_i(gs_ph2), .gs_rdy_i(gs_rdy), .gs_irq_n_i(gs_irq_n), .gs_nmi_n_i(gs_nmi_n),
+        .gs_res_n_i(gs_res_n), .gs_abort_n_i(gs_abort_n), .gs_be_i(gs_be),
+        .gs_d_i(gs_d), .gs_d_o(gs_d_o_w), .gs_d_oe_o(gs_d_oe_w),
+        .gs_a_o(gs_a), .gs_rw_o(gs_rw), .gs_vp_o(gs_vp), .gs_rdy_out_o(gs_rdy_out),
+        .gs_d_dir_o(gs_d_dir), .gs_data_oe_n_o(gs_data_oe_n), .gs_addr_oe_n_o(gs_addr_oe_n),
+        .gs_ctl_oe_n_o(gs_oe_n),
+        .status_o(gs_status_w), .cycle_count_o(gs_cycle_w), .stall_count_o(gs_stall_w),
+        .be_count_o(gs_be_w), .hold_mismatch_o(gs_hmis_w), .hold_samples_o(gs_hsmp_w),
+        .ph2_period_o(gs_per_w), .ph2_high_o(gs_high_w), .last_addr_o(gs_last_w)
+    );
+
+    // telemetry: sequencer domain -> connector domain (two flops per bit;
+    // a wide counter may tear between bytes, as the other debug counters do)
+    reg [159:0] gs_tele_s0, gs_tele_s1;
+    always @(posedge clk_logic_w) begin
+        // STATUS bits 1:0 carry the SLOT-side /DMA and /RDY levels so the FPI's
+        // BE/RDY handshake can be matched against what the slots are asserting.
+        gs_tele_s0 <= {gs_last_w, gs_high_w, gs_per_w, gs_hsmp_w, gs_hmis_w, gs_be_w, gs_stall_w, gs_cycle_w,
+                       gs_status_w[7:2], a2_dma_n, a2_rdy_n};
+        gs_tele_s1 <= gs_tele_s0;
+    end
+    assign gs_tele_w = gs_tele_s1;
+    // trace: the entry is read in clk_logic already; the write pointer is
+    // two-flopped (it is static while the ring is frozen, which is when it
+    // is read).
+    reg [7:0] gs_twp_s0, gs_twp_s1;
+    always @(posedge clk_logic_w) begin
+        gs_twp_s0 <= {gs_trace_frozen_w, gs_trace_trigd_w, gs_trace_wptr_w};
+        gs_twp_s1 <= gs_twp_s0;
+    end
+    assign gs_trace_w = {gs_twp_s1, gs_trace_data_w};
+`else
+    assign gs_tele_w = 160'd0;
+    assign gs_trace_w = 48'd0;
+`endif
 
     /*
     // Data bus IOBUF instantiation

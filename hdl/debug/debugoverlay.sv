@@ -3,7 +3,16 @@ module DebugOverlay #(
     parameter bit ENABLE = 1'b1,
     parameter NUM_HEX_BYTES = 8,        // Number of hex bytes to display
     parameter X_OFFSET = 16,
-    parameter Y_OFFSET = 24
+    parameter Y_OFFSET = 24,
+    // OUT_PIPE=1 deepens the pipeline by three stages for the a2mega's
+    // 148.5 MHz clk_pix (timing campaign round 2): the X/Y offset
+    // subtracts are registered ahead of the region compares (cone (k2)),
+    // the font ROM read is split into a glyph select and a row select
+    // (cone (k)), and a stage is added between the font-row bit select
+    // and the output muxes (cone (e)). It shifts the overlay three more
+    // pixels right; the instantiation compensates with X_OFFSET-3.
+    // Default 0 keeps every other board byte-identical.
+    parameter OUT_PIPE = 0
 )(
     input  wire        clk_i,
     input  wire        reset_n,
@@ -129,14 +138,54 @@ module DebugOverlay #(
     //=========================================================================
 
     // --- Combinational: Stage 1 inputs ---
-    wire [11:0] rel_x = 12'(s0_x_r - X_OFFSET);
-    wire [10:0] rel_y = 11'(s0_y_r - Y_OFFSET);
+    // Stage-1 inputs. With OUT_PIPE=1 (timing campaign round 2, cone (k2))
+    // the X/Y offset subtracts are registered in an extra stage 0b so the
+    // region-compare tree in stage 1 starts from flops: "s0_x_r ->
+    // sA_in_space / sA_is_hex" (subtract + compares) was the clk_pix floor
+    // at +0.46 ns after the other overlay stages moved. One more pixel of
+    // overlay shift, compensated at the instantiation.
+    wire [11:0] sx_w;
+    wire [10:0] sy_w;
+    wire [7:0]  sr_w, sg_w, sb_w;
+    wire [11:0] rel_x;
+    wire [10:0] rel_y;
+    generate if (OUT_PIPE != 0) begin : g_s0b
+        reg [11:0] s0b_x_r;
+        reg [10:0] s0b_y_r;
+        reg [7:0]  s0b_r_r, s0b_g_r, s0b_b_r;
+        reg [11:0] relx_r;
+        reg [10:0] rely_r;
+        always @(posedge clk_i) begin
+            s0b_x_r <= s0_x_r;
+            s0b_y_r <= s0_y_r;
+            s0b_r_r <= s0_r_r;
+            s0b_g_r <= s0_g_r;
+            s0b_b_r <= s0_b_r;
+            relx_r  <= 12'(s0_x_r - X_OFFSET);
+            rely_r  <= 11'(s0_y_r - Y_OFFSET);
+        end
+        assign sx_w = s0b_x_r;
+        assign sy_w = s0b_y_r;
+        assign sr_w = s0b_r_r;
+        assign sg_w = s0b_g_r;
+        assign sb_w = s0b_b_r;
+        assign rel_x = relx_r;
+        assign rel_y = rely_r;
+    end else begin : g_s0b_direct
+        assign sx_w = s0_x_r;
+        assign sy_w = s0_y_r;
+        assign sr_w = s0_r_r;
+        assign sg_w = s0_g_r;
+        assign sb_w = s0_b_r;
+        assign rel_x = 12'(s0_x_r - X_OFFSET);
+        assign rel_y = 11'(s0_y_r - Y_OFFSET);
+    end endgenerate
     wire [3:0]  char_pos = rel_x[6:3];
     wire [2:0]  y_bit = rel_y[2:0];
 
     // Version string region
     localparam [10:0] VERSION_END = 11'(NUM_CHARS * CHAR_WIDTH);
-    wire x_version_in_range = (s0_x_r >= X_OFFSET) && (rel_x < VERSION_END);
+    wire x_version_in_range = (sx_w >= X_OFFSET) && (rel_x < VERSION_END);
 
     // Debug region start
     localparam [10:0] DEBUG_START = 11'(VERSION_END + DEBUG_SPACE);
@@ -170,7 +219,7 @@ module DebugOverlay #(
     localparam [10:0] DEBUG_END = 11'(BITS_START + NUM_BITS_FIELDS * BITS_REGION_WIDTH);
 
     wire debug_region = (rel_x >= DEBUG_START);
-    wire y_in_range = (s0_y_r >= Y_OFFSET) && (rel_y < CHAR_HEIGHT);
+    wire y_in_range = (sy_w >= Y_OFFSET) && (rel_y < CHAR_HEIGHT);
 
     // Region detection (combinational)
     reg signed [4:0] comb_hex_byte;
@@ -242,9 +291,9 @@ module DebugOverlay #(
         sA_y_in_range   <= y_in_range;
         sA_y_bit        <= y_bit;
         sA_char_pos     <= char_pos;
-        sA_r <= s0_r_r;
-        sA_g <= s0_g_r;
-        sA_b <= s0_b_r;
+        sA_r <= sr_w;
+        sA_g <= sg_w;
+        sA_b <= sb_w;
     end
 
     // Pre-compute intermediate values to avoid local reg inside always_comb
@@ -371,23 +420,93 @@ module DebugOverlay #(
     reg       s2_in_bounds, s2_is_space, s2_is_solid;
     reg [2:0] s2_x_bit;
     reg [7:0] s2_r, s2_g, s2_b;
-    always @(posedge clk_i) begin
-        s2_font_row  <= char_rom[s1_rom_addr];
-        s2_in_bounds <= s1_in_bounds;
-        s2_is_space  <= s1_is_space;
-        s2_is_solid  <= s1_is_solid;
-        s2_x_bit     <= s1_x_bit;
-        s2_r <= s1_r;
-        s2_g <= s1_g;
-        s2_b <= s1_b;
-    end
+
+    generate if (OUT_PIPE != 0) begin : g_rom_split
+        // Timing campaign round 2, cone (k): the single-cycle 128-entry
+        // LUT-ROM read "s1_rom_addr -> s2_font_row" was the clk_pix floor
+        // once the output stage moved (-0.007 ns on a 60K roll; the
+        // overlay's LUTs are spread across the die). Split it: stage 1b
+        // selects the whole 8-row glyph on the 4-bit character index
+        // (eight 16:1 constant muxes), stage 2 picks the row (8:1). One
+        // more pixel of overlay shift, compensated at the instantiation.
+        reg [63:0] s1b_glyph;
+        reg [2:0]  s1b_row;
+        reg [2:0]  s1b_x_bit;
+        reg        s1b_in_bounds, s1b_is_space, s1b_is_solid;
+        reg [7:0]  s1b_r, s1b_g, s1b_b;
+        always @(posedge clk_i) begin
+            s1b_glyph <= { char_rom[{s1_rom_addr[6:3], 3'd7}],
+                           char_rom[{s1_rom_addr[6:3], 3'd6}],
+                           char_rom[{s1_rom_addr[6:3], 3'd5}],
+                           char_rom[{s1_rom_addr[6:3], 3'd4}],
+                           char_rom[{s1_rom_addr[6:3], 3'd3}],
+                           char_rom[{s1_rom_addr[6:3], 3'd2}],
+                           char_rom[{s1_rom_addr[6:3], 3'd1}],
+                           char_rom[{s1_rom_addr[6:3], 3'd0}] };
+            s1b_row       <= s1_rom_addr[2:0];
+            s1b_x_bit     <= s1_x_bit;
+            s1b_in_bounds <= s1_in_bounds;
+            s1b_is_space  <= s1_is_space;
+            s1b_is_solid  <= s1_is_solid;
+            s1b_r <= s1_r;
+            s1b_g <= s1_g;
+            s1b_b <= s1_b;
+
+            s2_font_row  <= s1b_glyph[8*s1b_row +: 8];
+            s2_in_bounds <= s1b_in_bounds;
+            s2_is_space  <= s1b_is_space;
+            s2_is_solid  <= s1b_is_solid;
+            s2_x_bit     <= s1b_x_bit;
+            s2_r <= s1b_r;
+            s2_g <= s1b_g;
+            s2_b <= s1b_b;
+        end
+    end else begin : g_rom_direct
+        always @(posedge clk_i) begin
+            s2_font_row  <= char_rom[s1_rom_addr];
+            s2_in_bounds <= s1_in_bounds;
+            s2_is_space  <= s1_is_space;
+            s2_is_solid  <= s1_is_solid;
+            s2_x_bit     <= s1_x_bit;
+            s2_r <= s1_r;
+            s2_g <= s1_g;
+            s2_b <= s1_b;
+        end
+    end endgenerate
 
     wire pixel_on = s2_in_bounds && !s2_is_space && (s2_is_solid || s2_font_row[s2_x_bit]);
 
-    always @(posedge clk_i) begin
-        r_o <= pixel_on ? 8'hFF : s2_r;
-        g_o <= pixel_on ? 8'hFF : s2_g;
-        b_o <= pixel_on ? 8'hFF : s2_b;
-    end
+    //=========================================================================
+    // PIPELINE STAGE 3 (timing campaign round 2, cone (e)): the 8:1 font-row
+    // bit select + gating ANDs feeding the output muxes directly was the
+    // clk_pix path "s2_x_bit -> r_o/SET" (-0.045 in a 60K roll). Register
+    // the pixel decision and the pass-through color first; the output muxes
+    // then select on a single flop bit. One more pixel of overlay shift —
+    // compensated at the instantiation (X_OFFSET 16 -> 13 in the a2mega
+    // top, together with the cone (k) glyph/row split and the cone (k2)
+    // input stage above) so the overlay stays where it was.
+    //=========================================================================
+    generate if (OUT_PIPE != 0) begin : g_out_pipe
+        reg       s3_on;
+        reg [7:0] s3_r, s3_g, s3_b;
+        always @(posedge clk_i) begin
+            s3_on <= pixel_on;
+            s3_r  <= s2_r;
+            s3_g  <= s2_g;
+            s3_b  <= s2_b;
+        end
+        always @(posedge clk_i) begin
+            r_o <= s3_on ? 8'hFF : s3_r;
+            g_o <= s3_on ? 8'hFF : s3_g;
+            b_o <= s3_on ? 8'hFF : s3_b;
+        end
+    end else begin : g_out_direct
+        // legacy three-stage output (all boards except a2mega)
+        always @(posedge clk_i) begin
+            r_o <= pixel_on ? 8'hFF : s2_r;
+            g_o <= pixel_on ? 8'hFF : s2_g;
+            b_o <= pixel_on ? 8'hFF : s2_b;
+        end
+    end endgenerate
 
 endmodule

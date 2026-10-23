@@ -22,7 +22,7 @@
 //============================================================================
 import P65C816_pkg::*;
 
-module mcode
+module P65C816_mcode
   (
    input       CLK,
    input       RST_N,

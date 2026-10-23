@@ -21,7 +21,7 @@
 //  with this program. If not, see <https://www.gnu.org/licenses/>.
 //============================================================================
 
-module bit_adder(A, B, CI, S, CO);
+module P65C816_bit_adder(A, B, CI, S, CO);
    input   A;
    input   B;
    input   CI;
