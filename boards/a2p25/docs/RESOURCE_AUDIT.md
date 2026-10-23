@@ -1280,3 +1280,11 @@ per-frame samples across idle and effects: `REQ 439 / 1318 / 3952 / 1318 /
 timeouts stuck at 5 across the whole run (boot transients). `VGC STALE 0`,
 `SHADOW DROPS 0`, FB overflow clear. **Ed: no pops or crackles on this run.**
 Marble Madness smear check pending.
+
+**Ed, Marble Madness on `92f164d6…`: works, no smearing.** Both sides of the
+priority trade now hold with the cache in place: DOC at port 0 (Arkanoid
+LATE 0, no pops) and the VGC still fed (no smear, `VGC STALE 0` on the
+Arkanoid run). `92f164d6…` (source + bitstream committed in ec6c1d08) is the
+a2p25 build of record. Remaining from this thread: the HDD-image corruption
+around installs (§7.20, needs the damaged file), and a disk quiesce for the
+telnet `g` / fpgastream reload paths.
