@@ -31,7 +31,11 @@ module sound_glu #(
     // Passed to doc5503_pipelined: 1 = oscillator register banks in DPB
     // BSRAMs (rev 3.3+), 0 = rev-3.2-style FF banks with baseline read
     // timing (hardware discriminator for the register-path question).
-    parameter bit DOC_BANKS_IN_BSRAM = 1'b1,
+    // Default 0 = oscillator register banks in flops, as every board ran
+    // before 2026-10-22. The a2p25 (GW5A-25, logic-bound) passes 1 and the
+    // a2mega passes 0 explicitly; a default of 1 silently moved the Tang Nano
+    // boards' banks into BSRAM (+8 blocks: Enhanced classic 44 -> 46/46).
+    parameter bit DOC_BANKS_IN_BSRAM = 1'b0,
     // gen_doc_ext word cache: 0 = whole-cache flush on every sound-RAM write
     // (hardware control build), 1 = per-word invalidation.
     parameter bit DOC_CACHE_PER_WORD_INVALIDATE = 1'b1,
