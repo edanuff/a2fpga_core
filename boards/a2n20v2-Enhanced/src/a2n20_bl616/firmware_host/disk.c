@@ -11,6 +11,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <FreeRTOS.h>      /* xSemaphoreTake(0): try-lock the USB bus mutex */
+#include <semphr.h>        /* (usb_osal has no non-blocking mutex take)     */
+
 #include "ff.h"
 #include "fpga_spi.h"
 #include "fpga_sd.h"
@@ -850,6 +853,77 @@ static int usb_leaf_count(struct usbh_hub *hub)
     }
     return n;
 }
+
+/* Hot-plug watch for BUSY hubs. CherryUSB learns of downstream port changes
+ * only from the hub's interrupt-IN pipe, and once other devices behind the
+ * hub are streaming that pipe goes silent (hardware-verified 2026-07-11:
+ * plugging a pad into a hub already running Ethernet is never seen). The
+ * leaves==0 supervisor below never arms for this — the tree still has
+ * working leaves — so poll the hub directly: GET_PORT_STATUS on each port
+ * of every external hub and compare against what the driver thinks is there.
+ *   - change bits latched (hub hardware keeps them until CLEAR_FEATURE):
+ *     flag the port in the hub's int_buffer and wake the hub thread — the
+ *     driver then clears/debounces/resets/enumerates exactly as if the
+ *     interrupt URB had completed, on ITS thread (disk serving not stalled),
+ *     and restarts its own poll timer on the way out, reviving the dead pipe.
+ *   - device present but change already consumed (e.g. a prior enumeration
+ *     failed after the driver cleared C_CONNECTION): adopt inline, with a
+ *     strike cap so a broken device can't retrigger forever.
+ * Cost: one ~ms EP0 control transfer per port per scan; adds NO standing
+ * URBs, so the CONFIG_USB_EHCI_QH_NUM=20 budget is untouched. Caller must
+ * hold the bus mutex (serializes hub->parent->setup against the hub
+ * thread's own port work). */
+static void usb_hub_hotplug_scan(struct usbh_hub *hub)
+{
+    struct hub_port_status ps;
+
+    if (!hub)
+        return;
+    for (int i = 0; i < CONFIG_USBHOST_MAX_EHPORTS; i++) {
+        struct usbh_hubport *p = &hub->child[i];
+        if (p->connected && p->self)
+            usb_hub_hotplug_scan(p->self);
+    }
+    /* Root ports raise a real EHCI port-change interrupt (g_need_init path
+     * in main.c handles direct attach) — only external hubs go deaf. */
+    if (hub->is_roothub || !hub->connected ||
+        !hub->parent || !hub->parent->setup)
+        return;
+
+    static uint8_t adopt_strikes;
+    bool adopt = false, woken = false;
+
+    for (uint8_t port = 0; port < hub->nports; port++) {
+        if (sup_get_portstatus(hub, port + 1, &ps) < 0)
+            continue;
+        if (ps.wPortChange) {
+            /* Undelivered latched change: inject the interrupt the pipe
+             * failed to deliver. Same bitmap encoding the hub's endpoint
+             * uses (bit N = port N; bit 0 = the hub itself). */
+            size_t flags = usb_osal_enter_critical_section();
+            hub->int_buffer[(port + 1) / 8] |= (uint8_t)(1u << ((port + 1) % 8));
+            usb_osal_leave_critical_section(flags);
+            osd_log("USB: HUB%d PORT%d CHANGE %04X - WAKE",
+                    hub->index, port + 1, ps.wPortChange);
+            woken = true;
+        } else if ((ps.wPortStatus & HUB_PORT_STATUS_CONNECTION) &&
+                   !hub->child[port].connected) {
+            adopt = true;
+        }
+    }
+
+    if (woken)
+        usbh_hub_thread_wakeup(hub);   /* one wakeup covers all flagged ports */
+
+    if (!adopt) {
+        adopt_strikes = 0;
+    } else if (adopt_strikes < 3) {
+        osd_log("USB: HUB%d SETTLED DEVICE - ADOPT", hub->index);
+        int n = usb_hub_adopt_ports(hub);
+        osd_log("USB: ADOPTED %d DEVICE(S)", n);
+        adopt_strikes = n > 0 ? 0 : (uint8_t)(adopt_strikes + 1);
+    }
+}
 void disk_poll(void)
 {
     if (g_remount_req) {
@@ -984,7 +1058,7 @@ void disk_poll(void)
      * trigger. Capped so a genuinely empty hub doesn't recycle forever. */
     {
         static uint32_t sup_cnt;
-        static int      stall_s, attempts;
+        static int      stall_s, attempts, scan_s;
         if (++sup_cnt >= 500) {          /* ~1 s of 2 ms polls */
             sup_cnt = 0;
             uint32_t portsc = *(volatile uint32_t *)(0x20072030u);
@@ -995,6 +1069,22 @@ void disk_poll(void)
                 stall_s = 0;
                 if (leaves > 0)
                     attempts = 0;
+            }
+
+            /* Busy-hub hot-plug watch (see usb_hub_hotplug_scan). Only while
+             * the tree has working leaves — at leaves==0 the stall handler
+             * below owns recovery (its ADOPT/VBUS-CYCLE path is verified).
+             * Try-lock: if the hub thread holds the bus mutex it is already
+             * mid-enumeration/debounce; skip this round rather than stall
+             * disk serving behind it (this poll must never block long). */
+            if (leaves > 0 && ++scan_s >= 3) {
+                scan_s = 0;
+                struct usbh_bus *bus = &g_usbhost_bus[0];
+                if (bus->mutex != NULL &&
+                    xSemaphoreTake((SemaphoreHandle_t)bus->mutex, 0) == pdTRUE) {
+                    usb_hub_hotplug_scan(&bus->hcd.roothub);
+                    xSemaphoreGive((SemaphoreHandle_t)bus->mutex);
+                }
             }
             if (stall_s >= 8 && attempts < 5) {
                 attempts++;
