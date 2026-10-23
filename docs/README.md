@@ -39,7 +39,7 @@ follow links into the topic you need.
 
 | Doc | Topic |
 |---|---|
-| [memory_bandwidth_analysis.md](memory_bandwidth_analysis.md) | DDR3 / SDRAM bandwidth headroom analysis |
+| [memory_bandwidth_analysis.md](memory_bandwidth_analysis.md) | DDR3 / SDRAM / HyperRAM bandwidth headroom analysis |
 
 ## Maintaining these docs
 
