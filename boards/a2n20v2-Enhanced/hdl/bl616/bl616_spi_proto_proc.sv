@@ -61,17 +61,23 @@ module bl616_spi_proto_proc #(
     // =========================================================
     // SPI CLOCK DOMAIN — TX (MISO output)
     // Mode 1: master samples on negedge, so we shift out on posedge.
-    // Registered output: spi_miso_r loaded from tx_byte on each
-    // rising SCLK edge. CS# async-resets MISO high.
+    // CS# async-resets MISO high.
+    //
+    // tx_byte lives in the system clock domain. It is sampled exactly
+    // once per byte — at the first rising edge (bit 0) — into the
+    // sclk-domain copy tx_sr; bits 1-7 shift from that copy. A single
+    // sampling window per byte means a tx_byte update landing mid-byte
+    // (e.g. a late SDRAM read completion) can no longer splice old and
+    // new bits into one MISO byte, and the clk->sclk crossing has one
+    // CDC endpoint per byte instead of eight.
     //
     // spi_bit_cnt is incremented on negedge (RX block), so at each
     // posedge it holds the count from the previous negedge:
-    //   posedge 0: bit_cnt=0 -> tx_byte[7] (MSB first)
-    //   posedge 1: bit_cnt=1 -> tx_byte[6]
-    //   ...
-    //   posedge 7: bit_cnt=7 -> tx_byte[0]
+    //   posedge 0: bit_cnt=0 -> load tx_sr, drive tx_byte[7] (MSB first)
+    //   posedge k: bit_cnt=k -> tx_sr[7-k]   (k = 1..7)
     // =========================================================
     reg [7:0] tx_byte;
+    reg [6:0] tx_sr;
     reg       spi_miso_r;
 
     assign spi_miso = spi_miso_r;
@@ -79,17 +85,31 @@ module bl616_spi_proto_proc #(
     always @(posedge spi_sclk or posedge spi_cs_n) begin
         if (spi_cs_n) begin
             spi_miso_r <= 1'b1;
+        end else if (spi_bit_cnt == 3'd0) begin
+            spi_miso_r <= tx_byte[7];
+            tx_sr      <= tx_byte[6:0];
         end else begin
-            spi_miso_r <= tx_byte[3'd7 - spi_bit_cnt];
+            spi_miso_r <= tx_sr[3'd7 - spi_bit_cnt];
         end
     end
 
     // =========================================================
     // CDC: Toggle synchronizer for byte-ready handoff
+    //
+    // spi_byte_toggle (sclk domain) flips when a byte completes. The
+    // synchronized toggle edge first captures spi_rx_byte into
+    // rx_byte_q — a single clk-domain register that is the ONLY
+    // consumer of the async byte bus — and the FSM strobe fires one
+    // cycle later, so the FSM always sees settled, registered data.
+    // spi_rx_byte thus gets >2 clk cycles to settle after the toggle
+    // flips, and the sclk->clk data crossing has exactly 8 endpoints
+    // (rx_byte_q) instead of fanning out to every FSM capture field.
     // =========================================================
     reg [1:0] toggle_sync;
-    reg       toggle_prev;
-    wire      byte_rx_stb = toggle_sync[1] ^ toggle_prev;
+    reg       toggle_s2, toggle_s3;
+    wire      byte_capture_stb = toggle_sync[1] ^ toggle_s2;
+    wire      byte_rx_stb      = toggle_s2 ^ toggle_s3;
+    reg [7:0] rx_byte_q;
 
     // 2FF sync for CS# (needed for FSM reset in system domain)
     reg cs_n_q1, cs_n_q2;
@@ -98,12 +118,17 @@ module bl616_spi_proto_proc #(
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             toggle_sync <= 2'b00;
-            toggle_prev <= 1'b0;
+            toggle_s2   <= 1'b0;
+            toggle_s3   <= 1'b0;
+            rx_byte_q   <= 8'h00;
             cs_n_q1     <= 1'b1;
             cs_n_q2     <= 1'b1;
         end else begin
             toggle_sync <= {toggle_sync[0], spi_byte_toggle};
-            toggle_prev <= toggle_sync[1];
+            toggle_s2   <= toggle_sync[1];
+            toggle_s3   <= toggle_s2;
+            if (byte_capture_stb)
+                rx_byte_q <= spi_rx_byte;
             cs_n_q1     <= spi_cs_n;
             cs_n_q2     <= cs_n_q1;
         end
