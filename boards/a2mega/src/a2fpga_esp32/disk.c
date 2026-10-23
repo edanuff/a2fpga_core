@@ -38,6 +38,10 @@
 #include "a2fpga_regs.h"
 #include "fpga_link.h"
 #include "gcr_dsk.h"      /* on-the-fly .dsk/.do <-> 6-and-2 GCR nibble codec */
+
+/* .ino: releases the ESP32-driven Apple /RES (no-op where the FPGA owns it) */
+void a2_reset_hold_release(const char *why);
+#include "usbstorage.h"   /* USB stick as the image volume (backend switch) */
 #include "settings.h"     /* persisted image overrides + slot map */
 #include "disk.h"
 
@@ -451,12 +455,10 @@ void disk_request_remount(void)
  * shown while we look for the image(s); on a successful mount we hide it so the
  * screen returns to the Apple II, and on failure we leave it up so the message
  * can be read. */
-static void disk_remount(void)
+/* Close every image and clear the FPGA mounted/ready flags (the disk task
+ * owns these files; the storage backend may be swapped afterwards). */
+static void disk_unmount_all(void)
 {
-    osd_console_show();
-    DLOGI("DISK II: SEARCHING FOR STORAGE...");
-
-    /* Tear down the previous mount. */
     for (int v = 0; v < NDRV; v++) {
         if (g_img[v]) {
             fclose(g_img[v]);
@@ -475,8 +477,16 @@ static void disk_remount(void)
         g_hdd_mounted[u] = false;
         fpga_reg_write(A2REG_HDD_CTL(u), 0);
     }
+}
 
-    /* SD card present? The VFS mount is owned by the integrator; probe it. */
+static const char *storage_name(void) { return usbstorage_is_usb() ? "USB STICK" : "FLASH FS"; }
+
+static void disk_remount(void)
+{
+    osd_console_show();
+    DLOGI("DISK II: SEARCHING FOR STORAGE...");
+    disk_unmount_all();
+    /* Volume present? The VFS mount is owned by the integrator; probe it. */
     DIR *root = opendir(SD_ROOT);
     if (!root) {
         DLOGW("DISK II: NO SD CARD (%s NOT MOUNTED)", SD_ROOT);
@@ -484,7 +494,7 @@ static void disk_remount(void)
         return;   /* leave the console up so the message is visible */
     }
     closedir(root);
-    DLOGI("DISK II: SD CARD");
+    DLOGI("DISK II: %s", storage_name());
 
     int n_mounted = 0;
     for (int v = 0; v < NDRV; v++) {
@@ -514,7 +524,7 @@ static void disk_remount(void)
          * seeks during the delay (observed on the BL616 as a ~1.54 s gap). */
         g_hide_console_at_us = esp_timer_get_time() + 1500000;
     } else {
-        DLOGI("DISK II: NO DISK IMAGES ON SD CARD");
+        DLOGI("DISK II: NO DISK IMAGES ON %s", storage_name());
         /* leave the console up so the message is visible */
     }
 }
@@ -718,6 +728,18 @@ static void apply_slot_map(void)
 
 void disk_poll(void)
 {
+    /* Storage backend change (USB stick attached/removed, reported by
+     * usbhost): close the images first — they live on the volume about to
+     * be swapped — then let the integrator swap /sdcard, then remount. */
+    {
+        bool usb = false;
+        if (usbstorage_take_pending(&usb)) {
+            disk_unmount_all();
+            storage_activate(usb);
+            DLOGI("STORAGE: %s", usb ? "USB STICK" : "FLASH FS");
+            g_remount_req = true;
+        }
+    }
     if (g_remount_req) {
         g_remount_req = false;
         g_remounting  = true;
@@ -743,8 +765,10 @@ void disk_poll(void)
             bool any = false;
             for (int v = 0; v < NDRV; v++) any = any || g_mounted[v];
             for (int u = 0; u < NHDD; u++) any = any || g_hdd_mounted[u];
+            /* 10 s (was 7): the USB host role decision takes 5 s and a stick
+             * needs a moment to enumerate and mount before the Apple scans. */
             if ((any && !g_remount_req) ||
-                esp_timer_get_time() > 7000000) {
+                esp_timer_get_time() > 10000000) {
                 /* Program the slot map JUST before the release — this late in
                  * boot the link is proven good (the mounts above ran over it),
                  * and the Apple II is still held in reset so the reconfig is
@@ -752,6 +776,8 @@ void disk_poll(void)
                 apply_slot_map();
 
                 fpga_reg_write(A2REG_A2_RST_RELEASE, 1);
+                /* boards where the ESP32 owns the /RES pin (a2p25 IO33) */
+                a2_reset_hold_release(any ? "media mounted" : "no media");
                 s_released = true;
                 DLOGI("A2: RESET RELEASED%s", any ? "" : " (NO MEDIA)");
             }
@@ -851,7 +877,7 @@ void disk_get_hdd_info(int u, disk_info_t *out)
 
 bool disk_backend_is_usb(void)
 {
-    return false;   /* SD card is the only storage backend on the a2mega */
+    return usbstorage_is_usb();
 }
 
 bool disk_remount_pending(void)

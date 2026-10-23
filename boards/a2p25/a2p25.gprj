@@ -5,73 +5,111 @@
     <Version>5</Version>
     <Device name="GW5A-25A" pn="GW5A-LV25MG121NC1/I0">gw5a25a-002</Device>
     <FileList>
+        <File path="hdl/dp_defines.v" type="file.verilog" enable="1"/>
+        <File path="../a2mega/hdl/dp_aux_pad.sv" type="file.verilog" enable="1"/>
+        <File path="../a2mega/hdl/esp32/ddr3_debug_reader.sv" type="file.verilog" enable="1"/>
+        <File path="../a2mega/hdl/esp32/esp32_ospi_connector.sv" type="file.verilog" enable="1"/>
+        <File path="../a2mega/hdl/esp32/esp32_ospi_proto_proc.sv" type="file.verilog" enable="1"/>
+        <File path="../a2mega/hdl/esp32/osd_text_overlay.sv" type="file.verilog" enable="1"/>
+        <File path="../a2mega/hdl/bus/apple_bus.sv" type="file.verilog" enable="1"/>
+        <File path="../a2mega/hdl/memory/apple_memory.sv" type="file.verilog" enable="1"/>
+        <File path="../a2mega/hdl/sound/iir_filter.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_pll/gowin_pll.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_pll/gowin_pll_mod.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/pll_init.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_mipi_dphy/gowin_mipi_dphy.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_mipi_dphy/gowin_mipi_dphy_mipi_dphy.v" type="file.verilog" enable="1"/>
+        <File path="hdl/gowin/gowin_mipi_dphy/gowin_mipi_dphy_plla.v" type="file.verilog" enable="1"/>
+        <File path="hdl/dp/dp_dphy_tx.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/dp/transceiver_bank_dphy.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/psram_test/hr_clk_pll.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/hyperram/hyperram_phy_gw5a.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/hyperram/hyperram_ctrl.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/hyperram/hyperram_ports.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/hyperram/hyperram_ports_if.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/f18a/f18a_gpu_if.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/audio/audio_sample_buffer.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/audio/maud_measure.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/audio/sdp_engine.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/aux_channel.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/aux_interface.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/channel_managemnt.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/dp_aux_messages.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/dp_register_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/edid_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/hotplug_decode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/auxch/link_signal_mgmt.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/idle_pattern_inserter.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/insert_training_pattern.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/main_stream_processing.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/scrambler_all_channels.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/scrambler_reset_inserter.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/core/skew_channels.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/dp_transmitter.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/afe_adjust_seq.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/benz_encode.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/enc_8b10b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/lane_encoder_8b10b.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/gowin/gowin_plls.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/dp_video_timing.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/msa_inserter_1ch.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/msa_inserter_2ch.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/msa_inserter_4ch.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/pixel_cdc_fifo.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/displayport/video/video_stream_packer.v" type="file.verilog" enable="1"/>
+        <File path="../../hdl/bus/a2bus_control_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/bus/a2bus_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/bus/a2bus_timing.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/bus/gs_detector.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/debug/debugoverlay.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/f18a/f18a_color.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_core.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_counters.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_cpu.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_div32x16.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_gpu_if.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/f18a/f18a_single_port_ram.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_sprites.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_tile_linebuf_bsram.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_tiles.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_version.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_vga_cont_640_60.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a_vram.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/f18a/f18a.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/hdmi/audio_clock_regeneration_packet.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/hdmi/audio_info_frame.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/hdmi/audio_sample_packet.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/hdmi/auxiliary_video_information_info_frame.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/hdmi/hdmi.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/hdmi/packet_assembler.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/hdmi/packet_picker.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/hdmi/source_product_description_info_frame.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/hdmi/tmds_channel.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/disk/apple_disk.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/disk/drive_ii.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/disk/drive_volume_if.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/disk/hdd.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/memory/a2mem_if.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/memory/apple_memory.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/memory/mem_if_mux.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/memory/mem_port_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/mockingboard/mockingboard.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/slots/slot_if.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/slots/slotmaker_config_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/slots/slotmaker.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/slots/slots.hex" type="file.other" enable="1"/>
+        <File path="../../hdl/slots/slotmaker_config_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/apple_speaker.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/audio_out.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/audio_timing.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/sound/i2s_receiver.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/ssc/ssc_rom.vhd" type="file.vhdl" enable="1"/>
+        <File path="../../hdl/sound/doc5503.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sound/doc5503_pipelined.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sound/sound_glu.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sound/doc_fetch_cache.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/ssc/super_serial_card.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/supersprite/supersprite.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/support/YM2149.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc_2ff.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc_denoise.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/cdc_sampling.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/support/rom.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/sdpram32.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/support/sustained_high.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_6551.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_rx.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/support/uart_tx.v" type="file.verilog" enable="1"/>
-        <File path="../../hdl/support/via6522.vhd" type="file.vhdl" enable="1"/>
-        <File path="../../hdl/support/YM2149.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/uthernet2/uthernet2.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/apple_video.sv" type="file.verilog" enable="1"/>
-        <File path="../../hdl/video/vgc.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/apple_video_gen.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/direct_display.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/framebuffer_1080p.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/scanline_dim.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/framebuffer_writer.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/pixel_stream_if.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/vgc_gen.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/video_control_if.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/ssc/ssc_rom.vhd" type="file.vhdl" enable="1"/>
+        <File path="../../hdl/support/via6522.vhd" type="file.vhdl" enable="1"/>
+        <File path="../../hdl/disk/diskii.hex" type="file.other" enable="1"/>
+        <File path="../../hdl/disk/hdd_rom.hex" type="file.other" enable="1"/>
+        <File path="../../hdl/slots/slots.hex" type="file.other" enable="1"/>
         <File path="../../hdl/video/video.hex" type="file.other" enable="1"/>
+        <File path="hdl/top.sv" type="file.verilog" enable="1"/>
         <File path="hdl/a2p25.cst" type="file.cst" enable="1"/>
         <File path="hdl/a2p25.sdc" type="file.sdc" enable="1"/>
-        <File path="hdl/bus/apple_bus.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/esp32/cam_serializer.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/esp32/a2bus_stream.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/esp32/esp32_spi_connector.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/esp32/esp32_spi_proto_proc.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/gowin_pll_mod.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/gowin_pll/gowin_pll.v" type="file.verilog" enable="1"/>
-        <File path="hdl/gowin/pll_init.v" type="file.verilog" enable="1"/>
-        <File path="hdl/hdmi/serializer.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/sound/iir_filter.v" type="file.verilog" enable="1"/>
-        <File path="hdl/top.sv" type="file.verilog" enable="1"/>
     </FileList>
 </Project>

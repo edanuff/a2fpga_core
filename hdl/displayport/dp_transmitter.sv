@@ -45,6 +45,8 @@ module dp_transmitter #(
     // rgb pull-contract latency (see dp_video_timing.v): 1 = classic
     // next-cycle answer; 2 = consumer gets an extra pipeline cycle
     parameter int RGB_LATENCY = 1,
+    parameter int FIFO_LINES    = 3,   // pixel CDC FIFO depth, in video lines (see FIFO_ADDR_BITS)
+    parameter int PREFILL_WORDS = 0,   // 0 = one line (WORDS_PER_LINE)
     parameter bit AUDIO_ENABLE = 1,  // 0: bypass SDP engine entirely (no
                                      // secondary packets on the wire) —
                                      // video-restart-bug discriminator
@@ -113,8 +115,21 @@ module dp_transmitter #(
     parameter bit    LATE_REPLY_DRAIN = 0,
     parameter bit    POLITE_ATTACH = 0,
     parameter [5:0]  EDID_DEFER_CAP = 6'd40,
+    parameter [28:0] RETRY_WATCHDOG_CLKS = 29'd49999999,
+    parameter [5:0]  EQ_WAIT_MULT = 6'd1,
+    parameter        TRAIN_ERRCNT = 0,
     parameter        TRAIN_RECOVER = 1,
     parameter        ERRCNT_READ = 0,
+    parameter        LINK_CHECK = 1,   // see auxch/aux_channel.v
+    parameter [26:0] LINK_CHECK_CLKS = 27'd99999999, // see auxch/aux_channel.v
+    // ECHO_SINK_ADJUST (AFE sequencer off only): declare the sink's last
+    // ADJUST_REQUEST in TRAINING_LANEx_SET instead of the constant
+    // IDLE_SET_BYTE. For a PHY whose swing/PE are set by a downstream
+    // redriver that snoops those writes (a2p25: SN75DP130 auto mode) this
+    // is what makes the sink's request take effect. MAX_*_REACHED bits set
+    // at level 3. Until the first request of a training the legacy byte
+    // (VS2 + MAX_SWING) is declared. Default 0 = byte-identical legacy.
+    parameter        ECHO_SINK_ADJUST = 0,
     parameter        WEDGE_BIT = 30,
     parameter [31:0] WEDGE_PRELOAD = 32'h1000_0000,
     parameter int BIT_WIDTH  = $clog2(H_TOTAL),
@@ -172,6 +187,8 @@ module dp_transmitter #(
     output logic [15:0] debug_errcnt0,  // SYMBOL_ERROR_COUNT lane0 (raw, bit15=valid)
     output logic [15:0] debug_errcnt1,  // SYMBOL_ERROR_COUNT lane1
     output logic [27:0] debug_err_detail, // first teardown {reason, state, expected, rx_cnt}
+    output logic [103:0] debug_obs,     // LINK_CHECK==2 observe counters (auxch/aux_channel.v)
+    output logic [23:0]  debug_auxif,   // AUX interface liveness (auxch/aux_channel.v)
     output logic [31:0] debug_snapshot, // first-gate-failure {chstate24, seq4, tsl4}
     output logic [7:0]  debug_caps,    // sink capability profile
     // raw {DPCD 0x001 MAX_LINK_RATE, DPCD 0x002 MAX_LANE_COUNT byte};
@@ -195,6 +212,25 @@ module dp_transmitter #(
     // tx_running[1:0]}; ties to all-ones on non-Gowin/sim builds.
     output logic [7:0] serdes_status,
     output logic hpd_present_out,
+    // Packer health (tx_symbol_clk domain, quasi-static): saturating count
+    // of pixel-FIFO underruns since the link was last established, and the
+    // current FIFO read level. A non-zero count while video_live means the
+    // pixel clock is not exactly locked to the symbol clock (or the FIFO
+    // pre-fill is short) — the stream content is then garbage even though
+    // the link trains perfectly.
+    output logic [7:0]  debug_underrun_cnt,
+    output logic [15:0] debug_fifo_level,
+`ifdef DP_VENDOR_DPHY
+    // External PHY (a2p25: hardened MIPI D-PHY as a raw serializer). The
+    // board top hosts the serializer (boards/a2p25/hdl/dp/
+    // transceiver_bank_dphy.sv) because its pads are inout macro ports;
+    // this module hands it the pre-8b/10b symbol stream and takes back
+    // the symbol clock it derives from the D-PHY PLL.
+    input  logic        ext_symbol_clk,
+    input  logic [3:0]  ext_tx_running,
+    output logic [79:0] ext_tx_symbols,
+    output logic [3:0]  ext_powerup_channel,
+`endif
     // DRP register-dump readback (Gowin only; zeros elsewhere) — see
     // transceiver_bank_gowin dbg_* ports.
     input  logic [4:0]  drp_dbg_idx,
@@ -256,7 +292,13 @@ module dp_transmitter #(
     localparam int VALID_NUM     = TU_SIZE * 3 * PIXEL_CLK_MULT;
     localparam int VALID_DEN     = 2 * PIXEL_CLK_DIV * LANE_COUNT;
     localparam int WORDS_PER_LINE = H_VISIBLE / LANE_COUNT;
-    localparam int FIFO_ADDR_BITS = $clog2(3 * WORDS_PER_LINE);
+    // Pixel CDC FIFO depth in video lines and the prefill before a frame
+    // starts (defaults = the shipped sizing: 3 lines, prime at 1 line).
+    // The GW5A-25 build uses 1 line / half a line: the level only swings
+    // ~+-60 words around the prefill point at 1080p x4 (a2p25 bench), and
+    // 97 x 2048 bits was 11 of its 56 BSRAM blocks.
+    localparam int FIFO_ADDR_BITS = $clog2(FIFO_LINES * WORDS_PER_LINE);
+    localparam int FIFO_PREFILL   = (PREFILL_WORDS > 0) ? PREFILL_WORDS : WORDS_PER_LINE;
 
     initial begin
         if (H_TOTAL * 2 * PIXEL_CLK_DIV % PIXEL_CLK_MULT != 0)
@@ -270,7 +312,12 @@ module dp_transmitter #(
     // ------------------------------------------------------------------
     // Pixel clock (synchronous clocking: generated from the symbol clock)
     // ------------------------------------------------------------------
-`ifdef DP_VENDOR_GOWIN
+`ifdef DP_VENDOR_DPHY
+ `define DP_GOWIN_PIXEL_PLL
+`elsif DP_VENDOR_GOWIN
+ `define DP_GOWIN_PIXEL_PLL
+`endif
+`ifdef DP_GOWIN_PIXEL_PLL
  `ifdef GOWIN_PLL_IP
     // IDE-generated PLLA wrapper: clk_pixel = tx_symbol_clk * MULT / DIV,
     // realized as VCO = f_symbol * PIXEL_PLL_MDIV / PIXEL_PLL_IDIV and
@@ -359,6 +406,15 @@ module dp_transmitter #(
     logic [72:0] packed_data, sdp_merged_data, sdp_engine_out;
     assign sdp_merged_data = AUDIO_ENABLE ? sdp_engine_out : packed_data;
     logic        sdp_gap, frame_pulse, fifo_underrun;
+    logic        link_est_d = 1'b0;
+    always_ff @(posedge tx_symbol_clk) begin
+        link_est_d <= tx_link_established;
+        if (tx_link_established && !link_est_d)
+            debug_underrun_cnt <= 8'd0;
+        else if (fifo_underrun && debug_underrun_cnt != 8'hFF)
+            debug_underrun_cnt <= debug_underrun_cnt + 8'd1;
+        debug_fifo_level <= 16'(fifo_rlevel);
+    end
     logic        audio_strobe_sym, audio_buffer_ready, audio_buffer_take;
     logic        audio_mute;
     logic [4*2*AUDIO_BIT_WIDTH-1:0] audio_buffer_flat;
@@ -374,7 +430,7 @@ module dp_transmitter #(
         .SYMS_PER_LINE (SYMS_PER_LINE),
         .VALID_NUM     (VALID_NUM),
         .VALID_DEN     (VALID_DEN),
-        .PREFILL       (WORDS_PER_LINE),
+        .PREFILL       (FIFO_PREFILL),
         .SCHED_ROM     (SCHED_ROM),
         .SCHED_HEX     (SCHED_HEX)
     ) i_video_stream_packer (
@@ -551,8 +607,26 @@ module dp_transmitter #(
     // M5 runtime AFE adjust: ADJUST_REQUEST -> DRP sequence -> truthful
     // TRAINING_LANE_SET. Tied off (byte-identical legacy) when disabled.
     // per lane: [7:0] = lane 0 (DPCD 0x103), [15:8] = lane 1 (0x104)
-    logic [15:0] train_set_byte;
+    logic [15:0] train_set_byte, train_set_byte_afe;
     logic        adjust_evt;
+    // ECHO_SINK_ADJUST: per-lane {00, PE_MAX, PE[1:0], VS_MAX, VS[1:0]}
+    // from the raw request nibbles; falls back to 0x06 until the sink has
+    // asked for something in this training (adjust_seen clears with the
+    // link powerup, i.e. on every teardown).
+    logic        adjust_seen = 1'b0;
+    always_ff @(posedge clk100) begin
+        if (tx_powerup_channel == 4'b0000) adjust_seen <= 1'b0;
+        else if (adjust_evt)  adjust_seen <= 1'b1;
+    end
+    function automatic [7:0] echo_byte(input [1:0] vs, input [1:0] pe);
+        echo_byte = {2'b00, (pe == 2'd3), pe, (vs == 2'd3), vs};
+    endfunction
+    wire [15:0] train_set_byte_echo = adjust_seen
+        ? {echo_byte(debug_adjust[5:4], debug_adjust[7:6]),
+           echo_byte(debug_adjust[1:0], debug_adjust[3:2])}
+        : 16'h0606;
+    assign train_set_byte = (ECHO_SINK_ADJUST != 0 && ENABLE_AFE_ADJUST == 0)
+                          ? train_set_byte_echo : train_set_byte_afe;
     logic        afe_busy_w, afe_phy_reinit;
     logic        afe_drp_clk, afe_drp_req, afe_drp_gnt;
     assign debug_drp_clk = afe_drp_clk;
@@ -597,7 +671,7 @@ module dp_transmitter #(
         // watchdog replaying the boot CSR — all return the AFE to boot
         // state, so the sequencer must forget what it applied.
         .phy_reinit      (afe_phy_reinit),
-        .train_set_byte  (train_set_byte),
+        .train_set_byte  (train_set_byte_afe),
         .afe_busy        (afe_busy_w),
         .dbg_afe         (debug_afe),
         .dbg_afe1        (debug_afe1),
@@ -627,8 +701,13 @@ module dp_transmitter #(
                          .LATE_REPLY_DRAIN(LATE_REPLY_DRAIN),
                          .POLITE_ATTACH(POLITE_ATTACH),
                          .EDID_DEFER_CAP(EDID_DEFER_CAP),
+                         .RETRY_WATCHDOG_CLKS(RETRY_WATCHDOG_CLKS),
+                         .EQ_WAIT_MULT(EQ_WAIT_MULT),
+                         .TRAIN_ERRCNT(TRAIN_ERRCNT),
                          .TRAIN_RECOVER(TRAIN_RECOVER),
                          .ERRCNT_READ(ERRCNT_READ),
+                         .LINK_CHECK(LINK_CHECK),
+                         .LINK_CHECK_CLKS(LINK_CHECK_CLKS),
                          .WEDGE_BIT(WEDGE_BIT), .WEDGE_PRELOAD(WEDGE_PRELOAD)) i_channel_management(
         .clk100               (clk100),
         .train_set_byte       (train_set_byte),
@@ -649,6 +728,8 @@ module dp_transmitter #(
         .errcnt0              (debug_errcnt0),
         .errcnt1              (debug_errcnt1),
         .debug_err_detail     (debug_err_detail),
+        .debug_obs            (debug_obs),
+        .debug_auxif          (debug_auxif),
         .debug_snapshot       (debug_snapshot),
         .debug_caps           (debug_caps),
         .debug_sink_caps      (debug_sink_caps),
@@ -733,7 +814,9 @@ module dp_transmitter #(
     // "streaming" can never be observed - without this gate the watchdog
     // would tear down a healthy blind link every WDOG_GRACE forever
     // (observed on hw 2026-08-16: W cycling on the blind-monitor build).
-    wire wdog_streaming = (BLIND_SINK != 0)
+    // Same for LINK_CHECK=0: no status reads once established, so K stays
+    // 0 and a healthy held link would be pulsed off every WDOG_GRACE.
+    wire wdog_streaming = (BLIND_SINK != 0 || LINK_CHECK != 1)
                         ? tx_link_established
                         : tx_link_established && (debug_sink[1:0] != 2'b00);
     always_ff @(posedge clk100) begin
@@ -856,6 +939,22 @@ module dp_transmitter #(
         .dbg_wrusewd     (debug_wrusewd)
     );
     assign tx_running[3:2] = 2'b00;
+`elsif DP_VENDOR_DPHY
+    // External serializer (see port comment). All four lanes are handed
+    // over; the board PHY owns 8b/10b, lane mapping and the D-PHY.
+    assign tx_symbol_clk       = ext_symbol_clk;
+    assign ext_tx_symbols      = tx_symbols;
+    assign ext_powerup_channel = wdog_force ? 4'b0000 : tx_powerup_channel;
+    assign tx_running          = ext_tx_running;
+    assign dp_tx_lane_p  = '0;
+    assign dp_tx_lane_n  = '1;
+    assign serdes_status = {4'b0000, ext_tx_running};
+    assign wdog_replay_ack = wdog_replay_req;  // no DRP on this PHY
+    assign debug_wrusewd = 10'd0;
+    assign afe_drp_clk = clk100; assign afe_drp_gnt = afe_drp_req; assign afe_drp_ready = 1'b1;
+    assign drp_dbg_data = 32'd0;
+    assign drp_dbg_addr = 24'd0;
+    assign drp_dbg_done = 1'b0;
 `else
     // Behavioural stub for simulation and lint: refclk0 stands in for the
     // recovered symbol clock, lanes are tied off, all channels report running

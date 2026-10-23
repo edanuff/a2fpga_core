@@ -55,6 +55,7 @@
         <File path="../../hdl/slots/slots.hex" type="file.other" enable="1"/>
         <File path="../../hdl/sound/doc5503.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/sound_glu.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sound/doc_fetch_cache.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/ssc/ssc_rom.vhd" type="file.vhdl" enable="1"/>
         <File path="../../hdl/ssc/super_serial_card.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/supersprite/supersprite.sv" type="file.verilog" enable="1"/>

@@ -2,7 +2,12 @@
 
 ## Status
 
-**Work In Progress** - Tang Primer 25K version, coming soon.
+**displayport1 board rev in bring-up** — see
+[docs/MODERNIZATION_PLAN.md](docs/MODERNIZATION_PLAN.md) for the current plan,
+priorities (DP colorbars → AUX validation → PSRAM test → DOC/framebuffer/
+shadow on PSRAM) and the bench ladder. The new board removes LCAM, I2S and the
+UART, so the ESP32-S3 audio items below describe the PREVIOUS board rev and
+are superseded by the fabric DOC5503 on PSRAM.
 
 ## High Priority
 

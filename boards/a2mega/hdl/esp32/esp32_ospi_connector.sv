@@ -22,6 +22,10 @@
 // the register map and protocol details.
 //
 module esp32_ospi_connector #(
+    // 14-char gateware build stamp (YYYYMMDDHHMMSS), read a digit at a time
+    // through reg 0x3F (write the index, read the ASCII digit) — the menu's
+    // CORE: line and the same convention as the BL616 connector.
+    parameter [8*14-1:0] VERSION_STR = "00000000000000",
     parameter USE_SYNC    = 1,
     parameter USE_CRC     = 0,
     parameter IDLE_TO_CYC = 5_400_000,
@@ -97,6 +101,11 @@ module esp32_ospi_connector #(
     input  wire [47:0]  gs_trace_i,         // {frozen, triggered, wptr[5:0], trace_data[39:0]} (connector domain)
     input  wire [159:0] gs_tele_i,          // {last_addr[23:0], high[15:0], period[15:0], hold_samples[15:0],
                                             //  hold_mismatch[15:0], be[15:0], stall[15:0], cycle[31:0], status[7:0]}
+    // DOC fetch telemetry per frame (a2p25 HyperRAM DOC; read through the
+    // indexed window at REG_GS_SEL/REG_GS_DATA, indices 32-37)
+    input  wire [15:0] dbg_doc_reqf_i,      // DOC requests per frame
+    input  wire [15:0] dbg_doc_missf_i,     // DOC memory reads per frame
+    input  wire [15:0] dbg_doc_tof_i,       // DOC late fetches per frame
     output reg         ddr3_reinit_tgl_o,   // toggles on REG_DDR3_REINIT write (CDC as toggle)
 
     // DDR3 debug read window (ddr3_debug_reader on idle port 4)
@@ -274,6 +283,7 @@ module esp32_ospi_connector #(
     localparam REG_DBG_USB_PID_H = 7'h1F;
     localparam REG_DBG_USB_CLASS = 7'h7C;   // interface class
     localparam REG_DBG_USB_SUBCL = 7'h7D;   // interface subclass
+    // DOC fetch telemetry, latched per video frame in the top (16-bit, L/H):
     localparam REG_DBG_USB_FLAGS = 7'h20;   // {connerr,x_input,fs,connected,start,rdy,stb,busy}
     localparam REG_DBG_USB_TXNS  = 7'h21;   // transaction-start counter
     localparam REG_DBG_USB_DATA  = 7'h22;   // received-data-packet counter
@@ -297,6 +307,11 @@ module esp32_ospi_connector #(
     //  20-22 last issued address {lo, hi, bank}
     localparam REG_GS_DATA = 7'h4F;
     localparam REG_GS_SEL  = 7'h5F;
+    // Gateware build stamp: W = digit index 0-13, R = ASCII digit of
+    // VERSION_STR (the BL616 keeps its version at 0x3F; here 0x3F is the
+    // SERDES status, so the last plain register is used — 0x7F is the
+    // extended-transfer opcode).
+    localparam REG_CORE_BUILD = 7'h7E;
 
     // Memory spaces (XFER via reg 0x7F)
     localparam SPACE_TEST  = 3'd0;
@@ -332,7 +347,7 @@ module esp32_ospi_connector #(
 
     // System
     reg [7:0] scratch_r;
-    reg [4:0] gs_sel_r;
+    reg [5:0] gs_sel_r;    // 0-31: IIgs socket window; 32-37: DOC telemetry
     reg [7:0] gs_ctrl_r;
     reg [3:0] gs_out_extra_r;
     reg [4:0] gs_hold_tap_r;
@@ -346,41 +361,51 @@ module esp32_ospi_connector #(
     reg [7:0] gs_rdata;
     always @* begin
         case (gs_sel_r)
-            5'd0:  gs_rdata = gs_ctrl_r;
-            5'd1:  gs_rdata = gs_tele_i[7:0];
-            5'd2:  gs_rdata = {4'b0, gs_out_extra_r};
-            5'd3:  gs_rdata = {3'b0, gs_hold_tap_r};
-            5'd4:  gs_rdata = gs_tele_i[15:8];
-            5'd5:  gs_rdata = gs_tele_i[23:16];
-            5'd6:  gs_rdata = gs_tele_i[31:24];
-            5'd7:  gs_rdata = gs_tele_i[39:32];
-            5'd8:  gs_rdata = gs_tele_i[47:40];
-            5'd9:  gs_rdata = gs_tele_i[55:48];
-            5'd10: gs_rdata = gs_tele_i[63:56];
-            5'd11: gs_rdata = gs_tele_i[71:64];
-            5'd12: gs_rdata = gs_tele_i[79:72];
-            5'd13: gs_rdata = gs_tele_i[87:80];
-            5'd14: gs_rdata = gs_tele_i[95:88];
-            5'd15: gs_rdata = gs_tele_i[103:96];
-            5'd16: gs_rdata = gs_tele_i[111:104];
-            5'd17: gs_rdata = gs_tele_i[119:112];
-            5'd18: gs_rdata = gs_tele_i[127:120];
-            5'd19: gs_rdata = gs_tele_i[135:128];
-            5'd20: gs_rdata = gs_tele_i[143:136];
-            5'd21: gs_rdata = gs_tele_i[151:144];
-            5'd22: gs_rdata = gs_tele_i[159:152];
-            5'd23: gs_rdata = gs_trace_i[47:40];          // {frozen, triggered, wptr}
-            5'd24: gs_rdata = gs_trace_i[15:8];           // addr lo   (entry = {flags, bank, addr, data})
-            5'd25: gs_rdata = gs_trace_i[23:16];          // addr hi
-            5'd26: gs_rdata = gs_trace_i[31:24];          // bank
-            5'd27: gs_rdata = gs_trace_i[7:0];            // data at the fall
-            5'd28: gs_rdata = gs_trace_i[39:32];          // {0,0,0, VDA, VPA, be_ok, rdy, rw}
-            5'd29: gs_rdata = gs_trig_addr_r[7:0];
-            5'd30: gs_rdata = gs_trig_addr_r[15:8];
-            5'd31: gs_rdata = gs_trig_addr_r[23:16];
+            6'd0: gs_rdata = gs_ctrl_r;
+            6'd1: gs_rdata = gs_tele_i[7:0];
+            6'd2: gs_rdata = {4'b0, gs_out_extra_r};
+            6'd3: gs_rdata = {3'b0, gs_hold_tap_r};
+            6'd4: gs_rdata = gs_tele_i[15:8];
+            6'd5: gs_rdata = gs_tele_i[23:16];
+            6'd6: gs_rdata = gs_tele_i[31:24];
+            6'd7: gs_rdata = gs_tele_i[39:32];
+            6'd8: gs_rdata = gs_tele_i[47:40];
+            6'd9: gs_rdata = gs_tele_i[55:48];
+            6'd10: gs_rdata = gs_tele_i[63:56];
+            6'd11: gs_rdata = gs_tele_i[71:64];
+            6'd12: gs_rdata = gs_tele_i[79:72];
+            6'd13: gs_rdata = gs_tele_i[87:80];
+            6'd14: gs_rdata = gs_tele_i[95:88];
+            6'd15: gs_rdata = gs_tele_i[103:96];
+            6'd16: gs_rdata = gs_tele_i[111:104];
+            6'd17: gs_rdata = gs_tele_i[119:112];
+            6'd18: gs_rdata = gs_tele_i[127:120];
+            6'd19: gs_rdata = gs_tele_i[135:128];
+            6'd20: gs_rdata = gs_tele_i[143:136];
+            6'd21: gs_rdata = gs_tele_i[151:144];
+            6'd22: gs_rdata = gs_tele_i[159:152];
+            6'd23: gs_rdata = gs_trace_i[47:40];          // {frozen, triggered, wptr}
+            6'd24: gs_rdata = gs_trace_i[15:8];           // addr lo   (entry = {flags, bank, addr, data})
+            6'd25: gs_rdata = gs_trace_i[23:16];          // addr hi
+            6'd26: gs_rdata = gs_trace_i[31:24];          // bank
+            6'd27: gs_rdata = gs_trace_i[7:0];            // data at the fall
+            6'd28: gs_rdata = gs_trace_i[39:32];          // {0,0,0, VDA, VPA, be_ok, rdy, rw}
+            6'd29: gs_rdata = gs_trig_addr_r[7:0];
+            6'd30: gs_rdata = gs_trig_addr_r[15:8];
+            6'd31: gs_rdata = gs_trig_addr_r[23:16];
+            // DOC fetch telemetry per frame (a2p25; 2026-10-22 register-map
+            // merge: 0x3C-0x3F/0x2F/0x4F/0x5F were already the DP readback
+            // and this window on the a2mega side)
+            6'd32: gs_rdata = dbg_doc_reqf_i[7:0];     // wavetable requests
+            6'd33: gs_rdata = dbg_doc_reqf_i[15:8];
+            6'd34: gs_rdata = dbg_doc_missf_i[7:0];    // memory reads (cache misses)
+            6'd35: gs_rdata = dbg_doc_missf_i[15:8];
+            6'd36: gs_rdata = dbg_doc_tof_i[7:0];      // fetches past the slot deadline
+            6'd37: gs_rdata = dbg_doc_tof_i[15:8];
             default: gs_rdata = 8'h00;
         endcase
     end
+    reg [3:0] ver_idx_r;             // REG_CORE_BUILD digit index
     reg [7:0] scratch1_r, scratch2_r, scratch3_r, scratch4_r;
     reg [31:0] sys_time_r;
 
@@ -600,8 +625,9 @@ module esp32_ospi_connector #(
             REG_PROTO_VER:    reg_rdata = PROTO_VER;
             REG_CAPABILITIES: reg_rdata = CAP0;
             REG_SCRATCH:      reg_rdata = scratch_r;
-            REG_GS_SEL:       reg_rdata = {3'b0, gs_sel_r};
+            REG_GS_SEL:       reg_rdata = {2'b0, gs_sel_r};
             REG_GS_DATA:      reg_rdata = gs_rdata;
+            REG_CORE_BUILD:   reg_rdata = VERSION_STR[8*(13-ver_idx_r) +: 8];
             REG_STATUS:       reg_rdata = status_w;
             REG_SYSTIME_0:    reg_rdata = sys_time_r[7:0];
             REG_SYSTIME_1:    reg_rdata = sys_time_r[15:8];
@@ -749,11 +775,12 @@ module esp32_ospi_connector #(
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             scratch_r <= 8'h00;
+            ver_idx_r <= 4'd0;
             scratch1_r <= 8'h00;
             scratch2_r <= 8'h00;
             scratch3_r <= 8'h00;
             scratch4_r <= 8'h00;
-            gs_sel_r <= 5'd0;
+            gs_sel_r <= 6'd0;
             gs_trace_idx_r <= 6'd0;
             gs_trig_addr_r <= 24'd0;
             gs_ctrl_r <= 8'h00;
@@ -830,21 +857,22 @@ module esp32_ospi_connector #(
             if (reg_wr_req) begin
                 case (reg_idx)
                     REG_SCRATCH:      scratch_r <= reg_wdata;
+                    REG_CORE_BUILD:   ver_idx_r <= reg_wdata[3:0];
                     REG_DDR3_REINIT:  ddr3_reinit_tgl_o <= ~ddr3_reinit_tgl_o;
                     REG_SCRATCH1:     scratch1_r <= reg_wdata;
                     REG_SCRATCH2:     scratch2_r <= reg_wdata;
                     REG_SCRATCH3:     scratch3_r <= reg_wdata;
                     REG_SCRATCH4:     scratch4_r <= reg_wdata;
-                    REG_GS_SEL:       gs_sel_r <= reg_wdata[4:0];
+                    REG_GS_SEL:       gs_sel_r <= reg_wdata[5:0];
                     REG_GS_DATA: begin
                         case (gs_sel_r)
-                            5'd0: gs_ctrl_r      <= reg_wdata;
-                            5'd2: gs_out_extra_r <= reg_wdata[3:0];
-                            5'd3: gs_hold_tap_r  <= reg_wdata[4:0];
-                            5'd23: gs_trace_idx_r <= reg_wdata[5:0];
-                            5'd29: gs_trig_addr_r[7:0]   <= reg_wdata;
-                            5'd30: gs_trig_addr_r[15:8]  <= reg_wdata;
-                            5'd31: gs_trig_addr_r[23:16] <= reg_wdata;
+                            6'd0: gs_ctrl_r      <= reg_wdata;
+                            6'd2: gs_out_extra_r <= reg_wdata[3:0];
+                            6'd3: gs_hold_tap_r  <= reg_wdata[4:0];
+                            6'd23: gs_trace_idx_r <= reg_wdata[5:0];
+                            6'd29: gs_trig_addr_r[7:0]   <= reg_wdata;
+                            6'd30: gs_trig_addr_r[15:8]  <= reg_wdata;
+                            6'd31: gs_trig_addr_r[23:16] <= reg_wdata;
                             default: ;
                         endcase
                     end

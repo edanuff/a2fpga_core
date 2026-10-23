@@ -1,0 +1,21 @@
+-series GW5A
+-device GW5A-25
+-device_version A
+-package MBGA121N
+-part_number GW5A-LV25MG121NC1/I0
+
+
+-mod_name Gowin_MIPI_DPHY_MIPI_DPHY
+-file_name gowin_mipi_dphy_mipi_dphy
+-path /Users/edanuff/GitHub/a2fpga_core/.claude/worktrees/inspiring-hellman-22a2e1/boards/a2p25/hdl/gowin/gowin_mipi_dphy/
+-type MIPI_DPHY
+-file_type vlg
+-ip_version 1.1
+-tx enable
+-tx_mode 0
+-ln0 enable
+-ln1 enable
+-ln2 enable
+-ln3 enable
+-clk_sel pll
+-lane_div_sel 0

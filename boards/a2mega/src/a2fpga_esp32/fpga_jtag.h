@@ -17,6 +17,7 @@ extern "C" {
 // from the bitstream itself and require the live chip to match it, so the
 // wrong-die combination is refused in both directions.
 #define FPGA_JTAG_IDCODE_GW5AST138 0x0001081Bu
+#define FPGA_JTAG_IDCODE_GW5A25    0x0001281Bu   /* a2p25 (Tang Primer 25K) */
 
 void     fpga_jtag_init_pins(void);
 void     fpga_jtag_release_pins(void);

@@ -45,9 +45,14 @@
 #if A2MEGA_HAS_USBC_PD
 #include "usbc_glue.h"
 #endif
+#if A2MEGA_HAS_DP130
+#include "sn75dp130.h"
+#endif
 #include "a2fpga_regs.h"
 #include "telnetd.h"
 #include "wedge_watch.h"
+
+extern volatile bool viddbg_request;   /* serviced by loop() in a2fpga_esp32.ino */
 
 #define TELNET_PORT     23
 #define TEE_LINES       32
@@ -348,8 +353,12 @@ static void session(int fd)
     /* char-at-a-time: WILL ECHO, WILL SGA, DO SGA */
     static const uint8_t nego[] = { 255, 251, 1, 255, 251, 3, 255, 253, 3 };
     tn_send(fd, nego, sizeof(nego));
-    tn_puts(fd, "\r\nA2FPGA a2mega remote console\r\n"
-                "keys: c=console m=menu p=pd d=census x=regs e=eq +/-=eqstep l=lanes v=replug f=flip r=retrain g=fpgareload u=fusb t=trace :=cmdline q=quit\r\n"
+    tn_puts(fd, "\r\nA2FPGA " A2_BOARD_NAME " remote console\r\n"
+                "keys: c=console m=menu p=pd d=census x=regs z=viddbg e=eq +/-=eqstep l=lanes v=replug f=flip r=retrain g=fpgareload u=fusb t=trace i=i2cscan"
+#if A2MEGA_HAS_DP130
+                " n=dp130"
+#endif
+                " :=cmdline q=quit\r\n"
                 "menu: up/down move, left/right change, enter/a=ok,\r\n"
                 "      esc/backspace/b=back, y=view, s/tab=select\r\n\r\n");
 
@@ -554,6 +563,16 @@ static void session(int fd)
                 fpga_jtag_release_pins();
                 continue;
             }
+            if (esc_st == 0 && ch == 'z' && !menu_mode) {
+                /* Video/DOC debug block (FPGA regs 0x70-0x78, the CLI's
+                 * viddbg) into the console tee — the WiFi-only bench must
+                 * not depend on the USB CDC console for these counters.
+                 * The OSPI register reads belong to the main task: raise a
+                 * flag that loop() services (reading from this task rebooted
+                 * the ESP32 and reset the Apple II, 2026-10-14). */
+                viddbg_request = true;
+                continue;
+            }
             if (esc_st == 0 && ch == 'x' && !menu_mode) {
                 /* TUSB1046A register dump — the AUX snooper is the only
                  * on-the-wire view of the FPGA's AUX transmissions. */
@@ -561,6 +580,25 @@ static void session(int fd)
                 usbc_mux_dump_log();
 #else
                 tn_puts(fd, "mux: not built for this board rev\r\n");
+#endif
+                continue;
+            }
+            if (esc_st == 0 && ch == 'i' && !menu_mode) {
+                /* List responders on the DP I2C bus (mux/PD PHY/DP130). */
+#if A2MEGA_HAS_USBC_PD
+                usbc_i2c_scan_log();
+#else
+                tn_puts(fd, "i2c: not built for this board rev\r\n");
+#endif
+                continue;
+            }
+            if (esc_st == 0 && ch == 'n' && !menu_mode) {
+                /* SN75DP130 raw register dump (auto mode is never touched
+                 * from telnet; overrides go through the serial CLI). */
+#if A2MEGA_HAS_DP130
+                dp130_dump_log(0x00, 0x40);
+#else
+                tn_puts(fd, "dp130: not on this board rev\r\n");
 #endif
                 continue;
             }

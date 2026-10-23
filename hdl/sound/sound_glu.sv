@@ -32,6 +32,10 @@ module sound_glu #(
     // BSRAMs (rev 3.3+), 0 = rev-3.2-style FF banks with baseline read
     // timing (hardware discriminator for the register-path question).
     parameter bit DOC_BANKS_IN_BSRAM = 1'b1,
+    // gen_doc_ext word cache: 0 = whole-cache flush on every sound-RAM write
+    // (hardware control build), 1 = per-word invalidation.
+    parameter bit DOC_CACHE_PER_WORD_INVALIDATE = 1'b1,
+    parameter bit DOC_CACHE_HIT_DISABLE = 1'b0,   // diagnostic, see doc_fetch_cache
     // Output stage gain: audio = sat16(mix <<< OUTPUT_BOOST_SHIFT).
     // Default 1 preserves the field-validated GS x2 loudness — but now
     // CLAMPED instead of wrapping (tracker-class music with 8-14 voices
@@ -82,6 +86,7 @@ module sound_glu #(
     output [7:0] dbg_doc_stale_fetch_o,
     output [7:0] dbg_doc_fetch_drop_o,
     output [15:0] dbg_doc_fetch_count_o,
+    output [15:0] dbg_doc_timeouts_o,    // baseline DOC on external memory: fetches past the slot deadline (free-running)
     output [7:0] dbg_doc_frame_resync_o,  // rev 3.9 beat-framing resyncs
 
     // Ground-truth instrumentation at the DOC wave_* seam — measures the
@@ -147,6 +152,8 @@ module sound_glu #(
     generate
         if (USE_BSRAM) begin : gen_glu_idle
             assign glu_wq_drops_o = 8'd0;
+            assign glu_wq_pop_w = 1'b0;
+            assign glu_wq_pop_waddr_w = 14'd0;
             assign glu_mem_if.rd = '0;
             assign glu_mem_if.wr = '0;
             assign glu_mem_if.addr = '0;
@@ -183,6 +190,8 @@ module sound_glu #(
             wire gq_ack_w = GLU_WR_ACK_AVAIL ? glu_mem_if.available
                                              : glu_mem_if.ready;
             wire gq_pop_w = gq_wr_r && gq_ack_w;
+            assign glu_wq_pop_w = gq_pop_w;
+            assign glu_wq_pop_waddr_w = gq_addr_r[gq_rp_r][13:0];
 
             always_ff @(posedge a2bus_if.clk_logic) begin
                 if (!a2bus_if.system_reset_n) begin
@@ -295,6 +304,10 @@ module sound_glu #(
     reg [7:0] wave_data_r;
     reg [31:0] wave_data_word_r;   // rev-2 pipelined path: full-word response
     reg wave_data_ready_r;
+    wire [7:0] doc_filter_late_w;  // gen_doc_ext: superseded responses discarded
+    wire [15:0] doc_cache_hits_w, doc_cache_miss_w;  // gen_doc_ext word cache (free-running)
+    wire       glu_wq_pop_w;       // a queued sound-RAM write left for memory (cache invalidate)
+    wire [13:0] glu_wq_pop_waddr_w;  // ... its word address (sound-RAM relative)
 
     generate
         if (USE_BSRAM) begin : gen_doc_bsram
@@ -355,21 +368,47 @@ module sound_glu #(
                     wave_data_ready_r <= 1'b1;
                 end
             end
-        end else begin : gen_doc_ddr3
-            // Original DDR3 path (single outstanding read)
+        end else begin : gen_doc_ext
+            // Baseline DOC on external memory (HyperRAM / DDR3), single-word
+            // reads through doc_fetch_cache: a 64-word cache (sequential
+            // wavetable walks hit the same 32-bit word up to 4x, cutting the
+            // DOC's share of the memory bus ~4x and answering hits in two
+            // cycles) that also owns request ordering — a response still
+            // outstanding when a newer request arrives is superseded, so a
+            // fetch that missed the DOC's slot budget can never be consumed
+            // as the next oscillator's sample. Flushed on every sound-RAM
+            // write and again when that write leaves the queue for memory.
             assign doc_mem_if.wr = '0;
             assign doc_mem_if.data = '0;
             assign doc_mem_if.byte_en = 4'b1111;
-            assign doc_mem_if.addr = {7'b0, wave_addr_w[15:2]};
-            assign doc_mem_if.rd = ENABLE && doc_mem_rd_w;
             assign doc_mem_if.burst = 1'b0;
-
+            wire        cache_rd_w;
+            wire [13:0] cache_waddr_w;
+            wire        cache_valid_w;
+            wire [7:0]  cache_data_w;
+            assign doc_mem_if.rd   = ENABLE && cache_rd_w;
+            assign doc_mem_if.addr = {7'b0, cache_waddr_w};
+            doc_fetch_cache #(.PER_WORD_INVALIDATE(DOC_CACHE_PER_WORD_INVALIDATE),
+                              .HIT_DISABLE(DOC_CACHE_HIT_DISABLE)) u_fetch_cache (
+                .clk_i(a2bus_if.clk_logic),
+                .rst_n_i(a2bus_if.system_reset_n),
+                .req_i(ENABLE && doc_mem_rd_w),
+                .addr_i(wave_addr_w),
+                .flush_i(glu_mem_wr_r | glu_wq_pop_w),
+                .flush_waddr_i(glu_mem_wr_r ? glu_mem_addr_r[13:0] : glu_wq_pop_waddr_w),
+                .valid_o(cache_valid_w),
+                .data_o(cache_data_w),
+                .mem_rd_o(cache_rd_w),
+                .mem_addr_o(cache_waddr_w),
+                .mem_available_i(doc_mem_if.available),
+                .mem_ready_i(doc_mem_if.ready),
+                .mem_q_i(doc_mem_if.q),
+                .dbg_hits_o(doc_cache_hits_w),
+                .dbg_misses_o(doc_cache_miss_w),
+                .dbg_late_o(doc_filter_late_w));
             always_ff @(posedge a2bus_if.clk_logic) begin
-                wave_data_ready_r <= 1'b0;
-                if (doc_mem_if.ready) begin
-                    wave_data_r <= doc_mem_if.q[8*doc_mem_offset_r +: 8];
-                    wave_data_ready_r <= 1'b1;
-                end
+                wave_data_ready_r <= cache_valid_w;
+                if (cache_valid_w) wave_data_r <= cache_data_w;
             end
         end
     endgenerate
@@ -452,13 +491,21 @@ module sound_glu #(
                 .dbg_fetch_count_o(dbg_doc_fetch_count_o),
                 .dbg_frame_resync_o(dbg_doc_frame_resync_o)
             );
+            assign dbg_doc_timeouts_o = 16'd0;
         end else begin : gen_doc_baseline
-            assign dbg_doc_prime_miss_o  = 8'd0;
-            assign dbg_doc_stale_fetch_o = 8'd0;
-            assign dbg_doc_fetch_drop_o  = 8'd0;
-            assign dbg_doc_fetch_count_o = 16'd0;
+            assign dbg_doc_prime_miss_o = doc_latmax_w;
+            assign dbg_doc_stale_fetch_o = doc_timeout_w[7:0];
+            assign dbg_doc_fetch_drop_o = doc_late_w;
+            assign dbg_doc_fetch_count_o = doc_cache_miss_w;   // memory reads actually issued (word-cache misses)
+            assign dbg_doc_timeouts_o    = doc_timeout_w;
             assign dbg_doc_frame_resync_o = 8'd0;
+            // fetch telemetry: prime_miss = max fetch latency (clk), stale = budget
+            // timeouts (0x80 substituted), drop = stale responses discarded (filter)
+            wire [15:0] doc_timeout_w;
+            wire [7:0]  doc_latmax_w;
+            wire [7:0] doc_late_w = USE_BSRAM ? 8'd0 : doc_filter_late_w;
             doc5503 #(
+                .BANKS_IN_BSRAM(DOC_BANKS_IN_BSRAM)
             ) doc5503 (
                 .clk_i(a2bus_if.clk_logic),
                 .reset_n_i(a2bus_if.system_reset_n),
@@ -479,7 +526,9 @@ module sound_glu #(
                 .ready_o(),
                 .debug_osc_en_o(debug_doc_osc_en_w),
                 .debug_osc_mode_o(debug_osc_mode_w),
-                .debug_osc_halt_o(debug_osc_halt_w)
+                .debug_osc_halt_o(debug_osc_halt_w),
+                .dbg_fetch_timeout_o(doc_timeout_w),
+                .dbg_fetch_latmax_o(doc_latmax_w)
             );
         end
     endgenerate

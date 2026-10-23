@@ -43,8 +43,8 @@ verilator --binary --timing -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-UNSIGNED \
     -Wno-CASEINCOMPLETE -Wno-TIMESCALEMOD -Wno-fatal -j 4 \
     --top-module tb_cosim -o tb_cosim \
     ../../hdl/bus/a2bus_if.sv ../../hdl/memory/mem_port_if.sv \
-    ../../hdl/sound/doc5503.sv ../../hdl/sound/doc5503_pipelined.sv \
-    ../../hdl/sound/sound_glu.sv ../../boards/a2mega/hdl/sound/ensoniq_bsram.sv \
+    dpb_behav.sv ../../hdl/sound/doc5503.sv ../../hdl/sound/doc5503_pipelined.sv \
+    ../../hdl/sound/sound_glu.sv ../../hdl/sound/doc_fetch_cache.sv ../../boards/a2mega/hdl/sound/ensoniq_bsram.sv \
     ../../hdl/ddr3/ddr3_port_cdc.sv ../../hdl/ddr3/ddr3_ports.sv tb_cosim.sv
 ./obj_dir/tb_cosim | tee cosim_run.log | grep -E "PHASE|COSIM"
 grep -q "COSIM RESULT: PASS" cosim_run.log || { echo "COSIM FAILED"; exit 1; }

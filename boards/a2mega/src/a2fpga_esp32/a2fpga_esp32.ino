@@ -11,10 +11,13 @@
  *   - USB JTAG bridge for PC-driven FPGA programming (openFPGALoader)
  *   - Serial forwarding to FPGA; CLI mode for diagnostics ("+++")
  *
- * Board: a2mega. The ESP32 module varies by board revision (board_pins.h):
+ * Board: a2mega, plus the a2p25 "displayport1" rev (BOARD_REV=225, see
+ * boards/a2p25/docs/ESP32_FW_A2P25.md). The ESP32 module varies by board
+ * revision (board_pins.h):
  *   1.0a3   ESP32-S3-MINI-1-N4R2 — 4 MB flash + 2 MB quad PSRAM (same
  *           module as the a2p25; PSRAM available for large buffers)
  *   1.0a2x  ESP32-S3-MINI-1-N8   — 8 MB flash, no PSRAM
+ *   a2p25   ESP32-S3-MINI-1-N4R2 (as 1.0a3)
  *
  * Arduino IDE Settings (the Makefile encodes these per revision):
  *   - Board: ESP32S3 Dev Module
@@ -40,6 +43,9 @@
 #include "fpga_link.h"
 #include "fpga_screen.h"
 #include "osd_console.h"
+#include "usbhost.h"
+#include "usbstorage.h"
+#include "fwupdate.h"
 #include "settings.h"
 #include "wedge_watch.h"
 #include "disk.h"
@@ -52,6 +58,7 @@
 #include "ftpd.h"
 #include "telnetd.h"
 #include "usbc_glue.h"
+#include "sn75dp130.h"
 #include "esp_err.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -87,6 +94,42 @@ static const int SPI_HZ = 4 * 1000 * 1000;  // (reg path is clean at 8 MHz but
                                              // fabric-side prefetch to go higher  // 10 MHz for bring-up: the FPGA read
                                              // pipeline (2 cycles @ 54 MHz) is marginal
                                              // against back-to-back 20 MHz RX byte slots
+
+// OSPI bring-up, gated per board: on the a2p25 dp_test build the link's
+// D0 pad (IO11) carries the FPGA telemetry UART instead, and initializing
+// SPI2 on it would steal the pad from UART1.
+static esp_err_t ospi_init() {
+#if A2MEGA_HAS_OSPI_LINK
+    return a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+#if PIN_A2_RESET_OUT >= 0
+// Apple II /RES driver (a2p25: ESP32 IO33 -> open-drain inverter -> slot).
+static void a2_reset_drive(bool assert_reset) {
+    digitalWrite(PIN_A2_RESET_OUT,
+                 (assert_reset == (A2_RESET_ASSERT_LEVEL != 0)) ? HIGH : LOW);
+}
+// Reset hold (the BL616/a2mega contract, here in firmware because the
+// FPGA's reset-hold output has no pin on the a2p25): /RES stays asserted
+// from power-on (R1 holds the driver input high before we run) until the
+// disk task reports the mounts done — a2_reset_hold_release() from
+// disk.c — or until a 15 s backstop in loop(). Only when the OSPI link
+// exists (the dp_test bitstream has no Apple-bus logic: release at once).
+static bool     s_a2_held = false;
+static uint32_t s_a2_hold_deadline_ms = 0;
+extern "C" void a2_reset_hold_release(const char *why) {
+    if (!s_a2_held) return;
+    s_a2_held = false;
+    a2_reset_drive(false);
+    Serial.printf("[a2] /RES released (%s)\n", why ? why : "");
+    osd_log("A2: /RES RELEASED (%s)", why ? why : "");
+}
+#else
+extern "C" void a2_reset_hold_release(const char *why) { (void)why; }
+#endif
 
 // ============================================================================
 // Global State
@@ -179,7 +222,7 @@ static void cmd_process(String cmd) {
 
     } else if (cmd == "spiinit") {
         Serial.println("[SPI] Initializing Octal SPI...");
-        esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+        esp_err_t err = ospi_init();
         if (err == ESP_OK) {
             Serial.printf("[SPI] Initialized: %s mode @ %d Hz\n",
                          a2spi_is_octal() ? "OCTAL" : "STANDARD", SPI_HZ);
@@ -191,7 +234,7 @@ static void cmd_process(String cmd) {
         Serial.println("[SPI] Running SPI test...");
 
         if (!a2spi_is_ready()) {
-            esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+            esp_err_t err = ospi_init();
             if (err != ESP_OK) {
                 Serial.printf("[SPI] Init failed: %s\n", esp_err_to_name(err));
                 return;
@@ -241,7 +284,7 @@ static void cmd_process(String cmd) {
             Serial.println("Usage: spireg <reg> [value]");
         } else {
             if (!a2spi_is_ready()) {
-                esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+                esp_err_t err = ospi_init();
                 if (err != ESP_OK) {
                     Serial.printf("spireg: init error: %s\n", esp_err_to_name(err));
                     return;
@@ -277,21 +320,24 @@ static void cmd_process(String cmd) {
     } else if (cmd == "viddbg") {
         // Dump the video-pipeline debug registers (FPGA regs 0x70-0x77)
         if (!a2spi_is_ready()) {
-            esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+            esp_err_t err = ospi_init();
             if (err != ESP_OK) {
                 Serial.printf("viddbg: init error: %s\n", esp_err_to_name(err));
                 return;
             }
         }
         uint8_t v[9];
+        fpga_link_lock();   // shared OSPI link (see viddbg_log)
         for (int i = 0; i < 9; i++) {
             uint8_t st = 0;
             esp_err_t err = a2spi_reg_read_status((uint8_t)(0x70 + i), &v[i], &st);
             if (err != ESP_OK) {
+                fpga_link_unlock();
                 Serial.printf("viddbg: read 0x%02X error: %s\n", 0x70 + i, esp_err_to_name(err));
                 return;
             }
         }
+        fpga_link_unlock();
         Serial.printf("mode 0x%02X: use_vgc=%d SHRG=%d LINEAR=%d STORE80=%d PAGE2=%d MIXED=%d HIRES=%d TEXT=%d\n",
                       v[0], !!(v[0] & 0x80), !!(v[0] & 0x40), !!(v[0] & 0x20), !!(v[0] & 0x10),
                       !!(v[0] & 0x08), !!(v[0] & 0x04), !!(v[0] & 0x02), !!(v[0] & 0x01));
@@ -474,7 +520,7 @@ static void cmd_process(String cmd) {
             return;
         }
         if (!a2spi_is_ready()) {
-            esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+            esp_err_t err = ospi_init();
             if (err != ESP_OK) {
                 Serial.printf("ddrd: init error: %s\n", esp_err_to_name(err));
                 return;
@@ -512,7 +558,7 @@ static void cmd_process(String cmd) {
             Serial.println("Usage: spir <space> <addr> <len> [inc=1]");
         } else {
             if (!a2spi_is_ready()) {
-                esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+                esp_err_t err = ospi_init();
                 if (err != ESP_OK) {
                     Serial.printf("spir: init error: %s\n", esp_err_to_name(err));
                     return;
@@ -552,7 +598,7 @@ static void cmd_process(String cmd) {
             Serial.println("Usage: spiw <space> <addr> <inc> <b0> [b1 ...]");
         } else {
             if (!a2spi_is_ready()) {
-                esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+                esp_err_t err = ospi_init();
                 if (err != ESP_OK) {
                     Serial.printf("spiw: init error: %s\n", esp_err_to_name(err));
                     return;
@@ -633,12 +679,19 @@ static void cmd_process(String cmd) {
         Serial.printf("  TMS:  %d\n", PIN_TMS);
         Serial.printf("  TDI:  %d\n", PIN_TDI);
         Serial.printf("  TDO:  %d\n", PIN_TDO);
-        Serial.println("Serial:");
+#if A2MEGA_HAS_FPGA_UART
+        Serial.println("Serial (FPGA telemetry):");
         Serial.printf("  RXD:  %d\n", PIN_RXD);
         Serial.printf("  TXD:  %d\n", PIN_TXD);
+#endif
         Serial.println("Other:");
         Serial.printf("  FPGA_DONE: %d\n", PIN_FPGA_DONE);
-        Serial.printf("  Board rev: %d\n", A2MEGA_BOARD_REV);
+        Serial.printf("  Board: %s rev %d\n", A2_BOARD_NAME, A2MEGA_BOARD_REV);
+#if A2MEGA_BOARD_REV == 225
+        Serial.printf("  dp_test mode: %s\n", A2P25_DP_TEST ? "ON (IO10=HPD out, IO11=UART RX, no OSPI)" : "off");
+        Serial.printf("  RECONFIG_N=%d A2_RESET_OUT=%d (high=assert) LED0=%d LED1=%d BOOT=%d\n",
+                      PIN_FPGA_RECONFIG_N, PIN_A2_RESET_OUT, PIN_LED0, PIN_LED1, PIN_BOOT_BTN);
+#endif
 #if A2MEGA_HAS_SD
         Serial.printf("  SD:   CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d DET=%d\n",
                       PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3, PIN_SD_DET);
@@ -653,6 +706,105 @@ static void cmd_process(String cmd) {
 #if A2MEGA_HAS_USBC_PD
     } else if (cmd == "pd") {
         usbc_pd_status();
+#endif
+
+#if A2MEGA_HAS_USBC_PD
+    } else if (cmd == "muxdump") {
+        usbc_mux_dump_serial();
+    } else if (cmd == "muxflip") {
+        // Live A/B of the CC -> FLIPSEL convention (same as telnet 'f').
+        // Persists across attaches until toggled back or reboot.
+        usbc_mux_flip_toggle();
+        usbc_mux_dump_serial();
+    } else if (cmd == "i2cscan") {
+        usbc_i2c_scan_log();
+#endif
+
+#if A2MEGA_HAS_DP130
+    } else if (cmd == "dp130" || cmd.startsWith("dp130 ")) {
+        // SN75DP130 debug access. The part runs in its power-up AUTO mode;
+        // nothing writes it unless an operator issues "dp130 w".
+        //   dp130                    dump 0x00-0x3F
+        //   dp130 r <reg> [count]    read
+        //   dp130 w <reg> <val>      write (debug override)
+        //   dp130 probe              re-probe 0x2C-0x2F
+        String toks[4];
+        int nt = split_ws(cmd, toks, 4);
+        uint32_t reg = 0, arg = 0;
+        if (nt >= 2 && toks[1] == "probe") {
+            Serial.printf("dp130: %s at 0x%02X\n",
+                          dp130_init() ? "found" : "NOT found", dp130_addr());
+        } else if (nt >= 3 && toks[1] == "w") {
+            if (nt < 4 || !parse_u32(toks[2], reg) || reg > 0xFF ||
+                !parse_u32(toks[3], arg) || arg > 0xFF) {
+                Serial.println("Usage: dp130 w <reg> <val>");
+            } else {
+                int rc = dp130_write((uint8_t)reg, (uint8_t)arg);
+                uint8_t rb = 0;
+                int rrc = dp130_read((uint8_t)reg, &rb);
+                Serial.printf("dp130[0x%02X] <= 0x%02X %s; readback %s0x%02X\n",
+                              (unsigned)reg, (unsigned)arg, rc ? "NAK" : "ok",
+                              rrc ? "FAILED " : "", rb);
+            }
+        } else {
+            uint32_t first = 0x00, count = 0x40;
+            if (nt >= 3 && toks[1] == "r") {
+                if (!parse_u32(toks[2], first) || first > 0xFF) {
+                    Serial.println("Usage: dp130 r <reg> [count]");
+                    return;
+                }
+                count = 1;
+                if (nt >= 4 && (!parse_u32(toks[3], count) || count == 0))
+                    count = 1;
+                if (first + count > 0x100) count = 0x100 - first;
+            }
+            Serial.printf("dp130 @0x%02X%s:\n", dp130_addr(),
+                          dp130_present() ? "" : " (not detected at boot)");
+            for (uint32_t r = first; r < first + count; r++) {
+                if (((r - first) % 16) == 0)
+                    Serial.printf("%s%02X:", (r != first) ? "\n" : "", (unsigned)r);
+                uint8_t v = 0;
+                if (dp130_read((uint8_t)r, &v) == 0)
+                    Serial.printf(" %02X", v);
+                else
+                    Serial.print(" --");
+            }
+            Serial.println();
+        }
+#endif
+
+#if PIN_A2_RESET_OUT >= 0
+    } else if (cmd == "a2reset") {
+        Serial.println("a2reset: asserting Apple II /RES for 200 ms");
+        a2_reset_drive(true);
+        delay(200);
+        a2_reset_drive(false);
+        osd_log("APPLE II RESET PULSED");
+#endif
+
+#if A2MEGA_BOARD_REV == 225
+    } else if (cmd.startsWith("fwupdate")) {
+        // fwupdate <file>   check a .bin on the volume (relative to /sdcard)
+        // fwupdate go       install the checked file and restart
+        // fwupdate cancel
+        String arg = cmd.length() > 9 ? cmd.substring(9) : String("");
+        arg.trim();
+        if (arg == "go") { fwupdate_commit(); Serial.println("fwupdate: installing"); }
+        else if (arg == "cancel") { fwupdate_cancel(); Serial.println("fwupdate: cancelled"); }
+        else if (arg.length()) { Serial.printf("fwupdate: %s\n", fwupdate_request(arg.c_str()) ? "checking" : "busy"); }
+        else Serial.printf("fwupdate: state %d: %s (slot %s)\n", (int)fwupdate_state(), fwupdate_message(), fwupdate_running_slot());
+    } else if (cmd == "reconfig") {
+        // Pulse the FPGA's RECONFIG_N (open-drain style: drive low, then
+        // release to the R32 pull-up) — reload the bitstream from flash.
+        Serial.println("reconfig: pulsing RECONFIG_N low 1 ms");
+        pinMode(PIN_FPGA_RECONFIG_N, OUTPUT);
+        digitalWrite(PIN_FPGA_RECONFIG_N, LOW);
+        delay(1);
+        pinMode(PIN_FPGA_RECONFIG_N, INPUT);
+        uint32_t t0 = millis();
+        while (!digitalRead(PIN_FPGA_DONE) && millis() - t0 < 5000) delay(10);
+        Serial.printf("reconfig: DONE=%d after %lu ms\n", digitalRead(PIN_FPGA_DONE),
+                      (unsigned long)(millis() - t0));
 #endif
 
     } else if (cmd == "restart") {
@@ -681,6 +833,17 @@ static void cmd_process(String cmd) {
         Serial.println("  net       - Show WiFi/IP status");
 #if A2MEGA_HAS_USBC_PD
         Serial.println("  pd        - Show USB-C PD / DP Alt Mode status");
+        Serial.println("  i2cscan   - List devices on the DP I2C bus");
+#endif
+#if A2MEGA_HAS_DP130
+        Serial.println("  dp130 [r <reg> [n] | w <reg> <val> | probe] - SN75DP130 regs");
+#endif
+#if PIN_A2_RESET_OUT >= 0
+        Serial.println("  a2reset   - Pulse the Apple II /RES line (200 ms)");
+#endif
+#if A2MEGA_BOARD_REV == 225
+        Serial.println("  reconfig  - Pulse FPGA RECONFIG_N (reload from flash)");
+        Serial.println("  fwupdate [<file>|go|cancel] - MCU self-update from a .bin on the volume");
 #endif
         Serial.println("  restart   - Reboot the ESP32");
         Serial.println("  exit      - Return to serial forwarding mode");
@@ -698,9 +861,11 @@ static void cmd_process(String cmd) {
 void check_escape_timeout() {
     if (escape_buffer.length() > 0 && (millis() - last_char_time) > ESCAPE_TIMEOUT_MS) {
         if (!cli_mode) {
+#if A2MEGA_HAS_FPGA_UART
             for (int i = 0; i < escape_buffer.length(); i++) {
                 Serial1.write(escape_buffer.charAt(i));
             }
+#endif
         }
         escape_buffer = "";
     }
@@ -782,6 +947,33 @@ static bool mount_sd() {
 }
 #endif
 
+// Storage backend swap at /sdcard (called by disk.c from the disk task,
+// images closed): USB stick (FatFS over usbhost) or the local volume.
+extern "C" void storage_activate(bool usb) {
+#if A2MEGA_HAS_OSPI_LINK
+    if (usb) {
+#if !A2MEGA_HAS_SD
+        LittleFS.end();
+#else
+        SD_MMC.end();
+#endif
+        if (!usbstorage_mount("/sdcard")) {
+            osd_log("USB STICK: MOUNT FAILED (FAT?)");
+            sd_mounted = mount_sd();          /* back to the local volume */
+            return;
+        }
+        osd_log("USB STICK MOUNTED AT /SDCARD");
+        sd_mounted = true;
+    } else {
+        usbstorage_unmount();
+        sd_mounted = mount_sd();
+        osd_log(sd_mounted ? "LOCAL VOLUME MOUNTED" : "LOCAL VOLUME FAILED");
+    }
+#else
+    (void)usb;
+#endif
+}
+
 // WiFi configuration file: wifi.txt on the SD card (root, with
 // /sdcard/A2FPGA/wifi.txt as a fallback location).
 //   line 1: SSID
@@ -854,6 +1046,7 @@ static void disk_task(void *arg) {
     for (;;) {
         disk_poll();
         fpgaupdate_poll();
+        fwupdate_poll();
         vTaskDelay(pdMS_TO_TICKS(2));
     }
 }
@@ -882,7 +1075,10 @@ static void start_network() {
     wedge_watch_init();   /* auto-recovery policy (needs NVS up) */
     sd_mounted = mount_sd();
 
-    osd_log("A2MEGA ESP32 %s %s", __DATE__, __TIME__);
+    osd_log("%s ESP32 %s %s", A2_BOARD_NAME, __DATE__, __TIME__);
+#if A2MEGA_BOARD_REV == 225 && A2P25_DP_TEST
+    osd_log("DP_TEST MODE: HPD->IO10, TELEM<-IO11");
+#endif
 #if A2MEGA_HAS_SD
     osd_log(sd_mounted ? "SD CARD MOUNTED" : "NO SD CARD");
 #else
@@ -922,8 +1118,13 @@ static void start_network() {
 static void start_subsystems() {
     if (subsystems_up)
         return;
+#if !A2MEGA_HAS_OSPI_LINK
+    // dp_test build: no OSPI service in the bitstream and IO11 is the
+    // telemetry UART — never touch SPI2. (Called every 500 ms by loop().)
+    return;
+#endif
 
-    esp_err_t err = a2spi_init_once(SPI2_HOST, &OSPI_PINS, SPI_HZ);
+    esp_err_t err = ospi_init();
     if (err != ESP_OK) {
         Serial.printf("[SPI] init failed: %s\n", esp_err_to_name(err));
         return;
@@ -939,6 +1140,10 @@ static void start_subsystems() {
     }
 
     osd_console_show();
+
+    // USB host on the module's USB-C (gamepads, HID remotes): device-first
+    // role decision, then the OTG host stack (usbhost.cpp)
+    usbhost_start();
 
     disk_init();
     menu_init();
@@ -977,6 +1182,48 @@ static void start_subsystems() {
 // Arduino Setup and Loop
 // ============================================================================
 
+// Video/DOC debug block (FPGA regs 0x70-0x78) into the OSD/telnet console
+// log, so the counters are readable over WiFi (telnet key 'w'). Same
+// registers as the CLI's "viddbg"; on the a2p25 the two $C029 slots carry
+// the DOC fetch telemetry (timeouts, max latency in clk_logic cycles).
+volatile bool viddbg_request = false;   // telnet 'z' -> serviced in loop()
+extern "C" void viddbg_log(void)
+{
+    if (!a2spi_is_ready()) { osd_log("VIDDBG: SPI NOT READY"); return; }
+    uint8_t v[9], pf[6], st2 = 0;   // pf: DOC REQ lo/hi, MEMRD lo/hi, LATE lo/hi
+    // The OSPI link is shared with the disk/menu tasks: take the link mutex
+    // around the burst of register reads (an unlocked burst during disk
+    // streaming collided on the SPI driver and panicked the ESP32 — which
+    // holds the Apple II in reset while it reboots; 2026-10-14).
+    fpga_link_lock();
+    for (int i = 0; i < 9; i++) {
+        uint8_t st = 0;
+        if (a2spi_reg_read_status((uint8_t)(0x70 + i), &v[i], &st) != ESP_OK) {
+            fpga_link_unlock();
+            osd_log("VIDDBG: READ 0x%02X FAILED", 0x70 + i);
+            return;
+        }
+    }
+    /* DOC per-frame telemetry lives in the indexed debug window (select
+     * 0x5F, data 0x4F; indices 32-37 = REQ lo/hi, MEMRD lo/hi, LATE lo/hi).
+     * The plain registers it used until 2026-10-22 (0x3C-0x3F, 0x2F, 0x4F,
+     * 0x5F) are the DP readback and the GS-socket window on the a2mega. */
+    for (int i = 0; i < 6; i++) {
+        fpga_reg_write(0x5F, (uint8_t)(32 + i));
+        a2spi_reg_read_status(0x4F, &pf[i], &st2);
+    }
+    fpga_link_unlock();
+    osd_log("VIDDBG MODE %02X FB %02X OVFL %02X RD %02X", v[0], v[5], v[6], v[7]);
+#if A2MEGA_BOARD_REV == 225
+    osd_log("DOC TIMEOUTS %u  LATMAX %u CLK (0x%02X)", v[1], v[2], v[2]);
+    osd_log("DOC/FRAME REQ %u MEMRD %u LATE %u", (unsigned)pf[0] | ((unsigned)pf[1] << 8),
+            (unsigned)pf[2] | ((unsigned)pf[3] << 8), (unsigned)pf[4] | ((unsigned)pf[5] << 8));
+#else
+    osd_log("C029 WRITES %u LAST %02X", v[1], v[2]);
+#endif
+    osd_log("VGC HSYNC %u STALE %u  SHADOW DROPS %u", v[3], v[8], v[4]);
+}
+
 void setup() {
     // NOTE: do NOT route the USB JTAG bridge here. It was tried (early
     // rescue window for the MSPI-hang state, board #1 2026-08-11) and it
@@ -987,12 +1234,47 @@ void setup() {
     // (observed 30/30 flash-attempt failures). loop()'s edge-triggered
     // routing after USB init is the correct path; the MSPI-hang rescue
     // works through the SRAM-load retry race regardless.
+#if PIN_A2_RESET_OUT >= 0
+    // a2p25: R1 pulls the reset driver's input high, i.e. the Apple II has
+    // been held in /RES since power-on. Production (OSPI link): keep holding
+    // until the mounts are done (disk.c) or the 15 s backstop — the Apple's
+    // autoboot slot scan must not run before storage is up. dp_test: the
+    // bring-up bitstream has no Apple-bus logic, the card is passive —
+    // release at once.
+    pinMode(PIN_A2_RESET_OUT, OUTPUT);     // output latch resets to 0 = released
+#if A2MEGA_HAS_OSPI_LINK
+    a2_reset_drive(true);
+    s_a2_held = true;
+    s_a2_hold_deadline_ms = millis() + 15000;
+    Serial.println("[a2] /RES held until media mounted (15 s backstop)");
+    osd_log("A2: /RES HELD UNTIL MEDIA MOUNTED");
+#else
+    a2_reset_drive(false);
+#endif
+#endif
+#if PIN_LED0 >= 0
+    pinMode(PIN_LED0, OUTPUT);
+    digitalWrite(PIN_LED0, HIGH);
+#endif
+#if PIN_LED1 >= 0
+    pinMode(PIN_LED1, OUTPUT);
+    digitalWrite(PIN_LED1, LOW);
+#endif
+#if A2MEGA_BOARD_REV == 225
+    pinMode(PIN_FPGA_RECONFIG_N, INPUT);   // R32 pull-up; never driven here
+    // (IO10 is PIN_DP_HPD_OUT in both variants — set up as an output below)
+#endif
     Serial.begin(115200);
+#if A2MEGA_HAS_FPGA_UART
+    // a2mega: UART pads 44/43. a2p25 dp_test: GPIO-matrix routed — RX on
+    // IO11 (ESP32_OPI_D0 = FPGA ball C2, the bitstream's uart_tx), TX on
+    // IO12 (ESP32_OPI_D1 = ball F2, the PSRAM test console's uart_rx).
     Serial1.begin(BAUD, SERIAL_8N1, PIN_RXD, PIN_TXD);
+#endif
     delay(300);
 
     Serial.printf("A2FPGA ESP32-S3 Firmware (%s %s)\n", __DATE__, __TIME__);
-    Serial.println("a2mega co-processor: menu, SD disk serving, WiFi bridge");
+    Serial.printf("%s co-processor (board rev %d)\n", A2_BOARD_NAME, A2MEGA_BOARD_REV);
     Serial.println("Serial forwarding mode active. Use '+++' to enter CLI mode.");
 
     cli_mode = false;
@@ -1006,13 +1288,19 @@ void setup() {
     // until the PD stack reports a DisplayPort sink.
     pinMode(PIN_VBUS_SRC_EN, OUTPUT);
     digitalWrite(PIN_VBUS_SRC_EN, LOW);
+#if PIN_DP_HPD_OUT >= 0
     pinMode(PIN_DP_HPD_OUT, OUTPUT);
     digitalWrite(PIN_DP_HPD_OUT, LOW);
-    pinMode(PIN_FUSB_INT, INPUT);   // open-drain, external pull-up R19
+#endif
+    pinMode(PIN_FUSB_INT, INPUT);   // open-drain, external pull-up (R19 a2mega / R25 a2p25)
 
-    // PD policy (FUSB302B + TUSB1046A) is independent of the FPGA link and
+    // PD policy (FUSB302B + DP mux) is independent of the FPGA link and
     // time-bound once a partner attaches — start it before the subsystems.
     usbc_pd_init();
+#endif
+#if A2MEGA_HAS_DP130
+    // Probe only: the DP130 stays in its power-up auto mode.
+    dp130_init();
 #endif
 
     start_network();      /* WiFi/telnet console first — never FPGA-gated */
@@ -1036,30 +1324,52 @@ void setup() {
 }
 
 void loop() {
+    if (viddbg_request) { viddbg_request = false; viddbg_log(); }
+#if PIN_A2_RESET_OUT >= 0
+    // reset-hold backstop: a machine with no media, or a link that never
+    // came up, still boots
+    if (s_a2_held && (int32_t)(millis() - s_a2_hold_deadline_ms) >= 0)
+        a2_reset_hold_release("backstop");
+#endif
     // One-shot debug-UART line diagnostic (2026-08-13: FPGA heartbeat up,
     // uart_tx placed on H13, yet zero bytes reach the telnet tee): raw-
     // sample the Serial1 RX pad for 400 ms ~8 s after boot. The GPIO in-
     // register still reflects the pad while the UART owns it. A healthy
     // line idles HIGH and shows a burst of edges every ~340 ms; stuck
     // LOW = pin conflict/no drive; HIGH with 0 edges = FPGA not sending.
+#if A2MEGA_HAS_FPGA_UART
     static bool uart_diag_done = false;
     if (!uart_diag_done && millis() > 8000) {
         uart_diag_done = true;
-        int last = gpio_get_level(GPIO_NUM_44), edges = 0;
+        int last = gpio_get_level((gpio_num_t)PIN_RXD), edges = 0;
         uint32_t lows = 0, n = 0;
         uint32_t t0 = millis();
         while (millis() - t0 < 400) {
-            int v = gpio_get_level(GPIO_NUM_44);
+            int v = gpio_get_level((gpio_num_t)PIN_RXD);
             n++;
             if (v != last) { edges++; last = v; }
             if (!v) lows++;
         }
         char msg[64];
-        snprintf(msg, sizeof msg, "UARTDIAG: RX44 EDGES=%d LOW=%lu/%lu",
-                 edges, (unsigned long)lows, (unsigned long)n);
+        snprintf(msg, sizeof msg, "UARTDIAG: RX%d EDGES=%d LOW=%lu/%lu",
+                 PIN_RXD, edges, (unsigned long)lows, (unsigned long)n);
         osd_log(msg);
         Serial.printf("[diag] %s\n", msg);
     }
+#endif
+
+#if PIN_LED0 >= 0
+    // LED0 heartbeat (1 Hz): the ESP32 firmware is alive.
+    {
+        static uint32_t last_hb = 0;
+        static bool hb = true;
+        if (millis() - last_hb >= 500) {
+            last_hb = millis();
+            hb = !hb;
+            digitalWrite(PIN_LED0, hb ? HIGH : LOW);
+        }
+    }
+#endif
 
     // Late bring-up: keep probing until the FPGA answers on the OSPI link
     // (it may still be configuring at ESP32 boot).
@@ -1096,19 +1406,24 @@ void loop() {
         if (Serial.available()) {
             char c = Serial.read();
             String to_forward = check_escape_sequence(c);
+#if A2MEGA_HAS_FPGA_UART
             if (to_forward.length() > 0) {
                 for (int i = 0; i < to_forward.length(); i++) {
                     Serial1.write(to_forward.charAt(i));
                 }
             }
+#else
+            (void)to_forward;
+#endif
         }
 
+#if A2MEGA_HAS_FPGA_UART
         if (Serial1.available()) {
             char c1 = (char)Serial1.read();
             Serial.write(c1);
             // Tee FPGA debug-UART lines into the telnet console: the only
             // FPGA-status channel that works while the monitor owns USB-C.
-            static char fline[40];
+            static char fline[96];   // PSRAM test status lines are 63 chars
             static uint8_t flen = 0;
             if (c1 == '\n' || flen >= sizeof(fline) - 1) {
                 if (flen > 0) {
@@ -1121,6 +1436,7 @@ void loop() {
                 fline[flen++] = c1;
             }
         }
+#endif
     }
 
     vTaskDelay(1);

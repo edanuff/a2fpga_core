@@ -33,6 +33,8 @@
 #include "fpgaupdate.h"
 #include "net_status.h"
 #include "menu.h"
+#include "usbhost.h"
+#include "fwupdate.h"
 
 static const char *TAG = "menu";
 
@@ -48,7 +50,7 @@ static const char *TAG = "menu";
 /* Gateware build stamp, indexed reg (write index, read ASCII digit). Not in
  * a2fpga_regs.h because older a2mega cores may not implement it — the reader
  * degrades to "(NO VERSION REG)" when the digits don't come back. */
-#define A2REG_CORE_BUILD  0x3Fu
+#define A2REG_CORE_BUILD  0x7Eu   /* was 0x3F until the 2026-10-22 merge: 0x3F is the a2mega SERDES status */
 
 /* ---- display modes ------------------------------------------------------ */
 typedef enum { VIEW_APPLE, VIEW_CONSOLE, VIEW_MENU } view_t;
@@ -254,7 +256,7 @@ static void save_settings_status(void)
 }
 
 /* ---- gateware build stamp ------------------------------------------------ */
-/* Read the gateware build stamp via indexed reg 0x3F (write index, read
+/* Read the gateware build stamp via indexed reg 0x7E (write index, read
  * ASCII digit). Cores predating the register return zeros -> unknown. */
 static bool fpga_core_version(char *out, size_t cap)
 {
@@ -406,6 +408,7 @@ static const menu_screen_t SCR_SLOTS = { "SLOT ASSIGNMENTS", slots_build };
 static disk_list_ent_t s_pick_ents[DISK_LIST_MAX];
 static int   s_pick_count;
 static bool  s_pick_fpga;                      /* FPGA bitstream picker mode */
+static bool  s_pick_mcu;                       /* MCU firmware (.bin) picker mode */
 static char  s_pick_path[SETTINGS_NAME_LEN];   /* current subdir ("" = root) */
 static char *s_pick_target;            /* settings field to write */
 static const char *const *s_pick_exts; /* NULL-terminated extension list */
@@ -457,7 +460,7 @@ static void picker_choose(int id)
         return;
     }
 
-    if (s_pick_fpga) {                         /* update file selected */
+    if (s_pick_fpga || s_pick_mcu) {           /* update file selected */
         char full[SETTINGS_NAME_LEN];
         int n;
         if (s_pick_path[0])
@@ -469,7 +472,7 @@ static void picker_choose(int id)
             set_status(" PATH TOO LONG");
             return;
         }
-        fpgaupdate_request(full);
+        if (s_pick_mcu) fwupdate_request(full); else fpgaupdate_request(full);
         screen_pop();                          /* back to the update screen */
         return;
     }
@@ -511,7 +514,7 @@ static void picker_build(void)
         m = mi_add(MI_ACTION, "(UP ONE DIRECTORY)", "");
         m->action = picker_choose;
         m->id = -3;
-    } else if (!s_pick_fpga) {
+    } else if (!s_pick_fpga && !s_pick_mcu) {
         m = mi_add(MI_ACTION, "(AUTO - BUILT-IN NAMES)", "");
         m->action = picker_choose;
         m->id = -1;
@@ -540,6 +543,7 @@ static void picker_open(char *target, const char *const *exts,
                         uint8_t eject_bit)
 {
     s_pick_fpga      = false;
+    s_pick_mcu       = false;
     s_pick_target    = target;
     s_pick_exts      = exts;
     s_pick_eject_bit = eject_bit;
@@ -741,7 +745,10 @@ static void status_build(void)
         fpga_pad_state_t pad;
         fpga_pad_poll(&pad);
         mi_add(MI_INFO, "GAMEPAD",
+               usbhost_pad_present() ? "USB HOST PAD" :
+               usbhost_hid_present() ? "USB HOST HID" :
                !pad.present ? "NONE" : pad.is_pad ? "PRESENT" : "OTHER HID");
+        mi_add(MI_INFO, "USB PORT", usbhost_status_str());
     }
     mi_add(MI_INFO, "WIFI", net_connected() ? "CONNECTED" : "OFFLINE");
     mi_add(MI_INFO, "", "");
@@ -787,6 +794,7 @@ static void fpga_pick(int id)
 {
     (void)id;
     s_pick_fpga      = true;
+    s_pick_mcu       = false;
     s_pick_target    = NULL;
     s_pick_exts      = k_fpga_exts;
     s_pick_eject_bit = 0;
@@ -830,6 +838,34 @@ static void fpga_cancel(int id)
     screen_refresh();
 }
 
+/* MCU firmware update (fwupdate.c): pick a .bin on the volume, install
+ * into the inactive OTA slot, restart. */
+static void mcu_pick(int id)
+{
+    (void)id;
+    s_pick_fpga      = false;
+    s_pick_mcu       = true;
+    s_pick_target    = NULL;
+    s_pick_exts      = k_fpga_exts;            /* "bin" */
+    s_pick_eject_bit = 0;
+    s_pick_path[0]   = ' ';
+    picker_load();
+    screen_push(&SCR_PICKER);
+}
+static void mcu_install(int id)
+{
+    (void)id;
+    fwupdate_commit();
+    set_status(" INSTALLING MCU FIRMWARE");
+    screen_refresh();
+}
+static void mcu_cancel(int id)
+{
+    (void)id;
+    fwupdate_cancel();
+    screen_refresh();
+}
+
 static void firmware_build(void)
 {
     menu_item_t *m;
@@ -845,8 +881,35 @@ static void firmware_build(void)
         mi_add(MI_INFO, b, "");
     }
     mi_add(MI_INFO, "", "");
-    mi_add(MI_INFO, "MCU UPDATES: REFLASH THE ESP32 OVER", "");
-    mi_add(MI_INFO, "ITS OWN USB-C PORT (NO SD UPDATE).", "");
+    {
+        char b[MENU_LABEL_LEN + 1];
+        snprintf(b, sizeof(b), "MCU SLOT: %s", fwupdate_running_slot());
+        mi_add(MI_INFO, b, "");
+    }
+    switch (fwupdate_state()) {
+    case FWU_IDLE:
+        m = mi_add(MI_ACTION, "UPDATE MCU (.BIN ON VOLUME)", "");
+        m->action = mcu_pick;
+        break;
+    case FWU_CHECKING:
+    case FWU_INSTALL_REQ:
+    case FWU_INSTALLING:
+    case FWU_DONE:
+        mi_add(MI_INFO, fwupdate_message(), "");
+        break;
+    case FWU_READY:
+        mi_add(MI_INFO, fwupdate_message(), "");
+        m = mi_add(MI_ACTION, "INSTALL MCU FIRMWARE NOW", "");
+        m->action = mcu_install;
+        m = mi_add(MI_ACTION, "CANCEL MCU UPDATE", "");
+        m->action = mcu_cancel;
+        break;
+    case FWU_ERROR:
+        mi_add(MI_INFO, fwupdate_message(), "");
+        m = mi_add(MI_ACTION, "UPDATE MCU (.BIN ON VOLUME)", "");
+        m->action = mcu_pick;
+        break;
+    }
     mi_add(MI_INFO, "", "");
 
     switch (fpgaupdate_state()) {
@@ -1111,7 +1174,7 @@ void menu_input(uint16_t buttons)
 
     /* FPGA update progress: keep the update screen live */
     if (s_view == VIEW_MENU && s_stack[s_depth] == &SCR_FIRMWARE &&
-        fpgaupdate_dirty() && !s_fw_installing) {
+        (fpgaupdate_dirty() || fwupdate_dirty()) && !s_fw_installing) {
         screen_refresh();
         paint();
     }
@@ -1143,8 +1206,10 @@ void menu_tick(void)
     fpga_pad_state_t pad;
     fpga_pad_poll(&pad);
     /* Feed 0 when no gamepad is attached so releases are seen and held
-     * state clears; edge detection makes an unchanged word a no-op. */
-    menu_input((pad.present && pad.is_pad) ? pad.buttons : 0);
+     * state clears; edge detection makes an unchanged word a no-op.
+     * The ESP32's own USB host (usbhost.c: XInput pads, HID keyboards and
+     * remotes on the module's USB-C) is OR-ed in, same A2PAD layout. */
+    menu_input(((pad.present && pad.is_pad) ? pad.buttons : 0) | usbhost_buttons());
 }
 
 void menu_init(void)

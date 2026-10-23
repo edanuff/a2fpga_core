@@ -1990,6 +1990,7 @@ module top #(
 
     // Octal SPI connector instance
     esp32_ospi_connector #(
+        .VERSION_STR(`BUILD_DATETIME),
         .USE_SYNC(1),
         .USE_CRC(0),
         .IDLE_TO_CYC(5_400_000),  // ~100ms at 54MHz
@@ -2044,6 +2045,9 @@ module top #(
         .dbg_dp_caps_i(dp_caps_sync1),
         .dbg_dp_status_i({5'b0, dp_stat_sync1}),
         .dbg_dp_serdes_i(dp_serdes_sync1),
+        .dbg_doc_reqf_i(doc_dbg_req_frame_r),
+        .dbg_doc_missf_i(16'd0),
+        .dbg_doc_tof_i(16'd0),
         .ddr3_reinit_tgl_o(ddr3_reinit_tgl_w),
 
         .gs_ctrl_o(gs_ctrl_w),

@@ -504,7 +504,10 @@ static int handle_vdm_response(usbc_port_t *port,
         set_dp_outputs(port, true, port->dp_hpd_level);
         port->state = USBC_STATE_DP_ACTIVE;
         port->expected_vdm_command = 0u;
-        log_message(port, USBC_LOG_INFO, "DisplayPort Alt Mode active (pin C)");
+        log_message(port, USBC_LOG_INFO,
+                    port->polarity == FUSB302_POLARITY_CC2
+                        ? "DisplayPort Alt Mode active (pin C) CC2"
+                        : "DisplayPort Alt Mode active (pin C) CC1");
         return 0;
     default:
         return 0;

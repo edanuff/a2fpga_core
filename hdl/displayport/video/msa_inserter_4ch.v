@@ -176,10 +176,16 @@ always @(posedge clk) begin
         4'b0011: out_data[53:36] <= { SS,                                                    SS }; 
         4'b0100: out_data[53:36] <= { 1'b0, M_value[15:8],                                   1'b0, M_value[23:16] };
         4'b0101: out_data[53:36] <= { 1'b0, 4'b0000, H_visible[11:8],                        1'b0, M_value[7:0] };
-        4'b0110: out_data[53:36] <= { 1'b0, 4'b0000, V_visible[11:8],                        1'b0, 4'b0000, H_visible[7:0] };
-        4'b0111: out_data[53:36] <= { 1'b0, 8'b00000000,                                     1'b0, 4'b0000, V_visible[7:0] };
+        // (bug fixed 2026-10-11: these two rows concatenated 22 bits into the
+        // 18-bit lane pair, so Vheight[15:8] went out as V_visible[11:8]<<4 —
+        // 720p was announced as 8400 lines; sinks locked all four lanes and
+        // then rejected the stream. a2p25 4-lane bring-up.)
+        4'b0110: out_data[53:36] <= { 1'b0, 4'b0000, V_visible[11:8],                        1'b0, H_visible[7:0] };
+        4'b0111: out_data[53:36] <= { 1'b0, 8'b00000000,                                     1'b0, V_visible[7:0] };
         4'b1000: out_data[53:36] <= { 1'b0, SE,                                              1'b0, 8'b00000000 };
-        default: out_data[53:36] <= { in_data[53:44],                                        in_data[44:36]};
+        // (fixed 2026-10-11: was {in_data[53:44], in_data[44:36]} = 19 bits -> lane 2
+        //  pass-through symbols shifted by one bit outside the MSA)
+        default: out_data[53:36] <= { in_data[53:45],                                        in_data[44:36]};
     endcase
 
     // channel Four 
@@ -193,7 +199,9 @@ always @(posedge clk) begin
         4'b0110: out_data[71:54] <= { 1'b0, N_value[7:0],                                    1'b0, N_value[15:8]}; 
         4'b0111: out_data[71:54] <= { 1'b0, misc1,                                           1'b0, misc0};
         4'b1000: out_data[71:54] <= { 1'b0, SE,                                              1'b0, 8'b00000000}; 
-        default: out_data[71:54] <= { in_data[71:64],                                        in_data[63:56] };
+        // (fixed 2026-10-11: was {in_data[71:64], in_data[63:56]} = 16 bits -> lane 3
+        //  pass-through lost its K bits and shifted every symbol)
+        default: out_data[71:54] <= { in_data[71:63],                                        in_data[62:54] };
     endcase
                 
     //---------------------------------------------------------

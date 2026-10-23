@@ -139,6 +139,8 @@ module framebuffer_1080p #(
     // =========================================================================
 
     localparam HDMI_WIDTH  = 1920;
+    localparam HDMI_H_TOTAL = 2200;  // raster line length incl. blanking (cx wraps here)
+    localparam H_TRIGGER_LEAD = 12;  // see the h_trigger block in the output path
     localparam HDMI_HEIGHT = 1080;
     localparam H_SCALE     = 3;    // 560->1680 / 640->1920
     localparam V_SCALE     = 5;    // 192->960  / 200->1000
@@ -295,6 +297,7 @@ module framebuffer_1080p #(
     reg [15:0] wr_pixel_even_r;      // buffered even pixel (RGB565)
     reg        frame_pending_r;      // waiting for first fb_we after accepted frame start
     reg        frame_parity_r;      // toggles each frame for TEST_PATTERN==6
+    reg        frame_done_parity_r; // buffer the writer last COMPLETED (read side)
 
     // 4-pair accumulator: collects 4 × 32-bit pixel pairs before FIFO push
     reg [31:0] wr_accum_r [0:2];     // Slots 0-2; slot 3 comes from current pair
@@ -334,6 +337,7 @@ module framebuffer_1080p #(
             wr_pixel_even_r <= 16'd0;
             frame_pending_r <= 1'b0;
             frame_parity_r <= 1'b0;
+            frame_done_parity_r <= 1'b1;
             wr_accum_r[0] <= 32'd0;
             wr_accum_r[1] <= 32'd0;
             wr_accum_r[2] <= 32'd0;
@@ -341,6 +345,7 @@ module framebuffer_1080p #(
             wr_accum_addr_r <= 21'd0;
         end else begin
             if (frame_start_w) begin
+                frame_done_parity_r <= frame_parity_r;   // the frame just written is complete
                 frame_parity_r <= ~frame_parity_r;
                 // Arm reset, but align to the first pixel write pulse so
                 // wr_x/wr_y stay phase-locked to the producer's fb_we stream.
@@ -514,10 +519,21 @@ module framebuffer_1080p #(
     // line is 0, and 0 never equals v_border (60/40) or v_border-LEAD
     // (48/28), so the +1 form is exact there too. fb_line_last_r is
     // consumed a full line after fb_line_px_r settles.
+    // (10-11, a2p25 GW5A-25: the change detect and the cy==0 compare still
+    // fed the tracker's update directly — -0.75 ns at 148.5 MHz on the
+    // smaller die. The tracker now acts on the REGISTERED change flag, one
+    // cycle after cy0_r moved, so the border/lead flags are evaluated
+    // against the CURRENT cy0_r (== form) rather than cy+1: at the cycle
+    // the tracker reads them, cy0_r already holds the new line. Timing
+    // round 2 cones (g)/(o) below add the registered cy==0 flag and a
+    // decision stage on top; both read these flags one cycle after the
+    // change, which is exactly what the == form is for. 2026-10-22 merge:
+    // round 2 had kept the +1 form with the later consumption, which would
+    // have put every vertical event one raster line early.)
     reg at_border_nxt_r, at_lead_nxt_r, fb_line_last_r;
     always @(posedge clk_pixel) begin
-        at_border_nxt_r <= (cy0_r + 11'd1 == v_border_px_r);
-        at_lead_nxt_r   <= (cy0_r + 11'd1 == v_border_px_r - 11'(PREFETCH_LEAD_LINES));
+        at_border_nxt_r <= (cy0_r == v_border_px_r);
+        at_lead_nxt_r   <= (cy0_r == v_border_px_r - 11'(PREFETCH_LEAD_LINES));
         fb_line_last_r  <= (fb_line_px_r == fb_height_px_r[8:0] - 9'd1);
     end
 
@@ -601,7 +617,7 @@ module framebuffer_1080p #(
     reg [8:0] fb_line_hold_px_r;
     reg       v_active_hold_px_r, v_approach_hold_px_r;
     always @(posedge clk_pixel) begin
-        if (cy0_r != cy_prev_px_r) begin
+        if (cy_changed_px_r) begin
             fb_line_hold_px_r    <= fb_line_px_r;
             v_active_hold_px_r   <= v_active_px_r;
             v_approach_hold_px_r <= v_approach_px_r;
@@ -981,9 +997,14 @@ module framebuffer_1080p #(
                 // line and pixels are written to wrong line buffer positions.
                 if (fetch_start_line0_w) begin
                     // Approaching active area — prefetch line 0
-                    // Latch read buffer: read from the buffer the writer
-                    // just FINISHED (opposite of writer's current buffer).
-                    rd_buf_offset_r <= frame_parity_r ? 21'd0 : BUFFER_OFFSET;
+                    // Latch read buffer: the buffer the writer last
+                    // COMPLETED. (Was "opposite of the writer's current
+                    // buffer" — wrong whenever the writer is idle between
+                    // frames: the display then picked the buffer the
+                    // writer took next and tore one frame later; a2p25
+                    // bench 10-11, fixed-phase 60 Hz renderer, stripe
+                    // stepped at 1/8 down every frame.)
+                    rd_buf_offset_r <= frame_done_parity_r ? BUFFER_OFFSET : 21'd0;
                     last_fetched_line_r <= 9'd0;
                     line0_prefetched_r <= 1'b1;
                     fetch_bank_r <= 3'd0;
@@ -1142,7 +1163,9 @@ module framebuffer_1080p #(
     // Stores 1 pixel per entry, serializing the 2-pixel words through a
     // small buffer on the write side.
 
-    reg [COLOR_BITS-1:0] line_buf [0:8191] /* synthesis syn_ramstyle="block_ram" */;
+    // Stored as RGB565 (the memory format, converted back on the read side):
+    // 8192 x 16 = 8 BSRAM blocks; 8192 x 18 needed 9 (a2p25 GW5A-25 fit, 10-11).
+    reg [15:0] line_buf [0:8191] /* synthesis syn_ramstyle="block_ram" */;
 
     // ---- Write side (clk domain, 54 MHz) ----
     // Each 32-bit word contains 2 packed RGB565 pixels.
@@ -1200,9 +1223,9 @@ module framebuffer_1080p #(
         end else if (rd_pixel_active_r) begin
             // Extract pixel from latched word and write to line buffer
             line_buf[{fetch_bank_r, lb_wr_pixel_x[9:0]}] <=
-                (TEST_PATTERN == 1) ? test_pixel(lb_wr_pixel_x[9:0]) :
-                rd_pixel_idx_r ? rgb565_to_666(rd_word_latched_r[31:16]) :
-                                 rgb565_to_666(rd_word_latched_r[15:0]);
+                (TEST_PATTERN == 1) ? rgb666_to_565(test_pixel(lb_wr_pixel_x[9:0])) :
+                rd_pixel_idx_r ? rd_word_latched_r[31:16] :
+                                 rd_word_latched_r[15:0];
             lb_wr_pixel_x <= lb_wr_pixel_x + 11'd1;
             if (rd_pixel_idx_r)
                 rd_pixel_active_r <= 1'b0;
@@ -1243,7 +1266,7 @@ module framebuffer_1080p #(
                     bp_sync_pending_r <= 1'b1;
 
                 if (fb_we_r) begin
-                    line_buf[{bypass_y_r[2:0], bypass_x_r[9:0]}] <= fb_data_r;
+                    line_buf[{bypass_y_r[2:0], bypass_x_r[9:0]}] <= rgb666_to_565(fb_data_r);
                     if (bypass_x_r == fb_width - 11'd1) begin
                         bypass_x_r <= 11'd0;
                         // Apply frame sync at clean line boundary only
@@ -1302,13 +1325,40 @@ module framebuffer_1080p #(
     // 1b below): H_SCALE phase + source-x advance incrementally from the
     // one-shot equality trigger at the left border — no divider, no wide
     // subtract in the address path.
-    // Trigger pre-registered one cycle earlier (+6 == border at cycle N
-    // implies +5 == border at N+1; cx is monotonic and the border is far
-    // from the line wrap, so the identity is exact). The 12-bit equality
-    // then never appears in the address/CE cone.
+    // Trigger pre-registered one cycle earlier (cx == border-LEAD at cycle N
+    // implies cx == border-(LEAD-1) at N+1; cx is monotonic). The 12-bit
+    // equality then never appears in the address/CE cone, and the
+    // compare target is a registered constant (h_trigger_x_px_r).
+    // The trigger X is computed modulo the raster line: with a 640-wide
+    // source the active window spans the full 1920 and h_border is 0, so
+    // the +5 lookahead lands in the previous line's blanking (cx = 2195).
+    // The earlier "cx0_r + 5 == h_border" form could never match there —
+    // IIgs SHR frames scanned out black while the framebuffer held the
+    // rendered image (a2p25 10-11; the a2mega shares this read side).
+    // Apple geometry: 120 - H_TRIGGER_LEAD.
+    // H_TRIGGER_LEAD: raster cycles between the trigger and the first
+    // active pixel reaching the DP transmitter's rgb input, less the
+    // transmitter's RGB_LATENCY (2). Counted 10-11 on the a2p25 (identical
+    // chain on the a2mega): this module 6 (cx0_r, h_trigger_r, stage 1,
+    // 1b, 2, 3 — timing round 2 cone (i) added the 1b address copy, hence
+    // 12 rather than the 11 counted on 10-11), then the top's composite 8
+    // (fb_rgb_osd_r 1, osd_text_overlay 1, scanline_dim 0, DebugOverlay 6
+    // — s0/sA/sB/s1/s2/output, ENABLE notwithstanding) = 14, minus 2 = 12.
+    // UNVERIFIED on hardware after the merge: check the IIgs SHR left
+    // edge (one 320-mode pixel of border colour = off by 6). The value had been 5 since the
+    // 08-30 stage-3 split, from before the OSD/overlay stages existed in
+    // this path: every frame scanned out 6 raster pixels late — invisible
+    // inside the Apple modes' 120-px borders, but the borderless 640-wide
+    // IIgs SHR frame showed 6 px (one 320-mode pixel) of border colour at
+    // its left edge. Change the chain, change this number.
+    reg [11:0] h_trigger_x_px_r;
     reg h_trigger_r;
-    always @(posedge clk_pixel)
-        h_trigger_r <= (cx0_r + 12'd6 == h_border_px_r);
+    always @(posedge clk_pixel) begin
+        h_trigger_x_px_r <= (h_border_px_r < 12'(H_TRIGGER_LEAD))
+                              ? h_border_px_r + 12'(HDMI_H_TOTAL - H_TRIGGER_LEAD)
+                              : h_border_px_r - 12'(H_TRIGGER_LEAD);
+        h_trigger_r <= (cx0_r == h_trigger_x_px_r);
+    end
     wire        h_trigger_w = h_trigger_r;
 
     reg        h_act_r;
@@ -1383,7 +1433,7 @@ module framebuffer_1080p #(
     // and "lb_rd_addr -> line_buf ADB" (routing + BSRAM address setup) sat
     // at +0.004..+0.303 across 60K rolls. This copy has no logic on either
     // side and can be placed at the blocks. +1 read latency, compensated by
-    // the cx+4 lookahead / +6 trigger above and the extra active-flag stage.
+    // the cx+4 lookahead / H_TRIGGER_LEAD above and the extra active-flag stage.
     (* syn_keep = 1, syn_preserve = 1 *) reg [12:0] lb_rd_addr_q;
     reg in_active_s1b_r;
     always @(posedge clk_pixel) begin
@@ -1399,7 +1449,7 @@ module framebuffer_1080p #(
 
     always @(posedge clk_pixel) begin
         lb_rd_data_r <= (TEST_PATTERN == 2) ?
-            test_pixel(lb_rd_addr_q[9:0]) : line_buf[lb_rd_addr_q];
+            test_pixel(lb_rd_addr_q[9:0]) : rgb565_to_666(line_buf[lb_rd_addr_q]);
         in_active_px_r <= in_active_s1b_r;
     end
 

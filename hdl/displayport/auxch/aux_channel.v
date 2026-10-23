@@ -154,6 +154,18 @@ module aux_channel #(
     // (~330 us extra dwell per wait state). Default 0 = legacy.
     parameter POLITE_ATTACH = 0,
     parameter [5:0] EDID_DEFER_CAP = 6'd40,
+    // Free-running retry watchdog: resets an unfinished attach ceremony.
+    // 0.5 s was fine for monitors (~0.4 s to established); a DP->HDMI
+    // converter that brings up its HDMI side first takes longer (a2p25
+    // 10-12: cut at align_test every attempt).
+    parameter [28:0] RETRY_WATCHDOG_CLKS = 29'd49999999,
+    // EQ dwell: align_wait0-3 are 4 x 100 us (the DP default when DPCD
+    // 0x00E TRAINING_AUX_RD_INTERVAL = 0). Sinks advertising 4 ms+ (DP->HDMI
+    // converters, a2p25 10-12) need the status read held off that long;
+    // reading early and re-issuing TPS2 restarts their equalizer forever.
+    // Each wait state dwells max(EQ_WAIT_MULT, interval-derived) x 100 us;
+    // the interval is latched from DPCD 0x00E during the capability read.
+    parameter [5:0] EQ_WAIT_MULT = 6'd1,
     // TRAINING RECOVERY (08-28, from the 60K bisect + AD3 capture of the
     // step-6b stall): a garbled/short/lost reply to a TRAINING-phase read
     // used to route to `error`/reset — a FULL ceremony restart (presence
@@ -178,6 +190,25 @@ module aux_channel #(
     // read NEVER tear down the link — every error path skips to
     // check_wait. Default 0 = legacy byte-identical.
     parameter ERRCNT_READ = 0,
+    // TRAIN_ERRCNT: read SYMBOL_ERROR_COUNT (0x210-0x213) after every EQ
+    // status read (instrument: does the sink see symbol errors on TPS2?)
+    parameter TRAIN_ERRCNT = 0,
+    // LINK_CHECK: 1 (default) = periodic / hpd_irq status checks while the
+    // link is established (spec flow; a failed check tears the link down).
+    // 0 = once established, stay established until HPD drops or the
+    // watchdog fires — bring-up aid for a marginal AUX RX path (a2p25
+    // displayport1: training succeeds, established-state AUX transactions
+    // intermittently NACK/time out and tore the link down every ~1 s).
+    // 2 = OBSERVE: periodic checks run as in 1, but nothing in the
+    // established set ever tears the link down — short replies, non-ACKs,
+    // DEFERs, timeouts and failed lock gates are only counted (debug_obs)
+    // and the FSM returns to link_established. Bring-up instrument for
+    // measuring established-state AUX reliability with the picture up.
+    parameter LINK_CHECK = 1,
+    // Periodic established-state check interval in clk cycles (default
+    // ~1 s at 100 MHz). a2p25 polls faster so a sink that drops CR after
+    // establish (Sceptre: ~2 s and ~5 s in) is retrained promptly.
+    parameter [26:0] LINK_CHECK_CLKS = 27'd99999999,
     // WEDGE-SUSPECT DETECTOR (advisory ONLY — no autonomous action in
     // this build; the ESP32 auto-replug policy arms separately after
     // bench validation). Fires when, within one established session:
@@ -257,6 +288,14 @@ module aux_channel #(
         // {reason[3:0], from_state[7:0], expected[7:0], rx_byte_count[7:0]}
         // reason: 1=short reply, 2=non-ACK, 3=gate, 4=AUX timeout, 5=retry
         output [27:0] debug_err_detail,
+        // LINK_CHECK==2 observe counters (16-bit, wrapping; zero otherwise):
+        // {last_hdr[7:0], checks, short, nack, defer, timeout, gate}
+        // checks = check_link reads issued; one error class counted per
+        // read; last_hdr = reply header byte of the last non-ACK.
+        output [103:0] debug_obs,
+        // AUX interface liveness: {tx_state[2:0], rx_state[2:0], channel_busy,
+        //  aux_rx_empty, expected[7:0], rx_byte_count[7:0]}
+        output [23:0] debug_auxif,
         // 1-clk pulse on a failing check_wait evaluation (snapshot trigger)
         output reg   gate_fail_evt,
         // completed periodic status reads: increments when the 0x204 byte
@@ -358,6 +397,7 @@ module aux_channel #(
     // recovery exists to avoid.
     localparam [7:0] train_wait    = 8'h3E;
     localparam [7:0] errcnt_read   = 8'h3F;  // 0x210-0x213 read (in-established)
+    localparam [7:0] errcnt_train  = 8'h40;  // same read inside the EQ loop (TRAIN_ERRCNT)
     localparam [3:0] TRAIN_RETRY_CAP = 4'd8;
 
     // Checking the state of the link
@@ -379,6 +419,27 @@ module aux_channel #(
     reg         link_check_now;
     reg [26:0]  link_check_count;
     reg [14:0]  count_100us;
+    reg [6:0]   train_interval_r = 7'd0;   // DPCD 0x00E (latched per caps read)
+    // effective per-align_wait-state multiplier (x100 us, 4 states):
+    // the sink's interval (n x 4 ms -> n x 10 per state, capped at 16 ms)
+    // or the EQ_WAIT_MULT floor, whichever is larger
+    wire [5:0]  eq_int_mult_w = (train_interval_r == 7'd0) ? 6'd1 :
+                                (train_interval_r >= 7'd4) ? 6'd40 : {train_interval_r[1:0], 1'b0} + {train_interval_r[1:0], 3'b0};  // n*10
+    wire [5:0]  eq_mult_w     = (eq_int_mult_w > EQ_WAIT_MULT) ? eq_int_mult_w : EQ_WAIT_MULT;
+    // Registered (timing): the multiplier only changes at the capability
+    // read and blind_dwell counts cycles in state, so a one-cycle-late
+    // "more dwell needed" flag is exact where it is consumed and keeps
+    // the 7-bit compare out of the FSM's advance condition (-1.2 ns at
+    // clk100 when it was combinational, a2p25 10-12).
+    reg         is_align_wait_r   = 1'b0;   // state is align_wait0-3
+    reg  [23:0] eq_dwell_cycles_r = 24'd10000;
+    reg         eq_dwell_done_r   = 1'b0;   // blind_dwell reached the threshold
+    always @(posedge clk) begin
+        is_align_wait_r   <= (state == align_wait0 || state == align_wait1 ||
+                              state == align_wait2 || state == align_wait3);
+        eq_dwell_cycles_r <= {eq_mult_w, 4'd0} * 24'd625;   // mult x 10000 cycles (100 us @ 100 MHz)
+        eq_dwell_done_r   <= (blind_dwell >= eq_dwell_cycles_r);
+    end
     
     reg       adjust_de_active;
     reg       dp_reg_de_active;
@@ -443,6 +504,7 @@ module aux_channel #(
     reg [7:0]  irq_vec_r        = 8'd0;   // last nonzero 0x201 read
     reg [7:0]  irq_clear_byte_r = 8'd0;   // value being written back
     reg        irq_pending      = 1'b0;   // hpd_irq seen; service due
+    reg        link_check_pend  = 1'b0;   // periodic check due (held while msg engine busy)
     reg [3:0]  dbg_irq_sat      = 4'd0;   // IRQ services performed
     // POLITE_ATTACH / ESI state (all inert at legacy defaults)
     reg [7:0]  sink_count_r     = 8'd0;   // presence-read count byte
@@ -460,7 +522,8 @@ module aux_channel #(
     reg [7:0]  train_pend       = 8'd0;   // training state to retry after train_wait
     reg [3:0]  train_retry_cnt  = 4'd0;   // retries taken this training pass
     reg        train_st         = 1'b0;   // registered: state is in 0x14..0x2C
-    reg        errcnt_st        = 1'b0;   // registered: state == errcnt_read
+    reg        errcnt_st        = 1'b0;   // registered: state == errcnt_read / errcnt_train
+    wire [7:0] errcnt_skip_w = (state == errcnt_train) ? align_adjust : check_wait;
     reg [15:0] err0_r           = 16'd0;  // SYMBOL_ERROR_COUNT lane0 {0x211,0x210}
     reg [15:0] err1_r           = 16'd0;  // SYMBOL_ERROR_COUNT lane1 {0x213,0x212}
     reg        lane_set_sent    = 1'b0;   // a lane-set write went out this training
@@ -507,7 +570,14 @@ module aux_channel #(
                               (state == irq_clear) ||
                               (state == esi_read_rt) || (state == esi_clear_rt) ||
                               (state == esi_clear2_rt) || (state == esi_eval_rt);
-    wire obs_active = (GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS);
+    wire obs_active = (LINK_CHECK == 2) ||
+                      ((GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS));
+    wire obs_mode   = (LINK_CHECK == 2) && in_established_set;
+    reg [15:0] ob_chk = 16'd0, ob_short = 16'd0, ob_nack = 16'd0,
+               ob_defer = 16'd0, ob_tmo = 16'd0, ob_gate = 16'd0;
+    reg [7:0]  ob_hdr = 8'd0;
+    reg        ob_counted = 1'b0;     // one class per check_link read
+    reg        ob_defer_evt = 1'b0;
     // Registered at the state transition (not combinational off `state`):
     // the six 8-bit compares fed the short-read/non-ACK/DEFER/timeout
     // branches of the next_state mux and tipped the knife-edge (23
@@ -521,6 +591,9 @@ module aux_channel #(
     assign debug_aux_err  = {dbg_short_sat, dbg_nack_sat, dbg_other_sat,
                              dbg_obs_sat, dbg_kick_sat, dbg_irq_sat};
     assign debug_err_detail = err_detail;
+    assign debug_obs = {ob_hdr, ob_chk, ob_short, ob_nack, ob_defer, ob_tmo, ob_gate};
+    wire [5:0] auxif_state;
+    assign debug_auxif = {auxif_state, channel_busy, aux_rx_empty, expected, rx_byte_count};
     assign debug_esi   = {dbg_esi2003, dbg_esi2005};
     assign debug_defer = {edid_giveup, defer_cnt};
     assign wedge_suspect_o = wedge_suspect;
@@ -624,7 +697,8 @@ aux_interface #(
            //------------------------------
            .busy        (channel_busy),
            .abort       (1'b0),   
-           .timeout     (channel_timeout)
+           .timeout     (channel_timeout),
+           .debug_state (auxif_state)
     );
 
     assign aux_rx_rd_en = (!channel_busy) & (!aux_rx_empty);  // CHECK THIS!
@@ -646,6 +720,21 @@ always @(posedge clk) begin
     // The per-reason counters are ALSO incremented here — once per tagged
     // event — instead of at the sites: the short-read site evaluates per
     // received byte and over-counted (accounting discrepancy, 08-24).
+    // LINK_CHECK==2 observe accounting (sites set err_evt/ob_defer_evt)
+    ob_defer_evt <= 1'b0;
+    if (LINK_CHECK == 2) begin
+        if (state == check_link && state_d != check_link) begin
+            ob_chk     <= ob_chk + 16'd1;
+            ob_counted <= 1'b0;
+        end else if ((err_evt || ob_defer_evt) && !ob_counted) begin
+            ob_counted <= 1'b1;
+            if (ob_defer_evt)              ob_defer <= ob_defer + 16'd1;
+            else if (err_reason == 4'd1)   ob_short <= ob_short + 16'd1;
+            else if (err_reason == 4'd2)   ob_nack  <= ob_nack  + 16'd1;
+            else if (err_reason == 4'd3)   ob_gate  <= ob_gate  + 16'd1;
+            else if (err_reason == 4'd4)   ob_tmo   <= ob_tmo   + 16'd1;
+        end
+    end
     if (err_evt) begin
         if (!err_detail_v) begin
             err_detail_v <= 1'b1;
@@ -791,7 +880,8 @@ always @(posedge clk) begin
             align_wait1:        state_on_success <= align_wait2;                        
             align_wait2:        state_on_success <= align_wait3;                        
             align_wait3:        state_on_success <= align_test;                        
-            align_test:         state_on_success <= align_adjust;                        
+            align_test:         state_on_success <= (TRAIN_ERRCNT != 0) ? errcnt_train : align_adjust;
+            errcnt_train:       state_on_success <= align_adjust;
             align_adjust:       state_on_success <= align_wait_after;
             align_wait_after:   if(symbol_locked_i == 1'b1) begin
                                            state_on_success <= switch_to_normal;
@@ -846,6 +936,11 @@ always @(posedge clk) begin
                                     // at the poll cadence).
                                     if (dbg_obs_sat != 4'hF)
                                         dbg_obs_sat <= dbg_obs_sat + 4'd1;
+                                    if (LINK_CHECK == 2) begin
+                                        err_evt <= 1'b1; err_reason <= 4'd3;
+                                        err_from <= state; err_exp <= expected;
+                                        err_rxc <= rx_byte_count;
+                                    end
                                     state_on_success <= link_established;
                                     dbg_fail_mask <= dbg_fail_mask |
                                         ~{clock_locked_i, equ_locked_i,
@@ -916,7 +1011,7 @@ always @(posedge clk) begin
         // compares in the error paths cost setup at the knife-edge)
         train_st      <= (next_state >= clock_training) &&
                          (next_state <= align_wait_after);
-        errcnt_st     <= (next_state == errcnt_read);
+        errcnt_st     <= (next_state == errcnt_read || next_state == errcnt_train);
         // EDID completed this session (giveup exits set edid_giveup in
         // the same cycle; a redundant edid_done alongside it is harmless)
         if (state == edid_block7 && next_state == read_sink_count)
@@ -996,7 +1091,7 @@ always @(posedge clk) begin
             edid_block7:          begin msg <= 8'h02; expected <= 8'h11; edid_de_active <= 1'b1; end
                     
             read_sink_count:      begin msg <= 8'h03; expected <= 8'h02; reset_addr_on_change <= 1'b1; end
-            read_registers:       begin msg <= 8'h04; expected <= 8'h0D; dp_reg_de_active <= 1'b1; end
+            read_registers:       begin msg <= 8'h04; expected <= 8'h11; dp_reg_de_active <= 1'b1; end   // 16 bytes 0x000-0x00F (0x00E = TRAINING_AUX_RD_INTERVAL)
             set_power_d0:         begin msg <= 8'h13; expected <= 8'h01; end
             set_channel_coding:   begin msg <= 8'h06; expected <= 8'h01;  end
             set_speed_270:        begin msg <= 8'h07; expected <= 8'h01;  end
@@ -1054,6 +1149,7 @@ always @(posedge clk) begin
             check_link:           begin msg <= 8'h0D; expected <= 8'h09; status_de_active <= 1'b1;  end
             check_wait:           begin msg <= 8'h00; expected <= 8'h00; end
             errcnt_read:          begin msg <= 8'h1E; expected <= 8'h05; end
+            errcnt_train:         begin msg <= 8'h1E; expected <= 8'h05; end
             // write the latched vector back to 0x201 (ACK reply = 1 byte)
             irq_clear:            begin msg <= 8'h1A; expected <= 8'h01; end
             error:                begin msg <= 8'h00; end
@@ -1093,6 +1189,7 @@ always @(posedge clk) begin
             align_wait2:          begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
             align_wait3:          begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
             align_test:           begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
+            errcnt_train:         begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end   // keep TPS2 on during the count read
             align_adjust:         begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
             align_wait_after:     begin tx_powerup <= 1'b1; tx_align_train <= 1'b1; end
             switch_to_normal:     begin tx_powerup <= 1'b1; end
@@ -1151,6 +1248,7 @@ always @(posedge clk) begin
     // instead of ~650 us.
     if(state == next_state && expected == 8'h00 && count_100us[14] == 1'b1 &&
        state != presence_wait && state != defer_wait && state != train_wait &&
+       !is_align_wait_r &&
        (POLITE_ATTACH == 0 ||
         !(state == clock_wait || state == clock_wait_after) ||
         blind_dwell[15] == 1'b1)) begin
@@ -1168,6 +1266,12 @@ always @(posedge clk) begin
     end
     // train_wait: same ~650 us pace before retrying a failed training read
     if(state == next_state && state == train_wait && blind_dwell[16] == 1'b1) begin
+        next_state <= state_on_success;
+    end
+    // align_wait0-3: EQ dwell = eq_mult_w x 100 us per state (the sink's
+    // TRAINING_AUX_RD_INTERVAL from DPCD 0x00E, or the EQ_WAIT_MULT floor);
+    // everything feeding the FSM here is a flop (timing, a2p25 10-12)
+    if(state == next_state && is_align_wait_r && eq_dwell_done_r) begin
         next_state <= state_on_success;
     end
 
@@ -1219,7 +1323,7 @@ always @(posedge clk) begin
                     next_state <= link_established;
                 end else if (errcnt_st) begin
                     // instrumentation read failed: never tear down for it
-                    next_state <= check_wait;
+                    next_state <= errcnt_skip_w;
                 end else if (POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 && train_st) begin
                     // short/garbled training-read reply: paced retry with
                     // TX held, cheap retrain on budget exhaustion (the
@@ -1231,6 +1335,11 @@ always @(posedge clk) begin
                     end else begin
                         next_state      <= clock_training;
                     end
+                end else if (obs_mode) begin
+                    next_state <= link_established;   // observe: count only
+                    err_evt <= 1'b1; err_reason <= 4'd1;
+                    err_from <= state; err_exp <= expected;
+                    err_rxc <= rx_byte_count;
                 end else begin
                     next_state <= error;
                     if (in_established_set) begin
@@ -1257,7 +1366,7 @@ always @(posedge clk) begin
                         esi_off    <= 1'b1;
                         next_state <= link_established;
                     end else if (errcnt_st && aux_rx_data != 8'h20) begin
-                        next_state <= check_wait;   // instrumentation: skip
+                        next_state <= errcnt_skip_w;   // instrumentation: skip
                     end else if (POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 &&
                                  train_st && aux_rx_data != 8'h20) begin
                         // non-ACK header on a training read (a clean DEFER
@@ -1267,6 +1376,14 @@ always @(posedge clk) begin
                             next_state      <= train_wait;
                         end else begin
                             next_state      <= clock_training;
+                        end
+                    end else if (obs_mode) begin
+                        next_state <= link_established;   // observe: count only
+                        ob_hdr     <= aux_rx_data;
+                        if (aux_rx_data != 8'h20) begin   // DEFER counted below
+                            err_evt <= 1'b1; err_reason <= 4'd2;
+                            err_from <= state; err_exp <= expected;
+                            err_rxc <= rx_byte_count;
                         end
                     end else begin
                         next_state <= error;
@@ -1288,10 +1405,13 @@ always @(posedge clk) begin
                 // transactions that aeert "AUX DEFER"
                 //--------------------------------------------
                 if(aux_rx_data == 8'h20) begin
-                    if (errcnt_st) begin
+                    if (obs_mode) begin
+                        ob_defer_evt <= 1'b1;             // observe: count only
+                        next_state   <= link_established;
+                    end else if (errcnt_st) begin
                         // deferred instrumentation read: skip (defer_wait
                         // would drop tx_link_established mid-stream)
-                        next_state <= check_wait;
+                        next_state <= errcnt_skip_w;
                     end else if ((esi_attach_st || esi_rt_st) && IRQ_SERVICE == 2) begin
                         // ESI defer: paced retry from a small budget; the
                         // rt states are watchdog-excluded, so WITHOUT the
@@ -1366,14 +1486,18 @@ always @(posedge clk) begin
                     esi_2005_r  <= aux_rx_data;
                     dbg_esi2005 <= dbg_esi2005 | aux_rx_data;
                 end
+                // TRAINING_AUX_RD_INTERVAL (DPCD 0x00E = caps read byte 15):
+                // bits 6:0, 0 = 400 us EQ interval, n = n x 4 ms
+                if(state == read_registers && rx_byte_count == 8'h0F)
+                    train_interval_r <= aux_rx_data[6:0];
                 // SYMBOL_ERROR_COUNT: bytes 1-4 = 0x210..0x213
-                if(state == errcnt_read && rx_byte_count == 8'h01)
+                if((state == errcnt_read || state == errcnt_train) && rx_byte_count == 8'h01)
                     err0_r[7:0]  <= aux_rx_data;
-                if(state == errcnt_read && rx_byte_count == 8'h02)
+                if((state == errcnt_read || state == errcnt_train) && rx_byte_count == 8'h02)
                     err0_r[15:8] <= aux_rx_data;
-                if(state == errcnt_read && rx_byte_count == 8'h03)
+                if((state == errcnt_read || state == errcnt_train) && rx_byte_count == 8'h03)
                     err1_r[7:0]  <= aux_rx_data;
-                if(state == errcnt_read && rx_byte_count == 8'h04)
+                if((state == errcnt_read || state == errcnt_train) && rx_byte_count == 8'h04)
                     err1_r[15:8] <= aux_rx_data;
                         
                 if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
@@ -1406,8 +1530,14 @@ always @(posedge clk) begin
         next_state <= esi_attach_st ? set_power_d0 : link_established;
         state      <= error;   // force the transition machinery
     end else
+    if (BLIND_SINK == 0 && channel_timeout == 1'b1 && obs_mode) begin
+        next_state <= link_established;   // observe: count only
+        state      <= error;              // force the transition machinery
+        err_evt    <= 1'b1; err_reason <= 4'd4;
+        err_from   <= state; err_exp <= expected; err_rxc <= rx_byte_count;
+    end else
     if (BLIND_SINK == 0 && channel_timeout == 1'b1 && errcnt_st) begin
-        next_state <= check_wait;   // instrumentation timeout: skip
+        next_state <= errcnt_skip_w;   // instrumentation timeout: skip
         state      <= error;        // force the transition machinery
     end else
     if (BLIND_SINK == 0 && channel_timeout == 1'b1 &&
@@ -1445,8 +1575,17 @@ always @(posedge clk) begin
     //-----------------------------------------------
     if (IRQ_SERVICE != 0 && hpd_irq)
         irq_pending <= 1'b1;
-    if(state == link_established &&
-       (link_check_now == 1'b1 || (IRQ_SERVICE != 0 && irq_pending))) begin
+    // (msg_busy: never hand the message engine a request while it is still
+    // emitting the previous one — it would be dropped and the FSM would
+    // wait forever in check_link. link_check_now is a pulse, so remember it.)
+    // Latch the periodic-check pulse only for the busy-engine hold; a pulse
+    // that lands while the FSM is elsewhere is dropped exactly as before
+    // (tb_polite_attach counts its runtime ESI services).
+    if (link_check_now) link_check_pend <= 1'b1;
+    if (state != link_established) link_check_pend <= 1'b0;
+    if(LINK_CHECK != 0 && state == link_established && !msg_busy &&
+       (link_check_pend == 1'b1 || (IRQ_SERVICE != 0 && irq_pending))) begin
+        link_check_pend <= 1'b0;
         next_state  <= check_link;
         // ESI mode: remember an hpd_irq-triggered check owes an ESI
         // service pass after the status gate (0x201 is never raised by
@@ -1505,7 +1644,7 @@ always @(posedge clk) begin
         // the 0.5 s watchdog reset every walk forever (live-hit
         // 2026-08-14: D cycling 02..06). 4 s keeps the watchdog while
         // clearing the full walk with 2x margin.
-        retry_count <= (BLIND_SINK != 0) ? 29'd399999999 : 29'd49999999;
+        retry_count <= (BLIND_SINK != 0) ? 29'd399999999 : RETRY_WATCHDOG_CLKS;
     end else begin
         retry_now   <= 1'b0;
         retry_count <= retry_count - 1;
@@ -1513,7 +1652,7 @@ always @(posedge clk) begin
     if(link_check_count == 0) begin
         link_check_now   <= 1'b1;
         // PPS actually became a 2Hz pulse....
-        link_check_count <= 27'd99999999;
+        link_check_count <= LINK_CHECK_CLKS;
     end else begin
         link_check_now   <= 1'b0;
         link_check_count <= link_check_count - 1;
