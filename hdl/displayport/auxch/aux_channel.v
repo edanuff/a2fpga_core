@@ -938,8 +938,6 @@ always @(posedge clk) begin
                                         dbg_obs_sat <= dbg_obs_sat + 4'd1;
                                     if (LINK_CHECK == 2) begin
                                         err_evt <= 1'b1; err_reason <= 4'd3;
-                                        err_from <= state; err_exp <= expected;
-                                        err_rxc <= rx_byte_count;
                                     end
                                     state_on_success <= link_established;
                                     dbg_fail_mask <= dbg_fail_mask |
@@ -1338,8 +1336,6 @@ always @(posedge clk) begin
                 end else if (obs_mode) begin
                     next_state <= link_established;   // observe: count only
                     err_evt <= 1'b1; err_reason <= 4'd1;
-                    err_from <= state; err_exp <= expected;
-                    err_rxc <= rx_byte_count;
                 end else begin
                     next_state <= error;
                     if (in_established_set) begin
@@ -1382,8 +1378,6 @@ always @(posedge clk) begin
                         ob_hdr     <= aux_rx_data;
                         if (aux_rx_data != 8'h20) begin   // DEFER counted below
                             err_evt <= 1'b1; err_reason <= 4'd2;
-                            err_from <= state; err_exp <= expected;
-                            err_rxc <= rx_byte_count;
                         end
                     end else begin
                         next_state <= error;
@@ -1534,7 +1528,6 @@ always @(posedge clk) begin
         next_state <= link_established;   // observe: count only
         state      <= error;              // force the transition machinery
         err_evt    <= 1'b1; err_reason <= 4'd4;
-        err_from   <= state; err_exp <= expected; err_rxc <= rx_byte_count;
     end else
     if (BLIND_SINK == 0 && channel_timeout == 1'b1 && errcnt_st) begin
         next_state <= errcnt_skip_w;   // instrumentation timeout: skip
