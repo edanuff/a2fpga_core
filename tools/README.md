@@ -30,6 +30,11 @@ All parts currently used by A2FPGA boards should build with the education versio
 
 ## Build & Flash Helper Scripts (recommended)
 
+Every full `tools/build.sh` run ends with `tools/resource_report.py`: the
+per-module LUT/REG/BSRAM table, diffed against the snapshot committed in
+`boards/<board>/impl/<proj>_resources.json`. `RESOURCE_FAIL=bsram` makes a
+BSRAM increase fail the build; see docs/build_profiles.md.
+
 Two scripts wrap the common workflows so you don't have to remember per-board details
 (the `.gprj` filename, the openFPGALoader cable/board tag, the timing check). Run them
 from the repo root:

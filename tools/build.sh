@@ -18,6 +18,10 @@
 #             (region constraints have produced 9-HOUR runs) and gets
 #             killed with a loud failure instead of eating the day.
 #   DRY_RUN=1 print what would run without invoking gw_sh
+#   RESOURCE_BASELINE  baseline for the per-module resource diff: a git ref,
+#             a snapshot file, or "none" (default HEAD = the committed snapshot)
+#   RESOURCE_FAIL  bsram|lut|reg — fail the build (exit 5) if that resource grew
+#             at the device level versus the baseline (use bsram on the Tang Nanos)
 #
 # Notes:
 #   - Uses the pipe method (the only supported way; never `gw_sh -exit -e`).
@@ -28,6 +32,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+here="$(cd "$(dirname "$0")" && pwd)"
 GW_SH="${GW_SH:-/Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh}"
 
 board="${1:-}"
@@ -153,5 +158,23 @@ if [[ "$stage" == "all" ]]; then
     else
         echo "   Timing report not found at $tr — verify the PnR step completed."
         exit 4
+    fi
+
+    # ---- Resource accounting (per-module, diffed against the committed snapshot) ----
+    # Writes boards/<board>/impl/<proj>_resources.json (tracked) and prints the
+    # per-module deltas versus the snapshot in git. RESOURCE_BASELINE=<ref|file|none>
+    # picks the baseline (default HEAD); RESOURCE_FAIL=bsram|lut|reg makes a
+    # device-level increase of that resource fail the build (exit 5). A board
+    # with no BSRAM to spare should build with RESOURCE_FAIL=bsram.
+    echo
+    rr_args=( "$board" "$proj" --baseline "${RESOURCE_BASELINE:-HEAD}" )
+    if [[ -n "${RESOURCE_FAIL:-}" ]]; then rr_args+=( --fail-on "$RESOURCE_FAIL" ); fi
+    rr_rc=0
+    python3 "$here/resource_report.py" "${rr_args[@]}" || rr_rc=$?
+    if [[ "$rr_rc" == "2" ]]; then
+        echo "!! RESOURCE REGRESSION (RESOURCE_FAIL=${RESOURCE_FAIL}) — see the per-module table above."
+        exit 5
+    elif [[ "$rr_rc" != "0" ]]; then
+        echo "   (resource report unavailable: exit $rr_rc)"
     fi
 fi

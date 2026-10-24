@@ -34,6 +34,12 @@ same script directly).
 
    If violations exist, say so plainly with the numbers — do **not** report success.
 
+4. **Read the resource report** the script prints after the timing check (per-module
+   LUT/REG/BSRAM, diffed against the committed `boards/<board>/impl/<proj>_resources.json`).
+   Report any module delta it flags, and a BSRAM increase on a Tang Nano board is a
+   finding, not noise (build those with `RESOURCE_FAIL=bsram`). A change that moves the
+   numbers commits the regenerated snapshot with it. See docs/build_profiles.md.
+
 ## Notes
 
 - Never invoke `gw_sh` with `-exit -e` or from `~/bin/` — only the pipe method (the script

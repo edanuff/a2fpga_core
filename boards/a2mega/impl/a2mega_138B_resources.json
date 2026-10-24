@@ -1,0 +1,1126 @@
+{
+"board": "a2mega",
+"modules": {
+"top": {
+"alu": 184,
+"bsram": 0,
+"dsp": 0,
+"lut": 384,
+"reg": 923,
+"rom16": 0,
+"ssram": 0
+},
+"top/ALU": {
+"alu": 24,
+"bsram": 0,
+"dsp": 0,
+"lut": 137,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/AddrGen": {
+"alu": 120,
+"bsram": 0,
+"dsp": 0,
+"lut": 298,
+"reg": 66,
+"rom16": 0,
+"ssram": 0
+},
+"top/COM2": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 90,
+"reg": 67,
+"rom16": 0,
+"ssram": 0
+},
+"top/MCode": {
+"alu": 0,
+"bsram": 6,
+"dsp": 0,
+"lut": 14,
+"reg": 4,
+"rom16": 0,
+"ssram": 0
+},
+"top/a2bus_timing_inst": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/apple_bus": {
+"alu": 13,
+"bsram": 0,
+"dsp": 0,
+"lut": 15,
+"reg": 42,
+"rom16": 0,
+"ssram": 0
+},
+"top/apple_fb_writer": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 5,
+"reg": 29,
+"rom16": 0,
+"ssram": 0
+},
+"top/apple_memory": {
+"alu": 531,
+"bsram": 0,
+"dsp": 0,
+"lut": 898,
+"reg": 826,
+"rom16": 0,
+"ssram": 0
+},
+"top/apple_speaker": {
+"alu": 19,
+"bsram": 0,
+"dsp": 0,
+"lut": 32,
+"reg": 23,
+"rom16": 0,
+"ssram": 0
+},
+"top/apple_video_gen": {
+"alu": 35,
+"bsram": 1,
+"dsp": 0,
+"lut": 502,
+"reg": 253,
+"rom16": 24,
+"ssram": 0
+},
+"top/cache_ram": {
+"alu": 0,
+"bsram": 4,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/clocks_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/debug_overlay": {
+"alu": 36,
+"bsram": 0,
+"dsp": 0,
+"lut": 259,
+"reg": 467,
+"rom16": 0,
+"ssram": 0
+},
+"top/diskii": {
+"alu": 24,
+"bsram": 0,
+"dsp": 0,
+"lut": 62,
+"reg": 35,
+"rom16": 0,
+"ssram": 0
+},
+"top/diskrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/drive_1": {
+"alu": 27,
+"bsram": 0,
+"dsp": 1,
+"lut": 135,
+"reg": 54,
+"rom16": 0,
+"ssram": 0
+},
+"top/drive_2": {
+"alu": 27,
+"bsram": 0,
+"dsp": 1,
+"lut": 131,
+"reg": 54,
+"rom16": 0,
+"ssram": 0
+},
+"top/e0": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/esp32_ospi": {
+"alu": 62,
+"bsram": 11,
+"dsp": 0,
+"lut": 1068,
+"reg": 1028,
+"rom16": 0,
+"ssram": 0
+},
+"top/f18a_core": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 15,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_enc[0].enc": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 39,
+"reg": 39,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_enc[1].enc": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 39,
+"reg": 40,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_msa2.i_msa": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 98,
+"reg": 41,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_banks_ff.acc_ram": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 420,
+"reg": 768,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_banks_ff.control_ram": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 164,
+"reg": 256,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_banks_ff.fh_ram": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 164,
+"reg": 256,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_banks_ff.fl_ram": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 164,
+"reg": 256,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_banks_ff.rts_ram": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 164,
+"reg": 256,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_banks_ff.vol_ram": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 164,
+"reg": 256,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_banks_ff.wds_ram": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 164,
+"reg": 256,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_banks_ff.wtp_ram": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 164,
+"reg": 256,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_cdc[0].u_cdc": {
+"alu": 15,
+"bsram": 2,
+"dsp": 0,
+"lut": 26,
+"reg": 106,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_cdc[1].u_cdc": {
+"alu": 15,
+"bsram": 2,
+"dsp": 0,
+"lut": 23,
+"reg": 108,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_cdc[2].u_cdc": {
+"alu": 15,
+"bsram": 2,
+"dsp": 0,
+"lut": 24,
+"reg": 101,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_cdc[3].u_cdc": {
+"alu": 15,
+"bsram": 2,
+"dsp": 0,
+"lut": 23,
+"reg": 108,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_cdc[4].u_cdc": {
+"alu": 15,
+"bsram": 5,
+"dsp": 0,
+"lut": 24,
+"reg": 204,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_cdc[5].u_cdc": {
+"alu": 15,
+"bsram": 2,
+"dsp": 0,
+"lut": 34,
+"reg": 110,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_cdc[6].u_cdc": {
+"alu": 15,
+"bsram": 2,
+"dsp": 0,
+"lut": 23,
+"reg": 109,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_doc_pipelined.doc5503": {
+"alu": 345,
+"bsram": 0,
+"dsp": 1,
+"lut": 2184,
+"reg": 1053,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_evt_log.i_evt_log": {
+"alu": 0,
+"bsram": 2,
+"dsp": 0,
+"lut": 158,
+"reg": 31,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_gs_detect.gs_detector_inst": {
+"alu": 16,
+"bsram": 0,
+"dsp": 0,
+"lut": 36,
+"reg": 23,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_no_denoise.cdc_7M": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 3,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_no_denoise.cdc_phi0": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 3,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_no_denoise.cdc_phi1": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 1,
+"reg": 3,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_no_denoise.cdc_q3": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 3,
+"rom16": 0,
+"ssram": 0
+},
+"top/hdd": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 304,
+"reg": 161,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_afe_adjust": {
+"alu": 8,
+"bsram": 0,
+"dsp": 0,
+"lut": 106,
+"reg": 87,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_audio_sample_buffer": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 13,
+"reg": 169,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_aux_channel": {
+"alu": 148,
+"bsram": 0,
+"dsp": 1,
+"lut": 664,
+"reg": 340,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_aux_interface": {
+"alu": 52,
+"bsram": 0,
+"dsp": 0,
+"lut": 523,
+"reg": 677,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_aux_messages": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 206,
+"reg": 22,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_aux_pad": {
+"alu": 9,
+"bsram": 0,
+"dsp": 0,
+"lut": 14,
+"reg": 11,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_benz": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 37,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_channel_management": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 7,
+"reg": 20,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_dp": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 92,
+"reg": 42,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_dp_reg_decode": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 3,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_dp_serdes": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_dp_serdes_138b": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_dp_video_timing": {
+"alu": 12,
+"bsram": 0,
+"dsp": 0,
+"lut": 47,
+"reg": 138,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_gs_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_gs_socket": {
+"alu": 57,
+"bsram": 2,
+"dsp": 0,
+"lut": 193,
+"reg": 163,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_hotplug_decode": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 52,
+"reg": 24,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_idle_pattern_inserter": {
+"alu": 17,
+"bsram": 0,
+"dsp": 0,
+"lut": 85,
+"reg": 77,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_insert_training_pattern": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 48,
+"reg": 224,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_link_signal_mgmt": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 28,
+"reg": 26,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_main_stream_processing": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_maud_measure": {
+"alu": 72,
+"bsram": 0,
+"dsp": 0,
+"lut": 9,
+"reg": 72,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_mgmt_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_pixel_cdc_fifo": {
+"alu": 51,
+"bsram": 13,
+"dsp": 0,
+"lut": 138,
+"reg": 167,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_pixel_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_scrambler": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 73,
+"reg": 50,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_scrambler_reset_inserter": {
+"alu": 9,
+"bsram": 0,
+"dsp": 0,
+"lut": 18,
+"reg": 44,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_sdp_engine": {
+"alu": 5,
+"bsram": 0,
+"dsp": 0,
+"lut": 980,
+"reg": 609,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_skew_channels": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 19,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_transceiver_bank": {
+"alu": 35,
+"bsram": 0,
+"dsp": 0,
+"lut": 195,
+"reg": 162,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_video_stream_packer": {
+"alu": 0,
+"bsram": 2,
+"dsp": 0,
+"lut": 366,
+"reg": 151,
+"rom16": 0,
+"ssram": 0
+},
+"top/inst_color": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 501,
+"reg": 774,
+"rom16": 0,
+"ssram": 0
+},
+"top/inst_counters": {
+"alu": 38,
+"bsram": 0,
+"dsp": 0,
+"lut": 55,
+"reg": 42,
+"rom16": 0,
+"ssram": 0
+},
+"top/inst_cpu": {
+"alu": 67,
+"bsram": 0,
+"dsp": 0,
+"lut": 465,
+"reg": 429,
+"rom16": 0,
+"ssram": 0
+},
+"top/inst_linebuf": {
+"alu": 0,
+"bsram": 2,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/inst_ram": {
+"alu": 0,
+"bsram": 8,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/inst_sprites": {
+"alu": 28,
+"bsram": 2,
+"dsp": 0,
+"lut": 262,
+"reg": 153,
+"rom16": 0,
+"ssram": 0
+},
+"top/inst_tiles": {
+"alu": 136,
+"bsram": 0,
+"dsp": 4,
+"lut": 559,
+"reg": 351,
+"rom16": 0,
+"ssram": 0
+},
+"top/inst_vga_cont": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 8,
+"reg": 3,
+"rom16": 0,
+"ssram": 0
+},
+"top/inst_vram": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 119,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/lu_ram0": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/lu_ram1": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/m6522_left": {
+"alu": 32,
+"bsram": 0,
+"dsp": 0,
+"lut": 290,
+"reg": 169,
+"rom16": 0,
+"ssram": 0
+},
+"top/m6522_right": {
+"alu": 32,
+"bsram": 0,
+"dsp": 0,
+"lut": 283,
+"reg": 165,
+"rom16": 0,
+"ssram": 0
+},
+"top/mockingboard": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 3,
+"reg": 1,
+"rom16": 0,
+"ssram": 0
+},
+"top/osd_overlay": {
+"alu": 37,
+"bsram": 1,
+"dsp": 0,
+"lut": 103,
+"reg": 97,
+"rom16": 0,
+"ssram": 0
+},
+"top/pll_ddr3_inst": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/proto": {
+"alu": 16,
+"bsram": 0,
+"dsp": 0,
+"lut": 572,
+"reg": 201,
+"rom16": 0,
+"ssram": 0
+},
+"top/psg_left": {
+"alu": 91,
+"bsram": 0,
+"dsp": 0,
+"lut": 342,
+"reg": 220,
+"rom16": 0,
+"ssram": 0
+},
+"top/psg_right": {
+"alu": 91,
+"bsram": 0,
+"dsp": 0,
+"lut": 342,
+"reg": 220,
+"rom16": 0,
+"ssram": 0
+},
+"top/ram_disk_mux": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 12,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/rom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/scan_timer": {
+"alu": 67,
+"bsram": 0,
+"dsp": 0,
+"lut": 103,
+"reg": 43,
+"rom16": 0,
+"ssram": 0
+},
+"top/sg": {
+"alu": 42,
+"bsram": 2,
+"dsp": 0,
+"lut": 133,
+"reg": 173,
+"rom16": 0,
+"ssram": 0
+},
+"top/slotmaker": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 17,
+"reg": 6,
+"rom16": 0,
+"ssram": 0
+},
+"top/ssp_psg": {
+"alu": 91,
+"bsram": 0,
+"dsp": 0,
+"lut": 339,
+"reg": 220,
+"rom16": 0,
+"ssram": 0
+},
+"top/superserial": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 15,
+"reg": 2,
+"rom16": 0,
+"ssram": 0
+},
+"top/supersprite": {
+"alu": 17,
+"bsram": 0,
+"dsp": 0,
+"lut": 36,
+"reg": 20,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_board_plls": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_cpu": {
+"alu": 130,
+"bsram": 0,
+"dsp": 0,
+"lut": 1363,
+"reg": 192,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_csr_rom": {
+"alu": 0,
+"bsram": 2,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_ddr3": {
+"alu": 126,
+"bsram": 0,
+"dsp": 0,
+"lut": 3699,
+"reg": 7195,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_ddr3_dbg_reader": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 7,
+"reg": 34,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_ddr3_ports": {
+"alu": 131,
+"bsram": 0,
+"dsp": 0,
+"lut": 570,
+"reg": 781,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_framebuffer": {
+"alu": 262,
+"bsram": 13,
+"dsp": 0,
+"lut": 861,
+"reg": 1108,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_phy": {
+"alu": 68,
+"bsram": 0,
+"dsp": 0,
+"lut": 154,
+"reg": 159,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_pll_init": {
+"alu": 17,
+"bsram": 0,
+"dsp": 0,
+"lut": 60,
+"reg": 38,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_scanline_dim": {
+"alu": 22,
+"bsram": 0,
+"dsp": 0,
+"lut": 29,
+"reg": 17,
+"rom16": 0,
+"ssram": 0
+},
+"top/uart_rx_inst": {
+"alu": 24,
+"bsram": 0,
+"dsp": 0,
+"lut": 71,
+"reg": 46,
+"rom16": 0,
+"ssram": 0
+},
+"top/uart_tx_inst": {
+"alu": 24,
+"bsram": 0,
+"dsp": 0,
+"lut": 52,
+"reg": 44,
+"rom16": 0,
+"ssram": 0
+},
+"top/upar_arbiter_wrap_dp_serdes_inst": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 400,
+"reg": 153,
+"rom16": 0,
+"ssram": 0
+},
+"top/uthernet2": {
+"alu": 0,
+"bsram": 9,
+"dsp": 0,
+"lut": 103,
+"reg": 32,
+"rom16": 0,
+"ssram": 0
+},
+"top/vdp": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/vgc_fb_writer": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 3,
+"reg": 14,
+"rom16": 0,
+"ssram": 0
+},
+"top/vgc_gen": {
+"alu": 12,
+"bsram": 0,
+"dsp": 1,
+"lut": 377,
+"reg": 349,
+"rom16": 0,
+"ssram": 0
+}
+},
+"pnr_totals": {
+"BSRAM": [
+134,
+340
+],
+"CLS": [
+26265,
+69120
+],
+"Logic": [
+29060,
+138240
+],
+"PLL": [
+5,
+12
+],
+"Register": [
+25611,
+139095
+]
+},
+"project": "a2mega_138B"
+}

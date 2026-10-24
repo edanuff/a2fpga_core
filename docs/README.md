@@ -18,6 +18,8 @@ follow links into the topic you need.
 
 ## Reference topics
 
+- [Build profiles and resource accounting](build_profiles.md) — per-board `*_profile.vh` feature/instrument switches; the per-module resource report every build runs and diffs against the committed snapshot
+
 | Doc | What's in it |
 |---|---|
 | [getting-started.md](getting-started.md) | First-run environment setup — toolchain matrix, per-board needs, the `/setup` skill |
