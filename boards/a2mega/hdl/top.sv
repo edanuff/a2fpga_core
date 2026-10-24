@@ -17,6 +17,7 @@
 //
 
 `include "datetime.svh"
+`include "a2mega_profile.vh"
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -37,16 +38,16 @@ module top #(
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
-    parameter bit DISK_II_ENABLE = 1,
+    parameter bit DISK_II_ENABLE = `A2_FEATURE_DISK_II,
     parameter bit [7:0] DISK_II_ID = 4,
 
-    parameter bit UTHERNET2_ENABLE = 1,
+    parameter bit UTHERNET2_ENABLE = `A2_FEATURE_UTHERNET2,
     parameter bit [7:0] UTHERNET2_ID = 5,
 
-    parameter bit HDD_ENABLE = 1,
+    parameter bit HDD_ENABLE = `A2_FEATURE_HDD,
     parameter bit [7:0] HDD_ID = 6,
 
-    parameter bit ENSONIQ_ENABLE = 1,
+    parameter bit ENSONIQ_ENABLE = `A2_FEATURE_ENSONIQ,
     parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
     parameter int GS = 0,                       // Apple IIgs mode
@@ -1919,7 +1920,7 @@ module top #(
 
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),
-        .ENABLE(1'b1),
+        .ENABLE(`A2_INSTR_DEBUG_OVERLAY),
         // timing round 2 cones (e)+(k)+(k2): three extra pipeline stages
         // (offset subtracts registered ahead of the region compares; font
         // ROM read split into glyph/row selects; font-row bit select
@@ -2030,11 +2031,7 @@ module top #(
         .USE_CRC(0),
         .IDLE_TO_CYC(5_400_000),  // ~100ms at 54MHz
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
-`ifdef GS_SOCKET
-        .EVT_LOG(1)               // socket bring-up event log (138B only; ~5.8k flops)
-`else
-        .EVT_LOG(0)
-`endif
+        .EVT_LOG(`A2_INSTR_EVENT_LOG)   // a2mega_profile.vh (1 under GS_SOCKET)
     ) esp32_ospi (
         .clk(clk_logic_w),
         .rst_n(device_reset_n_w),

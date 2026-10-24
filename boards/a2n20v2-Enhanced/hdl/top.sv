@@ -40,6 +40,7 @@
 //`define VIDEO_FRAMEBUFFER
 
 `include "datetime.svh"
+`include "a2n20v2_enhanced_profile.vh"
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -48,33 +49,33 @@ module top #(
     parameter bit SCANLINES_ENABLE = 0,
     parameter bit APPLE_SPEAKER_ENABLE = 0,
 
-    parameter bit SUPERSPRITE_ENABLE = 1,
+    parameter bit SUPERSPRITE_ENABLE = `A2_FEATURE_SUPERSPRITE,
     parameter bit [7:0] SUPERSPRITE_ID = 1,
     parameter bit SUPERSPRITE_FORCE_VDP_OVERLAY = 0,
 
-    parameter bit MOCKINGBOARD_ENABLE = 1,
+    parameter bit MOCKINGBOARD_ENABLE = `A2_FEATURE_MOCKINGBOARD,
     parameter bit [7:0] MOCKINGBOARD_ID = 2,
 
-    parameter bit SUPERSERIAL_ENABLE = 1,
+    parameter bit SUPERSERIAL_ENABLE = `A2_FEATURE_SUPERSERIAL,
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
-    parameter bit DISK_II_ENABLE = 1,
+    parameter bit DISK_II_ENABLE = `A2_FEATURE_DISK_II,
     parameter bit [7:0] DISK_II_ID = 4,
 
-    parameter bit UTHERNET2_ENABLE = 1,
+    parameter bit UTHERNET2_ENABLE = `A2_FEATURE_UTHERNET2,
     parameter bit [7:0] UTHERNET2_ID = 5,
 
-    parameter bit HDD_ENABLE = 1,
+    parameter bit HDD_ENABLE = `A2_FEATURE_HDD,
     parameter bit [7:0] HDD_ID = 6,
 
-    parameter bit ENSONIQ_ENABLE = 1,
+    parameter bit ENSONIQ_ENABLE = `A2_FEATURE_ENSONIQ,
     parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit SHADOW_ALL_MEMORY = 0,        // Shadoow all memory in SDRAM, not just video ram
     parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
-    parameter bit FORCE_DEBUG_OVERLAY = 0,      // Always show the debug overlay on the HDMI output
+    parameter bit FORCE_DEBUG_OVERLAY = `A2_INSTR_FORCE_DEBUG_OVERLAY,  // Always show the debug overlay on the HDMI output
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
     parameter bit BUS_DATA_OUT_ENABLE = 1,      // Allow driving data to Apple bus
 
@@ -1807,7 +1808,7 @@ module top #(
     wire [7:0] debug_b_w;
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
-        .ENABLE(1'b1),
+        .ENABLE(`A2_INSTR_DEBUG_OVERLAY),
         .NUM_HEX_BYTES(9)
     ) debug_overlay (
         .clk_i          (clk_pixel_w),

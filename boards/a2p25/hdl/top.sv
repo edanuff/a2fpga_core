@@ -22,6 +22,7 @@
 //
 
 `include "datetime.svh"
+`include "a2p25_profile.vh"
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -36,31 +37,31 @@ module top #(
 
     // SuperSprite/F18A deferred on the GW5A-25 (resource budget, see the
     // integration plan). The slot ID stays reserved.
-    parameter bit SUPERSPRITE_ENABLE = 0,
+    parameter bit SUPERSPRITE_ENABLE = `A2_FEATURE_SUPERSPRITE,
     parameter bit [7:0] SUPERSPRITE_ID = 1,
 
     // Mockingboard off for the first fit on the GW5A-25: with it the core was
     // 20.3k/23k logic, 97% CLS, and placement failed (integration plan §3).
-    parameter bit MOCKINGBOARD_ENABLE = 0,
+    parameter bit MOCKINGBOARD_ENABLE = `A2_FEATURE_MOCKINGBOARD,
     parameter bit [7:0] MOCKINGBOARD_ID = 2,
 
     // No UART pins on this revision: the SSC can be built but has no wire.
-    parameter bit SUPERSERIAL_ENABLE = 0,
+    parameter bit SUPERSERIAL_ENABLE = `A2_FEATURE_SUPERSERIAL,
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
-    parameter bit DISK_II_ENABLE = 1,
+    parameter bit DISK_II_ENABLE = `A2_FEATURE_DISK_II,
     parameter bit [7:0] DISK_II_ID = 4,
 
     // Uthernet II off on the GW5A-25: its 16 KB W5100 buffer is ~10 of the
     // 56 BSRAM blocks and the first fit check came out at 67 (integration plan §3).
-    parameter bit UTHERNET2_ENABLE = 0,
+    parameter bit UTHERNET2_ENABLE = `A2_FEATURE_UTHERNET2,
     parameter bit [7:0] UTHERNET2_ID = 5,
 
-    parameter bit HDD_ENABLE = 1,
+    parameter bit HDD_ENABLE = `A2_FEATURE_HDD,
     parameter bit [7:0] HDD_ID = 6,
 
-    parameter bit ENSONIQ_ENABLE = 1,
+    parameter bit ENSONIQ_ENABLE = `A2_FEATURE_ENSONIQ,
     parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
     parameter int GS = 0,                       // IIgs mode is autodetected (apple_bus); forcing it did not change SHR/DOC (10-11)
@@ -1751,7 +1752,7 @@ module top #(
     // overlay and the debug registers over the OPI link remain.
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),
-        .ENABLE(1'b0),
+        .ENABLE(`A2_INSTR_DEBUG_OVERLAY),
         .X_OFFSET(16),
         .Y_OFFSET(24)
     ) debug_overlay (
@@ -1848,7 +1849,7 @@ module top #(
         .USE_CRC(0),
         .IDLE_TO_CYC(5_400_000),  // ~100ms at 54MHz
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
-        .EVT_LOG(0)               // no CPU socket, no room: GW5A-25 failed to place with it
+        .EVT_LOG(`A2_INSTR_EVENT_LOG)   // a2p25_profile.vh
     ) esp32_ospi (
         .clk(clk_logic_w),
         .rst_n(device_reset_n_w),
