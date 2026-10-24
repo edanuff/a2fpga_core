@@ -144,6 +144,22 @@ if [[ "$stage" == "all" ]]; then
         exit 4
     fi
     echo ">> Bitstream: boards/$board/impl/pnr/${proj}.fs"
+    # ---- Resource accounting (per-module, diffed against the committed snapshot) ----
+    # Runs BEFORE the timing verdict: a build that just failed timing is the one
+    # whose module deltas you need to see. Writes boards/<board>/impl/<proj>_resources.json
+    # (tracked) and prints the per-module deltas versus the snapshot in git.
+    # RESOURCE_BASELINE=<ref|file|none> picks the baseline (default HEAD);
+    # RESOURCE_FAIL=bsram|lut|reg makes a device-level increase of that resource
+    # fail the build (exit 5, checked after the timing verdict). A board with no
+    # BSRAM to spare should build with RESOURCE_FAIL=bsram.
+    rr_args=( "$board" "$proj" --baseline "${RESOURCE_BASELINE:-HEAD}" )
+    if [[ -n "${RESOURCE_FAIL:-}" ]]; then rr_args+=( --fail-on "$RESOURCE_FAIL" ); fi
+    rr_rc=0
+    python3 "$here/resource_report.py" "${rr_args[@]}" || rr_rc=$?
+    if [[ "$rr_rc" != "0" && "$rr_rc" != "2" ]]; then
+        echo "   (resource report unavailable: exit $rr_rc)"
+    fi
+    echo
     echo ">> Timing summary:"
     if [[ -f "$tr" ]]; then
         sv="$(grep -A1 "Setup Violated Endpoints" "$tr" | sed -E 's/<[^>]+>//g' | grep -Eo '[0-9]+' | head -1)"
@@ -159,22 +175,8 @@ if [[ "$stage" == "all" ]]; then
         echo "   Timing report not found at $tr — verify the PnR step completed."
         exit 4
     fi
-
-    # ---- Resource accounting (per-module, diffed against the committed snapshot) ----
-    # Writes boards/<board>/impl/<proj>_resources.json (tracked) and prints the
-    # per-module deltas versus the snapshot in git. RESOURCE_BASELINE=<ref|file|none>
-    # picks the baseline (default HEAD); RESOURCE_FAIL=bsram|lut|reg makes a
-    # device-level increase of that resource fail the build (exit 5). A board
-    # with no BSRAM to spare should build with RESOURCE_FAIL=bsram.
-    echo
-    rr_args=( "$board" "$proj" --baseline "${RESOURCE_BASELINE:-HEAD}" )
-    if [[ -n "${RESOURCE_FAIL:-}" ]]; then rr_args+=( --fail-on "$RESOURCE_FAIL" ); fi
-    rr_rc=0
-    python3 "$here/resource_report.py" "${rr_args[@]}" || rr_rc=$?
     if [[ "$rr_rc" == "2" ]]; then
         echo "!! RESOURCE REGRESSION (RESOURCE_FAIL=${RESOURCE_FAIL}) — see the per-module table above."
         exit 5
-    elif [[ "$rr_rc" != "0" ]]; then
-        echo "   (resource report unavailable: exit $rr_rc)"
     fi
 fi
