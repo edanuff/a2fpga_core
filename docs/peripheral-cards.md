@@ -1,5 +1,8 @@
 # Peripheral Card Emulation
 
+> Status (2026-10-25): catalog re-read from the board tops and `hdl/slots/slots.hex`. Disk II,
+> the ProDOS hard disk and Uthernet II ship on the coprocessor boards; CardROM is excised.
+
 The catalog of virtual Apple II cards the core provides — what each emulates, the upstream cores it
 reuses, and where the HDL lives. How cards attach to the bus and how to add one is in
 [bus-interface.md](bus-interface.md); the sound mixing is in [audio.md](audio.md). This page is the
@@ -9,13 +12,17 @@ Each card is a slave on [`a2bus_if`](../hdl/bus/a2bus_if.sv) + [`slot_if`](../hd
 with an 8-bit card **ID**, assigned to a slot by [`slots.hex`](../hdl/slots/slots.hex) (and
 reconfigurable at runtime by the coprocessor). Default assignment:
 
-| Card | ID | Default slot | Emulates |
-|---|---|---|---|
-| SuperSprite | 1 | 7 | Synetix SuperSprite (TMS9918A VDP + AY-3-8910) |
-| Mockingboard | 2 | 4 | Sweet Micro Systems Mockingboard (2× AY-3-8910 + 2× 6522) |
-| Super Serial Card | 3 | 2 | Apple Super Serial Card (6551 ACIA) |
-| Disk II | 4 | 5 | Apple Disk II controller (RAMDISK) — **not currently built, see below** |
-| Uthernet II | 5 | 3 | a2RetroSystems Uthernet II (WIZnet W5100) — a2n20v2-Enhanced only; FPGA front-end + BL616 MACRAW bridge, see [boards/a2n20v2-Enhanced/docs/UTHERNET2.md](../boards/a2n20v2-Enhanced/docs/UTHERNET2.md) |
+| Card | ID | Default slot | Emulates | Boards |
+|---|---|---|---|---|
+| SuperSprite | 1 | 7 | Synetix SuperSprite (TMS9918A VDP + AY-3-8910) | Tang Nano 20K boards, a2mega 138K |
+| Mockingboard | 2 | 4 | Sweet Micro Systems Mockingboard (2× AY-3-8910 + 2× 6522) | all but a2mega 60K and a2p25 |
+| Super Serial Card | 3 | 2 | Apple Super Serial Card (6551 ACIA) | all but a2mega 60K and a2p25 |
+| Disk II | 4 | 5 | Apple Disk II controller, images served track-on-demand by the coprocessor | a2n20v2-Enhanced, a2mega, a2p25 |
+| Uthernet II | 5 | 3 | a2RetroSystems Uthernet II (WIZnet W5100), network engine on the coprocessor | a2n20v2-Enhanced (USB Ethernet), a2mega (WiFi) |
+| ProDOS HDD | 6 | 6 | AppleWin-style ProDOS hard-disk card, two block-device units served by the coprocessor | a2n20v2-Enhanced, a2mega, a2p25 |
+
+The per-board set is decided in `boards/<board>/hdl/<board>_profile.vh` (and per die on the
+a2mega); the exact table is in [boards.md](boards.md#which-cards-each-board-carries).
 
 ## SuperSprite — [`supersprite.sv`](../hdl/supersprite/supersprite.sv)
 
@@ -46,28 +53,59 @@ the slot's device register space; the ROM maps into the card's I/O/C8 ROM space 
 inactive (it reads `a2mem_if` for that). The UART's TX/RX connect to the board's host serial line
 (over USB), giving **ADTPro**-compatible serial — including bootstrapping from it.
 
-## Disk II — [`apple_disk.sv`](../hdl/disk/apple_disk.sv) (not currently built)
+## Disk II — [`apple_disk.sv`](../hdl/disk/apple_disk.sv) (`DiskII`) + [`drive_ii.sv`](../hdl/disk/drive_ii.sv)
 
-A Disk II controller emulation that serves disk images from a **RAMDISK** in SDRAM, with the disk
-images supplied by the coprocessor over [`drive_volume_if`](../hdl/disk/drive_volume_if.sv) (block
-I/O for two drives). 
+A Disk II controller (the Apple-II_MiSTer / Edwards `drive_ii` lineage) serving two drives
+**track-on-demand**: on a seek, `drive_ii` raises a request on the drive side of
+[`drive_volume_if`](../hdl/disk/drive_volume_if.sv) (`lba`/`blk_cnt`/`rd`), the coprocessor
+streams the requested nibblized track (6656 bytes) into the card's memory window (an SDRAM /
+DDR3 / HyperRAM port, or a BSRAM buffer inside the ESP32 connector) and pulses `ack`; writes go
+back the same way. `.nib` images are served as-is; `.dsk`/`.do`/`.po`/`.2mg` are nibblized on the
+fly in the coprocessor firmware (6-and-2 GCR, read-write with decode-on-flush). Design record:
+[boards/a2n20v2-Enhanced/docs/disk_image_serving_design.md](../boards/a2n20v2-Enhanced/docs/disk_image_serving_design.md).
+The "WORK IN PROGRESS / requires PicoSoC" header comments in the two source files predate this
+and are stale.
 
-**Status: not instantiated on any current board.** It was wired through the on-FPGA PicoSoC
-RAMDISK path, which has been removed; the BL616 path currently stubs the disk signals
-(`// no DiskII controller yet with BL616`). The `hdl/disk/` modules remain as the basis for
-re-enabling Disk II on the BL616/ESP32 coprocessor path — see the
-[coprocessor interface](coprocessor-interface.md) (`drive_volume_if`) and the board TODOs.
+Timing trap: the nibble register advances on the **rising** `phi0` edge (the start of the read
+window), never on `phi1_posedge`; the wrong edge races the 6502's latch and produces boot hangs
+and I/O errors.
 
-## CardROM — [`cardrom.s`](../boards/a2n20v2-Enhanced/src/cardrom/cardrom.s) (not a slot card)
+## ProDOS hard disk — [`hdd.sv`](../hdl/disk/hdd.sv)
 
-CardROM is the A2FPGA's own **$F000–$FFFF ROM presence**, not a slotted peripheral. At power-up it
-asserts the Apple **INH** line to inhibit the internal monitor ROM and hold the machine in a known
-state until the FPGA is ready. Once the top level signals readiness (`req_rom_release_i` → an
-internal `fpga_done` flag) **and** the Apple fetches the reset vector at **`$FFFC`**, it releases
-INH and normal operation proceeds. Reads in `$F800–$FFFF` return the card ROM (from the
-board-independent `cardrom.hex`); reads below that return the `fpga_done` status bit so monitor
-code can poll FPGA readiness. This is the ROM-side counterpart to the a2bridge power-on-reset hold
-described in [bus-interface.md](bus-interface.md).
+An AppleWin-style ProDOS HDD interface card with its own driver ROM
+([`hdd_rom.a65`](../hdl/disk/hdd_rom.a65), assembled to `hdd_rom.hex`). Because the 6502 cannot be
+halted on a real bus, commands are asynchronous: reading EXECUTE (`$C0s0`) latches the command
+and sets the busy bit, the driver ROM polls STATUS until the coprocessor has served the 512-byte
+block over the unit's `drive_volume_if`, then streams it through the NEXTBYTE port. Two units
+(`.hdv`/`.po`/`.2mg` images, LBA 1:1 into the file), each with a 512-byte BSRAM sector buffer and
+a block window in the board's memory. Code traps are recorded in the module header (an
+`STA abs,X` false read, the Gowin DPB write mode, `data_out_en`).
+
+## Uthernet II — [`uthernet2.sv`](../hdl/uthernet2/uthernet2.sv)
+
+Emulates the register/memory front end of an a2RetroSystems Uthernet II: the WIZnet **W5100** in
+indirect bus mode, four `$C0nX` registers over an on-chip dual-port copy of the W5100 address
+space (9 BSRAM blocks on the Tang Nano 20K). The socket engine and the network bridge run on the
+coprocessor, which reaches the backing store through the connector's memory SPACE 3 and is
+notified of socket commands by a per-socket doorbell. MACRAW mode is implemented (IP65, ADTPro,
+Contiki, Marinetti); the hardware TCP/UDP socket modes are not. On the Enhanced the frames go
+out a USB-Ethernet adapter (CDC-ECM, RTL8153 class); on the a2mega the ESP32 bridges them to
+WiFi with MAC NAT. Design and the FPGA-to-firmware contract:
+[UTHERNET2.md](../boards/a2n20v2-Enhanced/docs/UTHERNET2.md) and
+[UTHERNET2_PROTOCOL.md](../boards/a2n20v2-Enhanced/docs/UTHERNET2_PROTOCOL.md). Off on the a2p25
+(BSRAM budget).
+
+## CardROM — [`cardrom.s`](../boards/a2n20v2-Enhanced/src/cardrom/cardrom.s) (excised)
+
+CardROM was the A2FPGA's own **$F000–$FFFF ROM presence**, not a slotted peripheral: at power-up
+it asserted the Apple **INH** line to inhibit the internal monitor ROM and hold the machine until
+the FPGA was ready, releasing INH once readiness was signalled **and** the Apple fetched the
+reset vector at `$FFFC`. The 6502 source and `cardrom.hex` remain under
+`boards/a2n20v2-Enhanced/src/cardrom/`, but no board top instantiates the HDL any more (the
+Enhanced top ties `cardrom_active_i` to 0, "CardROM excised"): the reset hold that keeps an
+Apple from booting before the coprocessor has mounted its volumes is now done directly on the
+reset line (register 0x2E on the BL616 path; the ESP32 drives `/RES` through a 74LVC2G06 on the
+a2mega and a2p25). See [bus-interface.md](bus-interface.md) for the a2bridge power-on-reset hold.
 
 ## Reused cores
 
@@ -83,11 +121,15 @@ The card logic is built on established open cores (full attributions in the top-
 
 ## Enabling cards & board differences
 
-Each card has an `*_ENABLE` (and `*_ID`) parameter in `top.sv` (`SUPERSPRITE_ENABLE`,
-`MOCKINGBOARD_ENABLE`, `SUPERSERIAL_ENABLE`, …). Resource-limited boards drop cards: **a2n9**
-(Tang Nano 9K) omits SuperSprite (the F18A VDP doesn't fit). Mockingboard is enabled across the
-board family. Slot assignment is via [`slots.hex`](../hdl/slots/slots.hex) at build time and the
-coprocessor's `slotmaker_config_if` at runtime.
+Each card has an `*_ENABLE` (and `*_ID`) parameter in `top.sv` whose default comes from the
+board's `*_profile.vh` (`A2_FEATURE_SUPERSPRITE`, `A2_FEATURE_MOCKINGBOARD`, … see
+[build_profiles.md](build_profiles.md)); on the a2mega the three classic cards are per die
+(`dp_test_die_pkg`: off on the 60K, on on the 138K). Resource-limited boards drop cards: **a2n9**
+omits SuperSprite (the F18A VDP doesn't fit), the **a2p25** carries only Disk II and the HDD
+(logic at 97%, BSRAM 52/56). An `ENABLE=0` card is removed from the build but keeps its slot ID
+reserved. Slot assignment is via [`slots.hex`](../hdl/slots/slots.hex) at build time and the
+coprocessor's `slotmaker_config_if` at runtime (the Enhanced and ESP32 menus apply it before the
+Apple's reset is released).
 
 > Adding a new card (the `a2bus_if`/`slot_if` slave pattern, the data/IRQ mux, registering it in
 > `slots.hex`) is covered in [bus-interface.md](bus-interface.md#adding-a-new-virtual-card).
@@ -97,4 +139,5 @@ coprocessor's `slotmaker_config_if` at runtime.
 - [bus-interface.md](bus-interface.md) — how cards attach to the bus and how to add one.
 - [audio.md](audio.md) — how the Mockingboard / SuperSprite / Ensoniq audio is mixed.
 - [coprocessor-interface.md](coprocessor-interface.md) — disk volume I/O and runtime slot config.
+- [boards.md](boards.md#which-cards-each-board-carries) — which board carries which card.
 - [README.md](../README.md) — the cards as user-facing features, and the full open-core credits.
