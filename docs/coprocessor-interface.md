@@ -1,5 +1,8 @@
 # Coprocessor Interface
 
+> Status (2026-10-25): connector table corrected: the a2p25 uses the a2mega's 8-bit OSPI
+> connector; the 3-wire SPI connector survives only in the rev-0 legacy project.
+
 How an external coprocessor (MCU) observes and controls the A2FPGA core, and the contract for
 building a new coprocessor connector. This is the surface originally built for the on-FPGA
 PicoSoC; it now backs the **BL616** (a2n20v2-Enhanced) and **ESP32-S3** (a2mega, a2p25) MCUs,
@@ -44,9 +47,9 @@ read the observe interfaces and drive the control interfaces.
 | [`a2bus_control_if`](../hdl/bus/a2bus_control_if.sv) (`.control`) | A single `ready` line gating whether the bus controller proceeds — a one-way "MCU is up" handshake, not full bus mastering. |
 | [`video_control_if`](../hdl/video/video_control_if.sv) (`.control`) | Override the displayed video mode and colors (for an on-screen display / config UI). `enable` plus the mode/color fields; the video generators consume the `.display` side. |
 | [`slotmaker_config_if`](../hdl/slots/slotmaker_config_if.sv) (`.controller`) | Assign which virtual card occupies each slot at runtime (`slot`, `card_i`, `wr`, `reconfig`; reads back `card_o`) — reconfigure cards without a rebuild. |
-| [`drive_volume_if`](../hdl/disk/drive_volume_if.sv) (`.volume`), `volumes[2]` | Disk volumes: present mount state/size/read-only and service block I/O (`lba`/`blk_cnt`/`rd`/`wr`/`ack`). Two volumes. The Disk II controller is the `.drive` side. |
+| [`drive_volume_if`](../hdl/disk/drive_volume_if.sv) (`.volume`), `volumes[2]` and `hdd_volumes[2]` | Disk volumes: present mount state/size/read-only and service block I/O (`lba`/`blk_cnt`/`rd`/`wr`/`ack`). Two Disk II drives (track-on-demand) and two ProDOS HDD units (512-byte blocks); the cards are the `.drive` side. |
 | [`f18a_gpu_if`](../hdl/f18a/f18a_gpu_if.sv) (`.master`) | F18A (TMS9918A) GPU: execution control plus VRAM / palette / register access. (The a2mega OSPI connector currently uses this for memory access only and stubs execution.) |
-| [`mem_port_if`](../hdl/memory/mem_port_if.sv) (`.client`), **optional** | One SDRAM port for the MCU (`addr`/`data`/`wr`/`rd`/`burst` → `q`/`available`/`ready`). Present on the BL616 path; the ESP32 connectors use local BRAM spaces instead. |
+| [`mem_port_if`](../hdl/memory/mem_port_if.sv) (`.client`), **optional** | Memory ports for the MCU (`addr`/`data`/`wr`/`rd`/`burst` → `q`/`available`/`ready`): the BL616 has a general SDRAM port plus the Disk II track and HDD block windows; the ESP32 connector keeps the track/block buffers in BSRAM inside its own spaces and has a DDR3/HyperRAM debug reader on the lowest-priority port. |
 
 > The `a2mem_if`/`a2bus_if` "master vs slave" modport names refer to who drives the *Apple-side*
 > data; the **coprocessor is always the reader** of those two. It writes only through the control
@@ -54,20 +57,24 @@ read the observe interfaces and drive the control interfaces.
 
 ## Reference connectors
 
-Three connectors implement this contract today. **The BL616 connector is the canonical, full
+Two connectors implement this contract today. **The BL616 connector is the canonical, full
 implementation** — start there. Transport and protocol details live in the per-board protocol docs.
 
-| Connector | Board | Transport | Scope | Protocol doc |
+| Connector | Boards | Transport | Scope | Protocol doc |
 |---|---|---|---|---|
-| [`bl616_spi_connector`](../boards/a2n20v2-Enhanced/hdl/bl616/bl616_spi_connector.sv) | a2n20v2-Enhanced | 4-wire SPI (CS#-framed) | **Full**: all control interfaces + SDRAM port + bus-event FIFO + on-FPGA SD master | [BL616_SPI_PROTOCOL.md](../boards/a2n20v2-Enhanced/src/a2n20_bl616/docs/BL616_SPI_PROTOCOL.md) |
-| [`esp32_spi_connector`](../boards/a2p25/hdl/esp32/esp32_spi_connector.sv) | a2p25 | 3-wire SPI (sync-framed) | Minimal/diagnostic (register + local-RAM space) | [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md) |
-| [`esp32_ospi_connector`](../boards/a2mega/hdl/esp32/esp32_ospi_connector.sv) | a2mega | Octal SPI (8-bit parallel) | Memory-mapped: video, slots, volumes, F18A VRAM | [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) |
+| [`bl616_spi_connector`](../boards/a2n20v2-Enhanced/hdl/bl616/bl616_spi_connector.sv) | a2n20v2-Enhanced | 4-wire SPI (CS#-framed), ~20 MHz | **Full**: all control interfaces + SDRAM port + Disk II / HDD windows + bus-event FIFO + Uthernet II SPACE 3 + on-FPGA SD master | [BL616_SPI_PROTOCOL.md](../boards/a2n20v2-Enhanced/src/a2n20_bl616/docs/BL616_SPI_PROTOCOL.md) |
+| [`esp32_ospi_connector`](../boards/a2mega/hdl/esp32/esp32_ospi_connector.sv) | a2mega **and a2p25** (`a2p25.gprj` lists `../a2mega/hdl/esp32/`) | Octal SPI (8-bit parallel, sync-pattern framed) | Full: video control + OSD text VRAM, slots, Disk II / HDD volumes with BSRAM track and block buffers, Uthernet II, F18A VRAM, event log, DDR3/HyperRAM debug reader, DP readback, reset and alive handshakes | [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) (register map re-synced to `a2fpga_regs.h` is pending; the firmware header is authoritative), [ESP32_ENHANCED_PORT.md](../boards/a2mega/docs/ESP32_ENHANCED_PORT.md) |
+
+The rev-0 a2p25's 3-wire [`esp32_spi_connector`](../boards/a2p25/hdl/esp32/esp32_spi_connector.sv)
+(register + local-RAM space only) is built by `legacy_a2p25_rev0.gprj` alone; its protocol is
+archived at [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md).
 
 The protocol docs are the **authoritative source for the register map, opcodes, framing, and
 memory spaces** — this page intentionally does not duplicate them (they'd drift). What's common
-across all three: an opcode that selects register read/write or a variable-length memory
-transfer ("XFER") portal, a status byte, and a small set of memory spaces (a local scratch RAM
-is always present).
+across the connectors: an opcode that selects register read/write or a variable-length memory
+transfer ("XFER") portal, a status byte, a device-ID / version / capability block
+(`REG_CAPABILITIES` tells firmware which instruments a build profile left in), and a small set
+of memory spaces (a local scratch RAM is always present).
 
 ## The bridge pattern
 
@@ -111,7 +118,8 @@ idle values, and `spi_miso = 1'b1`. A new connector must drive the same set.
 ## See also
 
 - [BL616_SPI_PROTOCOL.md](../boards/a2n20v2-Enhanced/src/a2n20_bl616/docs/BL616_SPI_PROTOCOL.md) — canonical wire protocol & register map.
-- [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md), [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) — the ESP32 variants.
+- [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) — the ESP32 OSPI link (a2mega and a2p25); [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md) — the archived rev-0 3-wire variant.
+- The ESP32 firmware side: `boards/a2mega/src/a2fpga_esp32/` (shared; a2p25 notes in [ESP32_FW_A2P25.md](../boards/a2p25/docs/ESP32_FW_A2P25.md)).
 - [architecture.md](architecture.md) — where the coprocessor sits in the whole design.
 - [boards.md](boards.md) — which board uses which MCU and transport.
 - The BL616 firmware side: [src/a2n20_bl616/README.md](../boards/a2n20v2-Enhanced/src/a2n20_bl616/README.md).
