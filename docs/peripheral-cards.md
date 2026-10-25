@@ -104,8 +104,9 @@ reset vector at `$FFFC`. The 6502 source and `cardrom.hex` remain under
 `boards/a2n20v2-Enhanced/src/cardrom/`, but no board top instantiates the HDL any more (the
 Enhanced top ties `cardrom_active_i` to 0, "CardROM excised"): the reset hold that keeps an
 Apple from booting before the coprocessor has mounted its volumes is now done directly on the
-reset line (register 0x2E on the BL616 path; the ESP32 drives `/RES` through a 74LVC2G06 on the
-a2mega and a2p25). See [bus-interface.md](bus-interface.md) for the a2bridge power-on-reset hold.
+reset line itself: `apple_bus` holds `/RES` until the coprocessor releases it (BL616 register
+0x2E; on the a2mega the FPGA's `a2_res_out_n` through a 74LVC2G06; on the a2p25 that output has
+no pin and the ESP32 drives `/RES` from its own GPIO). See [bus-interface.md](bus-interface.md) for the a2bridge power-on-reset hold.
 
 ## Reused cores
 
