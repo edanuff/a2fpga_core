@@ -9,10 +9,12 @@ Seen on 2 dies (GW5AT-60, GW5AST-138), 2 monitors, 2 DP→HDMI converter
 sinks, n=4. Product impact: `board_1_0a4_requirements.md` item 11 (marginal
 catches can ship a shifted screen; recovery requires a full re-acquisition).
 
-Status: **mechanism identified by RTL analysis and REPRODUCED in simulation**
-(`hdl/displayport/sim/tb_offset_wrap.v`). Fix proposed below as a diff
-(not applied — shared production RTL); the exact sim-verified patch is
-also saved apply-ready as `boards/a2mega/docs/offset_wrap_fix.patch`.
+Status (2026-10-25): **fix APPLIED.** The mechanism was identified by RTL
+analysis and reproduced in simulation (`hdl/displayport/sim/tb_offset_wrap.v`);
+the diff proposed below now lives in `hdl/displayport/video/video_stream_packer.v`
+(the two `OFFSET-WRAP FIX` blocks, since re-pipelined by timing round 2). The
+apply-ready copy `offset_wrap_fix.patch` was deleted on 2026-10-25 as a
+duplicate of the code; this file is the record of the investigation.
 
 ---
 

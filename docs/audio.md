@@ -79,7 +79,7 @@ interleaved with video into the TMDS stream. `clk_audio` paces sample capture.
 
 The DOC path is gated by `` `define ENSONIQ `` in each board's `top.sv`. On a2p25 the IIgs sound
 is emulated on the coprocessor instead of in the FPGA (see [a2p25/TODO.md](../boards/a2p25/TODO.md)
-and its [LCAM session notes](../boards/a2p25/docs/LCAM_SESSION_NOTES.md)).
+and its [LCAM session notes](../boards/a2p25/docs/archive/LCAM_SESSION_NOTES.md)).
 
 ## Adding a sound source
 

@@ -421,7 +421,7 @@ the mux pin assignment (VDM) *and* the DP→HDMI converter chip's own
 despite the dongle legitimately "supporting 1080p."
 
 **FIRST CENSUS RESULTS (2026-09-01, a2mega fw e3c41cbe, 4 hubs — answer key
-in boards/a2mega/docs/mac_anker_aux_answer_key.md @ 0eefc9c5):** the C
+in boards/a2mega/docs/archive/dp-bringup-2026-08/mac_anker_aux_answer_key.md @ 0eefc9c5):** the C
 advertisement is **near-universal** (Anker + Ugreen both advertise C,D), so
 **the PD census alone cannot qualify a hub for ×4** — the Anker is the
 documented advertise-C-but-DPCD-2 counterexample (mux passes 4 pairs, the

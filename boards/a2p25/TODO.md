@@ -122,7 +122,7 @@ Remaining Issues
       1. Timer trigger: I2S task calls `es5503_stream_update()` periodically
       2. Write trigger: `handle_es5503_write()` calls `es5503_stream_update()` before control reg writes
       A mutex protects ES5503 state since both LCAM task and I2S task access it.
-      See docs/LCAM_SESSION_NOTES.md for full implementation details.
+      See docs/archive/LCAM_SESSION_NOTES.md for full implementation details.
 
 - [x] Selective write trigger: Initial MAME-style approach called stream_update on EVERY write,
       causing 32,768 mutex ops during burst test → 381 underruns. Fixed by only triggering on:
@@ -193,7 +193,7 @@ Nice‑to‑Haves
 - [ ] ES5503: Add voice activity + peak meter to `es5503info`; optional compat toggle to ignore 0x00 halts during bring‑up; validate multi‑voice mixing, pan/volume, and headroom; confirm E1 sequencing with IIgs programs.
 
 Further Reading / Playbook
-- Full session knowledge and procedures: `boards/a2p25/docs/LCAM_SESSION_NOTES.md`
+- Full session knowledge and procedures: `boards/a2p25/docs/archive/LCAM_SESSION_NOTES.md`
 - Firmware checklist and expected stats: `boards/a2p25/src/a2fpga_esp32/README.md`
 ## LCAM Investigation Summary
 
@@ -207,7 +207,7 @@ Further Reading / Playbook
   - Capture count: near-complete; exact 32,768 requires proper end-of-burst handling (see plan).
 
 Further Reading / Playbook
-- Full session knowledge and procedures: `boards/a2p25/docs/LCAM_SESSION_NOTES.md`
+- Full session knowledge and procedures: `boards/a2p25/docs/archive/LCAM_SESSION_NOTES.md`
 - Firmware checklist and expected stats: `boards/a2p25/src/a2fpga_esp32/README.md`
 
 ## LCAM Resolution Plan (Actionable)

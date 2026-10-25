@@ -28,7 +28,7 @@
 //   `gowin_pixel_pll` has no such luxury: the shared dp_transmitter
 //   instantiates it with (lock, clkout, clkin) only, so its PLL_INIT must run
 //   from `clkin` — the 135 MHz SERDES word clock, which the PCS **gates**
-//   during SERDES reset/teardown phases (established in WS4_GOWIN_STACK.md
+//   during SERDES reset/teardown phases (established in docs/archive/dp_gowin/WS4_GOWIN_STACK.md
 //   §10). Calibration is therefore only valid once the word clock is running,
 //   and a teardown that stops the word clock may leave the pixel PLL
 //   uncalibrated until the next lock cycle. If that proves to be a problem on

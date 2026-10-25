@@ -71,7 +71,7 @@ Consequences, in order of importance:
 3. **TXM/TXP ordering is identical on both dies** (TXM on the lower-numbered
    ball of every pair), so the carrier's uniform P/N swap is compensated the
    same way: `tx_pol_invert` on both used lanes. No polarity rework.
-4. **Ticket relevance (Gowin generator defect).** `WS4_GOWIN_STACK.md` §9/§11
+4. **Ticket relevance (Gowin generator defect).** `archive/dp_gowin/WS4_GOWIN_STACK.md` §9/§11
    convicts the EDP-PHY/Customized-PHY generator of emitting **raw-mode** PCS/PMA
    mode fields (`0xNN6C[13:12]`, `0xNNa0[9]`, `0xNNa6[17:16]`) when the *hardened
    8b10b* preset targets **lanes 2/3**, while emitting them correctly for lanes

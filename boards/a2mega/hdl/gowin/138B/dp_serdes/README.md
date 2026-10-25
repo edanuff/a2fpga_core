@@ -31,7 +31,7 @@ Four independent, hard blockers were found — each verified, not assumed:
    direction** (legal values 0/1/2), and a complete second-quad `[q1]` block.
    Those three choices decide whether the 135 MHz reference ever reaches
    QPLL0. Guessing them is exactly the class of error that cost a week of
-   silicon forensics in `docs/WS4_GOWIN_STACK.md` §§9-11.
+   silicon forensics in `docs/archive/dp_gowin/WS4_GOWIN_STACK.md` §§9-11.
 3. **`gw_sh` has no IP-generation TCL** (no `ip_*` commands) — re-verified.
 4. **`GowinModgen` cannot do it either.** `GowinModgen -do serdes.mod` exits 1
    with no diagnostic on the SERDES `.mod`; and in this environment it exits 1

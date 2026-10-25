@@ -54,7 +54,7 @@ Active across several boards with different implementations:
 [#33 DOC5503 mixer](https://github.com/a2fpga/a2fpga_core/issues/33); on **a2p25** the
 ES5503 runs on the ESP32-S3 and is largely working (see
 [a2p25/TODO.md](../boards/a2p25/TODO.md) and
-[a2p25/docs/LCAM_SESSION_NOTES.md](../boards/a2p25/docs/LCAM_SESSION_NOTES.md)); **a2mega**
+[a2p25/docs/archive/LCAM_SESSION_NOTES.md](../boards/a2p25/docs/archive/LCAM_SESSION_NOTES.md)); **a2mega**
 has its own DDR3-backed DOC path (see [gotchas.md](gotchas.md)).
 
 ### 4. Coprocessor, storage & configuration
@@ -69,7 +69,7 @@ the boards with a coprocessor:
 
 The DDR3 board under active development: framebuffer stability, ESP32 OSPI interface, and
 possible IIgs acceleration (TransWarp-GS-like). See [a2mega/TODO.md](../boards/a2mega/TODO.md),
-its [DDR3 refactor workplan](../boards/a2mega/docs/A2FPGA_DDR3_Framebuffer_Refactor_Workplan.md),
+its [DDR3 refactor workplan](../boards/a2mega/docs/archive/ddr3-framebuffer/A2FPGA_DDR3_Framebuffer_Refactor_Workplan.md),
 and the DDR3 sections of [gotchas.md](gotchas.md).
 
 ### 6. Board maturity

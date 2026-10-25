@@ -60,7 +60,7 @@ implementation** — start there. Transport and protocol details live in the per
 | Connector | Board | Transport | Scope | Protocol doc |
 |---|---|---|---|---|
 | [`bl616_spi_connector`](../boards/a2n20v2-Enhanced/hdl/bl616/bl616_spi_connector.sv) | a2n20v2-Enhanced | 4-wire SPI (CS#-framed) | **Full**: all control interfaces + SDRAM port + bus-event FIFO + on-FPGA SD master | [BL616_SPI_PROTOCOL.md](../boards/a2n20v2-Enhanced/src/a2n20_bl616/docs/BL616_SPI_PROTOCOL.md) |
-| [`esp32_spi_connector`](../boards/a2p25/hdl/esp32/esp32_spi_connector.sv) | a2p25 | 3-wire SPI (sync-framed) | Minimal/diagnostic (register + local-RAM space) | [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/ESP32_SPI_PROTOCOL.md) |
+| [`esp32_spi_connector`](../boards/a2p25/hdl/esp32/esp32_spi_connector.sv) | a2p25 | 3-wire SPI (sync-framed) | Minimal/diagnostic (register + local-RAM space) | [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md) |
 | [`esp32_ospi_connector`](../boards/a2mega/hdl/esp32/esp32_ospi_connector.sv) | a2mega | Octal SPI (8-bit parallel) | Memory-mapped: video, slots, volumes, F18A VRAM | [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) |
 
 The protocol docs are the **authoritative source for the register map, opcodes, framing, and
@@ -111,7 +111,7 @@ idle values, and `spi_miso = 1'b1`. A new connector must drive the same set.
 ## See also
 
 - [BL616_SPI_PROTOCOL.md](../boards/a2n20v2-Enhanced/src/a2n20_bl616/docs/BL616_SPI_PROTOCOL.md) — canonical wire protocol & register map.
-- [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/ESP32_SPI_PROTOCOL.md), [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) — the ESP32 variants.
+- [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md), [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) — the ESP32 variants.
 - [architecture.md](architecture.md) — where the coprocessor sits in the whole design.
 - [boards.md](boards.md) — which board uses which MCU and transport.
 - The BL616 firmware side: [src/a2n20_bl616/README.md](../boards/a2n20v2-Enhanced/src/a2n20_bl616/README.md).

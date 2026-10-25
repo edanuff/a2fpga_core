@@ -3,8 +3,8 @@
 *Campaign: 2026-08-02 → 2026-08-04. Outcome: the DOC5503 runs its 64KB
 wavetable RAM from DDR3 on the a2mega (GW5AT-60), hardware-verified with
 clean audio, clean video, and instrumentation matching the design math.
-Companion documents: `ensoniq_ddr3_pipelined_design.md` (the design and its
-revision history), `jtag_flash_reliability.md` / `jtag_bridge_research.md`
+Companion documents: `../../ensoniq_ddr3_pipelined_design.md` (the design and its
+revision history), `../../jtag_flash_reliability.md` / `../jtag/jtag_bridge_research.md`
 (the flashing saga that ran interleaved with this one).*
 
 ---

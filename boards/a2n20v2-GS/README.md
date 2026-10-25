@@ -51,4 +51,4 @@ turn the relative file paths into absolute file paths.
 - [Agent & contributor guide](../../AGENTS.md)
 - [This board's tasks & status (TODO.md)](TODO.md)
 - Board design docs:
-  - [SDRAM framebuffer workplan](docs/WORKPLAN.md)
+  - [SDRAM framebuffer workplan (implemented, archived)](docs/archive/WORKPLAN.md)

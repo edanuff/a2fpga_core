@@ -109,8 +109,8 @@ HDMI scanout:
   CDC between the memory side and the HDMI pixel clock.
 - This is the *consumer* end of the [video pipeline](video-pipeline.md)'s Apple-timed framebuffer
   path. Tuned parameters (burst length, buffer offsets, fetch timing) live in the code and in
-  [a2mega/docs/ddr3_framebuffer_480p_design.md](../boards/a2mega/docs/ddr3_framebuffer_480p_design.md)
-  / [a2n20v2-GS/docs/WORKPLAN.md](../boards/a2n20v2-GS/docs/WORKPLAN.md).
+  [a2mega/docs/archive/ddr3-framebuffer/ddr3_framebuffer_480p_design.md](../boards/a2mega/docs/archive/ddr3-framebuffer/ddr3_framebuffer_480p_design.md)
+  / [a2n20v2-GS/docs/archive/WORKPLAN.md](../boards/a2n20v2-GS/docs/archive/WORKPLAN.md).
 
 ## Critical constraints (don't get bitten)
 
