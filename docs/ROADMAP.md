@@ -52,9 +52,9 @@ Sporadic garbage data on some IIgs systems from the data-byte sampling window in
 `apple_bus.sv` (a regression introduced when denoising the ph1 clock to pass mbaudit), and
 [#56 another card's slot reads disturbed on a IIgs](https://github.com/a2fpga/a2fpga_core/issues/56).
 Top-priority item in [a2n20v2/TODO.md](../boards/a2n20v2/TODO.md) and
-[a2n20v2-GS/TODO.md](../boards/a2n20v2-GS/TODO.md). Affects the stable board. The
-predictive bus-clock recovery in `hdl/bus/apple_timer.sv` (`ENABLE_CLOCK_SYNC`, default off,
-simulation-verified) is the candidate fix awaiting hardware verification.
+[a2n20v2-GS/TODO.md](../boards/a2n20v2-GS/TODO.md). Affects the stable board. A predictive
+bus-clock recovery (`apple_timer`, simulation-verified, opt-in) was prototyped on a branch that
+is not in the tree (listed in the 2026-10-22 branch audit as rescued, uncommitted work).
 
 ### 3. IIgs audio — Ensoniq DOC 5503
 

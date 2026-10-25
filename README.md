@@ -7,8 +7,9 @@ Multicard core for A2FPGA Apple II FPGA co-processor cards.
 The A2FPGA consists of an Apple II peripheral card PCB that can be installed in any Apple II 
 slot (slot-7 recommended) that interfaces a modern FPGA to the Apple II bus. The
 FPGA interfaces with the Apple II bus to capture all accesses to display memory
-in order to drive a 480p HDMI display as well a providing the functionality of
-a number of popular peripheral cards in a single Apple II slot.  The A2FPGA
+in order to drive a 480p HDMI display (1080p over USB-C DisplayPort on the newer
+A2Mega and A2P25 boards) as well as providing the functionality of a number of
+popular peripheral cards in a single Apple II slot.  The A2FPGA
 has been tested with Apple II, II+, //e, and IIgs models.
 
 > **Contributing with AI coding agents:** This project is organized to make authoring
@@ -123,7 +124,9 @@ Both are experimental and not official releases yet; see each board's README for
 ## Other boards
 
 Other boards live in the [boards/](boards/) directory — earlier hardware (A2N9, A2N20v1) and
-newer boards in development (A2Mega for the Tang Mega 60K, A2P25 for the Tang Primer 25K). See
+newer boards in development: the A2Mega (Tang Mega 60K or 138K SOM, DDR3 framebuffer, USB-C
+DisplayPort output, ESP32-S3 coprocessor) and the A2P25 (Tang Primer 25K, HyperRAM framebuffer,
+USB-C DisplayPort output, ESP32-S3 coprocessor). See
 **[docs/boards.md](docs/boards.md)** for the full board matrix (chip, memory, status) and links
 to each board's documentation.
 
