@@ -1,13 +1,24 @@
 # A2Mega TODO
 
+> Status (2026-10-25): the live state of this board is kept in its `docs/` plans, not here:
+> the 1.0a4 rev gate is [docs/board_1_0a4_requirements.md](docs/board_1_0a4_requirements.md)
+> (with [docs/a2p25_carryover_2026-10-11.md](docs/a2p25_carryover_2026-10-11.md)), the timing
+> policy and log [docs/timing_round2.md](docs/timing_round2.md), the socket work
+> [docs/gs_socket_65816_scoping.md](docs/gs_socket_65816_scoping.md) section 8b, and the
+> still-open list of the 2026-10-22 merge in the fork-only merge record. The sections below
+> are the 2026-07 bring-up log of board 1.0a2a and the Enhanced port, kept as history; items
+> ticked there are done, unticked ones were overtaken by the 1.0a3 board (no SD card, no USB-A)
+> unless listed again in the plans above.
+
 ## Status
 
-**Work In Progress** — Tang Mega 60K version. The a2n20v2-Enhanced feature set
-(menu, SD disk serving, WiFi networking, FPGA self-update) is ported and
-building; hardware bring-up of the new co-processor paths is next. See
-[docs/ESP32_ENHANCED_PORT.md](docs/ESP32_ENHANCED_PORT.md).
+**Work In Progress** — board 1.0a3, Tang Mega 60K or 138K SOM. The core runs on the IIgs
+over USB-C DisplayPort on both SOMs; the Enhanced feature set is on the ESP32 and was
+hardware-verified on the IIgs in July (ProDOS boot from the link, WiFi, OSD, gamepad on the
+then-present USB-A port). Not re-verified on the a2mega since the 2026-10-22 merge
+(the board had not been attached since 2026-10-11 at the time of writing).
 
-## High Priority — bring-up of the Enhanced port (all code in place, untested on hardware)
+## 2026-07 bring-up log of the Enhanced port (board 1.0a2a; history)
 
 - [ ] Verify the OSPI link end-to-end from the ESP32 (`+++` CLI: `spitest`, `spireg 7`)
 - [ ] Verify SD card pins (`PIN_SD_D2`=IO35 inferred from schematic) and 4-bit SDMMC mount
@@ -254,6 +265,8 @@ burst-alignment assert. Open, in recommended order:
   micro-SD, WiFi, and JTAG-to-FPGA are on the ESP32
 - Disk track/HDD block buffers are BSRAM (XFER SPACE 4/5), not DDR3
 - ⚠️ **BSRAM is at the device limit.** New BSRAM consumers must reclaim first.
+  (Superseded 2026-08-04: the wavetable DID move to DDR3 behind the pipelined DOC,
+  see `docs/ensoniq_ddr3_pipelined_design.md` and `docs/gotchas.md`.)
   The Ensoniq 64KB wavetable (32 BSRAMs) is NOT trivially movable to DDR3 —
   the DOC's ~838 ns per-fetch deadline loses to DDR3 tail latency (that's why
   it's in BSRAM). Candidate reclaims: Uthernet II buffer aliasing (−3…−6,
