@@ -11,18 +11,20 @@ board, ask the user.
 
 Each board lives under `boards/<dir>/` with its own Gowin project(s), board-specific `hdl/`,
 build outputs in `impl/pnr/`, a `TODO.md` and a `docs/` folder indexed from its README.
+Deprecated boards and builds live under [`boards/deprecated/`](../boards/deprecated/README.md);
+`tools/build.sh` and `tools/flash.sh` still find them by name.
 
 ## Matrix
 
 | Board | FPGA | Off-chip memory | Framebuffer | Display | Ensoniq DOC | Coprocessor | `.gprj` | Status |
 |---|---|---|---|---|---|---|---|---|
 | [`a2n20v2`](../boards/a2n20v2/README.md) | Tang Nano 20K, GW2AR-LV18QN88C8/I7 | none used | none (display-locked) | HDMI 720x480 | no | none | `a2n20v2.gprj` | **Stable production** (recommended; IIgs supported) |
-| [`a2n20v2-GS`](../boards/a2n20v2-GS/README.md) | Tang Nano 20K, GW2AR-LV18QN88C8/I7 | SDRAM | SDRAM | HDMI 720x480 | SDRAM | none | `a2n20v2_gs.gprj` | Experimental; IIgs/Ensoniq audio focus |
+| [`a2n20v2-GS`](../boards/deprecated/a2n20v2-GS/README.md) (`boards/deprecated/`) | Tang Nano 20K, GW2AR-LV18QN88C8/I7 | SDRAM | SDRAM | HDMI 720x480 | SDRAM | none | `a2n20v2_gs.gprj` | **Deprecated build**: superseded by a2n20v2-Enhanced, which has the GS-specific build features |
 | [`a2n20v2-Enhanced`](../boards/a2n20v2-Enhanced/README.md) | Tang Nano 20K, GW2AR-LV18QN88C8/I7 | SDRAM | none / SDRAM (see variants) | HDMI 720x480 | SDRAM | BL616 (4-wire SPI) | `a2n20v2_enhanced.gprj`, `_dualrate.gprj`, `_fb.gprj` | Beta: USB host (gamepad, storage, Ethernet), disk-image serving, menu, self-update of MCU and FPGA from a USB stick |
 | [`a2mega`](../boards/a2mega/README.md) | Tang Mega SOM, **two dies**: GW5AT-LV60PG484AC1/I0 (60K) or GW5AST-LV138PG484AC1/I0 (138K) | DDR3 | DDR3, 1080p | USB-C DisplayPort Alt Mode, 1080p, 2-lane HBR (board 1.0a3) | DDR3 (pipelined DOC) | ESP32-S3 (8-bit OSPI) | `a2mega.gprj` (60K), `a2mega_138B.gprj` (138K) | WIP, active development: Enhanced feature set ported to the ESP32 and live on the IIgs; 65C816 in-socket work on the 138K; board rev 1.0a4 gated |
 | [`a2p25`](../boards/a2p25/README.md) | Tang Primer 25K, GW5A-LV25MG121NC1/I0 | HyperRAM 64 Mbit | HyperRAM, 1080p | USB-C DisplayPort Alt Mode, 1080p, 4-lane RBR through the hardened MIPI D-PHY (board rev displayport1) | HyperRAM (pipelined DOC) | ESP32-S3 (8-bit OSPI, shared a2mega firmware) | `a2p25.gprj` (`legacy_a2p25_rev0.gprj` is the unmaintained previous revision) | WIP: IIgs boots on the new core over DP 1080p with SHR and DOC audio (2026-10-11); logic-bound at ~97% CLS |
-| [`a2n9`](../boards/a2n9/README.md) | Tang Nano 9K, GW1NR-LV9QN88PC6/I5 | none used | none | HDMI 720x480 | no | none | `a2n9.gprj` | Deprecated: limited resources, no IIgs, no SuperSprite |
-| [`a2n20v1`](../boards/a2n20v1/README.md) | Tang Nano 20K, GW2AR-LV18QN88C8/I7 | none used | none | HDMI 720x480 | no | none | `a2n20v1.gprj` | Deprecated: superseded by a2n20v2 |
+| [`a2n9`](../boards/deprecated/a2n9/README.md) (`boards/deprecated/`) | Tang Nano 9K, GW1NR-LV9QN88PC6/I5 | none used | none | HDMI 720x480 | no | none | `a2n9.gprj` | **Deprecated board**: development board never released beyond a limited set of testers; no IIgs, no SuperSprite |
+| [`a2n20v1`](../boards/deprecated/a2n20v1/README.md) (`boards/deprecated/`) | Tang Nano 20K, GW2AR-LV18QN88C8/I7 | none used | none | HDMI 720x480 | no | none | `a2n20v1.gprj` | **Deprecated board**: development board never released beyond a limited set of testers; superseded by a2n20v2 |
 
 > ⚠️ **The `.gprj` filename does not always match the directory name, and the a2mega has one
 > per die.** Use the exact name from the table in the `open_project` line of a build, or
@@ -100,7 +102,7 @@ boards); it wraps the commands below with the per-board rules.
 
 ```bash
 openfpgaloader -b tangnano20k -f boards/a2n20v2/impl/pnr/a2n20v2.fs   # Tang Nano 20K boards (v1, v2, GS, Enhanced)
-openfpgaloader -b tangnano9k  -f boards/a2n9/impl/pnr/a2n9.fs          # Tang Nano 9K
+openfpgaloader -b tangnano9k  -f boards/deprecated/a2n9/impl/pnr/a2n9.fs   # Tang Nano 9K (deprecated)
 openFPGALoader --bulk-erase -f -c esp32s3 boards/a2mega/impl/pnr/a2mega.fs   # a2mega 60K, flash to SPI (138K: a2mega_138B.fs)
 openFPGALoader -c esp32s3 boards/a2mega/impl/pnr/a2mega.fs                   # a2mega, SRAM (volatile, for test builds)
 openFPGALoader --bulk-erase -f -c esp32s3 boards/a2p25/impl/pnr/a2p25.fs     # a2p25, through its ESP32-S3
@@ -124,8 +126,8 @@ its `TODO.md` and `docs/` folder; the deep material lives there, not in this wik
 | [a2mega](../boards/a2mega/README.md#documentation) | 1.0a3 bring-up plan and journal, bench test log, 1.0a4 rev requirements, DisplayPort link policy and adapter census, M5 runtime AFE, timing round 2, the pipelined Ensoniq-on-DDR3 design, ESP32 OSPI protocol and Enhanced-port design, 138K SOM ball map, the 65C816 in-socket scoping, TransWarp GS reference; history in `docs/archive/` |
 | [a2p25](../boards/a2p25/README.md#documentation) | displayport1 modernization plan with bench results, DP-over-D-PHY design, ball map, PSRAM test, resource audit, top integration plan, ESP32 firmware and feature port; previous-revision notes in `docs/archive/` |
 | [a2n20v2-Enhanced](../boards/a2n20v2-Enhanced/README.md#documentation) | Uthernet II design and FPGA-to-BL616 contract, disk-image serving design; BL616 firmware, SPI protocol, USB host and build setup under `src/a2n20_bl616/docs/` |
-| [a2n20v2-GS](../boards/a2n20v2-GS/README.md#documentation) | the SDRAM framebuffer workplan (implemented; archived) |
-| a2n20v2 / a2n9 / a2n20v1 | board README + TODO only |
+| [a2n20v2-GS](../boards/deprecated/a2n20v2-GS/README.md#documentation) (deprecated) | the SDRAM framebuffer workplan (implemented; archived) |
+| a2n20v2; deprecated a2n9 / a2n20v1 | board README + TODO only; [boards/deprecated/README.md](../boards/deprecated/README.md) says why each is there |
 
 > **Convention:** board-specific design notes, workplans and session notes go in
 > `boards/<board>/docs/`; superseded ones move to `boards/<board>/docs/archive/`. See

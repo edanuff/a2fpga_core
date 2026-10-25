@@ -72,7 +72,7 @@ that names what superseded every file:
 - [docs/archive/](archive/README.md) — repository-wide history (merge records are fork-only)
 - [boards/a2mega/docs/archive/](../boards/a2mega/docs/archive/README.md) — DDR3 framebuffer, Ensoniq-on-DDR3, JTAG, the 2026-08 DP bring-up
 - [boards/a2p25/docs/archive/](../boards/a2p25/docs/archive/README.md) — the previous revision: LCAM capture link (reusable), 3-wire SPI
-- [boards/a2n20v2-GS/docs/archive/](../boards/a2n20v2-GS/docs/archive/README.md) — the SDRAM framebuffer workplan
+- [boards/a2n20v2-GS/docs/archive/](../boards/deprecated/a2n20v2-GS/docs/archive/README.md) — the SDRAM framebuffer workplan (the GS build is deprecated; see [boards/deprecated/](../boards/deprecated/README.md))
 
 The rule is in [conventions.md](conventions.md#archive). The file-by-file audit that
 produced this structure is `docs/DOCS_AUDIT_2026-10.md` (a fork-only record, excluded

@@ -52,7 +52,7 @@ Sporadic garbage data on some IIgs systems from the data-byte sampling window in
 `apple_bus.sv` (a regression introduced when denoising the ph1 clock to pass mbaudit), and
 [#56 another card's slot reads disturbed on a IIgs](https://github.com/a2fpga/a2fpga_core/issues/56).
 Top-priority item in [a2n20v2/TODO.md](../boards/a2n20v2/TODO.md) and
-[a2n20v2-GS/TODO.md](../boards/a2n20v2-GS/TODO.md). Affects the stable board. A predictive
+the deprecated GS build's TODO. Affects the stable board. A predictive
 bus-clock recovery (`apple_timer`, simulation-verified, opt-in) was prototyped on a branch that
 is not in the tree (listed in the 2026-10-22 branch audit as rescued, uncommitted work).
 
@@ -97,10 +97,11 @@ revision's firmware tree under `boards/a2p25/src/` is a pending decision.
 
 ### 7. Board maturity
 
-- **a2n20v2-GS** is intended to eventually become the main a2n20v2 release; the GS and
-  Enhanced cores now share `apple_bus` / `apple_memory_sdram`, and folding the GS into the
-  Enhanced build (dual-rate SDRAM, then the framebuffer parameter) is the path.
-- **a2n20v1** and **a2n9** are deprecated (maintenance-only, kept in sync with shared HDL).
+- **a2n20v2-GS** is deprecated: superseded by the **a2n20v2-Enhanced** build, which carries the
+  GS-specific build features (dual-rate SDRAM with the SHR aux banks in SDRAM, the `_fb`
+  framebuffer variant). It lives under [boards/deprecated/](../boards/deprecated/README.md).
+- **a2n20v1** and **a2n9** are deprecated development boards (never released beyond a limited
+  set of testers), also under `boards/deprecated/`; nothing is rebuilt there.
 
 ### Explicitly not planned / rejected
 

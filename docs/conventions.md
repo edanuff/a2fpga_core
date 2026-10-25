@@ -69,6 +69,9 @@ find their way from the top-level wiki down to board-specific detail:
 - **`boards/<board>/README.md`** — the board's entry point. Ends with a **Documentation** section
   linking up to the wiki ([docs/](README.md)), to [AGENTS.md](../AGENTS.md), to the board's
   `TODO.md`, and to any board docs. Also linked from [boards.md](boards.md).
+- **`boards/deprecated/<board>/`** — a board or build that is no longer active keeps the same
+  layout there (its `.gprj` references the shared HDL as `../../../hdl/`), with the reason in
+  [boards/deprecated/README.md](../boards/deprecated/README.md); the tools find it by name.
 - **`boards/<board>/TODO.md`** — current, temporal status and priorities for that board.
 - **`boards/<board>/docs/`** — board-specific **design docs, workplans, and session notes**.
   This is the home for anything that isn't a board overview or a task list: framebuffer designs,

@@ -61,7 +61,7 @@ exit' | /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh
 
 - `run all` = synthesis + place & route + bitstream. `run syn` = synthesis only.
 - **The `.gprj` filename is not always `<board>.gprj`.** See [boards.md](boards.md) for the
-  exact project file per board (e.g. `a2n20v2-GS` uses `a2n20v2_gs.gprj`).
+  exact project file per board (e.g. `a2n20v2-Enhanced` uses `a2n20v2_enhanced.gprj`; the a2mega has one per SOM).
 - `prebuild.tcl` runs automatically on `open_project`, regenerating the board's `boards/<board>/hdl/datetime.svh`.
 - OpenGL/Chromium warnings on macOS are safe to ignore.
 

@@ -99,9 +99,9 @@ treat those values as the tuned configuration. The a2mega and a2p25 tops carry
 | a2mega 138K | ✓ | ✓ | ✓ | ✓ pipelined DOC, wavetable in **DDR3** | DP SDP |
 | a2p25 | ✓ | off (budget) | off (budget) | ✓ pipelined DOC, wavetable in **HyperRAM** (fetch cache, port priority 0) | DP SDP |
 | a2n20v2-Enhanced | ✓ | ✓ | ✓ | ✓ baseline DOC, wavetable in SDRAM | HDMI |
-| a2n20v2-GS | ✓ | ✓ | ✓ | ✓ baseline DOC, wavetable in SDRAM | HDMI |
+| a2n20v2-GS (deprecated build) | ✓ | ✓ | ✓ | ✓ baseline DOC, wavetable in SDRAM | HDMI |
 | a2n20v2 | ✓ | ✓ | ✓ | ✗ | HDMI; production, no IIgs sound |
-| a2n20v1 / a2n9 | ✓ | ✓ | ✓ (n9: no SSP) | ✗ | HDMI; deprecated |
+| a2n20v1 / a2n9 (deprecated boards) | ✓ | ✓ | ✓ (n9: no SSP) | ✗ | HDMI |
 
 The DOC path is switched by `A2_FEATURE_ENSONIQ` in each board's `*_profile.vh`.
 

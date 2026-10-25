@@ -20,4 +20,4 @@ code comment or document that cites it is updated in the same commit.
 
 Board history lives beside each board: [boards/a2mega/docs/archive/](../../boards/a2mega/docs/archive/README.md),
 [boards/a2p25/docs/archive/](../../boards/a2p25/docs/archive/README.md),
-[boards/a2n20v2-GS/docs/archive/](../../boards/a2n20v2-GS/docs/archive/README.md).
+[boards/deprecated/a2n20v2-GS/docs/archive/](../../boards/deprecated/a2n20v2-GS/docs/archive/README.md).

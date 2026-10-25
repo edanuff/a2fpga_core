@@ -110,16 +110,17 @@ For ROM 00/01 IIgs models (such as the Woz edition), the A2N20v2 must be placed 
 
 ### Work-in-progress A2N20v2 variants
 
-Two experimental variants of the A2N20v2 are under active development — these may be what you're
-looking for if you want the newer features, with the usual work-in-progress caveats:
+One variant of the A2N20v2 is under active development — it may be what you're looking for if
+you want the newer features, with the usual work-in-progress caveats:
 
-- **[A2N20v2-GS](boards/a2n20v2-GS/)** — GS-optimized: Ensoniq DOC audio plus a framebuffer so
-  games that use beam-racing techniques display correctly. Intended to become the main A2N20v2
-  release.
-- **[A2N20v2-Enhanced](boards/a2n20v2-Enhanced/)** — adds an external BL616 MCU coprocessor for
-  SD-card disk images and on-screen configuration.
+- **[A2N20v2-Enhanced](boards/a2n20v2-Enhanced/)** — adds an external BL616 MCU coprocessor
+  (USB host, disk images from a USB stick, on-screen menu, networking, self-update) and the
+  GS-specific build features: Ensoniq DOC audio with its wavetable in SDRAM and, in its
+  framebuffer build, a framebuffer so games that use beam-racing techniques display correctly.
 
-Both are experimental and not official releases yet; see each board's README for current status.
+It is a beta, not an official release; see its README for current status. The earlier
+A2N20v2-GS build and the A2N9 / A2N20v1 development boards are kept under
+[boards/deprecated/](boards/deprecated/README.md).
 
 ## Other boards
 

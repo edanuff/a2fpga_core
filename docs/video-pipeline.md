@@ -48,8 +48,8 @@ the finished frame out at HDMI timing.
   on the a2mega and a2p25 (source-resolution lines scaled x3/x5 into a centred 1920x1080 raster
   for the DisplayPort core). [`framebuffer_480p`](../hdl/video/framebuffer_480p.sv) is the 480p
   ancestor of the 1080p module.
-- **Boards today:** `a2mega` (DDR3), `a2p25` (HyperRAM), `a2n20v2-GS` (SDRAM),
-  `a2n20v2-Enhanced` `_fb` build (SDRAM).
+- **Boards today:** `a2mega` (DDR3), `a2p25` (HyperRAM), the `a2n20v2-Enhanced` `_fb` build
+  (SDRAM); the deprecated `a2n20v2-GS` build was the first SDRAM user.
 - **Beam-racing: kept intact** — because capture is clocked by the Apple's own video timing,
   software that races the beam (*Arkanoid*, *Bugz*) reproduces faithfully; the finished frame is
   just presented to HDMI delayed by up to one frame, which is invisible.

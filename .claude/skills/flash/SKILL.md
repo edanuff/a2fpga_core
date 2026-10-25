@@ -1,6 +1,6 @@
 ---
 name: flash
-description: Flash an A2FPGA board's FPGA BITSTREAM (the .fs gateware) with openFPGALoader. Use when the user asks to flash, program, upload, load, or deploy a BITSTREAM/gateware to a board (a2mega, a2n20v2, a2n20v2-GS, a2n20v2-Enhanced, a2p25, a2n9, a2n20v1). NOT for the a2n20v2-Enhanced BL616 MCU/microcontroller FIRMWARE — for that use the `flash-mcu` skill (different tool, different chip; using this one would not touch the BL616).
+description: Flash an A2FPGA board's FPGA BITSTREAM (the .fs gateware) with openFPGALoader. Use when the user asks to flash, program, upload, load, or deploy a BITSTREAM/gateware to a board (a2mega, a2n20v2, a2n20v2-Enhanced, a2p25; deprecated under boards/deprecated/: a2n20v2-GS, a2n9, a2n20v1). NOT for the a2n20v2-Enhanced BL616 MCU/microcontroller FIRMWARE — for that use the `flash-mcu` skill (different tool, different chip; using this one would not touch the BL616).
 ---
 
 # Flash an A2FPGA board
@@ -32,8 +32,8 @@ connected before running, unless the user already said to go ahead.
 
 | Board(s) | openFPGALoader |
 |---|---|
-| a2n20v1, a2n20v2, a2n20v2-GS, a2n20v2-Enhanced (Tang Nano 20K) | `-b tangnano20k` |
-| a2n9 (Tang Nano 9K) | `-b tangnano9k` |
+| a2n20v2, a2n20v2-Enhanced, and the deprecated a2n20v1, a2n20v2-GS (Tang Nano 20K) | `-b tangnano20k` |
+| a2n9 (Tang Nano 9K, deprecated) | `-b tangnano9k` |
 | a2mega (Tang Mega 60K), a2p25 (Tang Primer 25K) | `-c esp32s3` (on-board ESP32S3; flash adds `--bulk-erase -f`) |
 
 ## Notes

@@ -46,9 +46,10 @@ tools/flash.sh <board>          # program the bitstream to SPI flash (persistent
 tools/flash.sh <board> --sram   # load to volatile SRAM (lost on power-down)
 ```
 
-`<board>` is a directory under `boards/` (e.g. `a2mega`, `a2n20v2-GS`). Both scripts
-auto-discover the board's `.gprj`/bitstream, so the directory-vs-filename mismatch
-(e.g. `a2n20v2-GS` → `a2n20v2_gs.gprj`) is handled for you. Use `DRY_RUN=1` to preview
+`<board>` is a directory under `boards/` (e.g. `a2mega`, `a2n20v2-Enhanced`) or under
+`boards/deprecated/` (found by name). Both scripts auto-discover the board's `.gprj`/bitstream,
+so the directory-vs-filename mismatch (e.g. `a2n20v2-Enhanced` → `a2n20v2_enhanced.gprj`) is
+handled for you; boards with several projects need `GPRJ=`. Use `DRY_RUN=1` to preview
 the command without running it. `build.sh` reports timing violations and fails if the
 build is not clean.
 

@@ -64,7 +64,7 @@ controller:
 
 The index assignment encodes the priority decision for that board.
 
-**`a2n20v2-GS` (SDRAM)** — [top.sv:162](../boards/a2n20v2-GS/hdl/top.sv)
+**`a2n20v2-GS` (SDRAM; deprecated build)** — [top.sv](../boards/deprecated/a2n20v2-GS/hdl/top.sv)
 | Port | Use |
 |---|---|
 | 0 | Framebuffer line **reads** (highest — must not starve, or the scanout stalls) |
@@ -151,7 +151,7 @@ display scanout:
 - This is the *consumer* end of the [video pipeline](video-pipeline.md)'s Apple-timed framebuffer
   path. Tuned parameters (burst length, buffer offsets, fetch timing) live in the code and in
   [a2mega/docs/archive/ddr3-framebuffer/ddr3_framebuffer_480p_design.md](../boards/a2mega/docs/archive/ddr3-framebuffer/ddr3_framebuffer_480p_design.md)
-  / [a2n20v2-GS/docs/archive/WORKPLAN.md](../boards/a2n20v2-GS/docs/archive/WORKPLAN.md).
+  / [a2n20v2-GS/docs/archive/WORKPLAN.md](../boards/deprecated/a2n20v2-GS/docs/archive/WORKPLAN.md).
 
 ## Critical constraints (don't get bitten)
 

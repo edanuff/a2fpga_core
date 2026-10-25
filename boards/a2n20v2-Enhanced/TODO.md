@@ -25,8 +25,8 @@
 - [ ] Startup gate when the card is powered before the Apple (supplemental power): the reset
       contract is jumped and the Apple does not boot. Reported in agent notes with a proposed
       fix (an `a2_alive` level gate that re-arms the hold); nothing for it is in the tree
-- [ ] Fold the GS build into the Enhanced build (shared `apple_bus` / `apple_memory_sdram` done;
-      next `DUAL_RATE_SDRAM`, then the framebuffer parameter) so one core serves both
+- [x] Supersede the GS build: the shared `apple_bus` / `apple_memory_sdram`, the dual-rate SDRAM
+      path and the `_fb` framebuffer variant are here; `a2n20v2-GS` is deprecated (2026-10-25)
 - [ ] Uthernet II: hardware TCP/UDP socket modes (only MACRAW is implemented)
 - [ ] Classic build has no BSRAM headroom (46/46): any new feature must reclaim blocks first;
       build with `RESOURCE_FAIL=bsram`

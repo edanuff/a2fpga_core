@@ -1,6 +1,6 @@
 ---
 name: build
-description: Build (synthesize + place & route) an A2FPGA FPGA board with the Gowin gw_sh CLI and verify timing. Use when the user asks to build, synthesize, compile, run PnR, or generate a bitstream for a board (a2mega, a2n20v2, a2n20v2-GS, a2n20v2-Enhanced, a2p25, a2n9, a2n20v1).
+description: Build (synthesize + place & route) an A2FPGA FPGA board with the Gowin gw_sh CLI and verify timing. Use when the user asks to build, synthesize, compile, run PnR, or generate a bitstream for a board (a2mega, a2n20v2, a2n20v2-Enhanced, a2p25; deprecated under boards/deprecated/: a2n20v2-GS, a2n9, a2n20v1).
 ---
 
 # Build an A2FPGA board
@@ -12,8 +12,9 @@ same script directly).
 ## Steps
 
 1. **Determine the board.** If the user named one, use it. If not, ask which board
-   (list: `a2mega`, `a2n20v2`, `a2n20v2-GS`, `a2n20v2-Enhanced`, `a2p25`, `a2n9`,
-   `a2n20v1`). See [docs/boards.md](../../../docs/boards.md). Do not guess.
+   (active: `a2mega`, `a2n20v2`, `a2n20v2-Enhanced`, `a2p25`; deprecated, under
+   `boards/deprecated/` but found by name: `a2n20v2-GS`, `a2n9`, `a2n20v1`). See
+   [docs/boards.md](../../../docs/boards.md). Do not guess.
 
 2. **Run the build** from the repo root:
    ```bash
@@ -22,7 +23,8 @@ same script directly).
    ```
    Builds take minutes — run in the background and wait for completion rather than
    polling. The script auto-discovers the board's `.gprj` (names don't always match the
-   directory, e.g. `a2n20v2-GS` → `a2n20v2_gs.gprj`).
+   directory, e.g. `a2n20v2-Enhanced` → `a2n20v2_enhanced.gprj`; the a2mega has one
+   project per SOM and needs `GPRJ=`).
 
 3. **Report the timing result.** The script prints setup/hold violation counts and the
    bitstream path, and exits non-zero if violations are present or no bitstream was
