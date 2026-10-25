@@ -1,7 +1,7 @@
 # boards/a2mega/docs/archive
 
 Status: created 2026-10-25 by the documentation consolidation
-([docs/DOCS_AUDIT_2026-10.md](../../../../docs/DOCS_AUDIT_2026-10.md)).
+(`docs/DOCS_AUDIT_2026-10.md`, a fork-only record).
 Nothing here is maintained; each entry names the document that replaced it.
 Files were moved with `git mv`, so `git log --follow` still finds their history.
 

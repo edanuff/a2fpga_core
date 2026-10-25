@@ -1,0 +1,38 @@
+# UPSTREAM_EXCLUDE.txt - paths that never leave the edanuff fork.
+# Honoured by tools/upstream_export.sh. One pathspec per line, :(glob) semantics
+# (a trailing slash means the whole directory). Comments and blank lines are ignored.
+# Record every exclusion here rather than in anyone's memory; the export script
+# prints the removed list for review before anything is pushed.
+
+# Private records of the fork's own history
+BRANCH_AUDIT_*.md
+MERGE_RESOLUTIONS_*.md
+docs/archive/merges/
+docs/DOCS_AUDIT_*.md
+
+# Gowin vendor-IP evaluation and reverse-engineering notes (third-party IP)
+boards/a2mega/docs/archive/dp_gowin/
+boards/a2mega/docs/WS4_GOWIN_STACK.md
+boards/a2mega/docs/gowin_serdes_re_findings.md
+boards/a2mega/a2mega_dp_gowin.gprj
+boards/a2mega/hdl/dp_gowin/
+
+# Vendor documents, if any ever reappear (board schematics under boards/*/sch are ours and stay)
+docs/**/*.pdf
+boards/*/docs/**/*.pdf
+
+# Outreach and correspondence drafts
+**/outreach/
+
+# Agent tooling
+.claude/
+
+# Open policy questions (docs/DOCS_AUDIT_2026-10.md section 5): uncomment once decided.
+# Q3 - are bench journals and AUX captures fork-only as a class?
+#boards/a2mega/docs/test_log.md
+#boards/a2mega/docs/bringup_1_0a3_log.md
+#boards/a2mega/docs/acquisition_matrix_results.md
+#boards/a2mega/docs/archive/dp-bringup-2026-08/
+# Q7 - if the skills are public contributor tooling, replace the .claude/ line above with:
+#.claude/settings.json
+#.claude/hooks/

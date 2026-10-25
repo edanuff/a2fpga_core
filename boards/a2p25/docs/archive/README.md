@@ -1,7 +1,7 @@
 # boards/a2p25/docs/archive
 
 Status: created 2026-10-25 by the documentation consolidation
-([docs/DOCS_AUDIT_2026-10.md](../../../../docs/DOCS_AUDIT_2026-10.md)).
+(`docs/DOCS_AUDIT_2026-10.md`, a fork-only record).
 Nothing here is maintained. These describe the rev-0 a2p25 (Tang Primer 25K
 plus an ESP32-S3 running the ES5503 over an LCD_CAM capture link); the
 displayport1 board revision replaced all of it with a fabric DOC5503 on
