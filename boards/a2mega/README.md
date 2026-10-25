@@ -1,9 +1,8 @@
 # A2Mega Card
 
-> Status (2026-10-25): rewritten for board revision 1.0a3 (USB-C DisplayPort, two SOM
-> options). The 1.0a2a description (HDMI, micro-SD, USB-A) was out of date. Hardware
-> verification of the ESP32 feature port on the a2mega itself is not recorded in the repo;
-> the a2p25 carries the same firmware and verified it there.
+> Status (2026-10-25): describes board revision 1.0a3 (unreleased, under development; two SOM
+> options). Hardware verification of the ESP32 feature port on the a2mega itself is not
+> recorded in the repo; the a2p25 carries the same firmware and verified it there.
 
 The A2Mega is the A2FPGA Apple II card built around a Sipeed Tang Mega SOM on a carrier of
 our own design. Two interchangeable SOMs are supported, each with its own project:
@@ -13,12 +12,13 @@ our own design. Two interchangeable SOMs are supported, each with its own projec
 | Tang Mega 60K | GW5AT-LV60PG484AC1/I0 | `a2mega.gprj` | BSRAM-bound (107/118); the three classic cards are off on this die |
 | Tang Mega 138K | GW5AST-LV138PG484AC1/I0 | `a2mega_138B.gprj` | all cards; the 65C816 in-socket build (`GS_SOCKET`); its own DP SERDES IP generated in the IDE |
 
-Board revision **1.0a3** replaced the HDMI, micro-SD and USB-A ports of 1.0a2a with a single
-USB-C port: 4-lane DisplayPort Alt Mode (2 lanes used, HBR, 1080p), USB 2 to the ESP32, and
-USB-PD, with a TUSB1046A redriver and a FUSB302B PD controller managed by the ESP32. The
-framebuffer, the shadow memory and the Ensoniq wavetable live in DDR3. Revision 1.0a4 is
-specified in [docs/board_1_0a4_requirements.md](docs/board_1_0a4_requirements.md) and gated
-on the exercise plan.
+The board's one external port is USB-C: 4-lane DisplayPort Alt Mode (2 lanes used, HBR,
+1080p), USB 2 to the ESP32, and USB-PD, with a TUSB1046A redriver and a FUSB302B PD
+controller managed by the ESP32. There is no SD card and no USB-A port; storage and input go
+through the ESP32. The framebuffer, the shadow memory and the Ensoniq wavetable live in DDR3.
+The next revision, 1.0a4, is specified in
+[docs/board_1_0a4_requirements.md](docs/board_1_0a4_requirements.md) and gated on the
+exercise plan.
 
 What the core carries (decided in `hdl/a2mega_profile.vh` and per die in `dp_test_die_pkg`):
 Apple II / //e / IIgs video including SHR through `framebuffer_1080p` and the shared
@@ -64,7 +64,7 @@ and the a2mega port of the a2n20v2-Enhanced feature set over the 8-bit OSPI link
 
 Menu input from a USB gamepad, keyboard or remote on the USB-C port is the feature port's
 item P2 ([boards/a2p25/docs/ESP32_FEATURE_PORT.md](../a2p25/docs/ESP32_FEATURE_PORT.md)),
-verified on the a2p25; the earlier 1.0a2a fabric `usb_hid_host` on a USB-A port is gone.
+verified on the a2p25.
 
 ## Documentation
 
@@ -74,7 +74,7 @@ verified on the a2p25; the earlier 1.0a2a fabric `usb_hid_host` on a USB-A port 
 - Board documentation (`docs/`), grouped:
   - **Board revision and bench ground truth**
     - [test_log.md](docs/test_log.md) — the bench log (every experiment, two tables); ground truth for the 1.0a3 campaign
-    - [bringup_1_0a3_log.md](docs/bringup_1_0a3_log.md) — the 1.0a3 bring-up journal · [BRINGUP_1_0A3_PLAN.md](docs/BRINGUP_1_0A3_PLAN.md) — the executed plan, with the 1.0a2a-to-1.0a3 hardware changes
+    - [bringup_1_0a3_log.md](docs/bringup_1_0a3_log.md) — the 1.0a3 bring-up journal · [BRINGUP_1_0A3_PLAN.md](docs/BRINGUP_1_0A3_PLAN.md) — the executed plan (section 1 lists the board's USB-C, PD, SERDES and ESP32 pin facts)
     - [board_1_0a4_requirements.md](docs/board_1_0a4_requirements.md) — the 1.0a4 rev gate · [a2p25_carryover_2026-10-11.md](docs/a2p25_carryover_2026-10-11.md) — what the a2p25 proved for it · [PRE_REV_EXERCISE_PLAN.md](docs/PRE_REV_EXERCISE_PLAN.md) — the pre-revision gates (status is a maintainer question)
     - [apple_off_backfeed_level_shifters.md](docs/apple_off_backfeed_level_shifters.md) — level-shifter back-feed with the Apple off (1.0a4 design note)
     - [btb_pinout_1_0a3.md](docs/btb_pinout_1_0a3.md), [a2mega_pinmap_1_0a3.csv](docs/a2mega_pinmap_1_0a3.csv), [tang_mega_die_names.json](docs/tang_mega_die_names.json) — pin and ball maps (cited from the `.cst` files)

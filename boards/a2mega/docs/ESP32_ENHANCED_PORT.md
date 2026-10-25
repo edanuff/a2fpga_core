@@ -1,6 +1,6 @@
 # a2mega ESP32 Co-Processor — Enhanced Feature-Set Port
 
-> Status (2026-10-25): the port is live on both ESP32 boards (a2mega 1.0a3, a2p25 displayport1; verified on the IIgs); the firmware is `boards/a2mega/src/a2fpga_esp32/`. The register table in this document predates the 2026-10-22 merge, which remapped the DOC telemetry to window registers 40–45 and moved CORE_BUILD from 0x3F to 0x7E; `a2fpga_regs.h` in the firmware tree is the authoritative map until this table is re-synced. The hardware-differences table describes board 1.0a2a (micro-SD, USB-A); 1.0a3 has neither (see the board README).
+> Status (2026-10-25): the port is live on both ESP32 boards (a2mega 1.0a3, a2p25 displayport1; verified on the IIgs); the firmware is `boards/a2mega/src/a2fpga_esp32/`. The register table in this document predates the 2026-10-22 merge, which remapped the DOC telemetry to window registers 40–45 and moved CORE_BUILD from 0x3F to 0x7E; `a2fpga_regs.h` in the firmware tree is the authoritative map until this table is re-synced. The hardware-differences table was updated for board 1.0a3 on 2026-10-25.
 
 Port of the a2n20v2-Enhanced BL616 feature set (on-screen menu, disk-image
 serving, slot reconfiguration, Apple II reset hold, Uthernet II networking,
@@ -12,8 +12,8 @@ branch work (FPGA-fabric `usb_hid_host` core).
 | Function          | Enhanced (BL616)                   | a2mega (ESP32-S3-MINI-1-N8)                     |
 |-------------------|------------------------------------|--------------------------------------------------|
 | MCU↔FPGA link     | 4-wire SPI Mode 1, ~20 MHz         | Octal SPI (8-bit parallel), sync-pattern framing |
-| Gamepad / HID     | BL616 USB host (XInput)            | **FPGA-fabric `usb_hid_host`** on the USB-A port; ESP32 polls readback regs |
-| Storage           | USB MSC stick (SD fallback tunnel) | **Micro-SD on ESP32** (native 4-bit SDMMC: CLK=IO36? CMD/D0-D3, DET — see sch p.3) |
+| Gamepad / HID     | BL616 USB host (XInput)            | **ESP32-S3 USB host** on the board's USB-C port (feature port item P2; the ESP32 writes the pad/key regs 0x16–0x1B) |
+| Storage           | USB MSC stick (SD fallback tunnel) | **LittleFS on the ESP32 flash** (images by FTP) and USB mass storage on the ESP32's USB port; no SD card on this board |
 | Networking        | USB Ethernet (CDC-ECM/RTL8152)     | **WiFi STA** (raw-frame bridge with MAC NAT)     |
 | Track/block buffers | SDRAM windows (0x200000/0x204000) | **BSRAM** buffers inside the OSPI connector spaces |
 | Menu/console text | SDRAM OSD text page (0x020800)     | **Text VRAM BSRAM (SPACE 1)** + pixel-domain OSD overlay renderer |

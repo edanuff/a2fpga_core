@@ -41,6 +41,12 @@ The 1.0a3 USB-C DisplayPort bring-up. Ground truth for that campaign is
 | [m5_perlane_proposal.md](dp-bringup-2026-08/m5_perlane_proposal.md) | Per-lane ADJUST_REQUEST proposal | applied 2026-08-22; `m5_afe_adjust_design.md` section 12 |
 | [mac_anker_aux_answer_key.md](dp-bringup-2026-08/mac_anker_aux_answer_key.md) | AUX conformance answer key from a Mac-to-Anker capture, with three decoded transcripts ([mac_anker_bringup_annotated.txt](dp-bringup-2026-08/mac_anker_bringup_annotated.txt), [mac_anker_hdmireplug_annotated.txt](dp-bringup-2026-08/mac_anker_hdmireplug_annotated.txt), [our_board_bringup_annotated.txt](dp-bringup-2026-08/our_board_bringup_annotated.txt)) | the link policy that came out of it is in `acquisition_matrix_results.md` and `boards/a2p25/docs/DP_ALTMODE_DPHY_DESIGN.md` section 7a |
 
+## Board-level (2026-07)
+
+| File | Was | Superseded by |
+|---|---|---|
+| [todo_2026-07_enhanced_port_bringup.md](todo_2026-07_enhanced_port_bringup.md) | The board TODO during the 2026-07 ESP32 Enhanced-port bring-up on the previous board revision (micro-SD, USB-A) | the current `boards/a2mega/TODO.md`, `board_1_0a4_requirements.md` and the ESP32 feature port (`boards/a2p25/docs/ESP32_FEATURE_PORT.md`) |
+
 ## dp_gowin/ (2026-08, fork-only)
 
 | File | Was | Superseded by |

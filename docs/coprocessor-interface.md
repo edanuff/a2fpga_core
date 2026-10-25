@@ -1,7 +1,7 @@
 # Coprocessor Interface
 
 > Status (2026-10-25): connector table corrected: the a2p25 uses the a2mega's 8-bit OSPI
-> connector; the 3-wire SPI connector survives only in the rev-0 legacy project.
+> connector; the 3-wire SPI connector survives only in the unmaintained previous-revision project.
 
 How an external coprocessor (MCU) observes and controls the A2FPGA core, and the contract for
 building a new coprocessor connector. This is the surface originally built for the on-FPGA
@@ -65,7 +65,7 @@ implementation** — start there. Transport and protocol details live in the per
 | [`bl616_spi_connector`](../boards/a2n20v2-Enhanced/hdl/bl616/bl616_spi_connector.sv) | a2n20v2-Enhanced | 4-wire SPI (CS#-framed), ~20 MHz | **Full**: all control interfaces + SDRAM port + Disk II / HDD windows + bus-event FIFO + Uthernet II SPACE 3 + on-FPGA SD master | [BL616_SPI_PROTOCOL.md](../boards/a2n20v2-Enhanced/src/a2n20_bl616/docs/BL616_SPI_PROTOCOL.md) |
 | [`esp32_ospi_connector`](../boards/a2mega/hdl/esp32/esp32_ospi_connector.sv) | a2mega **and a2p25** (`a2p25.gprj` lists `../a2mega/hdl/esp32/`) | Octal SPI (8-bit parallel, sync-pattern framed) | Full: video control + OSD text VRAM, slots, Disk II / HDD volumes with BSRAM track and block buffers, Uthernet II, F18A VRAM, event log, DDR3/HyperRAM debug reader, DP readback, reset and alive handshakes | [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) (register map re-synced to `a2fpga_regs.h` is pending; the firmware header is authoritative), [ESP32_ENHANCED_PORT.md](../boards/a2mega/docs/ESP32_ENHANCED_PORT.md) |
 
-The rev-0 a2p25's 3-wire [`esp32_spi_connector`](../boards/a2p25/hdl/esp32/esp32_spi_connector.sv)
+The previous a2p25 revision's 3-wire [`esp32_spi_connector`](../boards/a2p25/hdl/esp32/esp32_spi_connector.sv)
 (register + local-RAM space only) is built by `legacy_a2p25_rev0.gprj` alone; its protocol is
 archived at [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md).
 
@@ -118,7 +118,7 @@ idle values, and `spi_miso = 1'b1`. A new connector must drive the same set.
 ## See also
 
 - [BL616_SPI_PROTOCOL.md](../boards/a2n20v2-Enhanced/src/a2n20_bl616/docs/BL616_SPI_PROTOCOL.md) — canonical wire protocol & register map.
-- [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) — the ESP32 OSPI link (a2mega and a2p25); [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md) — the archived rev-0 3-wire variant.
+- [ESP32_OSPI_DESIGN.md](../boards/a2mega/docs/ESP32_OSPI_DESIGN.md) — the ESP32 OSPI link (a2mega and a2p25); [ESP32_SPI_PROTOCOL.md](../boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md) — the archived previous-revision 3-wire variant.
 - The ESP32 firmware side: `boards/a2mega/src/a2fpga_esp32/` (shared; a2p25 notes in [ESP32_FW_A2P25.md](../boards/a2p25/docs/ESP32_FW_A2P25.md)).
 - [architecture.md](architecture.md) — where the coprocessor sits in the whole design.
 - [boards.md](boards.md) — which board uses which MCU and transport.

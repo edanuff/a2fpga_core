@@ -92,8 +92,8 @@ The IIgs boots on the new core over DP 1080p with SHR and DOC audio (2026-10-11,
 `boards/a2p25/docs/MODERNIZATION_PLAN.md` sections 6f–6g). Open: the known risks in that
 plan's section 7 (D-PHY amplitude margin at the SN75DP130, the PLL cascade soak, CK# floating
 on non-Infineon HyperRAM parts), the resource ceiling (97% CLS; Mockingboard, SuperSprite and
-Uthernet II are off), and the HDD image corruption seen around installs. The rev-0 LCAM
-firmware tree under `boards/a2p25/src/` is a pending decision.
+Uthernet II are off), and the HDD image corruption seen around installs. The previous
+revision's firmware tree under `boards/a2p25/src/` is a pending decision.
 
 ### 7. Board maturity
 
@@ -114,8 +114,10 @@ firmware tree under `boards/a2p25/src/` is a pending decision.
   record is fork-only (`boards/a2mega/docs/archive/dp_gowin/`).
 - **4-lane RBR on the a2mega** — not taken; the a2mega stays 2-lane HBR, the 4-lane path shipped
   on the a2p25 through the shared core (`boards/a2mega/docs/archive/dp-bringup-2026-08/`).
-- **Running the ES5503 on the ESP32 over an LCD_CAM capture link** (rev-0 a2p25) — replaced by
-  the fabric pipelined DOC on HyperRAM (`boards/a2p25/docs/archive/`).
+- **Running the ES5503 on the ESP32** (previous a2p25 revision) — abandoned; the fabric
+  pipelined DOC on HyperRAM replaced it. The LCAM capture link built for it is not rejected:
+  it is proven lossless burst transfer and a candidate low-latency FPGA-to-ESP32 transport,
+  possibly on the a2mega (`boards/a2p25/docs/archive/LCAM_SESSION_NOTES.md`).
 
 > Maintainer: add longer-term/aspirational items here as they come up, and record anything you
 > specifically do *not* want built (with a one-line why) so contributors don't re-propose it.

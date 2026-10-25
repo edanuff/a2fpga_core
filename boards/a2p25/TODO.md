@@ -1,8 +1,8 @@
 # A2P25 TODO
 
-> Status (2026-10-25): body replaced with the displayport1 open items; the rev-0 ES5503-on-ESP32
-> plan that was here (2026-01-28) is preserved in git history and summarized in
-> [docs/archive/README.md](docs/archive/README.md).
+> Status (2026-10-25): body replaced with the displayport1 open items; the previous revision's
+> ES5503-on-ESP32 plan that was here (2026-01-28, abandoned) is in git history and summarized
+> in [docs/archive/README.md](docs/archive/README.md).
 
 ## Status
 
@@ -10,9 +10,8 @@
 and DOC audio (2026-10-11)** — see
 [docs/MODERNIZATION_PLAN.md](docs/MODERNIZATION_PLAN.md) for the current plan,
 priorities (DP colorbars → AUX validation → PSRAM test → DOC/framebuffer/
-shadow on PSRAM) and the bench ladder. The new board removes LCAM, I2S and the
-UART, so the ESP32-S3 audio items below describe the PREVIOUS board rev and
-are superseded by the fabric DOC5503 on PSRAM.
+shadow on PSRAM) and the bench ladder. The board has no LCAM link, I2S or UART; the
+IIgs sound is the fabric DOC5503 on PSRAM.
 
 ## Open (from MODERNIZATION_PLAN.md sections 6–7, ESP32_FEATURE_PORT.md and RESOURCE_AUDIT.md)
 

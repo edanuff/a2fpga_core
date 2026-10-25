@@ -9,8 +9,8 @@ The A2P25 is the A2FPGA Apple II card built around the
 SOM (Gowin GW5A-LV25MG121). The current board revision, **displayport1**, adds a 64 Mbit
 HyperBus PSRAM (Infineon S27KL0642), an ESP32-S3 coprocessor on an 8-bit OSPI link, and a
 USB-C DisplayPort Alt Mode output driven from the GW5A's hardened MIPI D-PHY used as a raw
-serializer (4 lanes, RBR, 1080p) through an SN75DP130 retimer; the rev-0 board (HDMI, no
-memory, ES5503 on the ESP32 over an LCD_CAM capture link) is retired.
+serializer (4 lanes, RBR, 1080p) through an SN75DP130 retimer. It is unreleased and under
+development; the earlier revision is not maintained.
 
 What the core carries on this board (decided in `hdl/a2p25_profile.vh`; the GW5A-25 is
 logic-bound at ~97% CLS and 52/56 BSRAM):
@@ -34,7 +34,7 @@ tools/flash.sh a2p25                    # through the on-board ESP32-S3 (openFPG
 The board has several bench projects beside the core: `a2p25_dp_test*.gprj` (DisplayPort
 colorbars, 2 and 4 lanes, probes, blind-sink and AUX-observation variants),
 `a2p25_psram_test_ck54/81/108.gprj` (the HyperRAM eye-scan test at three clock rates) and
-`legacy_a2p25_rev0.gprj` (the rev-0 board's core, kept buildable under `hdl/legacy/`). Pass
+`legacy_a2p25_rev0.gprj` (the previous revision's core under `hdl/legacy/`, not maintained). Pass
 `GPRJ=<file>` to `tools/build.sh` and `tools/flash.sh` for those; both refuse to guess.
 Build with `bit_security 0` as every GW5A project here does (see `docs/gotchas.md`).
 
@@ -63,5 +63,5 @@ the ESP32's LittleFS plus USB mass storage on the ESP32's own USB port; there is
   - [TOP_INTEGRATION_PLAN.md](docs/TOP_INTEGRATION_PLAN.md) — how the new top was derived from the a2mega top (memory map, resource scoping, decisions)
   - [ESP32_FW_A2P25.md](docs/ESP32_FW_A2P25.md) · [ESP32_FEATURE_PORT.md](docs/ESP32_FEATURE_PORT.md) — the firmware on this board and the Enhanced feature port
   - [HyperRAM bandwidth budget (§3)](../../docs/memory_bandwidth_analysis.md#3-a2p25--hyperram-bandwidth-budget) — the original budget, revised by the modernization plan's section 4
-  - [docs/archive/](docs/archive/README.md) — rev-0 material: LCAM capture notes, the 3-wire SPI protocol
-- Rev-0 firmware: [src/a2fpga_esp32/README.md](src/a2fpga_esp32/README.md) (LCAM-era, not used on this board; whether to keep it is an open maintainer decision)
+  - [docs/archive/](docs/archive/README.md) — the previous revision's material: the LCAM capture-link notes (the link is proven lossless transfer work and may be reused; its ES5503 use is abandoned), the 3-wire SPI protocol
+- Previous-revision firmware: [src/a2fpga_esp32/README.md](src/a2fpga_esp32/README.md) (LCAM-era, not used on this board; where it lives is an open maintainer decision)

@@ -1,6 +1,6 @@
 # a2mega 1.0a3 Bring-Up Plan — USB-C DisplayPort
 
-> Status (2026-10-25): executed plan, kept because `a2mega_dp_test_top.sv` and `board_pins.h` cite it and section 1 is the record of what changed from 1.0a2a to 1.0a3. The bench results are in `test_log.md` and `bringup_1_0a3_log.md`.
+> Status (2026-10-25): executed plan, kept because `a2mega_dp_test_top.sv` and `board_pins.h` cite it and section 1 states the board's USB-C, PD, SERDES and ESP32 pin facts. The bench results are in `test_log.md` and `bringup_1_0a3_log.md`.
 
 Status: **HARDWARE IN HAND (2026-08-11).** All pre-hardware software is done
 and committed: Phases 0–1 (vendoring + ESP32 firmware), Phase 2 step 1

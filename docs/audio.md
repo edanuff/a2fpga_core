@@ -39,8 +39,8 @@ On the a2p25 the DOC's HyperRAM port must be the arbiter's highest priority and 
 firmware reads is the audio health metric (see
 [`boards/a2p25/docs/RESOURCE_AUDIT.md`](../boards/a2p25/docs/RESOURCE_AUDIT.md)).
 
-[`i2s_receiver`](../hdl/sound/i2s_receiver.sv) remains in `hdl/sound/` from the rev-0 a2p25,
-whose ES5503 ran on the ESP32 and entered over I2S; no current project builds it.
+[`i2s_receiver`](../hdl/sound/i2s_receiver.sv) remains in `hdl/sound/` from the abandoned
+ES5503-on-ESP32 path of the previous a2p25 revision; no current project builds it.
 
 ## Mixing
 
