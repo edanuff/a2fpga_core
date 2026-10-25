@@ -1,5 +1,8 @@
 # Getting Started (environment setup)
 
+> Status (2026-10-25): current; the ESP32 firmware pointers now go to the shared a2mega
+> firmware tree.
+
 This project is organized so that **coding agents (Claude Code and similar) can be productive
 quickly**. Clone it, run your agent **in the repo root**, and ask it to set up your build
 environment — or run the **`/setup`** skill. This page is the reference for what tools you need
@@ -15,7 +18,7 @@ and how to get them; `/setup` automates the checks and walks you through install
 | **Gowin EDA** (`gw_sh`) | Building any board bitstream (synthesis + place & route) | **Always** | `command -v gw_sh`, or the macOS app at `/Applications/GowinIDE.app/.../bin/gw_sh` | [setup-gowin-cli.md](setup-gowin-cli.md) · download links in [tools/README.md](../tools/README.md#getting-the-software) |
 | **openFPGALoader** | Flashing a bitstream to a board | To flash hardware | `openFPGALoader --version` | macOS: `brew install openfpgaloader` (`brew upgrade` for latest) |
 | **T-Head RISC-V GCC + Bouffalo SDK** | Building the **BL616** MCU firmware | Only if doing BL616 firmware dev (a2n20v2-Enhanced) | `/opt/riscv-toolchain/xuantie/bin/riscv64-unknown-elf-gcc` **and** `$BL_SDK_BASE` set | [a2n20v2-Enhanced BL616 README](../boards/a2n20v2-Enhanced/src/a2n20_bl616/README.md) |
-| **Arduino CLI + ESP32 core** | Building the **ESP32-S3** firmware/JTAG programmer | Only for a2mega / a2p25 | `arduino-cli version` and `arduino-cli core list \| grep esp32` | [a2p25 a2fpga_esp32 README](../boards/a2p25/src/a2fpga_esp32/README.md) |
+| **Arduino CLI + ESP32 core** | Building the **ESP32-S3** firmware/JTAG programmer | Only for a2mega / a2p25 | `arduino-cli version` and `arduino-cli core list \| grep esp32` | the shared firmware in `boards/a2mega/src/a2fpga_esp32/` (`make compile`, `BOARD_REV=103` a2mega / `225` a2p25); a2p25 notes in [ESP32_FW_A2P25.md](../boards/a2p25/docs/ESP32_FW_A2P25.md) |
 
 ## What you need, by board / task
 
@@ -25,6 +28,8 @@ and how to get them; `/setup` automates the checks and walks you through install
 - **a2mega or a2p25** → also the **Arduino + ESP32-S3** toolchain. These boards are programmed via an
   on-board ESP32-S3, so the Arduino toolchain is needed both for the ESP32 firmware *and* for the
   `esp32_usb_jtag` programmer that `openFPGALoader -c esp32s3` talks to (see [boards.md](boards.md)).
+  One firmware tree serves both boards (`boards/a2mega/src/a2fpga_esp32/`, selected by
+  `BOARD_REV`); the LCAM-era tree under `boards/a2p25/src/` does not match the current a2p25 board.
 
 ## Important toolchain notes
 
