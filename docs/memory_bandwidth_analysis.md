@@ -1,5 +1,14 @@
 # Memory Bandwidth Analysis — A2N20v2-GS (SDRAM), A2Mega (DDR3) & A2P25 (HyperRAM)
 
+> Status (2026-10-25): reference, partly superseded. Written 2026-08 for three expansion
+> scenarios that have since shipped: the SHR aux banks left BSRAM on the Enhanced dual-rate
+> build (`VGC_IN_SDRAM`, which supersedes the retention conclusion of sections 1 and 2), the
+> a2mega DOC runs from DDR3 behind the pipelined DOC (section 2's scenario), and the a2p25
+> displayport1 board has its HyperRAM with the framebuffer, shadow memory and DOC on it; the
+> live HyperRAM budget and port priorities are now `boards/a2p25/docs/MODERNIZATION_PLAN.md`
+> section 4 and `RESOURCE_AUDIT.md`, which revise section 3. Kept in `docs/` for the
+> bandwidth method and the measured controller parameters.
+
 ## Context
 
 Three expansion scenarios are under consideration. In each, BSRAM pressure is the
