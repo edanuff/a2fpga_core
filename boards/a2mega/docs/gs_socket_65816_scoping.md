@@ -10,7 +10,7 @@ BSRAM footprint is known; this board rev has no HyperRAM (the next rev
 will); the first iteration is a *drop-in replacement* for the IIgs's own
 65C816, to prove the socket circuit is electrically correct. Acceleration,
 cache and the HyperRAM backing store are explicitly out of scope here (they
-are the TransWarp endgame in `hyperram_scenarios.md`).
+are the TransWarp endgame in `hyperram_scenarios.md`, a document that was never committed to this repository; whether to add it is open, see `docs/DOCS_AUDIT_2026-10.md` section 5 question 4).
 
 ## 0. Summary
 

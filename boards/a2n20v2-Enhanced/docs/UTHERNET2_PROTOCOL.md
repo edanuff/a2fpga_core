@@ -2,7 +2,7 @@
 
 How the FPGA `Uthernet2` card (`hdl/uthernet2/uthernet2.sv`) and the BL616 W5100 engine
 (`firmware_host/w5100.c`) communicate over the existing SPI link. See
-[BL616_SPI_PROTOCOL.md](BL616_SPI_PROTOCOL.md) for the base SPI register/XFER protocol and
+[BL616_SPI_PROTOCOL.md](../src/a2n20_bl616/docs/BL616_SPI_PROTOCOL.md) for the base SPI register/XFER protocol and
 [UTHERNET2.md](UTHERNET2.md) for the overall design.
 
 ## 1. Backing store — SPI memory SPACE 3

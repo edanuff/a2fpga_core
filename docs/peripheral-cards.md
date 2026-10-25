@@ -58,7 +58,7 @@ RAMDISK path, which has been removed; the BL616 path currently stubs the disk si
 re-enabling Disk II on the BL616/ESP32 coprocessor path — see the
 [coprocessor interface](coprocessor-interface.md) (`drive_volume_if`) and the board TODOs.
 
-## CardROM — [`cardrom.sv`](../hdl/cardrom/cardrom.sv) (not a slot card)
+## CardROM — [`cardrom.s`](../boards/a2n20v2-Enhanced/src/cardrom/cardrom.s) (not a slot card)
 
 CardROM is the A2FPGA's own **$F000–$FFFF ROM presence**, not a slotted peripheral. At power-up it
 asserts the Apple **INH** line to inhibit the internal monitor ROM and hold the machine in a known

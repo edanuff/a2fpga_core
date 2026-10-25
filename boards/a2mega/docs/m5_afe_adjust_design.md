@@ -339,7 +339,7 @@ adjust_evt export:
 ```
 
 Compatibility: the other in-tree instantiator of `channel_management`
-(board-local `boards/a2mega/hdl/dp_gowin/dp_gowin_transmitter.sv`) keeps
+(board-local `boards/a2mega/hdl/dp_gowin/dp_gowin_transmitter.sv`, since removed with the Gowin-IP stack, see `archive/dp_gowin/`) kept
 compiling unmodified — the new ports are simply unconnected and unused at
 the default `AFE_ADJUST=0` — but should get explicit
 `.train_set_byte(8'h06), .adjust_evt()` ties when the diffs land.

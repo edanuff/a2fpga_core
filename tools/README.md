@@ -206,7 +206,7 @@ Then run it:
 
 ### Notes
 
-- The project's `prebuild.tcl` script (if present) runs automatically when opening the project, generating files like `hdl/datetime.svh` with build timestamps.
+- The project's `prebuild.tcl` script (if present) runs automatically when opening the project, generating files like `boards/<board>/hdl/datetime.svh` with build timestamps.
 - Warnings about OpenGL/Chromium on macOS can be safely ignored for command line builds.
 - For the full Tcl command reference, see the Gowin Software Tcl Commands User Guide (SUG1220E.pdf).
 

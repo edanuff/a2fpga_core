@@ -50,7 +50,7 @@ These are the rules new code must follow. The non-negotiable subset is mirrored 
 
 - Board feature toggles (card enables, slot assignments) live as `top.sv` parameters.
   Document any default changes in the PR.
-- `prebuild.tcl` may generate `hdl/datetime.svh`; never commit machine-local paths.
+- `prebuild.tcl` generates `boards/<board>/hdl/datetime.svh`; never commit machine-local paths.
 
 ## Per-board documentation {#per-board-docs}
 

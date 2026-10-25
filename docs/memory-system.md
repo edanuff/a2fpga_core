@@ -100,7 +100,7 @@ Memory runs faster than the 54 MHz logic clock, so every port crosses a clock do
 The board framebuffer is a memory client that owns the FB read+write ports and turns them into an
 HDMI scanout:
 
-- [`sdram_framebuffer`](../boards/a2n20v2-GS/hdl/video/sdram_framebuffer.sv) (GS) and
+- [`sdram_framebuffer`](../hdl/video/sdram_framebuffer.sv) (GS) and
   [`framebuffer_480p`](../hdl/video/framebuffer_480p.sv) (a2mega).
 - **Write side:** packs incoming pixels (2× RGB565 per 32-bit word) and writes them via the FB
   write port.

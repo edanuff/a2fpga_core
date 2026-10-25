@@ -1,5 +1,10 @@
 # WS4 — DP output on Gowin's own IP stack (a2mega_dp_gowin)
 
+> Archived 2026-10-25 (direction not taken; fork-only, see `UPSTREAM_EXCLUDE.txt`).
+> `boards/a2mega/a2mega_dp_gowin.gprj` and `boards/a2mega/hdl/dp_gowin/` named below
+> were removed from the tree afterwards; the findings that survived are in
+> `SOM_138B_BALLMAP.md` and `gowin_serdes_re_findings.md`.
+
 **Status (2026-08-19, three forensics rounds): C:8011 → §9 found dropped
 hardened-mode CSR fields #1/#2 on lanes 2/3 (fix silicon-verified) → §10
 migrated to the reference 1:2/X40 geometry (the 60.75 MHz "broken clock"

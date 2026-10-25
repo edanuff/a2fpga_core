@@ -1,5 +1,10 @@
 # A2N20v2-GS SDRAM Framebuffer Workplan
 
+> Archived 2026-10-25 (implemented). The `boards/a2n20v2-GS/hdl/video/*` and
+> `boards/a2mega/hdl/video/*` paths below are as they were when this was written;
+> all of those modules now live in the shared `hdl/video/`. Current description:
+> `docs/memory-system.md`.
+
 ## Goal
 
 Add SDRAM-based framebuffer support to the a2n20v2-GS board (Tang Nano 20K), enabling beam-racing game effects (e.g. Arkanoid, Bugz) to display correctly via HDMI. This combines:

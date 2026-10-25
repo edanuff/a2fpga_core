@@ -815,7 +815,7 @@ the budget under SHR load. Each late read then costs **two** faults:
 
 **Fix (three parts, all in the committed tree):**
 
-- **`hdl/sound/doc_fetch_filter.sv` (new), used by `sound_glu`'s
+- **`hdl/sound/doc_fetch_filter.sv` (new; proposal only, never committed: it was replaced by `hdl/sound/doc_fetch_cache.sv`, item 2 of the cache section below), used by `sound_glu`'s
   `gen_doc_ext` branch.** Responses come back in request order, so the filter
   keeps "accepted requests outstanding" and "of those, superseded": every DOC
   request supersedes everything still outstanding (the DOC has moved on,
@@ -845,7 +845,7 @@ registers.) The filter's discard count is on DebugOverlay hex 6 only.
 
 **Verification:**
 
-- `sim/doc5503/tb_fetch_late.sv` / `run_fetch_late.sh`: baseline DOC + filter
+- `sim/doc5503/tb_fetch_late.sv` / `run_fetch_late.sh` (proposed bench, not in the tree; the committed benches are in `sim/doc5503/`): baseline DOC + filter
   on a memory model with a two-slot acceptance queue, in-order service and
   random latency swept from fast (2–20 clk) through realistic tail (10–80
   clk, some fetches late) to pathological (50–120 clk, every fetch late,
