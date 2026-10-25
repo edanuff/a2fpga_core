@@ -1,5 +1,8 @@
 # Apple II Bus Interface
 
+> Status (2026-10-25): data-mux example and `apple_bus` sharing re-read from the tops; IIgs
+> autodetect and the a2mega socket mode added.
+
 How the core snoops the Apple II bus, the slot/card system, and **how to build a new virtual
 peripheral card**.
 
@@ -12,8 +15,10 @@ Apple II bus  →  board bus-interface hardware  →  FPGA pins  →  apple_bus 
 - The **board bus-interface hardware** level-shifts the 5 V Apple II bus to the FPGA and (on the
   CPLD boards) multiplexes it onto a narrow 8-bit host bus. The mechanism differs per board (table
   below).
-- **`apple_bus`** is **per board-family** (`boards/<board>/hdl/bus/apple_bus.sv`; the a2bridge-CPLD
-  boards a2n20v2-GS and a2n20v2-Enhanced share [`hdl/bus/apple_bus.sv`](../hdl/bus/apple_bus.sv)) —
+- **`apple_bus`** is **per board-family**: the a2bridge-CPLD boards (a2n20v2, a2n20v2-GS,
+  a2n20v2-Enhanced) share [`hdl/bus/apple_bus.sv`](../hdl/bus/apple_bus.sv); the level-shifter
+  boards share `boards/a2mega/hdl/bus/apple_bus.sv` (the a2p25 project lists the a2mega's);
+  a2n9 and a2n20v1 keep their own —
   it drives that hardware, samples address/data at the right point in the Apple bus cycle, and
   produces the clean, synchronized [`a2bus_if`](../hdl/bus/a2bus_if.sv). It also drives card data and the
   interrupt/inhibit lines back out. Clock synchronization + edge detection is in
@@ -74,7 +79,17 @@ card uses the `slave` modport (read-only). Signals, by group:
 - **Control lines (read):** `control_inh_n`, `control_irq_n`, `control_rdy_n`, `control_dma_n`,
   `control_nmi_n`, `control_reset_n`.
 - **Resets:** `system_reset_n` (Apple reset ∪ FPGA reset), `device_reset_n` (FPGA-local),
-  `sw_gs` (IIgs-mode DIP switch).
+  `sw_gs` (IIgs mode).
+
+### IIgs autodetect
+
+`sw_gs` is the DIP switch **or** a runtime detection ([`gs_detector`](../hdl/bus/gs_detector.sv),
+`GS_AUTODETECT` parameter of `apple_bus`, on by default on every current board). The detector
+watches the raw latched bus lines, unconditionally (a TransWarp GS emits its signature while
+`/RES` is still asserted), for the IIgs firmware's reset-time `$C029` / `$C036` read-modify-write
+pairs and a blind `$C029` write, plus a ROM fingerprint at `$FA62` that tells a IIgs from a //e;
+on detection the shadow memory is wiped of junk captured before the mode was known. Verified on
+hardware with a TransWarp GS installed.
 
 **Timing pattern:** address is latched mid-`phi1`; the data byte is sampled in `phi0` and flagged
 by a one-cycle `data_in_strobe`. So a card detects an access to its register with something like
@@ -123,11 +138,14 @@ Cards don't touch the bus directly. Each card outputs `rd_en_o` (it's answering 
 which drives it during the `phi0` window. From [a2n20v2-Enhanced/hdl/top.sv](../boards/a2n20v2-Enhanced/hdl/top.sv):
 
 ```systemverilog
-assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || diskii_rd || cardrom_rd;
-assign data_out_w = ssc_rd ? ssc_d_w : ssp_rd ? ssp_d_w : mb_rd ? mb_d_w :
-                    diskii_rd ? diskii_d_w : cardrom_rd ? cardrom_d_w : a2bus_if.data;
-assign irq_n_w = mb_irq_n && vdp_irq_n && ssc_irq_n;   // active-low IRQs AND-combined
+assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || u2_rd || diskii_rd || hdd_rd;
+assign data_out_w = ssc_rd ? ssc_d_w : ssp_rd ? ssp_d_w : mb_rd ? mb_d_w : u2_rd ? u2_d_w :
+                    diskii_rd ? diskii_d_w : hdd_rd ? hdd_d_w : a2bus_if.data;
+assign irq_n_w = mb_irq_n && vdp_irq_n && ssc_irq_n && u2_irq_n;   // active-low IRQs AND-combined
 ```
+
+The same six-way mux is in the a2mega and a2p25 tops. A disabled card's `*_rd` is a constant 0
+and drops out of the mux.
 
 `apple_bus` parameters `BUS_DATA_OUT_ENABLE` / `IRQ_OUT_ENABLE` gate whether the core is allowed to
 drive data / IRQ onto the physical bus at all.
@@ -148,6 +166,18 @@ as templates. A card module:
 5. **Wire it into `top.sv`:** instantiate it, add `rd_en`/`data` to the `data_out_*` mux and
    `irq_n` to the IRQ AND, behind an `ENABLE`/`ID` parameter.
 6. **Assign it a slot** in [`slots.hex`](../hdl/slots/slots.hex) (or via the coprocessor at runtime).
+
+## The a2mega 138K as the IIgs CPU (socket mode)
+
+With `GS_SOCKET` defined (`boards/a2mega/hdl/twgs/gs_socket_defines.v` first in a `.gprj`), the
+a2mega 138K build also drives the IIgs's 65C816 socket through a ribbon cable: a fabric 65C816
+(`iigs_65816_wrapper.sv`) behind a socket PHY (`gs_socket_phy.sv`) and a controller
+(`gs_socket_ctl.sv`) that can take over from, or hand back to, the machine's own CPU. ROM 01 and
+ProDOS boot through the real socket. The electrical contract, the deliberate departures from
+the W65C816 datasheet (RDY listen-only, the BE pulse, internal-cycle repeat) and the reset
+sequencing are in `boards/a2mega/docs/gs_socket_65816_scoping.md` (sections 3.3 and 8b); read
+it before chasing any socket compatibility bug. The slot-side bus interface above is unchanged
+in socket mode.
 
 ## Bus-timing gotcha (IIgs)
 
