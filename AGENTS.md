@@ -33,11 +33,14 @@ build environment") — it detects what's installed and guides the rest. Referen
 |---|---|
 | Set up your environment / install toolchains (first run) | [docs/getting-started.md](docs/getting-started.md), or run `/setup` |
 | Set up the Gowin CLI (esp. macOS) | [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md) |
+| Turn a feature or instrument on/off for a board; read the per-build resource report | [docs/build_profiles.md](docs/build_profiles.md) (`boards/<board>/hdl/<board>_profile.vh`) |
 | Understand how the codebase is organized | [docs/architecture.md](docs/architecture.md) |
 | Know which board is which (chip, status, quirks) | [docs/boards.md](docs/boards.md) |
 | Avoid known traps / hard-won lessons | [docs/gotchas.md](docs/gotchas.md) |
 | Follow coding & project conventions | [docs/conventions.md](docs/conventions.md) |
 | Understand *why* a design choice was made | [docs/adr/](docs/adr/) (decision records) |
+| Retire a document that no longer matches the code | the archive rule in [docs/conventions.md](docs/conventions.md#archive): `git mv` into the folder's `archive/`, add a README entry, fix every citation in the same commit |
+| Prepare a squash for the public upstream | `tools/upstream_export.sh` (dry run by default) honours `UPSTREAM_EXCLUDE.txt`, the committed list of fork-only paths, and gates on `/Users/` paths and broken links (`tools/check_doc_links.py`) |
 | Find what to work on next | [docs/ROADMAP.md](docs/ROADMAP.md) + `gh issue list` + `boards/<board>/TODO.md` |
 | Build a board | `/build` skill, or [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md) |
 | Flash a board (FPGA bitstream) | `/flash` skill, or [docs/boards.md](docs/boards.md) |
@@ -49,6 +52,8 @@ build environment") — it detects what's installed and guides the rest. Referen
 1. Identify which **board** the work targets (boards differ in chip, memory, and status —
    see [docs/boards.md](docs/boards.md)). If unclear, **ask the user**.
 2. Check `boards/<board>/TODO.md` for that board's current priorities, blockers, and status.
+   TODO currency varies by board: each carries a dated status line; the a2mega and
+   a2p25 ones defer to their `docs/` plans for the live state.
 3. For feature work, also scan [docs/ROADMAP.md](docs/ROADMAP.md) and `gh issue list`.
 
 ## Commit & PR conventions
