@@ -1,5 +1,7 @@
 # ESP32 Octal SPI Connector Design
 
+> Status (2026-10-25): the base OSPI protocol, now shared by the a2mega and the a2p25 (`a2p25.gprj` builds `../a2mega/hdl/esp32/`). The register map below predates the 2026-10-22 remap (DOC telemetry to window registers 40–45, CORE_BUILD 0x3F to 0x7E); `boards/a2mega/src/a2fpga_esp32/a2fpga_regs.h` is authoritative until this is re-synced. "Similar to the PicoSoC module" refers to the removed soft core.
+
 This document describes the extended ESP32 Octal SPI connector for the A2Mega board,
 providing control interfaces similar to the PicoSoC module.
 

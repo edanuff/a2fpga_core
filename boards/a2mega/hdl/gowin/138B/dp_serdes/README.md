@@ -1,5 +1,7 @@
 # 138B DP SERDES emission — **must be generated in the Gowin IDE GUI**
 
+> Status (2026-10-25): the emission this README said was missing is now present in this directory (`dp_serdes.v`, `dp_phy/`, `upar_arbiter/`, `dp_serdes.csr`, generated in the IDE per the checklist below) and builds in `a2mega_dp_test_138b.gprj` and `a2mega_138B.gprj`. Keep the checklist: regenerating for a new die or geometry still has to go through the GUI, for the reasons listed.
+
 This directory is **intentionally missing the emission itself**
 (`dp_serdes.v`, `dp_phy/`, `upar_arbiter/`, `dp_serdes.csr`). It holds only
 three `*.reference` sidecars: the 60B production configuration translated to

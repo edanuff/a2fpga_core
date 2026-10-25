@@ -1,5 +1,7 @@
 # `a2mega_dp_test_138b` — DP colorbars bring-up on the GW5AST-138B SOM
 
+> Status (2026-10-25): the blocker below is cleared. The SERDES emission was generated in the IDE (it sits in `../gowin/138B/dp_serdes/`), the project builds and the 138K SOM was silicon-verified on 2026-08-20; `a2mega_dp_test_138b` is the timing gate of `docs/timing_round2.md` and the DP builds from 08-20 on are in `docs/test_log.md`. The status table and the "nothing to flash" paragraph below are the 2026-08 state, kept for the die-difference record.
+
 Functional twin of `a2mega_dp_test` (2-lane HBR DisplayPort colorbars, AUX
 TLVDS front end, telemetry UART, LED ladder) targeting the **Tang Mega 138K**
 SOM instead of the 60K. The top level, the whole DP core, and the telemetry /

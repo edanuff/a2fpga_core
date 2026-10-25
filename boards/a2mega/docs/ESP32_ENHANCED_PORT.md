@@ -1,5 +1,7 @@
 # a2mega ESP32 Co-Processor — Enhanced Feature-Set Port
 
+> Status (2026-10-25): the port is live on both ESP32 boards (a2mega 1.0a3, a2p25 displayport1; verified on the IIgs); the firmware is `boards/a2mega/src/a2fpga_esp32/`. The register table in this document predates the 2026-10-22 merge, which remapped the DOC telemetry to window registers 40–45 and moved CORE_BUILD from 0x3F to 0x7E; `a2fpga_regs.h` in the firmware tree is the authoritative map until this table is re-synced. The hardware-differences table describes board 1.0a2a (micro-SD, USB-A); 1.0a3 has neither (see the board README).
+
 Port of the a2n20v2-Enhanced BL616 feature set (on-screen menu, disk-image
 serving, slot reconfiguration, Apple II reset hold, Uthernet II networking,
 FPGA self-update) to the a2mega's ESP32-S3, continuing the `a2mega-usb-host`
