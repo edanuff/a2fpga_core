@@ -1,6 +1,11 @@
 # Video Pipeline & Display Paths
 
-How Apple II video gets from the bus to HDMI. The core's design **decouples the video generator
+> Status (2026-10-25): the DisplayPort backend (a2mega, a2p25) and the Enhanced framebuffer
+> build added; board lists re-read from the tops. The DebugOverlay switches moved to the
+> build profiles.
+
+How Apple II video gets from the bus to the monitor: HDMI 720x480 on the Tang Nano boards,
+DisplayPort 1080p on the a2mega and a2p25. The core's design **decouples the video generator
 from the display backend** through one interface,
 [`pixel_stream_if`](../hdl/video/pixel_stream_if.sv). This page covers that model, the two
 consumer modes, the architectural direction, the interface contract, and **how to add a new
@@ -15,8 +20,8 @@ interface owns all of that. There are two consumers, and each board picks one:
 
 | Consumer | Path name | Mechanism | Off-chip RAM? | Beam-racing |
 |---|---|---|---|---|
-| [`framebuffer_writer`](../hdl/video/framebuffer_writer.sv) | **Apple-timed framebuffer** | Generator clocked by Apple video timing; pixels captured into SDRAM/DDR3, HDMI scans out the finished frame | Required | **Kept intact** |
-| [`direct_display`](../hdl/video/direct_display.sv) | **HDMI-locked render** | Generator clocked by the HDMI pixel clock; pixels go straight to the HDMI encoder | None | Breaks |
+| [`framebuffer_writer`](../hdl/video/framebuffer_writer.sv) | **Apple-timed framebuffer** | Generator clocked by Apple video timing; pixels captured into SDRAM / DDR3 / HyperRAM, the display scans out the finished frame | Required | **Kept intact** |
+| [`direct_display`](../hdl/video/direct_display.sv) | **Display-locked render** | Generator clocked by the HDMI pixel clock; pixels go straight to the HDMI encoder | None | Breaks |
 
 The two consumers differ in **which clock the generator is timed against**, and that single fact
 determines whether Apple software that uses *beam-racing* keeps working.
@@ -38,8 +43,13 @@ the finished frame out at HDMI timing.
 - **Clocks:** generator + writer run on `clk_logic` (~54 MHz), gated by a `pixel_clk_en` strobe
   at the Apple capture rate; the framebuffer is read out on the HDMI pixel clock — the buffer is
   the clock-domain boundary.
-- **Board framebuffer:** `sdram_framebuffer` on GS, [`framebuffer_480p`](../hdl/video/framebuffer_480p.sv) on a2mega.
-- **Boards today:** `a2mega` (DDR3), `a2n20v2-GS` (SDRAM).
+- **Board framebuffer:** [`sdram_framebuffer`](../hdl/video/sdram_framebuffer.sv) on the GS and
+  the Enhanced `_fb` build (720x480 HDMI); [`framebuffer_1080p`](../hdl/video/framebuffer_1080p.sv)
+  on the a2mega and a2p25 (source-resolution lines scaled x3/x5 into a centred 1920x1080 raster
+  for the DisplayPort core). [`framebuffer_480p`](../hdl/video/framebuffer_480p.sv) is the 480p
+  ancestor of the 1080p module.
+- **Boards today:** `a2mega` (DDR3), `a2p25` (HyperRAM), `a2n20v2-GS` (SDRAM),
+  `a2n20v2-Enhanced` `_fb` build (SDRAM).
 - **Beam-racing: kept intact** — because capture is clocked by the Apple's own video timing,
   software that races the beam (*Arkanoid*, *Bugz*) reproduces faithfully; the finished frame is
   just presented to HDMI delayed by up to one frame, which is invisible.
@@ -56,7 +66,9 @@ clock and sends RGB straight to the HDMI encoder — same generators, no framebu
 
 - **Clock:** the generator runs gated by the HDMI pixel clock.
 - **Off-chip RAM:** none. This is the path for boards that have no framebuffer memory, or that
-  don't intend to spend it on video.
+  don't intend to spend it on video: the classic `a2n20v2`, and the classic and `_dualrate`
+  Enhanced builds (their SDRAM holds shadow memory, the DOC wavetable and the disk windows, not
+  a frame).
 - **Beam-racing: breaks** — with no buffer to bridge the Apple-vs-HDMI clock mismatch, VRAM is
   sampled whenever the HDMI scan arrives, so mid-frame effects land at the wrong place and tear.
   This is an inherent limit of having no framebuffer, **not** a defect of `direct_display`.
@@ -72,10 +84,10 @@ generators are written once and the framebuffer is invisible to them.** Concrete
 - **New generators target `pixel_stream_if`** (the `apple_video_gen` / `vgc_gen` style), never
   the HDMI raster directly.
 - **The legacy raster-driven generators** — [`apple_video`](../hdl/video/apple_video.sv) and
-  [`vgc`](../hdl/video/vgc.sv), still used by `a2n20v2`, `a2n20v2-Enhanced`, `a2p25`, `a2n9`,
-  `a2n20v1` — are to be **migrated** onto the pixel-stream generators feeding a `direct_display`
-  consumer. Those boards then run the *identical* generators the framebuffer boards use, with
-  only the consumer differing.
+  [`vgc`](../hdl/video/vgc.sv) — survive as the non-pixel-stream fallback in the `a2n20v2` and
+  Enhanced tops (`USE_PIXEL_STREAM`) and in the deprecated `a2n9`/`a2n20v1`; the a2mega, a2p25
+  and GS tops are pixel-stream only. The direction is still to retire the fallback so every
+  board runs the *identical* generators, with only the consumer differing.
 - **`direct_display` is a first-class output model, not a test fixture.** It began as a
   ghost-isolation aid; it becomes the standard HDMI-locked consumer for any board that can't or
   won't carry a framebuffer.
@@ -85,6 +97,27 @@ generators are written once and the framebuffer is invisible to them.** Concrete
 
 The payoff: one set of video generators to maintain and test, new display features land on every
 board at once, and the only per-board video decision is **"framebuffer or direct."**
+
+## Display backends: HDMI and DisplayPort
+
+The consumer's output goes to one of two encoders:
+
+- **HDMI 720x480** ([`hdl/hdmi/`](../hdl/hdmi/hdmi.sv), the hdl-util core): all Tang Nano boards.
+  The pixel clock is 27 MHz; `direct_display` or the SDRAM framebuffer's line buffer feeds RGB
+  and the audio sample words into `hdmi`.
+- **DisplayPort 1080p** ([`hdl/displayport/`](../hdl/displayport/README.md), `dp_transmitter`):
+  the a2mega (USB-C Alt Mode, 2-lane HBR through the GW5A SERDES, `transceiver_bank_gowin.v`) and
+  the a2p25 (4-lane RBR through the GW5A-25's hardened MIPI D-PHY used as a raw serializer,
+  `boards/a2p25/hdl/dp/`, then an SN75DP130 retimer). The DP core is **pull-style**: it owns
+  `clk_pixel` (148.5 MHz from its own PLL) and emits `cx`/`cy`; `framebuffer_1080p` answers with
+  the RGB for those coordinates from its line buffer. Link training, DPCD, EDID and the link
+  policy (a census of hubs and converters decided it) are handled in fabric by
+  `auxch/channel_managemnt.v`; audio travels as secondary-data packets (`audio/sdp_engine.v`).
+  The a2mega's AUX front end, link policy and the adapter census are documented under
+  `boards/a2mega/docs/`; the a2p25's analog chain in
+  [DP_ALTMODE_DPHY_DESIGN.md](../boards/a2p25/docs/DP_ALTMODE_DPHY_DESIGN.md).
+
+Both backends sit behind the same generator/consumer seam; the choice is a board fact.
 
 ## The `pixel_stream_if` contract
 
@@ -152,7 +185,10 @@ and `vgc_gen`.
 | [`apple_video.sv`](../hdl/video/apple_video.sv) / [`vgc.sv`](../hdl/video/vgc.sv) | **Legacy** HDMI-raster generators — to be migrated onto the pixel-stream generators |
 | [`scan_timer.sv`](../hdl/video/scan_timer.sv) | Synthesizes Apple-timed `hsync`/`vsync`/`scanline` from the bus |
 | [`framebuffer_writer.sv`](../hdl/video/framebuffer_writer.sv) | Consumer: pixel stream → framebuffer write port |
-| [`framebuffer_480p.sv`](../hdl/video/framebuffer_480p.sv) | a2mega DDR3 framebuffer (board frame store) |
+| [`sdram_framebuffer.sv`](../hdl/video/sdram_framebuffer.sv) | SDRAM frame store, 720x480 HDMI scanout (GS, Enhanced `_fb`) |
+| [`framebuffer_1080p.sv`](../hdl/video/framebuffer_1080p.sv) | DDR3 / HyperRAM frame store, 1080p DisplayPort scanout (a2mega, a2p25) |
+| [`framebuffer_480p.sv`](../hdl/video/framebuffer_480p.sv) | 480p variant the 1080p module was derived from |
+| [`dp_transmitter.sv`](../hdl/displayport/dp_transmitter.sv) | DisplayPort transmitter core (pull-style video front end) |
 | [`direct_display.sv`](../hdl/video/direct_display.sv) | Consumer: pixel stream → HDMI (HDMI-locked, no buffer) |
 | [`f18a_gen.sv`](../hdl/video/f18a_gen.sv) | F18A/TMS9918A (SuperSprite) generator |
 | [`debugoverlay.sv`](../hdl/debug/debugoverlay.sv) | On-screen status overlay (see below) |
@@ -171,10 +207,14 @@ It renders, top-left:
 - **`NUM_HEX_BYTES`** (default 8) hex bytes from the `hex_values[]` input, and
 - two 8-bit rows from `debug_bits_0_i` / `debug_bits_1_i`.
 
-**Enable:** the `FORCE_DEBUG_OVERLAY` top-level parameter (on **a2n20v2-Enhanced
-it defaults to 1 — always on**) or the runtime `show_debug_overlay_r` toggle (the
-**`s2`** button). When you need to surface a value on screen, this is the
-mechanism — don't fight the text-screen / `video_control` override.
+**Enable:** the board profile switches it (`A2_INSTR_DEBUG_OVERLAY`; on the Enhanced
+`A2_INSTR_FORCE_DEBUG_OVERLAY` makes it always-on, default 0) or the runtime toggle (the
+**`s2`** button on the Tang Nano boards; the ESP32 menu on the a2mega). It is off in the
+a2p25 profile since the first clean full-core fit. On the a2mega it is a stage of the clk_pix
+chain (the framebuffer's `H_TRIGGER_LEAD` is counted through it), so turning it off is a
+stage-preserving bypass, not a removal (see [build_profiles.md](build_profiles.md)). When you
+need to surface a value on screen, this is the mechanism — don't fight the text-screen /
+`video_control` override.
 
 **Driving it from the BL616/MCU (a2n20v2-Enhanced):** wire what you want to show
 into the `DebugOverlay` instance's `hex_values`/`debug_bits` in
@@ -183,7 +223,7 @@ into the `DebugOverlay` instance's `hex_values`/`debug_bits` in
 (`scratch_r[0..4]`, SPI regs `0x07`, `0x0C`–`0x0F`); expose them as module
 outputs and connect them to `hex_values`, then have the firmware
 `fpga_spi_reg_write(0x07/0x0C..0x0F, status)` at each stage. With
-`FORCE_DEBUG_OVERLAY=1` the values appear immediately — a reliable status/heartbeat
+the force switch on the values appear immediately — a reliable status/heartbeat
 channel that works in **any** USB role (the SPI link is independent of USB),
 which is exactly what you want when the firmware presents no serial console
 (e.g. USB-host builds). The default `hex_values` wiring currently shows DOC/Ensoniq
