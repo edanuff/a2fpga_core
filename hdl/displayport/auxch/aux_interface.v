@@ -103,7 +103,6 @@ module aux_interface #(
     reg  [7:0] tx_fifo [31:0];
     reg  [4:0] tx_rd_ptr;
     reg  [4:0] tx_wr_ptr;
-    wire [4:0] tx_wr_ptr_plus_1;
 
     reg [15:0] timeout_count;
 
@@ -115,7 +114,16 @@ module aux_interface #(
     // registered from the next pointer values equals the compare of the
     // registered pointers on every cycle.
     reg  tx_empty = 1'b1;
-    wire tx_full_i;
+    // The FULL flags are registers too (138B clk100 ladder, 2026-10-24):
+    // the live `wr_ptr + 1 == rd_ptr` sat in front of the push strobe, so
+    // the write pointer's increment and compare headed the 256 FIFO write
+    // enables and the empty flag's own adders (tx_wr_ptr -> tx_empty D,
+    // 9 cells, +0.01 reported on the 138B gate once the ladder cones were
+    // gone). Same invariant as the empty flags: registered from the next
+    // pointer values, equal to the compare of the registered pointers on
+    // every cycle (rx: the rx_reset branch copies rd into wr, so the next
+    // value is `rd + 1 == rd` = 0).
+    reg  tx_full_i = 1'b0;
     reg  [7:0] tx_rd_data;
     reg  tx_rd_en;
     
@@ -134,11 +142,10 @@ module aux_interface #(
     assign debug_state = {tx_state, rx_state};
     reg  [7:0] rx_fifo [31:0];
     reg  [4:0] rx_wr_ptr;
-    wire [4:0] rx_wr_ptr_plus_1;
     reg  [4:0] rx_rd_ptr;
     reg  rx_reset;
     reg  rx_empty_i = 1'b1;   // registered, see tx_empty
-    wire rx_full;
+    reg  rx_full = 1'b0;
     reg [7:0] rx_wr_data;
     reg rx_wr_en;
 
@@ -216,10 +223,7 @@ end
     //--------------------------------------------
     // Async logic for the FIFO state and pointers
     //--------------------------------------------
-    assign rx_wr_ptr_plus_1 = rx_wr_ptr + 5'b00001;
-    assign tx_wr_ptr_plus_1 = tx_wr_ptr + 5'b00001;
-    assign rx_full      = ((rx_wr_ptr_plus_1 == rx_rd_ptr) ? 1'b1 : 1'b0);
-    assign tx_full_i    = ((tx_wr_ptr_plus_1 == tx_rd_ptr) ? 1'b1 : 1'b0);
+    // (rx_full / tx_full_i are registers now; see the declaration)
     // push/pop strobes shared by the pointer updates and the empty flags
     wire tx_push = (tx_full_i == 1'b0 && tx_wr_en == 1'b1);
     wire tx_pop  = (tx_empty  == 1'b0 && tx_rd_en == 1'b1);
@@ -394,10 +398,13 @@ always @(posedge clk) begin
         end
     end
 
-    // registered empty flags (next pointer values; see declaration)
+    // registered empty / full flags (next pointer values; see declaration)
     tx_empty   <= ((tx_wr_ptr + {4'b0, tx_push}) == (tx_rd_ptr + {4'b0, tx_pop}));
+    tx_full_i  <= ((tx_wr_ptr + {4'b0, tx_push} + 5'd1) == (tx_rd_ptr + {4'b0, tx_pop}));
     rx_empty_i <= (rx_reset == 1'b1) ? 1'b1 :
                   ((rx_wr_ptr + {4'b0, rx_push}) == (rx_rd_ptr + {4'b0, rx_pop}));
+    rx_full    <= (rx_reset == 1'b1) ? 1'b0 :
+                  ((rx_wr_ptr + {4'b0, rx_push} + 5'd1) == (rx_rd_ptr + {4'b0, rx_pop}));
 
     //----------------------------------------
     // Manage the timeout. If it is 

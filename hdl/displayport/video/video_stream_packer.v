@@ -157,8 +157,21 @@ module video_stream_packer #(
     wire at_eol_live = (line_cycle == CYCLES_PER_LINE-1);   // sim mirror only
     wire [$clog2(CYCLES_PER_LINE)-1:0] nc =
         at_eol ? {$clog2(CYCLES_PER_LINE){1'b0}} : line_cycle + 1'b1;
-    wire nl_active = at_eol ? ((line_num == V_TOTAL-1) || (line_num < V_VISIBLE-1))
-                            : is_active_line;
+    // Registered line-number class flags (138B clk100-ladder follow-up,
+    // 2026-10-24): the two-step flag nl2 below compared line_num (+1)
+    // against V_TOTAL-1 / V_VISIBLE-1 / V_VISIBLE and nc against
+    // CYCLES_PER_LINE-1 live, 9 cells in front of pf_prime / pf_ftu
+    // (line_cycle -> pf_prime D, -0.214 reported on a 138B roll). The
+    // three line_num flags follow line_num's own writes exactly as ln0_r
+    // does (zero on reset / start / slip; the wrapped-or-incremented
+    // value's compare on an eol advance; hold otherwise), and eol_m1_r
+    // follows line_cycle's writes exactly as at_eol does, one step
+    // earlier. Each is mirror-checked against its live compare below.
+    reg lnlast_r = 1'b0;   // == (line_num == V_TOTAL-1)
+    reg lnv_r    = 1'b1;   // == (line_num <  V_VISIBLE)
+    reg lnvm1_r  = 1'b1;   // == (line_num <  V_VISIBLE-1)
+    reg eol_m1_r = 1'b0;   // == (line_cycle == CYCLES_PER_LINE-2)
+    wire nl_active = at_eol ? (lnlast_r || lnvm1_r) : is_active_line;
     wire [13:0] s0n = {nc, 1'b0};
     wire [13:0] s1n = s0n + 1'b1;
 
@@ -356,8 +369,15 @@ module video_stream_packer #(
         at_eol ? ((line_num == V_TOTAL-1) ? {$clog2(V_TOTAL){1'b0}}
                                           : line_num + 1'b1)
                : line_num;
-    wire nl2 = at_eol_n ? ((ln1 == V_TOTAL-1) || (ln1 < V_VISIBLE-1))
-                        : (ln1 < V_VISIBLE);
+    // nl2 == at_eol_n ? ((ln1 == V_TOTAL-1) || (ln1 < V_VISIBLE-1)) : (ln1 < V_VISIBLE)
+    // with at_eol_n = !at_eol && (line_cycle == CYCLES_PER_LINE-2) and
+    // ln1 = line_num unless at_eol (then the advanced value): in the at_eol_n
+    // branch ln1 is line_num; in the else branch ln1 is line_num when
+    // !at_eol and the advanced value when at_eol, whose "< V_VISIBLE" is
+    // (line_num == V_TOTAL-1) || (line_num < V_VISIBLE-1). Hence:
+    wire nl2 = (at_eol || eol_m1_r) ? (lnlast_r || lnvm1_r) : lnv_r;
+    wire nl2_live = at_eol_n ? ((ln1 == V_TOTAL-1) || (ln1 < V_VISIBLE-1))
+                             : (ln1 < V_VISIBLE);   // sim mirror only
     wire [13:0] s0n2 = {nc2, 1'b0};
     wire [13:0] s1n2 = s0n2 + 1'b1;
 
@@ -554,11 +574,34 @@ module video_stream_packer #(
     // eol increment (same ordering as the sequential block)
     always @(posedge clk) begin
         if (reset || (!running && start_ok) ||
-            (running && (sof_mismatch || fetch_starved)))
-            ln0_r <= 1'b1;
-        else if (running && at_eol)
-            ln0_r <= (line_num == V_TOTAL-1);
+            (running && (sof_mismatch || fetch_starved))) begin
+            ln0_r    <= 1'b1;
+            lnlast_r <= (V_TOTAL == 1);
+            lnv_r    <= 1'b1;
+            lnvm1_r  <= 1'b1;
+        end else if (running && at_eol) begin
+            ln0_r    <= (line_num == V_TOTAL-1);
+            // next line_num = wrap ? 0 : line_num + 1
+            lnlast_r <= (line_num == V_TOTAL-2);
+            lnv_r    <= (line_num == V_TOTAL-1) || (line_num < V_VISIBLE-1);
+            lnvm1_r  <= (line_num == V_TOTAL-1) || (line_num < V_VISIBLE-2);
+        end
     end
+    // synthesis translate_off
+    reg [1:0] lnf_chk_en = 2'b00;
+    always @(posedge clk) begin
+        lnf_chk_en <= {lnf_chk_en[0], !reset};
+        if (lnf_chk_en[1] && (lnlast_r !== (line_num == V_TOTAL-1) ||
+                              lnv_r    !== (line_num <  V_VISIBLE) ||
+                              lnvm1_r  !== (line_num <  V_VISIBLE-1) ||
+                              eol_m1_r !== (line_cycle == CYCLES_PER_LINE-2) ||
+                              nl2      !== nl2_live)) begin
+            $display("FATAL: packer line flags diverged (lnlast=%b lnv=%b lnvm1=%b eol_m1=%b nl2=%b/%b line_num=%0d line_cycle=%0d)",
+                     lnlast_r, lnv_r, lnvm1_r, eol_m1_r, nl2, nl2_live, line_num, line_cycle);
+            $fatal(1);
+        end
+    end
+    // synthesis translate_on
     // synthesis translate_off
     reg [1:0] ln0_chk_en = 2'b00;
     always @(posedge clk) begin
@@ -581,6 +624,8 @@ module video_stream_packer #(
     always @(posedge clk) begin
         if (lc_zero)      at_eol <= 1'b0;
         else if (lc_inc)  at_eol <= (line_cycle == CYCLES_PER_LINE-2);
+        if (lc_zero)      eol_m1_r <= (CYCLES_PER_LINE == 2);
+        else if (lc_inc)  eol_m1_r <= (line_cycle == CYCLES_PER_LINE-3);
     end
     // synthesis translate_off
     reg [1:0] eol_chk_en = 2'b00;

@@ -413,11 +413,28 @@ module aux_channel #(
     reg  [7:0]  state            = error /* synthesis syn_maxfan = 12 */;
     reg  [7:0]  next_state       = error /* synthesis syn_maxfan = 12 */;
     reg  [7:0]  state_on_success = error;
+    // (138B clk100 ladder, 2026-10-24) next_state's assignment sites,
+    // grouped. The sites used to be ~15 independent `next_state <= ...`
+    // statements whose textual order is their priority; synthesis built
+    // that as one 2:1 mux per site in series, so the lowest-priority
+    // sites (the wait advances) reached the register through 10 mux
+    // levels (blind_dwell -> next_state D, 14 cells, -0.88 ns reported).
+    // Each site now records its request in the temporaries of its group
+    // (blocking, last writer within a group wins exactly as before), and
+    // ONE statement at the end of the block applies the groups in the
+    // original priority order: kick > hpd > link check > timeouts >
+    // reply processing > wait advances. Same winner, same value, same
+    // cycle, for every combination of sites.
+    reg         ns_a_v, ns_b_v, ns_c_v, ns_d_v, ns_e_v, ns_f_v;
+    reg  [7:0]  ns_b, ns_c;
     reg         retry_now;
     initial begin gate_fail_evt = 1'b0; status_seq = 4'd0; end
     reg  [28:0] retry_count;
+    reg         retry_zero_r = 1'b0;      // == (retry_count == 0); initial 0x200
+    localparam [28:0] RETRY_RELOAD = (BLIND_SINK != 0) ? 29'd399999999 : RETRY_WATCHDOG_CLKS;
     reg         link_check_now;
     reg [26:0]  link_check_count;
+    reg         lc_zero_r = 1'b0;         // == (link_check_count == 0); initial 0x200
     reg [14:0]  count_100us;
     reg [6:0]   train_interval_r = 7'd0;   // DPCD 0x00E (latched per caps read)
     // effective per-align_wait-state multiplier (x100 us, 4 states):
@@ -434,11 +451,27 @@ module aux_channel #(
     reg         is_align_wait_r   = 1'b0;   // state is align_wait0-3
     reg  [23:0] eq_dwell_cycles_r = 24'd10000;
     reg         eq_dwell_done_r   = 1'b0;   // blind_dwell reached the threshold
+    // wait-advance pre-decodes (see the advance site for the exactness
+    // argument): state / expected are stable for thousands of cycles
+    // wherever the dwell bits that consume these are set
+    reg         adv_ok_r = 1'b0;   // expected == 0 and not a paced wait state
+    reg         adv_cr_r = 1'b0;   // state is clock_wait / clock_wait_after
+    reg         adv_pw_r = 1'b0;   // state == presence_wait
+    reg         adv_dw_r = 1'b0;   // state == defer_wait
+    reg         adv_tw_r = 1'b0;   // state == train_wait
     always @(posedge clk) begin
         is_align_wait_r   <= (state == align_wait0 || state == align_wait1 ||
                               state == align_wait2 || state == align_wait3);
         eq_dwell_cycles_r <= {eq_mult_w, 4'd0} * 24'd625;   // mult x 10000 cycles (100 us @ 100 MHz)
         eq_dwell_done_r   <= (blind_dwell >= eq_dwell_cycles_r);
+        adv_ok_r <= (expected == 8'h00) &&
+                    state != presence_wait && state != defer_wait && state != train_wait &&
+                    !(state == align_wait0 || state == align_wait1 ||
+                      state == align_wait2 || state == align_wait3);
+        adv_cr_r <= (state == clock_wait || state == clock_wait_after);
+        adv_pw_r <= (state == presence_wait);
+        adv_dw_r <= (state == defer_wait);
+        adv_tw_r <= (state == train_wait);
     end
     
     reg       adjust_de_active;
@@ -446,7 +479,9 @@ module aux_channel #(
     reg       edid_de_active;
     reg       status_de_active;
     reg       msg_de;
-    reg [7:0] msg;
+    // syn_maxfan: the message engine now decodes its whole byte table from
+    // msg at load time (dp_aux_messages.v) — ~90 decoders read these bits
+    reg [7:0] msg /* synthesis syn_maxfan = 16 */;
     wire      msg_busy;
 
     wire       aux_tx_wr_en;
@@ -462,12 +497,25 @@ module aux_channel #(
     wire      channel_busy;
     wire      channel_timeout;
     
-    reg [7:0] expected;
-    reg [7:0] rx_byte_count;
+    // (138B clk100 ladder, 2026-10-24) the reply-byte branch reads these
+    // in every latch enable; replicated like the state registers
+    reg [7:0] expected      /* synthesis syn_maxfan = 12 */;
+    reg [7:0] rx_byte_count /* synthesis syn_maxfan = 12 */;
+    // maintained at both writes of rx_byte_count (same sites, same
+    // priority): rxc_nz_r == (rx_byte_count != 0), rxc_p1_r ==
+    // rx_byte_count + 1 (mod 256), so `rx_byte_count == expected - 1`
+    // is the plain equality `rxc_p1_r == expected` (same modular
+    // identity) and the branch prefix `rx_byte_count != 0` is one flop.
+    // Those two compares (8-bit decrement + equality, 8-bit OR) sat in
+    // series with the busy/just-read prefix in front of ~40 reply-byte
+    // latches (tx_empty -> esi_2005_r CE, +0.12 on the gate after the
+    // ladder fixes).
+    reg       rxc_nz_r = 1'b0;
+    reg [7:0] rxc_p1_r = 8'd1;
     reg [7:0] aux_addr_i;
     reg reset_addr_on_change;
     
-    reg       just_read_from_rx;
+    reg       just_read_from_rx /* synthesis syn_maxfan = 12 */;
     reg  [3:0] powerup_mask;
 
     // Per-state dwell timer (blind mode). 2026-08-14: widened from bit 17
@@ -477,7 +525,12 @@ module aux_channel #(
     // to lock TPS1 before we advanced to scrambled video. ~84 ms per state
     // is deep inside every sink's training budget; the full ladder still
     // completes in ~2 s after HPD.
-    reg [23:0] blind_dwell = 24'd0;
+    // (138B clk100 ladder, 2026-10-24) two halves with a maintained
+    // "low half is all ones" flag, like wedge_timer: bit-identical count.
+    reg [15:0] bd_lo       = 16'd0;
+    reg [7:0]  bd_hi       = 8'd0;
+    reg        bd_lo_max_r = 1'b0;        // == (bd_lo == 16'hFFFF)
+    wire [23:0] blind_dwell = {bd_hi, bd_lo};
 
     assign debug_pmod = state;
 
@@ -523,7 +576,10 @@ module aux_channel #(
     reg [3:0]  train_retry_cnt  = 4'd0;   // retries taken this training pass
     reg        train_st         = 1'b0;   // registered: state is in 0x14..0x2C
     reg        errcnt_st        = 1'b0;   // registered: state == errcnt_read / errcnt_train
-    wire [7:0] errcnt_skip_w = (state == errcnt_train) ? align_adjust : check_wait;
+    // (TRAIN_ERRCNT == 0 — every board today — folds errcnt_train out of
+    // these decodes: the state is unreachable then, its only entry being
+    // align_test's state_on_success under the same parameter)
+    wire [7:0] errcnt_skip_w = (TRAIN_ERRCNT != 0 && state == errcnt_train) ? align_adjust : check_wait;
     reg [15:0] err0_r           = 16'd0;  // SYMBOL_ERROR_COUNT lane0 {0x211,0x210}
     reg [15:0] err1_r           = 16'd0;  // SYMBOL_ERROR_COUNT lane1 {0x213,0x212}
     reg        lane_set_sent    = 1'b0;   // a lane-set write went out this training
@@ -545,7 +601,17 @@ module aux_channel #(
     // case it guarded is already blocked upstream by the presence gate
     // (no sink -> never establishes -> detector unreachable).
     reg [7:0]  r204_q           = 8'd0;   // last 0x204 byte from a status read
-    reg [31:0] wedge_timer      = 32'd0;
+    // (138B clk100 ladder, 2026-10-24) the 32-bit timer is two 16-bit
+    // halves; wedge_lo_max_r is maintained so that it equals
+    // (wedge_lo == 16'hFFFF) on every cycle (preload: constant compare;
+    // hold: both unchanged; count: lo+1 == FFFF <=> lo == FFFE), and the
+    // high half increments exactly on the cycle the monolithic counter
+    // carried. Bit-identical timer value; the increment was a 12-cell LUT
+    // chain on the 138B (wedge_timer_1 -> wedge_timer_30 CE, -0.58 ns).
+    reg [15:0] wedge_lo         = 16'd0;
+    reg [15:0] wedge_hi         = 16'd0;
+    reg        wedge_lo_max_r   = 1'b0;
+    wire [31:0] wedge_timer     = {wedge_hi, wedge_lo};
     reg        wedge_suspect    = 1'b0;
     reg        irq_service_due  = 1'b0;   // hpd_irq consumed; ESI service owed
     reg        err_evt          = 1'b0;   // tagged error-entry event
@@ -563,13 +629,52 @@ module aux_channel #(
     reg        err_detail_v     = 1'b0;
     reg [29:0] obs_timer        = 30'd0;  // time in the established set
     reg [7:0]  state_d          = 8'd0;
+    reg        std_err_r        = 1'b0;   // (state_d == error), maintained
     reg        inest_d          = 1'b0;
-    wire in_established_set = (state == link_established) ||
-                              (state == check_link) || (state == check_wait) ||
-                              (state == errcnt_read) ||
-                              (state == irq_clear) ||
-                              (state == esi_read_rt) || (state == esi_clear_rt) ||
-                              (state == esi_clear2_rt) || (state == esi_eval_rt);
+    // (138B clk100 ladder, 2026-10-24) the three state-class decodes the
+    // FSM reads most — "in the established set" (9 values; the retry
+    // watchdog exclusion, the error tagging, the wedge detector), "state
+    // is error" (the error-detail safety net) and "state is reset" (the
+    // watchdog) — are flags written at EVERY site that writes `state`,
+    // from the value being written (SET_STATE below), so each equals its
+    // decode of `state` on every cycle by construction (including the
+    // force sites, which write `state <= error` directly). A 9-way decode
+    // of the state replicas in series with the next_state mux was the
+    // gate's clk100 floor after the first fix set (state -> in_established
+    // _set -> next_state D, +0.146 reported, 7 cells / 5.6 ns of route).
+    reg  inest_r  = 1'b0;    // == in the established set
+    reg  st_err_r = 1'b1;    // == (state == error)   (initial state is error)
+    reg  st_rst_r = 1'b0;    // == (state == reset)
+    function inest_f(input [7:0] v);
+        inest_f = (v == link_established) ||
+                  (v == check_link) || (v == check_wait) ||
+                  (v == errcnt_read) ||
+                  (v == irq_clear) ||
+                  (v == esi_read_rt) || (v == esi_clear_rt) ||
+                  (v == esi_clear2_rt) || (v == esi_eval_rt);
+    endfunction
+    // "is a TRAINING_LANEx_SET state" — the 12 states whose entry the M5
+    // AFE hold gates. Maintained for next_state (ns_laneset_r, written by
+    // the same combine that writes next_state, from the same group's
+    // value), for state_on_success (sos_laneset_r, written with it) and
+    // for state (st_ls_r, SET_STATE), so afe_hold is afe_busy AND one flop
+    // instead of a 12-way decode of next_state (next_state -> afe_hold ->
+    // train_retry_cnt RESET / aux_addr_i D: 5 decode cells, +0.14 / +0.21
+    // on the diagnostic roll after the first two fix sets).
+    function laneset_f(input [7:0] v);
+        laneset_f = (v == clock_voltage_0p4 || v == clock_voltage_0p6 || v == clock_voltage_0p8 ||
+                     v == align_p0_V0p4 || v == align_p0_V0p6 || v == align_p0_V0p8 ||
+                     v == align_p1_V0p4 || v == align_p1_V0p6 || v == align_p1_V0p8 ||
+                     v == align_p2_V0p4 || v == align_p2_V0p6 || v == align_p2_V0p8);
+    endfunction
+    reg  ns_laneset_r  = 1'b0;   // == laneset_f(next_state)
+    reg  sos_laneset_r = 1'b0;   // == laneset_f(state_on_success)
+    reg  st_ls_r       = 1'b0;   // == laneset_f(state)
+    reg  sos_n_v;                // state_on_success written this cycle (blocking temporaries below)
+    reg  [7:0] sos_n;
+    reg  sos_ls_n, ns_b_ls, ns_c_ls;
+`define SET_STATE(v) begin state <= (v); inest_r <= inest_f(v); st_err_r <= ((v) == error); st_rst_r <= ((v) == reset); st_ls_r <= laneset_f(v); end
+    wire in_established_set = inest_r;
     wire obs_active = (LINK_CHECK == 2) ||
                       ((GATE_GRACE != 0) && (obs_timer < GATE_GRACE_CLKS));
     wire obs_mode   = (LINK_CHECK == 2) && in_established_set;
@@ -656,11 +761,22 @@ end
     // Holding here (before the state change) leaves every other path of
     // the FSM untouched: no message is sent, so no reply/timeout logic
     // runs; the 100 us timer is re-armed each held cycle.
-    wire afe_hold = (AFE_ADJUST != 0) && afe_busy && (next_state != state) && (
-        next_state == clock_voltage_0p4 || next_state == clock_voltage_0p6 || next_state == clock_voltage_0p8 ||
-        next_state == align_p0_V0p4 || next_state == align_p0_V0p6 || next_state == align_p0_V0p8 ||
-        next_state == align_p1_V0p4 || next_state == align_p1_V0p6 || next_state == align_p1_V0p8 ||
-        next_state == align_p2_V0p4 || next_state == align_p2_V0p6 || next_state == align_p2_V0p8);
+    // (138B clk100 ladder, 2026-10-24) the `next_state != state` term that
+    // used to sit here was redundant at every consumer — the transition
+    // block already ANDs it in, `state <= next_state` is a no-op when the
+    // two are equal, and the count_100us reload is inside the unequal
+    // branch — but it put the 8-bit inequality in series with the 12-way
+    // decode on every register the hold gates (next_state -> afe_hold ->
+    // 40 CEs, -0.92 ns reported). Same value wherever afe_hold is read.
+    // Three copies of the same AND (syn_keep: not merged), one per
+    // consumer group — the transition block (~25 enables), the
+    // pure-function block (~45 enables), state/count — so no single net
+    // carries all ~75 loads: roll 2 of 2026-10-24 drew 2.6 ns of route
+    // on the one afe_hold net (afe busy -> afe_hold -> aux_addr_i CE,
+    // -0.149). Identical value on every copy.
+    wire afe_hold = (AFE_ADJUST != 0) && afe_busy && ns_laneset_r;
+    (* syn_keep = 1 *) wire afe_hold_t = (AFE_ADJUST != 0) && afe_busy && ns_laneset_r;   // transition block
+    (* syn_keep = 1 *) wire afe_hold_p = (AFE_ADJUST != 0) && afe_busy && ns_laneset_r;   // pure-function block
 
 dp_aux_messages #(.LINK_RATE_MBPS(LINK_RATE_MBPS)) i_aux_messages(
          .clk          (clk),
@@ -704,6 +820,10 @@ aux_interface #(
     assign aux_rx_rd_en = (!channel_busy) & (!aux_rx_empty);  // CHECK THIS!
       
 always @(posedge clk) begin
+    // next_state request groups (see the declaration): nothing requested
+    ns_a_v = 1'b0; ns_b_v = 1'b0; ns_c_v = 1'b0; ns_d_v = 1'b0; ns_e_v = 1'b0; ns_f_v = 1'b0;
+    ns_b = 8'h00; ns_c = 8'h00; ns_b_ls = 1'b0; ns_c_ls = 1'b0;
+    sos_n = state_on_success; sos_ls_n = sos_laneset_r; sos_n_v = 1'b0;
     //-----------------------------------------
     // Are we going to change state this cycle?
     //-----------------------------------------
@@ -749,10 +869,11 @@ always @(posedge clk) begin
     // tagged — the safety net that catches teardown paths the reason
     // sites miss (the reason this latch is centralized at all)
     state_d    <= state;
+    std_err_r  <= st_err_r;      // == (state_d == error)
     expected_d <= expected;
     rxc_d      <= rx_byte_count;
     inest_d  <= in_established_set;
-    if (state == error && state_d != error && inest_d && !err_evt) begin
+    if (st_err_r && !std_err_r && inest_d && !err_evt) begin
         if (dbg_other_sat != 4'hF)
             dbg_other_sat <= dbg_other_sat + 4'd1;
         if (!err_detail_v) begin
@@ -764,83 +885,96 @@ always @(posedge clk) begin
     if (status_de == 1'b1 && aux_addr == 8'd4)
         status_seq <= status_seq + 4'd1;
      
-    if(next_state != state && !afe_hold) begin
+    if(next_state != state && !afe_hold_t) begin
         //-----------------------------------------------------------
         // Get ready to count how many reply bytes have been received
         //-----------------------------------------------------------
         rx_byte_count <= 0;
+        rxc_nz_r      <= 1'b0;
+        rxc_p1_r      <= 8'd1;
         
         //-------------------------------------------------
         // Controlling which FSM state to go to on success
         //-------------------------------------------------
         case(next_state)
-            reset:              state_on_success <= check_presence;
+            reset:              begin sos_n = check_presence; sos_ls_n = laneset_f(check_presence); sos_n_v = 1'b1; end
             // Legacy: EDID skipped (DDC-class, converters DEFER it).
             // POLITE: evaluate the count byte first — presence_eval
             // routes to the paced re-read (count 0), the EDID preamble,
             // or straight on (EDID given up).
-            check_presence:     state_on_success <= (POLITE_ATTACH != 0)
-                                                    ? presence_eval : read_sink_count;
-            presence_eval:      state_on_success <= (sink_count_r[5:0] == 6'd0)
+            check_presence:     begin sos_n = (POLITE_ATTACH != 0)
+                                                    ? presence_eval : read_sink_count; sos_ls_n = laneset_f((POLITE_ATTACH != 0)
+                                                    ? presence_eval : read_sink_count); sos_n_v = 1'b1; end
+            presence_eval:      begin sos_n = (sink_count_r[5:0] == 6'd0)
                                                     ? presence_wait
                                                     : ((edid_giveup || edid_done)
                                                                    ? read_sink_count
-                                                                   : edid_addr);
-            presence_wait:      state_on_success <= check_presence;
-            edid_addr:          state_on_success <= edid_block0;
-            defer_wait:         state_on_success <= defer_pend_state;
-            train_wait:         state_on_success <= train_pend;
-            esi_read:           state_on_success <= esi_clear;
-            esi_clear:          state_on_success <= (esi_2003_r != 8'h00)
-                                                    ? esi_clear2 : set_power_d0;
-            esi_clear2:         state_on_success <= set_power_d0;
-            esi_read_rt:        state_on_success <= esi_eval_rt;
+                                                                   : edid_addr); sos_ls_n = laneset_f((sink_count_r[5:0] == 6'd0)
+                                                    ? presence_wait
+                                                    : ((edid_giveup || edid_done)
+                                                                   ? read_sink_count
+                                                                   : edid_addr)); sos_n_v = 1'b1; end
+            presence_wait:      begin sos_n = check_presence; sos_ls_n = laneset_f(check_presence); sos_n_v = 1'b1; end
+            edid_addr:          begin sos_n = edid_block0; sos_ls_n = laneset_f(edid_block0); sos_n_v = 1'b1; end
+            defer_wait:         begin sos_n = defer_pend_state; sos_ls_n = laneset_f(defer_pend_state); sos_n_v = 1'b1; end
+            train_wait:         begin sos_n = train_pend; sos_ls_n = laneset_f(train_pend); sos_n_v = 1'b1; end
+            esi_read:           begin sos_n = esi_clear; sos_ls_n = laneset_f(esi_clear); sos_n_v = 1'b1; end
+            esi_clear:          begin sos_n = (esi_2003_r != 8'h00)
+                                                    ? esi_clear2 : set_power_d0; sos_ls_n = laneset_f((esi_2003_r != 8'h00)
+                                                    ? esi_clear2 : set_power_d0); sos_n_v = 1'b1; end
+            esi_clear2:         begin sos_n = set_power_d0; sos_ls_n = laneset_f(set_power_d0); sos_n_v = 1'b1; end
+            esi_read_rt:        begin sos_n = esi_eval_rt; sos_ls_n = laneset_f(esi_eval_rt); sos_n_v = 1'b1; end
             // evaluated on entry, with the latches fresh from the read:
             // clear only when something is pending, or when this pass was
             // IRQ-triggered (unconditional ack, Mac parity). The 1 Hz
             // poll with nothing pending costs ZERO writes.
-            esi_eval_rt:        state_on_success <= (esi_2005_r != 8'h00 ||
+            esi_eval_rt:        begin sos_n = (esi_2005_r != 8'h00 ||
                                                      esi_2003_r != 8'h00 ||
                                                      esi_ack_owed)
-                                                    ? esi_clear_rt : link_established;
-            esi_clear_rt:       state_on_success <= (esi_2003_r != 8'h00)
-                                                    ? esi_clear2_rt : link_established;
-            esi_clear2_rt:      state_on_success <= link_established;
-            edid_block0:        state_on_success <= edid_block1;
-            edid_block1:        state_on_success <= edid_block2;
-            edid_block2:        state_on_success <= edid_block3;
-            edid_block3:        state_on_success <= edid_block4;
-            edid_block4:        state_on_success <= edid_block5;
-            edid_block5:        state_on_success <= edid_block6;
-            edid_block6:        state_on_success <= edid_block7;
-            edid_block7:        state_on_success <= read_sink_count;
-            read_sink_count:    state_on_success <= read_registers;
+                                                    ? esi_clear_rt : link_established; sos_ls_n = laneset_f((esi_2005_r != 8'h00 ||
+                                                     esi_2003_r != 8'h00 ||
+                                                     esi_ack_owed)
+                                                    ? esi_clear_rt : link_established); sos_n_v = 1'b1; end
+            esi_clear_rt:       begin sos_n = (esi_2003_r != 8'h00)
+                                                    ? esi_clear2_rt : link_established; sos_ls_n = laneset_f((esi_2003_r != 8'h00)
+                                                    ? esi_clear2_rt : link_established); sos_n_v = 1'b1; end
+            esi_clear2_rt:      begin sos_n = link_established; sos_ls_n = laneset_f(link_established); sos_n_v = 1'b1; end
+            edid_block0:        begin sos_n = edid_block1; sos_ls_n = laneset_f(edid_block1); sos_n_v = 1'b1; end
+            edid_block1:        begin sos_n = edid_block2; sos_ls_n = laneset_f(edid_block2); sos_n_v = 1'b1; end
+            edid_block2:        begin sos_n = edid_block3; sos_ls_n = laneset_f(edid_block3); sos_n_v = 1'b1; end
+            edid_block3:        begin sos_n = edid_block4; sos_ls_n = laneset_f(edid_block4); sos_n_v = 1'b1; end
+            edid_block4:        begin sos_n = edid_block5; sos_ls_n = laneset_f(edid_block5); sos_n_v = 1'b1; end
+            edid_block5:        begin sos_n = edid_block6; sos_ls_n = laneset_f(edid_block6); sos_n_v = 1'b1; end
+            edid_block6:        begin sos_n = edid_block7; sos_ls_n = laneset_f(edid_block7); sos_n_v = 1'b1; end
+            edid_block7:        begin sos_n = read_sink_count; sos_ls_n = laneset_f(read_sink_count); sos_n_v = 1'b1; end
+            read_sink_count:    begin sos_n = read_registers; sos_ls_n = laneset_f(read_registers); sos_n_v = 1'b1; end
             // ESI mode: the Mac's unconditional attach-time ESI ack goes
             // here — between the caps read and the D0 wake.
-            read_registers:     state_on_success <= (IRQ_SERVICE == 2 && !esi_off)
-                                                    ? esi_read : set_power_d0;
-            set_power_d0:       state_on_success <= set_channel_coding;
-            set_channel_coding: state_on_success <= set_speed_270;                        
-            set_speed_270:      state_on_success <= set_downspread;                        
+            read_registers:     begin sos_n = (IRQ_SERVICE == 2 && !esi_off)
+                                                    ? esi_read : set_power_d0; sos_ls_n = laneset_f((IRQ_SERVICE == 2 && !esi_off)
+                                                    ? esi_read : set_power_d0); sos_n_v = 1'b1; end
+            set_power_d0:       begin sos_n = set_channel_coding; sos_ls_n = laneset_f(set_channel_coding); sos_n_v = 1'b1; end
+            set_channel_coding: begin sos_n = set_speed_270; sos_ls_n = laneset_f(set_speed_270); sos_n_v = 1'b1; end                        
+            set_speed_270:      begin sos_n = set_downspread; sos_ls_n = laneset_f(set_downspread); sos_n_v = 1'b1; end                        
             set_downspread:     case(link_count)
-                                           3'b001:  state_on_success <= set_link_count_1;                        
-                                           3'b010:  state_on_success <= set_link_count_2;                        
-                                           3'b100:  state_on_success <= set_link_count_4;
-                                           default: state_on_success <= error;
+                                           3'b001:  begin sos_n = set_link_count_1; sos_ls_n = laneset_f(set_link_count_1); sos_n_v = 1'b1; end                        
+                                           3'b010:  begin sos_n = set_link_count_2; sos_ls_n = laneset_f(set_link_count_2); sos_n_v = 1'b1; end                        
+                                           3'b100:  begin sos_n = set_link_count_4; sos_ls_n = laneset_f(set_link_count_4); sos_n_v = 1'b1; end
+                                           default: begin sos_n = error; sos_ls_n = laneset_f(error); sos_n_v = 1'b1; end
                                        endcase
-            set_link_count_1:   state_on_success <= clock_training; 
-            set_link_count_2:   state_on_success <= clock_training; 
-            set_link_count_4:   state_on_success <= clock_training; 
+            set_link_count_1:   begin sos_n = clock_training; sos_ls_n = laneset_f(clock_training); sos_n_v = 1'b1; end 
+            set_link_count_2:   begin sos_n = clock_training; sos_ls_n = laneset_f(clock_training); sos_n_v = 1'b1; end 
+            set_link_count_4:   begin sos_n = clock_training; sos_ls_n = laneset_f(clock_training); sos_n_v = 1'b1; end 
             //----- Display Port clock training -------------------                        
-            clock_training:     state_on_success <= clock_voltage_0p4;
-            clock_voltage_0p4:  state_on_success <= clock_wait;
-            clock_voltage_0p6:  state_on_success <= clock_wait;
-            clock_voltage_0p8:  state_on_success <= clock_wait;
-            clock_wait:         state_on_success <= clock_test;                        
-            clock_test:         state_on_success <= clock_adjust;
-            clock_adjust:       state_on_success <= clock_wait_after;
+            clock_training:     begin sos_n = clock_voltage_0p4; sos_ls_n = laneset_f(clock_voltage_0p4); sos_n_v = 1'b1; end
+            clock_voltage_0p4:  begin sos_n = clock_wait; sos_ls_n = laneset_f(clock_wait); sos_n_v = 1'b1; end
+            clock_voltage_0p6:  begin sos_n = clock_wait; sos_ls_n = laneset_f(clock_wait); sos_n_v = 1'b1; end
+            clock_voltage_0p8:  begin sos_n = clock_wait; sos_ls_n = laneset_f(clock_wait); sos_n_v = 1'b1; end
+            clock_wait:         begin sos_n = clock_test; sos_ls_n = laneset_f(clock_test); sos_n_v = 1'b1; end                        
+            clock_test:         begin sos_n = clock_adjust; sos_ls_n = laneset_f(clock_adjust); sos_n_v = 1'b1; end
+            clock_adjust:       begin sos_n = clock_wait_after; sos_ls_n = laneset_f(clock_wait_after); sos_n_v = 1'b1; end
             clock_wait_after:   if(clock_locked_i == 1'b1) begin
-                                    state_on_success <= align_training;
+                                    begin sos_n = align_training; sos_ls_n = laneset_f(align_training); sos_n_v = 1'b1; end
                                 // POLITE: write-on-change — the wire showed
                                 // 383 rewrites of an UNCHANGED 0x103 per
                                 // attach; skip the write and just poll again
@@ -848,76 +982,76 @@ always @(posedge clk) begin
                                 // already has.
                                 end else if(POLITE_ATTACH != 0 && LANE_SET_WOC != 0 && lane_set_sent &&
                                             lane_set_last == train_set_byte) begin
-                                    state_on_success <= clock_wait;
+                                    begin sos_n = clock_wait; sos_ls_n = laneset_f(clock_wait); sos_n_v = 1'b1; end
                                 end else if(swing_0p8 == 1'b1) begin
-                                    state_on_success <= clock_voltage_0p8;
+                                    begin sos_n = clock_voltage_0p8; sos_ls_n = laneset_f(clock_voltage_0p8); sos_n_v = 1'b1; end
                                 end else if(swing_0p6 == 1'b1) begin
-                                    state_on_success <= clock_voltage_0p6;
+                                    begin sos_n = clock_voltage_0p6; sos_ls_n = laneset_f(clock_voltage_0p6); sos_n_v = 1'b1; end
                                 end else begin
-                                    state_on_success <= clock_voltage_0p4;
+                                    begin sos_n = clock_voltage_0p4; sos_ls_n = laneset_f(clock_voltage_0p4); sos_n_v = 1'b1; end
                                 end
             //----- Display Port Alignment traning ------------                        
             align_training:     if(POLITE_ATTACH != 0 && LANE_SET_WOC != 0 && lane_set_sent &&
                                    lane_set_last == train_set_byte) begin
-                                     state_on_success <= align_wait0;
+                                     begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
                                 end else if(swing_0p8 == 1'b1) begin
-                                     state_on_success <= align_p0_V0p8;
+                                     begin sos_n = align_p0_V0p8; sos_ls_n = laneset_f(align_p0_V0p8); sos_n_v = 1'b1; end
                                 end else if(swing_0p6 == 1'b1) begin
-                                     state_on_success <= align_p0_V0p6;
+                                     begin sos_n = align_p0_V0p6; sos_ls_n = laneset_f(align_p0_V0p6); sos_n_v = 1'b1; end
                                 end else begin
-                                     state_on_success <= align_p0_V0p4;
+                                     begin sos_n = align_p0_V0p4; sos_ls_n = laneset_f(align_p0_V0p4); sos_n_v = 1'b1; end
                                 end
-            align_p0_V0p4:      state_on_success <= align_wait0;
-            align_p0_V0p6:      state_on_success <= align_wait0;
-            align_p0_V0p8:      state_on_success <= align_wait0;
-            align_p1_V0p4:      state_on_success <= align_wait0;
-            align_p1_V0p6:      state_on_success <= align_wait0;
-            align_p1_V0p8:      state_on_success <= align_wait0;
-            align_p2_V0p4:      state_on_success <= align_wait0;
-            align_p2_V0p6:      state_on_success <= align_wait0;
-            align_p2_V0p8:      state_on_success <= align_wait0;
-            align_wait0:        state_on_success <= align_wait1;                        
-            align_wait1:        state_on_success <= align_wait2;                        
-            align_wait2:        state_on_success <= align_wait3;                        
-            align_wait3:        state_on_success <= align_test;                        
-            align_test:         state_on_success <= (TRAIN_ERRCNT != 0) ? errcnt_train : align_adjust;
-            errcnt_train:       state_on_success <= align_adjust;
-            align_adjust:       state_on_success <= align_wait_after;
+            align_p0_V0p4:      begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
+            align_p0_V0p6:      begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
+            align_p0_V0p8:      begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
+            align_p1_V0p4:      begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
+            align_p1_V0p6:      begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
+            align_p1_V0p8:      begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
+            align_p2_V0p4:      begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
+            align_p2_V0p6:      begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
+            align_p2_V0p8:      begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
+            align_wait0:        begin sos_n = align_wait1; sos_ls_n = laneset_f(align_wait1); sos_n_v = 1'b1; end                        
+            align_wait1:        begin sos_n = align_wait2; sos_ls_n = laneset_f(align_wait2); sos_n_v = 1'b1; end                        
+            align_wait2:        begin sos_n = align_wait3; sos_ls_n = laneset_f(align_wait3); sos_n_v = 1'b1; end                        
+            align_wait3:        begin sos_n = align_test; sos_ls_n = laneset_f(align_test); sos_n_v = 1'b1; end                        
+            align_test:         begin sos_n = (TRAIN_ERRCNT != 0) ? errcnt_train : align_adjust; sos_ls_n = laneset_f((TRAIN_ERRCNT != 0) ? errcnt_train : align_adjust); sos_n_v = 1'b1; end
+            errcnt_train:       begin sos_n = align_adjust; sos_ls_n = laneset_f(align_adjust); sos_n_v = 1'b1; end
+            align_adjust:       begin sos_n = align_wait_after; sos_ls_n = laneset_f(align_wait_after); sos_n_v = 1'b1; end
             align_wait_after:   if(symbol_locked_i == 1'b1) begin
-                                           state_on_success <= switch_to_normal;
+                                           begin sos_n = switch_to_normal; sos_ls_n = laneset_f(switch_to_normal); sos_n_v = 1'b1; end
                                 end else if(POLITE_ATTACH != 0 && LANE_SET_WOC != 0 && lane_set_sent &&
                                             lane_set_last == train_set_byte) begin
-                                    state_on_success <= align_wait0;
+                                    begin sos_n = align_wait0; sos_ls_n = laneset_f(align_wait0); sos_n_v = 1'b1; end
                                 end else if(swing_0p8 == 1'b1) begin
                                     if(preemp_6p0 == 1'b1) begin
-                                        state_on_success <= align_p2_V0p8;
+                                        begin sos_n = align_p2_V0p8; sos_ls_n = laneset_f(align_p2_V0p8); sos_n_v = 1'b1; end
                                     end else if(preemp_3p5 == 1'b1) begin
-                                        state_on_success <= align_p1_V0p8;
+                                        begin sos_n = align_p1_V0p8; sos_ls_n = laneset_f(align_p1_V0p8); sos_n_v = 1'b1; end
                                     end else begin
-                                        state_on_success <= align_p0_V0p8;
+                                        begin sos_n = align_p0_V0p8; sos_ls_n = laneset_f(align_p0_V0p8); sos_n_v = 1'b1; end
                                     end
                                 end else if(swing_0p6 == 1'b1) begin
                                     if(preemp_6p0 == 1'b1) begin
-                                        state_on_success <= align_p2_V0p6;
+                                        begin sos_n = align_p2_V0p6; sos_ls_n = laneset_f(align_p2_V0p6); sos_n_v = 1'b1; end
                                     end else if(preemp_3p5 == 1'b1) begin
-                                        state_on_success <= align_p1_V0p6;
+                                        begin sos_n = align_p1_V0p6; sos_ls_n = laneset_f(align_p1_V0p6); sos_n_v = 1'b1; end
                                     end else begin
-                                        state_on_success <= align_p0_V0p6;
+                                        begin sos_n = align_p0_V0p6; sos_ls_n = laneset_f(align_p0_V0p6); sos_n_v = 1'b1; end
                                     end
                                 end else begin
                                     if(preemp_6p0 == 1'b1) begin
-                                        state_on_success <= align_p2_V0p4;
+                                        begin sos_n = align_p2_V0p4; sos_ls_n = laneset_f(align_p2_V0p4); sos_n_v = 1'b1; end
                                     end else if(preemp_3p5 == 1'b1) begin
-                                        state_on_success <= align_p1_V0p4;
+                                        begin sos_n = align_p1_V0p4; sos_ls_n = laneset_f(align_p1_V0p4); sos_n_v = 1'b1; end
                                     end else begin
-                                        state_on_success <= align_p0_V0p4;
+                                        begin sos_n = align_p0_V0p4; sos_ls_n = laneset_f(align_p0_V0p4); sos_n_v = 1'b1; end
                                     end 
                                 end                        
-            switch_to_normal:   state_on_success <= link_established;  
-            link_established:   state_on_success <= link_established;
-            check_link:         state_on_success <= (ERRCNT_READ != 0) ? errcnt_read : check_wait;
-            errcnt_read:        state_on_success <= check_wait;
-            irq_clear:          state_on_success <= link_established;
+            switch_to_normal:   begin sos_n = link_established; sos_ls_n = laneset_f(link_established); sos_n_v = 1'b1; end  
+            link_established:   begin sos_n = link_established; sos_ls_n = laneset_f(link_established); sos_n_v = 1'b1; end
+            check_link:         begin sos_n = (ERRCNT_READ != 0) ? errcnt_read : check_wait; sos_ls_n = laneset_f((ERRCNT_READ != 0) ? errcnt_read : check_wait); sos_n_v = 1'b1; end
+            errcnt_read:        begin sos_n = check_wait; sos_ls_n = laneset_f(check_wait); sos_n_v = 1'b1; end
+            irq_clear:          begin sos_n = link_established; sos_ls_n = laneset_f(link_established); sos_n_v = 1'b1; end
             check_wait:         begin
                                 dbg_gate_locks <= {clock_locked_i, equ_locked_i, symbol_locked_i, align_locked_i};
                                 // (check-non-fatal diagnostic reverted 08-18 night: it
@@ -925,10 +1059,13 @@ always @(posedge clk) begin
                                 // then BLOCKED the Anker path's recovery-by-retrain on
                                 // marginal instances. Teardown/retrain is load-bearing.)
                                 if(clock_locked_i == 1'b1 && equ_locked_i == 1'b1 && symbol_locked_i == 1'b1 && align_locked_i == 1'b1) begin
-                                    state_on_success <= (IRQ_SERVICE == 2 && !esi_off)
+                                    begin sos_n = (IRQ_SERVICE == 2 && !esi_off)
                                                         ? esi_read_rt :
                                                         (IRQ_SERVICE == 1 && irq_vec_r != 8'h00)
-                                                        ? irq_clear : link_established;
+                                                        ? irq_clear : link_established; sos_ls_n = laneset_f((IRQ_SERVICE == 2 && !esi_off)
+                                                        ? esi_read_rt :
+                                                        (IRQ_SERVICE == 1 && irq_vec_r != 8'h00)
+                                                        ? irq_clear : link_established); sos_n_v = 1'b1; end
                                 end else if (obs_active) begin
                                     // GRACE PERIOD: record, do NOT tear
                                     // down; stay established and keep
@@ -939,7 +1076,7 @@ always @(posedge clk) begin
                                     if (LINK_CHECK == 2) begin
                                         err_evt <= 1'b1; err_reason <= 4'd3;
                                     end
-                                    state_on_success <= link_established;
+                                    begin sos_n = link_established; sos_ls_n = laneset_f(link_established); sos_n_v = 1'b1; end
                                     dbg_fail_mask <= dbg_fail_mask |
                                         ~{clock_locked_i, equ_locked_i,
                                           symbol_locked_i, align_locked_i};
@@ -964,11 +1101,21 @@ always @(posedge clk) begin
                                                             symbol_locked_i, align_locked_i};
                                     end
                                     gate_fail_evt <= 1'b1;
-                                    state_on_success <= error;
+                                    begin sos_n = error; sos_ls_n = laneset_f(error); sos_n_v = 1'b1; end
                                 end
                                 end
-            error:              state_on_success <= error;
+            error:              begin sos_n = error; sos_ls_n = laneset_f(error); sos_n_v = 1'b1; end
+            // every value next_state can hold is listed above (all
+            // assignments are from the localparams, state_on_success,
+            // state, train_pend or defer_pend_state); the default is
+            // unreachable and only tells synthesis the enable is the
+            // transition alone, not transition AND "value is listed"
+            default:            begin sos_n = error; sos_ls_n = laneset_f(error); sos_n_v = 1'b1; end
         endcase
+        if (sos_n_v) begin
+            state_on_success <= sos_n;
+            sos_laneset_r    <= sos_ls_n;
+        end
 
         //----------------------------------------------------------
         // Controlling what message will be sent, how many words are 
@@ -1001,15 +1148,6 @@ always @(posedge clk) begin
             irq_clear_byte_r <= esi_2003_r;
             esi_2003_r       <= 8'h00;
         end
-        esi_attach_st <= (next_state == esi_read) || (next_state == esi_clear) ||
-                         (next_state == esi_clear2);
-        esi_rt_st     <= (next_state == esi_read_rt) || (next_state == esi_clear_rt) ||
-                         (next_state == esi_clear2_rt);
-        // registered like the ESI decodes (combinational state-range
-        // compares in the error paths cost setup at the knife-edge)
-        train_st      <= (next_state >= clock_training) &&
-                         (next_state <= align_wait_after);
-        errcnt_st     <= (next_state == errcnt_read || next_state == errcnt_train);
         // EDID completed this session (giveup exits set edid_giveup in
         // the same cycle; a redundant edid_done alongside it is harmless)
         if (state == edid_block7 && next_state == read_sink_count)
@@ -1024,14 +1162,7 @@ always @(posedge clk) begin
         if (next_state == esi_eval_rt || next_state == esi_clear)
             esi_defer_cnt <= 4'd0;
         // lane-set write tracking (POLITE write-on-change)
-        if (next_state == clock_voltage_0p4 || next_state == clock_voltage_0p6 ||
-            next_state == clock_voltage_0p8 ||
-            next_state == align_p0_V0p4 || next_state == align_p0_V0p6 ||
-            next_state == align_p0_V0p8 ||
-            next_state == align_p1_V0p4 || next_state == align_p1_V0p6 ||
-            next_state == align_p1_V0p8 ||
-            next_state == align_p2_V0p4 || next_state == align_p2_V0p6 ||
-            next_state == align_p2_V0p8) begin
+        if (ns_laneset_r) begin          // next_state is a lane-set state (maintained flag)
             lane_set_sent <= 1'b1;
             lane_set_last <= train_set_byte;
         end
@@ -1054,6 +1185,39 @@ always @(posedge clk) begin
             esi_ack_owed    <= 1'b0;
             wedge_suspect   <= 1'b0;
         end
+    end
+
+    //-----------------------------------------------------------------
+    // Registers that are pure functions of next_state (138B clk100
+    // ladder, 2026-10-24). msg / expected / the *_de_active routing
+    // flags / reset_addr_on_change / the tx_* flags / the esi_*_st,
+    // train_st and errcnt_st decodes used to be written inside the
+    // transition block above, i.e. with `next_state != state && !afe_hold`
+    // as their clock enable — the 8-bit inequality plus the hold decode in
+    // front of ~40 registers (16 of the 22 violated endpoints in the
+    // 2026-10-24 roll: next_state -> dp_reg_de_active/tx_clock_train/msg/
+    // train_st/... CE). They are now written on EVERY cycle the ladder is
+    // not held, from the same case statements (moved verbatim). Identical
+    // on every cycle: between transitions next_state == state, so the
+    // case re-selects the value the transition wrote; during an afe_hold
+    // neither version writes (the old block did not run, this one is
+    // gated by the same !afe_hold); at the transition both write from the
+    // same next_state at the same edge. `expected` keeps its hold on
+    // `error` and unlisted values exactly as the case left it before.
+    // (msg_de, state_on_success, rx_byte_count and the side-effect
+    // registers stay on the transition enable — they must fire once.)
+    //-----------------------------------------------------------------
+    if (!afe_hold_p) begin
+        esi_attach_st <= (next_state == esi_read) || (next_state == esi_clear) ||
+                         (next_state == esi_clear2);
+        esi_rt_st     <= (next_state == esi_read_rt) || (next_state == esi_clear_rt) ||
+                         (next_state == esi_clear2_rt);
+        // registered like the ESI decodes (combinational state-range
+        // compares in the error paths cost setup at the knife-edge)
+        train_st      <= (next_state >= clock_training) &&
+                         (next_state <= align_wait_after);
+        errcnt_st     <= (next_state == errcnt_read) ||
+                         (TRAIN_ERRCNT != 0 && next_state == errcnt_train);
         status_de_active     <= 1'b0;
         adjust_de_active     <= 1'b0;
         dp_reg_de_active     <= 1'b0;
@@ -1223,7 +1387,7 @@ always @(posedge clk) begin
         end                                       
     end
     if(!afe_hold)
-        state <= next_state;
+        `SET_STATE(next_state)   // state <= next_state (+ the class flags)
             
     //-----------------------------------------------------------
     // How a short wait is implemented...
@@ -1240,37 +1404,43 @@ always @(posedge clk) begin
     // back out before the status read ran — periodic link checks silently
     // skipped on a coin flip. This is the mechanism behind the dark-state
     // G:00/N:000 anomaly (checks "not running" for minutes).
-    // The paced wait states advance on their own (longer) dwells below —
-    // exclude them here. POLITE also stretches the two CR wait states by
+    // The paced wait states advance on their own (longer) dwells —
+    // excluded here. POLITE also stretches the two CR wait states by
     // ~330 us each (blind_dwell[15]) so the CR poll loop runs at ~1 ms
     // instead of ~650 us.
-    if(state == next_state && expected == 8'h00 && count_100us[14] == 1'b1 &&
-       state != presence_wait && state != defer_wait && state != train_wait &&
-       !is_align_wait_r &&
-       (POLITE_ATTACH == 0 ||
-        !(state == clock_wait || state == clock_wait_after) ||
-        blind_dwell[15] == 1'b1)) begin
-        next_state <= state_on_success;
-    end
-    // presence_wait: ~21 ms between sink-count re-reads while the branch
-    // reports no sink (blind_dwell counts cycles-in-state unconditionally)
-    if(state == next_state && state == presence_wait && blind_dwell[21] == 1'b1) begin
-        next_state <= state_on_success;
-    end
-    // defer_wait: ~650 us before re-sending a DEFERred request (the hub
-    // ACKs the Mac's EDID reads on the 3rd try at this pacing)
-    if(state == next_state && state == defer_wait && blind_dwell[16] == 1'b1) begin
-        next_state <= state_on_success;
-    end
-    // train_wait: same ~650 us pace before retrying a failed training read
-    if(state == next_state && state == train_wait && blind_dwell[16] == 1'b1) begin
-        next_state <= state_on_success;
-    end
-    // align_wait0-3: EQ dwell = eq_mult_w x 100 us per state (the sink's
-    // TRAINING_AUX_RD_INTERVAL from DPCD 0x00E, or the EQ_WAIT_MULT floor);
-    // everything feeding the FSM here is a flop (timing, a2p25 10-12)
-    if(state == next_state && is_align_wait_r && eq_dwell_done_r) begin
-        next_state <= state_on_success;
+    //
+    // (138B clk100 ladder, 2026-10-24) the five wait advances below all
+    // assign state_on_success and sat as five consecutive lowest-priority
+    // sites of the next_state mux chain; they are ONE site now (same
+    // priority position, same value — identical). Their state and
+    // `expected` decodes are the registered adv_*_r flags: count_100us
+    // reloads on every transition and its bit 14 is clear for the first
+    // 10,000 cycles in a state, blind_dwell resets on every transition and
+    // bits 16/21 are clear for the first 65,536, and `expected` is only
+    // written at a transition — so wherever a dwell bit is set the state
+    // and expected have been stable for thousands of cycles and the
+    // one-cycle-late flags equal the live decodes (the argument
+    // is_align_wait_r already relies on). blind_dwell[15] stays live in
+    // the POLITE CR term: it is only read ANDed with count_100us[14],
+    // whose first set cycle in a state (10,000) and the dwell bit's rise
+    // (32,768) never coincide. `state == next_state` and the dwell bits
+    // themselves stay live.
+    if(state == next_state && (
+         (count_100us[14] == 1'b1 && adv_ok_r &&
+          (POLITE_ATTACH == 0 || !adv_cr_r || blind_dwell[15] == 1'b1)) ||
+         // presence_wait: ~21 ms between sink-count re-reads while the
+         // branch reports no sink (blind_dwell counts cycles-in-state)
+         (adv_pw_r && blind_dwell[21] == 1'b1) ||
+         // defer_wait: ~650 us before re-sending a DEFERred request (the
+         // hub ACKs the Mac's EDID reads on the 3rd try at this pacing)
+         (adv_dw_r && blind_dwell[16] == 1'b1) ||
+         // train_wait: same ~650 us pace before retrying a failed training read
+         (adv_tw_r && blind_dwell[16] == 1'b1) ||
+         // align_wait0-3: EQ dwell = eq_mult_w x 100 us per state (the
+         // sink's TRAINING_AUX_RD_INTERVAL from DPCD 0x00E, or the
+         // EQ_WAIT_MULT floor)
+         (is_align_wait_r && eq_dwell_done_r))) begin
+        ns_a_v = 1'b1;                     // -> state_on_success
     end
 
     //-----------------------------------------------------------
@@ -1283,12 +1453,17 @@ always @(posedge clk) begin
     // adapt; the whole walk stays ~60 ms, inside the watchdog.
     //-----------------------------------------------------------
     if(state == next_state) begin
-        blind_dwell <= blind_dwell + 24'd1;
+        bd_lo       <= bd_lo + 16'd1;
+        bd_lo_max_r <= (bd_lo == 16'hFFFE);
+        if (bd_lo_max_r)
+            bd_hi   <= bd_hi + 8'd1;
     end else begin
-        blind_dwell <= 24'd0;
+        bd_lo       <= 16'd0;
+        bd_hi       <= 8'd0;
+        bd_lo_max_r <= 1'b0;
     end
     if(BLIND_SINK != 0 && channel_busy == 1'b0 && blind_dwell[23] == 1'b1) begin
-        next_state <= state_on_success;
+        ns_a_v = 1'b1;                     // -> state_on_success
     end
             
     //------------------------------------------------------------
@@ -1312,16 +1487,16 @@ always @(posedge clk) begin
             // rx=8 — a stale check_link reply). With expected==0 the
             // bytes are simply DRAINED (aux_rx_rd_en already empties the
             // FIFO) and ignored.
-            if((LATE_REPLY_DRAIN == 0 || expected != 8'h00) && rx_byte_count != expected-1 && aux_rx_empty == 1'b1) begin
+            if((LATE_REPLY_DRAIN == 0 || expected != 8'h00) && rxc_p1_r != expected && aux_rx_empty == 1'b1) begin
                 if (esi_attach_st) begin
                     esi_off    <= 1'b1;      // sink rejects ESI: one try, then off
-                    next_state <= set_power_d0;
+                    ns_b = set_power_d0; ns_b_ls = laneset_f(set_power_d0); ns_b_v = 1'b1;
                 end else if (esi_rt_st) begin
                     esi_off    <= 1'b1;
-                    next_state <= link_established;
+                    ns_b = link_established; ns_b_ls = laneset_f(link_established); ns_b_v = 1'b1;
                 end else if (errcnt_st) begin
                     // instrumentation read failed: never tear down for it
-                    next_state <= errcnt_skip_w;
+                    ns_b = errcnt_skip_w; ns_b_ls = laneset_f(errcnt_skip_w); ns_b_v = 1'b1;
                 end else if (POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 && train_st) begin
                     // short/garbled training-read reply: paced retry with
                     // TX held, cheap retrain on budget exhaustion (the
@@ -1329,22 +1504,22 @@ always @(posedge clk) begin
                     // transition tracker — keeping this cone shallow)
                     if (train_retry_cnt != TRAIN_RETRY_CAP) begin
                         train_pend      <= state;
-                        next_state      <= train_wait;
+                        ns_b = train_wait; ns_b_ls = laneset_f(train_wait); ns_b_v = 1'b1;
                     end else begin
-                        next_state      <= clock_training;
+                        ns_b = clock_training; ns_b_ls = laneset_f(clock_training); ns_b_v = 1'b1;
                     end
                 end else if (obs_mode) begin
-                    next_state <= link_established;   // observe: count only
+                    ns_b = link_established; ns_b_ls = laneset_f(link_established); ns_b_v = 1'b1;   // observe: count only
                     err_evt <= 1'b1; err_reason <= 4'd1;
                 end else begin
-                    next_state <= error;
+                    ns_b = error; ns_b_ls = laneset_f(error); ns_b_v = 1'b1;
                     if (in_established_set) begin
                         err_evt <= 1'b1; err_reason <= 4'd1;
                     end
                 end
             end
                                 
-            if(rx_byte_count == 8'h00) begin
+            if(!rxc_nz_r) begin
                 //------------------------------------------------
                 // Is the Ack missing? This doesn't work correctly
                 // if only byte is expected, as it gets overwritten 
@@ -1357,37 +1532,37 @@ always @(posedge clk) begin
                 if((LATE_REPLY_DRAIN == 0 || expected != 8'h00) && aux_rx_data != 8'h00) begin
                     if (esi_attach_st && aux_rx_data != 8'h20) begin
                         esi_off    <= 1'b1;
-                        next_state <= set_power_d0;
+                        ns_b = set_power_d0; ns_b_ls = laneset_f(set_power_d0); ns_b_v = 1'b1;
                     end else if (esi_rt_st && aux_rx_data != 8'h20) begin
                         esi_off    <= 1'b1;
-                        next_state <= link_established;
+                        ns_b = link_established; ns_b_ls = laneset_f(link_established); ns_b_v = 1'b1;
                     end else if (errcnt_st && aux_rx_data != 8'h20) begin
-                        next_state <= errcnt_skip_w;   // instrumentation: skip
+                        ns_b = errcnt_skip_w; ns_b_ls = laneset_f(errcnt_skip_w); ns_b_v = 1'b1;   // instrumentation: skip
                     end else if (POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 &&
                                  train_st && aux_rx_data != 8'h20) begin
                         // non-ACK header on a training read (a clean DEFER
                         // falls through to the paced defer path below)
                         if (train_retry_cnt != TRAIN_RETRY_CAP) begin
                             train_pend      <= state;
-                            next_state      <= train_wait;
+                            ns_b = train_wait; ns_b_ls = laneset_f(train_wait); ns_b_v = 1'b1;
                         end else begin
-                            next_state      <= clock_training;
+                            ns_b = clock_training; ns_b_ls = laneset_f(clock_training); ns_b_v = 1'b1;
                         end
                     end else if (obs_mode) begin
-                        next_state <= link_established;   // observe: count only
+                        ns_b = link_established; ns_b_ls = laneset_f(link_established); ns_b_v = 1'b1;   // observe: count only
                         ob_hdr     <= aux_rx_data;
                         if (aux_rx_data != 8'h20) begin   // DEFER counted below
                             err_evt <= 1'b1; err_reason <= 4'd2;
                         end
                     end else begin
-                        next_state <= error;
+                        ns_b = error; ns_b_ls = laneset_f(error); ns_b_v = 1'b1;
                         if (in_established_set) begin
                             err_evt <= 1'b1; err_reason <= 4'd2;
                         end
                     end
                 end
-                if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
-                    next_state <= state_on_success;
+                if(rxc_p1_r == expected && aux_rx_empty == 1'b1) begin
+                    ns_b = state_on_success; ns_b_ls = sos_laneset_r; ns_b_v = 1'b1;
                 end
                 //--------------------------------------------
                 // Has the Sink indicated that we should retry
@@ -1401,11 +1576,11 @@ always @(posedge clk) begin
                 if(aux_rx_data == 8'h20) begin
                     if (obs_mode) begin
                         ob_defer_evt <= 1'b1;             // observe: count only
-                        next_state   <= link_established;
+                        ns_b = link_established; ns_b_ls = laneset_f(link_established); ns_b_v = 1'b1;
                     end else if (errcnt_st) begin
                         // deferred instrumentation read: skip (defer_wait
                         // would drop tx_link_established mid-stream)
-                        next_state <= errcnt_skip_w;
+                        ns_b = errcnt_skip_w; ns_b_ls = laneset_f(errcnt_skip_w); ns_b_v = 1'b1;
                     end else if ((esi_attach_st || esi_rt_st) && IRQ_SERVICE == 2) begin
                         // ESI defer: paced retry from a small budget; the
                         // rt states are watchdog-excluded, so WITHOUT the
@@ -1413,12 +1588,13 @@ always @(posedge clk) begin
                         // unbounded with the link held
                         if (esi_defer_cnt >= 4'd8) begin
                             esi_off    <= 1'b1;
-                            next_state <= esi_attach_st ? set_power_d0
-                                                        : link_established;
+                            ns_b = esi_attach_st ? set_power_d0
+                                                        : link_established; ns_b_ls = laneset_f(esi_attach_st ? set_power_d0
+                                                        : link_established); ns_b_v = 1'b1;
                         end else begin
                             esi_defer_cnt    <= esi_defer_cnt + 4'd1;
                             defer_pend_state <= state;
-                            next_state       <= defer_wait;
+                            ns_b = defer_wait; ns_b_ls = laneset_f(defer_wait); ns_b_v = 1'b1;
                         end
                     end else if (POLITE_ATTACH != 0) begin
                         // Paced retry (~650 us, the Mac's cadence) instead
@@ -1432,15 +1608,15 @@ always @(posedge clk) begin
                              (state >= edid_block0 && state <= edid_block7)) &&
                             defer_cnt >= EDID_DEFER_CAP) begin
                             edid_giveup <= 1'b1;
-                            next_state  <= read_sink_count;
+                            ns_b = read_sink_count; ns_b_ls = laneset_f(read_sink_count); ns_b_v = 1'b1;
                         end else begin
                             defer_pend_state <= state;
-                            next_state       <= defer_wait;
+                            ns_b = defer_wait; ns_b_ls = laneset_f(defer_wait); ns_b_v = 1'b1;
                         end
                     end else begin
                         // legacy: just flip states to force a retry.
-                        state      <= state_on_success;
-                        next_state <= state;
+                        `SET_STATE(state_on_success)
+                        ns_b = state; ns_b_ls = st_ls_r; ns_b_v = 1'b1;
                     end
                 end
             end else begin
@@ -1485,17 +1661,17 @@ always @(posedge clk) begin
                 if(state == read_registers && rx_byte_count == 8'h0F)
                     train_interval_r <= aux_rx_data[6:0];
                 // SYMBOL_ERROR_COUNT: bytes 1-4 = 0x210..0x213
-                if((state == errcnt_read || state == errcnt_train) && rx_byte_count == 8'h01)
+                if((state == errcnt_read || (TRAIN_ERRCNT != 0 && state == errcnt_train)) && rx_byte_count == 8'h01)
                     err0_r[7:0]  <= aux_rx_data;
-                if((state == errcnt_read || state == errcnt_train) && rx_byte_count == 8'h02)
+                if((state == errcnt_read || (TRAIN_ERRCNT != 0 && state == errcnt_train)) && rx_byte_count == 8'h02)
                     err0_r[15:8] <= aux_rx_data;
-                if((state == errcnt_read || state == errcnt_train) && rx_byte_count == 8'h03)
+                if((state == errcnt_read || (TRAIN_ERRCNT != 0 && state == errcnt_train)) && rx_byte_count == 8'h03)
                     err1_r[7:0]  <= aux_rx_data;
-                if((state == errcnt_read || state == errcnt_train) && rx_byte_count == 8'h04)
+                if((state == errcnt_read || (TRAIN_ERRCNT != 0 && state == errcnt_train)) && rx_byte_count == 8'h04)
                     err1_r[15:8] <= aux_rx_data;
                         
-                if(rx_byte_count == expected-1 && aux_rx_empty == 1'b1) begin
-                    next_state <= state_on_success;
+                if(rxc_p1_r == expected && aux_rx_empty == 1'b1) begin
+                    ns_b = state_on_success; ns_b_ls = sos_laneset_r; ns_b_v = 1'b1;
                     if(reset_addr_on_change == 1'b1) begin
                         aux_addr_i <= 8'h00; 
                     end
@@ -1521,17 +1697,17 @@ always @(posedge clk) begin
         (esi_attach_st || esi_rt_st)) begin
         // sink ignores ESI entirely: same self-disable, no FSM reset
         esi_off    <= 1'b1;
-        next_state <= esi_attach_st ? set_power_d0 : link_established;
-        state      <= error;   // force the transition machinery
+        ns_c = esi_attach_st ? set_power_d0 : link_established; ns_c_ls = laneset_f(esi_attach_st ? set_power_d0 : link_established); ns_c_v = 1'b1;
+        `SET_STATE(error)   // force the transition machinery
     end else
     if (BLIND_SINK == 0 && channel_timeout == 1'b1 && obs_mode) begin
-        next_state <= link_established;   // observe: count only
-        state      <= error;              // force the transition machinery
+        ns_c = link_established; ns_c_ls = laneset_f(link_established); ns_c_v = 1'b1;   // observe: count only
+        `SET_STATE(error)              // force the transition machinery
         err_evt    <= 1'b1; err_reason <= 4'd4;
     end else
     if (BLIND_SINK == 0 && channel_timeout == 1'b1 && errcnt_st) begin
-        next_state <= errcnt_skip_w;   // instrumentation timeout: skip
-        state      <= error;        // force the transition machinery
+        ns_c = errcnt_skip_w; ns_c_ls = laneset_f(errcnt_skip_w); ns_c_v = 1'b1;   // instrumentation timeout: skip
+        `SET_STATE(error)        // force the transition machinery
     end else
     if (BLIND_SINK == 0 && channel_timeout == 1'b1 &&
         POLITE_ATTACH != 0 && TRAIN_RECOVER != 0 && train_st) begin
@@ -1540,21 +1716,18 @@ always @(posedge clk) begin
         // ceremony teardown; cheap retrain when the budget runs out
         if (train_retry_cnt != TRAIN_RETRY_CAP) begin
             train_pend      <= state;
-            next_state      <= train_wait;
+            ns_c = train_wait; ns_c_ls = laneset_f(train_wait); ns_c_v = 1'b1;
         end else begin
-            next_state      <= clock_training;
+            ns_c = clock_training; ns_c_ls = laneset_f(clock_training); ns_c_v = 1'b1;
         end
-        state      <= error;   // force the transition machinery
+        `SET_STATE(error)   // force the transition machinery
     end else
+    // (the exclusion list was reset + the nine established-set states,
+    // written out; it is the two maintained flags now — same set)
     if((BLIND_SINK == 0 && channel_timeout == 1'b1) ||
-                                  (state != reset      && state != link_established &&
-                                   state != check_link && state != check_wait       &&
-                                   state != errcnt_read && state != irq_clear  &&
-                                   state != esi_read_rt && state != esi_clear_rt &&
-                                   state != esi_clear2_rt && state != esi_eval_rt &&
-                                   retry_now == 1'b1)) begin
-        next_state <= reset;
-        state      <= error;
+                                  (!st_rst_r && !inest_r && retry_now == 1'b1)) begin
+        ns_c = reset; ns_c_ls = laneset_f(reset); ns_c_v = 1'b1;
+        `SET_STATE(error)
         if (in_established_set) begin
             err_evt <= 1'b1;
             err_reason <= (BLIND_SINK == 0 && channel_timeout == 1'b1) ? 4'd4 : 4'd5;
@@ -1579,7 +1752,7 @@ always @(posedge clk) begin
     if(LINK_CHECK != 0 && state == link_established && !msg_busy &&
        (link_check_pend == 1'b1 || (IRQ_SERVICE != 0 && irq_pending))) begin
         link_check_pend <= 1'b0;
-        next_state  <= check_link;
+        ns_d_v = 1'b1;                     // -> check_link
         // ESI mode: remember an hpd_irq-triggered check owes an ESI
         // service pass after the status gate (0x201 is never raised by
         // ESI-only branches, so the legacy vector latch cannot trigger it)
@@ -1600,8 +1773,8 @@ always @(posedge clk) begin
     //---------------------------------------------------------------
     if((BLIND_SINK != 0 || HPD_DISCONNECT_RESETS != 0) &&
        hpd_present == 1'b0) begin
-        next_state <= reset;
-        state      <= error;
+        ns_e_v = 1'b1;                     // -> reset
+        `SET_STATE(error)
     end
     // HPD SESSION BOUNDARY: the per-session EDID policy re-arms on
     // presence loss regardless of the teardown policy above (which
@@ -1626,29 +1799,42 @@ always @(posedge clk) begin
     end
     if(just_read_from_rx == 1'b1) begin
         rx_byte_count <= rx_byte_count+1;
+        rxc_nz_r      <= (rx_byte_count != 8'hFF);   // (count+1) != 0
+        rxc_p1_r      <= rx_byte_count + 8'd2;        // (count+1) + 1
     end
 
     //---------------------------------------
     // Manage the reset timer
     //---------------------------------------
-    if(retry_count == 0) begin
-        retry_now   <= 1'b1;
+    // (138B clk100 ladder, 2026-10-24) both down-counters reloaded off a
+    // live 29-/27-bit "== 0" compare of their own bits (retry_count ->
+    // retry_count RESET, 8 cells, the gate's clk100 floor after the first
+    // fix set). The zero flags are registers kept equal to the compare on
+    // every cycle by construction: reload -> (reload value == 0), count ->
+    // (count == 1 now <=> count-1 == 0 next). Counter values and the
+    // retry_now / link_check_now pulses are bit-identical.
+    if(retry_zero_r) begin
+        retry_now    <= 1'b1;
         // Blind mode walks the ladder at ~84 ms/state (~2.1 s total) —
         // the 0.5 s watchdog reset every walk forever (live-hit
         // 2026-08-14: D cycling 02..06). 4 s keeps the watchdog while
         // clearing the full walk with 2x margin.
-        retry_count <= (BLIND_SINK != 0) ? 29'd399999999 : RETRY_WATCHDOG_CLKS;
+        retry_count  <= RETRY_RELOAD;
+        retry_zero_r <= (RETRY_RELOAD == 29'd0);
     end else begin
-        retry_now   <= 1'b0;
-        retry_count <= retry_count - 1;
+        retry_now    <= 1'b0;
+        retry_count  <= retry_count - 1;
+        retry_zero_r <= (retry_count == 29'd1);
     end
-    if(link_check_count == 0) begin
+    if(lc_zero_r) begin
         link_check_now   <= 1'b1;
         // PPS actually became a 2Hz pulse....
         link_check_count <= LINK_CHECK_CLKS;
+        lc_zero_r        <= (LINK_CHECK_CLKS == 27'd0);
     end else begin
         link_check_now   <= 1'b0;
         link_check_count <= link_check_count - 1;
+        lc_zero_r        <= (link_check_count == 27'd1);
     end
 
     //-----------------------------------------------------------
@@ -1659,13 +1845,18 @@ always @(posedge clk) begin
     //-----------------------------------------------------------
     if (!in_established_set ||
         dbg_sink_status[1:0] != 2'b00 || !r204_q[7]) begin
-        wedge_timer <= WEDGE_PRELOAD;
+        wedge_lo       <= WEDGE_PRELOAD[15:0];
+        wedge_hi       <= WEDGE_PRELOAD[31:16];
+        wedge_lo_max_r <= (WEDGE_PRELOAD[15:0] == 16'hFFFF);
         if (dbg_sink_status[1:0] != 2'b00)
             wedge_suspect <= 1'b0;         // streaming again: stand down
     end else if (wedge_timer[WEDGE_BIT]) begin
         wedge_suspect <= 1'b1;
     end else begin
-        wedge_timer <= wedge_timer + 32'd1;
+        wedge_lo       <= wedge_lo + 16'd1;
+        wedge_lo_max_r <= (wedge_lo == 16'hFFFE);
+        if (wedge_lo_max_r)
+            wedge_hi   <= wedge_hi + 16'd1;
     end
 
     //-----------------------------------------------------------
@@ -1686,11 +1877,31 @@ always @(posedge clk) begin
             kick_cnt   <= kick_cnt + 3'd1;
             if (dbg_kick_sat != 4'hF)
                 dbg_kick_sat <= dbg_kick_sat + 4'd1;
-            next_state <= reset;
-            state      <= error;
+            ns_f_v = 1'b1;                 // -> reset
+            `SET_STATE(error)
             err_evt    <= 1'b1; err_reason <= 4'd6;
         end else
             kick_timer <= kick_timer + 30'd1;
     end
+
+    //-----------------------------------------------------------
+    // next_state: apply the request groups in the original priority
+    // order (kick > hpd > link check > timeouts > reply processing >
+    // wait advances); no request = hold. See the ns_* declaration.
+    //-----------------------------------------------------------
+    next_state <= ns_f_v ? reset :
+                  ns_e_v ? reset :
+                  ns_d_v ? check_link :
+                  ns_c_v ? ns_c :
+                  ns_b_v ? ns_b :
+                  ns_a_v ? state_on_success : next_state;
+    // the same selection, for the lane-set flag of the value written
+    ns_laneset_r <= ns_f_v ? 1'b0 :
+                    ns_e_v ? 1'b0 :
+                    ns_d_v ? 1'b0 :
+                    ns_c_v ? ns_c_ls :
+                    ns_b_v ? ns_b_ls :
+                    ns_a_v ? sos_laneset_r : ns_laneset_r;
 end        
+`undef SET_STATE
 endmodule

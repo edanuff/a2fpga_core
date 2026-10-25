@@ -277,24 +277,44 @@ hotplug_decode i_hotplug_decode(
     wire [3:0] status_seq_w;
     reg [31:0] snap_r    = 32'd0;
     reg        snapped_r = 1'b0;
+    // (138B clk100 ladder, 2026-10-24) the snapshot used to latch straight
+    // off gate_fail_evt & !snapped_r into 32 CEs — one LUT whose net ran
+    // 6.7 ns across the die to the snapshot flops (the 138B gate's worst
+    // clk100 path, +0.002 reported). The event is now registered once
+    // alongside a one-cycle-delayed copy of the data, and the snapshot
+    // latches from those a cycle later: same value captured (snap_d_r
+    // holds exactly what the old latch would have taken), visible to the
+    // reader one 10 ns cycle later. gate_fail_evt pulses are at least one
+    // status read apart, so the pending flag never sees a second event.
+    reg        snap_pend_r = 1'b0;
+    reg [31:0] snap_d_r    = 32'd0;
     // time since the last link_established rise, 100 ms units, saturating
     reg [3:0]  tsl_r     = 4'd0;
     reg [23:0] tsl_tick  = 24'd0;
+    // == (tsl_tick == 9_999_999) on every cycle, maintained at each write
+    // of tsl_tick (138B clk100 ladder, 2026-10-24: the live 24-bit compare
+    // reloaded the 24 tick flops; identical counts and tsl_r)
+    reg        tsl_last_r = 1'b0;
     reg        est_d     = 1'b0;
     always @(posedge clk100) begin
         est_d <= tx_link_established;
         if (tx_link_established && !est_d) begin
-            tsl_r <= 4'd0; tsl_tick <= 24'd0;
+            tsl_r <= 4'd0; tsl_tick <= 24'd0; tsl_last_r <= 1'b0;
         end else if (tx_link_established) begin
-            if (tsl_tick == 24'd9_999_999) begin   // 100 ms @ clk100
-                tsl_tick <= 24'd0;
+            if (tsl_last_r) begin                   // 100 ms @ clk100
+                tsl_tick   <= 24'd0;
+                tsl_last_r <= 1'b0;
                 if (tsl_r != 4'hF) tsl_r <= tsl_r + 4'd1;
-            end else
-                tsl_tick <= tsl_tick + 24'd1;
+            end else begin
+                tsl_tick   <= tsl_tick + 24'd1;
+                tsl_last_r <= (tsl_tick == 24'd9_999_998);
+            end
         end
-        if (gate_fail_evt_w && !snapped_r) begin
+        snap_d_r    <= {debug_chstate, status_seq_w, tsl_r};
+        snap_pend_r <= gate_fail_evt_w && !snapped_r && !snap_pend_r;
+        if (snap_pend_r) begin
             snapped_r <= 1'b1;
-            snap_r    <= {debug_chstate, status_seq_w, tsl_r};
+            snap_r    <= snap_d_r;
         end
     end
     assign debug_snapshot = snap_r;

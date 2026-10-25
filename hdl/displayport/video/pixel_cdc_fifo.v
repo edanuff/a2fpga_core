@@ -178,6 +178,18 @@ module pixel_cdc_fifo #(
     assign rdata  = rdata_r;
     assign rvalid = rvalid_r;
 
+    // rlevel (timing campaign round 2, 138B clk100-ladder follow-up,
+    // 2026-10-24): `(wptr_bin_r - rptr_bin) + rvalid_r + a_valid` was a
+    // three-operand sum in one clk_sym cycle (rptr_bin -> rlevel D, 14
+    // cells, -0.204 reported on a 138B roll). rptr_bin - a_valid -
+    // rvalid_r is the number of words POPPED by the consumer (every
+    // fetch adds one to rptr_bin and one to the valid flags, every pop
+    // clears one valid flag; rreset zeroes all three), so a pop counter
+    // holds that difference exactly and rlevel is one subtract of two
+    // registers. Mirror-checked in simulation below.
+    reg  [ADDR_BITS:0] pop_cnt_r = 0;
+    wire               pop_w     = rd_en && rvalid_r;
+
     always @(posedge rclk) begin
         wptr_gray_r1 <= wptr_gray;
         wptr_gray_r2 <= wptr_gray_r1;
@@ -185,9 +197,9 @@ module pixel_cdc_fifo #(
         ram_empty    <= ram_empty_n;                      // cone (n)
         rptr_gray_p1_r <= rreset ? {{ADDR_BITS{1'b0}}, 1'b1} :
                           fetch  ? bin2gray(rptr_bin + 2'd2) : bin2gray(rptr_bin + 1'b1);
-        rlevel       <= (wptr_bin_r - rptr_bin)
-                        + {{ADDR_BITS{1'b0}}, rvalid_r}
-                        + {{ADDR_BITS{1'b0}}, a_valid};
+        rlevel       <= wptr_bin_r - pop_cnt_r;
+        pop_cnt_r    <= rreset ? {(ADDR_BITS+1){1'b0}} :
+                        pop_w  ? pop_cnt_r + 1'b1 : pop_cnt_r;
         if (rreset) begin
             rptr_bin  <= 0;
             rptr_gray <= 0;
@@ -212,5 +224,13 @@ module pixel_cdc_fifo #(
             end
         end
     end
+
+    // synthesis translate_off
+    always @(posedge rclk) begin
+        if (pop_cnt_r !== (rptr_bin - {{ADDR_BITS{1'b0}}, a_valid} - {{ADDR_BITS{1'b0}}, rvalid_r}))
+            $fatal(1, "pixel_cdc_fifo: pop counter diverged (pop_cnt=%0d rptr=%0d a=%b r=%b)",
+                   pop_cnt_r, rptr_bin, a_valid, rvalid_r);
+    end
+    // synthesis translate_on
 
 endmodule

@@ -252,3 +252,163 @@ violation instead of a small positive number.
 **Bench check 2026-09-05 (ed, 138B, bitstream fd064d24 = margin-policy roll 1 of the final source):** DP link
 trained through the carry-select encoder and replicated ladder, Apple II picture up, Ensoniq PASS. The 138B is
 now durable and bench-verified; this is the build to base the 65816 work on.
+
+## 138B clk100 AUX ladder after the 2026-10-22 merge (2026-10-24/25, branch claude/nostalgic-shamir-4b4f64)
+
+The a2p25 AUX/training stack (c7064c6e..e4f2e056, ported to the a2mega in
+c478d26d) grew the ladder that the 2026-09-05 pass had left as the clk100 floor
+(+1.00 after the fanout replication; "ladder-limited" before it). On main
+56eeef50 + the profile commits, two consecutive 138B rolls of one source went
++0.007 reported (clean) and then **−0.922 with 22 violated endpoints**, all in
+`i_aux_channel`:
+
+| cone | endpoints | worst | shape |
+|---|---|---|---|
+| `next_state → afe_hold → transition CE` | 16 (`dp_reg_de_active`, `tx_clock_train`, `msg`, `train_st`, `tx_powerup`, `esi_*_st`, `errcnt_st`, … CE) | −0.922 | 8-bit inequality + 12-way decode + hold in front of ~40 registers, 8 cells |
+| `blind_dwell[15] → next_state D` | 5 | −0.882 | the POLITE CR-dwell term of the 100 µs advance, then 10 series mux levels of the next_state priority chain (14 cells) |
+| `i_aux_messages counter → aux_tx_data` | 1 | −0.862 | the 12-bit message table decoded live every cycle, 13 LUT levels |
+| `wedge_timer` 32-bit increment | 3 | −0.582 | 12 LUT cells |
+
+The deterministic gate (`a2mega_dp_test_138b`, same ladder parameters as the
+core) reproduced the knife-edge on the same source (0/0, clk100 **+0.002**,
+`gate_fail_evt → snapshot CE` with 6.7 ns of route; `state → next_state`
++0.07), so it was the iteration vehicle (8 min/build) and the full core was
+rolled on the final source only. Every path on this die is route-dominated
+(single hops of 1.5–2.9 ns between a replica and its loads), so each fix below
+cuts cells AND nets, and every one is exact: same values on every cycle.
+
+### Fixes (`hdl/displayport/auxch/`, `hdl/displayport/video/`)
+
+- **afe_hold without the transition term** — `(next_state != state)` was
+  redundant at every consumer (the transition block ANDs it in; `state <=
+  next_state` is a no-op when equal; the 100 µs reload sits inside the
+  unequal branch). Then the 12-way lane-set decode became a maintained flag
+  (`ns_laneset_r`, written by the same combine that writes next_state from
+  the same group's value; `sos_laneset_r` beside state_on_success, `st_ls_r`
+  beside state) so afe_hold is `afe_busy & one flop`; and the AND is three
+  `syn_keep` copies, one per consumer group (transition block, pure-function
+  block, state/count), after roll 2 drew 2.6 ns on the single ~75-load net.
+- **Pure-function transition registers off the transition enable** — `msg`,
+  `expected`, the `*_de_active` routing flags, `reset_addr_on_change`, the
+  `tx_*` flags and the `esi_*_st` / `train_st` / `errcnt_st` decodes are
+  functions of next_state alone; they are written on every un-held cycle
+  from the same case statements (moved verbatim) instead of only at
+  `next_state != state`. Between transitions `next_state == state`, so the
+  case re-selects what the transition wrote; the hold gates both versions;
+  `expected` keeps its hold on `error`/unlisted values. 16 of the 22.
+- **Wait advances merged and pre-decoded** — the five `next_state <=
+  state_on_success` wait sites are one site (same priority position, same
+  value); their state/`expected` decodes are registered flags. Exact because
+  `count_100us` reloads on every transition and its bit 14 is clear for the
+  first 10,000 cycles of a state, `blind_dwell` resets on every transition
+  and bits 16/21 are clear for the first 65,536, and `expected` is written
+  only at a transition — wherever a dwell bit is set the one-cycle-late
+  flags equal the live decodes (the `is_align_wait_r` argument, extended).
+  `blind_dwell[15]` stays live: it is only read ANDed with `count_100us[14]`,
+  whose first set cycle (10,000) never coincides with the dwell bit's rise
+  (32,768).
+- **next_state priority chain regrouped** — ~15 independent `next_state <=`
+  sites (synthesised as one series 2:1 mux each, lowest priority deepest)
+  now record requests in per-group blocking temporaries (last writer within
+  a group wins, as before) and one statement applies the groups in the
+  original order: kick > hpd > link check > timeouts > reply processing >
+  wait advances. Same winner, same value, same cycle.
+- **State-class flags maintained at every write of `state`** — the
+  established-set membership (9 values), `state == error` and `state ==
+  reset` are written by the macro that writes `state`, from the value being
+  written, so each equals its decode on every cycle including the force
+  sites. Retires the 9-way decode in series with the mux (the gate's floor
+  after the first set) and the error-detail safety-net enable.
+- **Counters** — `wedge_timer` (32) and `blind_dwell` (24) are two halves
+  with a maintained "low half all ones" flag (preload: constant compare;
+  hold: unchanged; count: lo+1 == FFFF ⇔ lo == FFFE); `retry_count` (29),
+  `link_check_count` (27) and channel_management's `tsl_tick` (24) reload
+  off a maintained zero flag (reload → reload-value == 0; count → count ==
+  1 ⇔ next == 0). Bit-identical values and pulses. `TRAIN_ERRCNT == 0`
+  (every board) now folds `errcnt_train` out of its decodes.
+- **Message engine byte table at load time** (`dp_aux_messages.v`) — the
+  187-entry `case (counter)` is a function evaluated once at message load
+  into eight {we, tag, data} slots that shift out one per cycle; the three
+  live bytes (`train_set_byte` lanes 0/1, `irq_clear_byte`) are tags
+  multiplexed in at the output register, so they are still sampled in the
+  cycle they are emitted. Cycle-exact by construction (slot k reaches the
+  head when `counter[3:0] == k`; zeros shift in for the old `default`).
+  Gate: LUT 230 → 128, FF 22 → 83.
+- **Reply-byte branch prefix** — `rxc_nz_r == (rx_byte_count != 0)` and
+  `rxc_p1_r == rx_byte_count + 1 (mod 256)` maintained at both writes of
+  `rx_byte_count`, so `rx_byte_count == expected-1` is the equality
+  `rxc_p1_r == expected` (the same modular identity) and the branch prefix
+  is one flop; `syn_maxfan = 12` on `rx_byte_count`, `expected`,
+  `just_read_from_rx` (16 on `msg`, which the engine now decodes ~90 ways at
+  load).
+- **AUX interface FIFO full flags registered** (`aux_interface.v`) — like
+  round 2's empty flags: from the next pointer values, equal to the compare
+  of the registered pointers on every cycle (rx: the rx_reset branch copies
+  rd into wr, so the next value is `rd+1 == rd` = 0). The live `wr_ptr+1 ==
+  rd_ptr` had headed the push strobe, the 256 FIFO write enables and the
+  empty flag's adders (`tx_wr_ptr → tx_empty`, 9 cells, +0.01 on the gate
+  once the ladder cones were gone).
+- **channel_management snapshot** — `gate_fail_evt & !snapped_r` ran 6.7 ns
+  across the die into 32 CEs. The event is registered beside a one-cycle
+  delayed copy of the data and the snapshot latches from those: the same
+  value is captured, visible one cycle later.
+- **Two clk_sym cones outside the ladder** (roll 2 of the first final set
+  drew −0.214 / −0.204 on them; both had sat at +0.00…+0.18 since 09-05):
+  `pixel_cdc_fifo.rlevel` was a three-operand sum `(wptr − rptr) + rvalid +
+  a_valid` (14 cells); `rptr − a_valid − rvalid` is the number of words the
+  consumer has popped, so a pop counter holds that difference exactly and
+  rlevel is one subtract of two registers (mirror-checked). The packer's
+  two-step flag `nl2` compared `line_num(+1)` and `nc` live (9 cells in
+  front of `pf_prime`/`pf_ftu`); three line_num class flags now follow
+  line_num's writes exactly as `ln0_r` does, and `eol_m1_r` follows
+  line_cycle's exactly as `at_eol` does, one step earlier; `nl2` is a mux
+  of flops (every flag and `nl2` itself mirror-checked against the live
+  expression).
+
+Proofs. `hdl/displayport/sim/tb_aux_msg_diff.v` (new): the new engine against
+the 56eeef50 table, cycle-exact over 3,000,000 random cycles / 129,719 loads.
+`hdl/displayport/sim/shadow_diff.py` (new): rewrites tb_train_recover (×3
+modes), tb_polite_attach (×2) and tb_link_observe so a second
+channel_management built from the 56eeef50 modules runs beside the DUT on the
+same inputs (forced pulses mirrored) with every output compared on every clock
+— 0 mismatches over 45.5 M compared cycles on the final source (the AFE hold is
+live in tb_polite_attach). The 16-run AUX suite PASS (train_recover ×3,
+polite_attach ×2, gate_fail_counters, hpd_disconnect_reset, link_observe,
+afe ×7, aux_idle_bias). `run_full_chain.sh` both packer configs: no underrun
+over 3,037,500 cycles, 720 rows pixel-exact, ALL AUDIO CHECKS PASSED, no
+mirror `$fatal`, and the 121.5 MB symbol dump is **byte-identical** to the
+same harness run on 56eeef50 (the harness's 6748 Maud/VBID "ERRORS" are its
+no-audio expectation and are identical on both).
+
+### Results (reported slack = real − 0.5 ns)
+
+| Build | viols | clk100 | clk_sym | clk_pix | clk_logic | note |
+|---|---|---|---|---|---|---|
+| gate, before | 0/0 | +0.002 | +0.080 | +0.658 | — | snapshot CE route; `state → next_state` +0.07 |
+| gate, set 1 (hold term, pure-function regs, advances, ROM, wedge, snapshot) | 0/0 | +0.033 | +0.060 | +0.196 | — | floor: `retry_count` reload; `in_established_set → next_state` |
+| gate, set 2 (+ state flags, chain regroup, counters) | 0/0 | +0.121 | +0.065 | +0.617 | — | floor: reply-byte latch CEs |
+| 138B diagnostic roll (set 2) | 0/0 | +0.001 | +0.305 | +0.016 | +1.771 | `expected → ==expected−1 → next_state`; `next_state → afe_hold` |
+| gate, set 3+4 (+ rxc flags, maxfan, lane-set flags) | 0/0 | +0.010 | — | — | — | floor: FIFO full/push, `tx_wr_ptr → tx_empty` |
+| gate, set 5 (+ registered full flags) | 0/0 | +0.025 | — | — | — | floor: `next_state → msg D`, 6 cells / 6.4 ns route |
+| 138B roll, set 5, #1 | 0/0 | +0.024 | +0.002 | +0.059 | +1.670 | clk100 floor `afe busy → train_retry_cnt CE` |
+| 138B roll, set 5, #2 | **7/0** | −0.149 | −0.214 | +0.217 | +1.115 | afe_hold net (2.6 ns); packer `pf_prime`; FIFO `rlevel` |
+| 138B roll, set 5, #3 | 0/0 | +0.329 | +0.107 | +0.188 | +1.554 | |
+| gate, set 6 (+ hold copies, rlevel, nl2) | 0/0 | +0.078 | +0.057 | +0.527 | — | clk_sym = FIFO BSRAM DO → CEB (round-2 residual) |
+| **138B final roll 1** (319d28c4) | 0/0 | **+0.772** | +0.105 | +0.045 | +0.527 | clk1x +2.76, clk_gs +1.34 |
+| **138B final roll 2** (8bd8bcb9) | 0/0 | **+0.448** | +0.100 | +0.830 | +1.244 | clk100 floor = `train_interval_r → eq_dwell_cycles_r` (the ×625 multiply) |
+| **138B final roll 3** (def55e2d) | 0/0 | **+0.687** | +0.046 | +0.090 | +0.637 | clk1x +0.66; clk_sym = `wptr_gray_r2 → wptr_bin_r` (gray→bin) |
+| 60K roll (set 6, d4826cf7) | 0/0 | +1.373 | +0.676 | +1.146 | +2.695 | clk1x +3.06 (the doc5503 LUT +154 vs its snapshot is synthesis jitter of an untouched module) |
+| a2p25 (set 6, c5373024) | 0/0 | +1.200 | +3.088 | +0.721 | clk_hr +2.912 | clk_tx +1.73, clk_mem +0.72 |
+
+Verdict: three consecutive 138B rolls of the final source are clean on every
+clock; clk100 sits at +0.45 … +0.77 reported (+0.95 … +1.27 real) with the AUX
+ladder no longer the floor on any roll, against +0.007 / −0.922 before and
++0.01 … +0.29 in the 09-05 set. Resources: `i_aux_messages` LUT −60 / REG +61,
+`i_aux_channel` LUT −28…−37 / REG +40, nothing else moved (the doc5503 LUT
+jitter of ±76 in some rolls is synthesis seeding; the snapshots are from the
+final rolls). The clk_sym floor on this die is now the pixel FIFO's block-RAM
+data-out family and the gray→bin synchroniser (+0.05 … +0.11 across the three
+rolls) — the "above the bar, noted" residual of cone (n), unchanged by this
+pass and the next thing to pipeline if a roll ever lands below it. Not flashed:
+the bitstreams of the three rolls are in `impl/pnr` history (roll 3 = the
+committed `a2mega_138B.fs`).
