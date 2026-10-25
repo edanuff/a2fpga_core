@@ -40,7 +40,7 @@ build environment") — it detects what's installed and guides the rest. Referen
 | Follow coding & project conventions | [docs/conventions.md](docs/conventions.md) |
 | Understand *why* a design choice was made | [docs/adr/](docs/adr/) (decision records) |
 | Retire a document that no longer matches the code | the archive rule in [docs/conventions.md](docs/conventions.md#archive): `git mv` into the folder's `archive/`, add a README entry, fix every citation in the same commit |
-| Prepare a squash for the public upstream | `tools/upstream_export.sh` (dry run by default) honours `UPSTREAM_EXCLUDE.txt`, the committed list of fork-only paths, and gates on `/Users/` paths and broken links (`tools/check_doc_links.py`) |
+| Prepare a squash for the public upstream | `tools/upstream_export.sh` (dry run by default) honours `UPSTREAM_EXCLUDE.txt`, the committed list of fork-only paths, and gates on absolute home-directory paths and broken links (`tools/check_doc_links.py`) |
 | Find what to work on next | [docs/ROADMAP.md](docs/ROADMAP.md) + `gh issue list` + `boards/<board>/TODO.md` |
 | Build a board | `/build` skill, or [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md) |
 | Flash a board (FPGA bitstream) | `/flash` skill, or [docs/boards.md](docs/boards.md) |
