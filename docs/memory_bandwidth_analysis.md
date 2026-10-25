@@ -696,7 +696,7 @@ BSRAM, the Ensoniq DOC5503 is emulated in software on the ESP32-S3 (fed by the
 LCAM bus stream, with audio returned over I2S), and video goes straight to HDMI
 through `apple_video` with no framebuffer.
 
-The `a2-p25` board revision (repo `/Users/edanuff/GitHub/a2-p25`, commit 800cd75
+The `a2-p25` board revision (the `a2-p25` hardware repository, a local checkout outside this repo, commit 800cd75
 "Add HyperRAM, turn FPGA-MCU interconnect into QSPI, remove LCAM") adds a
 **64 Mbit HyperBus PSRAM** and frees the pins for it by consolidating the
 FPGA↔ESP32 link to QSPI. The scenario this section evaluates:
@@ -960,7 +960,7 @@ unambiguously good trade on a 56-block device.
 
 ### 3.11 Pin, Bank and Skew Analysis (a2-p25 rev)
 
-Verified against `/Users/edanuff/GitHub/a2-p25` at commit 6971f51, the Tang Primer 25K
+Verified against the `a2-p25` hardware repository (local checkout, outside this repo) at commit 6971f51, the Tang Primer 25K
 SOM schematic (`Tang_Primer_25K_52300_Schematic.pdf`), the SOM pin-length table
 (`Tang_Primer_25K_52300_Pin_Length_table.xlsx`), and Gowin's Arora-V package
 propagation-delay table (TN725-1.2, sheet `GW5A-25`, column `GW5A-LV25MG121N`).

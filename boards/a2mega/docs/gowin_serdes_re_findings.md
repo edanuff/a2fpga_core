@@ -1,6 +1,6 @@
 # gowin-serdes (key2) reverse-engineering findings — cross-referenced for a2mega DP
 
-**Source repo:** `/Users/edanuff/GitHub/gowin-serdes` — key2's pure-Amaranth reimplementation
+**Source repo:** a local checkout of `gowin-serdes` (outside this repo) — key2's pure-Amaranth reimplementation
 of the Gowin GTR12 SerDes IP (GW5AT-15/60, GW5A(S)T-138), built from decrypted vendor IP
 (`gw/` reference tree, IEEE P1735 decryptor) and byte-exact TOML/CSR reproduction of the
 Gowin USB3.1 reference design. Their arbiter is claimed cycle-exact against the decrypted

@@ -5,8 +5,8 @@ and committed: Phases 0–1 (vendoring + ESP32 firmware), Phase 2 step 1
 (colorbars bitstream `a2mega_dp_test.fs`, timing-clean), Phase 3a (full core
 480p-over-DP) and 3b (full core 1080p, `a2mega.fs` sha `2270857e…`,
 timing-clean). **Execute Section 5 (hardware runbook) next.**
-Hardware source of truth: `/Users/edanuff/GitHub/a2-mega` branch `1.0a3`
-(HEAD `273d673 "Final Board"`). DP core: `/Users/edanuff/GitHub/DisplayPort_Verilog`
+Hardware source of truth: a local checkout of the `a2-mega` hardware repository (outside this repo), branch `1.0a3`
+(HEAD `273d673 "Final Board"`). DP core: a local checkout of `edanuff/DisplayPort_Verilog`
 (`examples/a2_mega` is the board-locked, timing-closed SERDES recipe; `usb-c/`
 holds the FUSB302B/TUSB1046A spec and the portable PD driver in C).
 

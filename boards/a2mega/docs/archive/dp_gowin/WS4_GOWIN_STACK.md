@@ -135,7 +135,7 @@ re-validation.
 | | |
 |---|---|
 | Base commit | `8280d7c1` (project sources; on `cfd720c9` = tip of `claude/epic-lovelace-54ee14`) |
-| Toolchain | Gowin V1.9.12.03 (certified install; `gw_sh` via `/Users/edanuff/gowin-1.9.12-ide/bin/gw_sh`, pipe method through `tools/build.sh`, `GPRJ=a2mega_dp_gowin.gprj`) |
+| Toolchain | Gowin V1.9.12.03 (certified install; `gw_sh` via `<gowin-install>/bin/gw_sh`, pipe method through `tools/build.sh`, `GPRJ=a2mega_dp_gowin.gprj`) |
 | Timing | **0 setup / 0 hold violations; TNS 0.000 all domains.** Fmax: clk_sym 135.491 ≥ 135.007, clk_strm 172.5 ≥ 74.25, clk100 122.5 ≥ 100, clk50 120.2 ≥ 50, cm_life 167.4 ≥ 100 |
 | Resources | 3531 LUT / 2575 FF / 4 BSRAM / 2 PLLA (vs the full open core's stream path — the encoder is *smaller*) |
 | `a2mega_dp_gowin.fs` sha256 | `43854f32e7289197b349e1f748e076efafe1fa94e7f9607e6b61bd2d2755bf87` |

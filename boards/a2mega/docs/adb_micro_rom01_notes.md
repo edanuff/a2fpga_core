@@ -130,7 +130,7 @@ beyond a clip on the keyboard cable):
    is out of its SYNC-wait and polling; silence = still waiting.
 3. Micro P25 (pin 49) vs the line, if the above are inconclusive.
 
-## Mega II reset behaviour — what the Mega-IIe project shows (rev3b, `/Users/edanuff/GitHub/Mega-IIe`)
+## Mega II reset behaviour — what the Mega-IIe project shows (rev3b, a local checkout of the `Mega-IIe` project, outside this repo)
 
 A working Apple II built around an extracted Mega II (no FPI, no ADB micro,
 a 65C02 and an RP2040 keyboard/power controller). Netlist (kicad-cli):

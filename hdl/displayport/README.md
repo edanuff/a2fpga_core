@@ -1,7 +1,7 @@
 # DisplayPort transmitter core (vendored)
 
 Vendored from https://github.com/edanuff/DisplayPort_Verilog
-(local dev sandbox: `/Users/edanuff/GitHub/DisplayPort_Verilog`), branch
+(local dev sandbox: a checkout of that repository outside this one), branch
 `master`, commit `87cd538` ("Add examples/a2_mega: board-specific SERDES
 config, timing-verified"). MIT license; originally derived from Mike Field
 (hamster)'s Artix-7 DisplayPort source, restructured into an instantiable

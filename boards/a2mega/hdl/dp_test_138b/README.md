@@ -82,7 +82,7 @@ GUI session as a cross-check.
 ## Build (after the GUI generation step)
 
 ```
-GW_SH=/Users/edanuff/gowin-1.9.12-ide/bin/gw_sh \
+GW_SH=<gowin-install>/bin/gw_sh \
 GPRJ=a2mega_dp_test_138b.gprj tools/build.sh a2mega
 ```
 
