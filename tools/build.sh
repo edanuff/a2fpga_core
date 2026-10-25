@@ -4,7 +4,8 @@
 #
 # Usage:
 #   tools/build.sh <board> [syn|all]
-#     <board>  board directory under boards/ (e.g. a2mega, a2n20v2-GS)
+#     <board>  board directory under boards/ (e.g. a2mega, a2n20v2-Enhanced); the
+#              deprecated boards under boards/deprecated/ are found by name too
 #     stage    "all" (default: synthesis + place & route + bitstream) or
 #              "syn" (synthesis only)
 #
@@ -40,12 +41,15 @@ stage="${2:-all}"
 
 if [[ -z "$board" ]]; then
     echo "Usage: tools/build.sh <board> [syn|all]"
-    echo "Boards:"; (cd "$REPO/boards" && ls -d */ 2>/dev/null | tr -d '/')
+    echo "Boards:"; (cd "$REPO/boards" && ls -d */ 2>/dev/null | tr -d '/' | grep -v '^deprecated$')
+    echo "Deprecated:"; (cd "$REPO/boards/deprecated" 2>/dev/null && ls -d */ 2>/dev/null | tr -d '/')
     exit 2
 fi
 
-bdir="$REPO/boards/$board"
-[[ -d "$bdir" ]] || { echo "No such board: '$board' (see boards/)"; exit 2; }
+brel="boards/$board"
+[[ -d "$REPO/$brel" ]] || brel="boards/deprecated/$board"
+bdir="$REPO/$brel"
+[[ -d "$bdir" ]] || { echo "No such board: '$board' (see boards/ and boards/deprecated/)"; exit 2; }
 
 gprj="${GPRJ:-$(cd "$bdir" && ls *.gprj 2>/dev/null | head -1)}"
 [[ -n "$gprj" ]] || { echo "No .gprj found in $bdir"; exit 2; }
@@ -143,7 +147,7 @@ if [[ "$stage" == "all" ]]; then
         echo "!! Bitstream is STALE (predates this build) — the run did not produce a new one."
         exit 4
     fi
-    echo ">> Bitstream: boards/$board/impl/pnr/${proj}.fs"
+    echo ">> Bitstream: $brel/impl/pnr/${proj}.fs"
     # ---- Resource accounting (per-module, diffed against the committed snapshot) ----
     # Runs BEFORE the timing verdict: a build that just failed timing is the one
     # whose module deltas you need to see. Writes boards/<board>/impl/<proj>_resources.json
@@ -165,7 +169,7 @@ if [[ "$stage" == "all" ]]; then
         sv="$(grep -A1 "Setup Violated Endpoints" "$tr" | sed -E 's/<[^>]+>//g' | grep -Eo '[0-9]+' | head -1)"
         hv="$(grep -A1 "Hold Violated Endpoints"  "$tr" | sed -E 's/<[^>]+>//g' | grep -Eo '[0-9]+' | head -1)"
         echo "   Setup violations: ${sv:-?}    Hold violations: ${hv:-?}"
-        echo "   Full report: boards/$board/impl/pnr/${proj}_tr_content.html"
+        echo "   Full report: $brel/impl/pnr/${proj}_tr_content.html"
         if [[ "${sv:-1}" != "0" || "${hv:-1}" != "0" ]]; then
             echo "   !! TIMING VIOLATIONS PRESENT — build is NOT clean. Inspect the report before using this bitstream."
             exit 4

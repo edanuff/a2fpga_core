@@ -1,4 +1,8 @@
-# A2N9 Card
+# A2N9 Card (deprecated)
+
+> Status (2026-10-25): **deprecated development board**, never released beyond a limited set of
+> testers; superseded by the A2N20v2. Kept buildable under `boards/deprecated/`, not rebuilt
+> against shared-HDL changes. See [boards/deprecated/README.md](../README.md).
 
 <p align="center">
   <img width="400" height="334" src="photos/a2n9.png">
@@ -33,6 +37,6 @@ turn the relative file paths into absolute file paths.
 
 ## Documentation
 
-- [Project documentation wiki](../../docs/README.md) — Gowin CLI setup, architecture, conventions, gotchas
-- [Agent & contributor guide](../../AGENTS.md)
+- [Project documentation wiki](../../../docs/README.md) — Gowin CLI setup, architecture, conventions, gotchas
+- [Agent & contributor guide](../../../AGENTS.md)
 - [This board's tasks & status (TODO.md)](TODO.md)

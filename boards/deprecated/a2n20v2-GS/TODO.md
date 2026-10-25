@@ -1,7 +1,8 @@
 # A2N20v2-GS TODO
 
-> Status (2026-10-25): items current; the build-status section is dated. Current standings
-> (resource snapshots, timing) are in `docs/boards.md`.
+> Status (2026-10-25): **deprecated build**, superseded by a2n20v2-Enhanced (see
+> `boards/deprecated/README.md`). The items below are kept as written; the live IIgs bus-timing
+> item is tracked in `boards/a2n20v2/TODO.md`.
 
 ## High Priority
 
@@ -29,4 +30,4 @@
 
 - Last verified build: 2026-01-16 (this note); the GS project was rebuilt clean on 2026-10-23 with a resource snapshot in `impl/`
 - Timing: All constraints met
-- This is the stable/production version for Tang Nano 20K with IIgs support
+- (historical note) this was the GS-focused experimental build for the Tang Nano 20K

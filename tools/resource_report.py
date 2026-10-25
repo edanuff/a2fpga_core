@@ -89,13 +89,16 @@ def main():
     ap.add_argument("--no-write", action="store_true", help="do not write the snapshot")
     a = ap.parse_args()
 
-    bdir = os.path.join(REPO, "boards", a.board)
+    brel = f"boards/{a.board}"
+    if not os.path.isdir(os.path.join(REPO, brel)):
+        brel = f"boards/deprecated/{a.board}"
+    bdir = os.path.join(REPO, brel)
     if not os.path.isdir(bdir):
-        sys.exit(f"no such board dir: boards/{a.board}")
+        sys.exit(f"no such board dir: boards/{a.board} (or boards/deprecated/{a.board})")
     proj = a.proj or sorted(f[:-5] for f in os.listdir(bdir) if f.endswith(".gprj"))[0]
     syn = os.path.join(bdir, "impl", "gwsynthesis", f"{proj}_syn_resource.html")
     rpt = os.path.join(bdir, "impl", "pnr", f"{proj}.rpt.txt")
-    snap_rel = f"boards/{a.board}/impl/{proj}_resources.json"
+    snap_rel = f"{brel}/impl/{proj}_resources.json"
     snap_abs = os.path.join(REPO, snap_rel)
     if not os.path.exists(syn):
         print(f"!! no synthesis hierarchy report at {os.path.relpath(syn, REPO)} — run a build first", file=sys.stderr)
@@ -108,7 +111,7 @@ def main():
     bmods = (base or {}).get("modules", {})
     btot = {k: tuple(v) for k, v in (base or {}).get("pnr_totals", {}).items()}
 
-    print(f">> Resources: boards/{a.board} {proj}   (baseline: {base_desc})")
+    print(f">> Resources: {brel} {proj}   (baseline: {base_desc})")
     print("   device (place & route):")
     for k in ("Logic", "Register", "CLS", "BSRAM", "DSP"):
         if k in totals:

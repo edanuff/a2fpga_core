@@ -1,4 +1,11 @@
-# A2N20v2 Card GS (Work In Progress)
+# A2N20v2 Card GS (deprecated build)
+
+> Status (2026-10-25): **deprecated.** This build for the A2N20v2 card has been superseded by
+> the [a2n20v2-Enhanced](../../a2n20v2-Enhanced/README.md) build, which carries the GS-specific
+> build features (dual-rate SDRAM with the SHR aux banks in SDRAM, the `_fb` framebuffer
+> variant) alongside the BL616 coprocessor features. Kept buildable under
+> `boards/deprecated/`; not rebuilt against shared-HDL changes. See
+> [boards/deprecated/README.md](../README.md).
 
 This is the project version that builds the FPGA bitstream for the 
 [Tang Nano 20K](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/nano-20k.html)
@@ -15,8 +22,8 @@ for //e double-hires will not usually run on a II, nor will IIgs software run on
 a II or //e.  However, the soft switches and display modes are supported on all
 models for software you write yourself.
 
-NOTE: This version is considered experimental but will eventually become the
-main A2N20v2 release.
+NOTE: this version was the experimental GS-focused build; its features moved into the
+a2n20v2-Enhanced build.
 
 New features that this project provides include:
 
@@ -47,8 +54,8 @@ turn the relative file paths into absolute file paths.
 
 ## Documentation
 
-- [Project documentation wiki](../../docs/README.md) — Gowin CLI setup, architecture, conventions, gotchas
-- [Agent & contributor guide](../../AGENTS.md)
+- [Project documentation wiki](../../../docs/README.md) — Gowin CLI setup, architecture, conventions, gotchas
+- [Agent & contributor guide](../../../AGENTS.md)
 - [This board's tasks & status (TODO.md)](TODO.md)
 - Board design docs:
   - [SDRAM framebuffer workplan (implemented, archived)](docs/archive/WORKPLAN.md)

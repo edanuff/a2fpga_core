@@ -4,7 +4,8 @@
 #
 # Usage:
 #   tools/flash.sh <board> [--sram]
-#     <board>  board directory under boards/ (e.g. a2mega, a2n20v2)
+#     <board>  board directory under boards/ (e.g. a2mega, a2n20v2); the deprecated
+#              boards under boards/deprecated/ are found by name too
 #     --sram   load to volatile SRAM (lost on power-down) instead of SPI flash
 #
 # Environment:
@@ -15,8 +16,8 @@
 #   DRY_RUN=1 print the openFPGALoader command without running it
 #
 # Per-board programming config (the error-prone knowledge this encapsulates):
-#   a2n20v1 / a2n20v2 / a2n20v2-GS / a2n20v2-Enhanced  -> -b tangnano20k   (Tang Nano 20K)
-#   a2n9                                               -> -b tangnano9k    (Tang Nano 9K)
+#   a2n20v2 / a2n20v2-Enhanced (and deprecated a2n20v1, a2n20v2-GS) -> -b tangnano20k (Tang Nano 20K)
+#   a2n9 (deprecated)                                                 -> -b tangnano9k  (Tang Nano 9K)
 #   a2mega (Tang Mega 60K) / a2p25 (Tang Primer 25K)   -> -c esp32s3       (on-board ESP32S3 programmer)
 #
 set -uo pipefail
@@ -29,12 +30,14 @@ mode="flash"
 
 if [[ -z "$board" ]]; then
     echo "Usage: tools/flash.sh <board> [--sram]"
-    echo "Boards:"; (cd "$REPO/boards" && ls -d */ 2>/dev/null | tr -d '/')
+    echo "Boards:"; (cd "$REPO/boards" && ls -d */ 2>/dev/null | tr -d '/' | grep -v '^deprecated$')
+    echo "Deprecated:"; (cd "$REPO/boards/deprecated" 2>/dev/null && ls -d */ 2>/dev/null | tr -d '/')
     exit 2
 fi
 
 bdir="$REPO/boards/$board"
-[[ -d "$bdir" ]] || { echo "No such board: '$board' (see boards/)"; exit 2; }
+[[ -d "$bdir" ]] || bdir="$REPO/boards/deprecated/$board"
+[[ -d "$bdir" ]] || { echo "No such board: '$board' (see boards/ and boards/deprecated/)"; exit 2; }
 
 gprj="${GPRJ:-$(cd "$bdir" && ls *.gprj 2>/dev/null | head -1)}"
 nprj="$(cd "$bdir" && ls *.gprj 2>/dev/null | wc -l | tr -d ' ')"
