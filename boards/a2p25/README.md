@@ -1,18 +1,67 @@
 # A2P25 Card
 
-This is the project version that builds the FPGA bitstream for the 
-[Tang Primer 25K](https://wiki.sipeed.com/hardware/en/tang/tang-primer-25k/primer-25k.html)
-version of the A2FPGA Apple II card.
+> Status (2026-10-25): rewritten for the displayport1 board revision. The IIgs boots on the
+> new core over DisplayPort 1080p with SHR and DOC audio (2026-10-11); the board is in
+> active bring-up and not a release.
 
-Coming soon
+The A2P25 is the A2FPGA Apple II card built around the
+[Tang Primer 25K](https://wiki.sipeed.com/hardware/en/tang/tang-primer-25k/primer-25k.html)
+SOM (Gowin GW5A-LV25MG121). The current board revision, **displayport1**, adds a 64 Mbit
+HyperBus PSRAM (Infineon S27KL0642), an ESP32-S3 coprocessor on an 8-bit OSPI link, and a
+USB-C DisplayPort Alt Mode output driven from the GW5A's hardened MIPI D-PHY used as a raw
+serializer (4 lanes, RBR, 1080p) through an SN75DP130 retimer; the rev-0 board (HDMI, no
+memory, ES5503 on the ESP32 over an LCD_CAM capture link) is retired.
+
+What the core carries on this board (decided in `hdl/a2p25_profile.vh`; the GW5A-25 is
+logic-bound at ~97% CLS and 52/56 BSRAM):
+
+- Apple II / //e / IIgs video including SHR, through a HyperRAM framebuffer scanned out at
+  1080p over DisplayPort (`framebuffer_1080p` + the shared `hdl/displayport` core)
+- IIgs Ensoniq DOC in the fabric (`doc5503_pipelined`, wavetable in HyperRAM behind a fetch
+  cache at the arbiter's top priority)
+- Disk II (slot 5) and ProDOS hard disk (slot 6) images served by the ESP32
+- IIgs autodetect on the bus; the Apple's reset is held by the ESP32 until media is mounted
+- Off for the first fit: SuperSprite, Mockingboard (resource budget), Super Serial Card (no
+  UART pins on this revision), Uthernet II (BSRAM budget)
+
+## Building and flashing
+
+```bash
+tools/build.sh a2p25                    # a2p25.gprj (the only full-core project)
+tools/flash.sh a2p25                    # through the on-board ESP32-S3 (openFPGALoader -c esp32s3)
+```
+
+The board has several bench projects beside the core: `a2p25_dp_test*.gprj` (DisplayPort
+colorbars, 2 and 4 lanes, probes, blind-sink and AUX-observation variants),
+`a2p25_psram_test_ck54/81/108.gprj` (the HyperRAM eye-scan test at three clock rates) and
+`legacy_a2p25_rev0.gprj` (the rev-0 board's core, kept buildable under `hdl/legacy/`). Pass
+`GPRJ=<file>` to `tools/build.sh` and `tools/flash.sh` for those; both refuse to guess.
+Build with `bit_security 0` as every GW5A project here does (see `docs/gotchas.md`).
+
+## ESP32-S3 coprocessor
+
+The board runs the **shared a2mega ESP32-S3 firmware** (`boards/a2mega/src/a2fpga_esp32/`)
+built as board revision 225: USB-C PD and DP Alt Mode entry (FUSB302B, mux control, HPD
+reconstruction from PD VDMs), the Enhanced feature set over the OSPI link (on-screen menu and
+console, Disk II and HDD image serving, slot configuration, reset hold), WiFi with a telnet
+console and FTP, and network bitstream streaming. Build and flash instructions:
+[docs/ESP32_FW_A2P25.md](docs/ESP32_FW_A2P25.md); the feature port's status:
+[docs/ESP32_FEATURE_PORT.md](docs/ESP32_FEATURE_PORT.md) (P1–P4 verified 2026-10-12). Storage is
+the ESP32's LittleFS plus USB mass storage on the ESP32's own USB port; there is no SD card.
 
 ## Documentation
 
 - [Project documentation wiki](../../docs/README.md) — Gowin CLI setup, architecture, conventions, gotchas
 - [Agent & contributor guide](../../AGENTS.md)
 - [This board's tasks & status (TODO.md)](TODO.md)
-- Board design docs:
-  - [HyperRAM bandwidth budget (§3)](../../docs/memory_bandwidth_analysis.md#3-a2p25--hyperram-bandwidth-budget) — framebuffer + fabric Ensoniq + shadow memory on the a2-p25 board rev
-  - [LCAM capture session notes (rev 0, archived)](docs/archive/LCAM_SESSION_NOTES.md)
-  - [ESP32 3-wire SPI protocol (rev 0, archived)](docs/archive/ESP32_SPI_PROTOCOL.md)
-  - [ESP32 firmware (a2fpga_esp32)](src/a2fpga_esp32/README.md)
+- Board design docs (`docs/`):
+  - [MODERNIZATION_PLAN.md](docs/MODERNIZATION_PLAN.md) — the displayport1 plan: priorities, clocking, the HyperRAM controller and memory map, the bench ladder and every bench result (DP first light, PSRAM, 4-lane 1080p, framebuffer, the IIgs boot, SHR and DOC root causes, the USB-C-to-HDMI adapter investigation), known risks, build provenance
+  - [DP_ALTMODE_DPHY_DESIGN.md](docs/DP_ALTMODE_DPHY_DESIGN.md) — why DisplayPort over the D-PHY, the analog chain, the alternatives rejected, the link policy inherited from the a2mega census
+  - [PINOUT_DISPLAYPORT1.md](docs/PINOUT_DISPLAYPORT1.md) — netlist-derived ball map (cited from every `.cst`)
+  - [PSRAM_TEST.md](docs/PSRAM_TEST.md) — the HyperRAM eye-scan test and its results
+  - [RESOURCE_AUDIT.md](docs/RESOURCE_AUDIT.md) — per-module resource accounting on the GW5A-25, the DOC fetch cache, the port-priority decision; read before adding anything
+  - [TOP_INTEGRATION_PLAN.md](docs/TOP_INTEGRATION_PLAN.md) — how the new top was derived from the a2mega top (memory map, resource scoping, decisions)
+  - [ESP32_FW_A2P25.md](docs/ESP32_FW_A2P25.md) · [ESP32_FEATURE_PORT.md](docs/ESP32_FEATURE_PORT.md) — the firmware on this board and the Enhanced feature port
+  - [HyperRAM bandwidth budget (§3)](../../docs/memory_bandwidth_analysis.md#3-a2p25--hyperram-bandwidth-budget) — the original budget, revised by the modernization plan's section 4
+  - [docs/archive/](docs/archive/README.md) — rev-0 material: LCAM capture notes, the 3-wire SPI protocol
+- Rev-0 firmware: [src/a2fpga_esp32/README.md](src/a2fpga_esp32/README.md) (LCAM-era, not used on this board; whether to keep it is an open maintainer decision)
