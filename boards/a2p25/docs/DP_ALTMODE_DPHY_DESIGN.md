@@ -1,6 +1,10 @@
 # A2P25 Board Rev: USB-C DisplayPort Output via Hardened MIPI D-PHY
 
-**Status:** Proposed design for next a2p25 board rev
+**Status (2026-10-25):** built and working. This is the design basis of the displayport1
+board revision and of `boards/a2p25/hdl/dp/transceiver_bank_dphy.sv`; DP colorbars lit on
+2026-10-10 and the full core runs the IIgs at 1080p x4 over this chain since 2026-10-11
+(`MODERNIZATION_PLAN.md` sections 6b–6g). The analysis below is as written on 2026-09-01;
+the open risks that survived the bench are in `MODERNIZATION_PLAN.md` section 7.
 **Date:** 2026-09-01
 **Depends on:** a2mega DP TX gateware (60K/138K SERDES implementation), a2mega USB-C alt-mode support-IC stack
 

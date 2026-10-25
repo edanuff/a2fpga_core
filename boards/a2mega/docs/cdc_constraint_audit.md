@@ -1,5 +1,7 @@
 # CDC / timing-constraint audit (a2mega DP, 08-22)
 
+> Status (2026-10-25): reference. Hypothesis document of 2026-08-22; its recommendations landed in `timing_round2.md` (set-level fixes, the shadow-diff proof tool) and in `transceiver_bank_gowin.v`, which cites it.
+
 **Why.** Test log row 85: the SAME RTL, with only placement perturbed
 (`set_option -place_option 1`), went from 6 blinks-to-lock to ZERO. Every
 build reports 0 setup/hold violations and TNS 0.000, and `Fmax` has no

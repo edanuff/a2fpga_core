@@ -1,5 +1,7 @@
 # a2mega Full-Core PnR Structural Analysis — Why Closure Is a Lottery, and How to End It
 
+> Status (2026-10-25): reference, partly executed. The first structural item (`wr_fifo` to BSRAM) shipped; the campaign continues in `timing_round2.md`, which is the live record. Cited from `framebuffer_1080p.sv`.
+
 **Analysis date:** 2026-08-31.
 **Timing snapshots** are the build artifacts present in `boards/a2mega/impl/pnr/` at analysis
 time (copied to a scratch dir before analysis; the tree is being rebuilt by the bench session):

@@ -1,5 +1,7 @@
 # Timing campaign, round 2 — durable closure (2026-09-02 →)
 
+> Status (2026-10-25): current; the log ends with the 2026-10-25 re-closure of the 138B clk100 AUX ladder after the 2026-10-22 merge (three clean rolls, +0.45 to +0.77 reported).
+
 Rule (ed): re-rolls are not closure. A build is **durable** only when worst
 setup slack is positive with margin (target ≥ +0.5 ns, the observed roll
 spread) on every clock, on the deterministic dp_test gate AND across ≥3

@@ -1,6 +1,11 @@
 # 65C816 in-socket replacement — scoping (a2mega 1.0a3, GW5AST-138B)
 
-**Status: scoping document, 2026-09-05. No HDL written yet.** This is the
+**Status (2026-10-25): stages S2–S6 are merged** — ROM 01 and ProDOS boot through the real
+socket on the 138B (`hdl/twgs/`, `GS_SOCKET` build); section 8b is the integration record and
+section 3.3 the decision record of the datasheet departures. Sections 0–7 and 9 are the
+2026-09-05 scoping as written; "no HDL yet" statements in them are historical. Next: the S6
+auto-arm reset sequencing and the S7 accelerator (`gs_socket_s7_accelerator_scoping.md`).
+**Scoping document, 2026-09-05.** This is the
 Phase C material of `PRE_REV_EXERCISE_PLAN.md` (C0 circuit review + C1 RTL
 inventory + the sim/bench plan), gathered so the first iteration can be
 decided before any RTL work starts.

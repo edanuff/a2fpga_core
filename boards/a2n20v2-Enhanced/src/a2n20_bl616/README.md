@@ -1,6 +1,6 @@
 # A2N20 Tang Nano 20K BL616 Firmware
 
-BL616 microcontroller firmware providing application-tier services to the a2fpga Apple II FPGA design on the Sipeed Tang Nano 20K. Replaces the PicoRV32 soft CPU + SD card SPI currently used in the FPGA with a dedicated MCU solution, freeing FPGA logic and providing significantly more RAM and processing power for filesystem access, USB peripherals, and future extensibility.
+BL616 microcontroller firmware providing application-tier services to the a2fpga Apple II FPGA design on the Sipeed Tang Nano 20K. (History, 2026-10-25 note: it replaced the PicoRV32 soft CPU + SD card SPI that the FPGA used until mid-2026; the comparisons with "PicoRV32 (current)" further down are from that time.) A dedicated MCU solution, freeing FPGA logic and providing significantly more RAM and processing power for filesystem access, USB peripherals, and future extensibility.
 
 ## Goals
 

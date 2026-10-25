@@ -1,5 +1,7 @@
 # Tang Mega 138K Module Analysis — Memory System Implications
 
+> Status (2026-10-25): reference. Pre-silicon analysis (2026-07-24); the 138K SOM was verified on 2026-08-20 and is built by `a2mega_138B.gprj`. Cited from `clocks_138b.sv` and `framebuffer_1080p.sv` for the scaling and memory arguments; the ball map is `SOM_138B_BALLMAP.md`.
+
 *Analysis date: 2026-07-24. Status: analysis only — no bring-up work committed.*
 
 ## Scope

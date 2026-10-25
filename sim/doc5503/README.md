@@ -10,7 +10,10 @@ hardware).
 
 See `boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md` (§11-§12) for
 the hardware history and the line-cited port-contract accounting this
-model implements.
+model implements. The a2p25 runs the same `doc5503_pipelined` on its
+HyperRAM port (behind `hdl/sound/doc_fetch_cache.sv`, exercised here by
+`tb_fetch_cache.sv` / `run_fetch_cache.sh`); the memory-model latencies in
+this bench cover that port too.
 
 ## Running
 

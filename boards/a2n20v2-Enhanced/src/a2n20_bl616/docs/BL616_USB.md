@@ -12,8 +12,12 @@ grounded assessment of which other USB device classes are feasible.
 - The single port is **host *or* device per firmware build** — not both. The
   default firmware is the **FT2232 device** (JTAG+UART programming bridge); the
   **`firmware_host/`** build is a **USB host**. They are separate images.
-- **Working today:** USB-host **XInput gamepad** → pressing **Select** toggles
-  the HDMI display between the Apple II output and an MCU-drawn menu.
+- **Working today** (status 2026-10-25; the sections below were written for the first
+  gamepad milestone): USB-host **XInput gamepads**, **HID keyboards and consumer-page
+  remotes**, **mass storage** (the disk-image volume and the self-update source),
+  **CDC-ECM USB-Ethernet** for the Uthernet II bridge, all through a hub; the EHCI
+  queue-head pool was raised to 20 after a famine deafened the last device and killed
+  hot-plug. **Select** toggles the HDMI display between the Apple II output and the menu.
 - The BL616 has **native WiFi 6 + BLE** radios, **but on the Tang Nano 20K there
   is no antenna wired to them — so wireless (native *or* USB dongle) is not an
   option.** Card↔PC communication therefore goes over **wired USB-Ethernet**

@@ -1,6 +1,9 @@
 # a2p25 displayport1 — full-core integration plan (track B3 + B5)
 
-Status 2026-10-11: B4 (framebuffer on PSRAM) has first light. `sound_glu` /
+Status (2026-10-25): executed. The new top is `boards/a2p25/hdl/top.sv` and boots the IIgs with
+SHR and DOC audio (2026-10-11, `MODERNIZATION_PLAN.md` section 6f). Section 6 holds the
+decisions that still bind; folding them into the modernization plan and archiving this file
+is open. Status as written on 2026-10-11: B4 (framebuffer on PSRAM) has first light. `sound_glu` /
 `doc5503_pipelined` (B3) and the shadow memory (B5) both hang off the Apple
 bus, so neither has a standalone bench: they arrive with the new `top.sv`.
 This document is the port plan for that top. Parent plan:

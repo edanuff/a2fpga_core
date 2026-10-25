@@ -1,6 +1,10 @@
 # Disk II / ProDOS image serving on a2n20v2-Enhanced (BL616)
 
-Status: **design** (2026-06-23). Backend: SD card (FPGA SPI tunnel) and/or USB Mass Storage
+Status (2026-10-25): **implemented** in the BL616 firmware (`src/a2n20_bl616/`): track-on-demand
+Disk II with `.nib` and on-the-fly GCR for `.dsk`/`.do`/`.po`/`.2mg` (`gcr_dsk.c`, read-write
+with decode-on-flush), the ProDOS HDD block device (`hdl/disk/hdd.sv`, slot 6) and the same
+model on the ESP32 for the a2mega/a2p25. The text below is the 2026-06-23 design as written.
+Original status: **design** (2026-06-23). Backend: SD card (FPGA SPI tunnel) and/or USB Mass Storage
 on the BL616 host. Informed by reading the existing A2FPGA HDL/firmware and the
 [MiSTle-Dev/NanoApple2](https://github.com/MiSTle-Dev/NanoApple2) core (same GW2AR Tang Nano 20K,
 same BL616 companion-MCU lineage, same Edwards `apple2fpga` Disk II core).

@@ -23,8 +23,8 @@
 - [ ] **Dual-rate / `_fb` CDC request path is not timing-verified** (word-granularity corruption
       hazard): [upstream #52](https://github.com/a2fpga/a2fpga_core/issues/52)
 - [ ] Startup gate when the card is powered before the Apple (supplemental power): the reset
-      contract is jumped and the Apple does not boot; the fix (an `a2_alive` level gate that
-      re-arms the hold) is in flight and not merged
+      contract is jumped and the Apple does not boot. Reported in agent notes with a proposed
+      fix (an `a2_alive` level gate that re-arms the hold); nothing for it is in the tree
 - [ ] Fold the GS build into the Enhanced build (shared `apple_bus` / `apple_memory_sdram` done;
       next `DUAL_RATE_SDRAM`, then the framebuffer parameter) so one core serves both
 - [ ] Uthernet II: hardware TCP/UDP socket modes (only MACRAW is implemented)

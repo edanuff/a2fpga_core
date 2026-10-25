@@ -1,10 +1,21 @@
 # a2mega JTAG / bitstream-flash reliability
 
-**Status:** analysis complete, **hardware verification pending** (board powered off and
-unavailable at the time of writing). Everything below is labelled **VERIFIED** (read
-directly out of a file in this repo, the carrier schematic, or the PnR report) or
-**INFERRED** (reasoning on top of verified facts). Nothing here has been re-measured on
-hardware.
+> **Read this first (status 2026-10-25).** The root cause is in the section
+> "2026-08-15: TRUE ROOT CAUSE — SecurityBit + auto-boot race", which supersedes every
+> verdict before it: Gowin bitstreams default `SecurityBit: ON`, and the GW5A's auto-boot
+> retry re-arms against the still-valid flash image mid-operation, racing openFPGALoader's
+> JTAG-SPI passthrough (wedges, fake successes, corrupt content). The fix is `bit_security 0`
+> in every process configuration (done in all projects), a 500 kHz flash phase through the
+> ESP32 bridge (`tools/flash.sh`), and the `flash_rescue.gprj` SRAM core for probing and
+> erasing a wedged part. The hardware was never marginal. The first ~700 lines are the
+> investigation that got there, kept as the record. The later a2mega3-loader patch
+> (skip eraseSRAM, keep the configured device) exists only outside the repo (documentation
+> audit, section 5).
+
+**Original status (2026-08-04):** analysis complete, **hardware verification pending** (board
+powered off and unavailable at the time of writing). Everything below is labelled **VERIFIED**
+(read directly out of a file in this repo, the carrier schematic, or the PnR report) or
+**INFERRED** (reasoning on top of verified facts).
 
 ---
 

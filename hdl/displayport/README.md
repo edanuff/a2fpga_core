@@ -1,4 +1,14 @@
-# DisplayPort transmitter core (vendored)
+# DisplayPort transmitter core
+
+> Status (2026-10-25): the core has been developed **in this repository** since 2026-08
+> (AUX front end and link policy from the a2mega census, M5 runtime AFE, timing round 2,
+> the 4-lane MSA and SDP audio path, the a2p25 AUX/training stack) and runs on two boards:
+> the a2mega (2-lane HBR, GW5A SERDES backend below) and the a2p25 (4-lane RBR through the
+> GW5A-25 D-PHY, `boards/a2p25/hdl/dp/transceiver_bank_dphy.sv`). The vendoring paragraph
+> that follows describes the August origin; whether `edanuff/DisplayPort_Verilog` is still
+> the development home to re-sync with, or this directory is now the source of truth, is an
+> open maintainer question (documentation audit, section 5). Until it is answered, treat the
+> tree here as what the boards build.
 
 Vendored from https://github.com/edanuff/DisplayPort_Verilog
 (local dev sandbox: a checkout of that repository outside this one), branch
@@ -25,8 +35,9 @@ directory and updating the commit hash above.
   entirely in fabric by `auxch/channel_managemnt.v`.
 - `core/` — main stream processing, scrambler, training/idle patterns.
 - `video/` — internal timing gen, pixel CDC FIFO, TU packer, MSA
-  (1ch/2ch wired; `msa_inserter_4ch.v` exists but 4-lane is NOT wired in
-  `dp_transmitter` yet).
+  (1, 2 and 4-channel inserters all wired; `LANE_COUNT=4` is what the a2p25
+  builds at 1080p since 2026-10-11, with the 4-lane SDP audio fix of the
+  same day).
 - `audio/` — SDP engine, Maud measurement, sample buffer.
 - `auxch/` — AUX channel, hotplug decode (0.5 ms IRQ / 2 ms disconnect
   thresholds), link policy.
@@ -61,6 +72,11 @@ is correct as generated; a future 4-lane IP needs it on lanes 0 and 1
 as well, plus a new `DP_SERDES_LANES_*` branch in
 `transceiver_bank_gowin.v`.
 
-Status: simulation-verified + timing-closed on GW5AT-60B (1080p59.94,
-2-lane HBR, ~2.9k LUT / 13 BSRAM / 2 PLLA). **No hardware bring-up yet.**
-Bring-up plan: `boards/a2mega/docs/BRINGUP_1_0A3_PLAN.md`.
+Status of the a2mega backend: hardware-proven on both SOMs (60K from 2026-08,
+138K from 2026-08-20; the 138K has its own IDE-generated SERDES IP under
+`boards/a2mega/hdl/gowin/138B/dp_serdes/` and die lanes 1+2 instead of 2+3),
+through hubs, converters and direct DP monitors (`boards/a2mega/docs/
+adapter_census_results.md`). The executed bring-up plan:
+`boards/a2mega/docs/BRINGUP_1_0A3_PLAN.md`; the bench log: `test_log.md`.
+Timing: `boards/a2mega/docs/timing_round2.md` (every change to the AUX
+ladder runs `sim/shadow_diff.py` against a git revision).
