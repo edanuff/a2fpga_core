@@ -75,7 +75,7 @@ verified on the a2p25.
   - **Board revision and bench ground truth**
     - [test_log.md](docs/test_log.md) — the bench log (every experiment, two tables); ground truth for the 1.0a3 campaign
     - [bringup_1_0a3_log.md](docs/bringup_1_0a3_log.md) — the 1.0a3 bring-up journal · [BRINGUP_1_0A3_PLAN.md](docs/BRINGUP_1_0A3_PLAN.md) — the executed plan (section 1 lists the board's USB-C, PD, SERDES and ESP32 pin facts)
-    - [board_1_0a4_requirements.md](docs/board_1_0a4_requirements.md) — the 1.0a4 rev gate · [a2p25_carryover_2026-10-11.md](docs/a2p25_carryover_2026-10-11.md) — what the a2p25 proved for it · [PRE_REV_EXERCISE_PLAN.md](docs/PRE_REV_EXERCISE_PLAN.md) — the pre-revision gates (status is a maintainer question)
+    - [board_1_0a4_requirements.md](docs/board_1_0a4_requirements.md) — the 1.0a4 rev gate · [a2p25_carryover_2026-10-11.md](docs/a2p25_carryover_2026-10-11.md) — what the a2p25 proved for it (its *Remaining gates* section is the live list; the 2026-08 exercise plan is archived)
     - [apple_off_backfeed_level_shifters.md](docs/apple_off_backfeed_level_shifters.md) — level-shifter back-feed with the Apple off (1.0a4 design note)
     - [btb_pinout_1_0a3.md](docs/btb_pinout_1_0a3.md), [a2mega_pinmap_1_0a3.csv](docs/a2mega_pinmap_1_0a3.csv), [tang_mega_die_names.json](docs/tang_mega_die_names.json) — pin and ball maps (cited from the `.cst` files)
     - [SOM_138B_BALLMAP.md](docs/SOM_138B_BALLMAP.md), [tang_mega_138k_analysis.md](docs/tang_mega_138k_analysis.md) — the 138K SOM

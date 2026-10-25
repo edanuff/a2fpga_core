@@ -205,7 +205,7 @@ Weekend backfill: only rows with certain provenance; `?` = not recorded
 
 <!-- new rows below; never reuse ids -->
 
-## GS socket bench — in-socket 65C816 (Phase C of PRE_REV_EXERCISE_PLAN)
+## GS socket bench — in-socket 65C816 (Phase C of the pre-revision exercise plan, now `archive/dp-bringup-2026-08/PRE_REV_EXERCISE_PLAN.md`)
 
 Own table: the DP columns above do not apply. Machine = ROM 01 IIgs, no other
 cards, CPU socket empty, ribbon from the card's J5 to the socket. Card = B3

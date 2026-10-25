@@ -1,11 +1,12 @@
 # a2mega 1.0a4 — board revision requirements (rev gate)
 
-**Ship gate REVISED 08-20: the send is gated on the pre-revision
-exercise plan (`PRE_REV_EXERCISE_PLAN.md`) — steady video → USB 2.0
-through hub → 65C816 in-circuit emulation (the unverified socket
-circuit) → item 4b power DMM. This document is COMPLETE and parked;
-Phase C/P findings fold in before the send.** (Original gate below was
-Fri 2026-08-22, superseded.) Every item is
+**Ship gate (2026-10-25): two bench items remain before the send,
+both listed under *Remaining gates* below — item 4b (the power-path
+DMM) and USB host through the dock. The 2026-08-20 exercise plan that
+used to gate this document is done otherwise (video steadiness, the
+65C816 socket) and is archived at
+`archive/dp-bringup-2026-08/PRE_REV_EXERCISE_PLAN.md`.** (Original gate
+below was Fri 2026-08-22, superseded.) Every item is
 EVIDENCED (links to test log / bringup log) or marked OPEN with the
 experiment that closes it. Nothing goes on the board without a reason;
 no rev until the OPEN items that could change the netlist are closed.
@@ -13,6 +14,25 @@ no rev until the OPEN items that could change the netlist are closed.
 **2026-10-11:** the a2p25 displayport1 board validated the §1 AUX network on
 hardware and produced shared-gateware fixes and HyperRAM results that this rev
 inherits — see [a2p25_carryover_2026-10-11.md](a2p25_carryover_2026-10-11.md).
+
+## Remaining gates (2026-10-25)
+
+1. **Item 4b, power-path DMM** (below): characterize the non-VBUS power path and
+   identify the element that passes the phantom VBUS backfeed. Decides whether
+   the LM66100/TPS2553 arrangement stays (plus item 4's blocking eFuse) or is
+   replaced. Still OPEN, uncharacterized.
+2. **USB host through the dock, on this board.** The a2mega has one port and
+   will never get a second one, so keyboard, gamepad and mass storage must reach
+   the ESP32 through the alt-mode dock's downstream ports while DP video runs.
+   Proven so far: USB 2.0 data through the dock's upstream port with the ESP32
+   as a *device* (firmware reflashed over the Anker hub with DP up, test log
+   row 62, 2026-08-20); the ESP32 *host* stack with hub-class enumeration,
+   XInput, HID and MSC (`usbhost.cpp`, shared firmware) on the a2p25 with a
+   plain hub (2026-10-12). Not yet done: the two together on the a2mega — the
+   port in host role behind the dock (role policy: device for 5 s after boot,
+   then host unless a PC enumerated us; VBUS sourced through the TPS2553 or the
+   dock self-powered). A bench session with the current firmware; any failure
+   that points at the connector, mux or VBUS path is a 1.0a4 netlist item.
 
 ## CONFIRMED changes (evidence in hand)
 

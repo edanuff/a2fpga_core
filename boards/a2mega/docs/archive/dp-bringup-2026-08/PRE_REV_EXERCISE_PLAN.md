@@ -1,5 +1,13 @@
 # Pre-revision exercise plan — prove every 1.0a3 circuit before the 1.0a4 send
 
+> Archived 2026-10-25 (ed): the plan is past. Phase V (video) and Phase C (the 65C816
+> socket, S2–S6 merged, ROM 01 and ProDOS boot through the real socket) are done; M5 shipped,
+> M1/M2/M3 are in the firmware and the log, M4/M6/M7 were margin work not taken further. The
+> two gates that survive were carried into `../../board_1_0a4_requirements.md`: item 4b (the
+> power-path DMM) and the USB-host-through-the-dock verification (Phase U, whose device
+> direction was proven on 2026-08-20, test log row 62, and whose host stack was proven on the
+> a2p25 with a plain hub on 2026-10-12). The text below is as written in 2026-08.
+
 **Decision of record (2026-08-20):** the 1.0a4 revision does NOT ship until
 every unverified circuit on 1.0a3 has been exercised. The freeze document
 (`board_1_0a4_requirements.md`) is complete and parked; it gains findings

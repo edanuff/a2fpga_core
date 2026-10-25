@@ -1,6 +1,6 @@
 # M5 — runtime TX AFE control via DRP (honor ADJUST_REQUEST)
 
-Goal (PRE_REV_EXERCISE_PLAN V2.4 / M5): make the sink's ADJUST_REQUEST a
+Goal (`archive/dp-bringup-2026-08/PRE_REV_EXERCISE_PLAN.md` V2.4 / M5): make the sink's ADJUST_REQUEST a
 real control loop — change TX swing / pre-emphasis at runtime through
 the SERDES DRP/UPAR port during link training, instead of the fixed
 max-swing "truthful declarations" policy.

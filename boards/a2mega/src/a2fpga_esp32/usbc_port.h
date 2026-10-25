@@ -178,7 +178,7 @@ int usbc_port_task(usbc_port_t *port);
  * detach. After hold_ms the port re-enters unattached and the normal
  * DRP toggle / attach / alt-mode ceremony runs from scratch. Bench
  * primitive for renegotiation-inclusive acquisition statistics
- * (PRE_REV_EXERCISE_PLAN V2.1); known limit: may not clear the
+ * (docs/archive/dp-bringup-2026-08/PRE_REV_EXERCISE_PLAN.md V2.1); known limit: may not clear the
  * drain-only hub wedge class (test log row 57), which needs its caps
  * drained — this clears everything a detach clears. */
 int usbc_port_virtual_replug(usbc_port_t *port, uint32_t hold_ms);

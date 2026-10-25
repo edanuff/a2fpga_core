@@ -36,6 +36,7 @@ The 1.0a3 USB-C DisplayPort bring-up. Ground truth for that campaign is
 | File | Was | Superseded by |
 |---|---|---|
 | [week_plan_0817.md](dp-bringup-2026-08/week_plan_0817.md) | One week's plan (board-out week) | executed; `board_1_0a4_requirements.md` carries what survived |
+| [PRE_REV_EXERCISE_PLAN.md](dp-bringup-2026-08/PRE_REV_EXERCISE_PLAN.md) | The 2026-08-20 gate plan for the 1.0a4 send (video steadiness, USB through the hub, the 65C816 socket, power) | Phases V and C done, M items shipped or dropped; the two surviving gates (item 4b power DMM, USB host through the dock) are in `board_1_0a4_requirements.md` (archived 2026-10-25) |
 | [four_lane_rbr_scope.md](dp-bringup-2026-08/four_lane_rbr_scope.md) | Scope for moving the a2mega to 4-lane RBR | direction not taken on a2mega (stayed 2-lane HBR); 4 lanes shipped on a2p25 through the shared `hdl/displayport` core (`a2p25_carryover_2026-10-11.md`) |
 | [m5_review_0821.md](dp-bringup-2026-08/m5_review_0821.md) | Disposition of the six M5 review items, all closed | `m5_afe_adjust_design.md` sections 10 to 14 |
 | [m5_perlane_proposal.md](dp-bringup-2026-08/m5_perlane_proposal.md) | Per-lane ADJUST_REQUEST proposal | applied 2026-08-22; `m5_afe_adjust_design.md` section 12 |

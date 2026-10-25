@@ -78,8 +78,8 @@ builds' CDC request-path crossing
 
 The 1.0a3 board runs the full core over USB-C DisplayPort on both SOMs (60K, 138K). The
 1.0a4 revision is gated by `boards/a2mega/docs/board_1_0a4_requirements.md` and the carry-over
-from the a2p25 (`a2p25_carryover_2026-10-11.md`); the pre-revision exercise plan's remaining
-gates are an open question for the maintainer (see `docs/DOCS_AUDIT_2026-10.md` section 5).
+from the a2p25 (`a2p25_carryover_2026-10-11.md`); its *Remaining gates* section lists the two
+bench items left (the power-path DMM, USB host through the dock on this board).
 On the 138K, the 65C816 in-socket replacement boots ROM 01 and ProDOS through the real socket
 (`gs_socket_65816_scoping.md` section 8b); next are the auto-arm reset sequencing and the
 TransWarp-style accelerator scoping (`gs_socket_s7_accelerator_scoping.md`), whose HyperRAM

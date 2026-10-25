@@ -6,7 +6,7 @@ section 3.3 the decision record of the datasheet departures. Sections 0–7 and 
 2026-09-05 scoping as written; "no HDL yet" statements in them are historical. Next: the S6
 auto-arm reset sequencing and the S7 accelerator (`gs_socket_s7_accelerator_scoping.md`).
 **Scoping document, 2026-09-05.** This is the
-Phase C material of `PRE_REV_EXERCISE_PLAN.md` (C0 circuit review + C1 RTL
+Phase C material of `archive/dp-bringup-2026-08/PRE_REV_EXERCISE_PLAN.md` (C0 circuit review + C1 RTL
 inventory + the sim/bench plan), gathered so the first iteration can be
 decided before any RTL work starts.
 
