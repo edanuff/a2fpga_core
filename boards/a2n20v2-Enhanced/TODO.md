@@ -1,29 +1,44 @@
 # A2N20v2-Enhanced TODO
 
-## High Priority
+> Status (2026-10-25): rewritten. The previous list (audio clock bug, PicoSoC interface,
+> "complete Disk II") described early 2026; all of it shipped. Current standings are in
+> `docs/boards.md`; the user-facing feature list is in [README.md](README.md).
 
-- [ ] **Fix audio output** - `clk_audio_w` has no driver, causing `audio_out`, `apple_speaker`, and related modules to be swept away during synthesis optimization
-- [ ] Complete interface between PicoSoC and the rest of the system
-- [ ] Complete the Disk II emulation and integrate with OSD
+## Shipped (for orientation)
 
-## Medium Priority
+- BL616 MCU coprocessor over 4-wire SPI (the PicoSoC soft core is gone): on-screen menu,
+  settings persistence, slot map applied before the Apple's reset is released
+- Disk II (.nib/.dsk/.do/.po/.2mg, on-the-fly GCR) and ProDOS HDD (.hdv/.po/.2mg) image serving
+  from a USB stick or the SD card tunnel
+- USB host: XInput gamepads, HID keyboards and media remotes, mass storage, USB-Ethernet
+  (CDC-ECM) through a hub (EHCI queue-head pool sized for it)
+- Uthernet II (W5100) MACRAW bridge, hardware-verified with IP65 / ADTPro / Contiki
+- Telnet console and menu mirror, FTP, modem on the Super Serial Card
+- Self-update of the MCU firmware and the FPGA core from the USB stick
+- Audio clock fixed; the WS2812 status LED as an MCU liveness watchdog
+- Three builds: classic (46/46 BSRAM), dual-rate SDRAM (SHR aux banks in SDRAM), framebuffer
 
-- [ ] Figure out how to persist settings to either the Tang Nano 20K attached flash or onto the SD Card
-- [ ] Create the on-screen display (OSD) software
-- [ ] Determine how to enter the OSD on a IIgs since /INH to replace the ROM is not viable
+## Open
 
-## Low Priority / Future
+- [ ] **Dual-rate / `_fb` CDC request path is not timing-verified** (word-granularity corruption
+      hazard): [upstream #52](https://github.com/a2fpga/a2fpga_core/issues/52)
+- [ ] Startup gate when the card is powered before the Apple (supplemental power): the reset
+      contract is jumped and the Apple does not boot; the fix (an `a2_alive` level gate that
+      re-arms the hold) is in flight and not merged
+- [ ] Fold the GS build into the Enhanced build (shared `apple_bus` / `apple_memory_sdram` done;
+      next `DUAL_RATE_SDRAM`, then the framebuffer parameter) so one core serves both
+- [ ] Uthernet II: hardware TCP/UDP socket modes (only MACRAW is implemented)
+- [ ] Classic build has no BSRAM headroom (46/46): any new feature must reclaim blocks first;
+      build with `RESOURCE_FAIL=bsram`
+- [ ] IIgs bus-timing items shared with a2n20v2 ([a2n20v2/TODO.md](../a2n20v2/TODO.md))
 
-- [ ] Document the PicoSoC peripheral memory map
-- [ ] Add configuration options for slot assignments via OSD
+## Known issues
 
-## Known Issues
+- Build warning about `doc_osc_halt_w` in `top.sv` (cosmetic)
+- Flashing the BL616 with `make flash` bricks the fused Tang Nano 20K boards; use the
+  `/flash-mcu` skill (`a2n20-mcu-program`) only. See the BL616 README.
 
-- Audio modules are being optimized away due to missing clock driver (see High Priority)
-- Build warnings about `doc_osc_halt_w` undeclared signal (line 608 in top.sv)
+## Build status
 
-## Build Status
-
-- Last verified build: 2026-01-16
-- Timing: All constraints met (clk_logic: 69.3 MHz actual vs 54 MHz required)
-- Resource usage: Logic 42%, BSRAM 68%, DSP 64%
+- Last verified builds: 2026-10-23 (all three projects, 0 timing violations; resource snapshots
+  in `impl/*_resources.json`)
