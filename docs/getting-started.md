@@ -29,7 +29,7 @@ and how to get them; `/setup` automates the checks and walks you through install
   on-board ESP32-S3, so the Arduino toolchain is needed both for the ESP32 firmware *and* for the
   `esp32_usb_jtag` programmer that `openFPGALoader -c esp32s3` talks to (see [boards.md](boards.md)).
   One firmware tree serves both boards (`boards/a2mega/src/a2fpga_esp32/`, selected by
-  `BOARD_REV`); the LCAM-era tree under `boards/a2p25/src/` does not match the current a2p25 board.
+  `BOARD_REV`); `boards/a2p25/src/` only points there.
 
 ## Important toolchain notes
 

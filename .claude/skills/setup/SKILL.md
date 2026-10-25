@@ -80,8 +80,9 @@ arduino-cli version 2>/dev/null && arduino-cli core list 2>/dev/null | grep -i e
 ```
 - **Missing:** offer `brew install arduino-cli`, then install the ESP32 core
   (`arduino-cli core install esp32:esp32`) — confirm first. Arduino IDE works too.
-- For board/sketch specifics, point to
-  [boards/a2p25/src/a2fpga_esp32/README.md](../../../boards/a2p25/src/a2fpga_esp32/README.md).
+- For board/sketch specifics, point to the shared firmware `boards/a2mega/src/a2fpga_esp32/`
+  (`make BOARD_REV=103 compile` for the a2mega, `225` for the a2p25) and
+  [boards/a2p25/docs/ESP32_FW_A2P25.md](../../../boards/a2p25/docs/ESP32_FW_A2P25.md).
 
 ## Step 6 — Summarize
 

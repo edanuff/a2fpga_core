@@ -92,8 +92,7 @@ The IIgs boots on the new core over DP 1080p with SHR and DOC audio (2026-10-11,
 `boards/a2p25/docs/MODERNIZATION_PLAN.md` sections 6f–6g). Open: the known risks in that
 plan's section 7 (D-PHY amplitude margin at the SN75DP130, the PLL cascade soak, CK# floating
 on non-Infineon HyperRAM parts), the resource ceiling (97% CLS; Mockingboard, SuperSprite and
-Uthernet II are off), and the HDD image corruption seen around installs. The previous
-revision's firmware tree under `boards/a2p25/src/` is a pending decision.
+Uthernet II are off), and the HDD image corruption seen around installs.
 
 ### 7. Board maturity
 

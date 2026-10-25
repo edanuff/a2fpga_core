@@ -11,7 +11,8 @@ The LCAM capture link itself is kept as useful work:** it reached lossless
 32,768-packet bursts at 13.5 MB/s and is a candidate low-latency FPGA-to-ESP32
 transport, possibly on the a2mega (ed, 2026-10-25). The previous revision's
 gateware is `boards/a2p25/hdl/legacy/` (`legacy_a2p25_rev0.gprj`); its
-firmware tree under `boards/a2p25/src/` awaits a maintainer decision.
+firmware tree was deleted from `boards/a2p25/src/` on 2026-10-25 (in git
+history before that date).
 
 | File | Was | Superseded by | Period |
 |---|---|---|---|

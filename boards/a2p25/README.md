@@ -64,4 +64,4 @@ the ESP32's LittleFS plus USB mass storage on the ESP32's own USB port; there is
   - [ESP32_FW_A2P25.md](docs/ESP32_FW_A2P25.md) · [ESP32_FEATURE_PORT.md](docs/ESP32_FEATURE_PORT.md) — the firmware on this board and the Enhanced feature port
   - [HyperRAM bandwidth budget (§3)](../../docs/memory_bandwidth_analysis.md#3-a2p25--hyperram-bandwidth-budget) — the original budget, revised by the modernization plan's section 4
   - [docs/archive/](docs/archive/README.md) — the previous revision's material: the LCAM capture-link notes (the link is proven lossless transfer work and may be reused; its ES5503 use is abandoned), the 3-wire SPI protocol
-- Previous-revision firmware: [src/a2fpga_esp32/README.md](src/a2fpga_esp32/README.md) (LCAM-era, not used on this board; where it lives is an open maintainer decision)
+- [src/README.md](src/README.md) — points at the shared ESP32 firmware in `boards/a2mega/src/` (the previous revision's firmware was deleted 2026-10-25)

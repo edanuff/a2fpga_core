@@ -27,7 +27,6 @@ IIgs sound is the fabric DOC5503 on PSRAM.
 - [ ] Resource ceiling: 97% CLS, 52/56 BSRAM; SuperSprite, Mockingboard and Uthernet II are off.
       Any addition needs a reclaim first; `tools/resource_report.py a2p25`
 - [ ] Fold the TOP_INTEGRATION_PLAN section 6 decisions into MODERNIZATION_PLAN and archive it
-- [ ] Decide the fate of the rev-0 firmware tree `src/a2fpga_esp32/` (maintainer)
 - [ ] USB-C-to-HDMI adapters: only RBR-capable, lane-count-honest adapters work (plan section
       6h recipe); document the qualified list for users
 

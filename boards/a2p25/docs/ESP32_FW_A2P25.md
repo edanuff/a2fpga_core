@@ -2,8 +2,8 @@
 
 The a2-p25 displayport1 revision runs the **a2mega ESP32-S3 firmware**
 (`boards/a2mega/src/a2fpga_esp32/`) built as board revision **225**. The
-old LCAM-era firmware under `boards/a2p25/src/` does not match this board
-and is not used.
+previous revision's LCAM-era firmware was deleted from `boards/a2p25/src/`
+on 2026-10-25 (git history has it).
 
 What the a2mega firmware brings over unchanged: the USB-C PD stack
 (FUSB302B), DP alt-mode entry and mux control, HPD-to-FPGA reconstruction

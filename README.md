@@ -234,8 +234,8 @@ VHDL code for the A2FPGA codebase that is portable across FPGA hardware.
 
 Coprocessor firmware and Apple II-side sources live under each board's `src/` directory:
 [boards/a2n20v2-Enhanced/src/](boards/a2n20v2-Enhanced/src/) (BL616 MCU firmware and the CardROM
-6502 source), [boards/a2mega/src/](boards/a2mega/src/) and [boards/a2p25/src/](boards/a2p25/src/)
-(ESP32-S3 firmware). The earlier on-FPGA PicoRV32 soft core (PicoSoC) and its firmware have been
+6502 source) and [boards/a2mega/src/](boards/a2mega/src/) (the ESP32-S3 firmware shared by the
+a2mega and the a2p25; see [boards/a2p25/src/README.md](boards/a2p25/src/README.md)). The earlier on-FPGA PicoRV32 soft core (PicoSoC) and its firmware have been
 removed; see [boards/a2n20v2-Enhanced/src/README.md](boards/a2n20v2-Enhanced/src/README.md).
 
 ## Credits
