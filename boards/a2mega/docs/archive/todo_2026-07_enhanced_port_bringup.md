@@ -248,8 +248,8 @@ burst-alignment assert. Open, in recommended order:
 
 - Uses ESP32-S3-MINI-1-N8 for control/configuration instead of internal PicoSoC
 - OSPI (8-bit parallel) interface between ESP32 and FPGA — register map in
-  [docs/ESP32_OSPI_DESIGN.md](docs/ESP32_OSPI_DESIGN.md), Enhanced-port additions in
-  [docs/ESP32_ENHANCED_PORT.md](docs/ESP32_ENHANCED_PORT.md)
+  [docs/ESP32_OSPI_DESIGN.md](../ESP32_OSPI_DESIGN.md), Enhanced-port additions in
+  [docs/ESP32_ENHANCED_PORT.md](../ESP32_ENHANCED_PORT.md)
 - USB-A port is wired to the FPGA (usb_hid_host core), not the ESP32;
   micro-SD, WiFi, and JTAG-to-FPGA are on the ESP32
 - Disk track/HDD block buffers are BSRAM (XFER SPACE 4/5), not DDR3
