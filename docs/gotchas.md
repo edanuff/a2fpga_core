@@ -1,5 +1,8 @@
 # Gotchas & Hard-Won Lessons
 
+> Status (2026-10-25): current. The Ensoniq-on-DDR3 entry below was rewritten; everything
+> else was reviewed against the code in the 2026-10 audit and stands.
+
 Non-obvious traps that have each cost real debugging time. Read the relevant section before
 working in these areas. **When you discover a new one, add it here** — that's the whole point.
 
@@ -82,12 +85,18 @@ working in these areas. **When you discover a new one, add it here** — that's 
   LUTs; synthesis then grinds for tens of minutes before `ERROR RP0006`). Mux the address by
   direction instead. Two R/W ports with one address each (the `hdd.sv`/`uthernet2.sv` pattern)
   infer fine.
-- **The GW5AT-60 has 118 BSRAMs and the a2mega uses nearly all of them.** Any new BSRAM must
-  reclaim one first. Note the biggest pool — the Ensoniq 64KB wavetable (32 BSRAMs) — is NOT
-  simply movable to DDR3: the DOC has a hard ~838 ns per-fetch deadline (timeout = audible
-  silence) and DDR3 tail latency (burst queue + refresh + CDC) misses it; that is why it was
-  moved to BSRAM in the first place. Much of the a2mega's BSRAM spend (CDC FIFOs, line-buffer
-  lead, DOC wavetable, disk buffers) is deliberate latency insulation against DDR3 variance.
+- **The GW5AT-60 has 118 BSRAMs and the a2mega uses nearly all of them** (107/118 in the
+  2026-10 build). Any new BSRAM must reclaim one first. The Ensoniq 64 KB wavetable (32 BSRAMs)
+  **did** move to DDR3, but not by pointing the baseline DOC at a memory port: the DOC has a
+  hard ~838 ns per-fetch deadline (a missed fetch is audible) and DDR3 tail latency (burst queue
+  + refresh + CDC) misses it, which is why the first attempts failed. What shipped (2026-08-04,
+  hardware-verified) is the **pipelined DOC** (`hdl/sound/doc5503_pipelined.sv`): each
+  oscillator's fetch is issued during its service slot and consumed at its next one, so the
+  deadline becomes the ~3.35 µs service period. The same module runs on the a2p25's HyperRAM
+  with a fetch cache in front and the DOC port at the arbiter's top priority. Design and
+  history: `boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md`; the differential proof:
+  `sim/doc5503/`. The rest of the a2mega's BSRAM spend (CDC FIFOs, line-buffer lead, disk
+  buffers) is still deliberate latency insulation against DDR3 variance.
 - **Do NOT convert `ddr3_port_cdc`'s FIFOs to registers to save BSRAM.** GW5A has no
   distributed RAM, so shallow FIFOs land in BSRAM and look like easy savings — but FF-array
   buffers crossing independent clocks **corrupt data on GW5AT** (the debugged "8-char rippling
