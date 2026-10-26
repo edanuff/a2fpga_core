@@ -27,12 +27,11 @@ boards/*/docs/**/*.pdf
 # Agent tooling
 .claude/
 
-# Open policy questions (docs/DOCS_AUDIT_2026-10.md section 5): uncomment once decided.
-# Q3 - are bench journals and AUX captures fork-only as a class?
-#boards/a2mega/docs/test_log.md
-#boards/a2mega/docs/bringup_1_0a3_log.md
-#boards/a2mega/docs/acquisition_matrix_results.md
-#boards/a2mega/docs/archive/dp-bringup-2026-08/
+# Decided 2026-10-25 (ed): the bench journals and AUX captures (test_log.md,
+# bringup_1_0a3_log.md, acquisition_matrix_results.md, archive/dp-bringup-2026-08/)
+# are PUBLIC; the design docs cite them by row.
+
+# Open policy question (docs/DOCS_AUDIT_2026-10.md section 5):
 # Q7 - if the skills are public contributor tooling, replace the .claude/ line above with:
 #.claude/settings.json
 #.claude/hooks/

@@ -1,26 +1,23 @@
 # DisplayPort transmitter core
 
-> Status (2026-10-25): the core has been developed **in this repository** since 2026-08
-> (AUX front end and link policy from the a2mega census, M5 runtime AFE, timing round 2,
-> the 4-lane MSA and SDP audio path, the a2p25 AUX/training stack) and runs on two boards:
-> the a2mega (2-lane HBR, GW5A SERDES backend below) and the a2p25 (4-lane RBR through the
-> GW5A-25 D-PHY, `boards/a2p25/hdl/dp/transceiver_bank_dphy.sv`). The vendoring paragraph
-> that follows describes the August origin; whether `edanuff/DisplayPort_Verilog` is still
-> the development home to re-sync with, or this directory is now the source of truth, is an
-> open maintainer question (documentation audit, section 5). Until it is answered, treat the
-> tree here as what the boards build.
+> Status (2026-10-25): current. **Development of this core happens here, in a2fpga_core.**
+> It runs on two boards: the a2mega (2-lane HBR, GW5A SERDES backend below) and the a2p25
+> (4-lane RBR through the GW5A-25 D-PHY, `boards/a2p25/hdl/dp/transceiver_bank_dphy.sv`).
 
-Vendored from https://github.com/edanuff/DisplayPort_Verilog
-(local dev sandbox: a checkout of that repository outside this one), branch
-`master`, commit `87cd538` ("Add examples/a2_mega: board-specific SERDES
-config, timing-verified"). MIT license; originally derived from Mike Field
-(hamster)'s Artix-7 DisplayPort source, restructured into an instantiable
-`dp_transmitter` with a Gowin GW5A SERDES backend.
+A DisplayPort 1.x source (transmitter) in Verilog: link training, DPCD and EDID handling in
+fabric, a pull-style video front end, audio in secondary-data packets, and a PHY backend
+per board. MIT license; originally derived from Mike Field (hamster)'s Artix-7 DisplayPort
+source, restructured into an instantiable `dp_transmitter`.
 
-**Upstream is the place to develop the core** (it has the Icarus
-testbenches under `test_benches/` and golden-model checkers under `misc/`
-that are not vendored here). Re-vendor by copying `src/**` over this
-directory and updating the commit hash above.
+**Standalone version.** Developers looking for this core without the a2fpga dependencies
+may want to start from [edanuff/DisplayPort_Verilog](https://github.com/edanuff/DisplayPort_Verilog),
+which also carries the Icarus testbenches (`test_benches/`) and golden-model checkers
+(`misc/`). Current development occurs in this repository, however, and this tree may
+contain fixes and features that have not yet been backported there (as of 2026-10: the AUX
+front end and link policy from the adapter census, the M5 runtime AFE, the timing round 2
+restructuring, the 4-lane MSA and SDP audio path, the a2p25 AUX/training stack and the
+D-PHY backend). This directory was seeded from that project at commit `87cd538`
+(2026-07); a backport session is planned.
 
 ## Layout
 
@@ -29,7 +26,7 @@ directory and updating the commit hash above.
   clock via `gowin_pixel_pll`) and outputs `cx`/`cy`; you return
   `rgb[23:0]` for the previous cycle's coordinates, registered on
   `clk_pixel`. Audio: `clk_audio` strobe + `audio_sample_word[1:0]`
-  (same contract as the vendored HDMI core). AUX is raw digital
+  (same contract as the HDMI core in `hdl/hdmi/`). AUX is raw digital
   (`auxch_in/out/tri`) — the pseudo-differential tri-state buffer idiom
   lives in the board top. Link training / DPCD / EDID are handled
   entirely in fabric by `auxch/channel_managemnt.v`.
@@ -45,7 +42,7 @@ directory and updating the commit hash above.
   fabric 8b10b because the GTR12 hard encoder can't force disparity for
   TPS2) and hand-written PLLA wrappers (`gowin_plls.v`).
 
-Not vendored: upstream `src/artix7/` (Xilinx GTX backend),
+Not carried over from DisplayPort_Verilog: `src/artix7/` (Xilinx GTX backend),
 `src/test_streams/` (legacy 73-bit stream test sources, incompatible with
 `dp_transmitter`'s front end), `src/debug/` (7-segment driver).
 
