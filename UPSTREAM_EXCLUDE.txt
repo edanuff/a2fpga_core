@@ -24,14 +24,14 @@ boards/*/docs/**/*.pdf
 # Outreach and correspondence drafts
 **/outreach/
 
-# Agent tooling
-.claude/
+# Agent tooling: SHIPPED upstream (ed, 2026-10-25). The skills (/setup, /build, /flash,
+# /flash-mcu) are contributor tooling that AGENTS.md and docs/getting-started.md rely on,
+# and .claude/hooks/guard-mcu-flash.py is the guard against bricking a fused Tang Nano 20K.
+# Nothing private lives there; keep it that way or list the file here.
 
 # Decided 2026-10-25 (ed): the bench journals and AUX captures (test_log.md,
 # bringup_1_0a3_log.md, acquisition_matrix_results.md, archive/dp-bringup-2026-08/)
 # are PUBLIC; the design docs cite them by row.
 
-# Open policy question (docs/DOCS_AUDIT_2026-10.md section 5):
-# Q7 - if the skills are public contributor tooling, replace the .claude/ line above with:
-#.claude/settings.json
-#.claude/hooks/
+# Third-party-derived notes (boards/a2mega/docs/twgs_reference.md, adb_micro_rom01_notes.md)
+# are the author's own synthesis and stay PUBLIC (ed, 2026-10-25).

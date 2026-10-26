@@ -8,9 +8,12 @@
 > in every process configuration (done in all projects), a 500 kHz flash phase through the
 > ESP32 bridge (`tools/flash.sh`), and the `flash_rescue.gprj` SRAM core for probing and
 > erasing a wedged part. The hardware was never marginal. The first ~700 lines are the
-> investigation that got there, kept as the record. The later a2mega3-loader patch
-> (skip eraseSRAM, keep the configured device) exists only outside the repo (documentation
-> audit, section 5).
+> investigation that got there, kept as the record. The later "a2mega3" openFPGALoader patch (keep the configured
+> device, skip the eraseSRAM step so the auto-boot cannot re-arm mid-flash) was
+> **not taken** (ed, 2026-10-25): it was never bench-validated, and the SecurityBit
+> fix plus the 500 kHz flash phase made it unnecessary. The patch and its write-up
+> exist on the branch `rescue/a2mega3-loader-patch` (not merged) and in the
+> out-of-tree rescue folder of 2026-10-22; do not revive it without a bench session.
 
 **Original status (2026-08-04):** analysis complete, **hardware verification pending** (board
 powered off and unavailable at the time of writing). Everything below is labelled **VERIFIED**

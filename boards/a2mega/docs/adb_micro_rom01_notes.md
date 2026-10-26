@@ -1,5 +1,9 @@
 # IIgs ADB microcontroller firmware (ROM 01, M50740, 341s0345) — reading notes
 
+> Status (2026-10-25): open investigation (the 9.95 ms /RESET re-assertion on the socket
+> bench). These are the author's reading notes on the disassembled micro ROM; the ROM itself
+> is not in this repository. Public (ed, 2026-10-25).
+
 Why: the a2mega socket bench (test_log.md G45–G63) shows this IIgs re-asserting
 its /RESET 9.95 ms after its own power-on release, permanently, on about half
 of power-ups — only when the a2mega is in the slot and no real 65816 is

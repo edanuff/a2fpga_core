@@ -1,5 +1,9 @@
 # TransWarp GS — Technical Reference
 
+> Status (2026-10-25): reference; the author's synthesis of the 1989 manual, no third-party
+> text reproduced. Input to the socket work (`gs_socket_65816_scoping.md` section 3.3 and
+> `gs_socket_s7_accelerator_scoping.md`). Public.
+
 This document is a **technical extraction and synthesis** of the *Applied Engineering TransWarp GS User's Manual (1989)* combined with register-level details from various sources.
 
 It is intended to provide **engineering-level context** when reasoning about:
