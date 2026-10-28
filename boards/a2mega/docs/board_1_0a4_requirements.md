@@ -90,6 +90,35 @@ inherits — see [a2p25_carryover_2026-10-11.md](a2p25_carryover_2026-10-11.md).
    i.e. today's undamped line genuinely rings (why external attenuation
    "fixed" it).
 
+   **BOM erratum found 2026-10-28 (1.0a3 as built):** R33/R34 were drawn
+   as 2 M but the assembly BOM (export 2026-08-02) carried
+   ERJ-1GNF1003C, the 100 k part number copied from the AUX bias
+   resistors, so every 1.0a3 board has **100 k** SBU bleeds, not 2 M.
+   That makes each bleed as stiff as the DP source presence bias
+   itself: with the crossbar closed, AUX_N idles near half rail instead
+   of near 3V3 and AUX_P sees ≈50 k to ground. All 1.0a3 AUX idle
+   measurements (the 08-13 SBU DC reads, the adapter census) were taken
+   in that condition, so orientation-detection or idle-level oddities
+   seen there should be retested on 1.0a5 before being attributed to
+   anything else. Fixed on 1.0a5 (reannotated R48/R49) with
+   ERJ-1GNJ205C; a2-mega `tools/preflight.py` now fails on a part
+   number shared by parts of different values.
+   Why 2 M is not optional (TUSB1046A-DCI datasheet SLLSF13B): the pin
+   table says SBU1/SBU2 "should be DC coupled to the SBU pin on the
+   Type-C receptacle. A 2-M ohm resistor to GND is also recommended",
+   and the switch electricals (section 6, "AUXp or AUXn and SBU1 or
+   SBU2") specify RON only with VI = 0-0.4 V on the AUXp path and
+   2.7-3.6 V on the AUXn path, with "AUX Channel DC common mode voltage"
+   limits of 0-0.4 V for AUXp/SBU and 2.7-3.6 V for AUXn/SBU. The
+   crossbar is a pair of pass switches biased for AUXp near ground and
+   AUXn near 3V3; a 100 k bleed against the 100 k AUXn pull-up parks the
+   AUXn/SBU line near 1.65 V, outside its characterized window, so the
+   AUXn switch ran out of spec on every 1.0a3 board. That is consistent
+   with (not proof of) the 08-13 "crossbar effectively open" finding and
+   the AUX_SBU_OVR workaround. The a2p25 (R43/R45 on its 2026-09-08
+   assembly BOM, now R45/R47) was built with the correct ERJ-1GNJ205C
+   and never showed the symptom.
+
    Additions, final values:
    (a) **Series 100 Ω per leg AT THE BTB PINS** (position is
    load-bearing: source termination sits at the driver end; the caps'
