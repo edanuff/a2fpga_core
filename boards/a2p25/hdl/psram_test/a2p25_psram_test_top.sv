@@ -60,7 +60,8 @@ module a2p25_psram_test_top #(
     parameter int AUTOSTART = 1,
     parameter int AUTO_LEN  = 2**21 - 16,       // words (top 16 = calibration block)
     parameter int UART_BAUD = 115_200,
-    parameter int STATUS_CLKS = CK_MHZ * 1_000_000 / 2   // 1 s
+    parameter int STATUS_CLKS = CK_MHZ * 1_000_000 / 2,  // 1 s
+    parameter int PROTOCOL  = 0                   // hyperram_ctrl PROTOCOL: 0 HyperBus, 1 Xccela, 2 detect
 ) (
     input  logic clk50_in,          // E2
 
@@ -147,10 +148,13 @@ module a2p25_psram_test_top #(
     logic            m_cal_ok;
     logic [4:0]      m_rd_arrival;
     logic [31:0]     m_stat_xfers, m_stat_lat2x, m_stat_rd_timeouts, m_stat_lat_mismatch;
+    logic            m_proto_xccela, m_det_fail;
+    logic [15:0]     m_dev_id;
 
     hyperram_ctrl #(
         .CLK_HZ     (CLK_HZ),
-        .ADDR_WIDTH (AW)
+        .ADDR_WIDTH (AW),
+        .PROTOCOL   (PROTOCOL)
     ) i_ctrl (
         .clk              (clk),
         .clk_mem          (clk_mem),
@@ -189,6 +193,9 @@ module a2p25_psram_test_top #(
         .stat_lat2x       (m_stat_lat2x),
         .stat_rd_timeouts (m_stat_rd_timeouts),
         .stat_lat_mismatch(m_stat_lat_mismatch),
+        .proto_xccela     (m_proto_xccela),
+        .dev_id           (m_dev_id),
+        .det_fail         (m_det_fail),
         .hr_ck            (hr_ck),
         .hr_cs_n          (hr_cs_n),
         .hr_rwds          (hr_rwds),
@@ -259,7 +266,10 @@ module a2p25_psram_test_top #(
         .m_stat_xfers        (m_stat_xfers),
         .m_stat_lat2x        (m_stat_lat2x),
         .m_stat_rd_timeouts  (m_stat_rd_timeouts),
-        .m_stat_lat_mismatch (m_stat_lat_mismatch)
+        .m_stat_lat_mismatch (m_stat_lat_mismatch),
+        .m_proto_xccela      (m_proto_xccela),
+        .m_dev_id            (m_dev_id),
+        .m_det_fail          (m_det_fail)
     );
 
     // ------------------------------------------------------------------

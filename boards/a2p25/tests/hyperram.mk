@@ -51,6 +51,7 @@ $(HR_PMODEL): $(HR_MODEL) | $(HR_BUILD)
 # Compile order: Gowin primitives first (they carry `timescale 1ns/1ps for
 # the RTL that follows), then RTL, model, harness, testbench.
 $(HR_BUILD)/hyperram_ctrl.vvp: $(HR_RTL) $(HR_TB_COMMON) test_hyperram_ctrl.sv $(HR_PMODEL)
+	@rm -f $@
 	iverilog $(HR_IVFLAGS) -s test_hyperram_ctrl -o $@ \
 	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(HR_PMODEL) $(HR_TB_COMMON) test_hyperram_ctrl.sv $(HR_IVFILTER)
 	@test -f $@
@@ -70,6 +71,7 @@ hyperram: $(HR_BUILD)/hyperram_ctrl.vvp
 
 # BIST
 $(HR_BUILD)/hyperram_bist.vvp: $(HR_RTL) $(HR_BIST_RTL) $(HR_TB_COMMON) test_hyperram_bist.sv $(HR_PMODEL)
+	@rm -f $@
 	iverilog $(HR_IVFLAGS) -s test_hyperram_bist -o $@ \
 	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(HR_BIST_RTL) $(HR_PMODEL) $(HR_TB_COMMON) test_hyperram_bist.sv $(HR_IVFILTER)
 	@test -f $@
@@ -92,6 +94,7 @@ hyperram_bist: $(HR_BUILD)/hyperram_bist.vvp
 #   make hyperram_ports
 HR_PORTS_RTL = ../../../hdl/hyperram/hyperram_ports.sv
 $(HR_BUILD)/hyperram_ports.vvp: $(HR_RTL) $(HR_PORTS_RTL) $(HR_TB_COMMON) test_hyperram_ports.sv $(HR_PMODEL)
+	@rm -f $@
 	iverilog $(HR_IVFLAGS) -s test_hyperram_ports -o $@ \
 	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(HR_PORTS_RTL) $(HR_PMODEL) $(HR_TB_COMMON) test_hyperram_ports.sv $(HR_IVFILTER)
 	@test -f $@
@@ -104,6 +107,60 @@ hyperram_clean:
 
 .PHONY: hyperram hyperram_bist hyperram_clean
 
+# ---- Xccela (AP Memory APS6408L) and boot-time device detection ----
+#   make xccela         PROTOCOL=1 against sim_models/aps6408l_model.sv
+#   make xccela_auto    PROTOCOL=2: must detect Xccela
+#   make xccela_cold    PROTOCOL=2, model ignores everything until Global Reset
+#   make hyperram_auto  PROTOCOL=2 against the S27KL0642 model: must detect HyperBus
+XC_MODEL = sim_models/aps6408l_model.sv
+XC_DLYS ?= 0 2000 4000
+
+$(HR_BUILD)/xccela_ctrl.vvp: $(HR_RTL) $(HR_TB_COMMON) $(XC_MODEL) test_xccela_ctrl.sv | $(HR_BUILD)
+	@rm -f $@
+	iverilog $(HR_IVFLAGS) -DXCCELA_DEVICE -s test_xccela_ctrl -o $@ \
+	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(XC_MODEL) $(HR_TB_COMMON) test_xccela_ctrl.sv $(HR_IVFILTER)
+	@test -f $@
+
+$(HR_BUILD)/xccela_ctrl_auto.vvp: $(HR_RTL) $(HR_TB_COMMON) $(XC_MODEL) test_xccela_ctrl.sv | $(HR_BUILD)
+	@rm -f $@
+	iverilog $(HR_IVFLAGS) -DXCCELA_DEVICE -Ptest_xccela_ctrl.PROTOCOL=2 -s test_xccela_ctrl -o $@ \
+	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(XC_MODEL) $(HR_TB_COMMON) test_xccela_ctrl.sv $(HR_IVFILTER)
+	@test -f $@
+
+$(HR_BUILD)/hyperram_ctrl_auto.vvp: $(HR_RTL) $(HR_TB_COMMON) test_hyperram_ctrl.sv $(HR_PMODEL)
+	@rm -f $@
+	iverilog $(HR_IVFLAGS) -Ptest_hyperram_ctrl.PROTOCOL=2 -s test_hyperram_ctrl -o $@ \
+	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(HR_PMODEL) $(HR_TB_COMMON) test_hyperram_ctrl.sv $(HR_IVFILTER)
+	@test -f $@
+
+define XC_SWEEP
+	@echo "=== $(1): board delay sweep ($(XC_DLYS) ps) $(3) ==="
+	@fail=0; \
+	for d in $(XC_DLYS); do \
+	  vvp -n $(2) +BOARD_DLY_PS=$$d +SEED=$(HR_SEED) +NTRANS=$(HR_NTRANS) $(3) > $(HR_BUILD)/$(1)_dly$$d.log 2>&1; \
+	  grep -E 'init_done' $(HR_BUILD)/$(1)_dly$$d.log | sed 's/^/  /'; \
+	  line=$$(grep -E '(XCCELA|HYPERRAM)_CTRL (PASS|FAIL)' $(HR_BUILD)/$(1)_dly$$d.log | tail -1); \
+	  [ -n "$$line" ] || line="$(1) FAIL dly=$${d}ps (no result, see $(HR_BUILD)/$(1)_dly$$d.log)"; \
+	  echo "$$line"; \
+	  echo "$$line" | grep -q PASS || fail=1; \
+	done; \
+	if [ $$fail = 0 ]; then echo "=== $(1) SWEEP PASS ==="; else echo "=== $(1) SWEEP FAIL (logs in $(HR_BUILD)) ==="; exit 1; fi
+endef
+
+xccela: $(HR_BUILD)/xccela_ctrl.vvp
+	$(call XC_SWEEP,xccela,$<,)
+
+xccela_auto: $(HR_BUILD)/xccela_ctrl_auto.vvp
+	$(call XC_SWEEP,xccela_auto,$<,)
+
+xccela_cold: $(HR_BUILD)/xccela_ctrl_auto.vvp
+	$(call XC_SWEEP,xccela_cold,$<,+XC_COLD)
+
+hyperram_auto: $(HR_BUILD)/hyperram_ctrl_auto.vvp
+	$(call XC_SWEEP,hyperram_auto,$<,)
+
+.PHONY: xccela xccela_auto xccela_cold hyperram_auto
+
 # Standalone PSRAM bitstream system test: a2p25_psram_test_top (CK 108)
 # driven over its console UART against the vendor model.
 #   make psram_test_top
@@ -111,6 +168,7 @@ PT_RTL = ../hdl/psram_test/psram_test_defines_ck108.v sim_models/hr_clk_pll_sim.
          ../hdl/gowin/gowin_pll/gowin_pll.v ../hdl/gowin/gowin_pll/gowin_pll_mod.v ../hdl/gowin/pll_init.v \
          ../hdl/psram_test/hr_uart_cmd.sv ../hdl/psram_test/a2p25_psram_test_top.sv
 $(HR_BUILD)/psram_test_top.vvp: $(HR_RTL) $(HR_BIST_RTL) $(PT_RTL) $(HR_TB_COMMON) test_psram_test_top.sv $(HR_PMODEL)
+	@rm -f $@
 	iverilog $(HR_IVFLAGS) -s test_psram_test_top -o $@ \
 	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(HR_BIST_RTL) $(PT_RTL) $(HR_PMODEL) $(HR_TB_COMMON) test_psram_test_top.sv $(HR_IVFILTER)
 	@test -f $@

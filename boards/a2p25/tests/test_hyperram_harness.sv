@@ -1,7 +1,8 @@
 //
-// HyperRAM simulation harness: clocks, Infineon S27KL0642 model, board
-// delay and pin-level timing checks. Shared by test_hyperram_ctrl.sv and
-// test_hyperram_bist.sv.
+// HyperRAM simulation harness: clocks, Infineon S27KL0642 model (or, with
+// -DXCCELA_DEVICE, the APS6408L Xccela model), board delay and pin-level
+// timing checks. Shared by test_hyperram_ctrl.sv, test_hyperram_bist.sv and
+// test_xccela_ctrl.sv.
 //
 // (c) 2026 Ed Anuff <ed@a2fpga.com>
 //
@@ -88,6 +89,18 @@ module test_hyperram_harness (
     assign ram_dq   = f2r_dq;
     assign ram_rwds = f2r_rwds;
 
+`ifdef XCCELA_DEVICE
+    // AP Memory APS6408L behavioural model (sim_models/aps6408l_model.sv);
+    // compile with -DXCCELA_DEVICE. Its own pin timing checks replace the
+    // HyperBus ones below.
+    aps6408l_model u_xram (
+        .DQ      (ram_dq),
+        .DQS     (ram_rwds),
+        .CE_n    (ram_cs_n),
+        .CLK     (ram_ck),
+        .RESET_n (1'b1)
+    );
+`else
     s27kl0642 u_ram (
         .DQ7      (ram_dq[7]),
         .DQ6      (ram_dq[6]),
@@ -104,9 +117,16 @@ module test_hyperram_harness (
         .RESETNeg (1'b1)
     );
 
+`endif
+
     // RAM drivers, delayed back to the FPGA
+`ifdef XCCELA_DEVICE
+    wire [7:0] m_dq   = u_xram.Dout_zd;
+    wire       m_rwds = u_xram.DQSout_zd;
+`else
     wire [7:0] m_dq   = u_ram.Dout_zd;
     wire       m_rwds = u_ram.RWDSout_zd;
+`endif
     always @(m_dq)   r2f_dq   <= #(dly) m_dq;
     always @(m_rwds) r2f_rwds <= #(dly) m_rwds;
 
@@ -153,6 +173,7 @@ module test_hyperram_harness (
     integer ck_rises_in_cs = 0, ck_falls_in_cs = 0;
     logic   first_cs = 1'b1;
 
+`ifndef XCCELA_DEVICE
     always @(negedge ram_cs_n) begin
         if (!first_cs && ($realtime - t_cs_rise) < T_CSHI)
             terr("tCSHI", $realtime - t_cs_rise);
@@ -227,6 +248,11 @@ module test_hyperram_harness (
         t_rwds_chg    = $realtime;
         f2r_rwds_prev = f2r_rwds;
     end
+
+`else
+    // Xccela: the device model checks tCSP/tCHD/tCPH/tRC/tCEM/tDS/tDH itself
+    always @(u_xram.timing_errors) timing_errors = u_xram.timing_errors;
+`endif
 
     // ---------------------------------------------------------------------
     // Contention (both sides drive for > 1 ps)

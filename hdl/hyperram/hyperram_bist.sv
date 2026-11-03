@@ -102,6 +102,8 @@
 //   0x25 CTL_RD_TMO  RO  controller read timeouts
 //   0x26 CTL_LAT_MISMATCH RO reads whose CA latency sample disagreed with
 //                        the observed data arrival (should stay 0)
+//   0x27 DEVICE      RO  [15:0] ID0 (HyperBus) or {MR2, MR1} (Xccela)
+//                        [16] 1 = Xccela PSRAM  [17] boot probe failed
 //   0x30 EYE_IDX     RW  [7:0] eye table index
 //   0x31 EYE_DATA    RO  [31:24] tap  [23:0] error words (saturating)
 //                        (two clks after EYE_IDX is written)
@@ -169,7 +171,10 @@ module hyperram_bist #(
     input  wire [31:0]              m_stat_xfers,
     input  wire [31:0]              m_stat_lat2x,
     input  wire [31:0]              m_stat_rd_timeouts,
-    input  wire [31:0]              m_stat_lat_mismatch
+    input  wire [31:0]              m_stat_lat_mismatch,
+    input  wire                     m_proto_xccela,       // detected / configured device protocol
+    input  wire [15:0]              m_dev_id,
+    input  wire                     m_det_fail
 );
 
     // =====================================================================
@@ -706,6 +711,7 @@ module hyperram_bist #(
             8'h24: reg_rdata <= m_stat_lat2x;
             8'h25: reg_rdata <= m_stat_rd_timeouts;
             8'h26: reg_rdata <= m_stat_lat_mismatch;
+            8'h27: reg_rdata <= {14'd0, m_det_fail, m_proto_xccela, m_dev_id};   // device: [17] probe failed, [16] 1 = Xccela, [15:0] ID0 / {MR2, MR1}
             8'h30: reg_rdata <= {24'd0, r_eye_idx};
             8'h31: reg_rdata <= eye_q;
             default: reg_rdata <= 32'd0;

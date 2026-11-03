@@ -91,6 +91,8 @@ module test_hyperram_bist;
     wire [15:0]           m_cfg_cr0, m_cr0_active;
     wire [7:0]            m_dly_force_code, m_dly_code, m_cal_tap;
     wire [31:0]           m_cal_map, m_stat_xfers, m_stat_lat2x, m_stat_rd_timeouts, m_stat_lat_mismatch;
+    wire                  m_proto_xccela, m_det_fail;
+    wire [15:0]           m_dev_id;
     wire [4:0]            m_rd_arrival;
 
     hyperram_ctrl #(
@@ -135,6 +137,9 @@ module test_hyperram_bist;
         .stat_lat2x        (m_stat_lat2x),
         .stat_rd_timeouts  (m_stat_rd_timeouts),
         .stat_lat_mismatch (m_stat_lat_mismatch),
+        .proto_xccela      (m_proto_xccela),
+        .dev_id            (m_dev_id),
+        .det_fail          (m_det_fail),
         .hr_ck             (hr_ck),
         .hr_cs_n           (hr_cs_n),
         .hr_rwds           (hr_rwds),
@@ -210,7 +215,10 @@ module test_hyperram_bist;
         .m_stat_xfers        (m_stat_xfers),
         .m_stat_lat2x        (m_stat_lat2x),
         .m_stat_rd_timeouts  (m_stat_rd_timeouts),
-        .m_stat_lat_mismatch (m_stat_lat_mismatch)
+        .m_stat_lat_mismatch (m_stat_lat_mismatch),
+        .m_proto_xccela      (m_proto_xccela),
+        .m_dev_id            (m_dev_id),
+        .m_det_fail          (m_det_fail)
     );
 
     // ---------------------------------------------------------------------

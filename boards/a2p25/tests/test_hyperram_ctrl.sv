@@ -34,6 +34,7 @@ module test_hyperram_ctrl;
     localparam ADDR_WIDTH = 21;
     localparam [ADDR_WIDTH-1:0] CAL_ADDR = {ADDR_WIDTH{1'b1}} - 15;
     parameter  LAT2X_ADJ  = 0;
+    parameter  PROTOCOL   = 0;     // 2: boot-time device detection (must find HyperBus)
 
     // ---------------------------------------------------------------------
     // Harness + DUT
@@ -97,12 +98,15 @@ module test_hyperram_ctrl;
     wire  [15:0] cr0_active;
     wire  [7:0]  dly_code;
     wire  [4:0]  rd_arrival;
+    wire         proto_xccela, det_fail;
+    wire  [15:0] dev_id;
 
     hyperram_ctrl #(
         .CLK_HZ     (54_000_000),
         .ADDR_WIDTH (ADDR_WIDTH),
         .LATENCY    (6),
-        .LAT2X_ADJ  (LAT2X_ADJ)
+        .LAT2X_ADJ  (LAT2X_ADJ),
+        .PROTOCOL   (PROTOCOL)
     ) u_dut (
         .clk               (clk),
         .clk_mem           (clk_mem),
@@ -141,6 +145,9 @@ module test_hyperram_ctrl;
         .stat_lat2x        (stat_lat2x),
         .stat_rd_timeouts  (stat_rd_timeouts),
         .stat_lat_mismatch (stat_lat_mismatch),
+        .proto_xccela      (proto_xccela),
+        .dev_id            (dev_id),
+        .det_fail          (det_fail),
         .hr_ck             (hr_ck),
         .hr_cs_n           (hr_cs_n),
         .hr_rwds           (hr_rwds),
@@ -414,6 +421,7 @@ module test_hyperram_ctrl;
     integer clkcnt = 0;
     always @(posedge clk) clkcnt = clkcnt + 1;
 
+
     task automatic random_phase(input integer n);
         integer t, l, r;
         logic [ADDR_WIDTH-1:0] a;
@@ -450,6 +458,12 @@ module test_hyperram_ctrl;
         $display("[%0t] init_done  board delay %0d ps  cal_ok=%0d  cal_map=%b  tap=%0d  arrival=%0d.%0d",
                  $time, u_h.dly_ps, cal_ok, cal_map, dly_code, rd_arrival[4:1], rd_arrival[0] ? 5 : 0);
         if (!cal_ok) fail("calibration failed");
+        if (PROTOCOL == 2) begin
+            $display("[%0t] detect: proto_xccela=%0d dev_id=%h det_fail=%0d", $time, proto_xccela, dev_id, det_fail);
+            if (proto_xccela !== 1'b0) fail("detection reported Xccela on the HyperRAM model");
+            if (det_fail !== 1'b0)     fail("detection reported failure on the HyperRAM model");
+            if (dev_id !== 16'h0C81)   fail($sformatf("dev_id %h != ID0 0C81", dev_id));
+        end
         if (u_h.u_ram.Config_reg0 !== cr0_active)
             fail($sformatf("boot CR0 model %h != active %h", u_h.u_ram.Config_reg0, cr0_active));
 

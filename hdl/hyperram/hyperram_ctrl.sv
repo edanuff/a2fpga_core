@@ -186,6 +186,55 @@
 //   - ck_en goes clk_mem posedge -> negedge (T/2) -> clk_mem_90 ODDR
 //     (3T/4).
 //
+// ---------------------------------------------------------------------------
+// Xccela / OPI PSRAM (PROTOCOL = 1 or 2)
+// ---------------------------------------------------------------------------
+// The AP Memory APS6408L-3OBM-BA sits on the same 24-ball footprint as the
+// HyperRAM but speaks the Xccela protocol. Same PHY, clocking, calibration,
+// write buffer and strobe-framed read capture; the differences are all in
+// the command layer and are selected per request by c_xc / x_xc:
+//   - CA: INST byte held for CK#1 (both halves), then the 32-bit BYTE
+//     address A3..A0. Linear write A0h, linear read 20h, MRW C0h, MRR 40h,
+//     Global Reset FFh (MA in the A0 slot for MRW/MRR). Note the read/write
+//     bit is inverted relative to HyperBus (HyperBus A0h = linear read).
+//   - No latency indication during CA: DQS is Hi-Z through CA, driven low
+//     after CK#3 (preamble), and the first DQS rising edge is D0. In
+//     variable mode a refresh collision pushes data out by anything from
+//     LC to 2*LC. Reads therefore clock the worst case (2 + 2*LC + hw + 1)
+//     and, once the strobe arrives, rd_ck_tot is trimmed to the CKs still
+//     needed; CS# is released on the observed last byte (relobs), not on a
+//     prediction. Extra CKs before CS# rises are harmless.
+//   - Writes use a separate, fixed write latency WLC (MR4[7:5]); no
+//     pushout, no 2x, no CK pause. Data starts at CK#(3 + WLC).
+//   - Registers are 8-bit MR0..MR8. cfg_cr0 / cr0_active carry {MR4, MR0};
+//     a cfg_cr0_write issues MRW MR0 then MRW MR4. MRW data rides on CK#4
+//     (fixed latency 1), so MR writes are valid whatever latency the
+//     device currently holds.
+//   - Boot: tPU, then the probe sequence below, then MRW MR0 / MR4
+//     (XC_RLC, XC_WLC, XC_DRIVE, XC_FIXED), then the usual calibration.
+//   - Bursts wrap inside the device's 1 KB page: callers must not issue a
+//     burst that crosses a 1 KB boundary (hyperram_ports' size-aligned
+//     bursts never do).
+//   - xfer_lat2x / stat_lat2x on Xccela reads mean "data arrived later
+//     than the 1x window", stat_lat_mismatch stays 0.
+//
+// PROTOCOL = 2 detects the device at boot (front-end states F_DET_*):
+//   1. Xccela MRR of MR1 (frame 40 40 00 00 00 01). A HyperRAM decodes it
+//      as a register write to the read-only ID1 (its CR0/CR1 decode needs
+//      CA[24] = 1) and drives nothing: the read times out.
+//   2. No valid answer (vendor != 0x0D or timeout): one Global Reset frame
+//      (FF FF ..., 4 CKs; a HyperRAM sees an aborted register read), tRST,
+//      and the MRR again. This is what a cold APS part needs before it
+//      answers anything.
+//   3. Still nothing: HyperBus ID0 read (E0 ...). Never sent before steps
+//      1-2, because INST E0 is undefined on an Xccela part.
+// Each step is tried at four input-delay taps (the probe runs before
+// calibration; the ID check rejects a capture at a bad tap). Result on
+// proto_xccela / dev_id (ID0, or {MR2, MR1}) / det_fail. With PROTOCOL = 1
+// steps 1-2 run as a liveness check and the Xccela init proceeds
+// regardless. Boot cost on a HyperRAM: 8 timed-out probes + tRST, ~6 us.
+// PROTOCOL = 0 is the original HyperBus controller, unchanged.
+//
 
 module hyperram_ctrl #(
     parameter CLK_HZ          = 54_000_000,
@@ -206,7 +255,14 @@ module hyperram_ctrl #(
     parameter CAL_REPEATS     = 4,          // reads per bin, all must pass
     parameter CAL_RETRIES     = 3,
     parameter [ADDR_WIDTH-1:0] CAL_ADDR = {ADDR_WIDTH{1'b1}} - (MAX_BURST - 1),
-    parameter [7:0] DLY_DEFAULT = 8'd0
+    parameter [7:0] DLY_DEFAULT = 8'd0,
+    // Device protocol: 0 = HyperBus (HyperRAM), 1 = Xccela / OPI PSRAM
+    // (AP Memory APS6408L), 2 = detect at boot (see "Xccela" in the header)
+    parameter PROTOCOL        = 0,
+    parameter XC_RLC          = 5,          // Xccela read latency code 3..7 (MR0[4:2])
+    parameter XC_WLC          = 5,          // Xccela write latency code 3..7 (MR4[7:5])
+    parameter [1:0] XC_DRIVE  = 2'b00,      // MR0[1:0]: 00 = 50, 01 = 100, 10 = 200, 11 = 400 ohm
+    parameter XC_FIXED        = 0           // MR0[5]: 1 = fixed (2x) read latency
 ) (
     input  wire                      clk,
     input  wire                      clk_mem,
@@ -251,6 +307,11 @@ module hyperram_ctrl #(
     output logic [31:0]              stat_rd_timeouts,
     output logic [31:0]              stat_lat_mismatch,
 
+    // Device / protocol (clk), valid once init_done
+    output logic                     proto_xccela, // 1 = Xccela PSRAM, 0 = HyperBus
+    output logic [15:0]              dev_id,       // HyperBus: ID0; Xccela: {MR2, MR1}
+    output logic                     det_fail,     // boot probe got no valid answer
+
     // Pins
     output wire                      hr_ck,
     output wire                      hr_cs_n,
@@ -276,12 +337,27 @@ module hyperram_ctrl #(
                                    FIXED_LATENCY[0], 1'b1, 2'b11};
     localparam [7:0]  CA0 = 8'(CS_LEAD);
     localparam integer NBINS = 256 >> CAL_STEP_LOG2;
+    // Xccela mode registers programmed at boot (cfg_cr0 = {MR4, MR0} there)
+    localparam [2:0] XC_RLC_CODE = (XC_RLC == 3) ? 3'b000 : (XC_RLC == 4) ? 3'b001 :
+                                   (XC_RLC == 5) ? 3'b010 : (XC_RLC == 6) ? 3'b011 : 3'b100;
+    localparam [2:0] XC_WLC_CODE = (XC_WLC == 3) ? 3'b000 : (XC_WLC == 4) ? 3'b100 :
+                                   (XC_WLC == 5) ? 3'b010 : (XC_WLC == 6) ? 3'b110 : 3'b001;
+    localparam [7:0]  XC_MR0 = {2'b00, XC_FIXED[0], XC_RLC_CODE, XC_DRIVE};
+    localparam [7:0]  XC_MR4 = {XC_WLC_CODE, 1'b0, 1'b0, 3'b000};   // fast refresh, full array
+    localparam [15:0] XC_CFG = {XC_MR4, XC_MR0};
+    localparam integer TRST_CYCLES = (CLK_HZ / 1_000_000) * 2 + 4;   // tRST = 2 us
 
     // =====================================================================
     // clk domain: command registers shared with the core
     // =====================================================================
     logic                    c_we;
-    logic                    c_reg;           // register-space write (CR0)
+    logic                    c_reg;           // register write (CR0 / MRx), or Global Reset
+    logic                    c_rreg;          // register read (boot probe)
+    logic                    c_gbrst;         // Xccela Global Reset frame (with c_reg)
+    logic                    c_det;           // boot probe: wide read window, worst-case clocks
+    logic                    c_xc;            // frame this request as Xccela (else HyperBus)
+    logic [7:0]              c_ma;            // Xccela mode-register address
+    logic [15:0]             c_regdata;       // register write data (CR0, or MR in [7:0])
     logic                    c_cal;           // write data = calibration pattern
     logic                    c_probe;         // read: measure arrival
     logic [ADDR_WIDTH-1:0]   c_addr;
@@ -290,13 +366,24 @@ module hyperram_ctrl #(
     logic [3:0]              c_be0;
     logic [35:0]             c_wbuf [0:15];   // words 1..15 {be, data} (FFs: GW5A-25 has no LUT RAM)
     logic                    req_tgl;
-    logic [15:0]             c_cr0;           // live CR0 (what the device holds)
+    logic [15:0]             c_cr0;           // live CR0 (HyperBus) or {MR4, MR0} (Xccela)
+    wire                     proto_q  = proto_xccela;
     wire  [3:0]              lat_code = c_cr0[7:4];
-    wire  [7:0]              c_lat    = (lat_code == 4'b1110) ? 8'd3 :
+    wire  [7:0]              hb_lat   = (lat_code == 4'b1110) ? 8'd3 :
                                         (lat_code == 4'b1111) ? 8'd4 :
                                         (lat_code == 4'b0000) ? 8'd5 :
                                         (lat_code == 4'b0001) ? 8'd6 : 8'd7;
-    wire                     c_fixed  = c_cr0[3];
+    wire  [7:0]              xc_rlat  = (c_cr0[4:2] == 3'b000) ? 8'd3 :
+                                        (c_cr0[4:2] == 3'b001) ? 8'd4 :
+                                        (c_cr0[4:2] == 3'b010) ? 8'd5 :
+                                        (c_cr0[4:2] == 3'b011) ? 8'd6 : 8'd7;
+    wire  [7:0]              xc_wlat  = (c_cr0[15:13] == 3'b000) ? 8'd3 :
+                                        (c_cr0[15:13] == 3'b100) ? 8'd4 :
+                                        (c_cr0[15:13] == 3'b010) ? 8'd5 :
+                                        (c_cr0[15:13] == 3'b110) ? 8'd6 : 8'd7;
+    wire  [7:0]              c_lat    = proto_q ? xc_rlat : hb_lat;
+    wire  [7:0]              c_wlat   = proto_q ? xc_wlat : hb_lat;
+    wire                     c_fixed  = proto_q ? c_cr0[5] : c_cr0[3];
 
     // core -> clk
     logic                    done_tgl_m = 1'b0;
@@ -344,7 +431,7 @@ module hyperram_ctrl #(
     logic [7:0]   ck_cnt;            // CK pulses issued
     logic         req_seen;
     logic [47:0]  ca;
-    logic         x_we, x_reg, x_cal, x_probe;
+    logic         x_we, x_reg, x_cal, x_probe, x_xc, x_det;
     logic [15:0]  x_regdata;
     logic [5:0]   x_hw;              // halfwords (16-bit) to transfer
     logic [5:0]   hw_out;            // write halfwords sent
@@ -425,6 +512,7 @@ module hyperram_ctrl #(
     // Write sequencing flags, maintained incrementally so the write data /
     // CK decision is a few registered terms (no magnitude compares):
     logic         in_ca;                     // cyc < CA0 + 3
+    logic         w_tail;                    // Xccela: extra CS#-low cycle after the last write CK
     logic         w_lt_lat1;                 // ck_cnt < lat1_ck_r
     logic         w_lt_end;                  // ck_cnt < wr_lat_end
     logic         w_more;                    // hw_out != x_hw
@@ -439,10 +527,15 @@ module hyperram_ctrl #(
     wire          relobs_now = rel_obs_hit || (cyc == rel_obs_cyc);
 
     // Request-time arithmetic (clk-domain command registers + arr)
-    wire  [7:0]   q_hw       = c_reg ? 8'd1 : {2'b0, c_len, 1'b0};
+    wire  [7:0]   q_hw       = c_reg ? 8'd1 : c_rreg ? 8'd2 : {2'b0, c_len, 1'b0};
     wire  [7:0]   q_arr      = {4'b0, arr_cyc};
-    wire  [7:0]   q_lat1     = 8'd2 + c_lat;
-    wire  [7:0]   q_lat2     = 8'd2 + c_lat + c_lat + 8'(LAT2X_ADJ);
+    // Boot probes assume latency 5 for the read window and clock out to
+    // 2 + 2*7 (the device's latency is unknown then; reads are framed).
+    wire  [7:0]   q_rlat     = c_det ? 8'd5 : c_lat;
+    wire  [7:0]   q_xlat     = (c_xc && c_we && !c_reg) ? c_wlat : q_rlat;
+    wire  [7:0]   q_lat1     = 8'd2 + q_xlat;
+    wire  [7:0]   q_lat2     = c_det ? 8'd16 : 8'd2 + q_xlat + q_xlat + 8'(LAT2X_ADJ);
+    wire  [31:0]  xc_addr    = 32'({c_addr, 2'b00});          // Xccela byte address
 
     // ---- Read capture (combinational next step) ----
     // Per clk_mem cycle the IDDR gives the rising sample (earlier) then
@@ -504,6 +597,15 @@ module hyperram_ctrl #(
                         obs2x       <= past_2x;
                         rel_obs_cyc <= cyc + {2'b0, x_hw} - 8'd5;
                         rel_obs_hit <= (x_hw <= 6'd5);
+                        // Xccela: the CK that produced this byte went out
+                        // ~arr cycles ago; x_hw - 1 more data CKs are
+                        // needed (+2 margin). Never below the CK issued
+                        // this cycle. Extra CKs are harmless (the device
+                        // keeps bursting inside the page until CE# rises).
+                        if (x_xc)
+                            rd_ck_tot <= ({2'b0, x_hw} + 8'd2 > q_arr + 8'd1)
+                                         ? ck_cnt + {2'b0, x_hw} + 8'd2 - q_arr
+                                         : ck_cnt + 8'd1;
                     end
                 end else if (rd_align) begin
                     rd_hold <= rx_dq_f;
@@ -544,32 +646,47 @@ module hyperram_ctrl #(
                 req_seen    <= req_tgl;
                 x_we        <= c_we | c_reg;
                 x_reg       <= c_reg;
+                x_xc        <= c_xc;
+                x_det       <= c_det;
                 x_cal       <= c_cal;
                 x_probe     <= c_probe;
-                x_regdata   <= c_cr0;
+                // Xccela MRW data byte rides on CK#4 rising (falling half: don't care)
+                x_regdata   <= c_xc ? {c_regdata[7:0], c_regdata[7:0]} : c_regdata;
                 x_hw        <= q_hw[5:0];
-                ca          <= c_reg ? 48'h60_0001_00_0000
-                                     : {~c_we, 1'b0, 1'b1, hw_addr[31:3], 13'd0, hw_addr[2:0]};
+                if (c_xc)
+                    // INST held for the whole first clock, then the 32-bit
+                    // byte address A3..A0. MRW/MRR/Global Reset: MA in A0.
+                    ca <= c_reg  ? {c_gbrst ? 16'hFFFF : 16'hC0C0, 16'h0000, 8'h00, c_ma} :
+                          c_rreg ? {16'h4040, 16'h0000, 8'h00, c_ma} :
+                          c_we   ? {16'hA0A0, xc_addr} : {16'h2020, xc_addr};
+                else
+                    ca <= c_reg  ? 48'h60_0001_00_0000 :
+                          c_rreg ? 48'hE0_0000_00_0000 :
+                                   {~c_we, 1'b0, 1'b1, hw_addr[31:3], 13'd0, hw_addr[2:0]};
                 lat1_ck_r   <= q_lat1;
                 lat2p1_r    <= q_lat2 + 8'd1;
                 lat1_m1     <= q_lat1 - 8'd1;
                 lat2_m1     <= q_lat2 - 8'd1;
-                end_m1      <= c_fixed ? q_lat2 - 8'd1 : q_lat1 - 8'd1;
+                // Xccela writes always use WLC (no 2x, even in fixed mode)
+                end_m1      <= (c_fixed && !(c_xc && c_we)) ? q_lat2 - 8'd1 : q_lat1 - 8'd1;
                 x_hw_m1     <= q_hw[5:0] - 6'd1;
                 in_ca       <= 1'b1;
+                w_tail      <= 1'b0;
                 w_lt_lat1   <= 1'b1;
                 w_lt_end    <= 1'b1;
                 w_more      <= 1'b1;
                 rd_more     <= 1'b1;
-                rd_dat_ck   <= c_fixed ? q_lat2 + 8'd1 : q_lat1;
-                rd_ck_tot   <= c_fixed ? q_lat2 + q_hw + 8'd1 : q_lat1 + q_hw;
+                // Xccela reads and boot probes clock the worst case (2x);
+                // Xccela reads then trim rd_ck_tot once the strobe arrives.
+                rd_dat_ck   <= (c_fixed || c_xc || c_det) ? q_lat2 + 8'd1 : q_lat1;
+                rd_ck_tot   <= (c_fixed || c_xc || c_det) ? q_lat2 + q_hw + 8'd1 : q_lat1 + q_hw;
                 rd_tot1     <= q_lat1 + q_hw;
                 rd_tot2     <= q_lat2 + q_hw + 8'd1;
                 lat_smp_cyc <= CA0 + q_arr;
                 data1_cyc   <= CA0 + q_lat1;
                 d2_cyc      <= CA0 + q_lat2 + 8'd1;
-                rd_open_cyc <= CA0 + c_lat + q_arr - 8'd1;    // data1 + arr - 2, -1 for the flag
-                rd_2x_cyc   <= CA0 + 8'd4 + c_lat + q_arr;    // data1 + arr + 2
+                rd_open_cyc <= CA0 + q_rlat + q_arr - 8'd1;   // data1 + arr - 2, -1 for the flag
+                rd_2x_cyc   <= CA0 + 8'd4 + q_rlat + q_arr;   // data1 + arr + 2
                 off_to      <= q_hw + q_arr + 8'(RD_TIMEOUT);
                 off_rel     <= q_hw + q_arr - 8'd5;           // arr >= 3, hw >= 2
                 to_cyc      <= 8'hFF;     // armed when the data CK goes out
@@ -590,8 +707,10 @@ module hyperram_ctrl #(
                 rd_pad      <= 1'b0;
                 obs2x       <= 1'b0;
                 lat_ca      <= 1'b0;
-                lat2x       <= c_fixed;
-                lat_known   <= c_fixed;
+                // Xccela: no latency indication during CA. Reads clock the
+                // worst case and are strobe-framed; writes are never 2x.
+                lat2x       <= c_xc ? !c_we : (c_fixed || c_det);
+                lat_known   <= c_fixed || c_xc || c_det;
                 state       <= S_XFER;
             end
         end
@@ -625,6 +744,12 @@ module hyperram_ctrl #(
                     p_dq_r  <= x_regdata[15:8];
                     p_dq_f  <= x_regdata[7:0];
                     p_ck_en <= 1'b1;
+                end else if (x_xc && !w_tail) begin
+                    // Xccela tCHD: CE# must stay low >= 2.5 ns after the
+                    // last CLK falling edge (one more cycle; HyperBus
+                    // tCSH is 0)
+                    p_dq_oe <= 1'b0;
+                    w_tail  <= 1'b1;
                 end else begin
                     p_cs_n     <= 1'b1;
                     p_dq_oe    <= 1'b0;
@@ -661,6 +786,8 @@ module hyperram_ctrl #(
                     p_rwds_r  <= wr_m0;
                     p_rwds_f  <= wr_m1;
                     hw_out    <= hw_out + 6'd1;
+                end else if (x_xc && !w_tail) begin
+                    w_tail    <= 1'b1;              // Xccela tCHD (see register write)
                 end else begin
                     p_cs_n     <= 1'b1;
                     gap_cnt    <= 4'(GAP_LOAD);
@@ -691,6 +818,7 @@ module hyperram_ctrl #(
                 if (ck_cnt < rd_ck_tot) begin
                     p_ck_en <= 1'b1;
                     ck_cnt  <= ck_cnt + 8'd1;
+                    w_tail  <= 1'b0;                // tail counts from the last CK
                     if (ck_cnt == rd_dat_ck) begin
                         // (re)base the end-of-read predictions on the
                         // actual data CK (moves for 2x reads)
@@ -699,12 +827,21 @@ module hyperram_ctrl #(
                         to_hit  <= 1'b0;
                         rel_hit <= (off_rel == 8'd0);
                     end
-                end else if (lat_known && ck_cnt == rd_ck_tot && rel_now &&
-                             (!rd_started || relobs_now)) begin
-                    // Last byte is sampled at the IDDR by now: release CS#
-                    p_cs_n  <= 1'b1;
-                    gap_cnt <= 4'(GAP_LOAD);
-                    state   <= S_DRAIN;
+                end else if (lat_known && ck_cnt == rd_ck_tot &&
+                             ((x_xc || x_det) ? (rd_started ? relobs_now : rel_now)
+                                              : (rel_now && (!rd_started || relobs_now)))) begin
+                    // Last byte is sampled at the IDDR by now: release CS#.
+                    // Xccela reads and boot probes release on the observed
+                    // arrival only: the prediction (rel_now) assumes the
+                    // calibrated arr, which a boot probe does not have yet.
+                    // (Xccela: one cycle after the last CK, tCHD >= 2.5 ns)
+                    if (x_xc && !w_tail) begin
+                        w_tail  <= 1'b1;
+                    end else begin
+                        p_cs_n  <= 1'b1;
+                        gap_cnt <= 4'(GAP_LOAD);
+                        state   <= S_DRAIN;
+                    end
                 end
             end
         end
@@ -718,7 +855,7 @@ module hyperram_ctrl #(
             if (!rd_more) begin
                 err_m      <= rd_pad;
                 lat2x_m    <= rd_started ? obs2x : lat2x;
-                mism_m     <= rd_started && !rd_pad && (obs2x != lat_ca);
+                mism_m     <= !x_xc && rd_started && !rd_pad && (obs2x != lat_ca);
                 done_tgl_m <= ~done_tgl_m;
                 state      <= S_IDLE;
                 if (x_probe && rd_started && !rd_pad && !obs2x &&
@@ -735,7 +872,7 @@ module hyperram_ctrl #(
         // ---- latency sample (RWDS during CA) ----
         // After the FSM so a 2x decision overrides a same-cycle w_lt_end
         // clear from the last 1x latency clock.
-        if (state == S_XFER && !x_reg && cyc == lat_smp_cyc) begin
+        if (state == S_XFER && !x_reg && !x_xc && cyc == lat_smp_cyc) begin
             lat_ca <= lat_smp;
             if (!lat_known) begin
                 lat2x      <= lat_smp;
@@ -811,6 +948,21 @@ module hyperram_ctrl #(
     localparam [4:0] F_CAL_RDD  = 5'd12;
     localparam [4:0] F_CR0_DONE = 5'd13;
     localparam [4:0] F_CAL_WRD  = 5'd14;
+    // Boot probe / Xccela init (PROTOCOL != 0)
+    localparam [4:0] F_DET_XC   = 5'd15;   // Xccela MRR MA=1 -> {MR2, MR1}
+    localparam [4:0] F_DET_XCW  = 5'd16;
+    localparam [4:0] F_DET_GBR  = 5'd17;   // Xccela Global Reset frame
+    localparam [4:0] F_DET_GBRW = 5'd18;
+    localparam [4:0] F_DET_TRST = 5'd19;   // tRST
+    localparam [4:0] F_DET_HB   = 5'd20;   // HyperBus ID0 read
+    localparam [4:0] F_DET_HBW  = 5'd21;
+    localparam [4:0] F_XC_MR0   = 5'd22;
+    localparam [4:0] F_XC_MR0W  = 5'd23;
+    localparam [4:0] F_XC_MR4   = 5'd24;
+    localparam [4:0] F_XC_MR4W  = 5'd25;
+    localparam [4:0] F_CFG_WAIT2 = 5'd26;  // second MRW of a cfg_cr0_write
+    localparam [4:0] F_DET_SET  = 5'd27;   // set the probe's input-delay tap
+    localparam [4:0] F_DET_SETW = 5'd28;
 
     logic [4:0]  fstate;
     logic        done_seen;
@@ -835,6 +987,30 @@ module hyperram_ctrl #(
     wire         rq_avail = (rq_rp != rq_wp_m);
     wire         cal_cmp  = (fstate == F_CAL_RDW);
     wire         cal_mis  = (rq_data_m[rq_rp] != cal_pattern(cal_word[3:0]));
+    wire         det_cmp  = (fstate == F_DET_XCW) || (fstate == F_DET_HBW);
+
+    // Boot probe state. The probe runs before calibration, so the input
+    // delay tap is still the default and may sit outside the eye for this
+    // board: each probe is tried at four taps (default, 128, 64, 192;
+    // 0.8 ns apart on a 3.2 ns line against a 4.6 ns bit) before the next
+    // phase. Phases: 0 Xccela MRR, 1 Global Reset then Xccela MRR again,
+    // 2 HyperBus ID0. The ID check rejects a capture at a bad tap.
+    logic [1:0]  det_phase;
+    logic [1:0]  det_tap;
+    wire  [7:0]  det_tap_code = (det_tap == 2'd0) ? DLY_DEFAULT :
+                                (det_tap == 2'd1) ? 8'd128 :
+                                (det_tap == 2'd2) ? 8'd64 : 8'd192;
+    logic [15:0] det_word;           // first halfword of the probe read
+    logic [15:0] trst_cnt;
+    // Xccela: MR1[4:0] vendor = 0x0D (APM), MR2[2:0] a defined density
+    wire         xc_id_ok = (det_word[4:0] == 5'h0D) &&
+                            (det_word[10:8] == 3'b001 || det_word[10:8] == 3'b011 ||
+                             det_word[10:8] == 3'b101 || det_word[10:8] == 3'b111 ||
+                             det_word[10:8] == 3'b110);
+    // HyperBus: ID0 arrives byte A first; manufacturer in [3:0]
+    // (1 Infineon/Cypress, 3 ISSI, 6 Winbond)
+    wire  [15:0] hb_id0   = {det_word[7:0], det_word[15:8]};
+    wire         hb_id_ok = (hb_id0[3:0] == 4'h1) || (hb_id0[3:0] == 4'h3) || (hb_id0[3:0] == 4'h6);
 
     assign init_done  = init_done_r;
     assign cr0_active = c_cr0;
@@ -860,13 +1036,20 @@ module hyperram_ctrl #(
     task automatic issue(input is_we, input is_reg, input is_cal, input is_probe,
                          input [ADDR_WIDTH-1:0] a, input [4:0] n);
         begin
-            c_we    <= is_we;
-            c_reg   <= is_reg;
-            c_cal   <= is_cal;
-            c_probe <= is_probe;
-            c_addr  <= a;
-            c_len   <= n;
-            req_tgl <= ~req_tgl;
+            c_we      <= is_we;
+            c_reg     <= is_reg;
+            c_cal     <= is_cal;
+            c_probe   <= is_probe;
+            c_addr    <= a;
+            c_len     <= n;
+            // defaults; probe / Xccela states override after the call
+            c_rreg    <= 1'b0;
+            c_gbrst   <= 1'b0;
+            c_det     <= 1'b0;
+            c_xc      <= proto_q;
+            c_ma      <= 8'h00;
+            c_regdata <= c_cr0;
+            req_tgl   <= ~req_tgl;
         end
     endtask
 
@@ -909,6 +1092,8 @@ module hyperram_ctrl #(
                     cal_fail <= 1'b1;
                 // synthesis translate_on
                 cal_word <= cal_word + 5'd1;
+            end else if (det_cmp) begin
+                det_word <= rq_data_m[rq_rp][15:0];
             end else begin
                 rvalid <= 1'b1;
                 rdata  <= rq_data_m[rq_rp];
@@ -917,7 +1102,144 @@ module hyperram_ctrl #(
 
         case (fstate)
         F_POR:
-            if (por_done_m) fstate <= F_CR0;
+            if (por_done_m) begin
+                det_phase <= 2'd0;
+                det_tap   <= 2'd0;
+                fstate    <= (PROTOCOL == 0) ? F_CR0 : F_DET_SET;
+            end
+
+        // ---- Boot probe. Xccela frames first: they are harmless to a
+        // HyperRAM (its register decode ignores addresses outside CR0/CR1
+        // and the ID registers are read-only), while the HyperBus ID read
+        // (INST E0) is undefined on an Xccela part. A device that does not
+        // answer at any tap gets one Global Reset (harmless to a HyperRAM
+        // too: an aborted register read) and a second round, which covers
+        // a cold APS part waiting for its Phase-2 reset. Only then is
+        // HyperBus tried. Probe reads are strobe-framed with a wide window
+        // and release CS# on the observed arrival, so neither the device's
+        // current latency nor the calibrated arrival matters.
+        F_DET_SET: begin
+            dly_code   <= det_tap_code;
+            dly_load_r <= 1'b1;
+            settle     <= 4'd8;
+            fstate     <= F_DET_SETW;
+        end
+
+        F_DET_SETW:
+            if (settle != 4'd0) settle <= settle - 4'd1;
+            else                fstate <= (det_phase == 2'd2) ? F_DET_HB : F_DET_XC;
+
+        F_DET_XC: begin
+            issue(1'b0, 1'b0, 1'b0, 1'b0, '0, 5'd1);
+            c_rreg <= 1'b1;
+            c_det  <= 1'b1;
+            c_xc   <= 1'b1;
+            c_ma   <= 8'h01;
+            fstate <= F_DET_XCW;
+        end
+
+        F_DET_XCW:
+            if (done_evt) begin
+                done_seen <= done_tgl_m;
+                if (!err_m && xc_id_ok) begin
+                    proto_xccela <= 1'b1;
+                    dev_id       <= det_word;
+                    fstate       <= F_XC_MR0;
+                end else if (det_tap != 2'd3) begin
+                    det_tap <= det_tap + 2'd1;
+                    fstate  <= F_DET_SET;
+                end else if (det_phase == 2'd0) begin
+                    det_phase <= 2'd1;
+                    det_tap   <= 2'd0;
+                    fstate    <= F_DET_GBR;
+                end else if (PROTOCOL == 1) begin
+                    proto_xccela <= 1'b1;        // forced: proceed blind
+                    det_fail     <= 1'b1;
+                    dev_id       <= det_word;
+                    fstate       <= F_XC_MR0;
+                end else begin
+                    det_phase <= 2'd2;
+                    det_tap   <= 2'd0;
+                    fstate    <= F_DET_SET;
+                end
+            end
+
+        F_DET_GBR: begin
+            issue(1'b1, 1'b1, 1'b0, 1'b0, '0, 5'd1);
+            c_gbrst   <= 1'b1;
+            c_xc      <= 1'b1;
+            c_regdata <= 16'h0000;
+            fstate    <= F_DET_GBRW;
+        end
+
+        F_DET_GBRW:
+            if (done_evt) begin
+                done_seen <= done_tgl_m;
+                trst_cnt  <= 16'(TRST_CYCLES);
+                fstate    <= F_DET_TRST;
+            end
+
+        F_DET_TRST:
+            if (trst_cnt == 16'd0) fstate <= F_DET_SET;
+            else                   trst_cnt <= trst_cnt - 16'd1;
+
+        F_DET_HB: begin
+            issue(1'b0, 1'b0, 1'b0, 1'b0, '0, 5'd1);
+            c_rreg <= 1'b1;
+            c_det  <= 1'b1;
+            c_xc   <= 1'b0;
+            fstate <= F_DET_HBW;
+        end
+
+        F_DET_HBW:
+            if (done_evt) begin
+                done_seen <= done_tgl_m;
+                if (!err_m && hb_id_ok) begin
+                    proto_xccela <= 1'b0;
+                    dev_id       <= hb_id0;
+                    fstate       <= F_CR0;
+                end else if (det_tap != 2'd3) begin
+                    det_tap <= det_tap + 2'd1;
+                    fstate  <= F_DET_SET;
+                end else begin
+                    proto_xccela <= 1'b0;        // nothing identified: HyperBus, flagged
+                    dev_id       <= hb_id0;
+                    det_fail     <= 1'b1;
+                    fstate       <= F_CR0;
+                end
+            end
+
+        // ---- Xccela init: MR0 (latency, drive) then MR4 (write latency).
+        // MR writes have fixed latency 1, so they are valid whatever the
+        // device currently holds (warm reload without a reset).
+        F_XC_MR0: begin
+            c_cr0 <= XC_CFG;
+            issue(1'b1, 1'b1, 1'b0, 1'b0, '0, 5'd1);
+            c_xc      <= 1'b1;
+            c_ma      <= 8'h00;
+            c_regdata <= {8'h00, XC_MR0};
+            fstate    <= F_XC_MR0W;
+        end
+
+        F_XC_MR0W:
+            if (done_evt) begin
+                done_seen <= done_tgl_m;
+                fstate    <= F_XC_MR4;
+            end
+
+        F_XC_MR4: begin
+            issue(1'b1, 1'b1, 1'b0, 1'b0, '0, 5'd1);
+            c_xc      <= 1'b1;
+            c_ma      <= 8'h04;
+            c_regdata <= {8'h00, XC_MR4};
+            fstate    <= F_XC_MR4W;
+        end
+
+        F_XC_MR4W:
+            if (done_evt) begin
+                done_seen <= done_tgl_m;
+                fstate    <= F_CR0_DONE;
+            end
 
         F_CR0: begin
             issue(1'b1, 1'b1, 1'b0, 1'b0, '0, 5'd1);
@@ -1081,8 +1403,11 @@ module hyperram_ctrl #(
                 cal_wr2     <= 1'b0;
                 fstate      <= F_CAL_WR;
             end else if (cfg_cr0_write) begin
+                // HyperBus: one CR0 write. Xccela: MRW MR0 now, MR4 next.
                 c_cr0  <= cfg_cr0;
                 issue(1'b1, 1'b1, 1'b0, 1'b0, '0, 5'd1);
+                c_regdata <= proto_q ? {8'h00, cfg_cr0[7:0]} : cfg_cr0;
+                c_ma      <= 8'h00;
                 fstate <= F_CFG_WAIT;
             end else if (req) begin
                 c_w0  <= wdata;
@@ -1108,6 +1433,19 @@ module hyperram_ctrl #(
         F_CFG_WAIT:
             if (done_evt) begin
                 done_seen <= done_tgl_m;
+                if (proto_q) begin
+                    issue(1'b1, 1'b1, 1'b0, 1'b0, '0, 5'd1);
+                    c_ma      <= 8'h04;
+                    c_regdata <= {8'h00, c_cr0[15:8]};
+                    fstate    <= F_CFG_WAIT2;
+                end else begin
+                    fstate    <= F_READY;
+                end
+            end
+
+        F_CFG_WAIT2:
+            if (done_evt) begin
+                done_seen <= done_tgl_m;
                 fstate    <= F_READY;
             end
 
@@ -1116,11 +1454,22 @@ module hyperram_ctrl #(
 
         if (!rst_n) begin
             fstate            <= F_POR;
-            c_cr0             <= CR0_VALUE;
+            c_cr0             <= (PROTOCOL == 1) ? XC_CFG : CR0_VALUE;
             c_reg             <= 1'b0;
             c_we              <= 1'b0;
             c_cal             <= 1'b0;
             c_probe           <= 1'b0;
+            c_rreg            <= 1'b0;
+            c_gbrst           <= 1'b0;
+            c_det             <= 1'b0;
+            c_xc              <= (PROTOCOL == 1);
+            c_ma              <= 8'h00;
+            c_regdata         <= (PROTOCOL == 1) ? XC_CFG : CR0_VALUE;
+            proto_xccela      <= (PROTOCOL == 1);
+            dev_id            <= 16'h0000;
+            det_fail          <= 1'b0;
+            det_phase         <= 2'd0;
+            det_tap           <= 2'd0;
             req_tgl           <= 1'b0;
             done_seen         <= done_tgl_m;
             rq_rp             <= 2'd0;

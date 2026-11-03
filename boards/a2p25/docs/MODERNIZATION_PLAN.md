@@ -172,6 +172,51 @@ be multi-sourced: Infineon, ISSI and Winbond use the same CR0 encoding.
 | Ensoniq wave RAM (64 KB) | 0x200000 |
 | BIST / calibration scratch (the controller's `CAL_ADDR` is the last 64 B) | top of memory |
 
+### 4.4 Second source: AP Memory APS6408L (Xccela) on the same footprint
+
+Added 2026-11-03. The APS6408L-3OBM-BA is ball-for-ball the HyperRAM
+24-FBGA map (B1, CK# on the HyperRAM, is NC on it; a grounded or floating
+B1 is fine either way) but speaks Xccela, not HyperBus: inverted
+read/write command bit, 32-bit byte address, no RWDS latency indication
+(refresh pushout only visible on the strobe), fixed separate write
+latency, 8-bit mode registers, bursts wrap inside a 1 KB page. The
+analysis is `xccela_vs_hyperbus.md` in the a2-mega repo.
+
+`hyperram_ctrl` now takes `PROTOCOL`: 0 HyperBus (default, unchanged
+behaviour), 1 Xccela, 2 detect at boot. Detection probes with Xccela
+register frames first (harmless to a HyperRAM), falls back to a HyperBus
+ID0 read, and reports on `proto_xccela` / `dev_id` / `det_fail` (BIST
+register 0x27). The PHY, clocking, calibration and arbiter are shared;
+see the "Xccela" section of the controller header for the mechanics.
+
+Simulation (`boards/a2p25/tests`, behavioural APS6408L model in
+`sim_models/aps6408l_model.sv`, written from the Rev 4.0 datasheet, not a
+vendor model):
+
+| Target | What it proves |
+|---|---|
+| `make hyperram` | HyperBus regression, PROTOCOL 0 |
+| `make hyperram_auto` | PROTOCOL 2 on the S27KL0642 model detects HyperBus; probes leave CR0/CR1 alone |
+| `make xccela` | PROTOCOL 1 on the APS model: placement, random traffic, pushout, fixed mode, pin timing |
+| `make xccela_auto` | PROTOCOL 2 detects Xccela |
+| `make xccela_cold` | device ignores everything until Global Reset: the probe retry path |
+
+Measured in simulation at 108 MHz, user clk cycles per transaction
+(HyperBus L 6 variable in brackets): read 1/4/16 words 14/17/29 at LC 5
+(14/17/29; 13/16 for 1/4 words at LC 4), write 9/12/24 (10/13/25).
+Xccela writes never see a 2x penalty; reads give back their latency gain
+to the tCHD tail cycle (CE# must stay low 2.5 ns after the last CLK
+falling edge, where HyperBus allows 0).
+
+Hardware bring-up with an APS part: reflow it onto U6 (a2p25) or U10
+(a2mega 1.0a5; no board change), build `a2p25_psram_test_top` with
+`PROTOCOL = 2`, read register 0x27 (expect 0x0001_930D for a 64 Mb
+die) and run the usual continuous test and eye scan. Unverified on
+silicon until then: that the device holds its last output while CLK is
+stopped with CE# low (the controller's early CS# release), and LC 4 at
+108 MHz (1 % under the part's 109 MHz limit for LC 4; LC 5 is the
+default).
+
 ## 5. HyperRAM CK# floats — OK on Infineon, check per vendor
 
 Both boards leave CK# unconnected:
