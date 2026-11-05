@@ -1,0 +1,105 @@
+{
+"board": "a2p25",
+"modules": {
+"a2p25_psram_test_top": {
+"alu": 46,
+"bsram": 0,
+"dsp": 0,
+"lut": 97,
+"reg": 74,
+"rom16": 0,
+"ssram": 0
+},
+"a2p25_psram_test_top/i_bist": {
+"alu": 472,
+"bsram": 1,
+"dsp": 0,
+"lut": 1763,
+"reg": 974,
+"rom16": 0,
+"ssram": 0
+},
+"a2p25_psram_test_top/i_cmd": {
+"alu": 111,
+"bsram": 0,
+"dsp": 0,
+"lut": 3691,
+"reg": 1084,
+"rom16": 0,
+"ssram": 0
+},
+"a2p25_psram_test_top/i_ctrl": {
+"alu": 362,
+"bsram": 0,
+"dsp": 0,
+"lut": 1561,
+"reg": 1510,
+"rom16": 0,
+"ssram": 0
+},
+"a2p25_psram_test_top/i_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"a2p25_psram_test_top/i_pll0": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"a2p25_psram_test_top/u_phy": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 3,
+"reg": 1,
+"rom16": 0,
+"ssram": 0
+},
+"a2p25_psram_test_top/u_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"a2p25_psram_test_top/u_pll_init": {
+"alu": 18,
+"bsram": 1,
+"dsp": 0,
+"lut": 155,
+"reg": 101,
+"rom16": 0,
+"ssram": 0
+}
+},
+"pnr_totals": {
+"BSRAM": [
+3,
+56
+],
+"CLS": [
+5798,
+11520
+],
+"Logic": [
+8308,
+23040
+],
+"Register": [
+3744,
+23280
+]
+},
+"project": "a2p25_psram_test_ck108_xc"
+}

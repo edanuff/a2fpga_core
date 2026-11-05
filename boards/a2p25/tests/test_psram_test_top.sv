@@ -163,6 +163,11 @@ module test_psram_test_top;
         if (hexval32(r, 3) < 3 * 2048) begin $display("FAIL: too few words read"); errors++; end
         cmd("R 12", r);
         if (hexval32(r, 3) != 0) begin $display("FAIL: error words %s", r); errors++; end
+        cmd("R 27", r);            // DEVICE: {det_fail, proto_xccela, dev_id}
+        $display("device: %s", r);
+        if (`PT_PROTOCOL == 2 && r != "27=00000C81") begin
+            $display("FAIL: PROTOCOL 2 did not detect the HyperRAM (%s)", r); errors++;
+        end
         cmd("R 19", r);
         $display("BIST 2x-latency transactions: %s", r);
 

@@ -33,7 +33,8 @@ tools/flash.sh a2p25                    # through the on-board ESP32-S3 (openFPG
 
 The board has several bench projects beside the core: `a2p25_dp_test*.gprj` (DisplayPort
 colorbars, 2 and 4 lanes, probes, blind-sink and AUX-observation variants),
-`a2p25_psram_test_ck54/81/108.gprj` (the HyperRAM eye-scan test at three clock rates) and
+`a2p25_psram_test_ck54/81/108.gprj` (the HyperRAM eye-scan test at three clock rates),
+`a2p25_psram_test_ck108_xc.gprj` (the same at 108 with device detection, for the Xccela second source) and
 `legacy_a2p25_rev0.gprj` (the previous revision's core under `hdl/legacy/`, not maintained). Pass
 `GPRJ=<file>` to `tools/build.sh` and `tools/flash.sh` for those; both refuse to guess.
 Build with `bit_security 0` as every GW5A project here does (see `docs/gotchas.md`).

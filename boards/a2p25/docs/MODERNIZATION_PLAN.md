@@ -209,13 +209,29 @@ to the tCHD tail cycle (CE# must stay low 2.5 ns after the last CLK
 falling edge, where HyperBus allows 0).
 
 Hardware bring-up with an APS part: reflow it onto U6 (a2p25) or U10
-(a2mega 1.0a5; no board change), build `a2p25_psram_test_top` with
-`PROTOCOL = 2`, read register 0x27 (expect 0x0001_930D for a 64 Mb
-die) and run the usual continuous test and eye scan. Unverified on
-silicon until then: that the device holds its last output while CLK is
-stopped with CE# low (the controller's early CS# release), and LC 4 at
-108 MHz (1 % under the part's 109 MHz limit for LC 4; LC 5 is the
-default).
+(a2mega 1.0a5; no board change), flash **`a2p25_psram_test_ck108_xc`**
+(built 2026-11-03, §8: the ck108 test with `PROTOCOL = 2`, selected by
+`psram_test_defines_ck108_xc.v` through the top's `PT_PROTOCOL` define),
+read register 0x27 (expect 0x0001_930D for a 64 Mb APS die;
+0x0000_0C81 on today's HyperRAM boards, which the same image must keep
+passing) and run the usual continuous test and eye scan
+([PSRAM_TEST.md](PSRAM_TEST.md)). `make psram_test_top_xc` runs that
+exact configuration against the Infineon model. Unverified on silicon
+until then: that the device holds its last output while CLK is stopped
+with CE# low (the controller's early CS# release), LC 4 at 108 MHz (1 %
+under the part's 109 MHz limit for LC 4; LC 5 is the default), and the
+APS model itself (written from the datasheet, no vendor model).
+
+The first `_xc` build missed 108 MHz by 1.4 ns on one cone:
+`proto_xccela` (clk domain) through the HyperBus/Xccela latency muxes
+and the `2 + 2L` adder into `rd_ck_tot` (clk_mem domain), one clk_mem
+period end to end. The controller now registers the latency-derived
+constants on clk (`lat_r`, `rlat1_r/rlat2_r`, `wlat1_r/wlat2_r`,
+`fixed_r`; invisible, since their sources only change in a cycle that
+issues a register write, which uses none of them) and precomputes the
+Xccela strobe-arrival trim (`xc_trim`) at request time. This also
+applies to PROTOCOL 0 builds: the clk_mem cone is now shallower than
+before the Xccela work (worst setup +0.51 ns vs +0.15 ns on 10-10).
 
 ## 5. HyperRAM CK# floats — OK on Infineon, check per vendor
 
@@ -695,3 +711,4 @@ Plan and gap table: [ESP32_FEATURE_PORT.md](ESP32_FEATURE_PORT.md) (10-12). Key 
 | 2026-10-11 | **`a2p25_dp_test` — LINK_CHECK=1 BASELINE** (spec flow; Sceptre 20/20 attaches as `_lc1`, sha a21f23c8…) | this commit | Gowin V1.9.12.01 | 0/0; worst setup +0.16 (thin) | `6ec36c790f12e8d349c2a4935ee6ed8b6ae9808a465922f0d2f72e4a5023bf17` |
 | 2026-10-11 | `a2p25_dp_test_hold` (LINK_CHECK=0, the 10-10 first-light policy, bench only) | this commit | Gowin V1.9.12.01 | 0/0; worst setup +0.29 | `4eb4705442788e960f2c8cf3772b379ea95f4830925df963f9f7f15fd71eb6ef` |
 | 2026-10-10 | `a2p25_dp_test` + HPD_DISCONNECT_RESETS=1 (**replug recovery verified**: Y 11→22→33, bars return) | this commit | Gowin V1.9.12.01 | 0/0 | `bc08d218a69cf396d0b618d27176b416c6d7a92a0cbf4be69d36ca5dd076a9c2` |
+| 2026-11-03 | **`a2p25_psram_test_ck108_xc`** (PROTOCOL 2, Xccela second-source bring-up; §4.4) | this commit | Gowin V1.9.12.01 | 0/0; clk_mem 114.3 vs 108 (worst setup +0.51 ns); sim `psram_test_top` / `_xc` / `hyperram*` / `xccela*` all PASS; not yet on hardware | `e3b50bccbfbf492bc6a4195f15b0cb804f669732f669c00096a6fea68170c440` |

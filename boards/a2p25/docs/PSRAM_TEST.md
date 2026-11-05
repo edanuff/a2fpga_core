@@ -12,8 +12,8 @@ context: [MODERNIZATION_PLAN.md](MODERNIZATION_PLAN.md) §2 (track B) and §4–
 | Self-test engine + register map | `hdl/hyperram/hyperram_bist.sv` (map in its header) |
 | Console (UART ↔ registers) | `boards/a2p25/hdl/psram_test/hr_uart_cmd.sv` |
 | Top | `boards/a2p25/hdl/psram_test/a2p25_psram_test_top.sv` |
-| Projects | `a2p25_psram_test_ck108.gprj`, `_ck81`, `_ck54` (HyperBus CK in MHz; logic = CK/2) |
-| Simulation | `make -C boards/a2p25/tests psram_test_top` (whole bitstream over the UART against the Infineon model), plus `hyperram` / `hyperram_bist` |
+| Projects | `a2p25_psram_test_ck108.gprj`, `_ck81`, `_ck54` (HyperBus CK in MHz; logic = CK/2); `a2p25_psram_test_ck108_xc.gprj` = CK 108 with controller `PROTOCOL 2` (detects a HyperRAM or an Xccela APS6408L at boot; the second-source bring-up image, register 0x27 says which part answered) |
+| Simulation | `make -C boards/a2p25/tests psram_test_top` (whole bitstream over the UART against the Infineon model), `psram_test_top_xc` (the `_xc` configuration on the same model: must report 0x27 = 0C81), plus `hyperram` / `hyperram_bist` / `xccela*` |
 
 The console runs over the two ESP32 link lines the bitstream borrows. The
 FPGA's TX on C2 goes to ESP32 IO11, and ESP32 IO12 goes to the FPGA's RX on
@@ -88,6 +88,8 @@ R 02            bit0 busy, bit1 done, bit4 errors seen
 R 11 / R 12 / R 13    words compared / error words / error bits
 R 14 / R 15 / R 16    first error: address (bit31 = valid), expected, actual
 R 19 / R 1A           2x-latency transactions / read timeouts
+R 27                  DEVICE (PROTOCOL 2 builds): bit17 det_fail, bit16 proto_xccela,
+                      [15:0] ID. HyperRAM S27KL0642: 00000C81. APS6408L: 0001930D
 ```
 At CK 108 one full pass over 8 MB takes well under a second. Leave
 continuous mode running for a soak and read `11/12/13`; the

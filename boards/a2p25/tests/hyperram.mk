@@ -159,7 +159,7 @@ xccela_cold: $(HR_BUILD)/xccela_ctrl_auto.vvp
 hyperram_auto: $(HR_BUILD)/hyperram_ctrl_auto.vvp
 	$(call XC_SWEEP,hyperram_auto,$<,)
 
-.PHONY: xccela xccela_auto xccela_cold hyperram_auto
+.PHONY: xccela xccela_auto xccela_cold hyperram_auto psram_test_top_xc
 
 # Standalone PSRAM bitstream system test: a2p25_psram_test_top (CK 108)
 # driven over its console UART against the vendor model.
@@ -175,3 +175,17 @@ $(HR_BUILD)/psram_test_top.vvp: $(HR_RTL) $(HR_BIST_RTL) $(PT_RTL) $(HR_TB_COMMO
 
 psram_test_top: $(HR_BUILD)/psram_test_top.vvp
 	vvp $(HR_BUILD)/psram_test_top.vvp | grep -v 'Timing checks'
+
+# Same bitstream-level test built from the _xc defines file (PROTOCOL 2,
+# the a2p25_psram_test_ck108_xc.gprj configuration) on the HyperRAM model:
+# proves the detection build boots a HyperRAM board and reports 0x27 = 0C81.
+#   make psram_test_top_xc
+PT_RTL_XC = $(subst psram_test_defines_ck108.v,psram_test_defines_ck108_xc.v,$(PT_RTL))
+$(HR_BUILD)/psram_test_top_xc.vvp: $(HR_RTL) $(HR_BIST_RTL) $(PT_RTL_XC) $(HR_TB_COMMON) test_psram_test_top.sv $(HR_PMODEL)
+	@rm -f $@
+	iverilog $(HR_IVFLAGS) -s test_psram_test_top -o $@ \
+	  "$(GOWIN_SIMLIB)" $(HR_RTL) $(HR_BIST_RTL) $(PT_RTL_XC) $(HR_PMODEL) $(HR_TB_COMMON) test_psram_test_top.sv $(HR_IVFILTER)
+	@test -f $@
+
+psram_test_top_xc: $(HR_BUILD)/psram_test_top_xc.vvp
+	vvp $(HR_BUILD)/psram_test_top_xc.vvp | grep -v 'Timing checks'

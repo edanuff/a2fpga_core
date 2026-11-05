@@ -384,6 +384,24 @@ module hyperram_ctrl #(
     wire  [7:0]              c_lat    = proto_q ? xc_rlat : hb_lat;
     wire  [7:0]              c_wlat   = proto_q ? xc_wlat : hb_lat;
     wire                     c_fixed  = proto_q ? c_cr0[5] : c_cr0[3];
+    // Registered copies and the derived CK counts (2 + L, 2 + 2L + adj).
+    // proto_xccela and c_cr0 change only in a clk cycle that issues a
+    // register write, and register writes use none of these, so the one
+    // cycle of delay is invisible. It keeps the clk -> clk_mem request-
+    // time cone (q_lat1/q_lat2 -> rd_ck_tot etc.) to one mux and one
+    // adder: fed straight from proto_xccela it missed 108 MHz by 1.4 ns.
+    logic [7:0]              lat_r, wlat_r;
+    logic                    fixed_r;
+    logic [7:0]              rlat1_r, rlat2_r, wlat1_r, wlat2_r;
+    always_ff @(posedge clk) begin
+        lat_r   <= c_lat;
+        wlat_r  <= c_wlat;
+        fixed_r <= c_fixed;
+        rlat1_r <= 8'd2 + c_lat;
+        rlat2_r <= 8'd2 + c_lat + c_lat + 8'(LAT2X_ADJ);
+        wlat1_r <= 8'd2 + c_wlat;
+        wlat2_r <= 8'd2 + c_wlat + c_wlat + 8'(LAT2X_ADJ);
+    end
 
     // core -> clk
     logic                    done_tgl_m = 1'b0;
@@ -500,6 +518,7 @@ module hyperram_ctrl #(
     logic [7:0]   rd_open_cyc;               // read framing window opens
     logic [7:0]   rd_2x_cyc;                 // no data by then -> 2x
     logic [7:0]   off_to, off_rel;           // x_hw + arr + RD_TIMEOUT, x_hw + arr - 5
+    logic [7:0]   xc_trim;                   // Xccela: CKs still needed once the strobe arrives
     logic [7:0]   to_cyc, rel_cyc, rel_obs_cyc;
     logic         rd_open, past_2x, to_hit, rel_hit, rel_obs_hit;
     logic [7:0]   arr_meas;
@@ -531,10 +550,10 @@ module hyperram_ctrl #(
     wire  [7:0]   q_arr      = {4'b0, arr_cyc};
     // Boot probes assume latency 5 for the read window and clock out to
     // 2 + 2*7 (the device's latency is unknown then; reads are framed).
-    wire  [7:0]   q_rlat     = c_det ? 8'd5 : c_lat;
-    wire  [7:0]   q_xlat     = (c_xc && c_we && !c_reg) ? c_wlat : q_rlat;
-    wire  [7:0]   q_lat1     = 8'd2 + q_xlat;
-    wire  [7:0]   q_lat2     = c_det ? 8'd16 : 8'd2 + q_xlat + q_xlat + 8'(LAT2X_ADJ);
+    wire          q_xcwr     = c_xc && c_we && !c_reg;        // Xccela memory write: WLC
+    wire  [7:0]   q_rlat     = c_det ? 8'd5  : lat_r;
+    wire  [7:0]   q_lat1     = c_det ? 8'd7  : q_xcwr ? wlat1_r : rlat1_r;
+    wire  [7:0]   q_lat2     = c_det ? 8'd16 : q_xcwr ? wlat2_r : rlat2_r;
     wire  [31:0]  xc_addr    = 32'({c_addr, 2'b00});          // Xccela byte address
 
     // ---- Read capture (combinational next step) ----
@@ -603,9 +622,7 @@ module hyperram_ctrl #(
                         // this cycle. Extra CKs are harmless (the device
                         // keeps bursting inside the page until CE# rises).
                         if (x_xc)
-                            rd_ck_tot <= ({2'b0, x_hw} + 8'd2 > q_arr + 8'd1)
-                                         ? ck_cnt + {2'b0, x_hw} + 8'd2 - q_arr
-                                         : ck_cnt + 8'd1;
+                            rd_ck_tot <= ck_cnt + xc_trim;
                     end
                 end else if (rd_align) begin
                     rd_hold <= rx_dq_f;
@@ -668,7 +685,7 @@ module hyperram_ctrl #(
                 lat1_m1     <= q_lat1 - 8'd1;
                 lat2_m1     <= q_lat2 - 8'd1;
                 // Xccela writes always use WLC (no 2x, even in fixed mode)
-                end_m1      <= (c_fixed && !(c_xc && c_we)) ? q_lat2 - 8'd1 : q_lat1 - 8'd1;
+                end_m1      <= (fixed_r && !(c_xc && c_we)) ? q_lat2 - 8'd1 : q_lat1 - 8'd1;
                 x_hw_m1     <= q_hw[5:0] - 6'd1;
                 in_ca       <= 1'b1;
                 w_tail      <= 1'b0;
@@ -678,8 +695,8 @@ module hyperram_ctrl #(
                 rd_more     <= 1'b1;
                 // Xccela reads and boot probes clock the worst case (2x);
                 // Xccela reads then trim rd_ck_tot once the strobe arrives.
-                rd_dat_ck   <= (c_fixed || c_xc || c_det) ? q_lat2 + 8'd1 : q_lat1;
-                rd_ck_tot   <= (c_fixed || c_xc || c_det) ? q_lat2 + q_hw + 8'd1 : q_lat1 + q_hw;
+                rd_dat_ck   <= (fixed_r || c_xc || c_det) ? q_lat2 + 8'd1 : q_lat1;
+                rd_ck_tot   <= (fixed_r || c_xc || c_det) ? q_lat2 + q_hw + 8'd1 : q_lat1 + q_hw;
                 rd_tot1     <= q_lat1 + q_hw;
                 rd_tot2     <= q_lat2 + q_hw + 8'd1;
                 lat_smp_cyc <= CA0 + q_arr;
@@ -689,6 +706,10 @@ module hyperram_ctrl #(
                 rd_2x_cyc   <= CA0 + 8'd4 + q_rlat + q_arr;   // data1 + arr + 2
                 off_to      <= q_hw + q_arr + 8'(RD_TIMEOUT);
                 off_rel     <= q_hw + q_arr - 8'd5;           // arr >= 3, hw >= 2
+                // Xccela strobe-arrival trim (see the rd_ck_tot update on the
+                // first strobe): hw + 2 - arr, never below the CK issued that
+                // cycle. Precomputed here so the trim is one adder on clk_mem.
+                xc_trim     <= (q_hw + 8'd2 > q_arr + 8'd1) ? q_hw + 8'd2 - q_arr : 8'd1;
                 to_cyc      <= 8'hFF;     // armed when the data CK goes out
                 rel_cyc     <= 8'hFF;
                 rel_obs_cyc <= 8'hFF;
@@ -709,8 +730,8 @@ module hyperram_ctrl #(
                 lat_ca      <= 1'b0;
                 // Xccela: no latency indication during CA. Reads clock the
                 // worst case and are strobe-framed; writes are never 2x.
-                lat2x       <= c_xc ? !c_we : (c_fixed || c_det);
-                lat_known   <= c_fixed || c_xc || c_det;
+                lat2x       <= c_xc ? !c_we : (fixed_r || c_det);
+                lat_known   <= fixed_r || c_xc || c_det;
                 state       <= S_XFER;
             end
         end

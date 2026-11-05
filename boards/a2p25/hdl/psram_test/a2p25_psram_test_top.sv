@@ -55,13 +55,19 @@
  `define PT_PE_F   4
 `endif
 
+// Controller protocol: 0 HyperBus (default), 1 Xccela, 2 detect at boot.
+// The *_xc defines file sets PT_PROTOCOL 2 (second-source APS6408L bring-up).
+`ifndef PT_PROTOCOL
+ `define PT_PROTOCOL 0
+`endif
+
 module a2p25_psram_test_top #(
     parameter int CK_MHZ    = `PT_CK_MHZ,
     parameter int AUTOSTART = 1,
     parameter int AUTO_LEN  = 2**21 - 16,       // words (top 16 = calibration block)
     parameter int UART_BAUD = 115_200,
     parameter int STATUS_CLKS = CK_MHZ * 1_000_000 / 2,  // 1 s
-    parameter int PROTOCOL  = 0                   // hyperram_ctrl PROTOCOL: 0 HyperBus, 1 Xccela, 2 detect
+    parameter int PROTOCOL  = `PT_PROTOCOL        // hyperram_ctrl PROTOCOL: 0 HyperBus, 1 Xccela, 2 detect
 ) (
     input  logic clk50_in,          // E2
 
