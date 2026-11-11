@@ -120,6 +120,109 @@ Consequences for the ladder:
   it is gated on rung 2a below (microcode ROM in fabric) being affordable.
 - Bubbled data-late and the step diet are ludicrous-mode only.
 
+## 2c. After the plateau: the structural options (2026-11-11)
+
+The two-edge step needs, per step, the address cone (one clock) plus the
+data cone (tC2Q + output mux + core, measured 18.7 ns after rungs 1-2d).
+At 108 MHz that is N = 4 unless the data cone fits two clocks (17.5 ns
+usable). All four options below keep the core cycle-exact; they differ in
+what else they touch. The speedups use the scoping doc's §3 model
+(Applesoft-class, 1-3 % external cycles); 2× Squeezer ≈ 11.8× stock.
+
+| option | step rate | touches | status |
+|---|---|---|---|
+| A. 108 MHz, N = 4 | 27 MHz, ≈ 9-10× | nothing (the plan) | always available |
+| B. core PLL at 100 MHz, N = 3 | 33 MHz, ≈ 11× | the HyperRAM-spine clock decision of 09-05 (100 is not 2:1 with clk_logic 54; broker CDC) | data fits (0.8 ns margin); **address 10.9 > 9.5 ns** — needs the ADDR_BUS IR pre-decode (≈ −2 ns) first |
+| C. 108 MHz, N = 3, memory clock phase-shifted | 36 MHz, ≈ 12-13× | a second PLL output for the BSRAM clock | **dead**: address 10.9 and data 18.7 sum to 29.6 ns against a 27.8 ns step; a phase shift only moves the shortfall between the edges |
+| D. cycle-exact data-late core (3x) | 54 MHz at 108 (needs the same 1.2 ns) or 50 MHz at 100 (fits), ≈ 15-16× | core control-path restructure: microcode and address one step ahead | design not started |
+
+A fifth lever is fidelity-compatible and worth noting: a small cache in
+front of the 128 KB banks (one to four blocks, placed near the core; one
+mux level) with a **CE stall on a miss**. The core's step count per
+instruction is unchanged — the broker already stretches steps for external
+cycles — only wall time moves. Hit path saves ~2 levels and the long BSRAM
+exit nets; a 5-10 % miss rate at two clocks each costs ~0.15 clocks per
+step. It is the kind of thing that turns a 1.2 ns miss into a fit, but it
+is two weeks of work and a second memory hierarchy; only if B/C fail.
+
+## 2d. Proposed clocking after the verdict (ed, 2026-11-11)
+
+**One accelerator domain, isolated at the socket.** A dedicated PLL output
+(100 MHz) clocks the socket PHY's pin sequencer; the data-late core steps at
+50 MHz (CE or a synchronous 50 MHz output of the same PLL); the 128 KB banks
+and the ROM image live in that domain. PHY ↔ core is synchronous logic.
+Everything the accelerator does with the rest of the machine — video, I/O,
+slot space, the Mega II banks, the card's own peripherals — is a socket
+cycle: out to the motherboard and back in through the slot, as every real
+accelerator does. No fabric fast path; S8 (serving our own slot cards
+inside the chip) becomes a deliberate later exception.
+
+Consequences:
+
+- The 108 MHz HyperRAM/DOC spine is untouched. The DOC budget on a2p25
+  was a 7 % miss fixed by priority, not headroom, and "glitch-free under
+  typical usage" is not a margin to spend on a 7 % clock cut.
+- The only remaining clock crossing is the expansion-RAM cache miss path
+  (DDR3 now, HyperRAM later), which already stalls the core: a few core
+  clocks per miss in wall time, never in step count. ESP32 housekeeping is
+  a slow register handshake.
+- On the shared backing store the DOC cannot be stalled and the core can:
+  **DOC first, CPU stalls.** (The TransWarp plan's "CPU at arbiter
+  priority 0" is superseded by this for the shared-memory case.)
+- The PHY sequencer at 10 ns instead of 9.3 ns resolution: sample points
+  and output-enable delays are re-derived in clocks; the socket-timing
+  bench (`hdl/twgs/sim/tb_gs_socket.sv`) re-validates it.
+- The core clock is free to move later: if a rung finds the 1.5 ns, the
+  PLL goes to 108 and nothing else is re-timed.
+
+Open checks: a free 100 MHz PLL output on the 138B SOM (the a2mega PLL
+plan lists unused CLKOUTs); the broker's miss-path CDC design.
+
+**Memory placement on the HyperRAM board rev (ed, 2026-11-11):** instead of
+putting the accelerator's expansion banks on the HyperRAM beside the DOC,
+**give the DDR3 to the accelerator and move the slot side (framebuffer,
+shadow, DOC, peripherals) to the HyperRAM** — i.e. make a2mega's slot side
+the a2p25 architecture, which already runs the full core at 1080p×4 with
+SHR and DOC audio from a 108 MHz HyperRAM (`docs/memory_bandwidth_analysis.md`
+§3, `boards/a2p25/docs/MODERNIZATION_PLAN.md`). The DDR3 then has one
+client: no arbiter tails (the 0.55-1.6 µs unbounded-under-FB-load tails
+were the reason the TransWarp plan rejected CPU-on-DDR3), the
+`ddr3_port_cdc` FIFO BSRAM (33 of 90 blocks) is freed, and the two boards
+share one slot-side gateware. Supersedes the "CPU → HyperRAM" placement in
+the TransWarp plan for the board rev.
+
+**Testing the split on today's boards (ed, 2026-11-11).** The board-rev
+architecture can be exercised before any board exists: an
+**accelerator-only a2mega build** (socket PHY + core + local banks/ROM +
+DDR3 as the single-client expansion store + ESP32 for control/telemetry
+over WiFi/telnet; no framebuffer, shadow snoop, DOC, slot ROM/I/O decode or
+OSD) in one slot of a IIgs, with an **a2p25 in another slot** providing
+video, DOC audio, disks and peripherals from its HyperRAM. The two cards
+share nothing but the motherboard bus, which is exactly the claim the
+single-domain design makes, so the pair is a stronger test than the merged
+board would be: any coupling the accelerator secretly needs shows up as a
+failure instead of a fast path. It also makes the single-client DDR3
+latency measurable on real hardware and shows the slot-side gateware
+running unmodified beside an accelerator (a2p25 sees the accelerator's
+forwarded bank $00/$01 writes as ordinary CPU writes, §2.4 of the scoping
+doc).
+
+Interaction points to watch: (1) **/RESET** — a2p25 holds the open-drain
+slot /RESET until its mounts are done (`reset_hold`); the accelerator's S6
+sequencer sees that as the socket /RES it already re-registers, so the
+hold simply lengthens the reset, but the arm window is measured from the
+*release*, which is now a2p25's, not the ADB micro's. This is not a
+bench artefact to design around: the accelerator must coexist with any
+reset-holding card (our own slot cards, other vendors' storage cards), so
+the S6 sequencer's arm reference is defined as *the last release of
+/RESET*, whoever held it (ed, 2026-11-11). (2) **Slot I/O
+ownership** — the accelerator build must claim no $C0n0/$Cn00/$C800 space
+and must never assert /INH or /DMA, or it collides with a2p25's slots.
+(3) **No OSD on the accelerator** — speed/mode control goes through the
+ESP32 (telnet), or later through a2p25's OSD by a side channel; nothing on
+the bench needs that yet. (4) The a2mega must carry the **138B SOM** (the
+cone numbers are 138B; the 60K has not been measured for this core).
+
 ## 3. The ladder
 
 | rung | change | exactness | expected |
@@ -241,6 +344,101 @@ does not move the cone or breaks the bench is reverted, not kept.
   microcode LUT ROM by opcode class so the lookup is shallower; two more
   placement rolls of the final 2b source before trusting any of these
   numbers to ±0.5 ns.
+
+- **2026-11-11 rung 2c.** Flag-load condition tree (`LOAD_P == 001`, the
+  PLB/PLD/TSX specials) pre-decoded into `XT_TAB` (now 25 bits); the
+  MVN/MVP PC repeat written as `PCr + ({16{PCDec}} & 16'hFFFD)` so the ALU
+  carry reaches the PC through the data path instead of a register enable
+  behind the whole decode; probe constraint tightened to 17 ns (the N = 3
+  budget). Bench gained PLB/PLD/TSX/PHB/PHD coverage in both modes (and a
+  push-order bug in that new code was caught by the mark counts, not by
+  lockstep — both cores executed it identically). Lockstep full, `+stall`,
+  ROM 1 M: PASS. Probe: **52.32 MHz, 19 levels, 18.62 ns**, 124 violated
+  endpoints, 3 645 LUT. The PC endpoints are now `PCr/D` (enable gone), but
+  the worst path shows **six LUT levels after the adder just to form `CO`**
+  (`CO_s26…s8`): the rung-1 adder recovers byte/nibble carries from the sum
+  by XOR, then muxes by width and decimal mode, then by `secOp`. Path 4 is
+  again the LUT-ROM lookup (`DR_0/Q` → `MI.va`, 18.5 ns). Budget gap ≈ 1.1 ns.
+
+- **2026-11-11 rung 2d, first try — REGRESSION, reverted in part.** One-hot
+  ALU control (`FST`/`SEC`/`SEL_ADD` as microcode columns, `FALUCtrl_r` 25
+  bits, ALU selects as AND-OR; bit-exact on 5.12 M vectors × all 256 control
+  words, `tb_alu_eq.sv`) plus a 20-bit adder with a guard bit above every
+  nibble so nibble/byte carries are sum bits. Lockstep: PASS. Probe:
+  **47.46 MHz, 23 levels, 20.6 ns.** The path says why: GowinSynthesis
+  splits the carry chain at each guard bit into four CLS segments
+  (`g_3 → g_5`, `g_8 → g_10`, `g_13 → g_15`) with 0.97-1.2 ns of routing
+  between them, so the chain costs ~4 ns instead of ~1.2. Lesson: **never
+  put constants inside a carry chain on GW5A; one unbroken add, side
+  chains for extra carries.** Replaced by a 17-bit chain plus a parallel
+  9-bit low-byte chain for `co8` (adder equivalence sweep re-run).
+
+- **2026-11-11 rung 2d, corrected.** One 17-bit chain + parallel 9-bit
+  low-byte chain for `co8`, flat decimal lookahead, one-hot ALU control.
+  Lockstep full, `+stall`, ROM 1 M: PASS. Probe: **52.20 MHz, 19 levels,
+  18.69 ns**, 104 violated endpoints, 3 616 LUT. Worst path: data `DO` →
+  mux → `DB` (3) → adder → `Result8` → carry/zero select (6, `CO_Z`) →
+  the masked PC add (16-bit chain, 1.8 ns net in front) → `PCr/D`.
+
+  **Plateau.** Four cycle-exact rungs with sound local reasoning (2b, 2c,
+  2d×2) left the cone where 2a put it: 50.1 / 52.3 / 47.5 / 52.2 MHz. The
+  remaining 18.7 ns is roughly half routing on a 19-level cone that starts
+  5.7 ns after the edge (tC2Q 2.2 + BSRAM exit net 2.1 + mux and entry
+  nets). Rearranging LUTs is not going to find the last 1.2 ns here.
+  What is left is structural, and it comes in three flavours (see §2c).
+
+- **2026-11-11 address cone measured.** `a2mega_cpu_probe_138b_fast_addr`
+  (27.8 ns base period; `set_max_delay 9.260` from core registers to the
+  BSRAM `AD` pins; results in the report's Timing Exceptions section):
+  **10.9 ns, 8 levels — 2.8 ns cells, 7.7 ns routing.** The path is
+  `IR` → the ADDR_BUS special-case decode (`n1710`, 2 levels) → the
+  address mux (`a_*`, 4 levels, 1.0-1.3 ns nets between) → a **2.3 ns net
+  with fan-out 65** into the 64 BSRAM blocks' address pins. The same report
+  also shows the microcode LUT-ROM lookup at 26 ns under a relaxed
+  constraint (`Y` → `NewAAL` → `NextState` (fan-out 175, 3.1 ns net) →
+  five ROM levels), i.e. the core-internal paths stretch to whatever they
+  are given; in the real step they have the whole step, and the earlier
+  probes held them to one data-clock budget — an over-constraint that
+  distorted every data-cone number so far. The `_mc` variant corrects it
+  (core → core as 2-cycle, data cone at 18.52 ns).
+
+  **Implication for the two-edge step at 108 MHz:** address 10.9 > 9.26
+  and data 18.7 > 17.5 — short on *both* edges, by ~2 ns each. At 100 MHz
+  N = 3 the data cone fits but the address cone does not (10.9 > 9.5)
+  unless the IR-dependent ADDR_BUS terms are pre-decoded (−2 levels,
+  ≈ −2 ns) or the memory clock is phase-lagged ~1.5 ns, which eats the data
+  margin again. The address fan-out net is inherent to a 64-block memory.
+  The data-late structure (D) is the only option that does not have to
+  win both edges: its step is max(address, data) = the data cone, so 2 ×
+  100 MHz fits today (50 MHz steps) and 2 × 108 needs the same 1.2 ns.
+
+- **2026-11-11 data cone, step structure modelled.**
+  `a2mega_cpu_probe_138b_fast_mc` (18.52 ns base = two 108 MHz clocks,
+  core → core paths 2-cycle): **50.96 MHz, 19.0-19.2 ns on the data cone**,
+  65 violated endpoints, all of them `DO` → core registers (`PCr`, `P`,
+  `T`, `X`, `Y`, microcode registers). Same path anatomy as before: tC2Q
+  2.2 + 1.9 ns BSRAM exit net + mux + 0.8/0.9 ns nets into `DB` + ALU +
+  carry/zero select + 1.6 ns net into the PC adder. Across five placements
+  the data cone has read 18.6-19.2 ns; call it **19 ± 0.3 ns**. Verdict
+  for the two-edge step at 108 MHz: not by LUT work. (Note: `get_regs
+  {u_cpu/*}` did not reach the nested `u_cpu/MCode/*` registers — one
+  microcode-lookup path still appears at one cycle; use two patterns next
+  time.)
+
+### Where this leaves the goal (2× Squeezer ≈ 11.8× stock)
+
+| structure | step | ≈ speedup | what it needs |
+|---|---|---|---|
+| two-edge, 108 MHz, N = 4 | 27 MHz | 9-10× (1.6× Squeezer) | nothing; the plan |
+| two-edge, 100 MHz, N = 3 | 33 MHz | 11× (1.9×) | address cone 10.9 → ≤ 9.5 ns (ADDR_BUS IR pre-decode, est. −2 ns); data 19.0 vs 19.5 budget — no margin |
+| data-late (cycle-exact), 100 MHz, N = 2 | 50 MHz | 15-16× (2.6×) | the 3x restructure; data cone 19.0 fits the 19.5 budget; address cone irrelevant (< step) |
+| data-late (cycle-exact), 108 MHz, N = 2 | 54 MHz | 16-17× (2.8×) | 3x plus 1.5 ns the fabric has not given up |
+
+Only the data-late core clears 2× with margin, and it does so at the same
+cone we have today. The cost is the restructure of the control path
+(microcode and address one step ahead) and the 100 MHz clock decision
+(the 09-05 HyperRAM-spine choice assumed 108; 100 is not 2:1 with
+clk_logic 54, so the broker gets a CDC or the spine moves too).
 
 ## 5. Questions for ed
 

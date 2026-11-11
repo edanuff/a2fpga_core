@@ -1,24 +1,16 @@
 //============================================================================
-//  65C816 CPU core
+//  65C816 CPU core — fast variant (S7 accelerator exploration)
 //
-//  SystemVerilog conversion of the VHDL 65C816 core written by srg320 for
-//  SNES_MiSTer (https://github.com/MiSTer-devel/SNES_MiSTer), with
-//  modifications for the Apple IIgs. See README.md in this directory.
+//  ALU with one-hot control (rung 2d).  Same arithmetic as P65C816_ALU; the
+//  fstOp/secOp case statements become AND-OR selects driven by the one-hot
+//  FST/SEC words and SEL_ADD that the microcode generator pre-decodes
+//  (gen_fast_mcode.py), so every select is one LUT level off the register.
+//  Bit-exact with the stock ALU (tb_alu_eq.sv: all 256 control words x
+//  random operands and flags).
 //
 //  Copyright (c) srg320 -- original VHDL implementation
 //  Copyright (c) 2026 Alan Steremberg -- Verilog conversion and IIgs changes
-//
-//  This program is free software; you can redistribute it and/or modify it
-//  under the terms of version 3 of the GNU General Public License as
-//  published by the Free Software Foundation.
-//
-//  This program is distributed in the hope that it will be useful, but WITHOUT
-//  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-//  FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-//  more details.
-//
-//  You should have received a copy of the GNU General Public License along
-//  with this program. If not, see <https://www.gnu.org/licenses/>.
+//  GPL-3.0 (see README.md in hdl/twgs/65C816).
 //============================================================================
 import F65C816_pkg::*;
 
@@ -26,7 +18,7 @@ module F65C816_ALU
   (
    input [15:0]        L,
    input [15:0]        R,
-   input FALUCtrl_r     CTRL,
+   input FALUCtrl_r    CTRL,
    input               w16,
    input               BCD,
    input               CI,
@@ -40,205 +32,61 @@ module F65C816_ALU
    output logic [15:0] IntR
    );
 
-  logic [15:0]         IntR16;
-  logic [7:0]          IntR8;
-  logic                CR8;
-  logic                CR16;
-  logic                CR;
-  logic                ZR;
-  logic                CIIn;
-  logic                ADDIn;
-  logic                BCDIn;
+   wire [7:0] F = CTRL.FST;
+   wire [7:0] S = CTRL.SEC;
 
-  logic [15:0]         AddR;
-  logic                AddCO;
-  logic                AddVO;
-  logic [15:0]         Result16;
-  logic [7:0]          Result8;
+   // ---- first operation on R (shift/rotate/pass/swap/dec/inc) and its carry
+   wire [7:0]  IntR8  = ({8{F[0]}} & {R[6:0], 1'b0}) | ({8{F[1]}} & {R[6:0], CI}) |
+                        ({8{F[2]}} & {1'b0, R[7:1]}) | ({8{F[3]}} & {CI, R[7:1]}) |
+                        ({8{F[4]}} & R[7:0])          | ({8{F[5]}} & R[15:8]) |
+                        ({8{F[6]}} & (R[7:0] - 8'd1)) | ({8{F[7]}} & (R[7:0] + 8'd1));
+   wire [15:0] IntR16 = ({16{F[0]}} & {R[14:0], 1'b0}) | ({16{F[1]}} & {R[14:0], CI}) |
+                        ({16{F[2]}} & {1'b0, R[15:1]}) | ({16{F[3]}} & {CI, R[15:1]}) |
+                        ({16{F[4]}} & R)                | ({16{F[5]}} & {R[7:0], R[15:8]}) |
+                        ({16{F[6]}} & (R - 16'd1))      | ({16{F[7]}} & (R + 16'd1));
+   wire shl = F[0] | F[1], shr = F[2] | F[3], pass = F[4] | F[5] | F[6] | F[7];
+   wire CR8  = (shl & R[7])  | (shr & R[0]) | (pass & CI);
+   wire CR16 = (shl & R[15]) | (shr & R[0]) | (pass & CI);
+   wire CR   = w16 ? CR16 : CR8;
 
-  always_comb begin
-    CR8 = CI;
-    CR16 = CI;
-    case (CTRL.fstOp)
-      3'b000:
-        begin
-          CR8 = R[7];
-          CR16 = R[15];
-          IntR8 = {R[6:0], 1'b0};
-          IntR16 = {R[14:0], 1'b0};
-        end
-      3'b001 :
-        begin
-          CR8 = R[7];
-          CR16 = R[15];
-          IntR8 = {R[6:0], CI};
-          IntR16 = {R[14:0], CI};
-        end
-      3'b010 :
-        begin
-          CR8 = R[0];
-          CR16 = R[0];
-          IntR8 = {1'b0, R[7:1]};
-          IntR16 = {1'b0, R[15:1]};
-        end
-      3'b011 :
-        begin
-          CR8 = R[0];
-          CR16 = R[0];
-          IntR8 = {CI, R[7:1]};
-          IntR16 = {CI, R[15:1]};
-        end
-      3'b100 :
-        begin
-          IntR8 = R[7:0];
-          IntR16 = R;
-        end
-      3'b101 :
-        begin
-          IntR8 = R[15:8];
-          IntR16 = {R[7:0], R[15:8]};
-        end
-      3'b110 :
-        begin
-          IntR8 = ((R[7:0]) - 8'd1);
-          IntR16 = (R - 16'd1);
-        end
-      3'b111 :
-        begin
-          IntR8 = ((R[7:0]) + 8'd1);
-          IntR16 = (R + 16'd1);
-        end
-    endcase
-  end
+   // ---- adder
+   wire CIIn  = CR | ~CTRL.secOp[0];
+   wire ADDIn = ~CTRL.secOp[2];
+   wire BCDIn = BCD & CTRL.secOp[0];
+   wire [15:0] AddR;
+   wire        AddCO, AddVO;
+   F65C816_AddSubBCD AddSub (.A(L), .B(R), .CI(CIIn), .ADD(ADDIn), .BCD(BCDIn), .w16(w16),
+                             .S(AddR), .CO(AddCO), .VO(AddVO));
 
-  assign CR = (w16 == 1'b0) ? CR8 : CR16;
+   // ---- second operation
+   wire [15:0] bit_r16 = CTRL.fc ? (IntR16 | L) : (IntR16 & ~L);   // TSB / TRB
+   wire [7:0]  bit_r8  = CTRL.fc ? (IntR8 | L[7:0]) : (IntR8 & ~L[7:0]);
+   wire [7:0]  Result8  = ({8{S[0]}} & (L[7:0] | IntR8)) | ({8{S[1]}} & (L[7:0] & IntR8)) |
+                          ({8{S[2]}} & (L[7:0] ^ IntR8)) | ({8{CTRL.SEL_ADD}} & AddR[7:0]) |
+                          ({8{S[4]}} & IntR8)            | ({8{S[5]}} & bit_r8);
+   wire [15:0] Result16 = ({16{S[0]}} & (L | IntR16)) | ({16{S[1]}} & (L & IntR16)) |
+                          ({16{S[2]}} & (L ^ IntR16)) | ({16{CTRL.SEL_ADD}} & AddR) |
+                          ({16{S[4]}} & IntR16)       | ({16{S[5]}} & bit_r16);
+   assign CO = (CTRL.SEL_ADD & AddCO) | (~CTRL.SEL_ADD & CR);
 
-  assign CIIn = CR | ~CTRL.secOp[0];
-  assign ADDIn = ~CTRL.secOp[2];
-  assign BCDIn = BCD & CTRL.secOp[0];
+   // bit-test zero (TSB/TRB/BIT): Z from IntR & L, not from the result
+   wire ZR = w16 ? ((IntR16 & L) == 16'h0000) : ((IntR8 & L[7:0]) == 8'h00);
+   assign ZO = S[5] ? ZR : (w16 ? (Result16 == 16'h0000) : (Result8 == 8'h00));
 
+   // ---- overflow / sign
+   wire bit_flags = S[1] & CTRL.fc;                 // BIT: N/V from the operand
+   always_comb begin
+      VO = VI;
+      SO = w16 ? Result16[15] : Result8[7];
+      if (bit_flags) begin
+         VO = w16 ? IntR16[14] : IntR8[6];
+         SO = w16 ? IntR16[15] : IntR8[7];
+      end
+      if (S[3] | (S[7] & CTRL.fc)) VO = AddVO;
+      if (S[5]) SO = SI;
+   end
 
-  F65C816_AddSubBCD AddSub
-    (
-     .A    (L),
-     .B    (R),
-     .CI   (CIIn),
-     .ADD  (ADDIn),
-     .BCD  (BCDIn),
-     .w16  (w16),
-     .S    (AddR),
-     .CO   (AddCO),
-     .VO   (AddVO)
-     );
-
-  always_comb begin : xhdl0
-    logic [7:0]     temp8;
-    logic [15:0]    temp16;
-    ZR = 1'b0;
-    temp8 = 8'h00;
-    temp16 = 16'h0000;
-    case (CTRL.secOp)
-      3'b000 :
-        begin
-          CO = CR;
-          Result8 = L[7:0] | IntR8;
-          Result16 = L | IntR16;
-        end
-      3'b001 :
-        begin
-          CO = CR;
-          Result8 = L[7:0] & IntR8;
-          Result16 = L & IntR16;
-        end
-      3'b010 :
-        begin
-          CO = CR;
-          Result8 = L[7:0] ^ IntR8;
-          Result16 = L ^ IntR16;
-        end
-      3'b011, 3'b110, 3'b111 :
-        begin
-          CO = AddCO;
-          Result8 = AddR[7:0];
-          Result16 = AddR;
-        end
-      3'b100 :
-        begin
-          CO = CR;
-          Result8 = IntR8;
-          Result16 = IntR16;
-        end
-      3'b101 :
-        begin
-          CO = CR;
-          if (CTRL.fc == 1'b0)
-            begin
-              Result8 = IntR8 & ((~L[7:0]));
-              Result16 = IntR16 & ((~L));
-            end
-          else
-            begin
-              Result8 = IntR8 | L[7:0];
-              Result16 = IntR16 | L;
-            end
-
-          temp8 = IntR8 & L[7:0];
-          temp16 = IntR16 & L;
-          if ((temp8 == 8'h00 & w16 == 1'b0) | (temp16 == 16'h0000 & w16 == 1'b1))
-            ZR = 1'b1;
-        end
-      default :
-        begin
-          // Default case for unused secOp values
-          CO = CR;
-          Result8 = 8'h00;
-          Result16 = 16'h0000;
-        end
-    endcase
-  end : xhdl0
-
-  always_comb begin
-    VO = VI;
-    if (w16 == 1'b0)
-      SO = Result8[7];
-    else
-      SO = Result16[15];
-    case (CTRL.secOp)
-      3'b001 :
-        if (CTRL.fc == 1'b1)
-          begin
-            if (w16 == 1'b0)
-              begin
-                VO = IntR8[6];
-                SO = IntR8[7];
-              end
-            else
-              begin
-                VO = IntR16[14];
-                SO = IntR16[15];
-              end
-          end
-      3'b011 :
-        VO = AddVO;
-      3'b101 :
-        SO = SI;
-      3'b111 :
-        if (CTRL.fc == 1'b1)
-          VO = AddVO;
-      default :
-        begin
-          // Use default values already assigned (VO=VI, SO from Result)
-        end
-    endcase
-  end
-
-  assign ZO = (CTRL.secOp == 3'b101) ? ZR :
-              ((w16 == 1'b0 & Result8 == 8'h00) | (w16 == 1'b1 & Result16 == 16'h0000)) ? 1'b1 :
-              1'b0;
-
-  assign RES = (w16 == 1'b0) ? {8'h00, Result8} :
-               Result16;
-  assign IntR = (w16 == 1'b0) ? {8'h00, IntR8} :
-                IntR16;
+   assign RES  = w16 ? Result16 : {8'h00, Result8};
+   assign IntR = w16 ? IntR16   : {8'h00, IntR8};
 
 endmodule

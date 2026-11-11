@@ -1,22 +1,20 @@
 //============================================================================
 //  65C816 CPU core — fast variant (S7 accelerator exploration)
 //
-//  Binary/BCD add-subtract, rewritten from the gate-level ripple of
-//  P65C816_AddSubBCD (4 x BCDAdder = 2 x adder4 = 8 x bit_adder per nibble,
-//  a 16-stage carry ripple plus four serial correction adders) into:
-//    * one behavioral 17-bit add, which GowinSynthesis maps onto the CLS
-//      carry chain;
-//    * the decimal corrections computed in parallel per nibble.
-//  Bit-exact with the original for every input, including non-BCD digits
-//  (checked by the +bcd sweep in hdl/twgs/sim/bench and the ROM-boot lockstep).
+//  Binary/BCD add-subtract.  Rung 1 replaced the gate-level ripple with a
+//  behavioral add; rung 2d:
+//    * the byte carry from a parallel low-byte chain (native, no XOR level);
+//    * decimal-add carries by a flat generate/propagate lookahead
+//      (two LUT levels after the nibble sums instead of a 4-deep chain).
+//  Bit-exact with P65C816_AddSubBCD for every input (tb_addsub_eq.sv).
 //
 //  Original per-nibble semantics (T = A + B2 + cin, B2 = ADD ? B : ~B):
 //    binary (BCD=0):     S = T mod 16,            cout = T >= 16
 //    BCD add (ADD=1):    cout = T >= 10,           S = (T + 6*cout) mod 16
 //    BCD sub (ADD=0):    cout = T >= 16 (binary),  S = (T - 6*~cout) mod 16
 //  VO is the two's-complement overflow of the UNCORRECTED nibble sum at
-//  bit 7 / bit 15, with that nibble's actual carry-in (the decimal carry in
-//  BCD add mode).  CO = carry out of nibble 1 (8-bit) or nibble 3 (16-bit).
+//  bit 7 / bit 15 with that nibble's actual carry-in.  CO = carry out of
+//  nibble 1 (8-bit) or nibble 3 (16-bit).
 //
 //  Copyright (c) srg320 -- original VHDL implementation
 //  Copyright (c) 2026 Alan Steremberg -- Verilog conversion and IIgs changes
@@ -35,22 +33,30 @@ module F65C816_AddSubBCD
    output        VO
    );
 
-   // ---- binary path: one carry-chain add
+   // ---- binary path.  One unbroken 17-bit carry chain for the sum and the
+   // word carry; the byte carry comes from a short parallel chain over the low
+   // byte (co8 native, no XOR recovery, no extra level).  The two nibble
+   // carries the decimal-subtract correction needs are recovered by XOR —
+   // that path is off the critical cone.  (A guard-bit-per-nibble version was
+   // tried: GowinSynthesis splits the chain at every guard, ~1 ns of routing
+   // per split, 23 levels — see the exploration log, rung 2d.)
    wire [15:0] B2  = B ^ {16{~ADD}};
-   wire [16:0] bin = {1'b0, A} + {1'b0, B2} + {16'd0, CI};
-   // binary carries INTO nibbles 1..3 and out of nibble 3, recovered from the sum
-   wire bc1 = bin[4]  ^ A[4]  ^ B2[4];
-   wire bc2 = bin[8]  ^ A[8]  ^ B2[8];
-   wire bc3 = bin[12] ^ A[12] ^ B2[12];
-   wire bc4 = bin[16];
+   wire [16:0] bin17 = {1'b0, A} + {1'b0, B2} + {16'd0, CI};
+   wire [8:0]  lo9   = {1'b0, A[7:0]} + {1'b0, B2[7:0]} + {8'd0, CI};
+   wire [3:0]  s0 = bin17[3:0], s1 = bin17[7:4], s2 = bin17[11:8], s3 = bin17[15:12];
+   wire        bc1 = bin17[4] ^ A[4] ^ B2[4];      // carry into nibble 1
+   wire        bc2 = lo9[8];                        // carry out of the low byte
+   wire        bc3 = bin17[12] ^ A[12] ^ B2[12];   // carry into nibble 3
+   wire        bc4 = bin17[16];
+   wire [15:0] bin = bin17[15:0];
 
    // ---- BCD subtract: binary result, -6 on every nibble whose carry out is 0
-   wire [15:0] sub_s = { bin[15:12] + (bc4 ? 4'd0 : 4'd10),
-                         bin[11:8]  + (bc3 ? 4'd0 : 4'd10),
-                         bin[7:4]   + (bc2 ? 4'd0 : 4'd10),
-                         bin[3:0]   + (bc1 ? 4'd0 : 4'd10) };
+   wire [15:0] sub_s = { s3 + (bc4 ? 4'd0 : 4'd10),
+                         s2 + (bc3 ? 4'd0 : 4'd10),
+                         s1 + (bc2 ? 4'd0 : 4'd10),
+                         s0 + (bc1 ? 4'd0 : 4'd10) };
 
-   // ---- BCD add: decimal carries by generate/propagate, digits in parallel
+   // ---- BCD add: flat decimal carry lookahead, digits in parallel
    wire [4:0] t0 = {1'b0, A[3:0]}   + {1'b0, B[3:0]};
    wire [4:0] t1 = {1'b0, A[7:4]}   + {1'b0, B[7:4]};
    wire [4:0] t2 = {1'b0, A[11:8]}  + {1'b0, B[11:8]};
@@ -60,9 +66,9 @@ module F65C816_AddSubBCD
    wire g2 = (t2 >= 5'd10), p2 = (t2 == 5'd9);
    wire g3 = (t3 >= 5'd10), p3 = (t3 == 5'd9);
    wire dc1 = g0 | (p0 & CI);
-   wire dc2 = g1 | (p1 & dc1);
-   wire dc3 = g2 | (p2 & dc2);
-   wire dc4 = g3 | (p3 & dc3);
+   wire dc2 = g1 | (p1 & g0) | (p1 & p0 & CI);
+   wire dc3 = g2 | (p2 & g1) | (p2 & p1 & g0) | (p2 & p1 & p0 & CI);
+   wire dc4 = g3 | (p3 & g2) | (p3 & p2 & g1) | (p3 & p2 & p1 & g0) | (p3 & p2 & p1 & p0 & CI);
    wire [3:0] u0 = t0[3:0] + {3'd0, CI};     // uncorrected nibble sums (mod 16)
    wire [3:0] u1 = t1[3:0] + {3'd0, dc1};
    wire [3:0] u2 = t2[3:0] + {3'd0, dc2};
@@ -75,15 +81,14 @@ module F65C816_AddSubBCD
    // ---- select
    wire bcd_add = BCD & ADD;
    wire bcd_sub = BCD & ~ADD;
-   assign S = bcd_add ? add_s : bcd_sub ? sub_s : bin[15:0];
+   assign S = bcd_add ? add_s : bcd_sub ? sub_s : bin;
 
    wire co8  = bcd_add ? dc2 : bc2;
    wire co16 = bcd_add ? dc4 : bc4;
    assign CO = w16 ? co16 : co8;
 
-   // overflow on the uncorrected sum with the mode's carry-in
-   wire s7  = bcd_add ? u1[3] : bin[7];
-   wire s15 = bcd_add ? u3[3] : bin[15];
+   wire s7  = bcd_add ? u1[3] : s1[3];
+   wire s15 = bcd_add ? u3[3] : s3[3];
    wire vo8  = ~(A[7]  ^ B2[7])  & (A[7]  ^ s7);
    wire vo16 = ~(A[15] ^ B2[15]) & (A[15] ^ s15);
    assign VO = w16 ? vo16 : vo8;

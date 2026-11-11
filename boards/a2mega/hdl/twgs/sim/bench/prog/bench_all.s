@@ -377,6 +377,28 @@ bcdtest:
 
 ;----------------------------------------------------------------- 5 stack
 stacktest:
+    ; PLB / PLD / TSX / TXS coverage (emulation mode): the fast core
+    ; pre-decodes these opcodes' flag-load specials into the microcode
+    tsx                     ; N/Z from SP (8-bit X)
+    lda #$00
+    pha
+    plb                     ; DBR = 0, Z set
+    lda #$80
+    pha
+    plb                     ; DBR = $80, N set
+    lda #$00
+    pha
+    plb                     ; back to bank 0
+    lda #$12
+    pha                     ; high byte first: PLD pulls low from SP+1, high from SP+2
+    lda #$34
+    pha
+    pld                     ; D = $1234 (N/Z from $1234)
+    tdc
+    cmp #$34
+    bne @bad_d
+    pea $0000
+    pld                     ; D back to 0
     ldy #20
 @rep:
     lda #13
@@ -386,6 +408,9 @@ stacktest:
     dey
     bne @rep
     rts
+@bad_d:
+    pea $0000
+    pld                     ; restore D so the status write lands in zero page
 @bad:
     FAIL 5
     rts
@@ -562,6 +587,13 @@ native:
     jsr mul16
     dey
     bne @m
+    tsx                     ; 16-bit TSX
+    pea $8000
+    pld                     ; D = $8000 (N set)
+    pea $0000
+    pld                     ; D = 0 (Z set)
+    phb
+    plb
     sed                     ; 16-bit decimal
     lda #$1234
     sta bcd

@@ -31,3 +31,18 @@ is authoritative):
 
 `mcode.sv` here is **generated** — edit `gen_fast_mcode.py` (or the stock
 table) and rerun it; do not hand-edit the tables.
+- **Rung 2c** — `XT_TAB` gains the `LOAD_P == 001` condition tree
+  (`PF_PLB/PLD/TSX/FORCE/M8/X8/M16/X16`); `AddrGen.sv` writes the MVN/MVP
+  PC repeat as `PCr + ({16{PCDec}} & 16'hFFFD)` so the ALU carry reaches
+  the PC through the data path, not a register enable.
+- **Rung 2d** — `AddSubBCD.sv`: one unbroken 17-bit carry chain plus a
+  parallel 9-bit low-byte chain for the byte carry, and a flat decimal-carry
+  lookahead (a guard-bit-per-nibble chain was tried and regressed: the
+  synthesizer splits the chain at each guard; see the exploration log). `ALU.sv`: one-hot `FST`/`SEC` and
+  `SEL_ADD` from the microcode (`FALUCtrl_r` is 25 bits) turn every select
+  into one AND-OR level; bit-exact against the stock ALU on all 256 control
+  words (`../sim/bench/tb_alu_eq.sv`).
+
+Probe variants: `a2mega_cpu_probe_138b_fast_addr.gprj` constrains only the
+register → BSRAM-address paths to one 108 MHz clock (`set_max_delay`), so
+its report shows the address cone the normal probe hides behind the data cone.

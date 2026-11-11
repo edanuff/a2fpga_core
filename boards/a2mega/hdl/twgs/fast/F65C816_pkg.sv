@@ -43,7 +43,13 @@ package F65C816_pkg;
     logic [1:0]  va;
   } FMicroInst_r;
 
+  // rung 2d: ALU control is pre-decoded in the microcode — one-hot first/second
+  // operation selects and the "carry out comes from the adder" bit sit beside
+  // the stock 3-bit fields, so the ALU's selects are single AND-OR levels.
   typedef struct packed {
+    logic [7:0]  FST;        // one-hot of fstOp
+    logic [7:0]  SEC;        // one-hot of secOp
+    logic        SEL_ADD;    // secOp in {011, 110, 111}: result/carry from the adder
     logic [2:0]  fstOp;
     logic [2:0]  secOp;
     logic        fc;
@@ -57,6 +63,8 @@ package F65C816_pkg;
     logic        W16_FORCE;   // w16 = FORCE | (M & ~MF & ~EF) | (X & ~XF & ~EF)
     logic        W16_M;
     logic        W16_X;
+    // rung 2c: LOAD_P == 001 condition tree pre-decoded per microinstruction
+    logic        PF_PLB, PF_PLD, PF_TSX, PF_FORCE, PF_M8, PF_X8, PF_M16, PF_X16;
     FALUCtrl_r    ALU_CTRL;
     logic [2:0]  STATE_CTRL;
     logic [3:0]  ADDR_BUS;

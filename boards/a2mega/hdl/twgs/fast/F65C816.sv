@@ -447,17 +447,17 @@ module F65C816
                   P <= P;
                3'b001 :
                   begin
-                     if (IR == 8'hAB)  // PLB - Set N and Z based on D_IN
+                     if (MC.PF_PLB)  // PLB (rung 2c: IR terms pre-decoded in XT_TAB)
                      begin
                         P[7] <= D_IN[7];  // N flag
                         P[1] <= (D_IN == 8'h00);  // Z flag
                      end
-                     else if (IR == 8'h2B)  // PLD - Set N and Z based on 16-bit value from stack
+                     else if (MC.PF_PLD)  // PLD
                      begin
                         P[7] <= D_IN[7];  // N flag from high byte
                         P[1] <= ({D_IN, DR} == 16'h0000);  // Z flag
                      end
-                     else if (IR == 8'hBA)  // TSX - Set N and Z based on SP value transferred to X
+                     else if (MC.PF_TSX)  // TSX
                      begin
                         if (XF == 1'b1 | EF == 1'b1)  // 8-bit X
                         begin
@@ -470,7 +470,7 @@ module F65C816
                            P[1] <= (SP == 16'h0000);  // Z flag
                         end
                      end
-                     else if ((MC.LOAD_AXY[1] == 1'b0 & MC.BYTE_SEL[0] == 1'b1 & (MF == 1'b1 | EF == 1'b1)) | (MC.LOAD_AXY[1] == 1'b1 & MC.BYTE_SEL[0] == 1'b1 & (XF == 1'b1 | EF == 1'b1)) | (MC.LOAD_AXY[1] == 1'b0 & MC.BYTE_SEL[1] == 1'b1 & (MF == 1'b0 & EF == 1'b0)) | (MC.LOAD_AXY[1] == 1'b1 & MC.BYTE_SEL[1] == 1'b1 & (XF == 1'b0 & EF == 1'b0)) | (MC.LOAD_AXY[1] == 1'b0 & MC.BYTE_SEL[1] == 1'b1 & w16 == 1'b1) | IR == 8'hEB | IR == 8'h5B)
+                     else if (MC.PF_FORCE | (MC.PF_M8 & (MF | EF)) | (MC.PF_X8 & (XF | EF)) | (MC.PF_M16 & ((~MF & ~EF) | w16)) | (MC.PF_X16 & ~XF & ~EF))
                      begin
                         P[1:0] <= {ZO, CO};
                         P[7:6] <= {SO, VO};

@@ -92,11 +92,10 @@ module F65C816_AddrGen
         NextPC = NewPCWithOffset16;
       3'b110 :
         NextPC = {AAH, AAL};
-      3'b111 :
-        if (PCDec == 1'b1)
-          NextPC = (PCr - 16'd3);
-        else
-          NextPC = PCr;
+      3'b111 :   // rung 2c: PCr - 3 or PCr as one masked add, so the ALU carry
+                 // (PCDec, MVN/MVP repeat) reaches the PC through the data path,
+                 // not through a register-enable with the whole decode in front
+        NextPC = PCr + ({16{PCDec}} & 16'hFFFD);
       default :
         NextPC = PCr;
     endcase
