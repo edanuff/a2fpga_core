@@ -434,8 +434,10 @@ struct SoftSw {
 //
 // I/O is a deterministic stand-in, a function of the access sequence only
 // (never of time), so runs at different speeds can be compared: the soft-
-// switch status reads return the tracked state, everything else reads back
-// the last byte written to that register.
+// switch status reads return the tracked state, the vertical-blanking flag
+// ($C019) and the video counters ($C02E/$C02F) advance with every read of
+// them (so firmware that waits for the beam gets on with it), everything
+// else reads back the last byte written to that register.
 // ---------------------------------------------------------------------------
 struct Machine {
     SoftSw sw;
@@ -443,6 +445,7 @@ struct Machine {
     int    ram_banks = 2;                 // fast RAM banks present (00, 01, expansion)
     std::vector<uint8_t> fast, slow, rom;
     uint8_t io[256];
+    uint32_t beam = 0;                    // advances on each read of $C019 / $C02E / $C02F
     long   n_io_wr = 0, n_shadow_wr = 0, n_lc_sw = 0, n_c028 = 0;
 
     Machine() : fast(128 * 65536, 0), slow(2 * 65536, 0), rom(4 * 65536, 0xFF)
@@ -491,10 +494,13 @@ struct Machine {
         case 0x16: return sw.ALTZP << 7;
         case 0x17: return sw.SLOTC3ROM << 7;
         case 0x18: return sw.STORE80 << 7;
+        case 0x19: return (beam & 1) << 7;      // VBL: alternates from read to read
         case 0x1C: return sw.PAGE2 << 7;
         case 0x1D: return sw.HIRES << 7;
         case 0x29: return (io[r] & 0xFE) | (sw.bank_latch ? 1 : 0);
         case 0x2D: return sw.sltromsel;
+        case 0x2E: return 0x80 | ((beam >> 1) & 0x7F);   // vertical counter
+        case 0x2F: return (beam & 1) << 7;               // horizontal counter (bit 7 = V0)
         case 0x34: return io[r] & 0x7F;         // clock chip: transaction always complete
         case 0x35: return sw.shadow;
         case 0x36: return sw.cyareg;
@@ -540,6 +546,7 @@ struct Machine {
             const uint8_t r = addr & 0xFF;
             if (r >= 0x80 && r <= 0x8F) n_lc_sw++;
             if (r == 0x28) n_c028++;
+            if (!we && (r == 0x19 || r == 0x2E || r == 0x2F)) beam++;
         }
         sw.cycle(addr, we, d, rom3);
     }
