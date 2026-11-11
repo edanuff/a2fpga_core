@@ -111,5 +111,76 @@ out = out.replace(r3, "            begin\n" + r3 + "              AF <= AF_TAB[(
 m_old = "   assign M = {ALUFlags, MI.stateCtrl,"
 assert m_old in out
 out = out.replace(m_old, "   assign M = {XT[24:17], XT[16:11], XT[10], XT[9], XT[8], XT[7:0], ALUFlags, MI.stateCtrl,")
+
+# ---- S7 data-late step: the address fields of the NEXT microinstruction ----
+# F65C816_naf returns {addrBus[3:0], addrInc[1:0], byteSel[1], outBus[2:0]} of
+# row (IR, NextState), from the *registered* IR, so the core can form the next
+# step's address during the current step.  NextState 0 (fetch) and 1 (step 1)
+# return zero = PBR:PC, no increment, no write.  That, and the core's use of
+# the registered D / DBR / EF / IR in the next-address function, rest on
+# properties of the table that are asserted here.
+F_STATECTRL, F_ADDRBUS, F_ADDRINC, F_LOADP, F_LOADDKB, F_OUTBUS = 0, 1, 2, 3, 10, 14
+FLD = [[x.strip().split("'b")[1] for x in r.split(',')] for r in rows]
+def successors(i):
+    """row indices that can follow row i; None = the fetch step"""
+    ir, st, sc = i >> 3, (i & 7) + 1, FLD[i][F_STATECTRL]
+    nxt = {'000': [st + 1], '001': [st + 1, st + 2], '010': [0, 2] if (ir & 0x1F) == 0x10 and st == 1 else [0],
+           '011': [0, st + 1], '100': [st + 1, 0], '101': [st + 1, st + 2], '110': [st + 1, st + 2],
+           '111': [st + 1, st + 2]}[sc]
+    return [None if n == 0 else (ir << 3) | (n - 1) for n in nxt]
+READS = {'D': {'0011', '0111'}, 'DBR': {'0001'},
+         'EF': {'0101', '0011', '0111', '1000', '1100', '1111'}}
+na = []
+for i, f in enumerate(FLD):
+    ir, st = i >> 3, (i & 7) + 1
+    if 'X' in f[F_ADDRBUS]:
+        na.append("10'bxxxxxxxxxx"); continue
+    na.append("10'b" + f[F_ADDRBUS] + f[F_ADDRINC] + f[FIELD_BYTESEL][0] + f[F_OUTBUS])
+    if st == 1:   # IR is new in step 1: its address must not depend on the opcode
+        assert (f[F_ADDRBUS], f[F_ADDRINC], f[F_OUTBUS]) == ('0000', '00', '000'), (hex(ir), f)
+    if f[7] == '111':   # MVN/MVP repeat: the core takes PCDec = (A != 0) instead of the ALU carry
+        assert f[FIELD_BUSCTRL] == '000101' and f[FIELD_ALUCTRL] == '10000' and alu_bits[16] == '10011000', (hex(ir), st, f)
+    loads = set()
+    if f[F_LOADDKB] == '01': loads.add('D')
+    if f[F_LOADDKB] == '11': loads.add('DBR')
+    if f[F_LOADP] == '101':  loads.add('EF')
+    for reg in loads:   # a register taken from its flop in the next-address function
+        for n in successors(i):
+            assert n is None or FLD[n][F_ADDRBUS] not in READS[reg], (reg, hex(ir), st, n)
+# SUCC_TAB: the address fields of BOTH possible successors of each row, {row(st+1), row(st+2)},
+# registered with the microinstruction (SN).  During a step the core then picks the next
+# step's fields with the NextState decision alone (fetch/step 1 -> zero, +1, +2), instead of
+# a ROM lookup behind NextState.  The fetch microinstruction's successor is step 1: zero.
+def na_bits(i):
+    return na[i].split("'b")[1] if i < len(na) and (i >> 3) == cur_ir else "x" * 10
+succ = []
+for i in range(len(FLD)):
+    cur_ir = i >> 3
+    succ.append("20'b" + ("x" * 20 if 'x' in na[i] else na_bits(i + 1) + na_bits(i + 2)))
+a = "   FMicroInst_r         MI;\n"
+assert out.count(a) == 1
+out = out.replace(a, "   // rung 3: address fields of the two possible successor rows (see gen_fast_mcode.py)\n"
+                     "   localparam logic [19:0] SUCC_TAB[0:2047] = '{\n" + ",\n".join("      " + x for x in succ) + "\n   };\n" + a)
+a = "   output FMCode_r   M\n   ) /* synthesis"
+assert out.count(a) == 1
+out = out.replace(a, "   output FMCode_r   M,\n   output logic [19:0] SN    // rung 3: {NAF of row st+1, NAF of row st+2} of the registered row\n   ) /* synthesis")
+for ind in ("         ", "               "):   # reset value and the fetch-step constant
+    a = "\n" + ind + "XT <= " + FETCH_XT + ";\n"
+    assert out.count(a) == 1, out.count(a)
+    out = out.replace(a, a + ind + "SN <= 20'b0;\n")
+a = "              XT <= XT_TAB[({IR, STATE2[2:0]})];\n"
+assert out.count(a) == 1
+out = out.replace(a, a + "              SN <= SUCC_TAB[({IR, STATE2[2:0]})];\n")
+naf_mod = ("\n\n// S7 data-late step: address fields of the next microinstruction (see gen_fast_mcode.py).\n"
+           "// Simulation reference only: the core selects the same fields from the registered SN.\n"
+           "module F65C816_naf\n  (\n   input [7:0]         IR,      // registered opcode\n"
+           "   input [3:0]         STATE,   // NextState\n"
+           "   output logic [9:0]  NAF      // {addrBus[3:0], addrInc[1:0], byteSel[1], outBus[2:0]}\n"
+           "   ) /* synthesis syn_romstyle = \"logic\" */;\n"
+           "   localparam logic [9:0] NA_TAB[0:2047] = '{\n" + ",\n".join("      " + a for a in na) + "\n   };\n"
+           "   wire [3:0] S2 = STATE - 4'd1;\n"
+           "   assign NAF = (STATE <= 4'd1) ? 10'b0000000000 : NA_TAB[({IR, S2[2:0]})];\n"
+           "endmodule\n")
+out = out.rstrip("\n") + naf_mod
 DST.write_text(out)
 print(f"wrote {DST}: {len(af)} rows, {sum('x' in a for a in af)} X rows")

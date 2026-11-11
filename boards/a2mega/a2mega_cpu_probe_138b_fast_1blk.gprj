@@ -11,6 +11,7 @@
         <File path="hdl/twgs/fast/AddSubBCD.sv" type="file.verilog" enable="1"/>
         <File path="hdl/twgs/fast/ALU.sv" type="file.verilog" enable="1"/>
         <File path="hdl/twgs/fast/AddrGen.sv" type="file.verilog" enable="1"/>
+        <File path="hdl/twgs/fast/AddrBus.sv" type="file.verilog" enable="1"/>
         <File path="hdl/twgs/fast/F65C816.sv" type="file.verilog" enable="1"/>
         <File path="hdl/cpu_probe_138b/cpu_probe_top.sv" type="file.verilog" enable="1"/>
         <File path="hdl/cpu_probe_138b/cpu_probe_mem.hex" type="file.other" enable="1"/>

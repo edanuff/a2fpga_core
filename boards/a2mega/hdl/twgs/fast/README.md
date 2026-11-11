@@ -43,6 +43,43 @@ table) and rerun it; do not hand-edit the tables.
   into one AND-OR level; bit-exact against the stock ALU on all 256 control
   words (`../sim/bench/tb_alu_eq.sv`).
 
+- **Rung 3 (data-late step)** — the core now produces the address of the
+  *next* step during the current one (`NA_OUT`), so a synchronous memory can
+  register it at the step edge and the step becomes one clock instead of an
+  address clock plus data clocks. `A_OUT` is the register of `NA_OUT`, so the
+  bus is unchanged and the lockstep bench checks it on every step.
+  - `AddrBus.sv` (`F65C816_AddrBus`) is the stock `ADDR_BUS` block moved
+    verbatim into a module. The core instantiates it twice: on the registers
+    (simulation cross-check only; synthesis sweeps it) and on their next
+    values.
+  - Next values: `AddrGen.sv` exports `PC_n`/`AA_n`/`AB_n`/`DX_n`; `SP_n`,
+    `PBR_n`, `SPW_n` and the emulation-mode stack-tracking flags are split
+    into next-value logic plus registers (same expressions, moved).
+  - The next step's microcode address fields are registered with the
+    microinstruction: `SUCC_TAB` (generated) holds the fields of both
+    possible successor rows, and the `NextState` decision (`NS_ZERO`,
+    `NS_INC2`) picks one, so there is no ROM lookup behind `NextState`.
+    `F65C816_naf` (`NA_TAB`) is the direct lookup, kept as the simulation
+    reference. (Used in synthesis, GowinSynthesis shared its decode with the
+    main microcode ROM and so put memory data → `NextIR` in front of it.)
+    `IR`, `D`, `DBR`, `EF` and the interrupt-class flags are read from their
+    registers; that is exact because of table properties the generator
+    asserts (every opcode's step 1 addresses `PBR:PC` with no write; `D`,
+    `DBR`, `EF` load only where the successor step does not read them).
+  - The MVN/MVP repeat decision is `A != 0` from the register instead of the
+    ALU carry-out (same value in that step; asserted by the generator and in
+    simulation), which removes memory → ALU → carry → PC adder from the
+    next-address path.
+  - Memory contract (bench `+datalate`, probe `CPU_PROBE_DATALATE`): read
+    port addressed by `NA_OUT`, clock-enabled by `RDY_OUT`; write port at
+    `A_OUT`/`D_OUT`/`WE` on the step edge; a one-entry bypass serves a read of
+    the byte written at the same edge (the bench returns garbage from the
+    memory there, so the bypass is proven necessary and sufficient).
+
 Probe variants: `a2mega_cpu_probe_138b_fast_addr.gprj` constrains only the
 register → BSRAM-address paths to one 108 MHz clock (`set_max_delay`), so
 its report shows the address cone the normal probe hides behind the data cone.
+`a2mega_cpu_probe_138b_fast_dl.gprj` is the data-late probe: one clock per step, so its
+reported Fmax is the step rate. The two-edge probes still build, but since rung 3
+their address clock starts at the `A_OUT` register, so they no longer measure the
+address cone.

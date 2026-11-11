@@ -44,7 +44,12 @@ module F65C816_AddrGen
    output logic [7:0]  AB,
    output logic [15:0] DX,
    output logic        AALCarry,
-   output logic        JumpNoOfl
+   output logic        JumpNoOfl,
+   // S7 data-late: the values PC / AA / AB / DX take after this step (EN assumed)
+   output logic [15:0] PC_n,
+   output logic [16:0] AA_n,
+   output logic [7:0]  AB_n,
+   output logic [15:0] DX_n
    );
 
   logic [7:0]          AAL;
@@ -179,52 +184,54 @@ module F65C816_AddrGen
    assign NewAAHWithCarry = (NewAAH + ({8'b00000000, SavedCarry}));
 
 
-   always @(posedge CLK or negedge RST_N)
-      if (RST_N == 1'b0)
-      begin
-         AAL <= 8'd0;
-         AAH <= 8'd0;
-         AB <= 8'd0;
-         DL <= 8'd0;
-         DH <= 8'd0;
-         AAHCarry <= 1'b0;
-         SavedCarry <= 1'b0;
-      end
-      else
-      begin
-         if (EN == 1'b1)
-         begin
+   // S7 data-late: next values as logic (EN assumed), registered below.
+   logic [7:0]  AAL_n;
+   logic [7:0]  AAH_n;
+   logic [7:0]  AB_nx;
+   logic [7:0]  DL_n;
+   logic [7:0]  DH_n;
+   logic        AAHCarry_n;
+   logic        SavedCarry_n;
+   always @* begin
+      AAL_n = AAL;
+      AAH_n = AAH;
+      AB_nx = AB;
+      DL_n = DL;
+      DH_n = DH;
+      AAHCarry_n = AAHCarry;
+      SavedCarry_n = SavedCarry;
+
             case (AALCtrl)
                3'b000 :
                   begin
                      if (IND_CTRL[1] == 1'b1)
-                        AAL <= NewAAL[7:0];
-                     SavedCarry <= 1'b0;
+                        AAL_n = NewAAL[7:0];
+                     SavedCarry_n = 1'b0;
                   end
                3'b001 :
                   begin
-                     AAL <= NewAAL[7:0];
-                     SavedCarry <= NewAAL[8];
+                     AAL_n = NewAAL[7:0];
+                     SavedCarry_n = NewAAL[8];
                   end
                3'b010 :
                   begin
-                     AAL <= D_IN;
-                     SavedCarry <= 1'b0;
+                     AAL_n = D_IN;
+                     SavedCarry_n = 1'b0;
                   end
                3'b011 :
                   begin
-                     AAL <= NewPCWithOffset16[7:0];
-                     SavedCarry <= 1'b0;
+                     AAL_n = NewPCWithOffset16[7:0];
+                     SavedCarry_n = 1'b0;
                   end
                3'b100 :
                   begin
-                     DL <= NewAAL[7:0];
-                     SavedCarry <= NewAAL[8];
+                     DL_n = NewAAL[7:0];
+                     SavedCarry_n = NewAAL[8];
                   end
                3'b101 :
                   begin
-                     DL <= NewDL[7:0];
-                     SavedCarry <= NewDL[8];
+                     DL_n = NewDL[7:0];
+                     SavedCarry_n = NewDL[8];
                   end
                3'b111 :
                   ;
@@ -236,38 +243,38 @@ module F65C816_AddrGen
                3'b000 :
                   if (IND_CTRL[1] == 1'b1)
                   begin
-                     AAH <= NewAAH[7:0];
-                     AAHCarry <= 1'b0;
+                     AAH_n = NewAAH[7:0];
+                     AAHCarry_n = 1'b0;
                   end
                3'b001 :
                   begin
-                     AAH <= NewAAHWithCarry[7:0];
-                     AAHCarry <= NewAAHWithCarry[8];
+                     AAH_n = NewAAHWithCarry[7:0];
+                     AAHCarry_n = NewAAHWithCarry[8];
                   end
                3'b010 :
                   begin
-                     AAH <= D_IN;
-                     AAHCarry <= 1'b0;
+                     AAH_n = D_IN;
+                     AAHCarry_n = 1'b0;
                   end
                3'b011 :
                   begin
-                     AAH <= NewPCWithOffset16[15:8];
-                     AAHCarry <= 1'b0;
+                     AAH_n = NewPCWithOffset16[15:8];
+                     AAHCarry_n = 1'b0;
                   end
                3'b100 :
                   begin
-                     DH <= NewAAH[7:0];
-                     AAHCarry <= 1'b0;
+                     DH_n = NewAAH[7:0];
+                     AAHCarry_n = 1'b0;
                   end
                3'b101 :
                   begin
-                     DH <= InnerDS[15:8];
-                     AAHCarry <= 1'b0;
+                     DH_n = InnerDS[15:8];
+                     AAHCarry_n = 1'b0;
                   end
                3'b110 :
                   begin
-                     DH <= (DH + ({7'b0000000, SavedCarry}));
-                     AAHCarry <= 1'b0;
+                     DH_n = (DH + ({7'b0000000, SavedCarry}));
+                     AAHCarry_n = 1'b0;
                   end
                3'b111 :
                   ;
@@ -279,17 +286,43 @@ module F65C816_AddrGen
                2'b00 :
                   ;
                2'b01 :
-                  AB <= D_IN;
+                  AB_nx = D_IN;
                2'b10 :
-                  AB <= (D_IN + ({7'b0000000, NewAAHWithCarry[8]}));
+                  AB_nx = (D_IN + ({7'b0000000, NewAAHWithCarry[8]}));
                2'b11 :
                   if (AALCtrl[2] == 1'b0 & AAHCtrl[2] == 1'b0)
-                     AB <= DBR;
+                     AB_nx = DBR;
                default :
                   ;
             endcase
-         end
+   end
+
+   always @(posedge CLK or negedge RST_N)
+      if (RST_N == 1'b0)
+      begin
+         AAL <= 8'd0;
+         AAH <= 8'd0;
+         AB <= 8'd0;
+         DL <= 8'd0;
+         DH <= 8'd0;
+         AAHCarry <= 1'b0;
+         SavedCarry <= 1'b0;
       end
+      else if (EN == 1'b1)
+      begin
+         AAL <= AAL_n;
+         AAH <= AAH_n;
+         AB <= AB_nx;
+         DL <= DL_n;
+         DH <= DH_n;
+         AAHCarry <= AAHCarry_n;
+         SavedCarry <= SavedCarry_n;
+      end
+
+   assign PC_n = NextPC;
+   assign AA_n = {AAHCarry_n, AAH_n, AAL_n};
+   assign AB_n = AB_nx;
+   assign DX_n = {DH_n, DL_n};
 
    assign AALCarry = NewAAL[8];
    assign AA = {AAHCarry, AAH, AAL};

@@ -230,7 +230,7 @@ cone numbers are 138B; the 60K has not been measured for this core).
 | 1 | `AddSubBCD` as one behavioral add (carry chain) + parallel decimal correction; `ALU_TAB` folded into the microcode ROM (`AF_TAB`) | cycle-exact | done: exact, no cone change |
 | 2a | microcode tables `syn_romstyle = "logic"`: microinstruction register in fabric flops behind LUT ROM, removing the BSRAM tC2Q + column net (~3.2 ns) from the head of every control path | cycle-exact | cone −1.5…−3 ns; also the enabler for 3x |
 | 2b | pre-decode into ROM width: one-hot `BUS_CTRL` selects + `w16` terms (done), then `LOAD_P`/`LOAD_PC` conditions per opcode, shallower LUT ROM | cycle-exact | done part: 18 → 16 levels, Fmax flat within roll noise (50-52); ~1.5 ns still to find |
-| 3x | cycle-exact data-late: microcode and address one step ahead (LUT ROM looked up from the opcode byte in the fetch step), BSRAM addressed at the step edge, data consumed next step | cycle-exact (lockstep) | N = 2, 54 MHz steps — **main line** |
+| 3 | cycle-exact data-late: the address of the next step formed from next-state values (`NA_OUT`), registered inside the BSRAM at the step edge; one clock per step; `A_OUT` = its register; writes at the step edge with a one-entry read bypass | cycle-exact (lockstep, incl. stalls, interrupts, ROM 01 boot) | **done 2026-11-11**: 41.1 MHz naive, 49.5 MHz after two next-address cuts (first rolls, core + 128 KB memory) — **main line** |
 | L1 | ludicrous: bubbled data-late where 3x's address path does not close | architecture-exact | optional core |
 | L2 | ludicrous: step diet (RMW double write, dummy reads on indexed page crossings, 16-bit operand fetch as one local read) | architecture-exact, local memory only | 10-20 % fewer steps |
 
@@ -472,6 +472,79 @@ Read from `impl/pnr/a2mega_cpu_probe_138b_fast_mc` (no new build):
   domain's PLL is free, so the frequency is a dial: data-late at 40 MHz
   (25 ns) clears 2× with ~5 ns in hand; 50 is the stretch, not the
   requirement.
+
+### Rung 3: the data-late step (2026-11-11)
+
+**What changed.** The microcode was already one step ahead (the
+microinstruction register is loaded from `NextIR`/`NextState`), so the whole
+restructure reduces to *the address one step ahead*: `F65C816` now outputs
+`NA_OUT`, the stock address function (`AddrBus.sv`, the `ADDR_BUS` block
+moved verbatim) evaluated on the values the registers will hold after the
+current step. `A_OUT` is the register of `NA_OUT`. The memory registers
+`NA_OUT` at the step edge (BSRAM read port, clock-enabled by `RDY_OUT`),
+its data is the core's `D_IN` for the following step, and writes go to
+`A_OUT`/`D_OUT` at the step edge on the second port with a one-entry bypass
+for a read of the byte just written. One clock per step.
+
+**Exactness.** Lockstep against the stock core, every step, in all modes:
+
+| bench | result |
+|---|---|
+| program, ideal memory | PASS, 4,610,768 steps |
+| program, `+datalate +stall` | PASS; 4,096 same-edge write/read collisions, all served by the bypass (the bench memory returns garbage there) |
+| ROM 01, `+datalate +stall`, 6 M clocks | PASS |
+| ROM 01, `+datalate +irq +stall` (2,924 IRQ assertions, 373 NMI pulses) | PASS |
+
+`+irq` (pseudo-random IRQ/NMI on both cores) is new; no earlier rung had
+interrupt coverage. Where the next-address function reads a register
+instead of its next value (`IR`, `D`, `DBR`, `EF`, the interrupt-class
+flags), `gen_fast_mcode.py` asserts the table property that makes it exact
+(every opcode's step 1 addresses `PBR:PC` with no write; those registers
+load only where no successor step reads them). In simulation the registered
+`A_OUT` is also compared with the stock function of the registers on every
+clock.
+
+**Timing (probe `a2mega_cpu_probe_138b_fast_dl`, 138B, 0.5 ns uncertainty,
+one clock = one step, so Fmax is the step rate):**
+
+| build | change | step rate | worst slack @ target | failing paths |
+|---|---|---|---|---|
+| 1 | naive next-address logic, 20 ns target | 41.05 MHz | −4.36 ns | 932 |
+| 2 | + repeat decision from `A`, + registered successor address fields, 20 ns target | **49.52 MHz** | −0.19 ns | 38 |
+| 3 | same source, 21 ns target (clean-close check) | **47.62 MHz, clean** | +0.002 ns | 0 |
+
+Build 3 is the gate result: the data-late core plus its 128 KB memory closes
+at **47.6 MHz steps with the 0.5 ns policy uncertainty and zero violations**
+(one roll; the three-roll durability rule applies to the integrated build,
+not to this probe). The placer stops at the constraint, so +0.002 ns says
+"met", not "no more to find"; build 2 shows about 0.8 ns more is there.
+
+- Build 1's worst paths were all in the new logic: `mem → ALU → carry-out →
+  PC adder → next address` (the MVN/MVP repeat decision), and `mem → NextIR
+  → next-address fields`. The second was a synthesis artefact: the direct
+  lookup `NA_TAB[{IR, NextState}]` shared decode terms with the main ROM
+  (`M_TAB[{NextIR, NextState}]`; sound, because `NextIR` is `IR` whenever
+  `STATE != 0`, but it puts the memory data in front of the lookup).
+- Cuts (both cycle-exact, both asserted): the repeat decision is `A != 0`
+  from the register (in that step the ALU computes `A − 1` in 16 bits, so
+  its carry-out is exactly that); the address fields of **both** possible
+  successor rows are registered with the microinstruction (`SUCC_TAB`) and
+  the `NextState` decision picks one, so no ROM sits behind `NextState`.
+- After build 2 the wall is the old data wall again (`mem → ALU → P / T`,
+  `mem → microcode registers`) with the next-address paths level with it
+  (`Y → AAL carry → NextState → RTL offset → address`, `mem → D + operand →
+  DX + inc → address`). 3,870 LUT / 416 FF / 64 BSRAM.
+
+**What the probe does not contain** (integration costs to expect):
+the ROM image and cache as further `D_IN` sources (one more mux level on
+the data cone); the broker's local-or-socket decision on the registered
+`A_OUT` feeding the core's clock enable; whatever the full build's placement
+costs versus an empty device. The PLL is a dial (§2d): plan the first
+integrated build at 40 MHz steps and move up from there.
+
+**Consequence for the two-edge probes:** they still build, but their
+address clock now starts at the `A_OUT` register, so they no longer measure
+the address cone.
 
 ## 5. Questions for ed
 

@@ -9,6 +9,14 @@
 // (BSRAM out -> ALU -> flags) and (regs -> A_OUT -> BSRAM address); the step
 // rate is Fmax / 2 here and 108 / N on the real card (N = clocks per step).
 //
+// CPU_PROBE_DATALATE (the _fast_dl project): the data-late step.  One clock
+// per step; the memory's read address is the core's NA_OUT (the address of
+// the next step, formed from next-state values) registered inside the BSRAM
+// at the step edge, so the clock period IS the step time and the reported
+// Fmax is the step rate.  Writes go to the registered A_OUT at the step
+// edge through the second port; a read of the byte written at the same edge
+// is served by a one-entry bypass (bench: tb_cpu_bench.sv +datalate).
+//
 // Stock core (P65C816) when CPU_PROBE_STOCK is defined (the _stock project
 // lists cpu_probe_stock_defines.v first); the fast variant F65C816 otherwise.
 // Memory image = the bench program (hdl/twgs/sim/bench/prog/bench_all.s),
@@ -33,10 +41,14 @@ module cpu_probe_top (
     always_ff @(posedge clk)
         if (!rst_n) phase <= 1'b0;
         else        phase <= ~phase;
+`ifdef CPU_PROBE_DATALATE
+    wire ce = 1'b1;
+`else
     wire ce = phase;
+`endif
 
     // ---- core
-    logic [23:0] a;
+    logic [23:0] a, na;
     logic [7:0]  din, dout;
     logic        we, vpa, vda, vpb, mlb, rdyo, iflag;
 
@@ -48,7 +60,11 @@ module cpu_probe_top (
         .CLK(clk), .RST_N(rst_n), .CE(ce), .RDY_IN(1'b1),
         .NMI_N(1'b1), .IRQ_N(1'b1), .ABORT_N(1'b1),
         .D_IN(din), .D_OUT(dout), .A_OUT(a), .WE(we), .RDY_OUT(rdyo),
-        .VPA(vpa), .VDA(vda), .MLB(mlb), .VPB(vpb), .I_FLAG(iflag));
+        .VPA(vpa), .VDA(vda), .MLB(mlb), .VPB(vpb), .I_FLAG(iflag)
+`ifndef CPU_PROBE_STOCK
+        , .NA_OUT(na)
+`endif
+        );
 
     // ---- 128 KB BSRAM, synchronous read on the address clock, write on the
     // step clock.  The two never coincide, and keeping them in if/else keeps
@@ -66,11 +82,28 @@ module cpu_probe_top (
     logic [7:0] mem [0:(1<<MEM_AW)-1];
     initial $readmemh("cpu_probe_mem.hex", mem);
     logic [7:0] rdata;
+`ifdef CPU_PROBE_DATALATE
+    // read port: next-step address, registered in the BSRAM when the core steps
+    always_ff @(posedge clk) if (rdyo) rdata <= mem[na[MEM_AW-1:0]];
+    // write port: this step's address and data, at the step edge
+    always_ff @(posedge clk) if (rdyo && !we) mem[a[MEM_AW-1:0]] <= dout;
+    // bypass: the byte written at the last edge, if this step reads it
+    logic              byp_wr = 1'b0;
+    logic [MEM_AW-1:0] byp_a;
+    logic [7:0]        byp_d;
+    always_ff @(posedge clk) if (rdyo) begin
+        byp_wr <= !we;
+        byp_a  <= a[MEM_AW-1:0];
+        byp_d  <= dout;
+    end
+    assign din = (byp_wr && byp_a == a[MEM_AW-1:0]) ? byp_d : rdata;
+`else
     always_ff @(posedge clk) begin
         if (ce && !we) mem[a[MEM_AW-1:0]] <= dout;
         else           rdata <= mem[a[MEM_AW-1:0]];
     end
     assign din = rdata;
+`endif
 
     // ---- keep every output observable
     logic [23:0] hb = 24'd0;

@@ -7,6 +7,7 @@
 #   default program: prog/bench_all.s (assembled with ca65/ld65 into OUT)
 #   +lockstep=0     architectural compare only (cycle-count-changing rungs)
 #   +rom=<boot1.rom>  ROM 01 boot stress instead of a program
+#   +datalate       DUT on a synchronous memory addressed one step ahead (NA_OUT)
 #   +stall +trace +vcd +cycles=N   see tb_cpu_bench.sv
 # Env: OUT (work dir, default ${TMPDIR:-/tmp}/cpu_bench)
 set -uo pipefail
@@ -29,7 +30,7 @@ done
 FILES=( "$STOCK/P65C816_pkg.sv" "$STOCK/mcode.sv" "$STOCK/bit_adder.v" "$STOCK/adder4.v"
         "$STOCK/BCDAdder.v" "$STOCK/AddSubBCD.sv" "$STOCK/ALU.sv" "$STOCK/AddrGen.sv" "$STOCK/P65C816.sv"
         "$FAST/F65C816_pkg.sv" "$FAST/mcode.sv"
-        "$FAST/AddSubBCD.sv" "$FAST/ALU.sv" "$FAST/AddrGen.sv" "$FAST/F65C816.sv"
+        "$FAST/AddSubBCD.sv" "$FAST/ALU.sv" "$FAST/AddrGen.sv" "$FAST/AddrBus.sv" "$FAST/F65C816.sv"
         "$HERE/tb_cpu_bench.sv" )
 
 verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \

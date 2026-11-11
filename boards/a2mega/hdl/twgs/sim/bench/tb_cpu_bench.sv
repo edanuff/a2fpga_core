@@ -18,10 +18,17 @@
 //    $BFF0 write  -> done; value = status (0 = pass)
 //    $BFF1 write  -> putchar
 //    $BFF2 write  -> checkpoint mark n: per-core step/instruction deltas
-// ROM mode (+rom=<boot1.rom>): ROM 01 image at FE0000; banks 00/01/E0/E1
+// ROM mode (+rom=<boot1.rom>): ROM 01 image at FE0000 (no bench port); banks 00/01/E0/E1
 // read $C100-$FFFF from the FF image; $C0xx is a write-back register file.
 // Boots the ROM self-test path far enough to be a strong lockstep stress.
 //
+// +datalate   DUT on a synchronous memory (S7 data-late step): the read address is the
+//             core's NA_OUT (next-step address) registered at the step edge, writes go
+//             to A_OUT at the step edge, and a read of the location written at the same
+//             edge is served by a one-entry bypass (the memory itself returns garbage
+//             there, as a block RAM may).  The reference stays on ideal memory.
+// +irq        pseudo-random IRQ and NMI pulses (same for both cores); for ROM mode, where
+//             the image has handlers — exercises the interrupt sequence and vector fetch
 // +cycles=N   clock budget (default 8,000,000)
 // +stall      pseudo-random RDY_IN stalls (same for both cores)
 // +trace      print every reference bus cycle
@@ -34,6 +41,7 @@ module tb_cpu_bench;
     always #5 clk = ~clk;
     logic rst_n = 1'b0;
     logic rdy   = 1'b1;
+    logic irq_n = 1'b1, nmi_n = 1'b1;
 
     //---------------------------------------------------------------- memories
     logic [7:0] mem_ref [0:(1<<24)-1];
@@ -64,18 +72,25 @@ module tb_cpu_bench;
 
     P65C816 u_ref (
         .CLK(clk), .RST_N(rst_n), .CE(1'b1), .RDY_IN(rdy),
-        .NMI_N(1'b1), .IRQ_N(1'b1), .ABORT_N(1'b1),
+        .NMI_N(nmi_n), .IRQ_N(irq_n), .ABORT_N(1'b1),
         .D_IN(ref_din), .D_OUT(ref_dout), .A_OUT(ref_a), .WE(ref_we), .RDY_OUT(ref_rdyo),
         .VPA(ref_vpa), .VDA(ref_vda), .MLB(ref_mlb), .VPB(ref_vpb), .I_FLAG(ref_if));
 
     F65C816 u_dut (
         .CLK(clk), .RST_N(rst_n), .CE(1'b1), .RDY_IN(rdy),
-        .NMI_N(1'b1), .IRQ_N(1'b1), .ABORT_N(1'b1),
+        .NMI_N(nmi_n), .IRQ_N(irq_n), .ABORT_N(1'b1),
         .D_IN(dut_din), .D_OUT(dut_dout), .A_OUT(dut_a), .WE(dut_we), .RDY_OUT(dut_rdyo),
         .VPA(dut_vpa), .VDA(dut_vda), .MLB(dut_mlb), .VPB(dut_vpb), .I_FLAG(dut_if));
 
     always_comb ref_din = rd_ref(ref_a);
-    always_comb dut_din = rd_dut(dut_a);
+    // data-late memory model (+datalate)
+    bit          datalate = 0;
+    logic [7:0]  dl_rdata, dl_wd;
+    logic [23:0] dl_wa;
+    logic        dl_wr = 1'b0;
+    longint      dl_collisions = 0;
+    wire         dl_hit = dl_wr && (map(dl_wa) == map(dut_a));
+    always_comb dut_din = !datalate ? rd_dut(dut_a) : dl_hit ? dl_wd : dl_rdata;
 
     //---------------------------------------------------------------- bookkeeping
     typedef struct packed {
@@ -139,7 +154,21 @@ module tb_cpu_bench;
     endtask
 
     //---------------------------------------------------------------- per-step model
-    always @(posedge clk) if (rst_n) begin
+    always @(posedge clk) begin
+      // synchronous read at the next-step address, evaluated before this edge's write
+      if (datalate && (!rst_n || dut_rdyo)) begin
+          logic [23:0] na;
+          bit          wr_now;
+          na = u_dut.NA_OUT;
+          wr_now = rst_n && !dut_we && !(!rom_mode && dut_a[23:8] == 16'h00BF && dut_a[7:4] == 4'hF);
+          if (wr_now && map(na) == map(dut_a)) begin
+              dl_rdata <= ~mem_dut[map(na)];      // collision: not the new data, not the old
+              dl_collisions++;
+          end else
+              dl_rdata <= mem_dut[map(na)];
+          dl_wr <= wr_now; dl_wa <= dut_a; dl_wd <= dut_dout;
+      end
+      if (rst_n) begin
         clocks++;
         if (rdy) begin
             arch_t r;
@@ -155,7 +184,7 @@ module tb_cpu_bench;
                 ref_arch_q.push_back(r);
             end
             if (!ref_we) begin
-                if (ref_a[23:8] == 16'h00BF && ref_a[7:4] == 4'hF) port_write(0, ref_a[7:0], ref_dout);
+                if (!rom_mode && ref_a[23:8] == 16'h00BF && ref_a[7:4] == 4'hF) port_write(0, ref_a[7:0], ref_dout);
                 else begin
                     mem_ref[map(ref_a)] = ref_dout;
                     w = '{a: ref_a, d: ref_dout}; ref_wr_q.push_back(w);
@@ -170,7 +199,7 @@ module tb_cpu_bench;
                 dut_arch_q.push_back(r);
             end
             if (!dut_we) begin
-                if (dut_a[23:8] == 16'h00BF && dut_a[7:4] == 4'hF) port_write(1, dut_a[7:0], dut_dout);
+                if (!rom_mode && dut_a[23:8] == 16'h00BF && dut_a[7:4] == 4'hF) port_write(1, dut_a[7:0], dut_dout);
                 else begin
                     mem_dut[map(dut_a)] = dut_dout;
                     w = '{a: dut_a, d: dut_dout}; dut_wr_q.push_back(w);
@@ -204,6 +233,7 @@ module tb_cpu_bench;
                 err("one core is not fetching opcodes any more (queue runaway)"); finish_up();
             end
         end
+      end
     end
 
     //---------------------------------------------------------------- RDY stalls
@@ -212,6 +242,19 @@ module tb_cpu_bench;
     always @(negedge clk) if (rst_n && stall_on) begin
         lfsr <= {lfsr[14:0], lfsr[15] ^ lfsr[13] ^ lfsr[12] ^ lfsr[10]};
         rdy  <= (lfsr[2:0] != 3'b000);   // ~12% stall cycles
+    end
+
+    //---------------------------------------------------------------- interrupts
+    logic [22:0] ilfsr = 23'h2A5A5A;
+    bit irq_on = 0;
+    longint irq_pulses = 0, nmi_pulses = 0;
+    always @(negedge clk) if (rst_n && irq_on) begin
+        ilfsr <= {ilfsr[21:0], ilfsr[22] ^ ilfsr[17]};
+        // IRQ: level, held ~64 clocks about every 2000; NMI: 4-clock low pulse about every 16000
+        if (ilfsr[10:0] == 11'h5A3) begin irq_n <= 1'b0; irq_pulses++; end
+        else if (ilfsr[5:0] == 6'h2B) irq_n <= 1'b1;
+        if (ilfsr[13:0] == 14'h1F37) begin nmi_n <= 1'b0; nmi_pulses++; end
+        else if (ilfsr[1:0] == 2'b10) nmi_n <= 1'b1;
     end
 
     //---------------------------------------------------------------- report
@@ -227,6 +270,8 @@ module tb_cpu_bench;
                          ref_mark_tab[m] ? real'(dut_mark_tab[m]) / real'(ref_mark_tab[m]) : 0.0);
             end
         end
+        if (irq_on) $display("  interrupts: %0d IRQ assertions, %0d NMI pulses", irq_pulses, nmi_pulses);
+        if (datalate) $display("  data-late memory: %0d write/read collisions served by the bypass", dl_collisions);
         if (!ref_done && !rom_mode) $display("  reference did not reach DONE");
         if (!dut_done && !rom_mode) $display("  DUT did not reach DONE");
         if (ref_status != 0 && ref_done) $display("  reference program status %0d (nonzero = self-check failed)", ref_status);
@@ -242,6 +287,8 @@ module tb_cpu_bench;
         int fd, n, v;
         if ($test$plusargs("trace")) trace = 1;
         if ($test$plusargs("stall")) stall_on = 1;
+        if ($test$plusargs("datalate")) datalate = 1;
+        if ($test$plusargs("irq")) irq_on = 1;
         if (!$value$plusargs("lockstep=%d", lockstep)) lockstep = 1;
         if (!$value$plusargs("cycles=%d", max_cycles)) max_cycles = 8000000;
         if ($test$plusargs("vcd")) begin $dumpfile("cpu_bench.vcd"); $dumpvars(0, tb_cpu_bench); end
