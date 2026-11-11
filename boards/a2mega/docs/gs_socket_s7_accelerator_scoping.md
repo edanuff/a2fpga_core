@@ -1,8 +1,11 @@
 # S7 — Accelerating the in-socket 65C816 (scoping)
 
 Status: scoping, 2026-09-13. Follows S6 (`gs_socket_65816_scoping.md` §8b:
-auto-arm, reset sequencing). Nothing here is built; the numbers are from the
-S4–S6 builds and the bench.
+auto-arm, reset sequencing). Sections 0–8 are that scoping as written; the
+numbers in them are from the S4–S6 builds and the bench. **2026-11-11: S7a
+(memory-map replica) and S7b (broker) exist and pass in simulation, with the
+reset rule as a gateware module — §9, which also records every departure
+from sections 2–7.** No board build contains any of it yet.
 
 ## 0. Summary
 
@@ -313,3 +316,335 @@ rule; S7a and S7b can proceed in parallel and neither needs the bench.
    one of them.)
 5. Is the "serve our own slot cards inside the chip" S8 worth moving up —
    it is the one thing that makes disk-bound work faster than any card.
+
+## 9. S7a + S7b in simulation, and the reset rule (2026-11-11)
+
+Simulation only: nothing here is in a `.gprj`, no board build was run, nothing
+was flashed. §9.6 lists what is not done.
+
+### 9.1 What exists
+
+| piece | path (under `boards/a2mega/hdl/twgs/`) | what it is |
+|---|---|---|
+| decode | `gs_mmu_decode.sv` | the MiSTer `rtl/mmu.sv` (GPL-3 header kept), function unchanged, plus `is_local`, `forward_write`, `local_we`, `region`, the RAM / ROM-image address |
+| replica | `gs_mmu_replica.sv` | soft-switch tracker fed by completed socket cycles + the decode |
+| broker | `gs_accel_broker.sv` | core on a clock enable in the PHY's clock domain; local / socket / posted-write / idle cycles; native mode |
+| arm sequencer | `gs_socket_arm_seq.sv` | the S6 arm rule timed from the last release of /RESET (§9.5) |
+| golden model | `sim/mmu/iigs_mmu_model.h` | port of the MiSTer `vsim/mmu_tb.cpp` model + the two new answers + a tracker model + a whole-machine memory model |
+| replica tests | `sim/mmu/run_mmu_replica_sim.sh` | decode sweep and tracker tests |
+| broker bench | `sim/broker/run_gs_broker_sim.sh`, `tb_gs_broker.sv`, `broker_test.s` | program suite and ROM 01 end-to-end suite |
+| arm bench | `sim/arm/run_gs_arm_seq_sim.sh`, `tb_gs_arm_seq.sv` | reset-rule cases at real time scale |
+
+`gs_socket_phy.sv`, `gs_socket_ctl.sv`, both CPU cores and the ESP32
+firmware are unchanged. The broker takes the core through its port list;
+the bench runs the stock `P65C816` and the restructured `F65C816` in it.
+
+### 9.2 Replica (S7a)
+
+The decode keeps every MiSTer output under its own name, so the MiSTer golden
+model still checks them, and adds the accelerator's answers. The tracker
+never looks at the core's local accesses: it is fed only the socket cycles
+that completed (address, direction, write data), which are exactly the
+cycles the FPI and the Mega II saw, so its state is a function of what the
+motherboard saw. That works because every switch that moves the map is in
+I/O space and I/O space is never local.
+
+Sweep (`run_mmu_replica_sim.sh`, 71 s): **869 952 896 decode vectors, 0
+failures** — all 2^18 combinations of the nine IIe / language-card switches,
+the seven SHADOW bits, the bank latch and the all-banks shadow bit, over
+banks 00, 01, 02, 03, 7E, 7F, 80, E0, E1, FC–FF and 53 boundary addresses,
+read and write, for ROM 01 and again for ROM 3; the slot space against all
+256 SLTROMSEL values; every expansion bank against every backed size; 6 M
+random vectors. Tracker: 97 directed facts (the language-card protocol,
+STATEREG, ROMBANK, INTC8ROM, the IOLC inhibit, all-banks shadow) checked on
+the RTL and on the golden model, and 3 M random bus cycles with the full
+state and a decode compared after each, for ROM 01 and for ROM 3:
+**5 999 973 checks each, 0 failures**. Mutated RTL fails both (checked).
+
+ROM 3 differences carried as the `ROM3` parameter (`rom_select` in the
+decode): text page 2 shadows (SHADOW bit 5), banks FC/FD are ROM, `$C028`
+is not a ROMBANK toggle.
+
+### 9.3 Broker (S7b)
+
+The core, the broker, the replica and the PHY's pin sequencer share one
+clock. A core step is `STEP_CLKS` clocks (parameter, default 4; the local
+memory is strobed `ADDR_CLKS` clocks into the step, default 1, and its data
+is taken at the end; 2 clocks per step is the minimum and is what the
+100 MHz runs use). Per step the replica classifies the access:
+
+- **local**: served by the card's memory; the socket shows an idle cycle;
+- **socket**: the core is held, the PHY runs one cycle with its S2–S6
+  timing, the core steps on the PHI2 fall that completes it;
+- **posted write** (`forward_write`): stored locally at once and queued in
+  the one-deep buffer; it always goes out before any later socket cycle, and
+  a second forwarded write waits for the buffer;
+- **native mode** (`native_i`, runtime): every step is a socket cycle, one
+  per PHI2 cycle.
+
+Bench (`run_gs_broker_sim.sh`): the S2–S6 socket bench (FPI PHI2 model,
+level-shifter delays, the W65C816S timing checks) with the golden machine
+model behind the socket, a reference core stepped in lockstep on a second,
+ideal machine, and a queue of the socket cycles the program is owed, derived
+from the reference side with the golden decode. Every PHI2 cycle must be the
+head of that queue or an idle read of the park address; every byte handed to
+the core must be the ideal machine's; with nothing outstanding the
+motherboard model's Mega II RAM, I/O registers and switches must equal the
+ideal machine's; at the end the card's RAM must equal the ideal machine's.
+In native mode an S6 PHY and PHI2-clocked core run beside the design on the
+same socket inputs and all card-driven pins are compared every clock.
+
+**Test ROM** (`broker_test.s`; 60 000 core steps per run, 120 000 in the
+mode-switching runs; every run has an RDY stall every 311 socket cycles and
+one BE + RDY pause; all but the four equality runs raise /IRQ twice). 21
+runs, all pass:
+
+| runs | clock, clks per step | what |
+|---|---|---|
+| native, paced | 108 MHz | every step a socket cycle: 60 001 steps = 60 001 socket cycles, 0 idle; 2 436 216 clks of pin comparison with S6, 0 differences; paced: verify count 0 |
+| fast | 108 MHz, 4 | 60 002 steps on 6 089 PHI2 cycles: 851 socket cycles for the core, 478 posted writes, 4 703 idle; 5 901 clks spent waiting for the write buffer |
+| fast, 1 MHz FPI (`+noturbo`) | 108 MHz, 4 | passes; the per-PHI2 interrupt sample fails here (§9.4 item 3) |
+| toggle (paced ↔ fast at pseudo-random points), also with expansion + local slot firmware | 108 MHz, 4 | 120 005 steps, pass |
+| fast with 2 expansion banks; with 1 of the machine's 4; with `cxrom_local` | 108 MHz, 4 | pass |
+| warm reset (/RES for 12 cycles, half way) in native, fast, toggle | 108 MHz, 4 | pass; native releases with RDY low; 0 posted writes dropped |
+| `F65C816` in fast and in native | 108 MHz, 4 | pass (native: pins identical to S6 with the stock core) |
+| native, fast, toggle | 100 MHz, 2 | pass; fast: 60 007 steps on 3 734 PHI2 cycles |
+
+The same program without interrupts in native, paced, fast (108 MHz / 4) and
+fast (100 MHz / 2): the four runs end at the same point (step hash
+`a81f325bc9229f39` over all 60 000 steps) and put the identical 900 writes
+to I/O, Mega II and shadowed ranges on the socket, in the same order. Time
+for those 60 000 steps: 22.530 ms native, 3.612 ms fast at 108 / 4 (16.6 MHz
+average step rate, 6.2×), 2.833 ms at 100 / 2 (21.2 MHz, 8.0×). The walk is
+I/O-heavy by design; a local step is 27 MHz and 50 MHz.
+
+**ROM 01 end to end** (`ROM=<boot1.rom>`, 3 000 000 core steps, six runs:
+native, paced, fast, fast with `cxrom_local`, fast at 100 MHz / 2, fast with
+`F65C816`). All six reach the same point — step hash `6012b76169ecc820`,
+1 064 distinct opcode addresses, last fetches `FF:A577`–`FF:A585` — and
+their write streams to I/O, Mega II and shadowed ranges are byte-identical
+files of 128 393 writes. Native: 3 000 001 socket cycles, 167 299 977 clks
+of pin comparison with S6, 0 differences. Paced: verify count 0, i.e. over
+the whole run every byte the card's memory returned was the byte the
+motherboard model returned on the socket. Fast (108 / 4): 2 315 837 local
+steps, 191 653 socket cycles for the core, 81 872 posted writes, 286 586
+idle cycles; 486.9 ms against 1 549.2 ms native (3.2×; 460.6 ms at
+100 / 2). That stretch of the ROM is bound by the socket, not the core: it
+draws the text screen (81 872 shadowed text-page writes, each a sync cycle
+of about 1 µs; the core waited 6.1 M clks = 56.6 ms for the write buffer)
+and does 44 410 I/O writes. How far the ROM gets is set by the bench machine
+(§9.6), not by the design.
+
+**Socket timing** (limits: 4 MHz-grade W65C816S, tADS/tBAS ≤ 75 ns, tAH/tBH/
+tDHW ≥ 20 ns, tMDS ≤ 70 ns), worst case over all runs:
+
+| PHY clock | tADS max | tBAS max | tAH min | tBH min | tMDS max | tDHW min | read release |
+|---|---|---|---|---|---|---|---|
+| 108 MHz (S6 bench today: 65.5 / 66.5 / 56.3 / 47.1 / 56.3 / 56.3 / 57.3) | 65.6 | 66.6 | 56.3 | 47.0 | 56.3 | 56.3 | 57.3 |
+| 100 MHz | 70.0 | 71.0 | 60.0 | 50.0 | 60.0 | 60.0 | 61.0 |
+
+At 100 MHz the address is 5 ns inside the 75 ns limit with `OUT_DELAY` = 2.
+The broker's outputs are registers in the PHY's own clock, so `OUT_DELAY` = 1
+is open at 100 MHz (one clock earlier); not tried.
+
+**Native-mode regression** (`sim/run_gs_socket_sim.sh`, unchanged files):
+program mode PASS (6 062 socket cycles), ROM mode PASS (200 000 cycles).
+
+**Does the bench notice?** Eight deliberate faults in the broker, one at a
+time: socket cycle allowed to overtake the posted write; idle cycles
+repeating the previous address; the forwarded write not stored locally; no
+internal-cycle substitution; RDY ignored; a second write accepted into the
+full buffer; the native request presented late; per-PHI2 interrupt sample in
+fast mode. All eight fail the bench (the last one in the 1 MHz FPI run).
+
+### 9.4 Departures from sections 2–7, and readings chosen
+
+1. **Idle cycles park on a ROM read** (`FF:0000`), not "the previous address
+   repeated" (§2.1). Repeating the previous address after an I/O or slot
+   access repeats its side effects for as long as the core stays local
+   (speaker, keyboard strobe, IWM data, the language-card two-read protocol).
+   A bank-FF read is a fast cycle with no effect anywhere.
+2. **Internal cycles** (VDA = VPA = 0) reach the socket in fast mode only
+   when their address is in I/O or slot space, and then exactly as S6 shows
+   them (aimed at `$C0xx`: the previous step's address repeated as a read —
+   the broker does that substitution itself, the PHY's own "previous
+   address" would be the park address). Elsewhere they cost a step and no
+   socket cycle.
+3. **Interrupt lines in fast mode use two-flop synchronisers**, not the
+   once-per-PHI2 sample of §2.1. With the per-cycle sample the core sees
+   /IRQ low for up to a whole PHI2 cycle after the handler's acknowledging
+   write released it, reaches RTI and takes the interrupt again: the bench
+   at 1 MHz FPI speed counts 4 handler entries for 2 interrupts with that
+   change put back. Native mode keeps the at-the-fall sample (S6).
+4. **Native mode is two switches.** `native_i` is the pacing (every step a
+   PHI2-paced socket cycle, pin-identical to S6). `mem_bypass_i` chooses the
+   data source in native mode: 1 = everything from the socket (S6; writes are
+   still copied into the card's memory), 0 = the card's memory stays the
+   memory of record (§6.3 step 3, and what §2.5's slowdowns need). Reason: a
+   pure-S6 native mode entered after fast mode has run would read the
+   motherboard's stale copy of banks 00/01. Paced ↔ fast can be switched at
+   any step in either direction (bench: switched at pseudo-random points);
+   `mem_bypass_i` may be set only while fast mode has not run since power-up.
+   The verify comparison (§5 risk 1) is built in for the paced mode and is
+   meaningful under the same condition.
+5. **§2.4 "or if it is I/O or language-card-inhibited space".** I/O is not a
+   forwarded write, it is a socket cycle. Language-card RAM writes are local
+   only: the machine does not copy the language card into E0/E1. With SHADOW
+   bit 6 set, `$C000–$FFFF` of banks 00/01 is plain local RAM.
+6. **`$C071–$C07F` of bank 00 reads from the ROM image.** It is the FPI's
+   interrupt-dispatch ROM, not I/O (MiSTer: "IRQ dispatch ROM", a fast cycle
+   in its clock model; bench G27 saw the BRK vector lead to `$C074`).
+7. **Slot space `$C100–$CFFF` is a socket cycle by default**
+   (`cxrom_local_i` = 0); §2.2 has internal firmware local. With the switch
+   set, pages the replica knows to be internal (INTCXROM, the slot's
+   SLTROMSEL bit, SLOTC3ROM, INTC8ROM — all tracked) are read from the image,
+   except `$C3xx` and `$CFFF`, which always go out because the Mega II and
+   the slot cards change state on them, and except writes. Why off by
+   default: the internal-versus-slot rule cannot be checked against a
+   reference here (MiSTer has no slot cards and uses SLTROMSEL alone; the
+   machine's reset value of SLTROMSEL and its slot-3 rule are not confirmed),
+   a wrong "internal" is a crash, and those pages are not hot. Both settings
+   pass the bench, including the ROM 01 boot.
+8. **ROMBANK** (§2.3 "write; which half of the ROM image"): tracked as a
+   toggle on ANY access to `$C028` on ROM 01 (bench G21) and through
+   STATEREG bit 1. While it is set the bank-00/01 ROM windows are socket
+   cycles: the motherboard decides which half appears. Banks FE/FF stay local.
+9. **Expansion banks** are local only below `02 + exp_banks_i`; the rest go
+   to the socket (§2.2 bypasses the machine's memory card for all of 02–7F).
+   No DDR3 or cache was built (S7d); the bench backs up to 16 banks with a
+   behavioural array.
+10. **Soft switches `$C000–$C00B` answer in every bank where the address
+    decodes as I/O.** MiSTer restricts them to banks 00/E0; the machine has
+    one I/O space. HIRES is cleared by reset. Reset values otherwise follow
+    MiSTer (SHADOW `$08`, bank latch set, SLTROMSEL 0, CYAREG `$80`; CYAREG
+    bit 7 is tracked but not used yet — the S2 bench FPI starts at 1 MHz).
+    A cycle that RDY stretches counts once.
+11. **Only shadowed writes are posted.** I/O, slot and Mega II writes stall
+    the core until they complete (the tracker must be current before the
+    next step is decoded). A posted write still in the buffer when /RES
+    falls is dropped — at most one byte of a shadowed page, which the card's
+    memory still holds.
+12. **RDY low also holds local steps** in fast mode (the TransWarp's
+    GS_PAUSE); the cycle the PHY is running repeats as in S6.
+13. **Vector pulls** keep the MiSTer rule (VP low reads ROM in the bank-00
+    language-card range, and `$FFEE/EF/FE/FF` always). The ROM 3 schematic
+    wires the CPU's VPB to a VP pin on the CYA; `gs_socket_65816_scoping.md`
+    §3.3 says the motherboard does not use VP. If a ROM 01 FPI ignores VP
+    the replica would return the ROM vector where the machine returns the
+    language-card RAM vector. Check on the bench with the paced mode's
+    verify counter before trusting interrupts under LC RAM.
+14. **§6.2 "against the FPI clock model (`clock_divider.v`)".** The bench is
+    the S2–S6 socket-level FPI model, with the fast / sync cycle
+    classification taken from `slow_class_now` of `clock_divider.v` (I/O,
+    E0/E1 and shadowed writes are sync cycles; the SHADOW/CYAREG/STATEREG
+    and `$C071–$C07F` exceptions). `clock_divider.v` itself produces clock
+    enables for a core that shares its clock and was not instantiated: the
+    socket bench needs PHI2 as a pin.
+15. **Clocking.** §2.1 says 110 MHz / 27.5 MHz; the bench runs the PHY at
+    108 MHz with 4 clocks per step (27 MHz) and at 100 MHz with 2 clocks per
+    step (50 MHz), the two cases the fast-core log asks for. The PHY is
+    unchanged (`OUT_DELAY` = 2); in native mode the broker must present the
+    next request by the PHY's issue clock, i.e. `ADDR_CLKS` ≤ `OUT_DELAY`.
+
+### 9.5 The reset rule
+
+**Where the S6 sequencing lives.** In the ESP32 firmware:
+`boards/a2mega/src/a2fpga_esp32/gs_socket.c` is the state machine (hold,
+clock-alive wait, release, wait for the line, arm). The gateware has no arm
+timing: `gs_socket_ctl.sv` passes `arm_i`/`listen_i` straight to the PHY;
+the PHY only re-registers /RES per PHI2 cycle (core in reset until /RES has
+been high at two falls); `hdl/esp32/esp32_ospi_connector.sv` holds the slot
+reset and has the POR probe and hardware arm that the bench modes 0 and 1
+use (`por_done`, arm in the same clock).
+
+**What the default firmware (mode 4) does today.** It releases its own hold
+with the socket off, then polls the slot /RESET level in STATUS, 1 ms apart,
+from the disk task loop; the first high sample starts a timer, a low sample
+clears it, and after `late` ms (20) of high samples it writes CTRL.arm. So
+its reference is already "the line reads high", not "our release": a second
+card that holds the line simply keeps it waiting. What it does not
+guarantee: a low pulse shorter than the gap between two polls — and the gap
+is as long as the disk task is busy — is never seen, so the arm can land
+less than 20 ms after a release; and modes 0, 1 and 3 arm at or before the
+release by design.
+
+**Gateware side: `gs_socket_arm_seq.sv`.** The slot /RESET pin (the
+wired-AND of the motherboard, our own hold and every other card) is
+synchronised; a request is passed to the PHY only when the line has been
+continuously high for `delay_ms_i`; any low sample restarts the count. Until
+then both `arm_o` and `listen_o` are low, so the control-input shifter stays
+off as S6 requires. Once passed the request stays passed while it is
+asserted (S6: a later /RESET is the PHY's business); `rearm_i` optionally
+drops the socket on every later /RESET fall and repeats the sequence.
+`seq_en_i` = 0 is a wire-through. It needs one pin and the request bits and
+nothing from the slot-side logic.
+
+Bench (`sim/arm/run_gs_arm_seq_sim.sh`, real time scale, the sequencer
+driving the real PHY and a PHI2-clocked core): motherboard release alone;
+a second card holding the line 3.3, 31.7, 137.9 ms and two seeded random
+times (17.2 and 78.7 ms by default) after the motherboard releases;
+/RESET re-asserted 9.97 ms into the window for 5 ms (the ROM 01 mark) and
+a 3 µs glitch 100 µs before the end; a request arriving 30 ms after the
+release; /RESET after arming with and without `rearm`; the bypass. In every
+case the socket is completely off (no drive, control shifter off) until the
+arm, the arm comes 20.0016 ms after the LAST release (20 ms + 2 clks), and
+the core then starts and runs. 13 releases, 11 arms, 2 count restarts,
+PASS. Three deliberate faults (count from the first release; listen not
+withheld; one millisecond short) fail it.
+
+**Not done.** The sequencer is not instantiated in a board build: wiring it
+into the 138B top needs a register (enable, delay, rearm, state) in the GS
+window and a build, and the accelerator-only top that will use it does not
+exist yet. S6 as shipped is therefore unchanged, firmware included.
+
+**Firmware change needed** (not made; `gs_socket.c`, mode 4 only, the other
+modes are bench knobs and stay as they are):
+
+1. `ST_TIMED_HOLD` → on releasing our hold, write the sequencer's delay
+   (`s_late_ms`), set its enable, and write `CTRL = LISTEN | ARM` at once.
+   The request is withheld by the gateware until 20 ms after the last
+   release, so nothing reaches the socket earlier than today.
+2. `ST_WAIT_RISE` → no level polling and no timer. Poll the sequencer state
+   (0.1 s is enough): "passed" → `ST_ARMED`; clock lost → `enter_machine_off`
+   as now.
+3. `gs late <ms>` writes the delay register; `gs` prints the sequencer
+   state, the line's high time and the restart count.
+4. The "SLOT RESET NEVER ROSE AFTER OUR RELEASE" message becomes "ANOTHER
+   CARD IS HOLDING /RESET" and is not an error.
+5. `enter_machine_off` clears CTRL as now (the request drops, the sequencer
+   re-arms itself for the next power-up).
+
+Behaviour that changes for a machine with no other reset holder: none, apart
+from the arm point being 20 ms after the edge instead of 20–22 ms after the
+first poll that saw it.
+
+### 9.6 Not done, open
+
+- No board build, no timing: the replica's decode sits in the address path
+  of a local step (core address → aux / language-card translation → memory
+  address); the fast-core log puts the bare address cone at 10.9 ns. S7c
+  has to register or pre-decode it. The new modules are in no `.gprj`.
+- Local memory is behavioural in the bench (128 KB RAM, the ROM image, up to
+  16 expansion banks). BSRAM wiring, the ROM copy at arm (§2.6), DDR3 and
+  its cache, speed control and the Zip / TransWarp registers (S7c–S7e) are
+  not started.
+- The bench machine is a model: I/O is a register file that reads back what
+  was written, plus the soft-switch status bits and a VBL flag / video
+  counters that advance with every read of them (a function of the access
+  sequence, never of time, so runs at different speeds stay comparable). It
+  has no slot cards and no ADB, so the ROM 01 run is a boot as far as that
+  model lets it go (§9.3) — the same point in every mode, not a boot to
+  BASIC.
+- There is no top level for the accelerator-only build: PHY, broker, core
+  and memories are wired together only in the bench. `gs_socket_ctl.sv`'s
+  telemetry (trace ring, sweeps, counters) is not carried over; the broker
+  has its own counters and the replica's state as outputs.
+- Unverified against hardware: item 13 (VP), the SLTROMSEL reset value and
+  slot-3 rule (item 7), the bank-01/E1 answer of `$C000–$C00B` (item 10),
+  the effect of ROMBANK beyond "A14 cleared" (item 8). The paced mode with
+  the verify counter is the instrument for all four.
+- A read of fast RAM by anything but the CPU (slot DMA) and the a2p25 /
+  a2mega slot-side logic watching the bus for bank-00 accesses that are now
+  local were not looked at; forwarded writes and all I/O still appear.
+- The ROM 01 re-assert itself is not modelled in the broker bench; the arm
+  bench models it as a holder of the line.
