@@ -63,3 +63,8 @@ src/cardrom/cardrom
 # are the tracked build products.
 boards/*/impl/pnr/*.pr
 boards/a2mega/captures/
+
+# S7 fast-core Fmax probes (boards/a2mega/docs/gs_socket_s7_fast_core_exploration.md):
+# timing instruments, never flashed — keep their bitstreams and resource snapshots local
+**/impl/pnr/a2mega_cpu_probe_*
+**/impl/a2mega_cpu_probe_*_resources.json

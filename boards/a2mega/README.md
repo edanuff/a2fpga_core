@@ -98,5 +98,6 @@ verified on the a2p25.
   - **IIgs CPU socket (138K)**
     - [gs_socket_65816_scoping.md](docs/gs_socket_65816_scoping.md) — the in-socket 65C816: electrical contract, datasheet departures, the S4 integration record
     - [gs_socket_s7_accelerator_scoping.md](docs/gs_socket_s7_accelerator_scoping.md) — accelerator scoping (open questions)
+    - [gs_socket_s7_fast_core_exploration.md](docs/gs_socket_s7_fast_core_exploration.md) — fast-core exploration log: bench, Fmax probe, optimization ladder
     - [adb_micro_rom01_notes.md](docs/adb_micro_rom01_notes.md), [twgs_reference.md](docs/twgs_reference.md) — the IIgs ADB micro's reset behaviour and the TransWarp GS reference
   - [docs/archive/](docs/archive/README.md) — the DDR3 framebuffer refactor, Ensoniq-on-DDR3 post-mortem, JTAG research, the 2026-08 DP bring-up planning and AUX captures
