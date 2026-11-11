@@ -542,6 +542,25 @@ the data cone); the broker's local-or-socket decision on the registered
 costs versus an empty device. The PLL is a dial (§2d): plan the first
 integrated build at 40 MHz steps and move up from there.
 
+**Clock choice this opens (not yet decided).** Under the two-edge step,
+three clocks of the existing 108 MHz (27.8 ns) did not fit (address 10.9 +
+data 19 ns). Under the data-late step the same 27.8 ns only has to cover
+the ~21 ns single-clock cone, with about 6 ns in hand. So **108 MHz / 3 =
+36 MHz steps needs no new PLL frequency and no re-derived socket timing**
+(the PHY keeps its validated 9.3 ns sequencer), and 36 MHz is at the 2×
+AppleSqueezer line. It is the natural first integrated build; 100 / 2 or a
+faster PHY clock / 3 is the later step toward the 47.6 MHz the probe closes.
+
+**System track, same day** (branch `s7-system-replica-broker`, scoping doc
+§9 there): memory-map replica, broker and a last-release-of-/RESET arm
+sequencer, all in simulation, all benches re-run here and passing. The
+broker is written for the two-edge step (memory strobed after the step
+edge from `A_OUT`); moving it to the data-late contract (read address =
+`NA_OUT`, local-or-socket decision from the registered `A_OUT` feeding the
+clock enable) is the integration step. Its ROM 01 run is a reminder of the
+socket bound: 3 M steps took 487 ms fast against 1549 ms native, 5.3 steps
+per PHI2 cycle, because that stretch is 81,872 shadowed text-page writes.
+
 **Consequence for the two-edge probes:** they still build, but their
 address clock now starts at the `A_OUT` register, so they no longer measure
 the address cone.
