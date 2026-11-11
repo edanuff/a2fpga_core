@@ -440,6 +440,39 @@ cone we have today. The cost is the restructure of the control path
 (the 09-05 HyperRAM-spine choice assumed 108; 100 is not 2:1 with
 clk_logic 54, so the broker gets a CDC or the spine moves too).
 
+### Review of the morning (2026-11-11, re-read of the `_mc` probe report)
+
+Read from `impl/pnr/a2mega_cpu_probe_138b_fast_mc` (no new build):
+
+- **Correction:** the data memory is not behind a 64:1 mux. Synthesis
+  mapped the 128 KB as 64 blocks of 16K×1 (`BIT_WIDTH=1`), eight blocks per
+  data bit, so the output mux is **8:1 per bit** and costs 0.74 ns of cells.
+  The memory side of the cone is tC2Q 2.2 + exit net 1.9 + mux 0.7 =
+  4.9 ns; the "64:1" label in the earlier anatomy tables is wrong, the
+  delays there are right. Nothing is left to win from re-organising the
+  memory; only the 1.9 ns exit net (placement) is soft.
+- **The top 25 paths are a wall 0.34 ns thick** (19.16 … 18.82 ns) ending in
+  five different places: `PCr` through `ALU CO → PCDec → PC adder` (the
+  MVN/MVP repeat decision, a 4 ns tail after the ALU result), `Y`/`X`/`T`,
+  `P`, and the microcode registers. Cutting any one exposes the next within
+  0.1 ns, which is what rungs 2b-2d experienced. A cycle-exact cut for the
+  first exists (the repeat decision is `A != 0` at the start of the step,
+  a register compare or a maintained flag, not the ALU carry-out) and is
+  worth doing inside the restructure, not as another rung.
+- **A pure core→core path is in the wall:** `X → AddrGen add → NewAAL →
+  NextState → microcode LUT ROM → MI`, 18.3 ns, of which about 8 ns is the
+  ROM lookup behind `NextState`. (It showed up single-cycle because the
+  multicycle exception does not match the nested `u_cpu/MCode/*`
+  registers.) In the two-edge step this path has the whole step; in the
+  data-late step it has **one** step, so it is a real 50 MHz constraint.
+- **Honest margin at 50 MHz steps:** 20.0 − 0.5 uncertainty = 19.5 ns
+  against a 19 ± 0.3 ns wall is +0.2 … +0.8 ns, and the data-late path
+  that no probe has measured yet is *memory data → next memory address in
+  one step*. The 2× goal needs only ≥ 33-36 MHz steps, and the accelerator
+  domain's PLL is free, so the frequency is a dial: data-late at 40 MHz
+  (25 ns) clears 2× with ~5 ns in hand; 50 is the stretch, not the
+  requirement.
+
 ## 5. Questions for ed
 
 1. Rung 3 changes the step count per instruction. The scoping doc's
