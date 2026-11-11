@@ -45,7 +45,7 @@ fi
 STOCK=( "$CORE/P65C816_pkg.sv" "$CORE/mcode.sv" "$CORE/bit_adder.v" "$CORE/adder4.v"
         "$CORE/BCDAdder.v" "$CORE/AddSubBCD.sv" "$CORE/ALU.sv" "$CORE/AddrGen.sv" "$CORE/P65C816.sv" )
 FASTF=( "$FAST/F65C816_pkg.sv" "$FAST/mcode.sv" "$FAST/AddSubBCD.sv" "$FAST/ALU.sv" "$FAST/AddrGen.sv"
-        "$FAST/F65C816.sv" )
+        "$FAST/AddrBus.sv" "$FAST/F65C816.sv" )
 DUT=( "$TWGS/gs_socket_phy.sv" "$TWGS/gs_mmu_decode.sv" "$TWGS/gs_mmu_replica.sv" "$TWGS/gs_accel_broker.sv"
       "$HERE/tb_gs_broker.sv" "$SIM/mmu/iigs_machine_dpi.cpp" )
 
