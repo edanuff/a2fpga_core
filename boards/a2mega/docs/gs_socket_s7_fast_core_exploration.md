@@ -180,6 +180,17 @@ Consequences:
 Open checks: a free 100 MHz PLL output on the 138B SOM (the a2mega PLL
 plan lists unused CLKOUTs); the broker's miss-path CDC design.
 
+**Decided 2026-11-12 (ed): 108 MHz.** Rung 5 (§4) found the 1.5 ns, so the
+accelerator domain runs at 108 MHz: the PHY's pin sequencer at 108 MHz, the
+core stepping every two clks, 54 MHz. Nothing else in this section changes:
+it is still one accelerator domain isolated at the socket, and the
+HyperRAM/DOC spine is still untouched. The 100 MHz figures above and the
+open check for a free 100 MHz PLL output are superseded; what is open
+instead is where the accelerator's 108 MHz comes from in the
+accelerator-only build (the PLL output the S6 build already uses, or one of
+its own). The 100 MHz probe (`a2mega_accel_probe_138b_n2`) stays as a
+margin instrument; `a2mega_accel_probe_138b_n8` is the reference.
+
 **Memory placement on the HyperRAM board rev (ed, 2026-11-11):** instead of
 putting the accelerator's expansion banks on the HyperRAM beside the DOC,
 **give the DDR3 to the accelerator and move the slot side (framebuffer,
@@ -1433,9 +1444,10 @@ What this result is and is not:
    sweep to say the socket timing has the room.
 5. ROM 01 hardware: the vector-pull behaviour (`/VP`) the replica assumes
    has only been seen in simulation.
-6. The accelerator's clock. The probe now closes at 108 MHz as well as at
-   100 MHz. At 108 MHz the step is 54 MHz and the PHY is S6's, already on
-   hardware; §2d's separate 100 MHz PLL output was a concession to the
-   core. Same frequency as the HyperRAM/DOC spine does not have to mean the
-   same clock net: the accelerator domain can stay isolated at the socket
-   either way. 108 for the accelerator-only build?
+6. ~~The accelerator's clock: 108 or 100 MHz for the accelerator-only
+   build?~~ **Answered 2026-11-12: 108 MHz** (§2d). The step is 54 MHz and
+   the PHY is S6's, already on hardware. In the broker bench the socket
+   timing of the 108 MHz near-memory builds is the same as the S6
+   configuration's, to the tenth of a nanosecond (tADS 65.6, tBAS 66.6,
+   tAH 56.3, tBH 47.0, tMDS 56.3, tDHW 56.3 ns), in native and in fast
+   mode.

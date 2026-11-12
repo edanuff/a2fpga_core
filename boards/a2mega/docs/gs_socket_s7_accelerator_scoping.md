@@ -810,4 +810,5 @@ part is in the log; the broker's part, none of it visible to the machine:
   never stepped in two successive clks, in any mode.
 
 At 108 MHz the PHY's timing is the one S6 ran on hardware, and section 2.1's
-"108 / N" is N = 2.
+"108 / N" is N = 2. **Decided 2026-11-12 (ed): the accelerator-only build
+uses 108 MHz**, 54 MHz steps (exploration log §2d).
