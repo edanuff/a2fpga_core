@@ -308,7 +308,20 @@ module F65C816
       end
 
 
-   F65C816_mcode MCode(.CLK(CLK), .RST_N(RST_N), .EN(EN_m), .IR(NextIR), .STATE(NextState), .M(MC), .SN(SN));
+   // rung 4: the microcode module takes the registered IR / STATE and the late
+   // decision as selects (the next state is 0, STATE + 1 or STATE + 2; 1 in the
+   // fetch step, with the opcode on the bus) - see gen_fast_mcode.py
+   F65C816_mcode MCode(.CLK(CLK), .RST_N(RST_N), .EN(EN_m), .IR(IR), .STATE(STATE), .NIR(NextIR),
+                       .NS_ZERO(NS_ZERO), .NS_INC2(NS_INC2), .M(MC), .SN(SN));
+`ifdef VERILATOR
+   always @(posedge CLK)
+      if (RST_N == 1'b1 && EN == 1'b1 &&
+          NextState !== ((STATE == 4'd0) ? 4'd1 : NS_ZERO ? 4'd0 : NS_INC2 ? STATE + 4'd2 : STATE + 4'd1)) begin
+         $display("ERROR: NextState %0d is not 0 / STATE + 1 / STATE + 2 as flagged (STATE %0d zero %b inc2 %b IR %02h) @%0t",
+                  NextState, STATE, NS_ZERO, NS_INC2, IR, $time);
+         $finish;
+      end
+`endif
 
 
    // S7 data-late: the MVN/MVP repeat decision (LOAD_PC == 111, step 5 of 44/54) was the
@@ -1130,9 +1143,13 @@ module F65C816
    // A nonzero increment follows only steps that leave those registers alone
    // (gen_fast_mcode.py asserts it of every row and successor), so NA_STAY is exact
    // whenever it is selected; PBR:PC never takes an increment.
-   logic [23:0] NA_MOVE, NA_STAY;
-   F65C816_AddrBus AddrBusNext
-     (.ADDR_SEL(NAF[11:8]), .INC(2'b00), .OUT_BUS(NAF[4:2]), .BYTE_SEL1(NAF[5]),
+   // rung 4: evaluated for each candidate of the next microinstruction (the fetch
+   // step's PBR:PC, the row for STATE + 1, the row for STATE + 2: SN) in parallel,
+   // and the late NextState decision selects the RESULT - no adder behind it.
+   logic [23:0] NA_FETCH;
+   logic [23:0] NA_CAND [0:1];
+   F65C816_AddrBus AddrBusFetch
+     (.ADDR_SEL(4'b0000), .INC(2'b00), .OUT_BUS(3'b000), .BYTE_SEL1(1'b0),
       .IR(IR), .EF(EF), .D_LO_NZ(DLNoZero),
       .PBR(PBR_n), .PC(PC_n), .DBR(DBR), .AA(AA_n), .AB(AB_n), .DX(DX_n), .SP(SP_n), .SPW(SPW_n),
       .PERPEI_SeqActive(PERPEI_SeqActive_a), .PERPEI_FirstDone(PERPEI_FirstDone_a),
@@ -1140,18 +1157,33 @@ module F65C816
       .RTL_SeqActive(RTL_SeqActive_a), .RTL_Offset(RTL_Offset_a), .RTL_SPW0(RTL_SPW0_a),
       .JSRL_WrapFF(JSRL_WrapFF_a),
       .IsResetInterrupt(IsResetInterrupt), .IsNMIInterrupt(IsNMIInterrupt), .IsIRQInterrupt(IsIRQInterrupt),
-      .ADDR_BUS(NA_MOVE));
-   F65C816_AddrBus AddrBusNextInc
-     (.ADDR_SEL(NAF[11:8]), .INC(NAF[7:6]), .OUT_BUS(NAF[4:2]), .BYTE_SEL1(NAF[5]),
-      .IR(IR), .EF(EF), .D_LO_NZ(DLNoZero),
-      .PBR(PBR), .PC(PC), .DBR(DBR), .AA(AA), .AB(AB), .DX(DX), .SP(SP), .SPW(SPW_n),
-      .PERPEI_SeqActive(PERPEI_SeqActive_a), .PERPEI_FirstDone(PERPEI_FirstDone_a),
-      .PLD_Addr0_Valid(PLD_Addr0_Valid_a), .PLD_Low0(PLD_Low0_a), .PLD_SPW0(PLD_SPW0_a),
-      .RTL_SeqActive(RTL_SeqActive_a), .RTL_Offset(RTL_Offset_a), .RTL_SPW0(RTL_SPW0_a),
-      .JSRL_WrapFF(JSRL_WrapFF_a),
-      .IsResetInterrupt(IsResetInterrupt), .IsNMIInterrupt(IsNMIInterrupt), .IsIRQInterrupt(IsIRQInterrupt),
-      .ADDR_BUS(NA_STAY));
-   assign NA_BUS = (NAF[7:6] == 2'b00) ? NA_MOVE : NA_STAY;
+      .ADDR_BUS(NA_FETCH));
+   for (genvar c = 0; c < 2; c++) begin : g_na
+      wire [11:0] naf_c = (c == 0) ? SN[23:12] : SN[11:0];
+      logic [23:0] na_move, na_stay;
+      F65C816_AddrBus AddrBusNext
+        (.ADDR_SEL(naf_c[11:8]), .INC(2'b00), .OUT_BUS(naf_c[4:2]), .BYTE_SEL1(naf_c[5]),
+         .IR(IR), .EF(EF), .D_LO_NZ(DLNoZero),
+         .PBR(PBR_n), .PC(PC_n), .DBR(DBR), .AA(AA_n), .AB(AB_n), .DX(DX_n), .SP(SP_n), .SPW(SPW_n),
+         .PERPEI_SeqActive(PERPEI_SeqActive_a), .PERPEI_FirstDone(PERPEI_FirstDone_a),
+         .PLD_Addr0_Valid(PLD_Addr0_Valid_a), .PLD_Low0(PLD_Low0_a), .PLD_SPW0(PLD_SPW0_a),
+         .RTL_SeqActive(RTL_SeqActive_a), .RTL_Offset(RTL_Offset_a), .RTL_SPW0(RTL_SPW0_a),
+         .JSRL_WrapFF(JSRL_WrapFF_a),
+         .IsResetInterrupt(IsResetInterrupt), .IsNMIInterrupt(IsNMIInterrupt), .IsIRQInterrupt(IsIRQInterrupt),
+         .ADDR_BUS(na_move));
+      F65C816_AddrBus AddrBusNextInc
+        (.ADDR_SEL(naf_c[11:8]), .INC(naf_c[7:6]), .OUT_BUS(naf_c[4:2]), .BYTE_SEL1(naf_c[5]),
+         .IR(IR), .EF(EF), .D_LO_NZ(DLNoZero),
+         .PBR(PBR), .PC(PC), .DBR(DBR), .AA(AA), .AB(AB), .DX(DX), .SP(SP), .SPW(SPW_n),
+         .PERPEI_SeqActive(PERPEI_SeqActive_a), .PERPEI_FirstDone(PERPEI_FirstDone_a),
+         .PLD_Addr0_Valid(PLD_Addr0_Valid_a), .PLD_Low0(PLD_Low0_a), .PLD_SPW0(PLD_SPW0_a),
+         .RTL_SeqActive(RTL_SeqActive_a), .RTL_Offset(RTL_Offset_a), .RTL_SPW0(RTL_SPW0_a),
+         .JSRL_WrapFF(JSRL_WrapFF_a),
+         .IsResetInterrupt(IsResetInterrupt), .IsNMIInterrupt(IsNMIInterrupt), .IsIRQInterrupt(IsIRQInterrupt),
+         .ADDR_BUS(na_stay));
+      assign NA_CAND[c] = (naf_c[7:6] == 2'b00) ? na_move : na_stay;
+   end
+   assign NA_BUS = NS_ZERO ? NA_FETCH : NS_INC2 ? NA_CAND[1] : NA_CAND[0];
 
 
    assign NA_OUT = NA_BUS;

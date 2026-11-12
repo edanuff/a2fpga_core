@@ -27,8 +27,11 @@ module F65C816_mcode
    input       CLK,
    input       RST_N,
    input       EN,
-   input [7:0] IR,
-   input [3:0] STATE,
+   input [7:0] IR,          // registered opcode
+   input [3:0] STATE,       // registered state
+   input [7:0] NIR,         // fetch step: the opcode on the data bus (00 for an interrupt)
+   input       NS_ZERO,     // the next state is 0 (fetch)
+   input       NS_INC2,     // the next state is STATE + 2 (else STATE + 1)
    output FMCode_r   M,
    output logic [23:0] SN    // rung 3: {NAF of row st+1, NAF of row st+2} of the registered row
    ) /* synthesis syn_romstyle = "logic" */;   // rung 2a: microcode ROMs in LUTs, not BSRAM
@@ -8521,9 +8524,9 @@ localparam logic [52:0] M_TAB[0:2047] = '{
    assign ALUFlags = AF;
 
 
+   wire [2:0] S_P1 = STATE[2:0] + 3'd1;
    always @(posedge CLK or negedge RST_N)
    begin: xhdl0
-      reg [3:0]   STATE2;
       if (RST_N == 1'b0)
       begin
          MI <= {3'b000, 4'b0000, 2'b00, 3'b000, 2'b00, 2'b00, 8'b00000000, 3'b001, 3'b000, 3'b000, 2'b00, 6'b000000, 5'b00000, 2'b00, 3'b000, 2'b11};
@@ -8531,25 +8534,35 @@ localparam logic [52:0] M_TAB[0:2047] = '{
          XT <= 25'b00000001_000001_0_1_0_00000000;
          SN <= 24'b0;
       end
-      else
+      else if (EN == 1'b1)
       begin
-         STATE2 = STATE - 4'd1;
-         if (EN == 1'b1)
+         if (STATE == 4'b0000)
+         begin        // the fetch step: step 1 of the opcode on the bus
+            MI <= M_TAB[({NIR, 3'b000})];
+            AF <= AF_TAB[({NIR, 3'b000})];
+            XT <= XT_TAB[({NIR, 3'b000})];
+            SN <= SUCC_TAB[({NIR, 3'b000})];
+         end
+         else if (NS_ZERO == 1'b1)
          begin
-            if (STATE == 4'b0000)
-            begin
-               MI <= {3'b000, 4'b0000, 2'b00, 3'b000, 2'b00, 2'b00, 8'b00000000, 3'b001, 3'b000, 3'b000, 2'b00, 6'b000000, 5'b00000, 2'b00, 3'b000, 2'b11};
-               AF <= AF_FETCH;
-               XT <= 25'b00000001_000001_0_1_0_00000000;
-               SN <= 24'b0;
-            end
-            else
-            begin
-              MI <= M_TAB[({IR, STATE2[2:0]})];
-              AF <= AF_TAB[({IR, STATE2[2:0]})];
-              XT <= XT_TAB[({IR, STATE2[2:0]})];
-              SN <= SUCC_TAB[({IR, STATE2[2:0]})];
-            end
+            MI <= {3'b000, 4'b0000, 2'b00, 3'b000, 2'b00, 2'b00, 8'b00000000, 3'b001, 3'b000, 3'b000, 2'b00, 6'b000000, 5'b00000, 2'b00, 3'b000, 2'b11};
+            AF <= AF_FETCH;
+            XT <= 25'b00000001_000001_0_1_0_00000000;
+            SN <= 24'b0;
+         end
+         else if (NS_INC2 == 1'b1)
+         begin
+            MI <= M_TAB[({IR, S_P1})];
+            AF <= AF_TAB[({IR, S_P1})];
+            XT <= XT_TAB[({IR, S_P1})];
+            SN <= SUCC_TAB[({IR, S_P1})];
+         end
+         else
+         begin
+            MI <= M_TAB[({IR, STATE[2:0]})];
+            AF <= AF_TAB[({IR, STATE[2:0]})];
+            XT <= XT_TAB[({IR, STATE[2:0]})];
+            SN <= SUCC_TAB[({IR, STATE[2:0]})];
          end
       end
    end

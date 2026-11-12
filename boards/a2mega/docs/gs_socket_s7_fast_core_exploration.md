@@ -1111,6 +1111,62 @@ checkable by the lockstep bench:
    address for each candidate row in parallel and select the result.
 3. *The flags.* `memory → DB → ALU → flags → P` is the path behind those.
 
+### Rung 4a: the next microinstruction and the next address as candidates (2026-11-12)
+
+Items 1 and 2 of the list above, in the core (`F65C816.sv`,
+`gen_fast_mcode.py`). `NextState` is 0, `STATE + 1` or `STATE + 2`, and 1 in
+the fetch step with the opcode on the bus; simulation now asserts exactly
+that on every step.
+
+- The microcode module takes the **registered** `IR` / `STATE` and looks up
+  both successor rows; the fetch step looks up `{opcode on the bus, 0}`;
+  `NS_ZERO` / `NS_INC2` / "fetch step" select. No table behind the late
+  decision.
+- The next address is evaluated for the fetch candidate and for both
+  successor rows (`SN`) in parallel, each the way it was (next register
+  values without an increment, or current values with it), and the same
+  decision selects the result. Five more `AddrBus` instances.
+
+Exact: lockstep against the stock core in every mode (program plain,
+`+stall`, `+datalate`, `+datalate +stall`; ROM 01 plain, `+irq`,
+`+datalate +irq`, `+datalate +irq +stall`: 7 to 8 M steps, 3,915 IRQ
+assertions, 485 NMI pulses), and the broker suite 72 / 72 with it.
+
+| build | what | result |
+|---|---|---|
+| dln18 (before) | core + 16 KB, 18 ns target | 53.3 MHz |
+| r4dln17 | the same with the candidates, 17 ns target | **55.2 MHz** (−1.13 ns) |
+| n2i | integrated, 100 MHz | 133 failing, step paths −1.2 to −2.3, a poor placement (enable into the core −0.9 where n2h had +1.1) |
+
+What the standalone report shows next (all three level at about 18.1 ns):
+
+- `A_OUT_r → din → …`: the probe's own write bypass compare; the
+  integrated design has no such path.
+- `STATE → microcode registers`: the candidate lookup itself, from
+  registers. Nine levels, of which 4.0 ns is the net from `STATE` (fan-out
+  305, it now feeds two lookups). Register copies of `IR` / `STATE` for
+  the lookups would take most of that.
+- `index register → AAL sum → next value → next address`: the adder is
+  5.5 ns in; the address-source selection behind it (`AddrBus`, per
+  candidate) is nine levels. It decodes a 4-bit mode and special sequences
+  for every candidate; one-hot source selects carried in `SUCC_TAB` (the
+  way `XT_TAB` did it for the data buses) would flatten it.
+
+And in the integrated design the interrupt lines reach the step-address
+register through the core's next-status logic in one clk (`irq_s → nx_two →
+NST → ea_r`, −2.3 in n2i's placement): the lines want to be held from one
+core step to the next in fast mode (native mode must stay as it is, pin for
+pin).
+
+**Where this leaves the goal.** Not met. Six placements of the near-memory
+design at 100 MHz lie between −0.4 and −2.3 ns on the step paths when the
+placement is of the good kind, that is 49 to 45 MHz, and the placement is
+not under control: one build to the next moves more than any single change
+here has. What is in hand is real (the flat-memory design this started from
+needed 26 ns): the broker is out of the way and proven, the core stands
+alone at 55 MHz. What is still needed is about 1.5 ns in the core's loop and
+a placement that repeats.
+
 ## 5. Questions for ed
 
 1. Rung 3 changes the step count per instruction. The scoping doc's

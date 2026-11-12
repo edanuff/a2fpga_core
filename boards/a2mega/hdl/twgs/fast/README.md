@@ -97,6 +97,14 @@ table) and rerun it; do not hand-edit the tables.
     every core register was 5 ns; copies made with `syn_keep` or
     `syn_maxfan` inside the core were merged again by GowinSynthesis).
     `CE_X` must equal `{4{CE}}`; simulation checks it.
+  - Rung 4a (2026-11-12): the next microinstruction and the next address are
+    formed as candidates and the late `NextState` decision only selects.
+    `NextState` is 0, `STATE + 1` or `STATE + 2` (1 in the fetch step, with
+    the opcode on the bus; asserted on every step in simulation), so
+    `F65C816_mcode` takes the registered `IR` / `STATE` plus `NIR`,
+    `NS_ZERO`, `NS_INC2` and looks up both successor rows and the fetched
+    opcode's first row; `NA_OUT` is evaluated for the fetch candidate and
+    both successor rows (`SN`) and selected by the same decision.
   - Memory contract (bench `+datalate`, probe `CPU_PROBE_DATALATE`): read
     port addressed by `NA_OUT`, clock-enabled by `RDY_OUT`; write port at
     `A_OUT`/`D_OUT`/`WE` on the step edge; a one-entry bypass serves a read of

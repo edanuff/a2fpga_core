@@ -228,6 +228,42 @@ st1_mod = ("\n\n// S7 data-late step: step 1 of each opcode (see gen_fast_mcode.
            "   localparam logic [1:0] ST1_TAB[0:255] = '{\n" + ",\n".join("      " + a for a in st1) + "\n   };\n"
            "   assign {VA1, TWOC} = ST1_TAB[IR];\n"
            "endmodule\n")
+# ---- rung 4: the next microinstruction as candidates ----
+# The stock module looks the row up from (NextIR, NextState), both late: NextState hangs
+# off the page-cross carry and the flags, NextIR off the data bus in the fetch step.  But
+# NextState is only ever 0, STATE + 1 or STATE + 2, and in the fetch step (STATE = 0) it
+# is 1 with IR = the opcode on the bus.  So the module takes the REGISTERED IR / STATE and
+# looks up both successor rows from them, takes step 1 of the fetched opcode from the
+# rows {NIR, 0} (an eight-input function), and the late decision only selects.
+hdr_old = "   input [7:0] IR,\n   input [3:0] STATE,\n"
+assert out.count(hdr_old) == 1, out.count(hdr_old)
+out = out.replace(hdr_old,
+    "   input [7:0] IR,          // registered opcode\n"
+    "   input [3:0] STATE,       // registered state\n"
+    "   input [7:0] NIR,         // fetch step: the opcode on the data bus (00 for an interrupt)\n"
+    "   input       NS_ZERO,     // the next state is 0 (fetch)\n"
+    "   input       NS_INC2,     // the next state is STATE + 2 (else STATE + 1)\n")
+b0 = out.index("   always @(posedge CLK or negedge RST_N)\n   begin: xhdl0")
+b1 = out.index("   assign M = {", b0)
+FETCH_MI = "{3'b000, 4'b0000, 2'b00, 3'b000, 2'b00, 2'b00, 8'b00000000, 3'b001, 3'b000, 3'b000, 2'b00, 6'b000000, 5'b00000, 2'b00, 3'b000, 2'b11}"
+assert FETCH_MI in out[b0:b1]
+def load(ind, idx):
+    return (f"{ind}MI <= M_TAB[{idx}];\n{ind}AF <= AF_TAB[{idx}];\n"
+            f"{ind}XT <= XT_TAB[{idx}];\n{ind}SN <= SUCC_TAB[{idx}];\n")
+def fetch(ind):
+    return f"{ind}MI <= {FETCH_MI};\n{ind}AF <= AF_FETCH;\n{ind}XT <= {FETCH_XT};\n{ind}SN <= 24'b0;\n"
+blk = ("   wire [2:0] S_P1 = STATE[2:0] + 3'd1;\n"
+       "   always @(posedge CLK or negedge RST_N)\n   begin: xhdl0\n"
+       "      if (RST_N == 1'b0)\n      begin\n" + fetch("         ") + "      end\n"
+       "      else if (EN == 1'b1)\n      begin\n"
+       "         if (STATE == 4'b0000)\n         begin        // the fetch step: step 1 of the opcode on the bus\n"
+       + load("            ", "({NIR, 3'b000})") + "         end\n"
+       "         else if (NS_ZERO == 1'b1)\n         begin\n" + fetch("            ") + "         end\n"
+       "         else if (NS_INC2 == 1'b1)\n         begin\n" + load("            ", "({IR, S_P1})") + "         end\n"
+       "         else\n         begin\n" + load("            ", "({IR, STATE[2:0]})") + "         end\n"
+       "      end\n   end\n\n")
+out = out[:b0] + blk + out[b1:]
+
 out = out.rstrip("\n") + naf_mod + st1_mod
 DST.write_text(out)
 print(f"wrote {DST}: {len(af)} rows, {sum('x' in a for a in af)} X rows")
