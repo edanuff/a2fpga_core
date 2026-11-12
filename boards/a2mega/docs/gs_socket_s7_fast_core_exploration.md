@@ -1019,6 +1019,32 @@ report in place. The standalone core probe that closes 52.6 MHz had its
 eight blocks in four neighbouring sites. Left to itself in the integrated
 design the placer put near-memory blocks 100 columns from the core.
 
+**Design note for item 1 (not built yet).** Two tiers of decode instead of
+one:
+
+- *Cheap, in the first clk, for the common classes.* From the bank, the
+  page, `we`, `/VP`, ROMBANK and the ROM type only:
+  a read in banks 00/01 below `$C000`, or at `$D000-$FFFF` unless
+  ROMBANK (ROM 01), or in a ROM bank; a write in banks 00/01 below `$C000`
+  outside the pages that can be shadowed (`$0400-$07FF`, `$0800-$0BFF` on a
+  ROM 3, `$2000-$9FFF`); an internal cycle outside `$Cxxx`; never a vector
+  pull. For those the tag is cheap as well: ROM or not (`RDROM` and IOLC
+  for the language-card area), the A12 fold (`LCBNK2`, IOLC, `RDROM`), and
+  the main / aux bit, which the replica already forms without the bank
+  compare for the read address (`aux00_rd`; the write view with RAMWRT).
+  `gs_mmu_decode` gets these as outputs and the decode sweep proves, over
+  every vector, that the class implies `is_local`, no side effect and no
+  forwarded write, and that the cheap tag is the full decode's.
+- *Full, with two clks, for everything else* (socket steps, expansion
+  banks, forwarded and language-card writes, `$Cxxx`): the registered copy
+  of the decode used from the third clk, as the decode-ahead broker's slow
+  path does. Its paths become two-clk paths again.
+
+With the first tier that shallow, the core's clock enable can be decided
+and combined with the tag compare in the first clk and be a plain register
+again (`ce_r`), and a write of a cheap-class step takes its address from
+the cheap view.
+
 ## 5. Questions for ed
 
 1. Rung 3 changes the step count per instruction. The scoping doc's
