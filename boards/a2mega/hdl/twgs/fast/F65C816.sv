@@ -27,6 +27,7 @@ module F65C816
    input         CLK/*verilator public_flat*/,
    input         RST_N,
    input         CE,
+   input [3:0]   CE_X,   // S7: four more copies of CE (same value), one per group of registers
 
    input         RDY_IN,
    input         NMI_N,
@@ -42,7 +43,8 @@ module F65C816
    output logic  MLB/*verilator public_flat*/,
    output logic  VPB/*verilator public_flat*/,
    output logic  I_FLAG, // P[2] (interrupt disable) — accelerator IRQ-delay tap
-   output [23:0] NA_OUT  // S7 data-late: address of the NEXT step (valid while RDY_OUT), A_OUT is its register
+   output [23:0] NA_OUT, // S7 data-late: address of the NEXT step (valid while RDY_OUT), A_OUT is its register
+   output [2:0]  NST_OUT // ... and its bus status: {VPB, WE (1 = read), internal (VPA = VDA = 0)}
    );
 
   logic [15:0]   A/*verilator public_flat*/;
@@ -71,7 +73,7 @@ module F65C816
   logic [3:0]    NextState;
   logic          NS_ZERO;    // rung 3: NextState == 0
   logic          NS_INC2;    // rung 3: NextState == STATE + 2
-  logic [19:0]   SN;         // rung 3: address fields of the two successor rows
+  logic [23:0]   SN;         // rung 3: address fields and VA of the two successor rows
   logic          LAST_CYCLE;
   logic          GotInterrupt;
   logic          IsResetInterrupt;
@@ -146,6 +148,19 @@ module F65C816
   logic          JSR_FOUND;
 
   assign EN = RDY_IN & CE & (~WAIExec) & (~STPExec);
+  // S7: the step enable reaches every register of the core in one clk of the
+  // accelerator clock; separate copies for the microcode registers, the address
+  // generator, the register file and the flags / data register keep each net
+  // short (same value as EN).
+  // (They are made from separate copies of CE, CE_X: copies made from the one
+  // CE are merged again by synthesis.)
+  wire EN_m = RDY_IN & CE_X[0] & (~WAIExec) & (~STPExec);
+  wire EN_g = RDY_IN & CE_X[1] & (~WAIExec) & (~STPExec);
+  wire EN_r = RDY_IN & CE_X[2] & (~WAIExec) & (~STPExec);
+  wire EN_p = RDY_IN & CE_X[3] & (~WAIExec) & (~STPExec);
+`ifdef VERILATOR
+  always @(posedge CLK) if (RST_N == 1'b1 && CE_X !== {4{CE}}) $display("ERROR: CE_X %b differs from CE %b @%0t", CE_X, CE, $time);
+`endif
 
   assign IsBranchCycle1 = (IR[4:0] == 5'b10000 & STATE == 4'b0001) ? 1'b1 :
                           1'b0;
@@ -293,7 +308,7 @@ module F65C816
       end
 
 
-   F65C816_mcode MCode(.CLK(CLK), .RST_N(RST_N), .EN(EN), .IR(NextIR), .STATE(NextState), .M(MC), .SN(SN));
+   F65C816_mcode MCode(.CLK(CLK), .RST_N(RST_N), .EN(EN_m), .IR(NextIR), .STATE(NextState), .M(MC), .SN(SN));
 
 
    // S7 data-late: the MVN/MVP repeat decision (LOAD_PC == 111, step 5 of 44/54) was the
@@ -308,7 +323,7 @@ module F65C816
          $display("PCDec MISMATCH @%0t: CO=%b A=%04h", $time, CO, A);
 `endif
 
-   F65C816_AddrGen AddrGen(.CLK(CLK), .RST_N(RST_N), .EN(EN), .LOAD_PC(MC.LOAD_PC), .PCDec(PCDecA), .GotInterrupt(GotInterrupt), .ADDR_CTRL(MC.ADDR_CTRL), .IND_CTRL(MC.IND_CTRL), .D_IN(D_IN), .X(X), .Y(Y), .D(D), .S(SP), .T(T), .DR(DR), .DBR(DBR), .e6502(EF), .PC(PC), .AA(AA), .AB(AB), .DX(DX), .AALCarry(AALCarry), .JumpNoOfl(JumpNoOverflow),
+   F65C816_AddrGen AddrGen(.CLK(CLK), .RST_N(RST_N), .EN(EN_g), .LOAD_PC(MC.LOAD_PC), .PCDec(PCDecA), .GotInterrupt(GotInterrupt), .ADDR_CTRL(MC.ADDR_CTRL), .IND_CTRL(MC.IND_CTRL), .D_IN(D_IN), .X(X), .Y(Y), .D(D), .S(SP), .T(T), .DR(DR), .DBR(DBR), .e6502(EF), .PC(PC), .AA(AA), .AB(AB), .DX(DX), .AALCarry(AALCarry), .JumpNoOfl(JumpNoOverflow),
                            .PC_n(PC_n), .AA_n(AA_n), .AB_n(AB_n), .DX_n(DX_n));
 
    // rung 2b: the IR/STATE terms of w16 are pre-decoded into the microcode
@@ -416,7 +431,7 @@ module F65C816
             SP <= SP_n;
             oldXF <= 1'b1;
          end
-         else if (EN == 1'b1)
+         else if (EN_r == 1'b1)
          begin
             if (MC.LOAD_AXY == 3'b110)
             begin
@@ -477,7 +492,7 @@ module F65C816
          P <= 9'b100110100;
       else
       begin
-         if (EN == 1'b1)
+         if (EN_p == 1'b1)
             case (MC.LOAD_P)
                3'b000 :
                   P <= P;
@@ -604,7 +619,7 @@ module F65C816
       end
       else
       begin
-         if (EN == 1'b1)
+         if (EN_p == 1'b1)
          begin
             DR <= D_IN;
 
@@ -922,7 +937,7 @@ module F65C816
          RTL_Offset <= 2'b00;
          RTL_WrapFF <= 1'b0;
          RTL_SPW0 <= 8'h00;
-      end else if (EN == 1'b1) begin
+      end else if (EN_p == 1'b1) begin
          EmuSPWrap <= EmuSPWrap_n;
          EmuStackSeqActive <= EmuStackSeqActive_n;
          EmuSPZeroAtStart <= EmuSPZeroAtStart_n;
@@ -1048,7 +1063,10 @@ module F65C816
 
          if (RDY_IN == 1'b1 & CE == 1'b1)
          begin
-            if ((NMI_SYNC == 1'b1 | IRQ_N == 1'b1 | ABORT_N == 1'b0) & WAIExec == 1'b1)
+            // WAI ends when an interrupt line is ASSERTED (IRQ_N low, masked or not), as in
+            // the VHDL original; the conversion had the IRQ_N test inverted, so WAI fell
+            // through with no interrupt pending and hung when one arrived during it.
+            if ((NMI_SYNC == 1'b1 | IRQ_N == 1'b0 | ABORT_N == 1'b0) & WAIExec == 1'b1)
                WAIExec <= 1'b0;
          end
       end
@@ -1078,19 +1096,19 @@ module F65C816
    // The next step's microcode address fields come from NA_TAB, indexed by the
    // registered IR and NextState; NextState 0 and 1 are the fetch step and
    // step 1 (PBR:PC, no write).
-   logic [9:0]  NAF;            // {addrBus[3:0], addrInc[1:0], byteSel[1], outBus[2:0]} of the next step
+   logic [11:0] NAF;            // {addrBus[3:0], addrInc[1:0], byteSel[1], outBus[2:0], va[1:0]} of the next step
    logic [23:0] NA_BUS;
    logic [23:0] A_OUT_r;
    // The fields of both possible successor rows are registered with the microinstruction
    // (SN, from SUCC_TAB); the NextState decision picks one.  NextState is 0, STATE+1 or
    // STATE+2 (the taken branch's state 2 is STATE+1): NS_ZERO / NS_INC2 are set beside it.
-   assign NAF = NS_ZERO ? 10'b0 : NS_INC2 ? SN[9:0] : SN[19:10];
+   assign NAF = NS_ZERO ? 12'b0 : NS_INC2 ? SN[11:0] : SN[23:12];
 `ifdef VERILATOR
-   logic [9:0] NAF_ref;
+   logic [11:0] NAF_ref;
    F65C816_naf NAFRom(.IR(IR), .STATE(NextState), .NAF(NAF_ref));
    always @(posedge CLK)
       if (RST_N == 1'b1 && EN == 1'b1 && NAF !== NAF_ref)
-         $display("NAF MISMATCH @%0t: NAF=%010b ref=%010b IR=%02h STATE=%0d NextState=%0d", $time, NAF, NAF_ref, IR, STATE, NextState);
+         $display("NAF MISMATCH @%0t: NAF=%012b ref=%012b IR=%02h STATE=%0d NextState=%0d", $time, NAF, NAF_ref, IR, STATE, NextState);
 `endif
 
    F65C816_AddrBus AddrBusNow
@@ -1103,8 +1121,18 @@ module F65C816
       .JSRL_WrapFF(JSRL_WrapFF),
       .IsResetInterrupt(IsResetInterrupt), .IsNMIInterrupt(IsNMIInterrupt), .IsIRQInterrupt(IsIRQInterrupt),
       .ADDR_BUS(ADDR_BUS));
+   // The next address is formed two ways and the next step's ADDR_INC picks one:
+   //  NA_MOVE  the registers at their NEXT values, no increment.  This is the late
+   //           path (operand bytes arriving from memory, index adds) and it has no
+   //           second adder behind it.
+   //  NA_STAY  AA / AB / DX / SP / PBR / PC at their CURRENT values plus the increment:
+   //           the adders, but from registers.
+   // A nonzero increment follows only steps that leave those registers alone
+   // (gen_fast_mcode.py asserts it of every row and successor), so NA_STAY is exact
+   // whenever it is selected; PBR:PC never takes an increment.
+   logic [23:0] NA_MOVE, NA_STAY;
    F65C816_AddrBus AddrBusNext
-     (.ADDR_SEL(NAF[9:6]), .INC(NAF[5:4]), .OUT_BUS(NAF[2:0]), .BYTE_SEL1(NAF[3]),
+     (.ADDR_SEL(NAF[11:8]), .INC(2'b00), .OUT_BUS(NAF[4:2]), .BYTE_SEL1(NAF[5]),
       .IR(IR), .EF(EF), .D_LO_NZ(DLNoZero),
       .PBR(PBR_n), .PC(PC_n), .DBR(DBR), .AA(AA_n), .AB(AB_n), .DX(DX_n), .SP(SP_n), .SPW(SPW_n),
       .PERPEI_SeqActive(PERPEI_SeqActive_a), .PERPEI_FirstDone(PERPEI_FirstDone_a),
@@ -1112,9 +1140,50 @@ module F65C816
       .RTL_SeqActive(RTL_SeqActive_a), .RTL_Offset(RTL_Offset_a), .RTL_SPW0(RTL_SPW0_a),
       .JSRL_WrapFF(JSRL_WrapFF_a),
       .IsResetInterrupt(IsResetInterrupt), .IsNMIInterrupt(IsNMIInterrupt), .IsIRQInterrupt(IsIRQInterrupt),
-      .ADDR_BUS(NA_BUS));
+      .ADDR_BUS(NA_MOVE));
+   F65C816_AddrBus AddrBusNextInc
+     (.ADDR_SEL(NAF[11:8]), .INC(NAF[7:6]), .OUT_BUS(NAF[4:2]), .BYTE_SEL1(NAF[5]),
+      .IR(IR), .EF(EF), .D_LO_NZ(DLNoZero),
+      .PBR(PBR), .PC(PC), .DBR(DBR), .AA(AA), .AB(AB), .DX(DX), .SP(SP), .SPW(SPW_n),
+      .PERPEI_SeqActive(PERPEI_SeqActive_a), .PERPEI_FirstDone(PERPEI_FirstDone_a),
+      .PLD_Addr0_Valid(PLD_Addr0_Valid_a), .PLD_Low0(PLD_Low0_a), .PLD_SPW0(PLD_SPW0_a),
+      .RTL_SeqActive(RTL_SeqActive_a), .RTL_Offset(RTL_Offset_a), .RTL_SPW0(RTL_SPW0_a),
+      .JSRL_WrapFF(JSRL_WrapFF_a),
+      .IsResetInterrupt(IsResetInterrupt), .IsNMIInterrupt(IsNMIInterrupt), .IsIRQInterrupt(IsIRQInterrupt),
+      .ADDR_BUS(NA_STAY));
+   assign NA_BUS = (NAF[7:6] == 2'b00) ? NA_MOVE : NA_STAY;
+
 
    assign NA_OUT = NA_BUS;
+
+   // ---- the bus status of the next step --------------------------------------
+   // WE, VPB and the VA field come from the next microinstruction: the fetch
+   // microinstruction when the next step is a fetch (NS_ZERO); in the fetch
+   // step, step 1 of the opcode on the data bus (always a read, never a vector
+   // pull; VA[0] and "last cycle of a two-cycle instruction" from ST1_TAB);
+   // otherwise the successor row (NAF).  VPA's two extra terms need STATE = 1,
+   // so they exist only in the fetch step, where P, GotInterrupt and NMI_SYNC do
+   // not change and IRQ_ACTIVE takes the IRQ pin.
+   logic       st1_va, st1_twoc;
+   F65C816_st1 St1Rom(.IR(NextIR), .VA1(st1_va), .TWOC(st1_twoc));
+   wire        nx_st1  = (STATE == 4'b0000);
+   wire        nx_plain = NS_ZERO | nx_st1;                      // next step: opcode fetch or step 1
+   wire [1:0]  nx_va   = NS_ZERO ? 2'b11 : nx_st1 ? {1'b0, st1_va} : NAF[1:0];
+   wire        nx_soft = nx_st1 & ~GotInterrupt & (NextIR == 8'h00 | NextIR == 8'h02);
+   wire        nx_two  = nx_st1 & st1_twoc & (((~IRQ_N) & (~P[2])) | NMI_SYNC);
+   wire        nx_vpa  = nx_va[0] | nx_two | nx_soft;
+   wire        nx_we   = nx_plain | (NAF[4:2] == 3'b000);
+   wire        nx_vpb  = nx_plain | (NAF[11:8] != 4'b1111);
+   assign NST_OUT = {nx_vpb, nx_we, ~nx_vpa & ~nx_va[1]};
+`ifdef VERILATOR
+   logic [2:0] NST_r;
+   always @(posedge CLK or negedge RST_N)
+      if (RST_N == 1'b0)   NST_r <= 3'b110;
+      else if (EN == 1'b1) NST_r <= NST_OUT;
+   always @(posedge CLK)
+      if (RST_N == 1'b1 && NST_r !== {VPB, WE, ~VPA & ~VDA})
+         $display("NST_OUT MISMATCH @%0t: said %03b, is %03b IR=%02h STATE=%0d", $time, NST_r, {VPB, WE, ~VPA & ~VDA}, IR, STATE);
+`endif
    always @(posedge CLK or negedge RST_N)
       if (RST_N == 1'b0)   A_OUT_r <= 24'h000000;
       else if (EN == 1'b1) A_OUT_r <= NA_BUS;

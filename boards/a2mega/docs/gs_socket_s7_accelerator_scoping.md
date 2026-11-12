@@ -681,3 +681,49 @@ In short: functionally complete in simulation; the core and memory paths
 fit 36 MHz steps, the next-read-address and broker-decision paths do not
 yet.
 
+### 10.1 Later the same day: decision from registers, and four behaviours to know
+
+The second round of timing work (exploration log, "Integration, second
+round") changed the interface and fixed two functional points. For the
+record of section 9:
+
+- **Ports.** Core → broker: `cpu_na_i` (next address), `cpu_nst_i` (next
+  step's `{VPB, WE, internal}`), `cpu_rdy_i` (the core takes this step; low
+  in WAI / STP). Broker → memories: `lm_ren_o` / `lm_wen_o` are registers,
+  `RA_COPIES` copies each, with as many copies of the two read addresses
+  (`lm_ram_ra_o`, 17 bits; `lm_rom_ra_o`, 18 bits: a ROM 3 image is 256 KB).
+  PHY parameters: `CORE_SUBST = 0` (the broker substitutes internal I/O
+  cycles itself) and `WDATA_LATE = 1` (the PHY takes the write data again the
+  clk after the issue; a native step's request is registered a clk before
+  its data). Both default to the S6 behaviour.
+- **A step is decided from registers only.** The status of a step
+  (`pl_int`, `pl_we`, `pl_vp_n`, `pl_io_int`) is registered from `cpu_nst_i`
+  every time the core steps; the decode is the one made a step ahead, or a
+  registered copy of the direct decode, which is itself made from the
+  registered status. Nothing is decided in the first clk of a step (`dec_ok`
+  is an explicit factor of the strobe). The memory-map switches take a
+  socket cycle's effect the clk after it completes.
+- **WAI / STP.** A waiting core does not take steps (`cpu_rdy_i` low): the
+  status stands and nothing is treated as decoded ahead. The bench now has a
+  WAI between its two interrupts and requires that it waits. That test found
+  the stock core's WAI wake-up inverted (fixed in both cores, see
+  `hdl/twgs/65C816/README.md`); the S6 build has the same core and needs the
+  fix when it is next built.
+- **A native-mode write reaches the card's copy when its socket cycle
+  completes**, not when the step is decided. Before, a native write step cut
+  short by /RESET wrote the card's RAM and not the motherboard's, so the copy
+  and the memory of record came apart by one byte (found when the WAI moved
+  a reset onto a write).
+- **A fast-mode local write of a step cut short by /RESET stays written**
+  (the write is in the second clk of the step; the reset arrives when it
+  arrives). It is the same as the reset arriving a step later; the bench
+  gives the ideal machine the same write and counts it. If that write was
+  also a forwarded (shadowed) one, its socket half is dropped with the
+  posted-write buffer, as 9.5 already records for a buffered write.
+- **Timing contract.** The multicycle exceptions are generated
+  (`hdl/accel_probe_138b/gen_sdc.py`) from the register groups named there;
+  each group's claim is asserted in clks by `tb_gs_broker.sv`. A two-clk
+  startpoint is always a register that changes only when the core steps, and
+  its endpoints are either enabled by a register (memory ports, core) or sit
+  behind the `dec_ok` factor.
+

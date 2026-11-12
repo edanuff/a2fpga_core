@@ -669,6 +669,225 @@ The 47.6 MHz of the standalone core probe is the core and one memory on an
 empty device; the integrated accelerator domain is the number that counts,
 and today it is "27 MHz with work, 36 MHz with more work".
 
+### Integration, second round: decision from registers, memory size, WAI (2026-11-11)
+
+Continues the entry above from build 6. Same probe (`accel_probe_top`,
+138B, 108 MHz, three clks per step = 36 MHz, 0.5 ns uncertainty), now three
+projects that differ only in the second local memory.
+
+**Builds.** "Failing" is the count of failing endpoints, "worst" the worst
+slack of any path.
+
+| build | change | failing | worst | note |
+|---|---|---|---|---|
+| 7 | step decided from registers only: the core announces the next step's bus status (`NST_OUT`), the broker registers it | 438 | −2.83 | every two-clk group positive |
+| 8 | next address split (`NA_MOVE` / `NA_STAY`); native request registered in the first clk; registered hit compare | 405 | −2.52 | placer put the RAM in the outermost strips |
+| 9 | memories floorplanned in strips (below); PHY's own internal-cycle substitution off | 718 | −2.23 | address −2.17, write enable −2.23 |
+| 10 | quadrant floorplan over six strips; read-address copies; registered write enable | 751 | −3.57 | worse: the core is pulled apart |
+| 11 | strips again, with the copies; memories written out block by block | 579 | −3.73 | what is left is one-clk nets |
+| 12 | status registered at every core step; registered, replicated memory enables; PHY takes write data a clk after the issue; constraints regenerated | 199 | −1.96 | (32 KB second memory) |
+| 13 | registered one-hot PHY select; registered-status direct decode; switches updated a clk later; separate reset copy; `dec_ok` | 102 / 78 / not routed | −1.17 / −0.66 / n/a | 32 KB / 128 KB / 256 KB second memory |
+| 14a | socket request taken from registers (`ea_r` + status); clock-enable copies from the broker (`CE_X`); data registers out of the reset branch | 38 | −0.35 | 128 KB |
+| 14b | same sources, RAM one strip lower (R64/R82, nearer the bottom-edge pins) | 63 | −0.40 | 128 KB; the standard layout stays |
+| 14c | same sources as 14a, the probe's loader stand-in (`ld_a`, `ld_d`, `ld_we`) declared false paths | 17 | −0.24 | 128 KB |
+
+Build 13, 128 KB (the ROM 01 machine), by group: core → core +0.54,
+memory → core +0.43, the three paths into the read address −0.34 to −0.53,
+one-clk paths −0.45 to −0.66. Build 14c, same machine: core → core +1.28,
+memory → core +0.39, core → read address −0.23 (`X` → `ADB`), and the
+one-clk paths that are left are the broker's PHY select to the pad
+registers (`sel_pw_r → u_phy/gs_d_o`, −0.24, of which 5.3 ns is the net to
+the pad) and the interrupt copy into the address register's enable
+(`irq_c → ea_r`, −0.16).
+
+**What the die looks like.** The 138B has its block RAM in horizontal
+strips 18 rows apart (R10, R28, ... R100), 36 to 38 sites per strip across
+the whole width, one every 6.5 columns. Banks 00/01 are 64 blocks of
+16K × 1, so they span most of two strips whatever is done, and the farthest
+block is about 100 columns (≈ 5 ns) from the core. Left alone the placer
+used the outermost strips. The layout that works
+(`hdl/accel_probe_138b/gen_floorplan.py`): RAM in the two strips the core
+sits between, the second memory in the next two out, the eight blocks of a
+data bit together, two bits to a quarter of the width, and one copy of the
+read addresses and enables per quarter. A layout by distance over six
+strips was worse. The socket's pins are on the bottom edge and the lower
+right edge, 100 to 180 columns from where the placer puts the broker; the
+one-clk paths to the pin registers are mostly that distance.
+
+**Does the size of the second memory matter?** Ed pointed out that a ROM 3
+has 256 KB of ROM (the probe had assumed 128 KB). Measured, same sources:
+
+| second memory | blocks in all | failing | worst |
+|---|---|---|---|
+| 32 KB (a cache in front of a backing store) | 80 | 102 | −1.17 |
+| 128 KB (ROM 01 image) | 128 | 78 | −0.66 |
+| 256 KB (ROM 3 image) | 192 | not routed | n/a |
+
+A 32 KB second memory is no better than the whole 128 KB image: the
+difference between the first two rows is placement noise, and a ROM 01
+machine needs no cache for timing. The 256 KB image is a different
+problem: with 192 of the die's blocks pinned to strips the router had not
+finished after 13 minutes (the others take 5 to 8 for the whole flow) and
+was stopped. A ROM 3 machine needs either a cache in front of the ROM, a
+longer step for ROM reads, or a layout of its own. Not decided.
+
+**Design changes** (all exact, all cross-checked in simulation on every
+step they apply to):
+
+- *The core announces the next step.* `NST_OUT` beside `NA_OUT`; the broker
+  registers both when the core steps (`pl_int`, `pl_we`, `pl_vp_n`,
+  `pl_io_int`, and the effective address `ea_r`). A step's socket request is
+  those registers; a step's decision is made from them and from the decode
+  registered a step ahead, or from a registered copy of the direct decode,
+  which is itself made from the registered status. The core's outputs reach
+  only what is passed on (write data, addresses).
+- *Nothing is decided in the first clk of a step*, and that is now an
+  explicit register factor (`dec_ok`) of the decision, not only a
+  consequence of a counter compare: the two-clk paths end at registers that
+  are captured every clk, so their inputs must be steady while the
+  startpoints settle.
+- *Enables are registers, in copies.* Read launch, RAM write enable and the
+  core's clock enable each have several preserved copies (`ren_c`, `wen_c`,
+  `ce_c`); `syn_maxfan` and `syn_keep` copies were merged again by
+  GowinSynthesis, registers with `syn_preserve` (or logic fed by them) are
+  not.
+- *The switches take a socket cycle's effect a clk later* (`cyc_stb_q`),
+  which takes the PHY's fall event out of the replica's write enables.
+- *Constraints are generated* (`gen_sdc.py`) from named register groups, and
+  each group's claim is a bench assertion in clks. Two were wrong before
+  this round (a one-clk write-enable path and a one-clk request path were
+  inside two-clk groups) and one was missing an assertion (how soon after a
+  switch change the decode may be used: a mutation that delayed the switch
+  update a second clk passed the suite until the assertion was added).
+
+**Three functional findings.**
+
+1. *WAI in the stock core was inverted.* The SystemVerilog conversion tests
+   `IRQ_N == 1` where srg320's VHDL has `IRQ_N = '0'`: a WAI ended after a
+   few cycles with no interrupt pending, and never ended when /IRQ fell
+   while it executed. Fixed in `P65C816.sv` and `F65C816.sv`. The S6 build
+   carries the same core and has the bug until it is rebuilt. Found because
+   the broker now gates on the core's "takes this step" output and I added
+   a WAI to the test program to exercise it; the lockstep benches could not
+   see it (both cores had it).
+2. *A native-mode write reached the card's copy before its socket cycle.*
+   A reset between the two left the card's RAM one byte different from the
+   motherboard's. The copy is now written when the cycle completes. Bench:
+   `+resetw` (reset in the middle of a socket write) and `+resetpw` (reset
+   in the cycle before a native write).
+3. *A fast-mode local write of a step cut short by /RESET stays written*
+   (it is in the second clk of the step). Accepted and counted by the bench:
+   it is the reset arriving one step later.
+
+**Verification** (working tree, after build 14's changes):
+
+| bench | result |
+|---|---|
+| broker suite, `all` (41 program runs + 8 ROM 01 runs of 3 M steps) | 49 / 49 PASS; ROM 01 step hash `6012b76169ecc820` and the same 128,393-write stream in all eight modes; 98.0 % of local reads launched ahead in the test program, 91.2 % in the ROM stretch |
+| replica sweep | PASS, 869,952,896 decode vectors and 5,999,973 tracker checks, twice |
+| S6 socket bench (program and ROM) | PASS |
+| arm sequencer | PASS |
+| CPU lockstep, program (plain, `+datalate`, `+stall`, `+datalate +stall`) | PASS |
+| CPU lockstep, ROM 01 (plain, `+irq`, `+datalate +irq`, `+datalate +irq +stall`) | PASS |
+
+The replica, socket, arm and CPU benches ran before the last broker-only
+change (`wen_nat & run_now`) and the bench additions, which they do not
+compile. Fifteen fault injections were run against the broker suite
+(one-line mutations of the new logic): twelve are detected. Two of the
+twelve were missed at first and are why the suite gained `+resetw`,
+`+resetpw`, the native kept-write error and the switch-settle assertion.
+The three that are not detected are defensive terms with no observable
+effect (`fresh_ok`'s `RDY` factor and the enable copies during WAI / STP,
+where nothing the core does is visible).
+
+**Where this leaves 36 MHz.** Not closed, 17 endpoints inside 0.24 ns on
+the ROM 01 machine, and no longer the target (next paragraph). What is left
+is two kinds of path. The broker-to-pad paths need either the PHY's issue
+moved a clk later than S6 (a register at the pad; needs the S6 hardware
+sweep to say the socket timing allows it) or the broker placed at the pads
+(`GROUP` / `GRP_LOC`, not tried). The core-to-read-address path is the
+same one the faster step has to shorten anyway.
+
+**The target moved.** Ed, 2026-11-11: the current AppleSqueezer (GS Turbo)
+advertises 48 MHz. From the maker's page: no 65C816 chip any more, a soft
+core written from scratch on a larger Xilinx FPGA, claimed cycle accurate,
+settings 2.8 / 7 / 14 / 21 / 48 MHz, "17 times" stock (= 48 / 2.8), DDR3. So
+"2× the AppleSqueezer" is 96 MHz, which this hardware will not do with a
+faithful core. **New goal (ed): exceed the Squeezer's 48 MHz by some
+margin, however narrow.** Fidelity stays first. In step time that is under
+20.8 ns; the natural configuration is §2d's (100 MHz PHY clock, two clks
+per step, 50 MHz).
+
+### Toward a step under 20.8 ns: where the time goes (2026-11-11)
+
+Four measurements, all 138B, 0.5 ns uncertainty, one roll each.
+
+| build | what | result |
+|---|---|---|
+| 15 | integrated probe as it stands, 100 MHz, `STEP_CLKS` 2, `ADDR_CLKS` 1 (`a2mega_accel_probe_138b_s2`) | 2292 failing, worst −5.9 ns |
+| w20 | same netlist, **every** path given one whole 20 ns step (a what-if, not a contract) | needs 26.3 ns (38.1 MHz) |
+| dl4 | the core alone with its 128 KB memory, today's source, 20 ns target (`a2mega_cpu_probe_138b_fast_dl`) | needs 21.0 ns (47.7 MHz) |
+| dln | the core alone with a **16 KB** memory (eight blocks, no output mux), 19 ns target (`a2mega_cpu_probe_138b_fast_dln`) | **met, 52.6 MHz, zero violations**; at an 18 ns target 53.3 MHz (−0.75 ns) |
+
+What they say:
+
+- Build 15 fails in two ways. The broker in the 2 / 1 configuration still
+  makes a write-enable decision inside one clk (the registered write enable
+  exists only for `ADDR_CLKS` ≥ 2), 15.7 ns against 10. That is broker work
+  and fits a step. The other is the core ↔ memory loop itself, which w20
+  isolates.
+- w20: with nothing else in the way the loop is 26.3 ns inside the
+  integrated design, 5.3 ns more than the same core needs alone (dl4). The
+  worst path shows why: ROM block at the far left of its strip → 2.0 ns to
+  the output mux → 2.6 ns to the core → next address → 2.8 ns to the read
+  address mux → **6.4 ns** to a RAM block at the far right. The 128 blocks
+  of banks 00/01 and the ROM image are four strips across the whole die;
+  no floorplan makes 128 blocks close to one core (a block site is about
+  117 logic sites of area).
+- dl4 against this morning's 49.5 MHz: the additions since (`NST_OUT`, the
+  split next address, the enable copies) cost about 0.8 ns, or it is roll
+  noise. Its two walls are `index register → page-cross carry → NextState →
+  microcode lookup` and `memory → DB → ALU → flags`.
+- dln: take the memory's size away and the core closes 19 ns clean. The
+  memory paths leave the top of the report; what is left is all `Y → carry
+  → NextState → …`, inside the core.
+
+**Conclusion: the flat memory is the wall, and the cache of §2c ("a fifth
+lever") is now the main line.** Its shape, fitted to the broker as it is:
+
+- *Near memory.* A direct-mapped, per-byte cache beside the core: 16K
+  entries of {tag, data}, each bit of the entry in its own 16K × 1 block
+  (about 19 blocks, no output mux). The launch a step ahead goes to it
+  alone, addressed by the low 14 bits of `NA_OUT` untranslated, so the
+  replica's address translation leaves the address path as well.
+- *Tag.* What identifies the physical byte beyond the index (bank, RAM or
+  ROM, language-card bank 1), from the replica's step-ahead decode, a
+  register. The step's check of its speculative launch (`ld_*` today) gains
+  "and the tag read equals the tag wanted". A hit is a fast step.
+- *Far memory.* The banks and the ROM image as they are, but read only
+  through the existing missed-launch path (`ml_*`: registered address,
+  `SLOW_CLKS`), so every path to and from them is multi-clk from registers
+  and they can sit anywhere. A miss is that path plus one near write. Every
+  local write goes to both (a write never misses: the entry is the byte).
+- *What it costs.* Wall time on a miss (about three clks), never a step.
+  Fidelity is untouched: the step sequence does not depend on the cache.
+- *What else it settles.* ROM 3's 256 KB (far memory, any size), and the
+  expansion banks on DDR3 later (the same miss path with a longer wait),
+  which the plan needed a cache for anyway (§2d).
+- *Care points.* An index is the logical low bits, so a physical byte must
+  be reachable under one index only. Banks 00/01 seen through the IIe
+  switches keep their low bits. Language-card bank 1 does not (logical
+  `$Dxxx`, physical `$Cxxx`): it gets a tag bit, and `$C000-$CFFF` as plain
+  RAM (I/O and language-card shadowing inhibited) is served from the far
+  memory only and invalidates its alias.
+
+Then, in this order: the broker's 2 / 1 contract (everything the step
+decides from registers of the step before, plus the tag compare, inside
+the first clk); and in the core, both successor microinstructions
+registered so the late `NextState` only selects (`SUCC_TAB` extended to the
+whole row, and the fetched opcode's first row from a 256-entry table of
+its own), which is the wall dln shows.
+
 ## 5. Questions for ed
 
 1. Rung 3 changes the step count per instruction. The scoping doc's
@@ -677,3 +896,11 @@ and today it is "27 MHz with work, 36 MHz with more work".
    "faithful" mode or the pacing comes from the broker. Which?
 2. Memory-side rungs (mux select pre-decode, 16-bit reads) belong to the
    S7 broker, not the core. Fine to prototype them inside the probe?
+3. The near memory (cache) changes what "50 MHz" means: a hit is a
+   two-clk step, a miss about three clks more. Is the goal the step rate
+   (the Squeezer's own kind of number) or a measured benchmark against one?
+4. May the S7 PHY issue a clk later than S6's? It would put a register at
+   the pads (the last one-clk paths at 36 MHz); it needs the S6 hardware
+   sweep to say the socket timing has the room.
+5. ROM 01 hardware: the vector-pull behaviour (`/VP`) the replica assumes
+   has only been seen in simulation.

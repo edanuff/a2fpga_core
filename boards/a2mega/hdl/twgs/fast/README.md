@@ -77,6 +77,26 @@ table) and rerun it; do not hand-edit the tables.
     registers; and the stack-tracking values that feed the next address are
     computed without the last-cycle term (`*_a`: a last cycle is followed by
     a fetch at `PBR:PC`, which reads none of them).
+  - For the broker (S7b, `gs_accel_broker` with `DATA_LATE`), three more, all
+    exact and cross-checked in simulation on every step:
+    `NST_OUT` is the NEXT step's bus status (`{VPB, WE, internal}`), from the
+    registered successor fields and, for a fetch step, a small per-opcode
+    table (`F65C816_st1`: step 1's `VA[0]` and the two-cycle flag), so the
+    broker can register a step's kind when the core steps and decide the step
+    from registers only. The next address is split into `NA_MOVE` (next
+    register values, increment forced to zero) and `NA_STAY` (current
+    registers, the successor's increment), picked by "increment is zero";
+    the generator asserts that a step that loads `AA`/`AB`, `DX`, `SP` or
+    `PBR` is never followed by an access through that register with a
+    non-zero increment, so the long next-value logic never feeds the
+    incrementer. And the step enable has separate copies for the microcode
+    registers, the address generator, the register file and the P / DR /
+    stack-tracking registers (`EN_m`, `EN_g`, `EN_r`, `EN_p`), each fed by its
+    own bit of the `CE_X` port, which the broker drives from preserved
+    copies of its clock-enable register (one net from that register to
+    every core register was 5 ns; copies made with `syn_keep` or
+    `syn_maxfan` inside the core were merged again by GowinSynthesis).
+    `CE_X` must equal `{4{CE}}`; simulation checks it.
   - Memory contract (bench `+datalate`, probe `CPU_PROBE_DATALATE`): read
     port addressed by `NA_OUT`, clock-enabled by `RDY_OUT`; write port at
     `A_OUT`/`D_OUT`/`WE` on the step edge; a one-entry bypass serves a read of

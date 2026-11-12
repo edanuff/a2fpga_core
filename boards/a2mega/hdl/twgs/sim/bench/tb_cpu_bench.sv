@@ -77,7 +77,7 @@ module tb_cpu_bench;
         .VPA(ref_vpa), .VDA(ref_vda), .MLB(ref_mlb), .VPB(ref_vpb), .I_FLAG(ref_if));
 
     F65C816 u_dut (
-        .CLK(clk), .RST_N(rst_n), .CE(1'b1), .RDY_IN(rdy),
+        .CLK(clk), .RST_N(rst_n), .CE(1'b1), .CE_X(4'b1111), .RDY_IN(rdy),
         .NMI_N(nmi_n), .IRQ_N(irq_n), .ABORT_N(1'b1),
         .D_IN(dut_din), .D_OUT(dut_dout), .A_OUT(dut_a), .WE(dut_we), .RDY_OUT(dut_rdyo),
         .VPA(dut_vpa), .VDA(dut_vda), .MLB(dut_mlb), .VPB(dut_vpb), .I_FLAG(dut_if));

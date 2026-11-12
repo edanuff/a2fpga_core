@@ -17,7 +17,6 @@
         <File path="hdl/twgs/gs_mmu_replica.sv" type="file.verilog" enable="1"/>
         <File path="hdl/twgs/gs_accel_broker.sv" type="file.verilog" enable="1"/>
         <File path="hdl/accel_probe_138b/accel_probe_top.sv" type="file.verilog" enable="1"/>
-        <File path="hdl/cpu_probe_138b/cpu_probe_mem.hex" type="file.other" enable="1"/>
         <File path="hdl/accel_probe_138b/accel_probe_138b.cst" type="file.cst" enable="1"/>
         <File path="hdl/accel_probe_138b/accel_probe_138b.sdc" type="file.sdc" enable="1"/>
     </FileList>

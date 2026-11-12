@@ -60,7 +60,7 @@ build b100_2 +define+CLK100 -GSTEP_CLKS=2     & p2=$!
 build b108_4f +define+FAST_CORE "${FASTF[@]}" & p3=$!
 # data-late step (broker launches the next step's read ahead, F65C816.NA_OUT): three clks of
 # 108 MHz = 36 MHz steps with two clks to decode the address, and two clks of 100 MHz = 50 MHz
-build b108_3d +define+FAST_CORE -GDATA_LATE=1 -GSTEP_CLKS=3 -GADDR_CLKS=2 "${FASTF[@]}" & p4=$!
+build b108_3d +define+FAST_CORE -GDATA_LATE=1 -GSTEP_CLKS=3 -GADDR_CLKS=2 -GRA_COPIES=4 "${FASTF[@]}" & p4=$!
 build b100_2d +define+FAST_CORE +define+CLK100 -GDATA_LATE=1 -GSTEP_CLKS=2 -GADDR_CLKS=1 "${FASTF[@]}" & p5=$!
 bfail=0
 wait $p1 || { echo "verilator FAILED (b108_4) - see $OUT/verilate_b108_4.log"; grep -E "%Error|error:" "$OUT/verilate_b108_4.log" | head -20; bfail=1; }
@@ -93,6 +93,10 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run p_rst_nat   b108_4  $T +mode=native +expect +irq +reset
     run p_rst_fast  b108_4  $T +mode=fast   +expect +irq +reset
     run p_rst_tog   b108_4  $T +mode=toggle +expect +irq +reset +steps=120000
+    # ... and with /RES falling in the middle of a socket write cycle
+    run p_rstw_nat  b108_4  $T +mode=native +expect +irq +resetw
+    run p_rstw_fast b108_4  $T +mode=fast   +expect +irq +resetw
+    run p_rstw_tog  b108_4  $T +mode=toggle +expect +irq +resetw +steps=120000
     run p_f816      b108_4f $T +mode=fast   +expect +irq
     run p_f816_nat  b108_4f $T +mode=native +expect +irq
     # data-late broker: every mode again, at 108/3 and 100/2
@@ -105,6 +109,10 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run d_fast_1mhz b108_3d $T +mode=fast   +expect +irq +noturbo
     run d_rst_fast  b108_3d $T +mode=fast   +expect +irq +reset
     run d_rst_tog   b108_3d $T +mode=toggle +expect +irq +reset +steps=120000
+    run d_rstw_nat  b108_3d $T +mode=native +expect +irq +resetw
+    run d_rstw_fast b108_3d $T +mode=fast   +expect +irq +resetw
+    run d_rstw_tog  b108_3d $T +mode=toggle +expect +irq +resetw +steps=120000
+    run d_rstpw_nat b108_3d $T +mode=native +expect +irq +resetpw
     run d2_fast     b100_2d $T +mode=fast   +expect +irq
     run d2_toggle   b100_2d $T +mode=toggle +expect +irq +steps=120000
     run q_native    b100_2  $T +mode=native +expect +irq

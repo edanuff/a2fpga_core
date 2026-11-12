@@ -47,6 +47,9 @@
 //   +cxrom=1        serve internal $C100-$CFFF firmware from the card
 //   +irq            raise /IRQ twice once the test program reaches its loop
 //   +reset          a warm reset (/RES low for 12 cycles) half way through
+//   +resetw         the same, with /RES falling in the middle of a socket write cycle
+//   +resetpw        the same, with /RES falling in the cycle before a native-mode write
+//                   (FAST_CORE builds, +mode=native: the bench waits for such a cycle)
 //   +nostall +nobe  no RDY stalls / no BE (DMA) pause
 //   +noturbo        ignore $C036 bit 7: the FPI stays at 1 MHz
 //   +expect         check the test program's result table
@@ -59,7 +62,8 @@
 module tb_gs_broker #(
     parameter int STEP_CLKS = 4,
     parameter int ADDR_CLKS = 1,
-    parameter bit DATA_LATE = 1'b0     // broker launches reads one step ahead (FAST_CORE builds only)
+    parameter bit DATA_LATE = 1'b0,    // broker launches reads one step ahead (FAST_CORE builds only)
+    parameter int RA_COPIES = 1        // copies of the read addresses the broker puts out
 );
 
     import "DPI-C" function int  mach_load_rom(input string path);
@@ -106,8 +110,9 @@ module tb_gs_broker #(
     string       mode_s = "fast";
     bit          cfg_native = 0, cfg_bypass = 0, cfg_toggle = 0;
     int          cfg_exp = 0, cfg_mbexp = 0, cfg_cxrom = 0;
-    bit          do_irq = 0, do_stall = 1, do_be = 1, do_expect = 0, s6cmp = 0, do_reset = 0;
+    bit          do_irq = 0, do_stall = 1, do_be = 1, do_expect = 0, s6cmp = 0, do_reset = 0, do_resetw = 0, do_resetpw = 0;
     int          n_dropped = 0;      // posted writes dropped by a reset (documented: at most one each)
+    int          n_kept = 0;         // local writes of a step cut short by a reset (documented: they stay written)
     longint      max_steps = 60000;
     int          wlog = 0;
     logic        native_i = 1'b1, mem_bypass_i = 1'b1;
@@ -129,23 +134,28 @@ module tb_gs_broker #(
     logic        phy_we_n, phy_vpa, phy_vda, phy_vp_n;
     // broker <-> core
     logic        cpu_rst_n, cpu_ce, cpu_irq_n, cpu_nmi_n, cpu_abort_n;
+    logic [3:0]  cpu_ce_c;
     logic [7:0]  cpu_d_in, cpu_d_out;
     logic [23:0] cpu_a;
     logic        cpu_we_n, cpu_vp_n, cpu_rdy_out, cpu_vpa, cpu_vda, cpu_mlb, cpu_iflag;
     // broker <-> local memory
-    logic        lm_ren, lm_wen;
+    logic [RA_COPIES-1:0] lm_ren_c, lm_wen_c;
+    wire         lm_ren = lm_ren_c[0], lm_wen = lm_wen_c[0];
     logic [23:0] lm_raddr, lm_waddr, cpu_na;
-    logic [16:0] lm_ram_ra;
-    logic [17:0] lm_rom_ra;
+    logic [RA_COPIES*17-1:0] lm_ram_ra_c;
+    logic [RA_COPIES*18-1:0] lm_rom_ra_c;
+    wire  [16:0] lm_ram_ra = lm_ram_ra_c[16:0];
+    wire  [17:0] lm_rom_ra = lm_rom_ra_c[17:0];
     logic [7:0]  lm_wdata, lm_ram_rdata, lm_rom_rdata;
     logic [31:0] stat_rd_hit, stat_rd_miss;
+    logic [2:0]  cpu_nst;
     // telemetry
     logic        brk_fast, verify_miss;
     logic [23:0] verify_addr;
     logic [15:0] verify_count;
     logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait;
 
-    gs_socket_phy u_phy (
+    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself
         .force_slow_i(1'b0),
         .clk(clk), .rst_n(rst_n), .armed_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
         .cpu_clk_o(), .cpu_rst_n_o(),
@@ -161,7 +171,7 @@ module tb_gs_broker #(
         .cycle_count_o(cycle_count), .stall_count_o(stall_count), .be_count_o(be_count)
     );
 
-    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK), .DATA_LATE(DATA_LATE)) u_brk (
+    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK), .DATA_LATE(DATA_LATE), .RA_COPIES(RA_COPIES), .CE_COPIES(4)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(native_i), .mem_bypass_i(mem_bypass_i),
         .cxrom_local_i(cfg_cxrom[0]), .exp_banks_i(cfg_exp[6:0]),
@@ -171,13 +181,13 @@ module tb_gs_broker #(
         .phy_vpa_o(phy_vpa), .phy_vda_o(phy_vda), .phy_vp_n_o(phy_vp_n),
         .gs_ph2_i(gs_ph2_f), .gs_d_i(gs_d_i_f), .gs_rdy_i(gs_rdy_f),
         .gs_irq_n_i(gs_irq_n_f), .gs_nmi_n_i(gs_nmi_n_f), .gs_abort_n_i(gs_abort_n_f),
-        .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_d_in_o(cpu_d_in),
+        .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_ce_c_o(cpu_ce_c), .cpu_d_in_o(cpu_d_in),
         .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n),
-        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na),
-        .lm_ren_o(lm_ren), .lm_ram_ra_o(lm_ram_ra), .lm_rom_ra_o(lm_rom_ra), .lm_raddr_o(lm_raddr),
+        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na), .cpu_nst_i(cpu_nst), .cpu_rdy_i(cpu_rdy_out),
+        .lm_ren_o(lm_ren_c), .lm_ram_ra_o(lm_ram_ra_c), .lm_rom_ra_o(lm_rom_ra_c), .lm_raddr_o(lm_raddr),
         .lm_ram_rdata_i(lm_ram_rdata), .lm_rom_rdata_i(lm_rom_rdata),
-        .lm_wen_o(lm_wen), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
+        .lm_wen_o(lm_wen_c), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
         .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(), .pw_busy_o(),
         .verify_miss_o(verify_miss), .verify_addr_o(verify_addr), .verify_count_o(verify_count),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
@@ -197,11 +207,13 @@ module tb_gs_broker #(
         .D_IN(cpu_d_in), .D_OUT(cpu_d_out), .A_OUT(cpu_a), .WE(cpu_we_n), .RDY_OUT(cpu_rdy_out),
         .VPA(cpu_vpa), .VDA(cpu_vda), .MLB(cpu_mlb), .VPB(cpu_vp_n), .I_FLAG(cpu_iflag)
 `ifdef FAST_CORE
-        , .NA_OUT(cpu_na)
+        , .CE_X(cpu_ce_c)
+        , .NA_OUT(cpu_na), .NST_OUT(cpu_nst)
 `endif
     );
 `ifndef FAST_CORE
     assign cpu_na = 24'd0;
+    assign cpu_nst = 3'b110;
     initial if (DATA_LATE) begin $display("DATA_LATE needs the FAST_CORE build"); $finish; end
 `endif
 
@@ -227,6 +239,12 @@ module tb_gs_broker #(
             else                         lexp[lexp_widx[19:0]] <= lm_wdata;
         end
         if (lm_ren && lm_wen) begin $display("ERROR: local memory read launch and write in the same clk"); $finish; end
+        if (lm_ren && (lm_ram_ra_c != {RA_COPIES{lm_ram_ra}} || lm_rom_ra_c != {RA_COPIES{lm_rom_ra}})) begin
+            $display("ERROR: the read-address copies differ at a launch"); $finish;
+        end
+        if (lm_ren_c != {RA_COPIES{lm_ren}} || lm_wen_c != {RA_COPIES{lm_wen}}) begin
+            $display("ERROR: the memory enable copies differ"); $finish;
+        end
     end
 
     // The timing contract the build's multicycle constraints will rely on, checked
@@ -234,7 +252,7 @@ module tb_gs_broker #(
     // (core register -> register paths), and local read data is taken no sooner
     // after its launch than the memory -> core path is allowed (STEP_CLKS with
     // DATA_LATE, STEP_CLKS - ADDR_CLKS in the two-edge step).
-    longint clk_no = 0, t_launch = 0, t_ce = -100, t_sel = 0;
+    longint clk_no = 0, t_launch = 0, t_ce = -100, t_sel = 0, t_sw = -100;
     logic [1:0] sel_q = 2'b00;
     always_ff @(posedge clk) begin
         clk_no <= clk_no + 1;
@@ -252,6 +270,17 @@ module tb_gs_broker #(
         if (DATA_LATE && u_brk.run_c && !u_brk.fresh_ok &&
             ((u_brk.strobe && !u_brk.mode_native) || u_brk.mem_evt) && clk_no - t_ce < u_brk.SLOW) begin
             $display("ERROR: registered decode used %0d clks after the core stepped (needs %0d)", clk_no - t_ce, u_brk.SLOW); $finish;
+        end
+        // ... and the memory-map switches (changed by a socket cycle that touches I/O
+        // or $Cxxx) have two clks to reach that registered decode and three to reach
+        // a launch (read address, the decode registered with it)
+        if (DATA_LATE && u_brk.sw_touch) t_sw <= clk_no;
+        if (DATA_LATE && u_brk.run_c && !u_brk.fresh_ok &&
+            ((u_brk.strobe && !u_brk.mode_native) || u_brk.mem_evt) && clk_no - t_sw < 3) begin
+            $display("ERROR: registered decode used %0d clks after the switches changed (needs 3)", clk_no - t_sw); $finish;
+        end
+        if (DATA_LATE && (u_brk.pf_launch || lm_ren) && clk_no - t_sw < 3) begin
+            $display("ERROR: read launched %0d clks after the switches changed (needs 3)", clk_no - t_sw); $finish;
         end
         if (cpu_ce) begin
             t_ce <= clk_no;
@@ -444,6 +473,12 @@ module tb_gs_broker #(
     logic [23:0] iss_a;
     logic [7:0]  iss_d;
     logic        iss_we_n, iss_vp_n;
+    // (the PHY takes the write data again the clk after the issue: WDATA_LATE)
+    logic issue_evt_q = 1'b0;
+    always @(posedge clk) begin
+        issue_evt_q <= issue_evt;
+        if (issue_evt_q) iss_d <= phy_d_out;
+    end
     always @(posedge clk) if (issue_evt) begin
         iss_a <= phy_a; iss_d <= phy_d_out; iss_we_n <= phy_we_n; iss_vp_n <= phy_vp_n;
         if (trace) $display("[%0t]   issue %06h rw%b kind %0d (0 idle, 1 core, 2 posted) core %s", $realtime, phy_a, phy_we_n,
@@ -732,6 +767,19 @@ module tb_gs_broker #(
         if (expq.size() > expq_max) expq_max = expq.size();
     endtask
 
+    // steps the core spent waiting in WAI (it does not take them)
+    int n_wai = 0;
+    always @(posedge clk) if (cpu_rst_n && cpu_ce && !cpu_rdy_out) n_wai++;
+
+    // the local write of the step in progress, until the step completes
+    logic        wr_pend = 1'b0;
+    logic [23:0] wr_pa;
+    logic [7:0]  wr_pd;
+    always_ff @(posedge clk) begin
+        if (cpu_ce || !cpu_rst_n) wr_pend <= 1'b0;
+        else if (lm_wen) begin wr_pend <= 1'b1; wr_pa <= u_brk.eff_addr; wr_pd <= lm_wdata; end
+    end
+
     always @(posedge clk) begin
         if (!cpu_rst_n) begin
             if (!ref_reset_done) begin
@@ -747,6 +795,17 @@ module tb_gs_broker #(
                     end
                 if (nd > 1) err($sformatf("%0d posted writes outstanding at reset", nd));
                 if (nd == 1) begin n_dropped++; mach_sync_slow(); end
+                // A step that had already written the card's memory when /RES cut it
+                // short: the byte stays written (the same as the reset arriving a
+                // step later).  Give the ideal machine the same write.
+                if (wr_pend) begin
+                    // (fast mode only: a native-mode write reaches the card's copy when
+                    // its socket cycle completes, so the two cannot come apart)
+                    if (u_brk.mode_native) err($sformatf("native-mode write at %06h reached the card's RAM, its socket cycle cut short by /RES", wr_pa));
+                    mach_commit(1, {8'd0, wr_pa}, 1, {24'd0, wr_pd}, 1);
+                    mach_sync_slow();       // (if it was a forwarded write, its socket half was dropped)
+                    n_kept++;
+                end
                 mach_reset(1);
                 ref_reset_done = 1;
             end
@@ -838,6 +897,8 @@ module tb_gs_broker #(
         if ($test$plusargs("nobe")) do_be = 0;
         if ($test$plusargs("expect")) do_expect = 1;
         if ($test$plusargs("reset")) do_reset = 1;
+        if ($test$plusargs("resetw")) begin do_reset = 1; do_resetw = 1; end
+        if ($test$plusargs("resetpw")) begin do_reset = 1; do_resetpw = 1; end
         void'($value$plusargs("mode=%s", mode_s));
         void'($value$plusargs("steps=%d", max_steps));
         void'($value$plusargs("exp=%d", cfg_exp));
@@ -911,7 +972,25 @@ module tb_gs_broker #(
             end
             if (do_reset && !reset_done && steps > max_steps / 2 && irq_n_bus && (!do_irq || irqs_done >= 2)) begin
                 reset_done = 1;
-                @(posedge ph2_bus); #30; res_n_bus = 1'b0;
+                if (do_resetw) begin
+                    // +resetw: /RES falls in the middle of a write cycle on the socket
+                    int g;
+                    g = 0;
+                    do begin @(posedge ph2_bus); g++; end while (rw_bus && g < 4000);
+                    if (rw_bus) err("+resetw: no write cycle on the socket to drop the reset on");
+                end else if (do_resetpw) begin
+                    // +resetpw: /RES falls in the socket cycle BEFORE a native-mode write
+                    // (the write step is then decided, and cut short before its cycle);
+                    // needs the F65C816's next-step status
+                    int g;
+                    g = 0;
+                    do begin @(posedge ph2_bus); g++; end
+                    while (!(u_brk.mode_native && cpu_nst[1:0] == 2'b00) && g < 200000);
+                    if (!(u_brk.mode_native && cpu_nst[1:0] == 2'b00)) err("+resetpw: no native step before a write found");
+                end else begin
+                    @(posedge ph2_bus);
+                end
+                #30; res_n_bus = 1'b0;
                 wait_cycles(12);
                 if (cpu_drv && !rw_bus) err("card writing while /RES low");
                 @(posedge ph2_bus); #30; res_n_bus = 1'b1;
@@ -965,6 +1044,9 @@ module tb_gs_broker #(
             if (mach_get(1, 0, 24'h000381) != 8'h01) err("BRK handler did not run exactly once");
             if (do_irq && mach_get(1, 0, 24'h000380) != 8'h02)
                 err($sformatf("IRQ handler ran %0d times, want 2", mach_get(1, 0, 24'h000380)));
+            // the loop waits in WAI between the two interrupts: about 300 PHI2 cycles
+            if (do_irq && (mach_get(1, 0, 24'h000382) != 8'h01 || n_wai < 100))
+                err($sformatf("WAI: flag %02h, %0d steps waited (want 01, at least 100)", mach_get(1, 0, 24'h000382), n_wai));
             if (!cfg_native || cfg_toggle) begin
                 if (stat_posted == 0) err("no posted write happened");
                 if (stat_pwwait == 0) err("the posted-write buffer was never full (back-to-back forwarding not exercised)");
@@ -990,8 +1072,8 @@ module tb_gs_broker #(
                  stall_checks, sync_cycles, refresh_cycles, vp_fetches, be_checks, slow_mode ? "slow" : "fast");
         $display("---- machine: %0d writes on the socket, %0d in the write stream (I/O, Mega II, shadowed, slots); model: %0d I/O writes, %0d shadow copies, %0d language-card accesses, %0d $C028",
                  n_sock_wr, n_wlog, mach_stat(0, 0), mach_stat(0, 1), mach_stat(0, 2), mach_stat(0, 3));
-        $display("---- checks: %0d steps compared with the reference, %0d machine-state comparisons, %0d clks of S6 pin comparison, %0d posted writes dropped by a reset",
-                 n_cmp, n_state_checks, n_s6cmp, n_dropped);
+        $display("---- checks: %0d steps compared with the reference, %0d machine-state comparisons, %0d clks of S6 pin comparison, %0d posted writes dropped and %0d local writes kept by a reset",
+                 n_cmp, n_state_checks, n_s6cmp, n_dropped, n_kept);
         $display("---- socket timing (ns): tADS max %.1f  tBAS max %.1f  tAH min %.1f  tBH min %.1f  tMDS max %.1f  tDHW min %.1f  read release after rise max %.1f",
                  st_max_tads, st_max_tbas, st_min_tah, st_min_tbh, st_max_tmds, st_min_tdhw, st_max_rel);
         $display("---- point reached: step hash %016h, %0d distinct opcode addresses, last %06h %06h %06h %06h",

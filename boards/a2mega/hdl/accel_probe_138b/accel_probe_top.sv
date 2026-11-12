@@ -10,8 +10,9 @@
 //
 // clk50_in stands in for the 108 MHz pin-sequencer clock (the constraint
 // file declares it as such); the core steps every STEP_CLKS = 3 clks = 36 MHz.
-// The probe is a timing instrument and is never flashed: the ROM image is the
-// CPU-bench program, not a ROM, behind a stand-in loader port.
+// A second project declares it 100 MHz and steps every two clks = 50 MHz.
+// The probe is a timing instrument and is never flashed: the memories are
+// uninitialised and the ROM image has a stand-in loader port.
 module accel_probe_top (
     input  logic        clk50_in,
     input  logic        button,          // SOM pushbutton, active low
@@ -34,8 +35,15 @@ module accel_probe_top (
     output logic        gs_addr_oe_n,
     output logic        gs_oe_n
 );
+    // (ACCEL_PROBE_STEP2: the 50 MHz variant - two clks of a 100 MHz clock per
+    // step, the step decided in its first clk; a2mega_accel_probe_138b_s2.gprj)
+`ifdef ACCEL_PROBE_STEP2
+    localparam int STEP_CLKS = 2;
+    localparam int ADDR_CLKS = 1;
+`else
     localparam int STEP_CLKS = 3;
     localparam int ADDR_CLKS = 2;
+`endif
     localparam int SLOW_CLKS = 3;
 
     wire clk = clk50_in;
@@ -59,7 +67,7 @@ module accel_probe_top (
     logic        enabled, running, fall_evt, issue_evt, ph2_alive, be_ok;
     logic [31:0] cycle_count;
 
-    gs_socket_phy u_phy (
+    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself
         .force_slow_i(1'b0),
         .clk(clk), .rst_n(rst_n), .armed_i(cfg[2]), .listen_i(1'b0), .out_extra_i(4'd0),
         .cpu_clk_o(), .cpu_rst_n_o(),
@@ -78,22 +86,36 @@ module accel_probe_top (
 
     // ---- broker
     logic        cpu_rst_n, cpu_ce, cpu_irq_n, cpu_nmi_n, cpu_abort_n;
+    logic [3:0]  cpu_ce_c;
     logic [7:0]  cpu_d_in, cpu_d_out;
     logic [23:0] cpu_a, cpu_na;
+    logic [2:0]  cpu_nst;
     logic        cpu_we_n, cpu_vp_n, cpu_vpa, cpu_vda, cpu_mlb, cpu_iflag, cpu_rdyo;
-    logic        lm_ren, lm_wen;
+    logic [RA_COPIES-1:0] lm_ren_c, lm_wen_c;
+    wire         lm_ren = lm_ren_c[0];
     logic [23:0] lm_raddr, lm_waddr;
-    // Each read-address bit goes to all 64 blocks of its memory: let the synthesizer
-    // replicate the last LUT so that placement can keep each copy near its blocks.
-    logic [16:0] lm_ram_ra /* synthesis syn_maxfan = 16 */;
-    logic [17:0] lm_rom_ra /* synthesis syn_maxfan = 16 */;
+    localparam int RA_COPIES = 4;                // one copy of the read addresses and enables per quarter of the floorplan
+    // The second local memory: 8 blocks per bit = the whole 128 KB ROM image of a
+    // ROM 01 machine; (ACCEL_PROBE_ROM3) 16 per bit = the 256 KB of a ROM 3; or
+    // (ACCEL_PROBE_SMALL_ROM) 2 per bit = 32 KB, the size of a cache in front of a
+    // backing store.  Three projects, to measure what the footprint of the memory costs.
+`ifdef ACCEL_PROBE_SMALL_ROM
+    localparam int ROM_BLKS = 2;
+`elsif ACCEL_PROBE_ROM3
+    localparam int ROM_BLKS = 16;
+`else
+    localparam int ROM_BLKS = 8;
+`endif
+    localparam int ROM_SELW = $clog2(ROM_BLKS);
+    logic [RA_COPIES*17-1:0] lm_ram_ra;
+    logic [RA_COPIES*18-1:0] lm_rom_ra;
     logic [7:0]  lm_wdata, lm_ram_rdata, lm_rom_rdata;
     logic        brk_fast, verify_miss, pw_busy, sock_idle;
     logic [15:0] verify_count;
     logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait, stat_rd_hit, stat_rd_miss;
     logic [7:0]  r_shadow, r_cyareg, r_sltromsel, r_statereg, r_misc;
 
-    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1)) u_brk (
+    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(RA_COPIES), .CE_COPIES(4)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(cfg[0]), .mem_bypass_i(cfg[1]),
         .cxrom_local_i(cfg[3]), .exp_banks_i(cfg[10:4]),
@@ -103,13 +125,13 @@ module accel_probe_top (
         .phy_vpa_o(phy_vpa), .phy_vda_o(phy_vda), .phy_vp_n_o(phy_vp_n),
         .gs_ph2_i(gs_ph2), .gs_d_i(gs_d), .gs_rdy_i(gs_rdy),
         .gs_irq_n_i(gs_irq_n), .gs_nmi_n_i(gs_nmi_n), .gs_abort_n_i(gs_abort_n),
-        .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_d_in_o(cpu_d_in),
+        .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_ce_c_o(cpu_ce_c), .cpu_d_in_o(cpu_d_in),
         .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n),
-        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na),
-        .lm_ren_o(lm_ren), .lm_ram_ra_o(lm_ram_ra), .lm_rom_ra_o(lm_rom_ra), .lm_raddr_o(lm_raddr),
+        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na), .cpu_nst_i(cpu_nst), .cpu_rdy_i(cpu_rdyo),
+        .lm_ren_o(lm_ren_c), .lm_ram_ra_o(lm_ram_ra), .lm_rom_ra_o(lm_rom_ra), .lm_raddr_o(lm_raddr),
         .lm_ram_rdata_i(lm_ram_rdata), .lm_rom_rdata_i(lm_rom_rdata),
-        .lm_wen_o(lm_wen), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
+        .lm_wen_o(lm_wen_c), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
         .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(sock_idle), .pw_busy_o(pw_busy),
         .verify_miss_o(verify_miss), .verify_addr_o(), .verify_count_o(verify_count),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
@@ -120,32 +142,59 @@ module accel_probe_top (
 
     // ---- core
     F65C816 u_cpu (
-        .CLK(clk), .RST_N(cpu_rst_n), .CE(cpu_ce), .RDY_IN(1'b1),
+        .CLK(clk), .RST_N(cpu_rst_n), .CE(cpu_ce), .CE_X(cpu_ce_c), .RDY_IN(1'b1),
         .NMI_N(cpu_nmi_n), .IRQ_N(cpu_irq_n), .ABORT_N(cpu_abort_n),
         .D_IN(cpu_d_in), .D_OUT(cpu_d_out), .A_OUT(cpu_a), .WE(cpu_we_n), .RDY_OUT(cpu_rdyo),
         .VPA(cpu_vpa), .VDA(cpu_vda), .MLB(cpu_mlb), .VPB(cpu_vp_n), .I_FLAG(cpu_iflag),
-        .NA_OUT(cpu_na)
+        .NA_OUT(cpu_na), .NST_OUT(cpu_nst)
     );
 
-    // ---- local memories.  The hex is named bare (see cpu_probe_top.sv).
-    logic [7:0] ram [0:(1<<17)-1];
-    logic [7:0] rom [0:(1<<17)-1];
-    initial $readmemh("../cpu_probe_138b/cpu_probe_mem.hex", ram);
-    initial $readmemh("../cpu_probe_138b/cpu_probe_mem.hex", rom);
-    always_ff @(posedge clk) if (lm_ren) lm_ram_rdata <= ram[lm_ram_ra];
-    always_ff @(posedge clk) if (lm_wen && lm_waddr[23:17] == 7'd0) ram[lm_waddr[16:0]] <= lm_wdata;
-    always_ff @(posedge clk) if (lm_ren) lm_rom_rdata <= rom[lm_rom_ra[16:0]];
-    // The ROM image is loaded at bring-up in the real build, so it is a RAM here
-    // too: a stand-in loader port (button held: write the registered data pads at
-    // a running address) keeps synthesis from collapsing it around its contents.
-    logic [16:0] ld_a = 17'd0;
+    // ---- local memories: 64 blocks of 16Kx1 each, written out block by block so
+    // that the floorplan (accel_probe_138b.cst) and the read-address copies can be
+    // tied to them.  The die's BSRAM sites are sparse (about 38 per strip across
+    // the whole width, strips 18 rows apart), so 128 blocks cover a large area
+    // whatever is done; the data bits are grouped two to a quadrant around the
+    // core, and each quadrant has its own copy of the two read addresses.  For
+    // every data bit: eight RAM blocks and eight ROM-image blocks read at once,
+    // and a registered block select picks one of each.  The ROM image is loaded
+    // at bring-up in the real build, so it is a RAM here too: a stand-in loader
+    // port (button held: write the registered data pads at a running address)
+    // keeps synthesis from collapsing it.
+    logic [17:0] ld_a = 18'd0;
     logic [7:0]  ld_d = 8'd0;
     logic        ld_we = 1'b0;
     always_ff @(posedge clk) begin
         ld_we <= ~btn_s[2];
         ld_d  <= gs_d;
-        if (ld_we) ld_a <= ld_a + 17'd1;
-        if (ld_we) rom[ld_a] <= ld_d;
+        if (ld_we) ld_a <= ld_a + 18'd1;
+    end
+    wire ram_bank = (lm_waddr[23:17] == 7'd0);      // a write to banks 00/01
+
+    for (genvar b = 0; b < 8; b++) begin : g_bit
+        wire [16:0] ra = lm_ram_ra[(b / 2) * 17 +: 17];
+        wire [17:0] oa = lm_rom_ra[(b / 2) * 18 +: 18];
+        wire        ren = lm_ren_c[b / 2];           // this quarter's copies of the enables
+        wire        wen = lm_wen_c[b / 2];
+        logic [2:0] ram_sel;
+        logic [ROM_SELW-1:0] rom_sel;
+        logic [7:0] ram_q;
+        logic [ROM_BLKS-1:0] rom_q;
+        always_ff @(posedge clk) if (ren) begin
+            ram_sel <= ra[16:14];
+            rom_sel <= oa[14 +: ROM_SELW];
+        end
+        for (genvar k = 0; k < 8; k++) begin : g_blk
+            logic mram [0:16383];
+            always_ff @(posedge clk) if (ren) ram_q[k] <= mram[ra[13:0]];
+            always_ff @(posedge clk) if (wen && ram_bank && lm_waddr[16:14] == 3'(k)) mram[lm_waddr[13:0]] <= lm_wdata[b];
+        end
+        for (genvar k = 0; k < ROM_BLKS; k++) begin : g_rblk
+            logic mrom [0:16383];
+            always_ff @(posedge clk) if (ren) rom_q[k] <= mrom[oa[13:0]];
+            always_ff @(posedge clk) if (ld_we && ld_a[14 +: ROM_SELW] == ROM_SELW'(k)) mrom[ld_a[13:0]] <= ld_d[b];
+        end
+        assign lm_ram_rdata[b] = ram_q[ram_sel];
+        assign lm_rom_rdata[b] = rom_q[rom_sel];
     end
 
     // ---- keep the telemetry observable

@@ -57,7 +57,7 @@ module cpu_probe_top (
 `else
     F65C816 u_cpu (
 `endif
-        .CLK(clk), .RST_N(rst_n), .CE(ce), .RDY_IN(1'b1),
+        .CLK(clk), .RST_N(rst_n), .CE(ce), .CE_X({4{ce}}), .RDY_IN(1'b1),
         .NMI_N(1'b1), .IRQ_N(1'b1), .ABORT_N(1'b1),
         .D_IN(din), .D_OUT(dout), .A_OUT(a), .WE(we), .RDY_OUT(rdyo),
         .VPA(vpa), .VDA(vda), .MLB(mlb), .VPB(vpb), .I_FLAG(iflag)
@@ -76,6 +76,10 @@ module cpu_probe_top (
     // core's own cone from the memory's clock-to-out + 64:1 mux share.
 `ifdef CPU_PROBE_SMALL_MEM
     localparam int MEM_AW = 11;
+`elsif CPU_PROBE_NEAR_MEM
+    // 16 KB: eight 16K x 1 blocks, no output mux - the size of a near memory
+    // (cache) in front of the banks, to see what the core does with one
+    localparam int MEM_AW = 14;
 `else
     localparam int MEM_AW = 17;
 `endif

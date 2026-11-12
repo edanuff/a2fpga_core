@@ -27,6 +27,7 @@ RES     = $0300
 SIG     = $037F                 ; $A5 when the walk is complete
 IRQCNT  = $0380                 ; incremented by the IRQ handler
 BRKCNT  = $0381                 ; incremented by the BRK handler
+WAIFLG  = $0382                 ; set once the loop has waited in WAI
 LOOPCNT = $0390
 
 resn    .set 0
@@ -46,6 +47,7 @@ main:
         stz SIG                 ; (the walk also runs again after a warm reset)
         stz IRQCNT
         stz BRKCNT
+        stz WAIFLG
         lda #$80
         sta $C036               ; FPI fast mode
 
@@ -389,6 +391,19 @@ t2:     txa
         txa
         res                     ; $01
 
+        ; ---- T16c an internal cycle aimed at I/O space straight after a LOCAL step:
+        ;      abs,X with a 16-bit index always has one, here at $C0xx, and the
+        ;      operand fetch before it comes from the card's ROM image.  The broker
+        ;      has that step's status a step ahead and must still substitute the
+        ;      previous address for it, not put a new I/O address on the bus.
+        rep #$10
+        .i16
+        ldx #$0022
+        lda $C000,x             ; = $C022
+        sep #$10
+        .i8
+        res
+
         ; ---- T17 BRK with the language card in RAM: the vector comes from ROM
         ;      (VP) and leads to the dispatch bytes at $C071
         lda $C083
@@ -414,7 +429,16 @@ spin:   dex
         lda $C022               ; I/O
         sta $E10450             ; Mega II
         inc LOOPCNT+1
-        jmp loop
+        ; once, after the first interrupt has been served: wait in WAI for the
+        ; second (runs without interrupts never get here)
+        lda IRQCNT
+        cmp #$01
+        bne nowai
+        lda WAIFLG
+        bne nowai
+        inc WAIFLG
+        wai
+nowai:  jmp loop
 
 ; copied to RAM by T16
 ramcode:
