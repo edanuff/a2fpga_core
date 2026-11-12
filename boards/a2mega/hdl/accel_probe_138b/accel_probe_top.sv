@@ -8,6 +8,13 @@
 // RAM, no control plane: the mode inputs come from a small register walked by
 // the SOM pushbutton so that nothing is constant-folded.
 //
+// (ACCEL_PROBE_NEAR) The same with the near memory in front of those two and
+// the two-clk step (gs_accel_broker NEAR): a 16K-entry cache of {tag, byte}
+// beside the core, fourteen blocks of 16K x 1, which is all the core's next
+// address reaches; the banks and the ROM image are read only from registers
+// and are left to the placer.  a2mega_accel_probe_138b_n2.gprj: 100 MHz,
+// 50 MHz steps.
+//
 // clk50_in stands in for the 108 MHz pin-sequencer clock (the constraint
 // file declares it as such); the core steps every STEP_CLKS = 3 clks = 36 MHz.
 // A second project declares it 100 MHz and steps every two clks = 50 MHz.
@@ -37,7 +44,12 @@ module accel_probe_top (
 );
     // (ACCEL_PROBE_STEP2: the 50 MHz variant - two clks of a 100 MHz clock per
     // step, the step decided in its first clk; a2mega_accel_probe_138b_s2.gprj)
-`ifdef ACCEL_PROBE_STEP2
+    // (ACCEL_PROBE_NEAR: two clks per step, every step decoded in its first clk
+    // from registers)
+`ifdef ACCEL_PROBE_NEAR
+    localparam int STEP_CLKS = 2;
+    localparam int ADDR_CLKS = 2;
+`elsif ACCEL_PROBE_STEP2
     localparam int STEP_CLKS = 2;
     localparam int ADDR_CLKS = 1;
 `else
@@ -94,7 +106,20 @@ module accel_probe_top (
     logic [RA_COPIES-1:0] lm_ren_c, lm_wen_c;
     wire         lm_ren = lm_ren_c[0];
     logic [23:0] lm_raddr, lm_waddr;
+`ifdef ACCEL_PROBE_NEAR
+    localparam bit NEAR      = 1'b1;
+    localparam int RA_COPIES = 1;                // the far memories are read from registers: no copies, no floorplan
+`else
+    localparam bit NEAR      = 1'b0;
     localparam int RA_COPIES = 4;                // one copy of the read addresses and enables per quarter of the floorplan
+`endif
+    // near memory: the tag holds A14-A17 (banks 00/01 and the ROM image; this probe
+    // has no expansion memory), so an entry is 8 + 6 bits
+    localparam int NEAR_AW = 14, NEAR_KW = 4, NTW = NEAR_KW + 2;
+    logic               nm_ren, nm_wen;
+    logic [NEAR_AW-1:0] nm_ra, nm_wa;
+    logic [7:0]         nm_rdata, nm_wdata;
+    logic [NTW-1:0]     nm_rtag, nm_wtag;
     // The second local memory: 8 blocks per bit = the whole 128 KB ROM image of a
     // ROM 01 machine; (ACCEL_PROBE_ROM3) 16 per bit = the 256 KB of a ROM 3; or
     // (ACCEL_PROBE_SMALL_ROM) 2 per bit = 32 KB, the size of a cache in front of a
@@ -115,7 +140,8 @@ module accel_probe_top (
     logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait, stat_rd_hit, stat_rd_miss;
     logic [7:0]  r_shadow, r_cyareg, r_sltromsel, r_statereg, r_misc;
 
-    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(RA_COPIES), .CE_COPIES(4)) u_brk (
+    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(RA_COPIES), .CE_COPIES(4),
+                      .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(cfg[0]), .mem_bypass_i(cfg[1]),
         .cxrom_local_i(cfg[3]), .exp_banks_i(cfg[10:4]),
@@ -132,6 +158,8 @@ module accel_probe_top (
         .lm_ren_o(lm_ren_c), .lm_ram_ra_o(lm_ram_ra), .lm_rom_ra_o(lm_rom_ra), .lm_raddr_o(lm_raddr),
         .lm_ram_rdata_i(lm_ram_rdata), .lm_rom_rdata_i(lm_rom_rdata),
         .lm_wen_o(lm_wen_c), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
+        .nm_ren_o(nm_ren), .nm_ra_o(nm_ra), .nm_rdata_i(nm_rdata), .nm_rtag_i(nm_rtag),
+        .nm_wen_o(nm_wen), .nm_wa_o(nm_wa), .nm_wdata_o(nm_wdata), .nm_wtag_o(nm_wtag),
         .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(sock_idle), .pw_busy_o(pw_busy),
         .verify_miss_o(verify_miss), .verify_addr_o(), .verify_count_o(verify_count),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
@@ -171,10 +199,11 @@ module accel_probe_top (
     wire ram_bank = (lm_waddr[23:17] == 7'd0);      // a write to banks 00/01
 
     for (genvar b = 0; b < 8; b++) begin : g_bit
-        wire [16:0] ra = lm_ram_ra[(b / 2) * 17 +: 17];
-        wire [17:0] oa = lm_rom_ra[(b / 2) * 18 +: 18];
-        wire        ren = lm_ren_c[b / 2];           // this quarter's copies of the enables
-        wire        wen = lm_wen_c[b / 2];
+        localparam int CI = (b / 2) % RA_COPIES;
+        wire [16:0] ra = lm_ram_ra[CI * 17 +: 17];
+        wire [17:0] oa = lm_rom_ra[CI * 18 +: 18];
+        wire        ren = lm_ren_c[CI];              // this quarter's copies of the enables
+        wire        wen = lm_wen_c[CI];
         logic [2:0] ram_sel;
         logic [ROM_SELW-1:0] rom_sel;
         logic [7:0] ram_q;
@@ -195,6 +224,23 @@ module accel_probe_top (
         end
         assign lm_ram_rdata[b] = ram_q[ram_sel];
         assign lm_rom_rdata[b] = rom_q[rom_sel];
+    end
+
+    // ---- near memory: one 16K x 1 block per entry bit, no output mux.  The tag is
+    // stored inverted, so that a block RAM's power-up zeros read as "no entry".
+    if (NEAR) begin : g_near
+        wire [8+NTW-1:0] nm_wv = {~nm_wtag, nm_wdata};
+        logic [8+NTW-1:0] nm_q;
+        for (genvar b = 0; b < 8 + NTW; b++) begin : g_nb
+            logic nmem [0:(1<<NEAR_AW)-1];
+            always_ff @(posedge clk) if (nm_ren) nm_q[b] <= nmem[nm_ra];
+            always_ff @(posedge clk) if (nm_wen) nmem[nm_wa] <= nm_wv[b];
+        end
+        assign nm_rdata = nm_q[7:0];
+        assign nm_rtag  = ~nm_q[8 +: NTW];
+    end else begin : g_nonear
+        assign nm_rdata = 8'h00;
+        assign nm_rtag  = '1;
     end
 
     // ---- keep the telemetry observable

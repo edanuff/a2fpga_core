@@ -727,3 +727,50 @@ record of section 9:
   its endpoints are either enabled by a register (memory ports, core) or sit
   behind the `dec_ok` factor.
 
+
+### 10.2 The near memory and the two-clk step (2026-11-11)
+
+The goal moved to a step rate above the current AppleSqueezer's 48 MHz
+(exploration log, "Toward a step under 20.8 ns" and "The near memory and
+the two-clk step"). Two things stood in the way of a 20 ns step and both
+are structural, so the broker gained a second way of running local steps,
+`NEAR = 1` (with `DATA_LATE`, `ADDR_CLKS = 2`). The decode-ahead broker of
+section 10 / 10.1 is unchanged and still builds (`NEAR = 0`).
+
+- **Near memory.** A direct-mapped cache of single bytes, 16K entries of
+  `{tag, byte}`, one 16K × 1 block per entry bit, beside the core. It is the
+  only memory the core's next address reaches. The index is the low 14
+  address bits, untranslated; the tag names the physical byte (ROM or RAM,
+  address bits above the index, and whether the language card moved A12).
+  The banks and the ROM image ("far") are read only on a miss, from
+  registers, and every local write goes to both. Ports: `nm_ren_o` (= the
+  core's clock enable), `nm_ra_o`, `nm_rdata_i`, `nm_rtag_i`, and a write
+  port from registers. Tags must power up all ones.
+- **No decode ahead.** The step's address and status are registers from the
+  moment the core steps. The replica decodes them in the step's first clk,
+  which also registers the decision "completes locally" and the tag
+  compare. In the second clk the core's clock enable is one gate behind
+  those registers. A near hit, a local write and an internal cycle are two
+  clks, the step after a socket cycle included. A miss, a socket cycle, a
+  wait for the posted-write buffer or for RDY go through the sequencer as
+  before, deciding in the second clk.
+- **Writes.** A local write is registered at the decision and made in the
+  following clk, to both memories, from registers. A near entry written at
+  or after the launch of the next read is not used for that read.
+- **The core's data** is the near memory's byte or one register (`alt_q`:
+  far data, or the socket byte).
+- **One byte, one entry.** The only local bytes with two addresses that
+  differ below A14 are `$C000-$CFFF` of banks 00/01 (language-card bank 1
+  as `$Dxxx`; plain RAM as `$Cxxx` when IOLC shadowing is inhibited). They
+  live under the `$Dxxx` index only; a read through `$Cxxx` is always a far
+  read.
+- **What it changes for the machine:** nothing. The step sequence does not
+  depend on the near memory; a miss costs clks, never a step. The card's
+  memory of record is still the far memory, and the bench compares every
+  near entry with it at the end of each run.
+- **What it settles on the side:** the size of the ROM image (256 KB on a
+  ROM 3) and of the banks no longer matters to the step, and the expansion
+  banks on DDR3 are the same miss path with a longer wait.
+- **Not done:** anything that loads the far memory behind the broker's back
+  (the ROM image at bring-up, an ESP32 poke) must do it before the core
+  runs or invalidate the near memory; there is no such port yet.

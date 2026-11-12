@@ -31,6 +31,11 @@
 //    I/O registers and soft switches must equal the ideal machine's; at the
 //    end the card's banks 00/01 (and expansion) must equal the ideal
 //    machine's fast RAM.
+//  * NEAR builds (the near memory and the two-clk step): the near memory is
+//    modelled as the block RAM it will be (a read launched in the clk of a
+//    write to the same index returns the new tag with the wrong byte), and
+//    at the end every entry must be the byte of the card's memory its tag
+//    names.
 //  * +mode=native|paced: an S6 PHY + PHI2-clocked core run beside the
 //    design under test on the same socket inputs, and every pin the card
 //    drives is compared every clk (native mode = S6, pin for pin).
@@ -63,7 +68,10 @@ module tb_gs_broker #(
     parameter int STEP_CLKS = 4,
     parameter int ADDR_CLKS = 1,
     parameter bit DATA_LATE = 1'b0,    // broker launches reads one step ahead (FAST_CORE builds only)
-    parameter int RA_COPIES = 1        // copies of the read addresses the broker puts out
+    parameter int RA_COPIES = 1,       // copies of the read addresses the broker puts out
+    parameter bit NEAR      = 1'b0,    // near memory and the two-clk step (DATA_LATE builds, ADDR_CLKS = 2)
+    parameter int NEAR_AW   = 14,
+    parameter int NEAR_KW   = 10
 );
 
     import "DPI-C" function int  mach_load_rom(input string path);
@@ -147,6 +155,11 @@ module tb_gs_broker #(
     wire  [16:0] lm_ram_ra = lm_ram_ra_c[16:0];
     wire  [17:0] lm_rom_ra = lm_rom_ra_c[17:0];
     logic [7:0]  lm_wdata, lm_ram_rdata, lm_rom_rdata;
+    localparam int NTW = NEAR_KW + 2;
+    logic               nm_ren, nm_wen;
+    logic [NEAR_AW-1:0] nm_ra, nm_wa;
+    logic [7:0]         nm_rdata, nm_wdata;
+    logic [NTW-1:0]     nm_rtag, nm_wtag;
     logic [31:0] stat_rd_hit, stat_rd_miss;
     logic [2:0]  cpu_nst;
     // telemetry
@@ -171,7 +184,8 @@ module tb_gs_broker #(
         .cycle_count_o(cycle_count), .stall_count_o(stall_count), .be_count_o(be_count)
     );
 
-    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK), .DATA_LATE(DATA_LATE), .RA_COPIES(RA_COPIES), .CE_COPIES(4)) u_brk (
+    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK), .DATA_LATE(DATA_LATE), .RA_COPIES(RA_COPIES), .CE_COPIES(4),
+                      .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(native_i), .mem_bypass_i(mem_bypass_i),
         .cxrom_local_i(cfg_cxrom[0]), .exp_banks_i(cfg_exp[6:0]),
@@ -188,6 +202,8 @@ module tb_gs_broker #(
         .lm_ren_o(lm_ren_c), .lm_ram_ra_o(lm_ram_ra_c), .lm_rom_ra_o(lm_rom_ra_c), .lm_raddr_o(lm_raddr),
         .lm_ram_rdata_i(lm_ram_rdata), .lm_rom_rdata_i(lm_rom_rdata),
         .lm_wen_o(lm_wen_c), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
+        .nm_ren_o(nm_ren), .nm_ra_o(nm_ra), .nm_rdata_i(nm_rdata), .nm_rtag_i(nm_rtag),
+        .nm_wen_o(nm_wen), .nm_wa_o(nm_wa), .nm_wdata_o(nm_wdata), .nm_wtag_o(nm_wtag),
         .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(), .pw_busy_o(),
         .verify_miss_o(verify_miss), .verify_addr_o(verify_addr), .verify_count_o(verify_count),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
@@ -247,22 +263,79 @@ module tb_gs_broker #(
         end
     end
 
+    // The near memory: {tag, byte} entries, one read port and one write port,
+    // tags all ones (no entry) at power-up.  A read launched in the clk of a
+    // write to the same index is undefined in a block RAM: here it returns the
+    // NEW tag with the wrong byte, the worst case for a broker that used it.
+    logic [7:0]     nmd [0:(1<<NEAR_AW)-1];
+    logic [NTW-1:0] nmt [0:(1<<NEAR_AW)-1];
+    longint n_nm_fill = 0, n_nm_wr = 0;
+    initial begin
+        for (int i = 0; i < (1<<NEAR_AW); i++) begin nmd[i] = 8'h00; nmt[i] = '1; end
+        nm_rdata = 8'h00; nm_rtag = '1;
+    end
+    always_ff @(posedge clk) begin
+        if (nm_ren) begin
+            nm_rdata <= (nm_wen && nm_wa == nm_ra) ? ~nm_wdata : nmd[nm_ra];
+            nm_rtag  <= (nm_wen && nm_wa == nm_ra) ? nm_wtag   : nmt[nm_ra];
+        end
+        if (nm_wen) begin
+            nmd[nm_wa] <= nm_wdata;
+            nmt[nm_wa] <= nm_wtag;
+            if (u_brk.nfill_r) n_nm_fill <= n_nm_fill + 1; else n_nm_wr <= n_nm_wr + 1;
+        end
+        if ((nm_ren || nm_wen) && !NEAR) begin $display("ERROR: near memory used without NEAR"); $finish; end
+        if (nm_wen && u_brk.nfill_r && (lm_wen || clk_no - t_launch < 2)) begin
+            $display("ERROR: near memory filled %0d clks after the far launch", clk_no - t_launch); $finish;
+        end
+    end
+    // every entry of the near memory is the byte of the card's memory its tag names
+    task automatic near_check();
+        int n_bad, n_valid, a12;
+        logic [23:0] ph;
+        logic [7:0]  want;
+        n_bad = 0; n_valid = 0;
+        for (int i = 0; i < (1<<NEAR_AW); i++) if (nmt[i] != '1) begin
+            n_valid++;
+            if (nmt[i][NTW-1]) begin
+                want = lrom[{nmt[i][3:0], 14'(i)}];
+            end else begin
+                a12  = i[12] ^ nmt[i][NTW-2];
+                ph   = 24'({nmt[i][NEAR_KW-1:0], 14'(i)});
+                ph[12] = a12[0];
+                want = (ph[23:17] == 7'd0) ? lram[ph[16:0]] : lexp[20'(ph - 24'h020000)];
+            end
+            if (nmd[i] !== want) begin
+                if (n_bad < 4) $display("   near memory entry %04h tag %03h = %02h, the card's memory has %02h", i, nmt[i], nmd[i], want);
+                n_bad++;
+            end
+        end
+        if (n_bad != 0) err($sformatf("the near memory differs from the card's memory in %0d of %0d entries", n_bad, n_valid));
+        $display("---- near memory: %0d of %0d entries in use, %0d fills, %0d writes", n_valid, 1<<NEAR_AW, n_nm_fill, n_nm_wr);
+    endtask
+
     // The timing contract the build's multicycle constraints will rely on, checked
     // in clks: in fast mode consecutive core steps are at least STEP_CLKS apart
     // (core register -> register paths), and local read data is taken no sooner
     // after its launch than the memory -> core path is allowed (STEP_CLKS with
     // DATA_LATE, STEP_CLKS - ADDR_CLKS in the two-edge step).
-    longint clk_no = 0, t_launch = 0, t_ce = -100, t_sel = 0, t_sw = -100;
-    logic [1:0] sel_q = 2'b00;
+    longint clk_no = 0, t_launch = 0, t_nlaunch = 0, t_ce = -100, t_sel = 0, t_sw = -100;
+    logic [2:0] sel_q = 3'b000;
+    logic       rdy_q = 1'b1;
+    logic [7:0] alt_qq = 8'h00;
+    longint     t_alt = 0;
+    wire  [2:0] sel_now = {u_brk.near_r, u_brk.use_lm_r, u_brk.rom_r};
     always_ff @(posedge clk) begin
         clk_no <= clk_no + 1;
         if (lm_ren) t_launch <= clk_no;
+        if (nm_ren) t_nlaunch <= clk_no;
         // the data-source select (as the core sees it this clk) and when it last changed
-        sel_q <= {u_brk.use_lm_r, u_brk.rom_r};
-        if (sel_q != {u_brk.use_lm_r, u_brk.rom_r}) t_sel <= clk_no;
+        sel_q <= sel_now;
+        if (sel_q != sel_now) t_sel <= clk_no;
         // nothing is registered from the core's outputs before the strobe clk
         // (the two-clk paths of a build with ADDR_CLKS = 2)
-        if ((u_brk.strobe || u_brk.mem_evt || lm_wen) && u_brk.run_c && clk_no - t_ce < ADDR_CLKS) begin
+        // (near memory: the write is made from registers, in the clk after the decision)
+        if ((u_brk.strobe || u_brk.mem_evt || (lm_wen && !NEAR)) && u_brk.run_c && clk_no - t_ce < ADDR_CLKS) begin
             $display("ERROR: step decision %0d clks after the core stepped (ADDR_CLKS %0d)", clk_no - t_ce, ADDR_CLKS); $finish;
         end
         // ... and the registered copy of the decode (a step that was not decoded ahead)
@@ -276,25 +349,47 @@ module tb_gs_broker #(
         // a launch (read address, the decode registered with it)
         if (DATA_LATE && u_brk.sw_touch) t_sw <= clk_no;
         if (DATA_LATE && u_brk.run_c && !u_brk.fresh_ok &&
-            ((u_brk.strobe && !u_brk.mode_native) || u_brk.mem_evt) && clk_no - t_sw < 3) begin
-            $display("ERROR: registered decode used %0d clks after the switches changed (needs 3)", clk_no - t_sw); $finish;
+            ((u_brk.strobe && !u_brk.mode_native) || u_brk.mem_evt) && clk_no - t_sw < (NEAR ? 2 : 3)) begin
+            $display("ERROR: registered decode used %0d clks after the switches changed (needs %0d)", clk_no - t_sw, NEAR ? 2 : 3); $finish;
         end
-        if (DATA_LATE && (u_brk.pf_launch || lm_ren) && clk_no - t_sw < 3) begin
+        // (near memory: the first-clk decision is made from the decode itself, one clk after
+        // the switches changed at the soonest - ordinary one-clk paths in a build)
+        // ... and with RDY high (RDY low at the last PHI2 fall holds local steps)
+        rdy_q <= u_brk.rdy_c;
+        if (NEAR && u_brk.ce_imm && !rdy_q) begin
+            $display("ERROR: a local step completed at once, decided while RDY was low"); $finish;
+        end
+        if (NEAR && u_brk.go_q && clk_no - t_sw < 2) begin
+            $display("ERROR: first-clk decision made in the clk the switches changed"); $finish;
+        end
+        if (DATA_LATE && ((u_brk.pf_launch && !NEAR) || lm_ren) && clk_no - t_sw < 3) begin
             $display("ERROR: read launched %0d clks after the switches changed (needs 3)", clk_no - t_sw); $finish;
         end
+        // near memory: the core's other data source (far data or the socket byte,
+        // registered) and the first clk it showed its present value
+        alt_qq <= u_brk.alt_q;
+        if (alt_qq != u_brk.alt_q) t_alt <= clk_no;
         if (cpu_ce) begin
             t_ce <= clk_no;
+            if (NEAR && u_brk.rd_step && !u_brk.near_r && u_brk.run_c &&
+                (alt_qq != u_brk.alt_q || clk_no - t_alt < 1)) begin
+                $display("ERROR: the core's data register changed %0d clks before the step (socket %0d)",
+                         clk_no - t_alt, !u_brk.use_lm_r); $finish;
+            end
             if (brk_fast && clk_no - t_ce < STEP_CLKS) begin
                 $display("ERROR: fast-mode steps %0d clks apart (STEP_CLKS %0d)", clk_no - t_ce, STEP_CLKS); $finish;
             end
-            if (u_brk.use_lm_r && brk_fast &&
-                clk_no - t_launch < (DATA_LATE ? STEP_CLKS : STEP_CLKS - ADDR_CLKS)) begin
-                $display("ERROR: local read data taken %0d clks after its launch", clk_no - t_launch); $finish;
+            // (near memory: its own launch; the far memories' data goes through a register)
+            if (u_brk.use_lm_r && brk_fast && u_brk.rd_step &&
+                (NEAR ? (u_brk.near_r ? clk_no - t_nlaunch < 2 : clk_no - t_launch < STEP_CLKS + 1)
+                      : clk_no - t_launch < (DATA_LATE ? STEP_CLKS : STEP_CLKS - ADDR_CLKS))) begin
+                $display("ERROR: local read data taken %0d clks after its launch (near %0d: %0d)",
+                         clk_no - t_launch, u_brk.near_r, clk_no - t_nlaunch); $finish;
             end
             // data-late: on a step whose data the core uses, the select has been
             // steady for a whole step (t_sel is the first clk it showed its new value)
             if (DATA_LATE && brk_fast && u_brk.rd_step &&
-                (sel_q != {u_brk.use_lm_r, u_brk.rom_r} || clk_no - t_sel < STEP_CLKS - 1)) begin
+                (sel_q != sel_now || clk_no - t_sel < STEP_CLKS - 1)) begin
                 $display("ERROR: data-source select changed %0d clks before the step", clk_no - t_sel); $finish;
             end
         end
@@ -725,6 +820,7 @@ module tb_gs_broker #(
             end
         end
         if (n_ram != 0) err($sformatf("card banks 00/01 differ from the ideal machine in %0d bytes", n_ram));
+        if (NEAR) near_check();
         for (a = 0; a < cfg_exp * 65536; a++) begin
             v = mach_get(1, 0, 24'h020000 + a);
             if (lexp[a] != v[7:0]) n_exp++;
@@ -777,7 +873,11 @@ module tb_gs_broker #(
     logic [7:0]  wr_pd;
     always_ff @(posedge clk) begin
         if (cpu_ce || !cpu_rst_n) wr_pend <= 1'b0;
-        else if (lm_wen) begin wr_pend <= 1'b1; wr_pa <= u_brk.eff_addr; wr_pd <= lm_wdata; end
+        // (near memory: the write is registered at the decision and made a clk later; a
+        // step that completes at its decision is not "in progress" when it lands)
+        else if (NEAR ? u_brk.wen_set : lm_wen) begin
+            wr_pend <= 1'b1; wr_pa <= u_brk.eff_addr; wr_pd <= NEAR ? cpu_d_out : lm_wdata;
+        end
     end
 
     always @(posedge clk) begin
@@ -874,14 +974,15 @@ module tb_gs_broker #(
     endtask
 
     // expected test-program results ($0300...): -1 = depends on the configuration
-    int expect_tab [0:65] = '{
+    int expect_tab [0:73] = '{
         'hFF, 'h00, 'h5C, 'h3F, 'h11, 'hC3, 'h3C, 'hA5, 'hA6, 'hA7,
         'h77, 'h5A, 'h5A, 'h00, 'h30, 'hEE, 'h00, 'h11, 'h00, 'hB1,
         'hB1, 'hB1, 'h00, 'hB2, 'h00, 'hB3, 'hC8, 'h00, 'hC9, 'hD1,
         'hE2, 'hD2, 'hD2, 'hD0, 'hD3, 'hD4, 'h00, 'h00, 'h0C, 'hD1,
         'h5E, 'hE1, 'hE2, 'hE1, -1,   -1,   'hFF, 'h05, 'hC3, 'hC1,
         'hC3, 'hC8, 'hCF, 'hFF, 'hC4, 'hC8, 'hFF, 'hC5, 'h1C, 'h1C,
-        'h1C, 'h08, 'hA1, 'hA7, 'h28, 'h01 };
+        'h1C, 'h08, 'hA1, 'hA7, 'h28, 'h01, 'hA7, 'hA5, 'h5A, 'h5A,
+        'h00, 'h22, 'h11, 'h01 };
 
     initial begin
         string  rom_path, wpath;
@@ -1031,7 +1132,7 @@ module tb_gs_broker #(
         if (!final_done) err("no quiet moment at the end of the run (socket cycles still outstanding)");
 
         if (do_expect) begin
-            for (i = 0; i <= 65; i++) begin
+            for (i = 0; i <= 73; i++) begin
                 int want, got;
                 want = expect_tab[i];
                 if (i == 44) want = (cfg_mbexp >= 1) ? 'h21 : 'hFF;

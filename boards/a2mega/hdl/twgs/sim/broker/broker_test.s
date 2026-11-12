@@ -387,6 +387,8 @@ t2:     txa
         sep #$30
         .a8
         .i8
+        lda $5105               ; (a cache in front of the memory: same index as $1105,
+                                ; so the read of $1105 below has to be fetched again)
         jsl $001100
         txa
         res                     ; $01
@@ -403,6 +405,49 @@ t2:     txa
         sep #$10
         .i8
         res
+
+        ; ---- T18 one byte, two addresses: $C000-$CFFF of bank 00 is the language
+        ;      card's bank 1 (seen at $Dxxx) and, with IOLC shadowing inhibited,
+        ;      plain RAM at $Cxxx.  Written and read both ways round (a cache in
+        ;      front of the card's memory must keep ONE copy of it).
+        lda $C08B
+        lda $C08B               ; RAM bank 1, write-enabled
+        lda #$A5
+        sta $D123               ; physical $C123
+        lda $D123
+        res                     ; $A5
+        lda #$48
+        sta $C035               ; IOLC inhibited
+        lda #$5A
+        sta $C123               ; the same byte, as plain RAM
+        lda #$08
+        sta $E0C035
+        lda $D123               ; bank 1 again
+        res                     ; $5A
+        lda #$48
+        sta $C035
+        lda $C123
+        res                     ; $5A
+        lda $D123
+        res                     ; $00: plain RAM at $D123 now
+        lda #$08
+        sta $E0C035
+        lda $C082
+
+        ; ---- T19 a read that goes to one bank while writes go to the other
+        ;      (RAMRD without RAMWRT), of an address last written in the other
+        sta $C005               ; RAMWRT on
+        lda #$22
+        sta $6100               ; -> 01/6100
+        sta $C004
+        lda #$11
+        sta $6100               ; -> 00/6100
+        sta $C003               ; RAMRD on
+        lda $6100
+        res                     ; $22 (aux)
+        sta $C002
+        lda $6100
+        res                     ; $11 (main)
 
         ; ---- T17 BRK with the language card in RAM: the vector comes from ROM
         ;      (VP) and leads to the dispatch bytes at $C071

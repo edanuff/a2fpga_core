@@ -888,6 +888,137 @@ registered so the late `NextState` only selects (`SUCC_TAB` extended to the
 whole row, and the fetched opcode's first row from a 256-entry table of
 its own), which is the wall dln shows.
 
+### The near memory and the two-clk step (2026-11-11)
+
+Built what the section above sets out, in two steps, and the second one
+changed its shape.
+
+**Step one: the near memory behind the decode-ahead broker.** A 16K-entry
+cache of `{tag, byte}`, the launch a step ahead going to it alone, the big
+memories read through the missed-launch path. It worked first time in
+simulation (the suite, ROM 01, a coherence check of every entry against
+the far memory at the end of each run). The what-if build (every path
+20 ns, `nw20`) said 41.7 MHz, up from 38.1, and showed what was still in
+the way: the core's next address is not valid until 18 ns after the step
+edge, and the replica's decode of it for the following step (the decode
+"ahead" that the tag and everything else the broker registers at a launch
+are made from) adds 5.4 ns behind that. **Decode-ahead cannot fit a 20 ns
+step**, whatever the memory.
+
+**Step two: decode in the step, not ahead of it** (`gs_accel_broker`
+`NEAR = 1`; the two were folded into one mode). The step's address and
+status are registers from the moment the core steps (`ea_r`, `pl_*`: they
+were already). So:
+
+- clk 1 of the step: the replica decodes those registers. Registered at
+  its end: the decode (`aq_*`, as before), "this step completes locally"
+  (`go_q`: not native, no socket cycle needed, write buffer free if it
+  forwards, RDY high), "it needs the near memory's byte" (`rdn_q`) and the
+  tag compare (`nh_dq`: the tag read at the launch against the tag the
+  decode names; not used if that entry was written at or after the launch).
+- clk 2: the core's clock enable is `go_q & (~rdn_q | nh_dq)`, one gate
+  behind registers, in four copies. The near memory is read again at that
+  edge, at the core's next address.
+- A local write is registered in clk 2 (address, data, near index and tag)
+  and made in the clk after, from registers, to both memories.
+- The core's data is the near byte or one register (`alt_q`: far data on a
+  miss, the socket byte on a socket read).
+- Everything that is not a two-clk step (socket cycle, near miss, a
+  forwarded write waiting for the buffer, RDY low) is the old sequencer
+  deciding in clk 2 from the registered decode, as before.
+
+The core's next address now drives the near memory's address pins, `ea_r`
+and nothing else; the replica's two prefetch decoders are gone from the
+netlist. The step after a socket cycle is a two-clk step like any other
+(decode-ahead could not launch for it: 8.8 % of the local reads in the
+ROM 01 stretch).
+
+**Simulation** (`run_gs_broker_sim.sh`, builds `b100_2x` and `b108_2x`:
+100 MHz = 50 MHz steps, 108 MHz = 54 MHz steps):
+
+| | |
+|---|---|
+| program suite | 62 / 62 runs, 21 of them on the near-memory broker (every mode, resets in and before socket writes, expansion RAM, local slot firmware, both clocks) |
+| ROM 01, 3 M steps | step hash `6012b76169ecc820` and the 128,393-write stream identical to native, at both clocks |
+| near memory in that stretch | 2,433 misses in 2,144,424 local reads (99.9 % two-clk steps); 3,112 of 16,384 entries used |
+| fault injections | 27 one-line mutations of the new logic, 18 detected |
+
+Of the nine not detected, eight are terms the design does not need
+(a redundant line, now removed; two guards on the `$Cxxx` alias that back
+each other up; two that invalidate a stale launch in cases no step
+produces; three that restate what the registers already guarantee). The
+ninth is a real gap in the bench: the write of a step that completes in
+the very clk /RESET is seen is not exercised (the logic has no special
+case for it: a write registered is a write made).
+
+Three injections were missed at first and are why the test program gained
+T18 (one byte written and read through both of its addresses, `$Dxxx` in
+language-card bank 1 and `$Cxxx` with IOLC inhibited), T19 (a read that
+goes to the other bank than writes do, of an address last written there)
+and an eviction read in T16b, and the bench a check that a step is never
+completed while RDY is low. The expected-result table had also stopped two
+entries short of the program's results; it covers them now.
+
+**Timing** (`a2mega_accel_probe_138b_n2`: 138B, 100 MHz, the generated
+contract `accel_probe_138b_n2.sdc`, 0.5 ns uncertainty):
+
+| build | what | failing | worst one-clk | worst step path |
+|---|---|---|---|---|
+| nw20 | near memory, decode ahead; what-if (every path 20 ns) | 173 | n/a | needs 24.0 ns (41.7 MHz) |
+| xw20 | near memory, decode in the step, no floorplan; what-if | 198 | n/a | needs 22.2 ns (45.1 MHz) |
+| n2a | real contract; near blocks one per site index, 46 columns wide | 69 | −0.43 | −0.42 |
+| n2b | same, with the step-address hold moved from its enable to its data | 422 | −2.70 | −4.13 |
+| n2d | near blocks packed into site indices 18-21 | 137 | −1.07 | −1.20 |
+| n2e | n2d with `Place_Option` 2 / `Route_Option` 1 | n/a | n/a | router not finished in 25 min, stopped |
+
+Three placements of one design differ by more than anything changed
+between them (n2a to n2b is one register's enable; identical floorplan), so
+none of them is a result to stand on. Read together they say **about 47 to
+48 MHz**: level with the target, not past it, against 38 MHz for the flat
+memory this morning.
+
+What is at the limit, all at once:
+
+- *The decode, one clk.* `ea_r` → replica decode → `go_q` / `rdn_q` /
+  `nh_dq`: ten levels, 10.5 to 11 ns. The depth is the general decode
+  (`is_local` behind the aux-bank logic behind the expansion-bank bound).
+- *The clock enable, one clk.* It is one gate behind registers but it is
+  not a short path: the core uses its enable in load conditions (`EN_m` …
+  inside data logic, not only on clock-enable pins), and `go_c` → core
+  measures 8.9 to 9.9 ns.
+- *The core's own loop, two clks.* `index → page-cross carry → NextState →
+  microcode` and `near memory → DB → ALU → flags`, 20.4 to 21.2 ns: the
+  wall the standalone probe shows at 53 MHz, plus 1.5 ns.
+
+Next, in this order:
+
+1. *A cheap first-clk decision.* Most steps can be classed "local, no side
+   effect, nothing to forward" from the bank, the page and a few switch
+   bits (a read in banks 00/01 below `$C000` or in a ROM bank; a write
+   below `$0400`; an internal cycle outside `$Cxxx`), without the full
+   decode. It only has to be a subset of what the full decode allows, and
+   the replica's exhaustive sweep can prove that it is. Then the enable can
+   be a register again (decided and combined in the first clk).
+2. *The core:* both successor microinstructions registered, the late
+   `NextState` only selecting between them (and the fetched opcode's first
+   row from a 256-entry table of its own).
+3. A clock a little under 100 MHz is always there: 97 MHz is 48.5 MHz.
+
+**What the contract is now.** Thirty-odd exception lines instead of
+seventy, in four statements: core / near memory / data select / `alt_q` to
+core / near address / step registers are step paths (two clks); the core's
+outputs reach other broker registers in the second clk at the soonest; a
+far read's address is presented for two clks; the mode changes only when
+the core steps. Everything else is one clk, the decode included.
+
+**Floorplan facts** (`gen_floorplan.py near`). Some block-RAM site indices
+hold two 16K × 1 blocks (`[A]` and `[B]`: 16, 18, 19, 21, 23 near the
+middle of the die), the others one (17, 20, 22); naming a half of a single
+site is error CT1130 and the build stops, leaving the previous timing
+report in place. The standalone core probe that closes 52.6 MHz had its
+eight blocks in four neighbouring sites. Left to itself in the integrated
+design the placer put near-memory blocks 100 columns from the core.
+
 ## 5. Questions for ed
 
 1. Rung 3 changes the step count per instruction. The scoping doc's
