@@ -1224,10 +1224,28 @@ What this result is and is not:
   100 MHz passes the socket bench; it has not been on hardware (S6 ran at
   108 MHz).
 
-So: reached, not yet durable. The margin to make it durable is the same
-list as before (the address-source selection behind the index adder, the
-flags), and the first thing to do with the next builds is to perturb this
-source and see how far the result moves.
+**Perturbed builds of that source** (probe-only changes that alter the
+netlist and not the design; the committed files are as n2j):
+
+| build | change | failing | worst slack | note |
+|---|---|---|---|---|
+| n2j | none | 0 | +0.012 | |
+| n2k | `Route_Maxfan` 20 instead of 23 | 0 | +0.012 | identical to n2j: not a different placement |
+| n2p2 | the loader stand-in steps by 3 | 0 | +0.012 | identical to n2j again |
+| n2p1 | the configuration register powers up with another value | 0 | +0.001 | a different placement (core → core +0.35, enable +1.23) |
+| n2p3 | … with a third value | 2 | −0.011 | a third placement; 11 ps short of the policy margin (raw slack +0.49 ns) |
+| n2m104 | n2j's source at 104 MHz (52 MHz steps) | 74 | −0.86 on the step paths, −0.54 on one-clk paths | the step paths come out at 20.1 ns |
+
+Three distinct placements at 100 MHz: two meet the constraint with the
+0.5 ns margin, the third misses it by 0.011 ns. The 104 MHz build says the
+same thing from the other side: asked for 19.2 ns, the tool reaches
+20.1 ns. **The design sits at a 20 ns step with the policy margin, with
+nothing to spare**: 50 MHz is reached but is not durable by the project's
+three-roll rule, 49 MHz would be (the same three builds have 0.19 ns and
+more at a 10.1 ns clk). Either is above the Squeezer.
+
+The margin to make 50 MHz itself durable is the same list as before (the
+address-source selection behind the index adder, the flags).
 
 ## 5. Questions for ed
 
