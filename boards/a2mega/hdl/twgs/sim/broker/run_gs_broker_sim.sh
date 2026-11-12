@@ -58,10 +58,16 @@ build() {   # name, extra verilator args...
 build b108_4                                  & p1=$!
 build b100_2 +define+CLK100 -GSTEP_CLKS=2     & p2=$!
 build b108_4f +define+FAST_CORE "${FASTF[@]}" & p3=$!
+# data-late step (broker launches the next step's read ahead, F65C816.NA_OUT): three clks of
+# 108 MHz = 36 MHz steps with two clks to decode the address, and two clks of 100 MHz = 50 MHz
+build b108_3d +define+FAST_CORE -GDATA_LATE=1 -GSTEP_CLKS=3 -GADDR_CLKS=2 "${FASTF[@]}" & p4=$!
+build b100_2d +define+FAST_CORE +define+CLK100 -GDATA_LATE=1 -GSTEP_CLKS=2 -GADDR_CLKS=1 "${FASTF[@]}" & p5=$!
 bfail=0
 wait $p1 || { echo "verilator FAILED (b108_4) - see $OUT/verilate_b108_4.log"; grep -E "%Error|error:" "$OUT/verilate_b108_4.log" | head -20; bfail=1; }
 wait $p2 || { echo "verilator FAILED (b100_2) - see $OUT/verilate_b100_2.log"; grep -E "%Error|error:" "$OUT/verilate_b100_2.log" | head -20; bfail=1; }
 wait $p3 || { echo "verilator FAILED (b108_4f, F65C816) - see $OUT/verilate_b108_4f.log"; grep -E "%Error|error:" "$OUT/verilate_b108_4f.log" | head -20; bfail=1; }
+wait $p4 || { echo "verilator FAILED (b108_3d) - see $OUT/verilate_b108_3d.log"; grep -E "%Error|error:" "$OUT/verilate_b108_3d.log" | head -20; bfail=1; }
+wait $p5 || { echo "verilator FAILED (b100_2d) - see $OUT/verilate_b100_2d.log"; grep -E "%Error|error:" "$OUT/verilate_b100_2d.log" | head -20; bfail=1; }
 [[ $bfail -ne 0 ]] && exit 1
 
 # ---------------------------------------------------------------- runs
@@ -89,6 +95,18 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run p_rst_tog   b108_4  $T +mode=toggle +expect +irq +reset +steps=120000
     run p_f816      b108_4f $T +mode=fast   +expect +irq
     run p_f816_nat  b108_4f $T +mode=native +expect +irq
+    # data-late broker: every mode again, at 108/3 and 100/2
+    run d_native    b108_3d $T +mode=native +expect +irq
+    run d_paced     b108_3d $T +mode=paced  +expect +irq
+    run d_fast      b108_3d $T +mode=fast   +expect +irq
+    run d_toggle    b108_3d $T +mode=toggle +expect +irq +steps=120000
+    run d_fast_exp  b108_3d $T +mode=fast   +expect +irq +exp=2
+    run d_tog_cx    b108_3d $T +mode=toggle +expect +irq +cxrom=1 +exp=2 +steps=120000
+    run d_fast_1mhz b108_3d $T +mode=fast   +expect +irq +noturbo
+    run d_rst_fast  b108_3d $T +mode=fast   +expect +irq +reset
+    run d_rst_tog   b108_3d $T +mode=toggle +expect +irq +reset +steps=120000
+    run d2_fast     b100_2d $T +mode=fast   +expect +irq
+    run d2_toggle   b100_2d $T +mode=toggle +expect +irq +steps=120000
     run q_native    b100_2  $T +mode=native +expect +irq
     run q_fast      b100_2  $T +mode=fast   +expect +irq
     run q_toggle    b100_2  $T +mode=toggle +expect +irq +steps=120000
@@ -97,6 +115,8 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run e_paced     b108_4  $T +mode=paced  +expect +wlog=wstream.txt
     run e_fast      b108_4  $T +mode=fast   +expect +wlog=wstream.txt
     run e_fast100   b100_2  $T +mode=fast   +expect +wlog=wstream.txt
+    run e_dl108     b108_3d $T +mode=fast   +expect +wlog=wstream.txt
+    run e_dl100     b100_2d $T +mode=fast   +expect +wlog=wstream.txt
 fi
 DO_ROM=0
 if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
@@ -109,6 +129,8 @@ if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
         run r_fast_cx   b108_4  $R +mode=fast +cxrom=1
         run r_fast100   b100_2  $R +mode=fast
         run r_f816      b108_4f $R +mode=fast
+        run r_dl108     b108_3d $R +mode=fast
+        run r_dl100     b100_2d $R +mode=fast
     elif [[ "$SUITE" == "rom" ]]; then
         echo "rom suite: set ROM=<path to a 128 KB ROM 01 image>"; exit 1
     else
@@ -148,11 +170,14 @@ same() {    # label, reference run, other runs...: step hash and write stream mu
     done
 }
 if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
-    same "test program" e_native e_paced e_fast e_fast100
+    same "test program" e_native e_paced e_fast e_fast100 e_dl108 e_dl100
 fi
 if [[ $DO_ROM -eq 1 ]]; then
-    same "ROM 01 boot ($STEPS steps)" r_native r_paced r_fast r_fast_cx r_fast100 r_f816
+    same "ROM 01 boot ($STEPS steps)" r_native r_paced r_fast r_fast_cx r_fast100 r_f816 r_dl108 r_dl100
 fi
+for n in "${NAMES[@]}"; do
+    case "$n" in d*|e_dl*|r_dl*) grep -E '^---- local reads' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
+done
 for n in "${NAMES[@]}"; do
     grep -E '^---- socket timing' "$OUT/$n/sim.log" | sed "s/^---- /$n: /"
 done > "$OUT/timing.txt"

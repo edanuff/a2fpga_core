@@ -648,3 +648,36 @@ first poll that saw it.
   local were not looked at; forwarded writes and all I/O still appear.
 - The ROM 01 re-assert itself is not modelled in the broker bench; the arm
   bench models it as a holder of the line.
+
+## 10. The broker on the data-late step, and the first timing builds (2026-11-11)
+
+Section 9's broker strobes the local memory from the core's address
+(two-edge step). With the `F65C816` core's next-step address (`NA_OUT`) the
+broker now also runs the data-late step (`DATA_LATE = 1`): the next step's
+read, its memory-map decode and its data-source select are launched and
+registered a step ahead and checked when the step runs; the core's clock
+enable is a register (a socket step completes the clk after the PHI2 fall
+event); native mode decides in the second clk and hands the PHY its request
+live; the local-memory port is split into a read launch (one read address
+per memory) and a write. The two-edge mode is unchanged and still tested
+with the stock core. `gs_mmu_replica` gained the `pf_*` views for it.
+
+Changes to section 9's record:
+
+- 9.3 clocking: with a registered clock enable the PHY's issue point is two
+  clks after the core steps; `ADDR_CLKS = 2` is used with `DATA_LATE`
+  (`ADDR_CLKS = 1` two-edge is unchanged).
+- 9.6 "the replica decode sits in the local-step address path": no longer
+  for a step that follows a local step; such a step uses the decode made a
+  step ahead. Other steps wait one clk for a registered copy.
+- Bench: `broker_test.s` T16b (self-modifying code), timing-contract
+  assertions in `tb_gs_broker.sv`, data-late builds `b108_3d` / `b100_2d`
+  and their runs in `run_gs_broker_sim.sh`.
+
+Design, verification table, the six probe builds
+(`a2mega_accel_probe_138b.gprj`, `hdl/accel_probe_138b/`) and the levers
+still open are in `gs_socket_s7_fast_core_exploration.md`, "Integration".
+In short: functionally complete in simulation; the core and memory paths
+fit 36 MHz steps, the next-read-address and broker-decision paths do not
+yet.
+

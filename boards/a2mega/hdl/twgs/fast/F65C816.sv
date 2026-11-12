@@ -780,6 +780,129 @@ module F65C816
          end
    end
 
+   // The same next values with "last cycle" taken as false, for the next-step address
+   // only (_a).  When the step IS the last one the next step is a fetch, which
+   // addresses PBR:PC and reads none of them, so the address is the same; leaving
+   // LAST_CYCLE (NextState) out keeps the next-state logic off the address path.
+   logic          EmuSPWrap_a;
+   logic          EmuStackSeqActive_a;
+   logic          EmuSPZeroAtStart_a;
+   logic          EmuSPFFAtStart_a;
+   logic          PLD_SeqActive_a;
+   logic          PLD_Addr0_Valid_a;
+   logic [7:0]    PLD_Low0_a;
+   logic          PLD_FirstCarry_a;
+   logic          PERPEI_SeqActive_a;
+   logic          PERPEI_FirstDone_a;
+   logic          RTL_SeqActive_a;
+   logic [15:0]   RTL_BaseAddr_a;
+   logic [1:0]    RTL_Offset_a;
+   logic          PLD_WrapFF_Latched_a;
+   logic          JSRL_SeqActive_a;
+   logic          JSRL_WrapFF_a;
+   logic [7:0]    RTL_SPW0_a;
+   logic [7:0]    PLD_SP0_a;
+   logic [7:0]    PLD_SPW0_a;
+   logic          RTL_WrapFF_a;
+   always @* begin
+      EmuSPWrap_a = EmuSPWrap;
+      EmuStackSeqActive_a = EmuStackSeqActive;
+      EmuSPZeroAtStart_a = EmuSPZeroAtStart;
+      EmuSPFFAtStart_a = EmuSPFFAtStart;
+      PLD_SeqActive_a = PLD_SeqActive;
+      PLD_Addr0_Valid_a = PLD_Addr0_Valid;
+      PLD_Low0_a = PLD_Low0;
+      PLD_FirstCarry_a = PLD_FirstCarry;
+      PERPEI_SeqActive_a = PERPEI_SeqActive;
+      PERPEI_FirstDone_a = PERPEI_FirstDone;
+      RTL_SeqActive_a = RTL_SeqActive;
+      RTL_BaseAddr_a = RTL_BaseAddr;
+      RTL_Offset_a = RTL_Offset;
+      PLD_WrapFF_Latched_a = PLD_WrapFF_Latched;
+      JSRL_SeqActive_a = JSRL_SeqActive;
+      JSRL_WrapFF_a = JSRL_WrapFF;
+      RTL_SPW0_a = RTL_SPW0;
+      PLD_SP0_a = PLD_SP0;
+      PLD_SPW0_a = PLD_SPW0;
+      RTL_WrapFF_a = RTL_WrapFF;
+
+         if (1'b0)
+            EmuSPWrap_a = 1'b0; // clear at instruction end
+         else if (EF == 1'b1 && MC.ADDR_BUS == 4'b1000 && SP[7:0] == 8'hFF)
+            EmuSPWrap_a = 1'b1;
+
+         // Start-of-sequence sampling (first 4'b1000 access in instruction)
+         if (1'b0) begin
+            EmuStackSeqActive_a = 1'b0;
+            EmuSPZeroAtStart_a = 1'b0;
+            EmuSPFFAtStart_a = 1'b0;
+            PLD_SeqActive_a = 1'b0;
+            PLD_Addr0_Valid_a = 1'b0;
+            PLD_Low0_a = 8'h00;
+            PLD_FirstCarry_a = 1'b0;
+         PERPEI_SeqActive_a = 1'b0;
+         PERPEI_FirstDone_a = 1'b0;
+         RTL_SeqActive_a = 1'b0;
+         RTL_BaseAddr_a = 16'h0000;
+         RTL_Offset_a = 2'b00;
+         PLD_WrapFF_Latched_a = 1'b0;
+            JSRL_SeqActive_a = 1'b0;
+            JSRL_WrapFF_a = 1'b0;
+         end else if (EF == 1'b1 && MC.ADDR_BUS == 4'b1000 && EmuStackSeqActive == 1'b0) begin
+            EmuStackSeqActive_a = 1'b1;
+            EmuSPZeroAtStart_a = (SPW[7:0] == 8'h00);
+            EmuSPFFAtStart_a = (SPW[7:0] == 8'hFF);
+            // For RTL (6B), capture original SP low for carry computation
+            if (IR == 8'h6B)
+              RTL_SPW0_a = SPW[7:0];
+         end
+
+         // Latch SP low at first PLD stack read in this instruction
+         if (EF == 1'b1 && IR == 8'h2B && MC.ADDR_BUS == 4'b1000 && MC.OUT_BUS == 3'b000 && PLD_SeqActive == 1'b0) begin
+            PLD_SeqActive_a = 1'b1;
+            PLD_SP0_a = SP[7:0];
+            PLD_SPW0_a = SPW[7:0];
+            PLD_Low0_a = (SPW[7:0] + 8'h01);
+            PLD_FirstCarry_a = (SPW[7:0] == 8'hFF);
+            PLD_Addr0_Valid_a = 1'b1; // reuse as have low0
+            // If this cycle increments SP from 0xFF->0x00, second read should use page 0x02
+            PLD_WrapFF_Latched_a = ((MC.LOAD_SP == 3'b110 || MC.LOAD_SP == 3'b111) && (SP[7:0] == 8'hFF));
+         end
+
+         // Track PER/PEI writes (two-byte push via 4'b0101) in emulation
+         if (EF == 1'b1 && (IR == 8'h62 || IR == 8'hD4) && MC.ADDR_BUS == 4'b0101 && MC.OUT_BUS != 3'b000) begin
+            if (PERPEI_SeqActive == 1'b0) begin
+               PERPEI_SeqActive_a = 1'b1;
+               PERPEI_FirstDone_a = 1'b0;
+            end else begin
+               PERPEI_FirstDone_a = 1'b1;
+            end
+         end
+
+         // Track RTL (6B) stack reads (three-byte pull) in emulation
+         if (EF == 1'b1 && IR == 8'h6B && MC.ADDR_BUS == 4'b1000 && MC.OUT_BUS == 3'b000) begin
+            if (!RTL_SeqActive) begin
+               RTL_SeqActive_a = 1'b1;
+               RTL_BaseAddr_a = ((SP + {14'b0, MC.ADDR_INC}) & 16'h01FF);
+               RTL_Offset_a = 2'b00;
+               RTL_WrapFF_a = (SP[7:0] == 8'h00);
+               RTL_SPW0_a = SPW[7:0];
+            end else begin
+               if (RTL_Offset != 2'b10)
+                  RTL_Offset_a = RTL_Offset + 2'b01;
+            end
+         end
+
+         // Track JSR long PC-byte pushes (IR=22) in emulation
+         if (EF == 1'b1 && IR == 8'h22 && MC.ADDR_BUS == 4'b1000 && MC.OUT_BUS == 3'b010 && MC.OUT_BUS != 3'b000) begin
+            if (!JSRL_SeqActive) begin
+               JSRL_SeqActive_a = 1'b1;
+               JSRL_WrapFF_a = (SP[7:0] == 8'hFF);
+            end
+         end
+   end
+
+
    always @(posedge CLK or negedge RST_N) begin
       if (!RST_N) begin
          EmuSPWrap <= 1'b0;
@@ -984,10 +1107,10 @@ module F65C816
      (.ADDR_SEL(NAF[9:6]), .INC(NAF[5:4]), .OUT_BUS(NAF[2:0]), .BYTE_SEL1(NAF[3]),
       .IR(IR), .EF(EF), .D_LO_NZ(DLNoZero),
       .PBR(PBR_n), .PC(PC_n), .DBR(DBR), .AA(AA_n), .AB(AB_n), .DX(DX_n), .SP(SP_n), .SPW(SPW_n),
-      .PERPEI_SeqActive(PERPEI_SeqActive_n), .PERPEI_FirstDone(PERPEI_FirstDone_n),
-      .PLD_Addr0_Valid(PLD_Addr0_Valid_n), .PLD_Low0(PLD_Low0_n), .PLD_SPW0(PLD_SPW0_n),
-      .RTL_SeqActive(RTL_SeqActive_n), .RTL_Offset(RTL_Offset_n), .RTL_SPW0(RTL_SPW0_n),
-      .JSRL_WrapFF(JSRL_WrapFF_n),
+      .PERPEI_SeqActive(PERPEI_SeqActive_a), .PERPEI_FirstDone(PERPEI_FirstDone_a),
+      .PLD_Addr0_Valid(PLD_Addr0_Valid_a), .PLD_Low0(PLD_Low0_a), .PLD_SPW0(PLD_SPW0_a),
+      .RTL_SeqActive(RTL_SeqActive_a), .RTL_Offset(RTL_Offset_a), .RTL_SPW0(RTL_SPW0_a),
+      .JSRL_WrapFF(JSRL_WrapFF_a),
       .IsResetInterrupt(IsResetInterrupt), .IsNMIInterrupt(IsNMIInterrupt), .IsIRQInterrupt(IsIRQInterrupt),
       .ADDR_BUS(NA_BUS));
 
@@ -1028,10 +1151,18 @@ module F65C816
       else
          MLB = 1'b1;
 
-      if (LAST_CYCLE == 1'b1 & STATE == 1 & MC.VA == 2'b00)
+      // S7 data-late: "last cycle" taken from the microinstruction instead of NextState,
+      // so VPA is a function of registers alone (it feeds the broker's step decision).
+      // In step 1 with VA = 00 the step is the last one exactly when STATE_CTRL is 010
+      // (the two-cycle implied instructions); gen_fast_mcode.py asserts it of the table.
+      if (STATE == 1 & MC.VA == 2'b00 & MC.STATE_CTRL == 3'b010)
          twoCls = 1'b1;
       else
          twoCls = 1'b0;
+`ifdef VERILATOR
+      if (RST_N == 1'b1 && twoCls !== (LAST_CYCLE == 1'b1 & STATE == 1 & MC.VA == 2'b00))
+         $display("twoCls MISMATCH @%0t: IR=%02h STATE=%0d", $time, IR, STATE);
+`endif
 
       if ((IsBRKInterrupt == 1'b1 | IsCOPInterrupt == 1'b1) & STATE == 1 & GotInterrupt == 1'b0)
          softInt = 1'b1;

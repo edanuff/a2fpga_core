@@ -60,7 +60,9 @@
 //    space), HIRES is cleared by reset, INTC8ROM and ROMBANK exist.
 //
 //  * Decode (combinational): gs_mmu_decode on the access the core is about
-//    to make, with the tracked state.
+//    to make, with the tracked state.  A second instance translates the
+//    address of the NEXT step as a read (pf_*), for the data-late broker's
+//    speculative memory read; only its address outputs are used.
 //
 module gs_mmu_replica #(
     parameter bit ROM3 = 1'b0          // 0 = ROM 01 machine, 1 = ROM 3
@@ -91,6 +93,23 @@ module gs_mmu_replica #(
     output logic        acc_local_rom_o,
     output logic [17:0] acc_rom_addr_o,
     output logic        acc_side_effect_o,
+
+    // prefetch view (S7 data-late step): the same decode of pf_addr_i - the core's
+    // NEXT-step address - as a read and as a write, with the tracked state, for the
+    // broker to register a step ahead.
+    input  logic [23:0] pf_addr_i,
+    output logic [23:0] pf_phys_o,           // read: RAM address
+    output logic [17:0] pf_rom_addr_o,       // read: ROM-image address
+    output logic        pf_local_o,          // read: served by the card
+    output logic        pf_local_rom_o,      // read: ... from the ROM image
+    output logic        pf_side_o,           // an access there can change machine state (I/O, Cx)
+    output logic [16:0] pf_ram_ra_o,         // read: address for the bank-00/01 RAM itself (below)
+    output logic [17:0] pf_rom_ra_o,         // read: address for the ROM image itself (below)
+    output logic [23:0] pfw_phys_o,          // write: RAM address
+    output logic        pfw_local_o,         // write: goes to the card's memory
+    output logic        pfw_local_we_o,      // write: ... and is stored
+    output logic        pfw_forward_o,       // write: ... and must also go to the socket
+    output logic        sw_touch_o,          // this clk a socket cycle may have moved the map
 
     // tracked state (telemetry, tests)
     output logic [7:0]  shadow_o,            // $C035
@@ -210,5 +229,64 @@ module gs_mmu_replica #(
         .local_we(acc_local_we_o), .local_rom(acc_local_rom_o), .rom_addr(acc_rom_addr_o),
         .side_effect(acc_side_effect_o)
     );
+
+    // ------------------------------------------------------------------ prefetch translation
+    gs_mmu_decode u_decode_pf (
+        .bank_log(pf_addr_i[23:16]), .addr_log(pf_addr_i[15:0]),
+        .we(1'b0), .vpb_n(1'b1), .rom_select(~ROM3),
+        .LCRAM2(lcram2), .RDROM(rdrom), .LC_WE(lc_we), .shadow(shadow),
+        .ALTZP(altzp), .RAMRD(ramrd), .RAMWRT(ramwrt), .STORE80(store80),
+        .PAGE2(page2), .HIRES_MODE(hires), .bank_latch(bank_latch),
+        .shadow_all(cyareg[4]), .SLTROMSEL(sltromsel),
+        .INTCXROM(intcxrom), .SLOTC3ROM(slotc3rom), .INTC8ROM(intc8rom), .ROMBANK(rombank),
+        .cxrom_local(cxrom_local_i), .exp_banks(exp_banks_i),
+        .addr_bus(pf_phys_o),
+        .aux(), .lcram2_sel(), .inhibit_cxxx(), .IO(), .EXTERNAL_IO(),
+        .is_internal_io(), .is_internal(), .fastram_ce(), .slowram_ce(), .slowram_we(),
+        .rom1_ce(), .rom2_ce(), .romc_ce(), .romd_ce(), .slot_ce(), .slot_internalrom_ce(),
+        .rom_writethrough(),
+        .region(), .is_local(pf_local_o), .forward_write(), .local_we(), .local_rom(pf_local_rom_o), .rom_addr(pf_rom_addr_o),
+        .side_effect(pf_side_o)
+    );
+
+    gs_mmu_decode u_decode_pfw (
+        .bank_log(pf_addr_i[23:16]), .addr_log(pf_addr_i[15:0]),
+        .we(1'b1), .vpb_n(1'b1), .rom_select(~ROM3),
+        .LCRAM2(lcram2), .RDROM(rdrom), .LC_WE(lc_we), .shadow(shadow),
+        .ALTZP(altzp), .RAMRD(ramrd), .RAMWRT(ramwrt), .STORE80(store80),
+        .PAGE2(page2), .HIRES_MODE(hires), .bank_latch(bank_latch),
+        .shadow_all(cyareg[4]), .SLTROMSEL(sltromsel),
+        .INTCXROM(intcxrom), .SLOTC3ROM(slotc3rom), .INTC8ROM(intc8rom), .ROMBANK(rombank),
+        .cxrom_local(cxrom_local_i), .exp_banks(exp_banks_i),
+        .addr_bus(pfw_phys_o),
+        .aux(), .lcram2_sel(), .inhibit_cxxx(), .IO(), .EXTERNAL_IO(),
+        .is_internal_io(), .is_internal(), .fastram_ce(), .slowram_ce(), .slowram_we(),
+        .rom1_ce(), .rom2_ce(), .romc_ce(), .romd_ce(), .slot_ce(), .slot_internalrom_ce(),
+        .rom_writethrough(),
+        .region(), .is_local(pfw_local_o), .forward_write(pfw_forward_o), .local_we(pfw_local_we_o),
+        .local_rom(), .rom_addr(), .side_effect()
+    );
+
+    // The addresses the two local memories are read at, for the speculative
+    // launch.  They carry only what each memory needs: the 128 KB RAM is only
+    // ever USED for banks 00/01 and the ROM image for banks 00/01 and the ROM
+    // banks, so the bank byte is not compared - for those banks the result is
+    // exactly pf_phys_o[16:0] / pf_rom_addr_o (gs_mmu_decode: the language-card
+    // $Dxxx bank-1 fold of A12, the main/aux select as bank bit 0, the ROM
+    // bank), for any other bank it is a don't-care.  This keeps the late bank
+    // bits of the core's next address off all but one address bit of each
+    // memory.  The broker checks, in simulation, every use against the full
+    // decode.
+    wire fold_en  = ~lcram2 & ~rdrom & ~shadow[6];
+    wire [15:0] pa = pf_addr_i[15:0];
+    wire aux00_rd = ((pa[15:9] == 7'b0000000) | (pa[15:14] == 2'b11)) ? altzp :
+                    (pa[15:10] == 6'b000001) ? ((store80 & page2) | (~store80 & ramrd)) :
+                    (pa[15:13] == 3'b001)    ? ((store80 & page2 & hires) | ((~store80 | ~hires) & ramrd)) :
+                                               ramrd;
+    assign pf_ram_ra_o = {pf_addr_i[16] | aux00_rd, pa[15:13], pa[12] & ~((pa[15:13] == 3'b110) & fold_en), pa[11:0]};
+    assign pf_rom_ra_o = {pf_addr_i[17] | ~pf_addr_i[23], pf_addr_i[16] | ~pf_addr_i[23], pa};
+
+    // every switch the tracker holds changes only in a clk with this strobe
+    assign sw_touch_o = cyc_stb_i & (cyc_io | cyc_cx);
 
 endmodule

@@ -565,6 +565,110 @@ per PHI2 cycle, because that stretch is 81,872 shadowed text-page writes.
 address clock now starts at the `A_OUT` register, so they no longer measure
 the address cone.
 
+### Integration: the data-late broker and the accelerator probe (2026-11-11)
+
+Both tracks merged (281d76c5), then the broker (`hdl/twgs/gs_accel_broker.sv`)
+was moved from the two-edge step to the data-late memory contract and the
+whole accelerator domain was put through place and route for the first time
+(`a2mega_accel_probe_138b.gprj`: PHY + broker + replica + `F65C816` + 128 KB
+RAM + 128 KB ROM image in block RAM, on the real socket balls, 108 MHz,
+three clks per step = 36 MHz). **Functionally complete and verified;
+timing does not close at 36 MHz yet.**
+
+**What the broker does now** (`DATA_LATE = 1`; the two-edge mode is kept and
+still passes with the stock core):
+
+- At the end of every local step it launches the next step's memory read at
+  the core's `NA_OUT`, and registers that step's memory-map decode (as a
+  read and as a write) and the data-source select with it. The step then
+  decides from registers. This is speculation and it is checked, not
+  assumed: a step that did not follow a local step, a vector pull, a
+  substituted address, a map change or a local write since the launch
+  takes the slow path (a registered copy of the direct decode, one clk
+  later; a relaunch that waits a full step). Correctness never rests on the
+  guess. In simulation every use of the step-ahead decode is compared with
+  the direct decode and stops the run on a difference.
+- The core's clock enable is a register. A socket step completes the clk
+  after the PHI2 fall event, which also gives the socket data byte three
+  clks to the core. Native mode decides in the second clk of a step and
+  hands the request to the PHY live in that clk, so it is still
+  pin-identical to S6 (2.4 M clks compared).
+- Each local memory has its own read address carrying only what it needs
+  (the RAM: the language-card A12 fold and the main/aux bit, no bank
+  compare; the ROM image: the ROM bank bit), exact for every bank that
+  memory is used for. The broker records what was launched and compares
+  that.
+- Core: `VPA` no longer depends on the next-state logic (the two-cycle term
+  comes from the microinstruction; the generator asserts the table fact),
+  and the emulation-mode stack-tracking values feed the next address
+  without the last-cycle term (exact: a last cycle is followed by a fetch).
+
+**Verification** (all from the working tree):
+
+| check | result |
+|---|---|
+| broker suite, 42 runs (native, paced, fast, toggling; stock core two-edge; `F65C816` data-late at 108/3 and 100/2; interrupts, RDY stalls, BE, warm reset, expansion RAM) | PASS |
+| ROM 01, 3 M steps, data-late broker | same step hash and identical 128,393-write stream as native |
+| new: self-modifying code (RMW of the next opcode byte); assertions on step spacing, launch → use, select steadiness, decision clk, settle time of the registered decode | PASS |
+| twelve injected faults (broker and the new address logic) | all fail the suite |
+| replica sweep (869,952,896 decode vectors + tracker), CPU lockstep bench, native socket regression | PASS |
+| local reads already in place when the step runs | 97.9 % (test program), 91.2 % (ROM boot stretch) |
+
+The bench's FPI model keeps the bank byte while RDY is low, so an RDY stall
+on a reset release is only valid in native mode (scoping doc 9.6); the
+periodic stall is now kept clear of the release in fast mode.
+
+**Timing** (probe builds, 138B, 0.5 ns uncertainty; budgets: step-length
+paths three clks = 27.8 ns, the broker's decision two clks = 18.5 ns):
+
+| build | change | failing paths | core → core | mem → core | → next read address | core → broker (2 clk) | core → RAM write (2 clk) |
+|---|---|---|---|---|---|---|---|
+| 1 | first pass | 3,362 | +1.76 | +1.65 | −2.60 | −7.90 | −9.57 |
+| 2 | `VPA` from the microinstruction; fabric read-address registers covered | 2,166 | +2.65 | +3.73 | −1.82 | −2.33 | −4.07 |
+| 3 | registered clock enable; step decode a step ahead; registered fallback decode | 1,912 | +0.74 | +1.98 | −5.17 | (one-clk, −7.9) | +2.67 (data) |
+| 4 | stack-tracking next values without last-cycle; native decision in clk 2 | 1,415 | +1.68 | +3.35 | −4.78 | −1.50 | −1.14 |
+| 5 | per-memory read addresses; live request native-only; missed read presented two clks | 851 | +2.26 | +2.24 | −4.56 | −1.66 | −1.78 |
+| 6 | read-address drivers replicated (`syn_maxfan`) | 775 | +1.29 | +1.49 | −3.31 | −1.83 | −3.56 |
+
+Reading:
+
+- **The core and memory data paths fit 36 MHz in every build**, as the
+  standalone probe predicted.
+- **The next-read-address path is 2-5 ns over.** After build 5 the worst
+  path is an ordinary low address bit: next-address logic ~17-19 ns, then
+  the mux, then **~9 ns of routing to the memory blocks**. RAM and ROM
+  together are 128 blocks on those nets, twice the standalone probe, and
+  they sit in BSRAM columns far from each other. Replicating the drivers
+  bought about 1.3 ns.
+- **The broker's own two-clk paths are 2-4 ns over**, and they are what
+  still hangs on the core's outputs in the step itself: the bus-status
+  signals (`VPA`/`VDA`/`WE`, through `internal` / substituted address)
+  into the write enable, the request and, in build 6, a statistics counter.
+- A few one-clk paths remain (the native live request into the PHY, the
+  registered decode's address onto the RAM write port, the verify counter,
+  the fall event into the freshness flag); each has an obvious local fix.
+
+**Levers not yet pulled, in the order I would try them:**
+
+1. *Step kind a step ahead.* Have the core output the NEXT step's bus
+   status (write / read / internal / vector pull, from the successor rows
+   already registered in `SUCC_TAB`) beside `NA_OUT`; the broker registers
+   it at the launch, and nothing in a step's decision depends on the core's
+   outputs any more. Removes the two-clk group except for data.
+2. *Floorplan the memories* (region constraints for the RAM and ROM blocks
+   next to the core) and replicate per column; the 9 ns is placement.
+3. Local fixes for the one-clk list above; statistics from registered
+   pulses.
+4. *Fall back to four clks per step (27 MHz)*: every step-length group has
+   more than 9 ns at four clks; the two-clk and one-clk groups still need
+   items 1 and 3.
+5. Lower the sequencer clock a few percent (three clks of ~100 MHz =
+   33 MHz) at the cost of re-deriving the socket timing.
+
+The 47.6 MHz of the standalone core probe is the core and one memory on an
+empty device; the integrated accelerator domain is the number that counts,
+and today it is "27 MHz with work, 36 MHz with more work".
+
 ## 5. Questions for ed
 
 1. Rung 3 changes the step count per instruction. The scoping doc's

@@ -1,0 +1,162 @@
+// S7 accelerator timing probe (boards/a2mega/docs/gs_socket_s7_fast_core_exploration.md).
+//
+// The whole accelerator domain as the accelerator-only build will have it,
+// on the real GS-socket balls of the 138B SOM: gs_socket_phy, gs_accel_broker
+// (data-late, with gs_mmu_replica), the F65C816 core, and the two local
+// memories in block RAM - banks 00/01 (128 KB, dual-port: read launch on one
+// port, write on the other) and the ROM 01 image (128 KB).  No expansion
+// RAM, no control plane: the mode inputs come from a small register walked by
+// the SOM pushbutton so that nothing is constant-folded.
+//
+// clk50_in stands in for the 108 MHz pin-sequencer clock (the constraint
+// file declares it as such); the core steps every STEP_CLKS = 3 clks = 36 MHz.
+// The probe is a timing instrument and is never flashed: the ROM image is the
+// CPU-bench program, not a ROM, behind a stand-in loader port.
+module accel_probe_top (
+    input  logic        clk50_in,
+    input  logic        button,          // SOM pushbutton, active low
+    output logic [3:0]  led,             // active low
+
+    input  logic        gs_ph2,
+    input  logic        gs_rdy,
+    input  logic        gs_irq_n,
+    input  logic        gs_nmi_n,
+    input  logic        gs_res_n,
+    input  logic        gs_abort_n,
+    input  logic        gs_be,
+    inout  wire  [7:0]  gs_d,
+    output logic [15:0] gs_a,
+    output logic        gs_rw,
+    output logic        gs_vp,
+    output logic        gs_rdy_out,
+    output logic        gs_d_dir,
+    output logic        gs_data_oe_n,
+    output logic        gs_addr_oe_n,
+    output logic        gs_oe_n
+);
+    localparam int STEP_CLKS = 3;
+    localparam int ADDR_CLKS = 2;
+    localparam int SLOW_CLKS = 3;
+
+    wire clk = clk50_in;
+
+    // ---- reset and the walked configuration register
+    logic [4:0] rst_cnt = 5'd0;
+    always_ff @(posedge clk) if (!rst_cnt[4]) rst_cnt <= rst_cnt + 5'd1;
+    wire rst_n = rst_cnt[4];
+
+    logic [2:0]  btn_s = 3'b111;
+    logic [10:0] cfg   = 11'b000_0000_0111;   // {exp_banks[6:0], cxrom_local, armed, mem_bypass, native}
+    always_ff @(posedge clk) begin
+        btn_s <= {btn_s[1:0], button};
+        if (btn_s[2] & ~btn_s[1]) cfg <= {cfg[9:0], ~cfg[10]};
+    end
+
+    // ---- socket PHY
+    logic [23:0] phy_a;
+    logic [7:0]  phy_d_out, gs_d_o;
+    logic        phy_we_n, phy_vpa, phy_vda, phy_vp_n, gs_d_oe;
+    logic        enabled, running, fall_evt, issue_evt, ph2_alive, be_ok;
+    logic [31:0] cycle_count;
+
+    gs_socket_phy u_phy (
+        .force_slow_i(1'b0),
+        .clk(clk), .rst_n(rst_n), .armed_i(cfg[2]), .listen_i(1'b0), .out_extra_i(4'd0),
+        .cpu_clk_o(), .cpu_rst_n_o(),
+        .cpu_a_i(phy_a), .cpu_d_out_i(phy_d_out), .cpu_we_n_i(phy_we_n), .cpu_vp_n_i(phy_vp_n),
+        .cpu_vpa_i(phy_vpa), .cpu_vda_i(phy_vda),
+        .gs_ph2_i(gs_ph2), .gs_rdy_i(gs_rdy), .gs_res_n_i(gs_res_n), .gs_be_i(gs_be),
+        .gs_d_o(gs_d_o), .gs_d_oe_o(gs_d_oe),
+        .gs_a_o(gs_a), .gs_rw_o(gs_rw), .gs_vp_o(gs_vp), .gs_rdy_out_o(gs_rdy_out),
+        .gs_d_dir_o(gs_d_dir), .gs_data_oe_n_o(gs_data_oe_n), .gs_addr_oe_n_o(gs_addr_oe_n),
+        .gs_ctl_oe_n_o(gs_oe_n),
+        .ph2_alive_o(ph2_alive), .running_o(running), .enabled_o(enabled), .be_ok_o(be_ok),
+        .fall_evt_o(fall_evt), .issue_evt_o(issue_evt), .ended_read_o(),
+        .cycle_count_o(cycle_count), .stall_count_o(), .be_count_o()
+    );
+    assign gs_d = gs_d_oe ? gs_d_o : 8'bz;
+
+    // ---- broker
+    logic        cpu_rst_n, cpu_ce, cpu_irq_n, cpu_nmi_n, cpu_abort_n;
+    logic [7:0]  cpu_d_in, cpu_d_out;
+    logic [23:0] cpu_a, cpu_na;
+    logic        cpu_we_n, cpu_vp_n, cpu_vpa, cpu_vda, cpu_mlb, cpu_iflag, cpu_rdyo;
+    logic        lm_ren, lm_wen;
+    logic [23:0] lm_raddr, lm_waddr;
+    // Each read-address bit goes to all 64 blocks of its memory: let the synthesizer
+    // replicate the last LUT so that placement can keep each copy near its blocks.
+    logic [16:0] lm_ram_ra /* synthesis syn_maxfan = 16 */;
+    logic [17:0] lm_rom_ra /* synthesis syn_maxfan = 16 */;
+    logic [7:0]  lm_wdata, lm_ram_rdata, lm_rom_rdata;
+    logic        brk_fast, verify_miss, pw_busy, sock_idle;
+    logic [15:0] verify_count;
+    logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait, stat_rd_hit, stat_rd_miss;
+    logic [7:0]  r_shadow, r_cyareg, r_sltromsel, r_statereg, r_misc;
+
+    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1)) u_brk (
+        .clk(clk), .rst_n(rst_n),
+        .native_i(cfg[0]), .mem_bypass_i(cfg[1]),
+        .cxrom_local_i(cfg[3]), .exp_banks_i(cfg[10:4]),
+        .phy_enabled_i(enabled), .phy_running_i(running),
+        .phy_fall_evt_i(fall_evt), .phy_issue_evt_i(issue_evt),
+        .phy_a_o(phy_a), .phy_d_out_o(phy_d_out), .phy_we_n_o(phy_we_n),
+        .phy_vpa_o(phy_vpa), .phy_vda_o(phy_vda), .phy_vp_n_o(phy_vp_n),
+        .gs_ph2_i(gs_ph2), .gs_d_i(gs_d), .gs_rdy_i(gs_rdy),
+        .gs_irq_n_i(gs_irq_n), .gs_nmi_n_i(gs_nmi_n), .gs_abort_n_i(gs_abort_n),
+        .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_d_in_o(cpu_d_in),
+        .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),
+        .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n),
+        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na),
+        .lm_ren_o(lm_ren), .lm_ram_ra_o(lm_ram_ra), .lm_rom_ra_o(lm_rom_ra), .lm_raddr_o(lm_raddr),
+        .lm_ram_rdata_i(lm_ram_rdata), .lm_rom_rdata_i(lm_rom_rdata),
+        .lm_wen_o(lm_wen), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
+        .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(sock_idle), .pw_busy_o(pw_busy),
+        .verify_miss_o(verify_miss), .verify_addr_o(), .verify_count_o(verify_count),
+        .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
+        .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
+        .shadow_o(r_shadow), .cyareg_o(r_cyareg), .sltromsel_o(r_sltromsel),
+        .statereg_o(r_statereg), .sw_misc_o(r_misc)
+    );
+
+    // ---- core
+    F65C816 u_cpu (
+        .CLK(clk), .RST_N(cpu_rst_n), .CE(cpu_ce), .RDY_IN(1'b1),
+        .NMI_N(cpu_nmi_n), .IRQ_N(cpu_irq_n), .ABORT_N(cpu_abort_n),
+        .D_IN(cpu_d_in), .D_OUT(cpu_d_out), .A_OUT(cpu_a), .WE(cpu_we_n), .RDY_OUT(cpu_rdyo),
+        .VPA(cpu_vpa), .VDA(cpu_vda), .MLB(cpu_mlb), .VPB(cpu_vp_n), .I_FLAG(cpu_iflag),
+        .NA_OUT(cpu_na)
+    );
+
+    // ---- local memories.  The hex is named bare (see cpu_probe_top.sv).
+    logic [7:0] ram [0:(1<<17)-1];
+    logic [7:0] rom [0:(1<<17)-1];
+    initial $readmemh("../cpu_probe_138b/cpu_probe_mem.hex", ram);
+    initial $readmemh("../cpu_probe_138b/cpu_probe_mem.hex", rom);
+    always_ff @(posedge clk) if (lm_ren) lm_ram_rdata <= ram[lm_ram_ra];
+    always_ff @(posedge clk) if (lm_wen && lm_waddr[23:17] == 7'd0) ram[lm_waddr[16:0]] <= lm_wdata;
+    always_ff @(posedge clk) if (lm_ren) lm_rom_rdata <= rom[lm_rom_ra[16:0]];
+    // The ROM image is loaded at bring-up in the real build, so it is a RAM here
+    // too: a stand-in loader port (button held: write the registered data pads at
+    // a running address) keeps synthesis from collapsing it around its contents.
+    logic [16:0] ld_a = 17'd0;
+    logic [7:0]  ld_d = 8'd0;
+    logic        ld_we = 1'b0;
+    always_ff @(posedge clk) begin
+        ld_we <= ~btn_s[2];
+        ld_d  <= gs_d;
+        if (ld_we) ld_a <= ld_a + 17'd1;
+        if (ld_we) rom[ld_a] <= ld_d;
+    end
+
+    // ---- keep the telemetry observable
+    logic [3:0] par = 4'd0;
+    logic [6:0] lm_raddr_q = 7'd0;      // the expansion-bank bits, as an expansion memory would register them
+    always_ff @(posedge clk) if (lm_ren) lm_raddr_q <= lm_raddr[23:17];
+    always_ff @(posedge clk) begin
+        par[0] <= ^{stat_steps, stat_sock, stat_posted, stat_pwwait};
+        par[1] <= ^{stat_rd_hit, stat_rd_miss, verify_count, verify_miss, pw_busy, sock_idle, brk_fast};
+        par[2] <= ^{r_shadow, r_cyareg, r_sltromsel, r_statereg, r_misc, cycle_count, ph2_alive, be_ok};
+        par[3] <= ^{cpu_mlb, cpu_iflag, cpu_rdyo, lm_raddr_q};
+    end
+    assign led = ~par;
+endmodule

@@ -58,7 +58,8 @@
 
 module tb_gs_broker #(
     parameter int STEP_CLKS = 4,
-    parameter int ADDR_CLKS = 1
+    parameter int ADDR_CLKS = 1,
+    parameter bit DATA_LATE = 1'b0     // broker launches reads one step ahead (FAST_CORE builds only)
 );
 
     import "DPI-C" function int  mach_load_rom(input string path);
@@ -132,9 +133,12 @@ module tb_gs_broker #(
     logic [23:0] cpu_a;
     logic        cpu_we_n, cpu_vp_n, cpu_rdy_out, cpu_vpa, cpu_vda, cpu_mlb, cpu_iflag;
     // broker <-> local memory
-    logic        lm_en, lm_we, lm_rom;
-    logic [23:0] lm_addr;
-    logic [7:0]  lm_wdata, lm_rdata;
+    logic        lm_ren, lm_wen;
+    logic [23:0] lm_raddr, lm_waddr, cpu_na;
+    logic [16:0] lm_ram_ra;
+    logic [17:0] lm_rom_ra;
+    logic [7:0]  lm_wdata, lm_ram_rdata, lm_rom_rdata;
+    logic [31:0] stat_rd_hit, stat_rd_miss;
     // telemetry
     logic        brk_fast, verify_miss;
     logic [23:0] verify_addr;
@@ -157,7 +161,7 @@ module tb_gs_broker #(
         .cycle_count_o(cycle_count), .stall_count_o(stall_count), .be_count_o(be_count)
     );
 
-    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK)) u_brk (
+    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK), .DATA_LATE(DATA_LATE)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(native_i), .mem_bypass_i(mem_bypass_i),
         .cxrom_local_i(cfg_cxrom[0]), .exp_banks_i(cfg_exp[6:0]),
@@ -170,13 +174,14 @@ module tb_gs_broker #(
         .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_d_in_o(cpu_d_in),
         .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n),
-        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n),
-        .lm_en_o(lm_en), .lm_we_o(lm_we), .lm_rom_o(lm_rom), .lm_addr_o(lm_addr),
-        .lm_wdata_o(lm_wdata), .lm_rdata_i(lm_rdata),
+        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na),
+        .lm_ren_o(lm_ren), .lm_ram_ra_o(lm_ram_ra), .lm_rom_ra_o(lm_rom_ra), .lm_raddr_o(lm_raddr),
+        .lm_ram_rdata_i(lm_ram_rdata), .lm_rom_rdata_i(lm_rom_rdata),
+        .lm_wen_o(lm_wen), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
         .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(), .pw_busy_o(),
         .verify_miss_o(verify_miss), .verify_addr_o(verify_addr), .verify_count_o(verify_count),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
-        .stat_pwwait_o(stat_pwwait),
+        .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
         .shadow_o(), .cyareg_o(), .sltromsel_o(), .statereg_o(), .sw_misc_o()
     );
 
@@ -191,23 +196,77 @@ module tb_gs_broker #(
         .NMI_N(cpu_nmi_n), .IRQ_N(cpu_irq_n), .ABORT_N(cpu_abort_n),
         .D_IN(cpu_d_in), .D_OUT(cpu_d_out), .A_OUT(cpu_a), .WE(cpu_we_n), .RDY_OUT(cpu_rdy_out),
         .VPA(cpu_vpa), .VDA(cpu_vda), .MLB(cpu_mlb), .VPB(cpu_vp_n), .I_FLAG(cpu_iflag)
+`ifdef FAST_CORE
+        , .NA_OUT(cpu_na)
+`endif
     );
+`ifndef FAST_CORE
+    assign cpu_na = 24'd0;
+    initial if (DATA_LATE) begin $display("DATA_LATE needs the FAST_CORE build"); $finish; end
+`endif
 
     //---------------------------------------------------------------- the card's memories (behavioural)
     logic [7:0] lram [0:(1<<17)-1];              // banks 00/01
     logic [7:0] lrom [0:(1<<18)-1];              // ROM image, FC0000-FFFFFF
     logic [7:0] lexp [0:EXP_MAX*65536-1];        // expansion banks 02..
-    wire [23:0] lexp_idx = lm_addr - 24'h020000;
+    // Synchronous, as the block RAMs will be: a read launch registers the data
+    // of BOTH memories as they are at that edge; a write is a separate port.
+    // The broker never launches and writes in the same clk (checked).
+    wire [23:0] lexp_ridx = lm_raddr - 24'h020000;
+    wire [23:0] lexp_widx = lm_waddr - 24'h020000;
     always_ff @(posedge clk) begin
-        if (lm_en) begin
-            if (lm_rom) begin
-                lm_rdata <= lrom[lm_addr[17:0]];
-            end else if (lm_addr[23:17] == 7'd0) begin
-                if (lm_we) lram[lm_addr[16:0]] <= lm_wdata;
-                lm_rdata <= lram[lm_addr[16:0]];
-            end else begin
-                if (lm_we) lexp[lexp_idx[19:0]] <= lm_wdata;
-                lm_rdata <= lexp[lexp_idx[19:0]];
+        if (lm_ren) begin
+            // the 128 KB RAM and the ROM image each read at their own address; the
+            // expansion memory at the physical address.  (The bench returns whichever
+            // RAM the physical address names, as a build's data mux will.)
+            lm_rom_rdata <= lrom[lm_rom_ra];
+            lm_ram_rdata <= (lm_raddr[23:17] == 7'd0) ? lram[lm_ram_ra] : lexp[lexp_ridx[19:0]];
+        end
+        if (lm_wen) begin
+            if (lm_waddr[23:17] == 7'd0) lram[lm_waddr[16:0]] <= lm_wdata;
+            else                         lexp[lexp_widx[19:0]] <= lm_wdata;
+        end
+        if (lm_ren && lm_wen) begin $display("ERROR: local memory read launch and write in the same clk"); $finish; end
+    end
+
+    // The timing contract the build's multicycle constraints will rely on, checked
+    // in clks: in fast mode consecutive core steps are at least STEP_CLKS apart
+    // (core register -> register paths), and local read data is taken no sooner
+    // after its launch than the memory -> core path is allowed (STEP_CLKS with
+    // DATA_LATE, STEP_CLKS - ADDR_CLKS in the two-edge step).
+    longint clk_no = 0, t_launch = 0, t_ce = -100, t_sel = 0;
+    logic [1:0] sel_q = 2'b00;
+    always_ff @(posedge clk) begin
+        clk_no <= clk_no + 1;
+        if (lm_ren) t_launch <= clk_no;
+        // the data-source select (as the core sees it this clk) and when it last changed
+        sel_q <= {u_brk.use_lm_r, u_brk.rom_r};
+        if (sel_q != {u_brk.use_lm_r, u_brk.rom_r}) t_sel <= clk_no;
+        // nothing is registered from the core's outputs before the strobe clk
+        // (the two-clk paths of a build with ADDR_CLKS = 2)
+        if ((u_brk.strobe || u_brk.mem_evt || lm_wen) && u_brk.run_c && clk_no - t_ce < ADDR_CLKS) begin
+            $display("ERROR: step decision %0d clks after the core stepped (ADDR_CLKS %0d)", clk_no - t_ce, ADDR_CLKS); $finish;
+        end
+        // ... and the registered copy of the decode (a step that was not decoded ahead)
+        // is not acted on before it has had SLOW - 1 clks to settle
+        if (DATA_LATE && u_brk.run_c && !u_brk.fresh_ok &&
+            ((u_brk.strobe && !u_brk.mode_native) || u_brk.mem_evt) && clk_no - t_ce < u_brk.SLOW) begin
+            $display("ERROR: registered decode used %0d clks after the core stepped (needs %0d)", clk_no - t_ce, u_brk.SLOW); $finish;
+        end
+        if (cpu_ce) begin
+            t_ce <= clk_no;
+            if (brk_fast && clk_no - t_ce < STEP_CLKS) begin
+                $display("ERROR: fast-mode steps %0d clks apart (STEP_CLKS %0d)", clk_no - t_ce, STEP_CLKS); $finish;
+            end
+            if (u_brk.use_lm_r && brk_fast &&
+                clk_no - t_launch < (DATA_LATE ? STEP_CLKS : STEP_CLKS - ADDR_CLKS)) begin
+                $display("ERROR: local read data taken %0d clks after its launch", clk_no - t_launch); $finish;
+            end
+            // data-late: on a step whose data the core uses, the select has been
+            // steady for a whole step (t_sel is the first clk it showed its new value)
+            if (DATA_LATE && brk_fast && u_brk.rd_step &&
+                (sel_q != {u_brk.use_lm_r, u_brk.rom_r} || clk_no - t_sel < STEP_CLKS - 1)) begin
+                $display("ERROR: data-source select changed %0d clks before the step", clk_no - t_sel); $finish;
             end
         end
     end
@@ -865,6 +924,9 @@ module tb_gs_broker #(
                     rdy_bus = 1'b0;
                     wait_cycles(4);
                     @(posedge ph2_bus); #20; rdy_bus = 1'b1;
+                end else if (next_stall < cyc_no + 8) begin
+                    // ... so keep the periodic stall clear of the release too
+                    next_stall = cyc_no + 8;
                 end
                 irqs_done = 0; irq_at = 0;          // the program starts over: interrupt it twice again
             end
@@ -921,6 +983,9 @@ module tb_gs_broker #(
                  (t_run_end - t_run_start) / 1.0e6, max_steps, real'(max_steps) * 1000.0 / (t_run_end - t_run_start));
         $display("---- broker: %0d synchronous socket cycles, %0d posted writes, %0d clks waiting for the write buffer, queue depth max %0d",
                  stat_sock, stat_posted, stat_pwwait, expq_max);
+        $display("---- local reads: %0d served by a read launched ahead, %0d launched at the strobe (%.1f %% ahead); DATA_LATE %0d",
+                 stat_rd_hit, stat_rd_miss,
+                 (stat_rd_hit + stat_rd_miss) ? 100.0 * real'(stat_rd_hit) / real'(stat_rd_hit + stat_rd_miss) : 0.0, DATA_LATE);
         $display("---- socket: %0d stalls checked, %0d sync, %0d refresh, %0d VP fetches, %0d BE checks; FPI %s",
                  stall_checks, sync_cycles, refresh_cycles, vp_fetches, be_checks, slow_mode ? "slow" : "fast");
         $display("---- machine: %0d writes on the socket, %0d in the write stream (I/O, Mega II, shadowed, slots); model: %0d I/O writes, %0d shadow copies, %0d language-card accesses, %0d $C028",

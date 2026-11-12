@@ -100,10 +100,43 @@
 // high, IRQ/NMI/ABORT, D_IN, and its bus outputs), so P65C816 and F65C816
 // are interchangeable.
 //
+// Local memory and the data-late step (DATA_LATE = 1, F65C816 only).  The
+// memories are synchronous: a read is LAUNCHED (lm_ren_o registers the RAM
+// and the ROM-image address, both memories read) and its data is used
+// STEP_CLKS later.  Without DATA_LATE every local read is launched at the
+// step's strobe from the core's address (two-edge step: ADDR_CLKS to form the
+// address, the rest of the step for the data).  With DATA_LATE the broker also
+// launches a read at the clock-enable edge of every local step, at the core's
+// NEXT-step address (cpu_na_i = F65C816.NA_OUT, translated as a read by the
+// replica's pf_ port), so that the following step finds its data already
+// there and the whole step is one STEP_CLKS-long path.  The launch is a
+// speculation and it is checked, not assumed: the broker remembers what the
+// memories' output registers hold (ld_*), and when the step runs it compares
+// that with the address the step really needs on the memory it really uses.
+// A match uses the data; anything else - the step after a socket cycle (no
+// launch: the socket data arrives too late to form the next address), a soft
+// switch that moved the map, a vector pull, a local write since the launch -
+// launches the read again, one clk after the strobe and from registers
+// (ml_*), and waits a full STEP_CLKS for it.  The select of the core's data
+// source (card RAM, card ROM, socket) is speculated and checked the same way:
+// it is set at the launch from the replica's view of the next address, and a
+// step that needs a different source sets it one clk after the strobe and
+// waits.  Correctness therefore never rests on the guess, only speed.
+// Timing shape this gives a build: core registers reach the memories'
+// read-address pins and the data-source select only through the next-address
+// path, once per step (a STEP_CLKS-cycle path, like memory data -> core and
+// core -> core); everything else the broker registers from the core's outputs
+// is captured at the strobe (an ADDR_CLKS-cycle path), and the select changes
+// at least STEP_CLKS before the core takes the data.
+// A write goes to the RAM at the strobe, always at least one clock before the
+// next launch, so a launch never coincides with a write.
+//
 module gs_accel_broker #(
     parameter int          STEP_CLKS = 4,            // fast mode: clks per local step (>= ADDR_CLKS + 1)
     parameter int          ADDR_CLKS = 1,            // clks from the step edge to the memory / request strobe
+    parameter int          SLOW_CLKS = 3,            // DATA_LATE: ... for a step whose decode was not registered ahead (>= 2, >= ADDR_CLKS)
     parameter logic [23:0] PARK_ADDR = 24'hFF0000,   // idle-cycle read address (must be ROM)
+    parameter bit          DATA_LATE = 1'b0,         // 1 = launch the next step's read one step ahead (needs cpu_na_i)
     parameter bit          ROM3      = 1'b0          // 0 = ROM 01 machine, 1 = ROM 3
 ) (
     input  logic        clk,
@@ -148,15 +181,21 @@ module gs_accel_broker #(
     input  logic        cpu_vpa_i,
     input  logic        cpu_vda_i,
     input  logic        cpu_vp_n_i,
+    input  logic [23:0] cpu_na_i,        // F65C816.NA_OUT: address of the next step (tie 0 without DATA_LATE)
 
-    // local memory: synchronous, strobed once per step; read data valid from
-    // the clk after lm_en_o and held until the next strobe
-    output logic        lm_en_o,
-    output logic        lm_we_o,
-    output logic        lm_rom_o,        // 1 = ROM image (lm_addr_o[17:0]), 0 = RAM (physical address)
-    output logic [23:0] lm_addr_o,
+    // local memory, synchronous.  Read: lm_ren_o registers the addresses and
+    // the memories read; the data is valid from the next clk and held until
+    // the next lm_ren_o.  Write: RAM only, at lm_wen_o; never in the same clk
+    // as a read launch.
+    output logic        lm_ren_o,
+    output logic [16:0] lm_ram_ra_o,     // read address of the bank-00/01 RAM
+    output logic [17:0] lm_rom_ra_o,     // read address of the ROM image
+    output logic [23:0] lm_raddr_o,      // RAM physical address, all banks (expansion memory)
+    input  logic [7:0]  lm_ram_rdata_i,
+    input  logic [7:0]  lm_rom_rdata_i,
+    output logic        lm_wen_o,
+    output logic [23:0] lm_waddr_o,
     output logic [7:0]  lm_wdata_o,
-    input  logic [7:0]  lm_rdata_i,
 
     // status / telemetry (clk domain)
     output logic        fast_o,          // the step in progress is a fast-mode step
@@ -171,6 +210,8 @@ module gs_accel_broker #(
     output logic [31:0] stat_sock_o,     // socket cycles run for the core (reads, synchronous writes)
     output logic [31:0] stat_posted_o,   // posted writes completed
     output logic [31:0] stat_pwwait_o,   // clks a forwarded write waited for the buffer
+    output logic [31:0] stat_rd_hit_o,   // local reads whose data and select were already in place
+    output logic [31:0] stat_rd_miss_o,  // local reads that launched or re-selected at the strobe and waited
     output logic [7:0]  shadow_o,        // replica state
     output logic [7:0]  cyareg_o,
     output logic [7:0]  sltromsel_o,
@@ -271,6 +312,12 @@ module gs_accel_broker #(
     logic [23:0] r_phys;
     logic [17:0] r_rom_addr;
     logic        r_local, r_fwd, r_local_we, r_local_rom, r_side;
+    logic [23:0] pf_phys;
+    logic [17:0] pf_rom_addr;
+    logic        pf_local, pf_local_rom, pf_side, pfw_local, pfw_local_we, pfw_fwd, sw_touch;
+    logic [23:0] pfw_phys;
+    logic [16:0] pf_ram_ra;
+    logic [17:0] pf_rom_ra;
     logic        cyc_stb;
     logic [23:0] fl_addr;
     logic        fl_we;
@@ -284,15 +331,48 @@ module gs_accel_broker #(
         .acc_region_o(r_region), .acc_phys_o(r_phys), .acc_local_o(r_local),
         .acc_forward_write_o(r_fwd), .acc_local_we_o(r_local_we), .acc_local_rom_o(r_local_rom),
         .acc_rom_addr_o(r_rom_addr), .acc_side_effect_o(r_side),
+        .pf_addr_i(cpu_na_i), .pf_phys_o(pf_phys), .pf_rom_addr_o(pf_rom_addr),
+        .pf_local_o(pf_local), .pf_local_rom_o(pf_local_rom), .pf_side_o(pf_side),
+        .pf_ram_ra_o(pf_ram_ra), .pf_rom_ra_o(pf_rom_ra),
+        .pfw_phys_o(pfw_phys), .pfw_local_o(pfw_local), .pfw_local_we_o(pfw_local_we), .pfw_forward_o(pfw_fwd),
+        .sw_touch_o(sw_touch),
         .shadow_o(shadow_o), .cyareg_o(cyareg_o), .sltromsel_o(sltromsel_o),
         .statereg_o(statereg_o), .misc_o(sw_misc_o)
     );
 
+    // ---- the decode view the step is run with
+    // Two-edge step: the replica's combinational decode (r_*), used at the strobe.
+    // Data-late step: nothing the sequencer registers hangs off that decode
+    // directly.  A step that follows a local step uses the decode of its own
+    // address made a step ahead (pl_*: the replica's pf_ views of the core's
+    // next-step address, as a read and as a write, registered at the launch);
+    // any other step uses the registered copy of r_* (aq_*), which it gives
+    // SLOW_CLKS - 1 clks to settle.  pl_* is the same function of the same
+    // address and switch state as r_* as long as the switches have not been
+    // touched since (sw_touch), the step is not a vector pull and its address
+    // is not substituted (io_int) - cross-checked in simulation below.
+    logic        pl_fresh;
+    logic        pl_r_local, pl_r_rom, pl_side, pl_w_local, pl_w_we, pl_w_fwd;
+    logic [23:0] pl_w_phys;
+    logic        aq_local, aq_fwd, aq_local_we, aq_local_rom, aq_side;
+    logic [23:0] aq_phys;
+    logic [17:0] aq_rom_addr;
+    logic [7:0]  cfg_q;
+
+    wire        fresh_ok    = DATA_LATE & pl_fresh & cpu_vp_n_i & ~io_int;
+    wire        d_local     = !DATA_LATE ? r_local     : fresh_ok ? (eff_we ? pl_w_local : pl_r_local) : aq_local;
+    wire        d_local_we  = !DATA_LATE ? r_local_we  : fresh_ok ? pl_w_we  : aq_local_we;
+    wire        d_fwd       = !DATA_LATE ? r_fwd       : fresh_ok ? pl_w_fwd : aq_fwd;
+    wire        d_local_rom = !DATA_LATE ? r_local_rom : fresh_ok ? pl_r_rom : aq_local_rom;
+    wire        d_side      = !DATA_LATE ? r_side      : fresh_ok ? pl_side  : aq_side;
+    wire [23:0] d_phys      = !DATA_LATE ? r_phys      : fresh_ok ? pl_w_phys : aq_phys;
+    wire [17:0] d_rom_addr  = !DATA_LATE ? r_rom_addr  : aq_rom_addr;
+
     // what this step needs
-    wire need_sock = mode_native | (internal ? r_side : ~r_local);
-    wire lm_read   = ~internal & r_local & ~eff_we;
-    wire lm_write  = ~internal & r_local & r_local_we;
-    wire post      = ~mode_native & ~internal & r_fwd;
+    wire need_sock = mode_native | (internal ? d_side : ~d_local);
+    wire lm_read   = ~internal & d_local & ~eff_we;
+    wire lm_write  = ~internal & eff_we & d_local & d_local_we;
+    wire post      = ~mode_native & ~internal & eff_we & d_fwd;
     wire use_lm    = lm_read & ~(mode_native & mode_bypass);
 
     //=========================================================================
@@ -301,6 +381,7 @@ module gs_accel_broker #(
     typedef enum logic [1:0] { K_IDLE, K_SYNC, K_PW } kind_t;
 
     logic        sreq_valid;              // the step's own socket cycle
+    logic        sreq_now;                // ... being requested in this clk (strobe & need_sock, below)
     logic [23:0] sreq_addr;
     logic        sreq_we, sreq_vpa, sreq_vda, sreq_vp_n;
     logic [7:0]  sreq_data;
@@ -318,7 +399,7 @@ module gs_accel_broker #(
     always_comb begin
         if (fl_busy)         sel = fl_kind;     // RDY held it: the PHY repeats it
         else if (pw_valid)   sel = K_PW;        // older than anything the core is waiting for
-        else if (sreq_valid) sel = K_SYNC;
+        else if (sreq_valid | sreq_now) sel = K_SYNC;
         else                 sel = K_IDLE;
     end
 
@@ -329,8 +410,16 @@ module gs_accel_broker #(
                 phy_vpa_o = 1'b0;   phy_vda_o = 1'b1;       phy_vp_n_o = 1'b1;
             end
             K_SYNC: begin
-                phy_a_o = sreq_addr; phy_d_out_o = sreq_data; phy_we_n_o = ~sreq_we;
-                phy_vpa_o = sreq_vpa; phy_vda_o = sreq_vda;   phy_vp_n_o = sreq_vp_n;
+                if (sreq_valid) begin
+                    phy_a_o = sreq_addr; phy_d_out_o = sreq_data; phy_we_n_o = ~sreq_we;
+                    phy_vpa_o = sreq_vpa; phy_vda_o = sreq_vda;   phy_vp_n_o = sreq_vp_n;
+                end else begin
+                    // the request being registered in this clk (same fields)
+                    phy_a_o = eff_addr;  phy_d_out_o = cpu_d_out_i; phy_we_n_o = ~eff_we;
+                    phy_vpa_o  = io_int ? 1'b0 : cpu_vpa_i;
+                    phy_vda_o  = io_int ? 1'b1 : cpu_vda_i;
+                    phy_vp_n_o = io_int ? 1'b1 : cpu_vp_n_i;
+                end
             end
             default: begin
                 // idle: park; while the core is in reset show its reset-state
@@ -350,21 +439,77 @@ module gs_accel_broker #(
     //=========================================================================
     // Step sequencer
     //=========================================================================
-    // strobe: ADDR_CLKS into the step; a forwarded write waits for the
-    // buffer, a fast step waits while RDY is low
-    wire strobe = (st == ST_ADDR) & (ph >= 4'(ADDR_CLKS - 1)) &
+    // strobe: the step's decision.  ADDR_CLKS into the step; in the data-late
+    // step SLOW_CLKS for a fast-mode step whose decode was not registered
+    // ahead (a native step needs no decode to go to the socket).  A forwarded
+    // write waits for the buffer, a fast step waits while RDY is low.  Nothing
+    // the broker or the PHY registers from the core's outputs is captured
+    // before the strobe, so with ADDR_CLKS = 2 those are two-clk paths; the
+    // PHY's issue point is two clks after the core steps, and a request made
+    // in that very clk is presented live (sreq_now) as well as registered.
+    localparam int SLOW  = (SLOW_CLKS > ADDR_CLKS) ? ((SLOW_CLKS > 2) ? SLOW_CLKS : 2) : ((ADDR_CLKS > 2) ? ADDR_CLKS : 2);
+    localparam int PH_ON = (STEP_CLKS > ADDR_CLKS + 1) ? STEP_CLKS - ADDR_CLKS - 1 : 0;   // clks left after a strobe at ADDR_CLKS
+    localparam int PH_SL = (STEP_CLKS > SLOW + 1)      ? STEP_CLKS - SLOW - 1      : 0;   // ... at SLOW
+    wire [3:0] t_dec  = (!DATA_LATE | mode_native | fresh_ok) ? 4'(ADDR_CLKS - 1) : 4'(SLOW - 1);
+    wire strobe = (st == ST_ADDR) & (ph >= t_dec) &
                   ~(post & pw_valid) & (mode_native | rdy_c);
+    // (native mode only: there the strobe is exactly this clk and the request is certain;
+    // a fast-mode request is registered and goes out at the next issue point)
+    assign sreq_now = run_c & mode_native & (st == ST_ADDR) & (ph >= 4'(ADDR_CLKS - 1));
 
-    logic use_lm_r, vfy_r;
+    // mem_evt: the step's memory actions (the write, a read that has to be
+    // launched now, the verify flag).  With the strobe - except in the
+    // data-late native step, whose strobe comes before the decode it needs.
+    logic [3:0] sc;                                               // clks since the core stepped
+    wire  mem_evt = (DATA_LATE & mode_native) ? (run_c & (st != ST_RESET) & (sc == 4'(SLOW - 1))) : strobe;
 
-    assign cpu_ce_o = run_c & (((st == ST_DATA) & (ph == 4'd0)) | sync_done);
-    assign cpu_d_in_o = use_lm_r ? lm_rdata_i : d_f;
+    logic use_lm_r, rom_r, vfy_r;
 
-    assign lm_en_o    = strobe & (lm_read | lm_write);
-    assign lm_we_o    = strobe & lm_write;
-    assign lm_rom_o   = r_local_rom;
-    assign lm_addr_o  = r_local_rom ? {6'd0, r_rom_addr} : r_phys;
-    assign lm_wdata_o = cpu_d_out_i;
+    // what the memories' output registers hold: the addresses of the last
+    // launch, valid until a write (which may have changed that RAM byte)
+    logic        ld_valid;
+    logic [23:0] ld_phys;                 // expansion memory: physical address
+    logic [16:0] ld_ram;                  // bank-00/01 RAM: the address it was read at
+    logic [17:0] ld_rom;                  // ROM image: the address it was read at
+    wire  ld_hit    = fresh_ok | (ld_valid & (d_local_rom       ? (ld_rom == d_rom_addr) :
+                                              ~|d_phys[23:17]   ? (ld_ram == d_phys[16:0]) :
+                                                                  (ld_phys == d_phys)));
+    wire  rd_launch = lm_read & ~ld_hit;                          // this step's read is not there yet
+    // data-late: the data-source select the step needs, against what was set
+    // ahead.  It matters on steps whose data the core uses: reads.
+    wire  rd_step   = ~internal & ~eff_we;
+    wire  sel_ok    = fresh_ok | ((use_lm_r == use_lm) & (~use_lm | (rom_r == d_local_rom)));
+    wire  sel_fix   = DATA_LATE & rd_step & ~sel_ok;
+    wire  rd_slow   = DATA_LATE & (rd_launch | (lm_read & ~sel_ok));   // a local read that has to wait
+
+    // The core's clock enable is a register: a local step's is known a clk
+    // ahead, a socket step completes the clk AFTER the PHI2 fall that ends its
+    // cycle (the data byte then has three clks from the fall to the core).
+    logic ce_r;
+    wire [3:0] ph_i = rd_slow ? 4'(STEP_CLKS + 1) : !DATA_LATE ? 4'(STEP_CLKS - ADDR_CLKS - 1) :
+                      fresh_ok ? 4'(PH_ON) : 4'(PH_SL);           // clks a local step still takes after the strobe
+    wire  local_ce  = ce_r & (st == ST_DATA);                     // a local step completes
+    wire  pf_launch = DATA_LATE & local_ce;                       // launch the next step's read
+
+    assign cpu_ce_o = ce_r;
+    wire [7:0] lm_rdata = rom_r ? lm_rom_rdata_i : lm_ram_rdata_i;
+    assign cpu_d_in_o = use_lm_r ? lm_rdata : d_f;
+
+    // a missing read: two-edge step - launched at the strobe from the decode;
+    // data-late - its addresses are registered at mem_evt, presented to the
+    // memories for two clks (ml_sel_r) and launched in the second (ml_go).
+    // The memories' read address is otherwise always the next-step address,
+    // so nothing switches it in the clk of an ordinary launch.
+    logic        ml_sel_r, ml_go, ml_apply, ml_use, ml_romsel;
+    logic [23:0] ml_phys;
+    logic [17:0] ml_rom;
+    assign lm_ren_o    = pf_launch | (DATA_LATE ? ml_go : (strobe & rd_launch));
+    assign lm_raddr_o  = !DATA_LATE ? r_phys            : ml_sel_r ? ml_phys       : pf_phys;
+    assign lm_ram_ra_o = !DATA_LATE ? r_phys[16:0]      : ml_sel_r ? ml_phys[16:0] : pf_ram_ra;
+    assign lm_rom_ra_o = !DATA_LATE ? r_rom_addr        : ml_sel_r ? ml_rom        : pf_rom_ra;
+    assign lm_wen_o       = mem_evt & lm_write;
+    assign lm_waddr_o     = d_phys;
+    assign lm_wdata_o     = cpu_d_out_i;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -376,7 +521,15 @@ module gs_accel_broker #(
             pw_valid <= 1'b0; pw_addr <= '0; pw_data <= '0;
             fl_kind <= K_IDLE; fl_busy <= 1'b0; fl_run <= 1'b0;
             fl_addr <= '0; fl_we <= 1'b0; fl_data <= '0;
-            use_lm_r <= 1'b0; vfy_r <= 1'b0;
+            use_lm_r <= 1'b0; rom_r <= 1'b0; vfy_r <= 1'b0;
+            ld_valid <= 1'b0; ld_phys <= '0; ld_rom <= '0;
+            ml_go <= 1'b0; ml_sel_r <= 1'b0; ml_phys <= '0; ml_rom <= '0; ld_ram <= '0;
+            ml_apply <= 1'b0; ml_use <= 1'b0; ml_romsel <= 1'b0;
+            ce_r <= 1'b0; sc <= '0; pl_fresh <= 1'b0; cfg_q <= '0;
+            pl_r_local <= 1'b0; pl_r_rom <= 1'b0; pl_side <= 1'b0;
+            pl_w_local <= 1'b0; pl_w_we <= 1'b0; pl_w_fwd <= 1'b0; pl_w_phys <= '0;
+            aq_local <= 1'b0; aq_fwd <= 1'b0; aq_local_we <= 1'b0; aq_local_rom <= 1'b0; aq_side <= 1'b0;
+            aq_phys <= '0; aq_rom_addr <= '0;
         end else if (!run_now) begin
             // core in reset (or the socket is not ours): nothing pending
             st <= ST_RESET; ph <= '0;
@@ -384,6 +537,8 @@ module gs_accel_broker #(
             prev_addr <= cpu_a_i;
             sreq_valid <= 1'b0; pw_valid <= 1'b0;
             use_lm_r <= 1'b0; vfy_r <= 1'b0;
+            ld_valid <= 1'b0; ml_go <= 1'b0; ml_sel_r <= 1'b0; ml_apply <= 1'b0;
+            ce_r <= 1'b0; sc <= '0; pl_fresh <= 1'b0;
             // the PHY keeps issuing (idle) cycles during reset
             if (phy_issue_evt_i) begin fl_kind <= K_IDLE; fl_busy <= 1'b1; fl_run <= 1'b0; end
             else if (phy_fall_evt_i) fl_busy <= 1'b0;
@@ -400,6 +555,64 @@ module gs_accel_broker #(
             if (cyc_done) fl_busy <= 1'b0;
             if (pw_done)  pw_valid <= 1'b0;
 
+            ml_go    <= ml_sel_r & ~ml_go;
+            ml_sel_r <= ml_sel_r & ~ml_go;
+            ml_apply <= 1'b0;
+            sc       <= cpu_ce_o ? 4'd0 : (sc != 4'd15) ? sc + 4'd1 : sc;
+            ce_r     <= sync_done | (strobe & ~need_sock & (ph_i == 4'd0)) | ((st == ST_DATA) & (ph == 4'd1));
+
+            // data-late: at the launch of the next step's read, the decode of
+            // that step and its data-source select are registered with it; the
+            // select is otherwise corrected one clk after mem_evt
+            if (pf_launch) begin
+                use_lm_r   <= pf_local & ~(native_s[1] & bypass_s[1]);
+                rom_r      <= pf_local_rom;
+                pl_r_local <= pf_local;   pl_r_rom <= pf_local_rom;   pl_side  <= pf_side;
+                pl_w_local <= pfw_local;  pl_w_we  <= pfw_local_we;   pl_w_fwd <= pfw_fwd;
+                pl_w_phys  <= pfw_phys;
+            end else if (ml_apply) begin
+                use_lm_r <= ml_use;
+                rom_r    <= ml_romsel;
+            end
+            // ... and is good for the one step that follows, unless the map is touched
+            cfg_q <= {cxrom_local_i, exp_banks_i};
+            if (sw_touch | (cfg_q != {cxrom_local_i, exp_banks_i})) pl_fresh <= 1'b0;
+            else if (pf_launch)                                     pl_fresh <= 1'b1;
+            else if (cpu_ce_o)                                      pl_fresh <= 1'b0;
+            // the registered copy of the combinational decode
+            if (DATA_LATE) begin
+                aq_local <= r_local; aq_fwd <= r_fwd; aq_local_we <= r_local_we;
+                aq_local_rom <= r_local_rom; aq_side <= r_side;
+                aq_phys <= r_phys; aq_rom_addr <= r_rom_addr;
+            end
+
+            // ---- memory actions of the step
+            if (mem_evt) begin
+                vfy_r <= mode_native & ~mode_bypass & lm_read;
+                if (DATA_LATE) begin
+                    if (rd_launch) begin
+                        ml_sel_r <= 1'b1;
+                        ml_phys  <= d_phys;
+                        ml_rom   <= d_rom_addr;
+                    end
+                    if (sel_fix) begin
+                        ml_apply  <= 1'b1;
+                        ml_use    <= use_lm;
+                        ml_romsel <= d_local_rom;
+                    end
+                end
+            end
+
+            // ---- what the memory output registers hold
+            if (lm_ren_o) begin
+                ld_valid <= 1'b1;
+                ld_phys  <= lm_raddr_o;
+                ld_ram   <= lm_ram_ra_o;
+                ld_rom   <= lm_rom_ra_o;
+            end else if (lm_wen_o) begin
+                ld_valid <= 1'b0;
+            end
+
             // ---- step sequencer
             unique case (st)
                 ST_RESET: begin
@@ -408,8 +621,10 @@ module gs_accel_broker #(
 
                 ST_ADDR: begin
                     if (strobe) begin
-                        use_lm_r <= use_lm;
-                        vfy_r    <= mode_native & ~mode_bypass & lm_read;
+                        if (!DATA_LATE) begin
+                            use_lm_r <= use_lm;
+                            rom_r    <= r_local_rom;
+                        end
                         if (post) begin
                             pw_valid <= 1'b1;
                             pw_addr  <= eff_addr;
@@ -428,7 +643,11 @@ module gs_accel_broker #(
                             st <= ST_SOCK;
                         end else begin
                             st <= ST_DATA;
-                            ph <= 4'(STEP_CLKS - ADDR_CLKS - 1);
+                            // data-late: a read that has to be launched now
+                            // (next clk) gets a whole STEP_CLKS for memory ->
+                            // core; everything else ends the step STEP_CLKS
+                            // after the previous one (or as soon as it is decided)
+                            ph <= ph_i;
                         end
                     end else if (ph != 4'd15) begin
                         ph <= ph + 4'd1;
@@ -457,12 +676,13 @@ module gs_accel_broker #(
     //=========================================================================
     // Verify (native, card memory of record) and statistics
     //=========================================================================
-    wire vfy_miss = sync_done & vfy_r & (d_f != lm_rdata_i);
+    wire vfy_miss = sync_done & vfy_r & (d_f != lm_rdata);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             verify_miss_o <= 1'b0; verify_addr_o <= '0; verify_count_o <= '0;
             stat_steps_o <= '0; stat_sock_o <= '0; stat_posted_o <= '0; stat_pwwait_o <= '0;
+            stat_rd_hit_o <= '0; stat_rd_miss_o <= '0;
         end else begin
             verify_miss_o <= vfy_miss;
             if (vfy_miss) begin
@@ -472,10 +692,30 @@ module gs_accel_broker #(
             if (cpu_ce_o)  stat_steps_o  <= stat_steps_o + 32'd1;
             if (sync_done) stat_sock_o   <= stat_sock_o + 32'd1;
             if (pw_done)   stat_posted_o <= stat_posted_o + 32'd1;
-            if ((st == ST_ADDR) & (ph >= 4'(ADDR_CLKS - 1)) & post & pw_valid)
+            if (mem_evt & lm_read & ~(DATA_LATE ? rd_slow : rd_launch)) stat_rd_hit_o  <= stat_rd_hit_o + 32'd1;
+            if (mem_evt & lm_read &  (DATA_LATE ? rd_slow : rd_launch)) stat_rd_miss_o <= stat_rd_miss_o + 32'd1;
+            if ((st == ST_ADDR) & (ph >= t_dec) & post & pw_valid)
                 stat_pwwait_o <= stat_pwwait_o + 32'd1;
         end
     end
+
+`ifdef VERILATOR
+    // The decode registered a step ahead must be the decode of the step: every
+    // time it is used, compare it with the replica's combinational view.
+    always @(posedge clk) if (rst_n && run_c && fresh_ok && (strobe || mem_evt)) begin
+        if (internal ? (pl_side !== r_side) :
+            eff_we   ? (pl_w_local !== r_local || pl_w_we !== r_local_we || pl_w_fwd !== r_fwd ||
+                        (r_local && pl_w_phys !== r_phys)) :
+                       (pl_r_local !== r_local || (r_local && pl_r_rom !== r_local_rom) ||
+                        (r_local && !ld_valid) ||
+                        (r_local && (r_local_rom       ? (ld_rom !== r_rom_addr) :
+                                     ~|r_phys[23:17]   ? (ld_ram !== r_phys[16:0]) : (ld_phys !== r_phys))))) begin
+            $display("ERROR: broker step-ahead decode differs from the step's: a=%06h we=%b int=%b @%0t",
+                     eff_addr, eff_we, internal, $time);
+            $finish;
+        end
+    end
+`endif
 
     assign fast_o      = run_c & ~mode_native;
     assign step_evt_o  = cpu_ce_o;

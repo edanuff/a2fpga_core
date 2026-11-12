@@ -68,3 +68,5 @@ boards/a2mega/captures/
 # timing instruments, never flashed — keep their bitstreams and resource snapshots local
 **/impl/pnr/a2mega_cpu_probe_*
 **/impl/a2mega_cpu_probe_*_resources.json
+**/impl/pnr/a2mega_accel_probe_*
+**/impl/a2mega_accel_probe_*_resources.json

@@ -370,6 +370,25 @@ t2:     txa
         lda $0392
         res                     ; $28
 
+        ; ---- T16b self-modifying code: a read-modify-write of the NEXT opcode
+        ;      byte.  The read of $1105 is the last read launched before the
+        ;      write to it, and the next read is the fetch of the same byte: a
+        ;      broker that still believed its memory output held $1105 would
+        ;      execute the old opcode.
+        rep #$30
+        .a16
+        .i16
+        ldx #ramcode2
+        ldy #$1100
+        lda #ramcode2_end - ramcode2 - 1
+        .byte $54, $00, $FF     ; MVN FF -> 00
+        sep #$30
+        .a8
+        .i8
+        jsl $001100
+        txa
+        res                     ; $01
+
         ; ---- T17 BRK with the language card in RAM: the vector comes from ROM
         ;      (VP) and leads to the dispatch bytes at $C071
         lda $C083
@@ -405,6 +424,14 @@ rcl:    inc $0392
         bne rcl
         rtl
 ramcode_end:
+
+; copied to RAM at $1100 by T16b
+ramcode2:
+        ldx #$00
+        inc $1100 + smc - ramcode2      ; $E7 -> $E8
+smc:    .byte $E7                       ; runs as INX
+        rtl
+ramcode2_end:
 
 ; interrupt handlers (bank FF, entered through the dispatch bytes)
 irq_handler:

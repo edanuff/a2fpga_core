@@ -70,6 +70,13 @@ table) and rerun it; do not hand-edit the tables.
     ALU carry-out (same value in that step; asserted by the generator and in
     simulation), which removes memory → ALU → carry → PC adder from the
     next-address path.
+  - Two later cuts for the integrated build, both exact and checked in
+    simulation: `VPA`'s two-cycle term comes from the microinstruction
+    (`STATE == 1 & VA == 00 & STATE_CTRL == 010`; the generator asserts that
+    this is "last cycle" for those rows), so the bus status is a function of
+    registers; and the stack-tracking values that feed the next address are
+    computed without the last-cycle term (`*_a`: a last cycle is followed by
+    a fetch at `PBR:PC`, which reads none of them).
   - Memory contract (bench `+datalate`, probe `CPU_PROBE_DATALATE`): read
     port addressed by `NA_OUT`, clock-enabled by `RDY_OUT`; write port at
     `A_OUT`/`D_OUT`/`WE` on the step edge; a one-entry bypass serves a read of

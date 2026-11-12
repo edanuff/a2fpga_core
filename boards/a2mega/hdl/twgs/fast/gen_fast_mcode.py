@@ -136,6 +136,9 @@ for i, f in enumerate(FLD):
     if 'X' in f[F_ADDRBUS]:
         na.append("10'bxxxxxxxxxx"); continue
     na.append("10'b" + f[F_ADDRBUS] + f[F_ADDRINC] + f[FIELD_BYTESEL][0] + f[F_OUTBUS])
+    if st == 1 and f[15] == '00':   # the core's twoCls: last cycle iff STATE_CTRL == 010 (never a branch)
+        if f[F_STATECTRL] == '010': assert (ir & 0x1F) != 0x10, hex(ir)
+        else:                       assert None not in successors(i), (hex(ir), f[F_STATECTRL])
     if st == 1:   # IR is new in step 1: its address must not depend on the opcode
         assert (f[F_ADDRBUS], f[F_ADDRINC], f[F_OUTBUS]) == ('0000', '00', '000'), (hex(ir), f)
     if f[7] == '111':   # MVN/MVP repeat: the core takes PCDec = (A != 0) instead of the ALU carry
