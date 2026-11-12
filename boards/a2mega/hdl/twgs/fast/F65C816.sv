@@ -70,6 +70,10 @@ module F65C816
   logic [7:0]    IR/*verilator public_flat*/;
   logic [7:0]    NextIR;
   logic [3:0]    STATE;
+  // rung 4a: their own copies of IR / STATE for the two microcode lookups (the
+  // lookups are most of the load on those registers; kept apart by synthesis)
+  logic [7:0]    IR_m    /* synthesis syn_preserve = 1 */;
+  logic [3:0]    STATE_m /* synthesis syn_preserve = 1 */;
   logic [3:0]    NextState;
   logic          NS_ZERO;    // rung 3: NextState == 0
   logic          NS_INC2;    // rung 3: NextState == STATE + 2
@@ -254,6 +258,8 @@ module F65C816
       begin
          STATE <= {4{1'b0}};
          IR <= {8{1'b0}};
+         STATE_m <= {4{1'b0}};
+         IR_m <= {8{1'b0}};
 `ifdef DEBUG_VERBOSE
          $display("CPU_RESET: RST_N asserted (low), STATE<=0, IR<=0");
 `endif
@@ -283,6 +289,8 @@ module F65C816
             end
             IR <= NextIR;
             STATE <= NextState;
+            IR_m <= NextIR;
+            STATE_m <= NextState;
 
             // Debug: Track every instruction completion with P[2] value (after this cycle completes)
             if (LAST_CYCLE && EN) begin
@@ -311,7 +319,7 @@ module F65C816
    // rung 4: the microcode module takes the registered IR / STATE and the late
    // decision as selects (the next state is 0, STATE + 1 or STATE + 2; 1 in the
    // fetch step, with the opcode on the bus) - see gen_fast_mcode.py
-   F65C816_mcode MCode(.CLK(CLK), .RST_N(RST_N), .EN(EN_m), .IR(IR), .STATE(STATE), .NIR(NextIR),
+   F65C816_mcode MCode(.CLK(CLK), .RST_N(RST_N), .EN(EN_m), .IR(IR_m), .STATE(STATE_m), .NIR(NextIR),
                        .NS_ZERO(NS_ZERO), .NS_INC2(NS_INC2), .M(MC), .SN(SN));
 `ifdef VERILATOR
    always @(posedge CLK)

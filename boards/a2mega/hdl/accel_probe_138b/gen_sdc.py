@@ -207,6 +207,11 @@ def generate_near(PERIOD, fname):
     for to in (CORE, STEPR):
         mc(2, regs(*MODE), to)
     note("""
+        ---- the interrupt lines the core sees in fast mode are held from one core step
+        to the next""")
+    for to in (CORE, STEPR):
+        mc(2, regs(*brk("irq_h", "nmi_h", "abort_h")), to)
+    note("""
         ---- (stated, not relaxed) the core's clock enable is one gate behind registers,
         and reaches the core in one clk""")
     out.append(f"set_max_delay {PERIOD:.3f} -from {regs(*brk('ce_c', 'ce_r', 'fa_c', 'fb_c', 'fh_c'))} -to {CORE}")

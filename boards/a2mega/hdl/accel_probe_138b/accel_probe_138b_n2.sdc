@@ -53,6 +53,13 @@ set_multicycle_path 1 -hold  -end -from [get_regs {u_brk/mode_native* u_brk/mode
 set_multicycle_path 2 -setup -end -from [get_regs {u_brk/mode_native* u_brk/mode_bypass*}] -to [get_regs {u_brk/ea_r* u_brk/pl_int* u_brk/pl_we* u_brk/pl_vp_n* u_brk/pl_io_int* u_brk/nl_idx* u_brk/nl_ok*}]
 set_multicycle_path 1 -hold  -end -from [get_regs {u_brk/mode_native* u_brk/mode_bypass*}] -to [get_regs {u_brk/ea_r* u_brk/pl_int* u_brk/pl_we* u_brk/pl_vp_n* u_brk/pl_io_int* u_brk/nl_idx* u_brk/nl_ok*}]
 
+// ---- the interrupt lines the core sees in fast mode are held from one core step
+// to the next
+set_multicycle_path 2 -setup -end -from [get_regs {u_brk/irq_h* u_brk/nmi_h* u_brk/abort_h*}] -to [get_regs {u_cpu/* u_cpu/MCode/* u_cpu/AddrGen/*}]
+set_multicycle_path 1 -hold  -end -from [get_regs {u_brk/irq_h* u_brk/nmi_h* u_brk/abort_h*}] -to [get_regs {u_cpu/* u_cpu/MCode/* u_cpu/AddrGen/*}]
+set_multicycle_path 2 -setup -end -from [get_regs {u_brk/irq_h* u_brk/nmi_h* u_brk/abort_h*}] -to [get_regs {u_brk/ea_r* u_brk/pl_int* u_brk/pl_we* u_brk/pl_vp_n* u_brk/pl_io_int* u_brk/nl_idx* u_brk/nl_ok*}]
+set_multicycle_path 1 -hold  -end -from [get_regs {u_brk/irq_h* u_brk/nmi_h* u_brk/abort_h*}] -to [get_regs {u_brk/ea_r* u_brk/pl_int* u_brk/pl_we* u_brk/pl_vp_n* u_brk/pl_io_int* u_brk/nl_idx* u_brk/nl_ok*}]
+
 // ---- (stated, not relaxed) the core's clock enable is one gate behind registers,
 // and reaches the core in one clk
 set_max_delay 10.000 -from [get_regs {u_brk/ce_c* u_brk/ce_r* u_brk/fa_c* u_brk/fb_c* u_brk/fh_c*}] -to [get_regs {u_cpu/* u_cpu/MCode/* u_cpu/AddrGen/*}]

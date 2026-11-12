@@ -337,9 +337,12 @@ module gs_accel_broker #(
     logic mode_native, mode_bypass;      // mode of the step in progress (below)
     // (a native step completes the clk after the fall event, when the clk-domain
     // copies hold the pads of its fall)
-    assign cpu_irq_n_o   = !mode_native ? irq_s[1]   : irq_c;
-    assign cpu_nmi_n_o   = !mode_native ? nmi_s[1]   : nmi_c;
-    assign cpu_abort_n_o = !mode_native ? abort_s[1] : abort_c;
+    // (near memory: ... and held from one core step to the next, irq_h below - the
+    // core's next status hangs off the lines, and the step registers off that)
+    logic irq_h, nmi_h, abort_h;
+    assign cpu_irq_n_o   = mode_native ? irq_c   : NEAR ? irq_h   : irq_s[1];
+    assign cpu_nmi_n_o   = mode_native ? nmi_c   : NEAR ? nmi_h   : nmi_s[1];
+    assign cpu_abort_n_o = mode_native ? abort_c : NEAR ? abort_h : abort_s[1];
 
     //=========================================================================
     // Reset: follow the PHY's view of /RES, re-registered at the fall event
@@ -352,6 +355,10 @@ module gs_accel_broker #(
         else        begin run_c <= run_now; run_rst <= run_now; end
     end
     assign cpu_rst_n_o = run_rst;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin irq_h <= 1'b1; nmi_h <= 1'b1; abort_h <= 1'b1; end
+        else if (!run_now | cpu_ce_o) begin irq_h <= irq_s[1]; nmi_h <= nmi_s[1]; abort_h <= abort_s[1]; end
+    end
 
     // mode inputs: two flops, then taken at step boundaries
     logic [1:0] native_s, bypass_s;

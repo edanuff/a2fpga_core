@@ -1167,6 +1167,68 @@ needed 26 ns): the broker is out of the way and proven, the core stands
 alone at 55 MHz. What is still needed is about 1.5 ns in the core's loop and
 a placement that repeats.
 
+### 50 MHz: the integrated probe closes (2026-11-12)
+
+Two more changes after rung 4a, both small, both from the reports above:
+
+- The microcode lookups get their own copies of `IR` / `STATE` (`IR_m`,
+  `STATE_m`, preserved): the net from `STATE` was 4 ns of the lookup.
+- In fast mode with the near memory the interrupt lines the core sees are
+  held from one core step to the next (`irq_h`, `nmi_h`, `abort_h`, loaded
+  from the two-flop synchronisers at every core step). The core's next
+  status hangs off them (a pending interrupt changes the next step's VPA)
+  and the step registers off that; held, it is a step path. Native mode
+  takes the lines as before, pin for pin with S6.
+
+Lockstep bench and the whole broker suite (72 / 72) pass with both.
+
+**Build n2j** (`a2mega_accel_probe_138b_n2`: PHY, broker with the near
+memory, replica, `F65C816`, near memory, banks 00/01 and the ROM 01 image;
+138B, 100 MHz, two clks per step, 0.5 ns setup uncertainty):
+
+| | |
+|---|---|
+| setup violations | **0** |
+| hold violations | 0 |
+| worst setup slack | +0.012 ns (`IR → next address → nl_ok`) |
+| Fmax of the 100 MHz clock | 100.06 MHz |
+| step paths (two clks) | core → core +0.08, core → near address +0.02, near memory → core +0.02 |
+| clock enable into the core | +0.88 |
+| full decode (two clks) | +7.7 |
+| broker → socket pads | +0.11 |
+| size | 8,110 LUT, 1,178 FF, 142 block RAMs |
+
+Provenance: sources = commit `ed8f71e6` plus the two changes above (the
+commit that adds this entry); Gowin V1.9.12.01, GW5AST-LV138PG484AC1/I0
+device version B; bitstream sha256 `65ee2c57e190ec56…6e5605` (a timing
+instrument, never flashed).
+
+**That is a 20 ns step: 50 MHz, against the AppleSqueezer's 48.** With the
+fidelity rule intact: the core is cycle-exact by the lockstep bench, and the
+broker's near memory changes wall time only.
+
+What this result is and is not:
+
+- It is one placement, with 0.01 ns to spare beyond the policy's 0.5 ns.
+  The tool is deterministic (the same build again, with a different
+  `Route_Maxfan`, is identical to the last digit), so "another roll" means
+  a changed source, and changed sources have moved this design by more
+  than a nanosecond tonight. The project rule for calling a clock closed
+  (three rolls of the final source) is not met.
+- The probe's power-up reset is a false path, and the socket's `d_f` data
+  byte is constrained as the asynchronous crossing it is.
+- It is the accelerator domain on an otherwise empty 138B. The
+  accelerator-only build adds the control plane and, later, the DDR3 miss
+  path, neither of which is in the step.
+- 100 MHz is the number chosen for the PHY in §2d. The PHY's timing at
+  100 MHz passes the socket bench; it has not been on hardware (S6 ran at
+  108 MHz).
+
+So: reached, not yet durable. The margin to make it durable is the same
+list as before (the address-source selection behind the index adder, the
+flags), and the first thing to do with the next builds is to perturb this
+source and see how far the result moves.
+
 ## 5. Questions for ed
 
 1. Rung 3 changes the step count per instruction. The scoping doc's
