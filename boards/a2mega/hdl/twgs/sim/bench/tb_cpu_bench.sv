@@ -31,6 +31,9 @@
 //             the image has handlers — exercises the interrupt sequence and vector fetch
 // +cycles=N   clock budget (default 8,000,000)
 // +stall      pseudo-random RDY_IN stalls (same for both cores)
+// +ce2        both cores step every second clk at most (CE on alternate clks): what
+//             F65C816_MCODE_ROM needs (microcode read from block RAM in the clk
+//             before a step ends); twice the clocks for the same steps
 // +trace      print every reference bus cycle
 // +vcd        write cpu_bench.vcd
 `timescale 1ns/1ps
@@ -65,19 +68,22 @@ module tb_cpu_bench;
     endfunction
 
     //---------------------------------------------------------------- cores
+    bit   ce2 = 0;
+    logic ce = 1'b1;
+    always @(negedge clk) ce <= ce2 ? ~ce : 1'b1;
     logic [7:0]  ref_din, ref_dout, dut_din, dut_dout;
     logic [23:0] ref_a, dut_a;
     logic        ref_we, ref_vpb, ref_rdyo, ref_vpa, ref_vda, ref_mlb, ref_if;
     logic        dut_we, dut_vpb, dut_rdyo, dut_vpa, dut_vda, dut_mlb, dut_if;
 
     P65C816 u_ref (
-        .CLK(clk), .RST_N(rst_n), .CE(1'b1), .RDY_IN(rdy),
+        .CLK(clk), .RST_N(rst_n), .CE(ce), .RDY_IN(rdy),
         .NMI_N(nmi_n), .IRQ_N(irq_n), .ABORT_N(1'b1),
         .D_IN(ref_din), .D_OUT(ref_dout), .A_OUT(ref_a), .WE(ref_we), .RDY_OUT(ref_rdyo),
         .VPA(ref_vpa), .VDA(ref_vda), .MLB(ref_mlb), .VPB(ref_vpb), .I_FLAG(ref_if));
 
     F65C816 u_dut (
-        .CLK(clk), .RST_N(rst_n), .CE(1'b1), .CE_X(4'b1111), .RDY_IN(rdy),
+        .CLK(clk), .RST_N(rst_n), .CE(ce), .CE_X({4{ce}}), .RDY_IN(rdy),
         .NMI_N(nmi_n), .IRQ_N(irq_n), .ABORT_N(1'b1),
         .D_IN(dut_din), .D_OUT(dut_dout), .A_OUT(dut_a), .WE(dut_we), .RDY_OUT(dut_rdyo),
         .VPA(dut_vpa), .VDA(dut_vda), .MLB(dut_mlb), .VPB(dut_vpb), .I_FLAG(dut_if));
@@ -170,7 +176,7 @@ module tb_cpu_bench;
       end
       if (rst_n) begin
         clocks++;
-        if (rdy) begin
+        if (rdy && ce) begin
             arch_t r;
             wr_t w;
             // ---- reference
@@ -287,6 +293,7 @@ module tb_cpu_bench;
         int fd, n, v;
         if ($test$plusargs("trace")) trace = 1;
         if ($test$plusargs("stall")) stall_on = 1;
+        if ($test$plusargs("ce2")) ce2 = 1;
         if ($test$plusargs("datalate")) datalate = 1;
         if ($test$plusargs("irq")) irq_on = 1;
         if (!$value$plusargs("lockstep=%d", lockstep)) lockstep = 1;

@@ -101,6 +101,7 @@ module accel_probe_top (
     logic [3:0]  cpu_ce_c;
     logic [7:0]  cpu_d_in, cpu_d_out;
     logic [23:0] cpu_a, cpu_na;
+    logic [13:0] cpu_na_b;
     logic [2:0]  cpu_nst;
     logic        cpu_we_n, cpu_vp_n, cpu_vpa, cpu_vda, cpu_mlb, cpu_iflag, cpu_rdyo;
     logic [RA_COPIES-1:0] lm_ren_c, lm_wen_c;
@@ -174,7 +175,7 @@ module accel_probe_top (
         .NMI_N(cpu_nmi_n), .IRQ_N(cpu_irq_n), .ABORT_N(cpu_abort_n),
         .D_IN(cpu_d_in), .D_OUT(cpu_d_out), .A_OUT(cpu_a), .WE(cpu_we_n), .RDY_OUT(cpu_rdyo),
         .VPA(cpu_vpa), .VDA(cpu_vda), .MLB(cpu_mlb), .VPB(cpu_vp_n), .I_FLAG(cpu_iflag),
-        .NA_OUT(cpu_na), .NST_OUT(cpu_nst)
+        .NA_OUT(cpu_na), .NST_OUT(cpu_nst), .NA_OUT_B(cpu_na_b)
     );
 
     // ---- local memories: 64 blocks of 16Kx1 each, written out block by block so
@@ -228,12 +229,18 @@ module accel_probe_top (
 
     // ---- near memory: one 16K x 1 block per entry bit, no output mux.  The tag is
     // stored inverted, so that a block RAM's power-up zeros read as "no entry".
+    // The read address is the core's next address, its latest output, and the blocks
+    // sit in two rows of block RAM 18 rows apart (gen_floorplan.py near): the blocks of
+    // the second row take the core's second copy of it (NA_OUT_B), so that neither
+    // copy's net spans both rows.
     if (NEAR) begin : g_near
+        localparam logic [8+NTW-1:0] ROW_B = 14'b11_0000_1100_1100;      // entry bits placed in R64
         wire [8+NTW-1:0] nm_wv = {~nm_wtag, nm_wdata};
         logic [8+NTW-1:0] nm_q;
         for (genvar b = 0; b < 8 + NTW; b++) begin : g_nb
             logic nmem [0:(1<<NEAR_AW)-1];
-            always_ff @(posedge clk) if (nm_ren) nm_q[b] <= nmem[nm_ra];
+            wire [NEAR_AW-1:0] ra = ROW_B[b] ? cpu_na_b[NEAR_AW-1:0] : nm_ra;
+            always_ff @(posedge clk) if (nm_ren) nm_q[b] <= nmem[ra];
             always_ff @(posedge clk) if (nm_wen) nmem[nm_wa] <= nm_wv[b];
         end
         assign nm_rdata = nm_q[7:0];

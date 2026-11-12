@@ -24,7 +24,7 @@
 // step): the core instantiates it on the NEXT values of its inputs, so the
 // address of step n+1 is available during step n and a synchronous memory can
 // register it at the step edge.  The logic is the stock ADDR_BUS block,
-// moved verbatim; only the input names changed.
+// moved; the input names changed, and the RTL page carry is a compare.
 module F65C816_AddrBus
   (
    input  [3:0]        ADDR_SEL,     // microcode ADDR_BUS field
@@ -63,8 +63,22 @@ module F65C816_AddrBus
    wire [8:0] pld_sum2low_w = {1'b0, PLD_Low0} + 9'd1;
    wire [8:0] pld_sum2car_w = {1'b0, PLD_SPW0} + 9'd2;
    wire [8:0] spw_sum1_w    = {1'b0, SPW[7:0]} + 9'd1;
+   // RTL in emulation mode: the page of a stack read is 01 plus the carry of
+   // (SP low at the start of the pull) + 1 + (the read's number).  The stock block adds
+   // (rtl_sum9_w, of which only bit 8 is used); the carry alone is a compare (S7).
+   wire       rtl_c_w       = !RTL_SeqActive ? (SPW[7:0] == 8'hFF) :
+                              (RTL_Offset == 2'b00) ? (RTL_SPW0 >= 8'hFE) :
+                              (RTL_Offset == 2'b01) ? (RTL_SPW0 >= 8'hFD) :
+                              (RTL_Offset == 2'b10) ? (RTL_SPW0 >= 8'hFC) : (RTL_SPW0 == 8'hFF);
+`ifdef VERILATOR
    wire [1:0] rtl_off_w     = RTL_SeqActive ? (RTL_Offset + 2'b01) : 2'b00; // effective offsets: 0,1,2
    wire [8:0] rtl_sum9_w    = {1'b0, (RTL_SeqActive ? RTL_SPW0 : SPW[7:0])} + 9'd1 + {7'b0, rtl_off_w};
+   always @* if (rtl_c_w !== rtl_sum9_w[8]) begin
+      $display("ERROR: AddrBus RTL carry %b, the stock sum says %b (active %b offset %0d sp0 %02h spw %02h)",
+               rtl_c_w, rtl_sum9_w[8], RTL_SeqActive, RTL_Offset, RTL_SPW0, SPW[7:0]);
+      $finish;
+   end
+`endif
    wire       jsrl_usewrap_w = JSRL_WrapFF | (SP[7:0] == 8'hFF);
 
    /* verilator lint_off LATCH */
@@ -135,7 +149,7 @@ module F65C816_AddrBus
                      // RTL reads: low byte from current SP (post-increment per microcode)
                      // Page determined by carry of (SPW.low + 1 + offset)
                      begin
-                       ADDR_BUS = {8'h00, (8'h01 + {7'b0, rtl_sum9_w[8]}), SP[7:0]};
+                       ADDR_BUS = {8'h00, (8'h01 + {7'b0, rtl_c_w}), SP[7:0]};
                      end
                   end else if (IR == 8'hAB) begin
                      // PLB read: use page 0x01 plus carry if SP crossed FF->00 prior to this read

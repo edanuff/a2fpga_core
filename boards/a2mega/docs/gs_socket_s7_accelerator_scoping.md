@@ -779,3 +779,35 @@ section 10 / 10.1 is unchanged and still builds (`NEAR = 0`).
 - **Not done:** anything that loads the far memory behind the broker's back
   (the ROM image at bring-up, an ESP32 poke) must do it before the core
   runs or invalidate the near memory; there is no such port yet.
+
+### 10.3 The step at 54 MHz, and what the broker changed for it (2026-11-12)
+
+The integrated probe closes at 108 MHz with two clks per step, three
+placements, and at 100 MHz likewise (exploration log, "Rung 5"). The core's
+part is in the log; the broker's part, none of it visible to the machine:
+
+- **The step's address is two registers.** `ea_r` is the core's next
+  address as given; `ea_k` follows the effective address in every clk. A
+  step that is an internal cycle aimed at I/O space repeats the address
+  before it and reads it from `ea_k`; the first-clk view is taken of `ea_r`
+  and one registered bit. The PHY's address is `ea_k`, which is the
+  effective address from a step's second clk, before any request is raised.
+- **Native mode's interrupt lines** come from the PH2-domain flops
+  registered in every clk (`irq_e`), not from the copy loaded at the fall
+  event: the same sample at the core's step, two clks sooner. Fast mode is
+  unchanged (`irq_h`). The testbench asserts in clks that the lines the
+  core sees are steady for two clks before every step, and the S6
+  comparison catches a line that is a step late.
+- **The step registers reset on `run_c`**, the registered view of /RES, a
+  clk after the sequencer, in a clk in which nothing reads them.
+- **The write registers load in every clk**; the write decision is one
+  register (`wen_r`).
+- **The near memory's read address has two copies** (`NA_OUT_B` of the
+  core), one per row of block RAM in the probe. The broker passes the first;
+  the probe's top level wires the second.
+- **The core's microcode is in block RAM** in the near-memory builds
+  (`F65C816_MCODE_ROM`), which the two-clk step makes possible: the core is
+  never stepped in two successive clks, in any mode.
+
+At 108 MHz the PHY's timing is the one S6 ran on hardware, and section 2.1's
+"108 / N" is N = 2.

@@ -32,7 +32,7 @@ motherboard; ours is on the card, so lever 2 is open to us.
 |---|---|---|
 | fast core | `boards/a2mega/hdl/twgs/fast/` (`F65C816*`) | the variant under exploration; starts as a renamed copy of `65C816/` |
 | bench | `hdl/twgs/sim/bench/run_cpu_bench.sh` | Verilator: stock `P65C816` (reference) and `F65C816` (DUT) on identical ideal memories, same clock/reset/RDY |
-| programs | `hdl/twgs/sim/bench/prog/bench_all.s` (ca65) | seven workloads with checkpoint marks, each self-checking a known result |
+| programs | `hdl/twgs/sim/bench/prog/bench_all.s` (ca65) | seven workloads with checkpoint marks, each self-checking a known result, and an eighth of corner cases the stock core alone judges |
 | Fmax probe | `boards/a2mega/a2mega_cpu_probe_138b_{stock,fast}.gprj` | core + 128 KB BSRAM in the address-clock/data-clock step on the 138B; `GPRJ=… tools/build.sh a2mega all` |
 | adder equivalence | `hdl/twgs/sim/bench/tb_addsub_eq.sv` | exhaustive 8-bit × modes + random 16-bit, stock vs fast `AddSubBCD` |
 
@@ -45,7 +45,9 @@ change the step count, run with `+lockstep=0`. `+stall` adds pseudo-random
 RDY stalls; `+rom=<boot1.rom>` boots the ROM 01 image (banks FE/FF, the
 reset-state map in 00/01/E0/E1, $C0xx as a write-back register file) as a
 lockstep stress — the ROM is never committed, point at the MiSTer
-`vsim/boot1.rom`.
+`vsim/boot1.rom`. `+ce2` steps both cores every second clk at most, which
+the block-RAM microcode needs (`+define+F65C816_MCODE_ROM` builds the DUT
+with it).
 
 Probe reading: the clock Fmax reported for `clk_cpu` is the cone frequency.
 The constraint (18 ns) is a target that makes the placer try, not a
@@ -231,6 +233,8 @@ cone numbers are 138B; the 60K has not been measured for this core).
 | 2a | microcode tables `syn_romstyle = "logic"`: microinstruction register in fabric flops behind LUT ROM, removing the BSRAM tC2Q + column net (~3.2 ns) from the head of every control path | cycle-exact | cone −1.5…−3 ns; also the enabler for 3x |
 | 2b | pre-decode into ROM width: one-hot `BUS_CTRL` selects + `w16` terms (done), then `LOAD_P`/`LOAD_PC` conditions per opcode, shallower LUT ROM | cycle-exact | done part: 18 → 16 levels, Fmax flat within roll noise (50-52); ~1.5 ns still to find |
 | 3 | cycle-exact data-late: the address of the next step formed from next-state values (`NA_OUT`), registered inside the BSRAM at the step edge; one clock per step; `A_OUT` = its register; writes at the step edge with a one-entry read bypass | cycle-exact (lockstep, incl. stalls, interrupts, ROM 01 boot) | **done 2026-11-11**: 41.1 MHz naive, 49.5 MHz after two next-address cuts (first rolls, core + 128 KB memory) — **main line** |
+| 4a | the next microinstruction and the next address as candidates, the late `NextState` decision selects | cycle-exact | **done 2026-11-12**: with the broker's near memory, 50 MHz steps in the integrated probe (one placement) |
+| 5 | for a core that steps every second clk at most: the microcode's successor rows read from block RAM a clk early (`F65C816_MCODE_ROM`); late signals taken out from behind logic they did not need | cycle-exact | **done 2026-11-12**: the integrated probe closes 108 MHz / 54 MHz steps and 100 MHz / 50 MHz, three placements each; half the LUTs |
 | L1 | ludicrous: bubbled data-late where 3x's address path does not close | architecture-exact | optional core |
 | L2 | ludicrous: step diet (RMW double write, dummy reads on indexed page crossings, 16-bit operand fetch as one local read) | architecture-exact, local memory only | 10-20 % fewer steps |
 
@@ -1247,6 +1251,172 @@ more at a 10.1 ns clk). Either is above the Squeezer.
 The margin to make 50 MHz itself durable is the same list as before (the
 address-source selection behind the index adder, the flags).
 
+### Rung 5: the microcode from block RAM; 54 MHz steps at 108 MHz (2026-11-12)
+
+The 50 MHz design sat on its limit on every front at once: the worst twenty
+endpoints of n2j were spread over the next address, the flags, the register
+file and the microcode, all within 0.2 ns of each other. A wider report
+(`report_timing -max_paths 400 -max_common_paths 1`, now generated into the
+probe's constraints) and the paths themselves showed two different things.
+
+**1. Logic in front of late signals for no functional reason.** Each of
+these is exact; where it rests on the microcode table the generator asserts
+it.
+
+- *The broker's tail behind the core's next address.* `ea_r` kept its value
+  when the next step was an internal cycle aimed at I/O space, so a compare
+  of the next address sat in front of 24 enables, eight levels after the
+  address was known. Now `ea_r` always loads, `ea_k` follows the effective
+  address in every clk with no enable (a step that repeats an address reads
+  it there), and the cheap view is taken of `ea_r` itself (the only thing
+  it is asked about a repeated address is one registered bit). The
+  launch-clk write compare that fed `nl_ok` is made a clk later from
+  registers, beside the one that was already there.
+- *The flags.* The next `P` takes the ALU's carry and zero in its last
+  level; the stock case statement had them six levels down.
+- *The adder's carry in* was `CR | ~secOp[0]`, `CR` being the bit a shift
+  moves out of the operand. No control word shifts and then adds, so it is
+  the carry flag, and memory data no longer reaches the carry chain's
+  first cell through two levels of logic.
+- *The ALU result*: one result for both widths, the adder's sum ORed in
+  last; each decimal digit formed for both values of its carry in.
+- *The address generator's high byte*: `AAH` + index from registers alone,
+  `DH` + index for both values of the low byte's carry. The stock form put
+  that carry in front of the bank byte through `AB = D_IN + carry`
+  (`ABSCtrl` 10), which no row of the microcode uses.
+- *The RTL page carry* in the address function is a compare, not a sum.
+- *The broker's step registers and the PHY.* `ea_r` and the next step's
+  status reset on `run_c`, the registered view of the reset, and no longer
+  hang off the PHY's fall event; the write registers load in every clk
+  (they are used only in the clk after the write is decided), so the
+  decision is on one register; the verify compare takes the card's byte
+  from a register; the PHY's address is `ea_k`.
+- *Native mode's interrupt lines* reached the core one clk before its step
+  (`irq_c`, loaded at the fall event). With the near memory the core now
+  sees the PH2-domain flops registered in every clk (`irq_e`, as `alt_q`
+  is for the data byte): the same sample, two clks before the step. A
+  mutation that delays it by a step is caught by the S6 comparison.
+
+**2. The size.** The first build with only the broker's tail and the flags
+changed (n2r) was *worse*: 67 failing endpoints, −0.9 ns, on paths the
+changes had not touched. With a front that wide, any changed netlist moves
+the placement by more than a few levels of logic gain. The microcode
+lookups were 4,189 of the probe's 7,393 LUTs, with one register driving 802
+loads: that was the thing to change.
+
+**Rung 5.** With the two-clk step the core never steps in successive clks,
+so `IR` and `STATE` are registers a whole clk before a step ends. The two
+successor rows are therefore *read* from them in a synchronous memory in the
+clk before the step ends (`F65C816_mrom`: the packed row table, two reads,
+24 block RAMs), instead of looked up in LUTs; step 1 of the opcode on the
+bus is still a lookup from the data (256 rows, in LUTs); the late decision
+selects as before, and the registered row is the same. Built with
+`F65C816_MCODE_ROM` defined (`F65C816_mcode_s`); the LUT form stays the
+default and the reference. The module stops a simulation if it is stepped
+in two successive clks, and the lockstep bench gained `+ce2` to run it.
+
+This is rung 2a turned round: 2a took the microcode *out* of block RAM
+because the block's clock-to-output sat at the head of every control path
+of a one-clk step. Here the block is read a clk early and the
+microinstruction register is still flops.
+
+Microcode: 4,189 LUTs → 448. The probe at synthesis: 7,393 LUTs → 3,739,
+142 block RAMs → 166. One more thing for the placement: the near memory's blocks sit in two
+rows of block RAM 18 rows apart, and the read address (the core's latest
+output) had one net to all of them; the core now gives it twice
+(`NA_OUT_B`, its own gates), one copy per row.
+
+**Builds** (138B, two clks per step, 0.5 ns setup uncertainty; all with the
+constraints generated by `gen_sdc.py`):
+
+| build | source | clk | failing | worst slack | Fmax of the clk |
+|---|---|---|---|---|---|
+| n2r | tail + flags only | 100 MHz | 67 | −0.906 | 92.6 |
+| n2s | + rung 5, adder carry in | 100 MHz | 0 | +0.049 | 100.4 |
+| n2s108 | the same | 108 MHz | 10 | −0.090 | 107.5 |
+| n8a | + address generator, ALU result, step registers | 108 MHz | 10 | −0.128 | 106.5 |
+| **n8b** | + interrupt lines, PHY address, RTL carry, second address copy (**the committed source**) | **108 MHz** | **0** | **+0.011** | **108.1** |
+| n8b116 | the same | 116 MHz | 29 | −0.173 | 114.3 |
+
+**That is an 18.5 ns step: 54 MHz, on the clock frequency the rest of the
+machine already runs at.** The 116 MHz build says where the design
+actually sits: asked for 17.2 ns, the tool reaches 17.5 ns (57 MHz), so at
+108 MHz there is about 0.5 ns on the one-clk paths and 1 ns on the step
+paths beyond the policy's margin, and at 100 MHz about 1.2 ns and 2.5 ns.
+
+**Three placements of the committed source at each clock** (the probe's
+configuration register powers up with another value: a different netlist,
+the same design; Fmax shows they are different placements):
+
+| | 100 MHz (50 MHz steps) | 108 MHz (54 MHz steps) |
+|---|---|---|
+| committed | 0 failing, +0.035, 100.2 MHz | 0 failing, +0.011, 108.1 MHz |
+| perturbation 1 | 0 failing, +0.114, 101.2 MHz | 0 failing, +0.050, 108.3 MHz |
+| perturbation 3 | 0 failing, +0.068, 100.4 MHz | 0 failing, +0.004, 108.0 MHz |
+
+No setup or hold violation in any of the six. By the project's rule (three
+rolls of the final source, 0.5 ns on every clock) both step rates are
+closed in the probe. The worst slacks are small because the tool stops
+when the constraint is met; the 116 MHz build is the measure of margin.
+
+Step paths of n8b: core → core +0.59, core → near address +0.15, near
+memory → core +0.12, core → step registers +0.56; clock enable into the
+core +0.92; full decode (two clks) +4.1.
+
+Provenance: sources = the commit that adds this entry; Gowin V1.9.12.01,
+GW5AST-LV138PG484AC1/I0 device version B; bitstreams (timing instruments,
+never flashed) sha256 `9462b1624e9614a9…73de360d` (`a2mega_accel_probe_138b_n8`, 108 MHz) and
+`62d2c0c3b2cacec4…e105162c` (`a2mega_accel_probe_138b_n2`, 100 MHz); 4,428 logic cells (3,734 LUT and 694 ALU; it was 8,110), 1,226 FF, 166 block RAMs.
+
+**Verification on the committed tree.**
+
+- CPU lockstep bench, stock core against `F65C816`, every step compared:
+  the test program (4.6 M steps) plain, with stalls, data-late,
+  data-late with stalls;
+  the ROM 01 boot plain, with interrupts, data-late with interrupts,
+  data-late with interrupts and stalls (7 to 8 M steps, 3,915 IRQ, 485
+  NMI). The same with the microcode in block RAM and both cores stepped
+  every second clk (`+ce2`; ROM boot 7 M steps, 7,824 IRQ, 980 NMI).
+- ALU and adder against the stock ones: 4,160,000 and 3,572,864 vectors,
+  no mismatch.
+- Broker suite: 72 / 72. The near-memory builds run the core with its
+  microcode in block RAM. ROM 01 boot, 3 M steps: step hash
+  `6012b76169ecc820` and the identical 128,393-write stream in every mode,
+  as before; 96.9 % of local steps are two-clk steps, as before.
+- Decode sweep: 869,952,896 vectors, no failure (the replica has a second
+  decode instance for the cheap view).
+- Fault injection, new logic only. Broker: 10 of 10 detected (the
+  address split four ways, the launch-clk write, the write registers, the
+  verify register, the reset view, the interrupt lines twice). Core, in
+  the lockstep bench: 13 of 13 detected after the bench program gained
+  an eighth workload (below); 7 of the first 10 were, before it.
+- The testbench asserts the new timing rule in clks: the interrupt lines
+  the core sees do not change in the two clks before a step.
+- The three core mutations that went unseen were in logic no bench program
+  reached: `BIT #imm` (the only instruction that loads Z alone), direct
+  page,X in emulation mode with `DL` = 0, and RTL in emulation mode with
+  the stack pointer at the top of page 1. `bench_all.s` has a mark 8 for
+  them now (339 steps), and the same mutations are caught.
+
+What this result is and is not:
+
+- It is the probe: the accelerator domain on an otherwise empty 138B, its
+  power-up reset a false path, never flashed. The accelerator-only build
+  adds the control plane and the DDR3 miss path, neither in the step.
+- At 108 MHz the PHY's timing is S6's, which has run on hardware. §2d
+  chose 100 MHz for the PHY because the core needed it; it said the PLL
+  would go to 108 if a rung found the 1.5 ns, and this is that rung.
+- Block RAM: the probe uses 166 of 340. The microcode takes 24 and could
+  take 12 as a two-port memory, or fewer with the constant columns packed
+  out; nothing here needed it.
+- Not rebuilt: the decode-ahead probes (`a2mega_accel_probe_138b`, `_s2`,
+  `_w20`, `_c32`, `_r3`) and the core-only probes. Their sources are the
+  same files; the suite runs their configurations.
+- Still open from before: the bench does not exercise the write of a step
+  completing in the clk /RESET is seen; the ROM 3 image (256 KB) has not
+  been built with the near memory; nothing invalidates the near memory if
+  the far memory is written behind the broker.
+
 ## 5. Questions for ed
 
 1. Rung 3 changes the step count per instruction. The scoping doc's
@@ -1263,3 +1433,9 @@ address-source selection behind the index adder, the flags).
    sweep to say the socket timing has the room.
 5. ROM 01 hardware: the vector-pull behaviour (`/VP`) the replica assumes
    has only been seen in simulation.
+6. The accelerator's clock. The probe now closes at 108 MHz as well as at
+   100 MHz. At 108 MHz the step is 54 MHz and the PHY is S6's, already on
+   hardware; §2d's separate 100 MHz PLL output was a concession to the
+   core. Same frequency as the HyperRAM/DOC spine does not have to mean the
+   same clock net: the accelerator domain can stay isolated at the socket
+   either way. 108 for the accelerator-only build?

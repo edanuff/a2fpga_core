@@ -1,5 +1,8 @@
 // Stock P65C816_ALU vs fast F65C816_ALU (one-hot control): every control
-// word (fstOp x secOp x fc x w16 = 256) x random L/R/CI/VI/SI/BCD.
+// word (fstOp x secOp x fc x w16 = 256) x random L/R/CI/VI/SI/BCD, except the
+// words that shift R and then use the adder (fstOp 0-3 with secOp 3, 6, 7):
+// the fast ALU takes the adder's carry in from the carry flag alone, and
+// gen_fast_mcode.py asserts the microcode has no such word.
 module tb_alu_eq;
   import P65C816_pkg::ALUCtrl_r;
   import F65C816_pkg::FALUCtrl_r;
@@ -12,6 +15,7 @@ module tb_alu_eq;
   initial begin
     for (int cw = 0; cw < 256; cw++) begin
       c0 = cw[7:0];
+      if (c0.fstOp < 3'd4 && (c0.secOp == 3'd3 || c0.secOp == 3'd6 || c0.secOp == 3'd7)) continue;
       c1.fstOp = c0.fstOp; c1.secOp = c0.secOp; c1.fc = c0.fc; c1.w16 = c0.w16;
       c1.FST = 8'd1 << c0.fstOp; c1.SEC = 8'd1 << c0.secOp;
       c1.SEL_ADD = (c0.secOp == 3'd3) | (c0.secOp == 3'd6) | (c0.secOp == 3'd7);

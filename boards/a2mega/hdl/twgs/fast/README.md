@@ -105,6 +105,36 @@ table) and rerun it; do not hand-edit the tables.
     `NS_ZERO`, `NS_INC2` and looks up both successor rows and the fetched
     opcode's first row; `NA_OUT` is evaluated for the fetch candidate and
     both successor rows (`SN`) and selected by the same decision.
+  - Rung 5 (2026-11-12), for a core that steps no faster than every second
+    clk (the broker's two-clk step). Build with `F65C816_MCODE_ROM` defined:
+    `F65C816_mcode_s` replaces `F65C816_mcode`. `IR` and `STATE` are then
+    registers a whole clk before the step ends, so both successor rows are
+    read from them in block RAM (`F65C816_mrom`, two synchronous reads of the
+    packed row table, 24 blocks) in the clk before the step ends; step 1 of
+    the fetched opcode is still a lookup from the data bus
+    (`F65C816_mst1`, 256 rows), and the decision selects as before. The
+    registered row is the same. The microcode was 4,189 of the integrated
+    probe's 7,393 LUTs; it is 448. The module stops a simulation if the
+    core is ever stepped in two successive clks; the lockstep bench runs
+    this build with `+ce2`.
+  - The same day, four cuts of logic that was in front of late signals for
+    no functional reason, each exact and each asserted where it rests on
+    the microcode table (`gen_fast_mcode.py`):
+    the next `P` takes the ALU's flags in its last level (the stock case
+    statement had them six levels down);
+    the adder's carry in is the carry flag alone (no control word shifts
+    the operand and then adds, so the operand's shifted-out bit never
+    reaches the carry chain; `tb_alu_eq.sv` skips the words that would);
+    the ALU has one result for both widths with the adder's sum ORed in
+    last, and each decimal digit is formed for both values of its carry in
+    (`tb_alu_eq.sv`, `tb_addsub_eq.sv`);
+    the address generator forms the high address byte per use (`AAH` +
+    index from registers; `DH` + index for both values of the low byte's
+    carry), and the stock `AB = D_IN + carry` (`ABSCtrl` 10), which no row
+    uses, is gone; the RTL page carry in `AddrBus.sv` is a compare, not a
+    sum.
+  - `NA_OUT_B` is `NA_OUT[13:0]` again from gates of its own, for a memory
+    whose read-address loads are far apart.
   - Memory contract (bench `+datalate`, probe `CPU_PROBE_DATALATE`): read
     port addressed by `NA_OUT`, clock-enabled by `RDY_OUT`; write port at
     `A_OUT`/`D_OUT`/`WE` on the step edge; a one-entry bypass serves a read of

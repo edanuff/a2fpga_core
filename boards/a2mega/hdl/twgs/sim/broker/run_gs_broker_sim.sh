@@ -63,9 +63,11 @@ build b108_4f +define+FAST_CORE "${FASTF[@]}" & p3=$!
 build b108_3d +define+FAST_CORE -GDATA_LATE=1 -GSTEP_CLKS=3 -GADDR_CLKS=2 -GRA_COPIES=4 "${FASTF[@]}" & p4=$!
 build b100_2d +define+FAST_CORE +define+CLK100 -GDATA_LATE=1 -GSTEP_CLKS=2 -GADDR_CLKS=1 "${FASTF[@]}" & p5=$!
 # ... and with the near memory (a 16K-entry cache in front of the card's memories, every step
-# decoded in its first clk): two-clk steps, 100 MHz = 50 MHz, 108 MHz = 54 MHz
-build b100_2x +define+FAST_CORE +define+CLK100 -GDATA_LATE=1 -GNEAR=1 -GSTEP_CLKS=2 -GADDR_CLKS=2 "${FASTF[@]}" & p8=$!
-build b108_2x +define+FAST_CORE -GDATA_LATE=1 -GNEAR=1 -GSTEP_CLKS=2 -GADDR_CLKS=2 "${FASTF[@]}" & p9=$!
+# decoded in its first clk): two-clk steps, 100 MHz = 50 MHz, 108 MHz = 54 MHz; the core with
+# its microcode's successor rows read from block RAM (F65C816_MCODE_ROM: the two-clk step is
+# what makes that possible, and the core stops the run if it is ever stepped in two successive clks)
+build b100_2x +define+FAST_CORE +define+F65C816_MCODE_ROM +define+CLK100 -GDATA_LATE=1 -GNEAR=1 -GSTEP_CLKS=2 -GADDR_CLKS=2 "${FASTF[@]}" & p8=$!
+build b108_2x +define+FAST_CORE +define+F65C816_MCODE_ROM -GDATA_LATE=1 -GNEAR=1 -GSTEP_CLKS=2 -GADDR_CLKS=2 "${FASTF[@]}" & p9=$!
 bfail=0
 wait $p1 || { echo "verilator FAILED (b108_4) - see $OUT/verilate_b108_4.log"; grep -E "%Error|error:" "$OUT/verilate_b108_4.log" | head -20; bfail=1; }
 wait $p2 || { echo "verilator FAILED (b100_2) - see $OUT/verilate_b100_2.log"; grep -E "%Error|error:" "$OUT/verilate_b100_2.log" | head -20; bfail=1; }

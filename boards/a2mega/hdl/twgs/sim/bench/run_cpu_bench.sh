@@ -9,6 +9,8 @@
 #   +rom=<boot1.rom>  ROM 01 boot stress instead of a program
 #   +datalate       DUT on a synchronous memory addressed one step ahead (NA_OUT)
 #   +stall +trace +vcd +cycles=N   see tb_cpu_bench.sv
+#   +ce2            both cores step every second clk at most
+#   +define+F65C816_MCODE_ROM   build the DUT with its microcode in block RAM (needs +ce2)
 # Env: OUT (work dir, default ${TMPDIR:-/tmp}/cpu_bench)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -20,9 +22,11 @@ mkdir -p "$OUT"
 
 PROG="$HERE/prog/bench_all.s"
 ARGS=()
+VDEFS=()
 for a in "$@"; do
     case "$a" in
         *.s) PROG="$a" ;;
+        +define+*) VDEFS+=( "$a" ) ;;
         *)   ARGS+=( "$a" ) ;;
     esac
 done
@@ -35,7 +39,7 @@ FILES=( "$STOCK/P65C816_pkg.sv" "$STOCK/mcode.sv" "$STOCK/bit_adder.v" "$STOCK/a
 
 verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
     --top-module tb_cpu_bench --Mdir "$OUT/obj" -o Vtb_cpu_bench \
-    --trace --trace-depth 3 -O3 \
+    --trace --trace-depth 3 -O3 "${VDEFS[@]+"${VDEFS[@]}"}" \
     "${FILES[@]}" > "$OUT/verilate.log" 2>&1
 rc=$?
 if [[ $rc -ne 0 ]]; then

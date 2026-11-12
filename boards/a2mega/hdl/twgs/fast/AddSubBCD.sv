@@ -5,7 +5,8 @@
 //  behavioral add; rung 2d:
 //    * the byte carry from a parallel low-byte chain (native, no XOR level);
 //    * decimal-add carries by a flat generate/propagate lookahead
-//      (two LUT levels after the nibble sums instead of a 4-deep chain).
+//      (two LUT levels after the nibble sums instead of a 4-deep chain);
+//    * (S7) each decimal digit formed for both values of its carry in.
 //  Bit-exact with P65C816_AddSubBCD for every input (tb_addsub_eq.sv).
 //
 //  Original per-nibble semantics (T = A + B2 + cin, B2 = ADD ? B : ~B):
@@ -56,7 +57,9 @@ module F65C816_AddSubBCD
                          s1 + (bc2 ? 4'd0 : 4'd10),
                          s0 + (bc1 ? 4'd0 : 4'd10) };
 
-   // ---- BCD add: flat decimal carry lookahead, digits in parallel
+   // ---- BCD add: flat decimal carry lookahead; each digit is formed for both values
+   // of its carry in, from the digit sum alone, and the carry selects (S7: the stock
+   // order - add the carry, then add 6 - was two more adders behind the lookahead)
    wire [4:0] t0 = {1'b0, A[3:0]}   + {1'b0, B[3:0]};
    wire [4:0] t1 = {1'b0, A[7:4]}   + {1'b0, B[7:4]};
    wire [4:0] t2 = {1'b0, A[11:8]}  + {1'b0, B[11:8]};
@@ -69,14 +72,21 @@ module F65C816_AddSubBCD
    wire dc2 = g1 | (p1 & g0) | (p1 & p0 & CI);
    wire dc3 = g2 | (p2 & g1) | (p2 & p1 & g0) | (p2 & p1 & p0 & CI);
    wire dc4 = g3 | (p3 & g2) | (p3 & p2 & g1) | (p3 & p2 & p1 & g0) | (p3 & p2 & p1 & p0 & CI);
-   wire [3:0] u0 = t0[3:0] + {3'd0, CI};     // uncorrected nibble sums (mod 16)
-   wire [3:0] u1 = t1[3:0] + {3'd0, dc1};
-   wire [3:0] u2 = t2[3:0] + {3'd0, dc2};
-   wire [3:0] u3 = t3[3:0] + {3'd0, dc3};
-   wire [15:0] add_s = { u3 + (dc4 ? 4'd6 : 4'd0),
-                         u2 + (dc3 ? 4'd6 : 4'd0),
-                         u1 + (dc2 ? 4'd6 : 4'd0),
-                         u0 + (dc1 ? 4'd6 : 4'd0) };
+   // {bit 3 of the uncorrected digit (t + c) mod 16, the digit: + 6 when t + c >= 10}
+   function automatic [4:0] dig(input [4:0] t, input c);
+      logic [5:0] w;
+      logic [3:0] u;
+      begin
+         w = {1'b0, t} + {5'd0, c};
+         u = w[3:0];
+         dig = {u[3], (w >= 6'd10) ? (u + 4'd6) : u};
+      end
+   endfunction
+   wire [4:0] d0 = CI  ? dig(t0, 1'b1) : dig(t0, 1'b0);
+   wire [4:0] d1 = dc1 ? dig(t1, 1'b1) : dig(t1, 1'b0);
+   wire [4:0] d2 = dc2 ? dig(t2, 1'b1) : dig(t2, 1'b0);
+   wire [4:0] d3 = dc3 ? dig(t3, 1'b1) : dig(t3, 1'b0);
+   wire [15:0] add_s = {d3[3:0], d2[3:0], d1[3:0], d0[3:0]};
 
    // ---- select
    wire bcd_add = BCD & ADD;
@@ -87,8 +97,8 @@ module F65C816_AddSubBCD
    wire co16 = bcd_add ? dc4 : bc4;
    assign CO = w16 ? co16 : co8;
 
-   wire s7  = bcd_add ? u1[3] : s1[3];
-   wire s15 = bcd_add ? u3[3] : s3[3];
+   wire s7  = bcd_add ? d1[4] : s1[3];
+   wire s15 = bcd_add ? d3[4] : s3[3];
    wire vo8  = ~(A[7]  ^ B2[7])  & (A[7]  ^ s7);
    wire vo16 = ~(A[15] ^ B2[15]) & (A[15] ^ s15);
    assign VO = w16 ? vo16 : vo8;

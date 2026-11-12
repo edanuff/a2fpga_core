@@ -330,6 +330,9 @@ module tb_gs_broker #(
     logic       rdy_q = 1'b1;
     logic [7:0] alt_qq = 8'h00;
     longint     t_alt = 0;
+    logic [2:0] il_q = 3'b111;
+    longint     t_il = 0;
+    wire  [2:0] il_now = {cpu_irq_n, cpu_nmi_n, cpu_abort_n};
     wire  [2:0] sel_now = {u_brk.near_r, u_brk.use_lm_r, u_brk.rom_r};
     always_ff @(posedge clk) begin
         clk_no <= clk_no + 1;
@@ -375,12 +378,21 @@ module tb_gs_broker #(
         // registered) and the first clk it showed its present value
         alt_qq <= u_brk.alt_q;
         if (alt_qq != u_brk.alt_q) t_alt <= clk_no;
+        // near memory: the interrupt lines the core sees (held from step to step in
+        // fast mode; in native mode the pads of the PHI2 fall, registered) and the
+        // first clk they showed their present value
+        il_q <= il_now;
+        if (il_q != il_now) t_il <= clk_no;
         if (cpu_ce) begin
             t_ce <= clk_no;
             if (NEAR && u_brk.rd_step && !u_brk.near_r && u_brk.run_c &&
                 (alt_qq != u_brk.alt_q || clk_no - t_alt < 1)) begin
                 $display("ERROR: the core's data register changed %0d clks before the step (socket %0d)",
                          clk_no - t_alt, !u_brk.use_lm_r); $finish;
+            end
+            if (NEAR && u_brk.run_c && (il_q != il_now || clk_no - t_il < 1)) begin
+                $display("ERROR: the core's interrupt lines changed %0d clks before the step (native %0d)",
+                         clk_no - t_il, u_brk.mode_native); $finish;
             end
             if (brk_fast && clk_no - t_ce < STEP_CLKS) begin
                 $display("ERROR: fast-mode steps %0d clks apart (STEP_CLKS %0d)", clk_no - t_ce, STEP_CLKS); $finish;

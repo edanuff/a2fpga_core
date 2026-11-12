@@ -46,6 +46,10 @@ def expand_alu(a):
     fst, sec = int(a[0:3], 2), int(a[3:6], 2)
     return f"{1 << fst:08b}{1 << sec:08b}{int(sec in (3, 6, 7))}" + a
 
+# the fast ALU's adder takes its carry in from the carry flag alone (ALU.sv): no control
+# word may put a shift (fstOp 0-3: its carry out is a bit of the operand) in front of the adder
+for a in alu_bits:
+    assert not (int(a[3:6], 2) in (3, 6, 7) and int(a[0:3], 2) < 4), a
 AF_FETCH = "25'b" + expand_alu(alu_bits[0])
 FIELD_ALUCTRL, FIELD_REGAXY, FIELD_BUSCTRL, FIELD_BYTESEL = 12, 9, 11, 13   # MicroInst_r field order
 
@@ -180,6 +184,10 @@ out = out.replace(a, a + "              SN <= SUCC_TAB[({IR, STATE2[2:0]})];\n")
 # before: a step that loads AA/AB, DX, SP or PBR is never followed by an access through
 # that register with a nonzero increment.  Asserted here, row by row.
 F_ADDRCTRL, F_MUXCTRL, F_LOADSP = 6, 5, 8
+# AddrGen.sv forms the high address byte per use and drops the stock "AB = D_IN + the high
+# byte's carry" (ABSCtrl 10), which put the low byte's carry in front of the bank: no row uses it.
+for i, f in enumerate(FLD):
+    assert 'X' in f[F_ADDRCTRL] or f[F_ADDRCTRL][6:8] != '10', (hex(i >> 3), i & 7, f[F_ADDRCTRL])
 AA_MODES, DX_MODES, SP_MODES = {'0001', '0101', '0010', '0110'}, {'0011', '0111'}, {'1000', '1100'}
 for i, f in enumerate(FLD):
     if 'X' in f[F_STATECTRL]: continue
@@ -264,6 +272,84 @@ blk = ("   wire [2:0] S_P1 = STATE[2:0] + 3'd1;\n"
        "      end\n   end\n\n")
 out = out[:b0] + blk + out[b1:]
 
-out = out.rstrip("\n") + naf_mod + st1_mod
+# ---- rung 5: the successor rows from block RAM (F65C816_mcode_s) ----
+# With the core stepping no faster than every second clk (the two-clk step), IR and
+# STATE are registers a whole clk before the step ends, so the two successor rows can
+# be READ from them in a synchronous memory in the step's last clk but one, instead of
+# looked up in LUTs: the table is most of the core's logic.  Step 1 of the opcode on
+# the bus is still a lookup from the data (256 rows), and the late decision selects as
+# before.  A row is {MI, AF, XT, SN}; "don't care" bits are zero in the memory.
+def packed(i, keep_x=False):
+    r = bits(rows[i]) + af[i][4:] + xt[i][4:] + succ[i][4:]
+    assert len(r) == 127, (i, len(r))
+    return r.lower() if keep_x else r.replace('X', '0').replace('x', '0')
+FETCH_ROW = bits(FETCH_MI.strip("{}")) + AF_FETCH[4:] + FETCH_XT[4:].replace('_', '') + "0" * 24
+assert len(FETCH_ROW) == 127 and set(FETCH_ROW) <= {'0', '1'}
+m_new = "   assign M = {XT[24:17], XT[16:11], XT[10], XT[9], XT[8], XT[7:0], ALUFlags, MI.stateCtrl,"
+m_line = [l for l in out.split("\n") if l.startswith(m_new)]
+assert len(m_line) == 1
+sync_mod = ("\n\n// S7 rung 5: the microcode table as a synchronous memory with two read ports' worth\n"
+            "// of rows (see gen_fast_mcode.py); block RAM.\n"
+            "module F65C816_mrom\n  (\n   input                CLK,\n   input [10:0]         AA,\n   input [10:0]         AB,\n"
+            "   output logic [126:0] QA,\n   output logic [126:0] QB\n"
+            "   ) /* synthesis syn_romstyle = \"block_rom\" */;\n"
+            "   localparam logic [126:0] ROW_TAB[0:2047] = '{\n" + ",\n".join("      127'b" + packed(i) for i in range(2048)) + "\n   };\n"
+            "   always @(posedge CLK) QA <= ROW_TAB[AA];\n"
+            "   always @(posedge CLK) QB <= ROW_TAB[AB];\n"
+            "endmodule\n"
+            "\n\n// S7 rung 5: step 1 of each opcode, the whole row, a lookup from the data bus\n"
+            "module F65C816_mst1\n  (\n   input [7:0]    IR,      // the opcode being fetched\n   output [126:0] Q\n"
+            "   ) /* synthesis syn_romstyle = \"logic\" */;\n"
+            "   localparam logic [126:0] ST1ROW_TAB[0:255] = '{\n" + ",\n".join("      127'b" + packed(ir << 3, True) for ir in range(256)) + "\n   };\n"
+            "   assign Q = ST1ROW_TAB[IR];\n"
+            "endmodule\n"
+            "\n\n// S7 rung 5: F65C816_mcode for a core that steps no faster than every second clk.\n"
+            "// The successor rows of the registered row are read from block RAM in the clk before\n"
+            "// the step ends (IR and STATE are registers: the address is steady from the step's\n"
+            "// first clk); step 1 of the fetched opcode is a lookup from the data bus; the\n"
+            "// NextState decision selects.  Same ports and the same registered row as\n"
+            "// F65C816_mcode, which is the reference (the lockstep bench runs either).\n"
+            "module F65C816_mcode_s\n  (\n   input       CLK,\n   input       RST_N,\n   input       EN,\n"
+            "   input [7:0] IR,          // registered opcode\n"
+            "   input [3:0] STATE,       // registered state\n"
+            "   input [7:0] NIR,         // fetch step: the opcode on the data bus (00 for an interrupt)\n"
+            "   input       NS_ZERO,     // the next state is 0 (fetch)\n"
+            "   input       NS_INC2,     // the next state is STATE + 2 (else STATE + 1)\n"
+            "   output FMCode_r   M,\n"
+            "   output logic [23:0] SN    // {NAF of row st+1, NAF of row st+2} of the registered row\n"
+            "   );\n"
+            "   localparam logic [126:0] FETCH_ROW = 127'b" + FETCH_ROW + ";\n"
+            "   wire [2:0]   S_P1 = STATE[2:0] + 3'd1;\n"
+            "   wire [126:0] qa, qb, q1;\n"
+            "   F65C816_mrom Rom(.CLK(CLK), .AA({IR, STATE[2:0]}), .AB({IR, S_P1}), .QA(qa), .QB(qb));\n"
+            "   F65C816_mst1 St1(.IR(NIR), .Q(q1));\n"
+            "   // (the fetch step's own decision is always \"the next state is 1\": its row has\n"
+            "   // STATE_CTRL 000, so NS_ZERO and NS_INC2 are 0 there and need no qualifying)\n"
+            "   wire [126:0] early = (STATE == 4'b0000) ? q1 : qa;\n"
+            "   logic [126:0] R;\n"
+            "   always @(posedge CLK or negedge RST_N)\n"
+            "      if (RST_N == 1'b0)   R <= FETCH_ROW;\n"
+            "      else if (EN == 1'b1) R <= NS_ZERO ? FETCH_ROW : NS_INC2 ? qb : early;\n"
+            "   FMicroInst_r MI;\n   FALUCtrl_r   AF, ALUFlags;\n   logic [24:0] XT;\n"
+            "   assign {MI, AF, XT, SN} = R;\n"
+            "   assign ALUFlags = AF;\n"
+            + m_line[0] + "\n"
+            "`ifdef VERILATOR\n"
+            "   // the memory is read in the clk before the step ends: never two steps in two clks,\n"
+            "   // and the fetch step never asks for anything but step 1\n"
+            "   logic en_q;\n"
+            "   always @(posedge CLK or negedge RST_N)\n"
+            "      if (RST_N == 1'b0) en_q <= 1'b0;\n"
+            "      else begin\n"
+            "         en_q <= EN;\n"
+            "         if (EN && en_q) begin $display(\"ERROR: F65C816_mcode_s stepped in two successive clks @%0t\", $time); $finish; end\n"
+            "         if (EN && STATE == 4'b0000 && (NS_ZERO || NS_INC2)) begin\n"
+            "            $display(\"ERROR: F65C816_mcode_s: fetch step with NS_ZERO %b NS_INC2 %b @%0t\", NS_ZERO, NS_INC2, $time); $finish;\n"
+            "         end\n"
+            "      end\n"
+            "`endif\n"
+            "endmodule\n")
+
+out = out.rstrip("\n") + naf_mod + st1_mod + sync_mod
 DST.write_text(out)
 print(f"wrote {DST}: {len(af)} rows, {sum('x' in a for a in af)} X rows")

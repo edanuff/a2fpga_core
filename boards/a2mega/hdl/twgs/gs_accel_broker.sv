@@ -339,10 +339,19 @@ module gs_accel_broker #(
     // copies hold the pads of its fall)
     // (near memory: ... and held from one core step to the next, irq_h below - the
     // core's next status hangs off the lines, and the step registers off that)
+    // (near memory, native: irq_e - the PH2-domain flops registered in every clk,
+    // like alt_q for the data byte.  They show the pads of a fall from the second
+    // clk edge after it, the fall event is the clk after that and the step the clk
+    // after the event: the same sample irq_c has at the step, two clks sooner.)
     logic irq_h, nmi_h, abort_h;
-    assign cpu_irq_n_o   = mode_native ? irq_c   : NEAR ? irq_h   : irq_s[1];
-    assign cpu_nmi_n_o   = mode_native ? nmi_c   : NEAR ? nmi_h   : nmi_s[1];
-    assign cpu_abort_n_o = mode_native ? abort_c : NEAR ? abort_h : abort_s[1];
+    logic irq_e, nmi_e, abort_e;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin irq_e <= 1'b1; nmi_e <= 1'b1; abort_e <= 1'b1; end
+        else        begin irq_e <= irq_f; nmi_e <= nmi_f; abort_e <= abort_f; end
+    end
+    assign cpu_irq_n_o   = NEAR ? (mode_native ? irq_e   : irq_h)   : mode_native ? irq_c   : irq_s[1];
+    assign cpu_nmi_n_o   = NEAR ? (mode_native ? nmi_e   : nmi_h)   : mode_native ? nmi_c   : nmi_s[1];
+    assign cpu_abort_n_o = NEAR ? (mode_native ? abort_e : abort_h) : mode_native ? abort_c : abort_s[1];
 
     //=========================================================================
     // Reset: follow the PHY's view of /RES, re-registered at the fall event
@@ -403,12 +412,16 @@ module gs_accel_broker #(
     wire         internal = !DATA_LATE ? internal_l : pl_int;
     wire         io_int   = !DATA_LATE ? io_int_l   : pl_io_int;
     wire         eff_we   = !DATA_LATE ? eff_we_l   : pl_we;
-    // ea_r: the step's effective address as a register, loaded when the core
-    // steps (the next address; kept when the next step is an internal cycle
-    // aimed at I/O space, which repeats this step's address).  With the status
-    // registers it IS a data-late step's socket request.
-    logic [23:0] ea_r;
-    wire [23:0]  eff_addr = DATA_LATE ? ea_r : (io_int ? prev_addr : cpu_a_i);
+    // The step's effective address, from registers loaded when the core steps:
+    // ea_r is the next address as the core gives it; a step that is an internal
+    // cycle aimed at I/O space (pl_io_int) repeats the address of the step before
+    // it, which ea_k keeps.  With the status registers it IS a data-late step's
+    // socket request.  (The choice is made here, behind registers, and not in what
+    // ea_r loads: that put the I/O-space compare of the core's next address, its
+    // latest output, in front of 24 enables.)
+    logic [23:0] ea_r, ea_k;
+    logic        ea_kfi;             // ea_k is not in $Cxxx
+    wire [23:0]  eff_addr = !DATA_LATE ? (io_int ? prev_addr : cpu_a_i) : pl_io_int ? ea_k : ea_r;
     // the next step's address aims an internal cycle at I/O space
     wire         nx_io_int = cpu_nst_i[0] & (cpu_na_i[15:8] == 8'hC0) &
                              ((cpu_na_i[23:17] == 7'd0) | (cpu_na_i[23:17] == 7'h70));
@@ -417,7 +430,7 @@ module gs_accel_broker #(
     logic [23:0] r_phys;
     logic [17:0] r_rom_addr;
     logic        r_local, r_fwd, r_local_we, r_local_rom, r_side;
-    logic        r_fast_rw, r_fast_int, r_fast_rom, r_fast_aux, r_fast_fold;
+    logic        r_fast_rw, r_fast_int_a, r_fast_rom, r_fast_aux, r_fast_fold;
     logic [1:0]  r_fast_rbank;
     logic [23:0] pf_phys;
     logic [17:0] pf_rom_addr;
@@ -438,11 +451,12 @@ module gs_accel_broker #(
         // direct decode is made from the registered status, not the core's outputs
         .cyc_stb_i(DATA_LATE ? cyc_stb_q : cyc_stb), .cyc_addr_i(fl_addr), .cyc_we_i(fl_we), .cyc_wdata_i(fl_data),
         .acc_addr_i(DATA_LATE ? eff_addr : eff_addr_l), .acc_we_i(DATA_LATE ? eff_we : eff_we_l),
+        .acc_faddr_i(ea_r),
         .acc_vpb_n_i(DATA_LATE ? (pl_vp_n | pl_io_int) : (cpu_vp_n_i | io_int_l)),
         .acc_region_o(r_region), .acc_phys_o(r_phys), .acc_local_o(r_local),
         .acc_forward_write_o(r_fwd), .acc_local_we_o(r_local_we), .acc_local_rom_o(r_local_rom),
         .acc_rom_addr_o(r_rom_addr), .acc_side_effect_o(r_side),
-        .acc_fast_rw_o(r_fast_rw), .acc_fast_int_o(r_fast_int), .acc_fast_rom_o(r_fast_rom),
+        .acc_fast_rw_o(r_fast_rw), .acc_fast_int_o(r_fast_int_a), .acc_fast_rom_o(r_fast_rom),
         .acc_fast_rbank_o(r_fast_rbank), .acc_fast_aux_o(r_fast_aux), .acc_fast_fold_o(r_fast_fold),
         .pf_addr_i(cpu_na_i), .pf_phys_o(pf_phys), .pf_rom_addr_o(pf_rom_addr),
         .pf_local_o(pf_local), .pf_local_rom_o(pf_local_rom), .pf_side_o(pf_side),
@@ -541,7 +555,9 @@ module gs_accel_broker #(
             end
             2'b01: if (DATA_LATE) begin
                 // (VPA / VDA: only "internal or not" matters to the PHY)
-                phy_a_o = ea_r;     phy_d_out_o = sreq_data;  phy_we_n_o = ~pl_we;
+                // (ea_k: the effective address from a register - it is that from the
+                // step's second clk, and the request is not raised before then)
+                phy_a_o = ea_k;     phy_d_out_o = sreq_data;  phy_we_n_o = ~pl_we;
                 phy_vpa_o = ~pl_io_int & ~pl_int;  phy_vda_o = pl_io_int | ~pl_int;
                 phy_vp_n_o = pl_io_int | pl_vp_n;
             end else begin
@@ -644,14 +660,22 @@ module gs_accel_broker #(
     // (a write to the launched index: the core's, in the clk after it was registered,
     // or a fill - compared register against register, not through the write port's mux)
     wire                  nl_wr;            // (assigned below, with the write registers)
-    wire                  nl_good = nl_ok & ~nl_wr;
+    // (a write made in the very clk of the launch: its index is kept with the
+    // launch's and compared in the step's first clk, not behind the core's next address)
+    logic                 lw_r;
+    logic [NEAR_AW-1:0]   lwa_r;
+    wire                  nl_good = nl_ok & ~nl_wr & ~(lw_r & (lwa_r == nl_idx));
     wire                  nh_d   = nl_good & ~r_nc & (nm_rtag_i == r_tag);
     logic                 nh_dq;            // ... registered for the sequencer (the full decode's tag)
     // the cheap view's tag for the step: ROM bank and A14-A15, or RAM bank bit 0,
     // A14-A15 and the language-card fold (banks 00/01 only, never $Cxxx)
-    wire  [23:0]          f_phys = {7'd0, r_fast_aux, eff_addr[15:13], eff_addr[12] ^ r_fast_fold, eff_addr[11:0]};
-    wire  [NTW-1:0]       f_tag  = r_fast_rom ? nm_tag(1'b1, 24'd0, {r_fast_rbank, eff_addr[15:14]}, 1'b0)
-                                              : nm_tag(1'b0, f_phys, 4'd0, eff_addr[12]);
+    // (the cheap view is of ea_r itself: a read or a write is never the repeated
+    // address; an internal cycle that is has ea_r in $C0xx, and the cheap view of
+    // the address it repeats is the one bit ea_kfi)
+    wire                  r_fast_int = r_fast_int_a | (pl_io_int & ea_kfi);
+    wire  [23:0]          f_phys = {7'd0, r_fast_aux, ea_r[15:13], ea_r[12] ^ r_fast_fold, ea_r[11:0]};
+    wire  [NTW-1:0]       f_tag  = r_fast_rom ? nm_tag(1'b1, 24'd0, {r_fast_rbank, ea_r[15:14]}, 1'b0)
+                                              : nm_tag(1'b0, f_phys, 4'd0, ea_r[12]);
     // (near memory: the far memories' output registers are not reused - a write
     // may still be on its way to them when the next step is decoded)
     wire  ld_hit    = NEAR ? ((nh_dq ^ aq_bad) & near_r) : (fresh_ok | (DATA_LATE ? aq_hit ^ aq_bad : r_hit));
@@ -789,13 +813,34 @@ module gs_accel_broker #(
         end
     end
 
-    // ea_r: loaded at every step the core takes; a step that is an internal cycle
-    // aimed at I/O space keeps the address before it (in the data, not the enable:
-    // that condition hangs off the interrupt lines through the core's next status).
+    // ea_r and the next step's status: loaded at every step the core takes.  Out of
+    // reset: the core's address, and the status of its first step - a read, not
+    // internal.  (On run_c, the registered view of the reset, not run_now: these
+    // registers then hang off the core alone and not off the PHY's fall event too.
+    // They are a clk later into their reset values than the sequencer, in a clk in
+    // which nothing uses them.)
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n)                                 ea_r <= '0;
-        else if (!run_now)                          ea_r <= cpu_a_i;
-        else if (DATA_LATE & cpu_ce_o & cpu_rdy_i)  ea_r <= nx_io_int ? ea_r : cpu_na_i;
+        if (!rst_n) begin
+            ea_r <= '0;
+            pl_int <= 1'b0; pl_we <= 1'b0; pl_vp_n <= 1'b1; pl_io_int <= 1'b0;
+        end else if (!run_c) begin
+            ea_r <= cpu_a_i;
+            pl_int <= 1'b0; pl_we <= 1'b0; pl_vp_n <= 1'b1; pl_io_int <= 1'b0;
+        end else if (DATA_LATE & cpu_ce_o & cpu_rdy_i) begin
+            ea_r      <= cpu_na_i;
+            pl_int    <= cpu_nst_i[0];
+            pl_we     <= ~cpu_nst_i[1] & ~nx_io_int;
+            pl_vp_n   <= cpu_nst_i[2];
+            pl_io_int <= nx_io_int;
+        end
+    end
+    // ea_k follows the effective address in every clk, with no enable: in a step
+    // that repeats an address that is ea_k itself (a run of internal cycles aimed at
+    // I/O space keeps repeating the address before the first of them), in any other
+    // it is ea_r, a clk behind - and a step is never shorter than two clks.
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin ea_k <= '0; ea_kfi <= 1'b0; end
+        else        begin ea_k <= eff_addr; ea_kfi <= (eff_addr[15:12] != 4'hC); end
     end
 
     // Registers that only carry data, each qualified by a flag the block below
@@ -810,7 +855,7 @@ module gs_accel_broker #(
             aq_phys <= '0; aq_rom_addr <= '0; aq_hit <= 1'b0;
             alt_q <= '0;
             fill_idx <= '0; fill_tag <= '0; fill_ok <= 1'b0;
-            wa_r <= '0; wd_r <= '0; widx_r <= '0; wtag_r <= '0; nl_idx <= '0;
+            wa_r <= '0; wd_r <= '0; widx_r <= '0; wtag_r <= '0; nl_idx <= '0; lw_r <= 1'b0; lwa_r <= '0;
         end else begin
             // the decode of the next step, registered with the launch of its read
             if (pf_launch) begin
@@ -836,12 +881,19 @@ module gs_accel_broker #(
             // the core's other data source: far memory data, or the socket byte (d_f:
             // PHI2-fall flops, steady for a clk and more before the core takes it)
             alt_q <= use_lm_r ? far_rdata : d_f;
-            if (NEAR & wen_set) begin
+            // (loaded in every clk: they are used in the clk after wen_set alone, with
+            // wen_r, so the write decision - the PHY's fall event in native mode, the
+            // sequencer otherwise - is on one register and not on these enables)
+            if (NEAR) begin
                 wd_r <= cpu_d_out_i;
-                if (wen_fast) begin wa_r <= f_phys; widx_r <= eff_addr[NEAR_AW-1:0]; wtag_r <= f_tag; end
+                if (wen_fast) begin wa_r <= f_phys; widx_r <= ea_r[NEAR_AW-1:0];     wtag_r <= f_tag; end
                 else          begin wa_r <= d_phys; widx_r <= w_idx;                 wtag_r <= w_tag; end
             end
-            if (NEAR & cpu_ce_o) nl_idx <= cpu_na_i[NEAR_AW-1:0];
+            if (NEAR & cpu_ce_o) begin
+                nl_idx <= cpu_na_i[NEAR_AW-1:0];
+                lw_r   <= nm_wen_o;
+                lwa_r  <= nm_wa_o;
+            end
             // what the memories' output registers hold
             if (lm_ren) begin
                 ld_phys <= lm_raddr_o;
@@ -866,7 +918,6 @@ module gs_accel_broker #(
             ml_go <= 1'b0; ml_sel_r <= 1'b0; ml_sel_c <= '0; wen_r <= 1'b0; wen_c <= '0; ren_r <= 1'b0; ren_c <= '0;
             ml_apply <= 1'b0; ml_use <= 1'b0; ml_romsel <= 1'b0;
             ce_r <= 1'b0; ce_c <= '0; sc <= '0; pl_fresh <= 1'b0; cfg_q <= '0; sw_touch_q <= 1'b0;
-            pl_int <= 1'b0; pl_we <= 1'b0; pl_vp_n <= 1'b1; pl_io_int <= 1'b0;
             ev_hit <= 1'b0; ev_miss <= 1'b0; ev_pww <= 1'b0;
             near_r <= 1'b0; fill_pend <= 1'b0; nfill_r <= 1'b0;
             fa_q <= 1'b0; fb_q <= 1'b0; fh_q <= 1'b0; fa_c <= '0; fb_c <= '0; fh_c <= '0; nh_dq <= 1'b0; nl_ok <= 1'b0;
@@ -883,8 +934,6 @@ module gs_accel_broker #(
             wen_r <= NEAR & wen_set;  wen_c <= {RA_COPIES{NEAR & wen_set}};
             ren_r <= 1'b0; ren_c <= '0;
             fa_q <= 1'b0; fb_q <= 1'b0; fh_q <= 1'b0; fa_c <= '0; fb_c <= '0; fh_c <= '0; nh_dq <= 1'b0; nl_ok <= 1'b0;
-            // the status of the core's first step out of reset: a read, not internal
-            pl_int <= 1'b0; pl_we <= 1'b0; pl_vp_n <= 1'b1; pl_io_int <= 1'b0;
             ce_r <= 1'b0; ce_c <= '0; sc <= '0; pl_fresh <= 1'b0; sw_touch_q <= 1'b0;
             ev_hit <= 1'b0; ev_miss <= 1'b0; ev_pww <= 1'b0;
             near_r <= 1'b0; fill_pend <= 1'b0; nfill_r <= 1'b0;
@@ -921,7 +970,7 @@ module gs_accel_broker #(
             nh_dq    <= nh_d;
             // what the near memory's output register holds: good from a launch the
             // core took, until that index is written
-            if (cpu_ce_o)                                  nl_ok <= NEAR & cpu_rdy_i & ~(nm_wen_o & (nm_wa_o == nm_ra_o));
+            if (cpu_ce_o)                                  nl_ok <= NEAR & cpu_rdy_i;
             else if (NEAR & nl_wr)                         nl_ok <= 1'b0;
             nfill_r  <= NEAR & fill_pend & fill_ok & (st == ST_DATA) & (ph == 4'd2);
             if (nfill_r | cpu_ce_o) fill_pend <= 1'b0;
@@ -950,13 +999,7 @@ module gs_accel_broker #(
             if (sw_touch_q | (cfg_q != {cxrom_local_i, exp_banks_i})) pl_fresh <= 1'b0;
             else if (pf_launch)                                     pl_fresh <= cpu_rdy_i & ~NEAR;
             else if (cpu_ce_o)                                      pl_fresh <= 1'b0;
-            // the next step's status, every time the core steps
-            if (DATA_LATE & cpu_ce_o & cpu_rdy_i) begin
-                pl_int    <= cpu_nst_i[0];
-                pl_we     <= ~cpu_nst_i[1] & ~nx_io_int;
-                pl_vp_n   <= cpu_nst_i[2];
-                pl_io_int <= nx_io_int;
-            end
+            // (the next step's status: with ea_r, above)
 
             ev_hit  <= (mem_evt & lm_read & ~(DATA_LATE ? rd_slow : rd_launch)) | (fast_q & ~internal & ~eff_we);
             ev_miss <= mem_evt & lm_read &  (DATA_LATE ? rd_slow : rd_launch);
@@ -1053,7 +1096,11 @@ module gs_accel_broker #(
     //=========================================================================
     // Verify (native, card memory of record) and statistics
     //=========================================================================
-    wire vfy_miss = sync_done & vfy_r & (d_f != lm_rdata);
+    // (the card's byte is registered for the compare: it has been steady since long
+    // before the PHI2 fall, and the compare hangs off the near memory's output otherwise)
+    logic [7:0] vfy_d;
+    always_ff @(posedge clk) vfy_d <= lm_rdata;
+    wire vfy_miss = sync_done & vfy_r & (d_f != vfy_d);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -1063,7 +1110,7 @@ module gs_accel_broker #(
         end else begin
             verify_miss_o <= vfy_miss;
             if (vfy_miss) begin
-                verify_addr_o <= DATA_LATE ? ea_r : sreq_addr;
+                verify_addr_o <= DATA_LATE ? eff_addr : sreq_addr;
                 if (verify_count_o != 16'hFFFF) verify_count_o <= verify_count_o + 16'd1;
             end
             if (cpu_ce_o)  stat_steps_o  <= stat_steps_o + 32'd1;
@@ -1089,6 +1136,17 @@ module gs_accel_broker #(
             $finish;
         end
     end
+    // The cheap view is taken of ea_r, the full decode of the effective address:
+    // the two addresses differ only on an internal cycle that repeats an address,
+    // and there the one thing the cheap view is asked is the same.
+    always @(posedge clk) if (rst_n && run_c && DATA_LATE) begin
+        if ((!pl_io_int && eff_addr !== ea_r) || (pl_io_int && (!pl_int || pl_we || ea_r[15:8] !== 8'hC0)) ||
+            r_fast_int !== (eff_addr[15:12] != 4'hC)) begin
+            $display("ERROR: the cheap view's address: ea_r %06h ea_k %06h io_int %b int %b we %b fast_int %b @%0t",
+                     ea_r, ea_k, pl_io_int, pl_int, pl_we, r_fast_int, $time);
+            $finish;
+        end
+    end
     initial if (NEAR && (!DATA_LATE || ADDR_CLKS != 2 || STEP_CLKS < 2 || NEAR_AW < 14 || NEAR_KW < 4 || NEAR_KW > 10)) begin
         $display("ERROR: NEAR needs DATA_LATE, ADDR_CLKS = 2, STEP_CLKS >= 2, NEAR_AW >= 14 and 4 <= NEAR_KW <= 10"); $finish;
     end
@@ -1105,7 +1163,7 @@ module gs_accel_broker #(
     always @(posedge clk) if (rst_n && run_c && (strobe || mem_evt)) begin
         if (internal !== internal_l || io_int !== io_int_l || eff_we !== eff_we_l ||
             (DATA_LATE && (pl_vp_n | pl_io_int) !== (cpu_vp_n_i | io_int_l)) ||
-            (DATA_LATE && ea_r !== eff_addr_l) ||
+            (DATA_LATE && eff_addr !== eff_addr_l) ||
             (fresh_ok && !cpu_vp_n_i)) begin
             $display("ERROR: broker step status differs from the core's: int %b/%b io_int %b/%b we %b/%b vp_n %b fresh %b @%0t",
                      internal, internal_l, io_int, io_int_l, eff_we, eff_we_l, cpu_vp_n_i, fresh_ok, $time);

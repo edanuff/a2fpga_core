@@ -207,10 +207,11 @@ def generate_near(PERIOD, fname):
     for to in (CORE, STEPR):
         mc(2, regs(*MODE), to)
     note("""
-        ---- the interrupt lines the core sees in fast mode are held from one core step
-        to the next""")
+        ---- the interrupt lines the core sees: in fast mode held from one core step to
+        the next; in native mode the pads of the PHI2 fall, in a register from the
+        second clk edge after it, two clks before the step""")
     for to in (CORE, STEPR):
-        mc(2, regs(*brk("irq_h", "nmi_h", "abort_h")), to)
+        mc(2, regs(*brk("irq_h", "nmi_h", "abort_h", "irq_e", "nmi_e", "abort_e")), to)
     note("""
         ---- (stated, not relaxed) the core's clock enable is one gate behind registers,
         and reaches the core in one clk""")
@@ -221,7 +222,7 @@ def generate_near(PERIOD, fname):
         copy and the tag compare made from it, used from the step's third clk""")
     FULL = regs(*brk("aq_", "nh_dq"))
     # (not nl_ok: a write in the step's first clk clears it, and the compare must see that in the second)
-    mc(2, regs(*brk("ea_r", "pl_int", "pl_we", "pl_vp_n", "pl_io_int")), FULL)
+    mc(2, regs(*brk("ea_r", "ea_k", "pl_int", "pl_we", "pl_vp_n", "pl_io_int")), FULL)
     mc(2, REPL, FULL)
     note("""
         ---- the core's outputs reach the broker's other registers no sooner than the
@@ -247,9 +248,14 @@ def generate_near(PERIOD, fname):
         ---- the probe's power-up reset (a counter in the top level, one net to every
         register's clear): released once, long before the socket is armed""")
     out.append("set_false_path -from [get_regs {rst_cnt_*}]")
+    note("""
+        ---- (report only) one path per endpoint, for a wider view of the step paths
+        than the default table""")
+    out.append("report_timing -setup -max_paths 400 -max_common_paths 1")
     pathlib.Path(__file__).with_name(fname).write_text("\n".join(out) + "\n")
     print(f"{fname}: {sum(1 for l in out if l.startswith('set_multicycle'))} exception lines")
 
 generate(3, 2, 9.259, "accel_probe_138b.sdc")
 generate(2, 1, 10.000, "accel_probe_138b_s2.sdc")
 generate_near(10.000, "accel_probe_138b_n2.sdc")
+generate_near(9.259, "accel_probe_138b_n8.sdc")      # the same design at 108 MHz: 54 MHz steps

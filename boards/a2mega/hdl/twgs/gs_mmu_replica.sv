@@ -93,7 +93,9 @@ module gs_mmu_replica #(
     output logic        acc_local_rom_o,
     output logic [17:0] acc_rom_addr_o,
     output logic        acc_side_effect_o,
-    // ... and gs_mmu_decode's cheap view of it (near memory: the first clk of a step)
+    // ... and gs_mmu_decode's cheap view (near memory: the first clk of a step) of the
+    // access at acc_faddr_i, the step's address before any substitution
+    input  logic [23:0] acc_faddr_i,
     output logic        acc_fast_rw_o,
     output logic        acc_fast_int_o,
     output logic        acc_fast_rom_o,
@@ -235,6 +237,26 @@ module gs_mmu_replica #(
         .region(acc_region_o), .is_local(acc_local_o), .forward_write(acc_forward_write_o),
         .local_we(acc_local_we_o), .local_rom(acc_local_rom_o), .rom_addr(acc_rom_addr_o),
         .side_effect(acc_side_effect_o),
+        .fast_rw(), .fast_int(), .fast_rom(), .fast_rbank(), .fast_aux(), .fast_fold()
+    );
+
+    // (the cheap view only: everything else of this instance is unconnected)
+    gs_mmu_decode u_decode_f (
+        .bank_log(acc_faddr_i[23:16]), .addr_log(acc_faddr_i[15:0]),
+        .we(acc_we_i), .vpb_n(acc_vpb_n_i), .rom_select(~ROM3),
+        .LCRAM2(lcram2), .RDROM(rdrom), .LC_WE(lc_we), .shadow(shadow),
+        .ALTZP(altzp), .RAMRD(ramrd), .RAMWRT(ramwrt), .STORE80(store80),
+        .PAGE2(page2), .HIRES_MODE(hires), .bank_latch(bank_latch),
+        .shadow_all(cyareg[4]), .SLTROMSEL(sltromsel),
+        .INTCXROM(intcxrom), .SLOTC3ROM(slotc3rom), .INTC8ROM(intc8rom), .ROMBANK(rombank),
+        .cxrom_local(cxrom_local_i), .exp_banks(exp_banks_i),
+        .addr_bus(),
+        .aux(), .lcram2_sel(), .inhibit_cxxx(), .IO(), .EXTERNAL_IO(),
+        .is_internal_io(), .is_internal(), .fastram_ce(), .slowram_ce(), .slowram_we(),
+        .rom1_ce(), .rom2_ce(), .romc_ce(), .romd_ce(), .slot_ce(), .slot_internalrom_ce(),
+        .rom_writethrough(),
+        .region(), .is_local(), .forward_write(), .local_we(), .local_rom(), .rom_addr(),
+        .side_effect(),
         .fast_rw(acc_fast_rw_o), .fast_int(acc_fast_int_o), .fast_rom(acc_fast_rom_o),
         .fast_rbank(acc_fast_rbank_o), .fast_aux(acc_fast_aux_o), .fast_fold(acc_fast_fold_o)
     );

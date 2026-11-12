@@ -5,8 +5,9 @@
 //  fstOp/secOp case statements become AND-OR selects driven by the one-hot
 //  FST/SEC words and SEL_ADD that the microcode generator pre-decodes
 //  (gen_fast_mcode.py), so every select is one LUT level off the register.
-//  Bit-exact with the stock ALU (tb_alu_eq.sv: all 256 control words x
-//  random operands and flags).
+//  Bit-exact with the stock ALU on every control word that does not put a
+//  shift in front of the adder - none of the microcode's does (tb_alu_eq.sv:
+//  those words x random operands and flags).
 //
 //  Copyright (c) srg320 -- original VHDL implementation
 //  Copyright (c) 2026 Alan Steremberg -- Verilog conversion and IIgs changes
@@ -50,7 +51,13 @@ module F65C816_ALU
    wire CR   = w16 ? CR16 : CR8;
 
    // ---- adder
-   wire CIIn  = CR | ~CTRL.secOp[0];
+   // Its carry in is CR | ~secOp[0] in the stock ALU, CR being the first operation's
+   // carry: the bit a shift moves out of R, or the carry flag when R passes through.
+   // Every control word that uses the adder (its sum, carry or overflow: secOp 011,
+   // 110, 111) passes R through (gen_fast_mcode.py asserts it of ALU_TAB), so the
+   // carry in is the carry flag and nothing of R - memory data - is in front of the
+   // carry chain.
+   wire CIIn  = CI | ~CTRL.secOp[0];
    wire ADDIn = ~CTRL.secOp[2];
    wire BCDIn = BCD & CTRL.secOp[0];
    wire [15:0] AddR;
@@ -59,25 +66,29 @@ module F65C816_ALU
                              .S(AddR), .CO(AddCO), .VO(AddVO));
 
    // ---- second operation
-   wire [15:0] bit_r16 = CTRL.fc ? (IntR16 | L) : (IntR16 & ~L);   // TSB / TRB
-   wire [7:0]  bit_r8  = CTRL.fc ? (IntR8 | L[7:0]) : (IntR8 & ~L[7:0]);
-   wire [7:0]  Result8  = ({8{S[0]}} & (L[7:0] | IntR8)) | ({8{S[1]}} & (L[7:0] & IntR8)) |
-                          ({8{S[2]}} & (L[7:0] ^ IntR8)) | ({8{CTRL.SEL_ADD}} & AddR[7:0]) |
-                          ({8{S[4]}} & IntR8)            | ({8{S[5]}} & bit_r8);
-   wire [15:0] Result16 = ({16{S[0]}} & (L | IntR16)) | ({16{S[1]}} & (L & IntR16)) |
-                          ({16{S[2]}} & (L ^ IntR16)) | ({16{CTRL.SEL_ADD}} & AddR) |
-                          ({16{S[4]}} & IntR16)       | ({16{S[5]}} & bit_r16);
+   // (S7) One result for both widths: in an 8-bit operation the high byte of every
+   // term is zero (L, the first operation's result and the adder's sum are masked),
+   // so there is no width select behind the terms; and the adder's sum, the latest
+   // of them, is ORed in last.
+   wire [15:0] IntRx = w16 ? IntR16 : {8'h00, IntR8};
+   wire [15:0] Lm    = w16 ? L      : {8'h00, L[7:0]};
+   wire [15:0] bit_r = CTRL.fc ? (IntRx | Lm) : (IntRx & ~Lm);   // TSB / TRB
+   wire [15:0] ResO  = ({16{S[0]}} & (Lm | IntRx)) | ({16{S[1]}} & (Lm & IntRx)) |
+                       ({16{S[2]}} & (Lm ^ IntRx)) |
+                       ({16{S[4]}} & IntRx)        | ({16{S[5]}} & bit_r);
+   wire [15:0] AddM  = {{8{CTRL.SEL_ADD & w16}}, {8{CTRL.SEL_ADD}}};
+   wire [15:0] Res   = ResO | (AddM & AddR);
    assign CO = (CTRL.SEL_ADD & AddCO) | (~CTRL.SEL_ADD & CR);
 
    // bit-test zero (TSB/TRB/BIT): Z from IntR & L, not from the result
-   wire ZR = w16 ? ((IntR16 & L) == 16'h0000) : ((IntR8 & L[7:0]) == 8'h00);
-   assign ZO = S[5] ? ZR : (w16 ? (Result16 == 16'h0000) : (Result8 == 8'h00));
+   wire ZR = ((IntRx & Lm) == 16'h0000);
+   assign ZO = S[5] ? ZR : (Res == 16'h0000);
 
    // ---- overflow / sign
    wire bit_flags = S[1] & CTRL.fc;                 // BIT: N/V from the operand
    always_comb begin
       VO = VI;
-      SO = w16 ? Result16[15] : Result8[7];
+      SO = w16 ? Res[15] : Res[7];
       if (bit_flags) begin
          VO = w16 ? IntR16[14] : IntR8[6];
          SO = w16 ? IntR16[15] : IntR8[7];
@@ -86,7 +97,7 @@ module F65C816_ALU
       if (S[5]) SO = SI;
    end
 
-   assign RES  = w16 ? Result16 : {8'h00, Result8};
-   assign IntR = w16 ? IntR16   : {8'h00, IntR8};
+   assign RES  = Res;
+   assign IntR = IntRx;
 
 endmodule

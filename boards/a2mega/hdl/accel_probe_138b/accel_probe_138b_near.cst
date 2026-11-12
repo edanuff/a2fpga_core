@@ -116,7 +116,7 @@ INS_LOC "g_near.g_nb[4].nmem_g_near.g_nb[4].nmem_0_1_s" BSRAM_R46[19][B];
 INS_LOC "g_near.g_nb[6].nmem_g_near.g_nb[6].nmem_0_0_s" BSRAM_R64[19][A];
 INS_LOC "g_near.g_nb[6].nmem_g_near.g_nb[6].nmem_0_1_s" BSRAM_R64[19][B];
 INS_LOC "g_near.g_nb[8].nmem_g_near.g_nb[8].nmem_0_0_s" BSRAM_R46[20];
-INS_LOC "g_near.g_nb[8].nmem_g_near.g_nb[8].nmem_0_1_s" BSRAM_R64[20];
+INS_LOC "g_near.g_nb[8].nmem_g_near.g_nb[8].nmem_0_1_s" BSRAM_R46[17];
 INS_LOC "g_near.g_nb[10].nmem_g_near.g_nb[10].nmem_0_0_s" BSRAM_R46[21][A];
 INS_LOC "g_near.g_nb[10].nmem_g_near.g_nb[10].nmem_0_1_s" BSRAM_R46[21][B];
 INS_LOC "g_near.g_nb[12].nmem_g_near.g_nb[12].nmem_0_0_s" BSRAM_R64[21][A];

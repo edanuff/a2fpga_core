@@ -10,6 +10,8 @@
 ;   mark 5  stack      recursive Fibonacci, JSR/RTS/PHA/PLX, stack-relative ADC
 ;   mark 6  interp     bytecode interpreter, JMP (abs,X) dispatch
 ;   mark 7  native     16-bit native mode: copy, sum, MVN, shift-add mul, 16-bit BCD
+;   mark 8  corners    BIT #imm, direct page,X in emulation mode with DL = 0 and
+;                      DL != 0, RTL in emulation mode at the top of page 1
 .setcpu "65816"
 
 BENCH_DONE = $BFF0
@@ -57,6 +59,27 @@ n_mulb: .res 2
     sta status
 .endmacro
 
+; a byte RTL may pull at offset pos above $0100: in page 1 (wrapped), and in page 2
+; where the pull runs over the top of the page
+.macro PUTB val, pos
+    lda #val
+    sta $0100 + ((pos) & $FF)
+    .if (pos) > $FF
+    sta $0100 + (pos)
+    .endif
+.endmacro
+; RTL in emulation mode with the stack pointer at $01xx
+.macro RTLT spl
+    .local back
+    PUTB <(back - 1), spl + 1
+    PUTB >(back - 1), spl + 2
+    PUTB 0, spl + 3
+    ldx #spl
+    txs
+    rtl
+back:
+.endmacro
+
 .segment "CODE"
 
 reset:
@@ -87,6 +110,65 @@ reset:
     MARK 6
     jsr native
     MARK 7
+
+;----------------------------------------------------------------- 8 corners
+; At the top level: it moves the stack pointer.  Nothing here checks a result of
+; its own; the stock core is the reference, step by step.
+    ; BIT #imm: the one instruction that loads Z and nothing else
+    lda #$0F
+    bit #$F0                ; Z set
+    bit #$01                ; Z clear
+    lda #$C0
+    bit #$3F                ; Z set, N and V stay
+    sec
+    bit #$80                ; Z clear, C stays
+    clc
+    xce
+    rep #$30
+    .a16
+    .i16
+    lda #$00FF
+    bit #$FF00
+    bit #$0001
+    sep #$30
+    .a8
+    .i8
+    sec
+    xce
+    ; direct page,X in emulation mode: DL = 0 wraps in the page ...
+    ldx #$20
+    ldy #$30
+    lda $F0,x               ; $0010
+    lda ($F0,x)             ; pointer at $0010
+    ldx $F0,y               ; $0020
+    ldx #$20
+    ora $E8,x               ; $0008
+    cmp ($F4,x)
+    ; ... DL != 0 does not (D = $0180: $0180 + $F0 + $20 = $0290)
+    lda #$01
+    xba
+    lda #$80
+    tcd
+    lda $F0,x
+    lda ($F0,x)
+    ldx $F0,y
+    ldx #$20
+    ora $E8,x
+    lda #$00
+    xba
+    lda #$00
+    tcd
+    ; RTL in emulation mode with the stack pointer at the top of page 1
+    RTLT $FB
+    RTLT $FC
+    RTLT $FD
+    RTLT $FE
+    RTLT $FF
+    RTLT $00
+    RTLT $7F
+    ldx #$FF
+    txs
+    MARK 8
     lda status
     sta BENCH_DONE
 hang:

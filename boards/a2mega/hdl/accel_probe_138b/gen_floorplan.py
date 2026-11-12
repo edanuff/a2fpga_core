@@ -29,7 +29,11 @@ strips outside those.  Variants (one project each):
                                   two blocks, named [A] and [B] (18, 19 and 21
                                   here; 17, 20 and 22 hold one, and naming a
                                   half of those is error CT1130): the data bits
-                                  are in 18 / 19, the tag bits in 20 / 21.  Left
+                                  are in 18 / 19, the tag bits in 17 / 20 / 21.
+                                  The blocks in R64 take the read address from
+                                  the core's second copy of it (accel_probe_top),
+                                  and a pair of entry bits is one memory to the
+                                  synthesizer, so each pair is in one row.  Left
                                   alone the placer put near blocks 100 columns
                                   from the core; one block per index spread them
                                   over 46 columns and the core with them.
@@ -104,7 +108,8 @@ def write(variant, layout="strips"):
         nb = lambda b: f"g_near.g_nb[{b - b % 2}].nmem_g_near.g_nb[{b - b % 2}].nmem_0_{b % 2}_s"
         SITES = ["R46[18][A]", "R46[18][B]", "R64[18][A]", "R64[18][B]",      # data bits 0-7
                  "R46[19][A]", "R46[19][B]", "R64[19][A]", "R64[19][B]",
-                 "R46[20]", "R64[20]",                                        # tag bits 8-13
+                 "R46[20]", "R46[17]",                                        # tag bits 8-13 (a pair of bits is
+                                                                              # one memory to the synthesizer: both in one row)
                  "R46[21][A]", "R46[21][B]", "R64[21][A]", "R64[21][B]"]
         lines = [f'INS_LOC "{nb(b)}" BSRAM_{SITES[b]};' for b in range(14)]
         s = (HERE / FILES["flat"]).read_text()

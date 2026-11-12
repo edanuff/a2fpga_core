@@ -60,7 +60,6 @@ module F65C816_AddrGen
   logic                AAHCarry;
 
   logic [8:0]          NewAAL;
-  logic [8:0]          NewAAH;
   logic [8:0]          NewAAHWithCarry;
   logic [8:0]          NewDL;
   logic [15:0]         InnerDS;
@@ -151,37 +150,27 @@ module F65C816_AddrGen
             ;
       endcase
 
-      case (IND_CTRL)
-         2'b00 :
-            if (AAHCtrl[2] == 1'b0)
-               NewAAH = (({1'b0, AAH}) + ({1'b0, X[15:8]}));
-            else if (e6502 == 1'b1 && D[7:0] == 8'h00)
-               // Emulation mode with DL=0: wrap at page boundary, no carry
-               NewAAH = (({1'b0, DH}) + ({1'b0, X[15:8]}));
-            else
-               NewAAH = (({1'b0, DH}) + ({1'b0, X[15:8]}) + ({8'b00000000, NewAAL[8]}));
-         2'b01 :
-            if (AAHCtrl[2] == 1'b0)
-               NewAAH = (({1'b0, AAH}) + ({1'b0, Y[15:8]}));
-            else if (e6502 == 1'b1 && D[7:0] == 8'h00)
-               // Emulation mode with DL=0: wrap at page boundary, no carry
-               NewAAH = (({1'b0, DH}) + ({1'b0, Y[15:8]}));
-            else
-               NewAAH = (({1'b0, DH}) + ({1'b0, Y[15:8]}) + ({8'b00000000, NewAAL[8]}));
-         2'b10 :
-            NewAAH = {1'b0, X[15:8]};
-         2'b11 :
-            NewAAH = {1'b0, Y[15:8]};
-         default :
-            ;
-      endcase
    end
+
+   // S7: the high byte.  The stock block forms one NewAAH from AAH or DH by AAHCtrl[2]
+   // and adds the low byte's carry to the DH form, so everything behind NewAAH hung
+   // off that carry.  Each use is formed on its own here (the uses are disjoint in
+   // the microcode: gen_fast_mcode.py asserts it):
+   //   NewAAHa   AAH + index, registers only            (AAHCtrl 000 with IND_CTRL[1], 001)
+   //   DHIdx     DH + index for both values of the carry, the carry selects   (AAHCtrl 100)
+   wire [7:0] IdxH     = IND_CTRL[0] ? Y[15:8] : X[15:8];
+   wire [8:0] NewAAHa  = IND_CTRL[1] ? {1'b0, IdxH} : ({1'b0, AAH} + {1'b0, IdxH});
+   wire [7:0] DHIdx0   = DH + IdxH;
+   wire [7:0] DHIdx1   = DH + IdxH + 8'd1;
+   // (emulation mode with DL = 0 wraps at the page boundary: no carry)
+   wire       DHCarry  = NewAAL[8] & ~(e6502 == 1'b1 && D[7:0] == 8'h00);
+   wire [7:0] NewDHIdx = IND_CTRL[1] ? IdxH : DHCarry ? DHIdx1 : DHIdx0;
 
    assign InnerDS = (ABSCtrl == 2'b11 & (AALCtrl[2] == 1'b1 | AAHCtrl[2] == 1'b1)) ?
                     (e6502 == 1'b1 ? {8'h01, S[7:0]} : S) : D;
 
    assign NewDL = (({1'b0, InnerDS[7:0]}) + ({1'b0, D_IN}));
-   assign NewAAHWithCarry = (NewAAH + ({8'b00000000, SavedCarry}));
+   assign NewAAHWithCarry = (NewAAHa + ({8'b00000000, SavedCarry}));
 
 
    // S7 data-late: next values as logic (EN assumed), registered below.
@@ -243,7 +232,7 @@ module F65C816_AddrGen
                3'b000 :
                   if (IND_CTRL[1] == 1'b1)
                   begin
-                     AAH_n = NewAAH[7:0];
+                     AAH_n = NewAAHa[7:0];
                      AAHCarry_n = 1'b0;
                   end
                3'b001 :
@@ -263,7 +252,7 @@ module F65C816_AddrGen
                   end
                3'b100 :
                   begin
-                     DH_n = NewAAH[7:0];
+                     DH_n = NewDHIdx;
                      AAHCarry_n = 1'b0;
                   end
                3'b101 :
@@ -287,8 +276,8 @@ module F65C816_AddrGen
                   ;
                2'b01 :
                   AB_nx = D_IN;
-               2'b10 :
-                  AB_nx = (D_IN + ({7'b0000000, NewAAHWithCarry[8]}));
+               2'b10 :   // (not in the microcode: the stock AB = D_IN + the high byte's carry)
+                  ;
                2'b11 :
                   if (AALCtrl[2] == 1'b0 & AAHCtrl[2] == 1'b0)
                      AB_nx = DBR;

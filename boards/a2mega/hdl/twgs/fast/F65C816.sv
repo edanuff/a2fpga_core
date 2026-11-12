@@ -44,7 +44,9 @@ module F65C816
    output logic  VPB/*verilator public_flat*/,
    output logic  I_FLAG, // P[2] (interrupt disable) — accelerator IRQ-delay tap
    output [23:0] NA_OUT, // S7 data-late: address of the NEXT step (valid while RDY_OUT), A_OUT is its register
-   output [2:0]  NST_OUT // ... and its bus status: {VPB, WE (1 = read), internal (VPA = VDA = 0)}
+   output [2:0]  NST_OUT, // ... and its bus status: {VPB, WE (1 = read), internal (VPA = VDA = 0)}
+   output [13:0] NA_OUT_B // NA_OUT[13:0] again, from gates of its own: the read address of a memory
+                          // whose blocks are far apart can be driven half from each
    );
 
   logic [15:0]   A/*verilator public_flat*/;
@@ -319,7 +321,14 @@ module F65C816
    // rung 4: the microcode module takes the registered IR / STATE and the late
    // decision as selects (the next state is 0, STATE + 1 or STATE + 2; 1 in the
    // fetch step, with the opcode on the bus) - see gen_fast_mcode.py
-   F65C816_mcode MCode(.CLK(CLK), .RST_N(RST_N), .EN(EN_m), .IR(IR_m), .STATE(STATE_m), .NIR(NextIR),
+   // (F65C816_MCODE_ROM: the successor rows from block RAM, for a core that steps no
+   // faster than every second clk - rung 5, gen_fast_mcode.py; the same registered row)
+`ifdef F65C816_MCODE_ROM
+   F65C816_mcode_s
+`else
+   F65C816_mcode
+`endif
+                 MCode(.CLK(CLK), .RST_N(RST_N), .EN(EN_m), .IR(IR_m), .STATE(STATE_m), .NIR(NextIR),
                        .NS_ZERO(NS_ZERO), .NS_INC2(NS_INC2), .M(MC), .SN(SN));
 `ifdef VERILATOR
    always @(posedge CLK)
@@ -508,95 +517,101 @@ module F65C816
       end
 
 
+   // S7: the next P.  The ALU's flags are its latest inputs (memory data -> ALU ->
+   // carry / zero), so they are selected LAST, one level, against everything else
+   // (P_o: the registers, the microinstruction and the data bus).  The same values
+   // as the stock case statement, which had the ALU branch inside it.
+   wire pf_alu = (MC.LOAD_P == 3'b001) & ~MC.PF_PLB & ~MC.PF_PLD & ~MC.PF_TSX &
+                 (MC.PF_FORCE | (MC.PF_M8 & (MF | EF)) | (MC.PF_X8 & (XF | EF)) | (MC.PF_M16 & ((~MF & ~EF) | w16)) | (MC.PF_X16 & ~XF & ~EF));
+   wire pf_z   = pf_alu | (MC.LOAD_P == 3'b111);
+   logic [8:0] P_o;
+   always_comb begin
+      P_o = P;
+      case (MC.LOAD_P)
+         3'b001 :
+            begin
+               if (MC.PF_PLB)  // PLB (rung 2c: IR terms pre-decoded in XT_TAB)
+               begin
+                  P_o[7] = D_IN[7];  // N flag
+                  P_o[1] = (D_IN == 8'h00);  // Z flag
+               end
+               else if (MC.PF_PLD)  // PLD
+               begin
+                  P_o[7] = D_IN[7];  // N flag from high byte
+                  P_o[1] = ({D_IN, DR} == 16'h0000);  // Z flag
+               end
+               else if (MC.PF_TSX)  // TSX
+               begin
+                  if (XF == 1'b1 | EF == 1'b1)  // 8-bit X
+                  begin
+                     P_o[7] = SP[7];  // N flag from low byte
+                     P_o[1] = (SP[7:0] == 8'h00);  // Z flag
+                  end
+                  else  // 16-bit X
+                  begin
+                     P_o[7] = SP[15];  // N flag from high byte
+                     P_o[1] = (SP == 16'h0000);  // Z flag
+                  end
+               end
+            end
+         3'b010 :
+            begin
+               P_o[2] = 1'b1;
+               P_o[3] = 1'b0;
+            end
+         3'b011 :
+            begin
+               P_o[7:6] = D_IN[7:6];
+               P_o[5] = D_IN[5] | EF;
+               P_o[4] = D_IN[4] | EF;
+               P_o[3:0] = D_IN[3:0];
+            end
+         3'b100 :
+            case (IR[7:6])
+               2'b00 :
+                  P_o[0] = IR[5];
+               2'b01 :
+                  P_o[2] = IR[5];
+               2'b10 :
+                  P_o[6] = 1'b0;
+               2'b11 :
+                  P_o[3] = IR[5];
+               default :
+                  ;
+            endcase
+         3'b101 :
+            begin
+               P_o[8] = P[0];
+               P_o[0] = P[8];
+               if (P[0] == 1'b1)
+               begin
+                  P_o[4] = 1'b1;
+                  P_o[5] = 1'b1;
+               end
+            end
+         3'b110 :
+            case (IR[5])
+               1'b1 :
+                  P_o[7:0] = P[7:0] | ({DR[7:6], (DR[5] & (~EF)), (DR[4] & (~EF)), DR[3:0]});
+               1'b0 :
+                  P_o[7:0] = P[7:0] & ((~({DR[7:6], (DR[5] & (~EF)), (DR[4] & (~EF)), DR[3:0]})));
+               default :
+                  ;
+            endcase
+         default :
+            ;
+      endcase
+   end
+   wire [8:0] P_n = {P_o[8], pf_alu ? SO : P_o[7], pf_alu ? VO : P_o[6], P_o[5:2],
+                     pf_z ? ZO : P_o[1], pf_alu ? CO : P_o[0]};
+
    always @(posedge CLK or negedge RST_N)
       if (RST_N == 1'b0)
          P <= 9'b100110100;
       else
       begin
          if (EN_p == 1'b1)
-            case (MC.LOAD_P)
-               3'b000 :
-                  P <= P;
-               3'b001 :
-                  begin
-                     if (MC.PF_PLB)  // PLB (rung 2c: IR terms pre-decoded in XT_TAB)
-                     begin
-                        P[7] <= D_IN[7];  // N flag
-                        P[1] <= (D_IN == 8'h00);  // Z flag
-                     end
-                     else if (MC.PF_PLD)  // PLD
-                     begin
-                        P[7] <= D_IN[7];  // N flag from high byte
-                        P[1] <= ({D_IN, DR} == 16'h0000);  // Z flag
-                     end
-                     else if (MC.PF_TSX)  // TSX
-                     begin
-                        if (XF == 1'b1 | EF == 1'b1)  // 8-bit X
-                        begin
-                           P[7] <= SP[7];  // N flag from low byte
-                           P[1] <= (SP[7:0] == 8'h00);  // Z flag
-                        end
-                        else  // 16-bit X
-                        begin
-                           P[7] <= SP[15];  // N flag from high byte
-                           P[1] <= (SP == 16'h0000);  // Z flag
-                        end
-                     end
-                     else if (MC.PF_FORCE | (MC.PF_M8 & (MF | EF)) | (MC.PF_X8 & (XF | EF)) | (MC.PF_M16 & ((~MF & ~EF) | w16)) | (MC.PF_X16 & ~XF & ~EF))
-                     begin
-                        P[1:0] <= {ZO, CO};
-                        P[7:6] <= {SO, VO};
-                     end
-                  end
-               3'b010 :
-                  begin
-                     P[2] <= 1'b1;
-                     P[3] <= 1'b0;
-                  end
-               3'b011 :
-                  begin
-                     P[7:6] <= D_IN[7:6];
-                     P[5] <= D_IN[5] | EF;
-                     P[4] <= D_IN[4] | EF;
-                     P[3:0] <= D_IN[3:0];
-                  end
-               3'b100 :
-                  case (IR[7:6])
-                     2'b00 :
-                        P[0] <= IR[5];
-                     2'b01 :
-                        P[2] <= IR[5];
-                     2'b10 :
-                        P[6] <= 1'b0;
-                     2'b11 :
-                        P[3] <= IR[5];
-                     default :
-                        ;
-                  endcase
-               3'b101 :
-                  begin
-                     P[8] <= P[0];
-                     P[0] <= P[8];
-                     if (P[0] == 1'b1)
-                     begin
-                        P[4] <= 1'b1;
-                        P[5] <= 1'b1;
-                     end
-                  end
-               3'b110 :
-                  case (IR[5])
-                     1'b1 :
-                        P[7:0] <= P[7:0] | ({DR[7:6], (DR[5] & (~EF)), (DR[4] & (~EF)), DR[3:0]});
-                     1'b0 :
-                        P[7:0] <= P[7:0] & ((~({DR[7:6], (DR[5] & (~EF)), (DR[4] & (~EF)), DR[3:0]})));
-                     default :
-                        ;
-                  endcase
-               3'b111 :
-                  P[1] <= ZO;
-               default :
-                  ;
-            endcase
+            P <= P_n;
 
             // Debug: Track I flag (P[2]) changes (only on the cycle where P actually changes)
             if (MC.LOAD_P == 3'b010) begin
@@ -1192,6 +1207,16 @@ module F65C816
       assign NA_CAND[c] = (naf_c[7:6] == 2'b00) ? na_move : na_stay;
    end
    assign NA_BUS = NS_ZERO ? NA_FETCH : NS_INC2 ? NA_CAND[1] : NA_CAND[0];
+   wire [13:0] NA_BUS_B /* synthesis syn_keep = 1 */;
+   assign NA_BUS_B = NS_ZERO ? NA_FETCH[13:0] : NS_INC2 ? NA_CAND[1][13:0] : NA_CAND[0][13:0];
+   assign NA_OUT_B = NA_BUS_B;
+`ifdef VERILATOR
+   always @(posedge CLK)
+      if (RST_N == 1'b1 && NA_BUS_B !== NA_BUS[13:0]) begin
+         $display("ERROR: NA_OUT_B %04h differs from NA_OUT[13:0] %04h @%0t", NA_BUS_B, NA_BUS[13:0], $time);
+         $finish;
+      end
+`endif
 
 
    assign NA_OUT = NA_BUS;
