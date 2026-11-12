@@ -269,7 +269,11 @@ module tb_gs_broker #(
     // NEW tag with the wrong byte, the worst case for a broker that used it.
     logic [7:0]     nmd [0:(1<<NEAR_AW)-1];
     logic [NTW-1:0] nmt [0:(1<<NEAR_AW)-1];
-    longint n_nm_fill = 0, n_nm_wr = 0;
+    longint n_nm_fill = 0, n_nm_wr = 0, n_fast2 = 0, n_loc_other = 0;
+    always_ff @(posedge clk) if (cpu_ce && brk_fast) begin
+        if (u_brk.fast_q) n_fast2 <= n_fast2 + 1;
+        else if (u_brk.st != 2'd3) n_loc_other <= n_loc_other + 1;      // (not a socket step)
+    end
     initial begin
         for (int i = 0; i < (1<<NEAR_AW); i++) begin nmd[i] = 8'h00; nmt[i] = '1; end
         nm_rdata = 8'h00; nm_rtag = '1;
@@ -311,7 +315,9 @@ module tb_gs_broker #(
             end
         end
         if (n_bad != 0) err($sformatf("the near memory differs from the card's memory in %0d of %0d entries", n_bad, n_valid));
-        $display("---- near memory: %0d of %0d entries in use, %0d fills, %0d writes", n_valid, 1<<NEAR_AW, n_nm_fill, n_nm_wr);
+        $display("---- near memory: %0d of %0d entries in use, %0d fills, %0d writes; %0d two-clk steps, %0d other local steps (%.1f %% two-clk)",
+                 n_valid, 1<<NEAR_AW, n_nm_fill, n_nm_wr, n_fast2, n_loc_other,
+                 (n_fast2 + n_loc_other) ? 100.0 * real'(n_fast2) / real'(n_fast2 + n_loc_other) : 0.0);
     endtask
 
     // The timing contract the build's multicycle constraints will rely on, checked
@@ -349,17 +355,17 @@ module tb_gs_broker #(
         // a launch (read address, the decode registered with it)
         if (DATA_LATE && u_brk.sw_touch) t_sw <= clk_no;
         if (DATA_LATE && u_brk.run_c && !u_brk.fresh_ok &&
-            ((u_brk.strobe && !u_brk.mode_native) || u_brk.mem_evt) && clk_no - t_sw < (NEAR ? 2 : 3)) begin
-            $display("ERROR: registered decode used %0d clks after the switches changed (needs %0d)", clk_no - t_sw, NEAR ? 2 : 3); $finish;
+            ((u_brk.strobe && !u_brk.mode_native) || u_brk.mem_evt) && clk_no - t_sw < 3) begin
+            $display("ERROR: registered decode used %0d clks after the switches changed (needs 3)", clk_no - t_sw); $finish;
         end
         // (near memory: the first-clk decision is made from the decode itself, one clk after
         // the switches changed at the soonest - ordinary one-clk paths in a build)
         // ... and with RDY high (RDY low at the last PHI2 fall holds local steps)
         rdy_q <= u_brk.rdy_c;
-        if (NEAR && u_brk.ce_imm && !rdy_q) begin
+        if (NEAR && u_brk.fast_q && !rdy_q) begin
             $display("ERROR: a local step completed at once, decided while RDY was low"); $finish;
         end
-        if (NEAR && u_brk.go_q && clk_no - t_sw < 2) begin
+        if (NEAR && u_brk.fast_q && clk_no - t_sw < 2) begin
             $display("ERROR: first-clk decision made in the clk the switches changed"); $finish;
         end
         if (DATA_LATE && ((u_brk.pf_launch && !NEAR) || lm_ren) && clk_no - t_sw < 3) begin
@@ -974,7 +980,7 @@ module tb_gs_broker #(
     endtask
 
     // expected test-program results ($0300...): -1 = depends on the configuration
-    int expect_tab [0:73] = '{
+    int expect_tab [0:77] = '{
         'hFF, 'h00, 'h5C, 'h3F, 'h11, 'hC3, 'h3C, 'hA5, 'hA6, 'hA7,
         'h77, 'h5A, 'h5A, 'h00, 'h30, 'hEE, 'h00, 'h11, 'h00, 'hB1,
         'hB1, 'hB1, 'h00, 'hB2, 'h00, 'hB3, 'hC8, 'h00, 'hC9, 'hD1,
@@ -982,7 +988,7 @@ module tb_gs_broker #(
         'h5E, 'hE1, 'hE2, 'hE1, -1,   -1,   'hFF, 'h05, 'hC3, 'hC1,
         'hC3, 'hC8, 'hCF, 'hFF, 'hC4, 'hC8, 'hFF, 'hC5, 'h1C, 'h1C,
         'h1C, 'h08, 'hA1, 'hA7, 'h28, 'h01, 'hA7, 'hA5, 'h5A, 'h5A,
-        'h00, 'h22, 'h11, 'h01 };
+        'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01 };
 
     initial begin
         string  rom_path, wpath;
@@ -1132,13 +1138,13 @@ module tb_gs_broker #(
         if (!final_done) err("no quiet moment at the end of the run (socket cycles still outstanding)");
 
         if (do_expect) begin
-            for (i = 0; i <= 73; i++) begin
+            for (i = 0; i <= 77; i++) begin
                 int want, got;
                 want = expect_tab[i];
                 if (i == 44) want = (cfg_mbexp >= 1) ? 'h21 : 'hFF;
                 if (i == 45) want = (cfg_mbexp >= 2) ? 'h22 : 'hFF;
                 got = mach_get(1, 0, 24'h000300 + i);
-                if (got != want) err($sformatf("test program result %0d ($%04h) = %02h, want %02h", i, 16'h0300 + i, got, want));
+                if (want >= 0 && got != want) err($sformatf("test program result %0d ($%04h) = %02h, want %02h", i, 16'h0300 + i, got, want));
             end
             if (mach_get(1, 0, 24'h00037F) != 8'hA5) err("test program did not reach its loop (signature missing)");
             if (mach_get(1, 0, 24'h000390) == 8'h00 && mach_get(1, 0, 24'h000391) == 8'h00) err("test program loop not running");

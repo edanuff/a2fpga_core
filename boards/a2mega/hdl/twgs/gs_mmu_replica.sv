@@ -93,6 +93,13 @@ module gs_mmu_replica #(
     output logic        acc_local_rom_o,
     output logic [17:0] acc_rom_addr_o,
     output logic        acc_side_effect_o,
+    // ... and gs_mmu_decode's cheap view of it (near memory: the first clk of a step)
+    output logic        acc_fast_rw_o,
+    output logic        acc_fast_int_o,
+    output logic        acc_fast_rom_o,
+    output logic [1:0]  acc_fast_rbank_o,
+    output logic        acc_fast_aux_o,
+    output logic        acc_fast_fold_o,
 
     // prefetch view (S7 data-late step): the same decode of pf_addr_i - the core's
     // NEXT-step address - as a read and as a write, with the tracked state, for the
@@ -227,7 +234,9 @@ module gs_mmu_replica #(
         .rom_writethrough(),
         .region(acc_region_o), .is_local(acc_local_o), .forward_write(acc_forward_write_o),
         .local_we(acc_local_we_o), .local_rom(acc_local_rom_o), .rom_addr(acc_rom_addr_o),
-        .side_effect(acc_side_effect_o)
+        .side_effect(acc_side_effect_o),
+        .fast_rw(acc_fast_rw_o), .fast_int(acc_fast_int_o), .fast_rom(acc_fast_rom_o),
+        .fast_rbank(acc_fast_rbank_o), .fast_aux(acc_fast_aux_o), .fast_fold(acc_fast_fold_o)
     );
 
     // ------------------------------------------------------------------ prefetch translation
@@ -246,7 +255,8 @@ module gs_mmu_replica #(
         .rom1_ce(), .rom2_ce(), .romc_ce(), .romd_ce(), .slot_ce(), .slot_internalrom_ce(),
         .rom_writethrough(),
         .region(), .is_local(pf_local_o), .forward_write(), .local_we(), .local_rom(pf_local_rom_o), .rom_addr(pf_rom_addr_o),
-        .side_effect(pf_side_o)
+        .side_effect(pf_side_o),
+        .fast_rw(), .fast_int(), .fast_rom(), .fast_rbank(), .fast_aux(), .fast_fold()
     );
 
     gs_mmu_decode u_decode_pfw (
@@ -264,7 +274,8 @@ module gs_mmu_replica #(
         .rom1_ce(), .rom2_ce(), .romc_ce(), .romd_ce(), .slot_ce(), .slot_internalrom_ce(),
         .rom_writethrough(),
         .region(), .is_local(pfw_local_o), .forward_write(pfw_forward_o), .local_we(pfw_local_we_o),
-        .local_rom(), .rom_addr(), .side_effect()
+        .local_rom(), .rom_addr(), .side_effect(),
+        .fast_rw(), .fast_int(), .fast_rom(), .fast_rbank(), .fast_aux(), .fast_fold()
     );
 
     // The addresses the two local memories are read at, for the speculative

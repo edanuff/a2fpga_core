@@ -746,14 +746,19 @@ section 10 / 10.1 is unchanged and still builds (`NEAR = 0`).
   registers, and every local write goes to both. Ports: `nm_ren_o` (= the
   core's clock enable), `nm_ra_o`, `nm_rdata_i`, `nm_rtag_i`, and a write
   port from registers. Tags must power up all ones.
-- **No decode ahead.** The step's address and status are registers from the
-  moment the core steps. The replica decodes them in the step's first clk,
-  which also registers the decision "completes locally" and the tag
-  compare. In the second clk the core's clock enable is one gate behind
-  those registers. A near hit, a local write and an internal cycle are two
-  clks, the step after a socket cycle included. A miss, a socket cycle, a
-  wait for the posted-write buffer or for RDY go through the sequencer as
-  before, deciding in the second clk.
+- **No decode ahead; two tiers of decode in the step.** The step's address
+  and status are registers from the moment the core steps. In its first
+  clk a cheap view (`gs_mmu_decode` `fast_*`: bank, page, a few switches)
+  classes the common steps as the card's alone and names their tag: reads
+  in banks 00/01 outside `$Cxxx` or in a ROM bank, writes in banks 00/01
+  where nothing can be shadowed, internal cycles outside `$Cxxx`. The view
+  is a subset of the full decode, proven on every vector of the decode
+  sweep. In the second clk the core's clock enable is one gate behind the
+  three registers that clk produced, so such a step is two clks, the step
+  after a socket cycle included. Every other step (a socket cycle, a near
+  miss, an expansion bank, a forwarded or language-card write, `$Cxxx`, a
+  vector pull, RDY low) goes through the sequencer as before, deciding
+  from the registered full decode, which has two clks to settle.
 - **Writes.** A local write is registered at the decision and made in the
   following clk, to both memories, from registers. A near entry written at
   or after the launch of the next read is not used for that read.

@@ -29,6 +29,7 @@ using namespace iigs;
 
 static Vgs_mmu_decode* dut;
 static long n_tests = 0, n_fail = 0;
+static long n_fast_r = 0, n_fast_w = 0, n_fast_i = 0;      // vectors in the cheap view's classes
 
 struct Dut { Out o; Ext e; };
 
@@ -142,6 +143,28 @@ static void run_one(const In& s)
     CHECK(d.e.local_rom, x.local_rom, "local_rom", "%u")
     CHECK(d.e.side_effect, x.side_effect, "side_effect", "%u")
     if (d.e.local_rom || x.local_rom) CHECK(d.e.rom_addr, x.rom_addr, "rom_addr", "%05x")
+    // the cheap view (near memory): a subset of "the card's alone", and for that
+    // subset the same ROM / bank / A12 answers as the full decode (golden model)
+    if (dut->fast_rw) {
+        CHECK(x.local, 1u, "fast_rw: local", "%u")
+        CHECK(x.side_effect, 0u, "fast_rw: side", "%u")
+        if (s.we) {
+            n_fast_w++;
+            CHECK(x.forward_write, 0u, "fast_rw: forward", "%u")
+            CHECK(x.local_we, 1u, "fast_rw: local_we", "%u")
+            CHECK(r.addr_bus, ((uint32_t)dut->fast_aux << 16) | s.addr, "fast_rw: w phys", "%06x")
+        } else {
+            n_fast_r++;
+            CHECK((unsigned)dut->fast_rom, (unsigned)x.local_rom, "fast_rom", "%u")
+            if (x.local_rom) {
+                CHECK((unsigned)dut->fast_rbank, x.rom_addr >> 16, "fast_rbank", "%u")
+            } else {
+                CHECK(r.addr_bus, ((uint32_t)dut->fast_aux << 16) | (s.addr ^ (dut->fast_fold ? 0x1000u : 0u)),
+                      "fast_rw: r phys", "%06x")
+            }
+        }
+    }
+    if (dut->fast_int) { n_fast_i++; CHECK(x.side_effect, 0u, "fast_int: side", "%u") }
     if (mism) n_fail++;
 }
 
@@ -298,6 +321,8 @@ int main(int argc, char** argv)
         printf("mmu_decode_tb: phase 4 done: %ld tests, %ld failures\n", n_tests - before, n_fail - fbefore);
     }
 
+    printf("mmu_decode_tb: cheap view: %ld read, %ld write and %ld internal-cycle vectors checked\n",
+           n_fast_r, n_fast_w, n_fast_i);
     printf("mmu_decode_tb: TOTAL %ld tests, %ld failures -> %s\n",
            n_tests, n_fail, n_fail ? "FAIL" : "PASS");
     delete dut;

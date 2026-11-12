@@ -127,7 +127,20 @@ module gs_mmu_decode #(
     output reg         local_we,      // local write is stored
     output reg         local_rom,     // local read comes from the ROM image (else RAM at addr_bus)
     output wire [17:0] rom_addr,      // ROM image address {bank[1:0], addr}: FC0000-FFFFFF -> 0-3FFFF
-    output wire        side_effect    // I/O or Cx space: a read here can change machine state
+    output wire        side_effect,   // I/O or Cx space: a read here can change machine state
+
+    // S7 near memory (gs_accel_broker NEAR): a cheap view of the common cases, for
+    // the first clk of a step - a few levels of logic from the address, `we`, /VP
+    // and a handful of switches, with no bank arithmetic.  fast_rw is a SUBSET of
+    // "is_local, no side effect, nothing to forward"; the fields beside it are the
+    // full decode's answers for the accesses in that subset (the decode sweep
+    // checks all of it against the outputs above, on every vector).
+    output wire        fast_rw,       // this read / write is certainly the card's alone
+    output wire        fast_int,      // an internal cycle at this address certainly has no side effect
+    output wire        fast_rom,      // fast_rw read: the byte is in the ROM image ...
+    output wire [1:0]  fast_rbank,    // ... in its bank rom_addr[17:16]
+    output wire        fast_aux,      // fast_rw, RAM: bank bit 0 of the physical address
+    output wire        fast_fold      // fast_rw read, RAM: the language card moves A12
 );
 
   localparam [2:0] REGION_RAM  = 3'd0;   // banks 00/01 fast RAM (incl. language-card RAM)
@@ -452,6 +465,36 @@ module gs_mmu_decode #(
       forward_write = we & exp_local & slowram_ce;
     end
   end
+
+  // ==========================================================================
+  // S7 near memory: the cheap view
+  // ==========================================================================
+  //   reads   banks 00/01 below $C000 (always RAM of the card);
+  //           banks 00/01 at $D000-$FFFF (language-card RAM or the ROM image,
+  //           both the card's - unless a ROM 01's ROMBANK is set);
+  //           the ROM banks
+  //   writes  banks 00/01 below $C000 outside every page that can be shadowed
+  //           ($0400-$07FF, $0800-$0BFF on a ROM 3, $2000-$9FFF)
+  //   never a vector pull; never $Cxxx; never an expansion or Mega II bank
+  wire f_main = (bank_log[7:1] == 7'd0);
+  wire f_romb = (bank_log[7:1] == 7'h7F) | (~rom_select & (bank_log[7:1] == 7'h7E));
+  wire f_lo   = (addr_log[15:14] != 2'b11);                                  // below $C000
+  wire f_lc   = (addr_log[15:14] == 2'b11) & (addr_log[13:12] != 2'b00);     // $D000-$FFFF
+  wire f_shw  = (addr_log[15:10] == 6'b000001) |
+                (~rom_select & (addr_log[15:10] == 6'b000010)) |
+                (~addr_log[15] & (addr_log[14] | addr_log[13])) | (addr_log[15:13] == 3'b100);
+  wire f_rw   = we ? RAMWRT : RAMRD;
+  wire f_aux0 = ((addr_log[15:9] == 7'b0000000) | (addr_log[15:14] == 2'b11)) ? ALTZP :
+                (addr_log[15:10] == 6'b000001) ? ((STORE80 & PAGE2) | (~STORE80 & f_rw)) :
+                (addr_log[15:13] == 3'b001)    ? ((STORE80 & PAGE2 & HIRES_MODE) | ((~STORE80 | ~HIRES_MODE) & f_rw)) :
+                                                 f_rw;
+  assign fast_rw    = vpb_n & (we ? (f_main & f_lo & ~f_shw)
+                                  : ((f_main & (f_lo | (f_lc & ~(rom_select & ROMBANK)))) | f_romb));
+  assign fast_int   = (addr_log[15:12] != 4'hC);
+  assign fast_rom   = f_romb | (f_main & f_lc & RDROM & ~shadow[6]);
+  assign fast_rbank = f_romb ? bank_log[1:0] : 2'b11;
+  assign fast_aux   = bank_log[0] | f_aux0;
+  assign fast_fold  = f_main & (addr_log[15:12] == 4'hD) & ~LCRAM2 & ~RDROM & ~shadow[6];
 
 `ifdef VERILATOR
   // ----------------------------------------------------------------------------

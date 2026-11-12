@@ -1045,6 +1045,72 @@ and combined with the tag compare in the first clk and be a plain register
 again (`ce_r`), and a write of a cheap-class step takes its address from
 the cheap view.
 
+### Two tiers of decode, built; what is left is the core (2026-11-12)
+
+The design note above is built (`gs_mmu_decode` `fast_*`, the broker's
+`fa_q` / `fb_q` / `fh_q`), with one change found on the way: deciding and
+combining with the tag compare into one clock-enable register in the first
+clk was nine levels again, so the first clk ends in three registers
+(completes anyway; completes if the byte is there; the byte is there) and
+the enable is one gate behind them in the second.
+
+**Proof and simulation.**
+
+- The decode sweep checks the cheap view against the golden model on every
+  one of its 869,952,896 vectors: where it says "the card's alone" the
+  full decode says local, no side effect, nothing forwarded, write stored,
+  and its ROM / bank-bit / A12-fold answers are the full decode's. 115 M
+  read, 10.5 M write and 447 M internal-cycle vectors are in the class; no
+  failures. Four deliberate errors in the cheap view (a shadowable page
+  let through, ROMBANK ignored, the fold without IOLC, the hi-res aux rule
+  without HIRES) are each caught.
+- Broker suite 72 / 72, ROM 01 hash and write stream unchanged. In the
+  ROM 01 stretch 96.9 % of the local steps are two-clk steps; the rest are
+  mostly its 81,872 forwarded text-page writes, which now take four.
+- The registered full decode now reads wrong in simulation until its two
+  clks have passed (`aq_bad`), in every data-late configuration, so that a
+  use of it before its timing contract allows fails instead of working by
+  the grace of a zero-delay decode. That caught an injected fault the suite
+  had passed (a cheap-class write taking its tag from the full decode).
+- Test T20 reads the two ROM banks at one address in both orders (caught
+  another). 15 injections on this logic, 14 detected; the one left is
+  equivalent on this code (re-using the far memories' output registers is
+  safe again now that the decode is used two clks later; it stays off).
+
+**Timing** (same probe and contract generator; the full decode is a
+two-clk path again, the probe's power-up reset is out of the timing):
+
+| build | what | failing | worst one-clk | worst step path |
+|---|---|---|---|---|
+| n2f | two tiers, enable registered in the first clk | 158 | −1.54 (cheap view → enable, nine levels) | −1.53 |
+| n2g | first clk ends in three registers | 432 | −2.88 | −3.52 |
+| n2h | n2g + the probe's reset net a false path; the launch-index compare off the write port's mux | 201 | none in the worst 25 | −1.77 |
+
+- n2g was the second placement of the bad kind (n2b the first). Both had
+  the probe's power-up reset among their worst paths: one counter bit to
+  the clear of 1,100 registers, by default a one-clk path. It is a stand-in
+  for a reset that is released long before the socket is armed, and it is
+  now a false path. One build since is not proof that this was the cause.
+- In n2h **every failing path in the worst 25 is the core's own loop**:
+  `AAL → page-cross carry → NextState → microcode registers` (−1.73) and
+  `→ next address → near memory / ea_r` (−1.77), then `near memory → core`
+  (−0.88). The broker's own paths have slack: enable into the core +1.1,
+  full decode +8.6, far memory +10.
+
+**So the broker is no longer the limit; the core is, by 0.4 to 1.8 ns
+depending on the placement.** What the paths ask for, in the core, all
+checkable by the lockstep bench:
+
+1. *The next microinstruction as candidates.* `NextState` is `STATE + 1`,
+   `STATE + 2` or 0, and in the fetch step always 1 with the opcode from
+   memory. Look up both successor rows from the registered `IR` / `STATE`,
+   the fetched opcode's first row from a 256-entry table of its own, and
+   let the late decision select (`NS_ZERO`, `NS_INC2`, "fetch step").
+2. *The next address as candidates.* The same decision selects the address
+   fields (`SN`) today and the address adder sits behind it; evaluate the
+   address for each candidate row in parallel and select the result.
+3. *The flags.* `memory → DB → ALU → flags → P` is the path behind those.
+
 ## 5. Questions for ed
 
 1. Rung 3 changes the step count per instruction. The scoping doc's

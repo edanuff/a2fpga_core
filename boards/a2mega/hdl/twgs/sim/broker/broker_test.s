@@ -449,6 +449,19 @@ t2:     txa
         lda $6100
         res                     ; $11 (main)
 
+        ; ---- T20 the two ROM banks at one address (a cache in front of the ROM
+        ;      image keeps them apart by the bank, here in both orders)
+        lda $FE1000
+        res                     ; $E1
+        lda $FF1000
+        res                     ; whatever bank FF holds there (the reference decides)
+        lda $FE1000
+        res                     ; $E1
+        lda $FE1001
+        lda $FF1001
+        lda $FE1001
+        res                     ; $E2
+
         ; ---- T17 BRK with the language card in RAM: the vector comes from ROM
         ;      (VP) and leads to the dispatch bytes at $C071
         lda $C083
