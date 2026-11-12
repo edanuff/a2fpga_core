@@ -48,6 +48,12 @@
 //    anywhere in the machine) with VDA = VPA = 0.  Departure from the
 //    scoping doc's "previous address repeated": repeating a previous I/O or
 //    slot address would repeat its side effects (9).
+//  * HOLD (hold_i): the core is not stepped past the step in progress.  The
+//    sequencer waits in ST_SOCK with no request; the socket's idle cycles are
+//    then reads of idle_a_i, each reported when it completes (idle_stb_o).
+//    gs_accel_romcopy uses it to read the ROM image through the socket; with
+//    nm_flush_i it also empties the near memory.  The step that was held makes
+//    no use of the near-memory byte launched for it.
 //
 // Internal cycles of the core (VDA = VPA = 0) carry no data.  In fast mode
 // they reach the socket only when their address could matter to the machine
@@ -199,6 +205,21 @@ module gs_accel_broker #(
     input  logic        mem_bypass_i,    // native only: 1 = read data from the socket for everything
     input  logic        cxrom_local_i,   // replica: internal $C100-$CFFF firmware served locally
     input  logic [6:0]  exp_banks_i,     // replica: expansion banks backed by the card
+
+    // hold (clk domain; for whatever loads the card's memories through the socket:
+    // the ROM image).  With hold_i the core is not stepped past the step in progress.
+    // While it is held (held_o) the socket's idle cycles are reads of idle_a_i
+    // instead of PARK_ADDR, and each one that completes is reported: idle_stb_o for
+    // one clk, the byte on idle_d_o.  With nm_flush_i (only while held) the near
+    // memory's entry nm_flush_idx_i is made empty.  The step that was held does not
+    // use the near memory's byte.  Tie hold_i and nm_flush_i low if unused.
+    input  logic        hold_i,
+    input  logic [23:0] idle_a_i,
+    output logic        held_o,
+    output logic        idle_stb_o,
+    output logic [7:0]  idle_d_o,
+    input  logic        nm_flush_i,
+    input  logic [NEAR_AW-1:0] nm_flush_idx_i,
 
     // PHY side (gs_socket_phy)
     input  logic        phy_enabled_i,   // enabled_o: the pins are ours
@@ -386,6 +407,8 @@ module gs_accel_broker #(
     typedef enum logic [1:0] { ST_RESET, ST_ADDR, ST_DATA, ST_SOCK } st_t;
     st_t         st;
     logic [3:0]  ph;                 // clks spent in ST_ADDR / left in ST_DATA
+    logic        held_r;             // the core is held between two steps (st = ST_SOCK, no request)
+    logic        fl_hold;            // the cycle the PHY issued last is an idle cycle of the hold
     logic [23:0] prev_addr;          // effective address of the previous step
 
     // internal cycle aimed at I/O space (the PHY's condition): repeat the
@@ -567,7 +590,8 @@ module gs_accel_broker #(
             default: begin
                 // idle: park; while the core is in reset show its reset-state
                 // address, as S6 does
-                phy_a_o = run_c ? PARK_ADDR : cpu_a_i;
+                // (held: the address the hold asks for)
+                phy_a_o = held_r ? idle_a_i : run_c ? PARK_ADDR : cpu_a_i;
                 phy_d_out_o = 8'h00; phy_we_n_o = 1'b1;
                 phy_vpa_o = 1'b0;    phy_vda_o = 1'b0;      phy_vp_n_o = 1'b1;
             end
@@ -787,9 +811,11 @@ module gs_accel_broker #(
     wire [NTW-1:0]      w_tag    = nm_far_only(d_phys) ? '1 : nm_tag(1'b0, d_phys, 4'd0, w_idx[12]);
     assign nm_ren_o   = NEAR & cpu_ce_o;
     assign nm_ra_o    = cpu_na_i[NEAR_AW-1:0];
-    assign nm_wen_o   = NEAR & (lm_wen | nfill_r);
-    assign nm_wa_o    = nfill_r ? fill_idx : widx_r;
-    assign nm_wtag_o  = nfill_r ? fill_tag : wtag_r;
+    // (held, nm_flush_i: the entry is made empty)
+    wire   nm_flush   = nm_flush_i & held_r;
+    assign nm_wen_o   = NEAR & (lm_wen | nfill_r | nm_flush);
+    assign nm_wa_o    = nm_flush ? nm_flush_idx_i : nfill_r ? fill_idx : widx_r;
+    assign nm_wtag_o  = nm_flush ? '1 : nfill_r ? fill_tag : wtag_r;
     assign nm_wdata_o = nfill_r ? alt_q    : wd_r;
 
     // next values of the registers `sel` is made of (the same as in the block below;
@@ -913,6 +939,7 @@ module gs_accel_broker #(
             pw_valid <= 1'b0; pw_addr <= '0; pw_data <= '0;
             fl_kind <= K_IDLE; fl_busy <= 1'b0; fl_run <= 1'b0; fl_issue_q <= 1'b0;
             fl_addr <= '0; fl_we <= 1'b0; fl_data <= '0;
+            held_r <= 1'b0; fl_hold <= 1'b0;
             use_lm_r <= 1'b0; rom_r <= 1'b0; vfy_r <= 1'b0;
             ld_valid <= 1'b0;
             ml_go <= 1'b0; ml_sel_r <= 1'b0; ml_sel_c <= '0; wen_r <= 1'b0; wen_c <= '0; ren_r <= 1'b0; ren_c <= '0;
@@ -937,6 +964,7 @@ module gs_accel_broker #(
             ce_r <= 1'b0; ce_c <= '0; sc <= '0; pl_fresh <= 1'b0; sw_touch_q <= 1'b0;
             ev_hit <= 1'b0; ev_miss <= 1'b0; ev_pww <= 1'b0;
             near_r <= 1'b0; fill_pend <= 1'b0; nfill_r <= 1'b0;
+            held_r <= 1'b0; fl_hold <= 1'b0;
             // the PHY keeps issuing (idle) cycles during reset
             if (phy_issue_evt_i) begin fl_kind <= K_IDLE; fl_busy <= 1'b1; fl_run <= 1'b0; end
             else if (phy_fall_evt_i) fl_busy <= 1'b0;
@@ -946,6 +974,7 @@ module gs_accel_broker #(
                 fl_kind <= sel;
                 fl_busy <= 1'b1;
                 fl_run  <= 1'b1;
+                fl_hold <= held_r & (sel == K_IDLE);
                 fl_addr <= phy_a_o;
                 fl_we   <= ~phy_we_n_o;
                 fl_data <= phy_d_out_o;
@@ -971,7 +1000,7 @@ module gs_accel_broker #(
             // what the near memory's output register holds: good from a launch the
             // core took, until that index is written
             if (cpu_ce_o)                                  nl_ok <= NEAR & cpu_rdy_i;
-            else if (NEAR & nl_wr)                         nl_ok <= 1'b0;
+            else if (NEAR & (nl_wr | held_r))              nl_ok <= 1'b0;
             nfill_r  <= NEAR & fill_pend & fill_ok & (st == ST_DATA) & (ph == 4'd2);
             if (nfill_r | cpu_ce_o) fill_pend <= 1'b0;
             ml_apply <= 1'b0;
@@ -1078,12 +1107,17 @@ module gs_accel_broker #(
                     if (ph != 4'd0) ph <= ph - 4'd1;
                 end
 
-                default: ;   // ST_SOCK: wait for sync_done
+                default: begin   // ST_SOCK: wait for sync_done; or the core is held
+                    if (held_r & ~hold_i) begin
+                        st <= ST_ADDR; ph <= '0; held_r <= 1'b0;
+                    end
+                end
             endcase
 
-            // ---- the step completes
+            // ---- the step completes (and the next one waits if the core is to be held)
             if (cpu_ce_o) begin
-                st          <= ST_ADDR;
+                st          <= hold_i ? ST_SOCK : ST_ADDR;
+                held_r      <= hold_i;
                 ph          <= '0;
                 prev_addr   <= eff_addr;
                 sreq_valid  <= 1'b0;
@@ -1187,6 +1221,9 @@ module gs_accel_broker #(
 
     assign fast_o      = run_c & ~mode_native;
     assign step_evt_o  = cpu_ce_o;
+    assign held_o      = held_r;
+    assign idle_stb_o  = cyc_done & (fl_kind == K_IDLE) & fl_hold & held_r;
+    assign idle_d_o    = d_f;
     assign sock_evt_o  = cyc_stb;
     assign sock_idle_o = fl_busy & (fl_kind == K_IDLE);
     assign pw_busy_o   = pw_valid;

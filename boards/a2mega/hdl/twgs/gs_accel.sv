@@ -1,0 +1,332 @@
+// A2MEGA - IIgs CPU socket accelerator: the accelerator domain
+//
+// (c) 2026 Ed Anuff <ed@a2fpga.com>
+//
+// Permission to use, copy, modify, and/or distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//
+// Description
+// -----------
+// Everything of the S7 accelerator that runs on the pin-sequencer clock, as
+// one module (docs/gs_socket_s7_accelerator_scoping.md, and the exploration
+// log's "Rung 5"): gs_socket_phy, gs_accel_broker with the near memory and
+// the two-clk step, the F65C816 core with its microcode in block RAM (build
+// with F65C816_MCODE_ROM), the near memory, the card's two memories of
+// record - banks 00/01 and the ROM image, 128 KB each - and
+// gs_accel_romcopy, which reads the image through the socket.  It is the
+// wiring of the timing probe (accel_probe_138b/accel_probe_top.sv), which
+// keeps its stand-ins; the broker bench runs this module beside its own
+// hand-wired design, pin for pin (ACCEL_SHADOW).
+//
+// One clock (clk).  The control inputs are quasi-static and already in its
+// domain.  What they ask for is granted only when it is safe:
+//
+//   cfg_cardmem_i  the card's memory is the memory of record (native mode:
+//                  its byte goes to the core and is compared with the
+//                  socket's - verify_count_o).  Needs a valid ROM image.
+//   cfg_fast_i     local steps at the clock's rate.  Needs cfg_cardmem_i.
+//   cfg_cxrom_i    internal $C100-$CFFF firmware served from the image.  Taken
+//                  when the core is in reset or held (a ROM copy), not mid-run.
+//   cfg_copy_i     a rising edge copies the ROM image through the socket
+//                  (the core is held for about 46 ms).
+//
+// With all of them low the module is S6 on the broker: every step a socket
+// cycle, every byte from the socket.  There is no expansion memory here.
+//
+// Memories: block RAM, zero at power-up.  The near memory's tags are stored
+// inverted so that zeros read as "no entry".  Banks 00/01 follow every write
+// the core makes from the moment the socket is armed; nothing else loads
+// them, so the card's memory matches the machine's only for bytes written
+// since then (scoping 2.6).
+//
+module gs_accel #(
+    parameter bit ROM3 = 1'b0,
+    parameter int NEAR_KW = 4,           // address bits above A13 in a near-memory tag: 4 = banks 00/01 and the ROM
+                                         // image, which is all this module has (the bench also runs it with 10)
+    parameter bit SIM_ROM_VALID = 1'b0   // SIMULATION ONLY: the bench loaded the ROM image (gs_accel_romcopy SIM_PRESET)
+) (
+    input  logic        clk,
+    input  logic        rst_n,
+
+    // control (clk domain, quasi-static)
+    input  logic        arm_i,           // take the socket (gs_socket_phy armed_i)
+    input  logic        listen_i,        // control-input shifter only
+    input  logic [3:0]  out_extra_i,     // PHY address-delay sweep
+    input  logic        cfg_fast_i,
+    input  logic        cfg_cardmem_i,
+    input  logic        cfg_cxrom_i,
+    input  logic        cfg_copy_i,
+    input  logic        clear_i,         // hold the PHI2 measurement at zero
+
+    // socket pins
+    input  logic        gs_ph2_i,
+    input  logic        gs_rdy_i,
+    input  logic        gs_irq_n_i,
+    input  logic        gs_nmi_n_i,
+    input  logic        gs_res_n_i,
+    input  logic        gs_abort_n_i,
+    input  logic        gs_be_i,
+    input  logic [7:0]  gs_d_i,
+    output logic [7:0]  gs_d_o,
+    output logic        gs_d_oe_o,
+    output logic [15:0] gs_a_o,
+    output logic        gs_rw_o,
+    output logic        gs_vp_o,
+    output logic        gs_rdy_out_o,
+    output logic        gs_d_dir_o,
+    output logic        gs_data_oe_n_o,
+    output logic        gs_addr_oe_n_o,
+    output logic        gs_ctl_oe_n_o,
+
+    // telemetry (clk domain)
+    output logic [7:0]  status_o,        // {ph2_alive, running, enabled, be_ok, res_n, rdy, 0, 0} (as gs_socket_ctl)
+    output logic [7:0]  mode_o,          // {rom_valid, copy_busy, held, fast, cardmem, cxrom, 0, 0}: what is in effect
+    output logic [31:0] cycle_count_o,   // PHY: bus cycles
+    output logic [15:0] stall_count_o,
+    output logic [15:0] be_count_o,
+    output logic [15:0] ph2_period_o,    // clk ticks per 256 PHI2 cycles
+    output logic [15:0] ph2_high_o,
+    output logic [23:0] last_addr_o,     // address of the last cycle put on the bus
+    output logic [15:0] verify_count_o,
+    input  logic [5:0]  tele_idx_i,      // quasi-static: selects tele_word_o
+    output logic [31:0] tele_word_o      // 0 steps, 1 socket cycles for the core, 2 posted writes, 3 clks waited for
+                                         // the write buffer, 4 local reads in place, 5 local reads that waited,
+                                         // 6 {verify_count, 8'h00, mode}, 7 {8'h00, verify_addr},
+                                         // 8 {copies, 8'h00, ROM image sum}, 9 {shadow, cyareg, sltromsel, statereg},
+                                         // 10 {24'h0, switch misc}, 11 PHY bus cycles; others 0
+);
+    localparam int STEP_CLKS = 2, ADDR_CLKS = 2, SLOW_CLKS = 3;
+    localparam int NEAR_AW = 14, NTW = NEAR_KW + 2;
+    localparam int ROM_BLKS = ROM3 ? 16 : 8;
+    localparam int ROM_SELW = $clog2(ROM_BLKS);
+
+    // ---- socket PHY
+    logic [23:0] phy_a;
+    logic [7:0]  phy_d_out;
+    logic        phy_we_n, phy_vpa, phy_vda, phy_vp_n;
+    logic        enabled, running, fall_evt, issue_evt, ph2_alive, be_ok;
+
+    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself
+        .force_slow_i(1'b0),
+        .clk(clk), .rst_n(rst_n), .armed_i(arm_i), .listen_i(listen_i), .out_extra_i(out_extra_i),
+        .cpu_clk_o(), .cpu_rst_n_o(),
+        .cpu_a_i(phy_a), .cpu_d_out_i(phy_d_out), .cpu_we_n_i(phy_we_n), .cpu_vp_n_i(phy_vp_n),
+        .cpu_vpa_i(phy_vpa), .cpu_vda_i(phy_vda),
+        .gs_ph2_i(gs_ph2_i), .gs_rdy_i(gs_rdy_i), .gs_res_n_i(gs_res_n_i), .gs_be_i(gs_be_i),
+        .gs_d_o(gs_d_o), .gs_d_oe_o(gs_d_oe_o),
+        .gs_a_o(gs_a_o), .gs_rw_o(gs_rw_o), .gs_vp_o(gs_vp_o), .gs_rdy_out_o(gs_rdy_out_o),
+        .gs_d_dir_o(gs_d_dir_o), .gs_data_oe_n_o(gs_data_oe_n_o), .gs_addr_oe_n_o(gs_addr_oe_n_o),
+        .gs_ctl_oe_n_o(gs_ctl_oe_n_o),
+        .ph2_alive_o(ph2_alive), .running_o(running), .enabled_o(enabled), .be_ok_o(be_ok),
+        .fall_evt_o(fall_evt), .issue_evt_o(issue_evt), .ended_read_o(),
+        .cycle_count_o(cycle_count_o), .stall_count_o(stall_count_o), .be_count_o(be_count_o)
+    );
+
+    // ---- what the control inputs are granted
+    logic        rom_valid, copy_busy, copy_start, cfg_copy_q;
+    wire         cardmem = cfg_cardmem_i & rom_valid;
+    wire         fast    = cfg_fast_i & cardmem;
+    // (cxrom goes straight into the decode of the step in progress: it is taken only
+    // while no step is, with the core in reset or held - so at /RES and at a ROM copy)
+    logic        cxrom;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin cfg_copy_q <= 1'b0; copy_start <= 1'b0; cxrom <= 1'b0; end
+        else begin
+            cfg_copy_q <= cfg_copy_i; copy_start <= cfg_copy_i & ~cfg_copy_q;
+            if (!cpu_rst_n | held) cxrom <= cfg_cxrom_i & rom_valid;
+        end
+    end
+
+    // ---- broker
+    logic        cpu_rst_n, cpu_ce, cpu_irq_n, cpu_nmi_n, cpu_abort_n;
+    logic [3:0]  cpu_ce_c;
+    logic [7:0]  cpu_d_in, cpu_d_out;
+    logic [23:0] cpu_a, cpu_na;
+    logic [13:0] cpu_na_b;
+    logic [2:0]  cpu_nst;
+    logic        cpu_we_n, cpu_vp_n, cpu_vpa, cpu_vda, cpu_mlb, cpu_iflag, cpu_rdyo;
+    logic        lm_ren, lm_wen;
+    logic [23:0] lm_raddr, lm_waddr;
+    logic [16:0] lm_ram_ra;
+    logic [17:0] lm_rom_ra;
+    logic [7:0]  lm_wdata, lm_ram_rdata, lm_rom_rdata;
+    logic               nm_ren, nm_wen;
+    logic [NEAR_AW-1:0] nm_ra, nm_wa;
+    logic [7:0]         nm_rdata, nm_wdata;
+    logic [NTW-1:0]     nm_rtag, nm_wtag;
+    logic        brk_fast, held, idle_stb, hold, nm_flush;
+    logic [7:0]  idle_d;
+    logic [23:0] idle_a, verify_addr;
+    logic [NEAR_AW-1:0] nm_flush_idx;
+    logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait, stat_rd_hit, stat_rd_miss;
+    logic [7:0]  r_shadow, r_cyareg, r_sltromsel, r_statereg, r_misc;
+
+    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(1), .CE_COPIES(4),
+                      .NEAR(1'b1), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .ROM3(ROM3)) u_brk (
+        .clk(clk), .rst_n(rst_n),
+        .native_i(~fast), .mem_bypass_i(~cardmem),
+        .cxrom_local_i(cxrom), .exp_banks_i(7'd0),
+        .hold_i(hold), .idle_a_i(idle_a), .held_o(held), .idle_stb_o(idle_stb), .idle_d_o(idle_d),
+        .nm_flush_i(nm_flush), .nm_flush_idx_i(nm_flush_idx),
+        .phy_enabled_i(enabled), .phy_running_i(running),
+        .phy_fall_evt_i(fall_evt), .phy_issue_evt_i(issue_evt),
+        .phy_a_o(phy_a), .phy_d_out_o(phy_d_out), .phy_we_n_o(phy_we_n),
+        .phy_vpa_o(phy_vpa), .phy_vda_o(phy_vda), .phy_vp_n_o(phy_vp_n),
+        .gs_ph2_i(gs_ph2_i), .gs_d_i(gs_d_i), .gs_rdy_i(gs_rdy_i),
+        .gs_irq_n_i(gs_irq_n_i), .gs_nmi_n_i(gs_nmi_n_i), .gs_abort_n_i(gs_abort_n_i),
+        .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_ce_c_o(cpu_ce_c), .cpu_d_in_o(cpu_d_in),
+        .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),
+        .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n),
+        .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na), .cpu_nst_i(cpu_nst), .cpu_rdy_i(cpu_rdyo),
+        .lm_ren_o(lm_ren), .lm_ram_ra_o(lm_ram_ra), .lm_rom_ra_o(lm_rom_ra), .lm_raddr_o(lm_raddr),
+        .lm_ram_rdata_i(lm_ram_rdata), .lm_rom_rdata_i(lm_rom_rdata),
+        .lm_wen_o(lm_wen), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
+        .nm_ren_o(nm_ren), .nm_ra_o(nm_ra), .nm_rdata_i(nm_rdata), .nm_rtag_i(nm_rtag),
+        .nm_wen_o(nm_wen), .nm_wa_o(nm_wa), .nm_wdata_o(nm_wdata), .nm_wtag_o(nm_wtag),
+        .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(), .pw_busy_o(),
+        .verify_miss_o(), .verify_addr_o(verify_addr), .verify_count_o(verify_count_o),
+        .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
+        .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
+        .shadow_o(r_shadow), .cyareg_o(r_cyareg), .sltromsel_o(r_sltromsel),
+        .statereg_o(r_statereg), .sw_misc_o(r_misc)
+    );
+
+    // ---- core
+    F65C816 u_cpu (
+        .CLK(clk), .RST_N(cpu_rst_n), .CE(cpu_ce), .CE_X(cpu_ce_c), .RDY_IN(1'b1),
+        .NMI_N(cpu_nmi_n), .IRQ_N(cpu_irq_n), .ABORT_N(cpu_abort_n),
+        .D_IN(cpu_d_in), .D_OUT(cpu_d_out), .A_OUT(cpu_a), .WE(cpu_we_n), .RDY_OUT(cpu_rdyo),
+        .VPA(cpu_vpa), .VDA(cpu_vda), .MLB(cpu_mlb), .VPB(cpu_vp_n), .I_FLAG(cpu_iflag),
+        .NA_OUT(cpu_na), .NST_OUT(cpu_nst), .NA_OUT_B(cpu_na_b)
+    );
+
+    // ---- the ROM image, through the socket
+    logic        rom_we;
+    logic [17:0] rom_wa;
+    logic [7:0]  rom_wd;
+    logic [15:0] rom_sum;
+    logic [7:0]  rom_copies;
+    gs_accel_romcopy #(.ROM3(ROM3), .NEAR_AW(NEAR_AW), .SIM_PRESET(SIM_ROM_VALID)) u_copy (
+        .clk(clk), .rst_n(rst_n),
+        .start_i(copy_start), .ready_i(enabled & running),
+        .hold_o(hold), .idle_a_o(idle_a), .held_i(held), .idle_stb_i(idle_stb), .idle_d_i(idle_d),
+        .nm_flush_o(nm_flush), .nm_flush_idx_o(nm_flush_idx),
+        .rom_we_o(rom_we), .rom_wa_o(rom_wa), .rom_wd_o(rom_wd),
+        .busy_o(copy_busy), .valid_o(rom_valid), .sum_o(rom_sum), .copies_o(rom_copies)
+    );
+
+    // ---- the card's memories of record: for every data bit eight blocks of
+    // 16K x 1 for banks 00/01 and eight (ROM 3: sixteen) for the ROM image, all
+    // read at once, a registered block select picking one of each.  They are read
+    // only from registers (the broker's far path), so they need no floorplan.
+    wire ram_bank = (lm_waddr[23:17] == 7'd0);      // a write to banks 00/01
+    for (genvar b = 0; b < 8; b++) begin : g_bit
+        logic [2:0] ram_sel;
+        logic [ROM_SELW-1:0] rom_sel;
+        logic [7:0] ram_q;
+        logic [ROM_BLKS-1:0] rom_q;
+        always_ff @(posedge clk) if (lm_ren) begin
+            ram_sel <= lm_ram_ra[16:14];
+            rom_sel <= lm_rom_ra[14 +: ROM_SELW];
+        end
+        for (genvar k = 0; k < 8; k++) begin : g_blk
+            logic mram [0:16383];
+            always_ff @(posedge clk) if (lm_ren) ram_q[k] <= mram[lm_ram_ra[13:0]];
+            always_ff @(posedge clk) if (lm_wen && ram_bank && lm_waddr[16:14] == 3'(k)) mram[lm_waddr[13:0]] <= lm_wdata[b];
+`ifdef VERILATOR
+            initial for (int i = 0; i < 16384; i++) mram[i] = 1'b0;
+`endif
+        end
+        for (genvar k = 0; k < ROM_BLKS; k++) begin : g_rblk
+            logic mrom [0:16383];
+            always_ff @(posedge clk) if (lm_ren) rom_q[k] <= mrom[lm_rom_ra[13:0]];
+            always_ff @(posedge clk) if (rom_we && rom_wa[14 +: ROM_SELW] == ROM_SELW'(k)) mrom[rom_wa[13:0]] <= rom_wd[b];
+`ifdef VERILATOR
+            initial for (int i = 0; i < 16384; i++) mrom[i] = 1'b0;
+`endif
+        end
+        assign lm_ram_rdata[b] = ram_q[ram_sel];
+        assign lm_rom_rdata[b] = rom_q[rom_sel];
+    end
+
+    // ---- near memory: one 16K x 1 block per entry bit, no output mux.  The read
+    // address is the core's next address, its latest output; the blocks sit in two
+    // rows of block RAM, and those of the second take the core's second copy of it
+    // (NA_OUT_B) so that neither copy's net spans both rows.
+    localparam logic [13:0] ROW_B = 14'b11_0000_1100_1100;           // entry bits placed in the second row (NEAR_KW = 4)
+    wire [8+NTW-1:0] nm_wv = {~nm_wtag, nm_wdata};
+    logic [8+NTW-1:0] nm_q;
+    for (genvar b = 0; b < 8 + NTW; b++) begin : g_nb
+        localparam bit SECOND = (NEAR_KW == 4) ? ROW_B[b] : ((b % 4) >= 2);
+        logic nmem [0:(1<<NEAR_AW)-1];
+        wire [NEAR_AW-1:0] ra = SECOND ? cpu_na_b[NEAR_AW-1:0] : nm_ra;
+        always_ff @(posedge clk) if (nm_ren) nm_q[b] <= nmem[ra];
+        always_ff @(posedge clk) if (nm_wen) nmem[nm_wa] <= nm_wv[b];
+`ifdef VERILATOR
+        initial begin for (int i = 0; i < (1<<NEAR_AW); i++) nmem[i] = 1'b0; nm_q[b] = 1'b0; end
+`endif
+    end
+    assign nm_rdata = nm_q[7:0];
+    assign nm_rtag  = ~nm_q[8 +: NTW];
+
+    // ---- telemetry
+    // PHI2 period / duty: clk ticks per 256 cycles (as gs_socket_ctl)
+    logic [1:0]  ph2_s;
+    logic [15:0] per_acc, hi_acc;
+    logic [7:0]  cyc256;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            ph2_s <= '0; per_acc <= '0; hi_acc <= '0; ph2_period_o <= '0; ph2_high_o <= '0; cyc256 <= '0;
+            last_addr_o <= '0;
+        end else begin
+            ph2_s <= {ph2_s[0], gs_ph2_i};
+            if (issue_evt) last_addr_o <= phy_a;
+            if (clear_i) begin
+                per_acc <= '0; hi_acc <= '0; ph2_period_o <= '0; ph2_high_o <= '0; cyc256 <= '0;
+            end else if (fall_evt) begin
+                if (cyc256 == 8'hFF) begin
+                    ph2_period_o <= per_acc + 1'b1;
+                    ph2_high_o   <= hi_acc + {15'd0, ph2_s[1]};
+                    per_acc <= '0;
+                    hi_acc  <= '0;
+                end else begin
+                    per_acc <= per_acc + 1'b1;
+                    hi_acc  <= hi_acc + {15'd0, ph2_s[1]};
+                end
+                cyc256 <= cyc256 + 1'b1;
+            end else begin
+                per_acc <= per_acc + 1'b1;
+                hi_acc  <= hi_acc + {15'd0, ph2_s[1]};
+            end
+        end
+    end
+
+    assign status_o = {ph2_alive, running, enabled, be_ok, gs_res_n_i, gs_rdy_i, 2'b00};
+    assign mode_o   = {rom_valid, copy_busy, held, brk_fast, cardmem, cxrom, 2'b00};
+    always_ff @(posedge clk) begin
+        unique case (tele_idx_i)
+            6'd0:    tele_word_o <= stat_steps;
+            6'd1:    tele_word_o <= stat_sock;
+            6'd2:    tele_word_o <= stat_posted;
+            6'd3:    tele_word_o <= stat_pwwait;
+            6'd4:    tele_word_o <= stat_rd_hit;
+            6'd5:    tele_word_o <= stat_rd_miss;
+            6'd6:    tele_word_o <= {verify_count_o, 8'h00, mode_o};
+            6'd7:    tele_word_o <= {8'h00, verify_addr};
+            6'd8:    tele_word_o <= {rom_copies, 8'h00, rom_sum};
+            6'd9:    tele_word_o <= {r_shadow, r_cyareg, r_sltromsel, r_statereg};
+            6'd10:   tele_word_o <= {24'h0, r_misc};
+            6'd11:   tele_word_o <= cycle_count_o;
+            default: tele_word_o <= 32'h0;
+        endcase
+    end
+endmodule

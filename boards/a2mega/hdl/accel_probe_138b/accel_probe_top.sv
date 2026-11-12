@@ -146,6 +146,8 @@ module accel_probe_top (
         .clk(clk), .rst_n(rst_n),
         .native_i(cfg[0]), .mem_bypass_i(cfg[1]),
         .cxrom_local_i(cfg[3]), .exp_banks_i(cfg[10:4]),
+        .hold_i(1'b0), .idle_a_i(24'd0), .held_o(), .idle_stb_o(), .idle_d_o(),
+        .nm_flush_i(1'b0), .nm_flush_idx_i('0),
         .phy_enabled_i(enabled), .phy_running_i(running),
         .phy_fall_evt_i(fall_evt), .phy_issue_evt_i(issue_evt),
         .phy_a_o(phy_a), .phy_d_out_o(phy_d_out), .phy_we_n_o(phy_we_n),

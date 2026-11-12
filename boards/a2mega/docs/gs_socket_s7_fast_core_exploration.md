@@ -191,6 +191,16 @@ accelerator-only build (the PLL output the S6 build already uses, or one of
 its own). The 100 MHz probe (`a2mega_accel_probe_138b_n2`) stays as a
 margin instrument; `a2mega_accel_probe_138b_n8` is the reference.
 
+**Correction and outcome, the same day.** S6's socket clock on hardware is
+not 108 MHz: the board's socket PLL (`gowin_gs_pll`) is 110 MHz (50 × 22 /
+10, constrained at 9.091 ns in `a2mega_138b.sdc`), and "108" in this log,
+in the scoping doc and in the PHY's comments is the nominal figure and the
+simulation bench's clock. The accelerator-only build therefore keeps that
+PLL unchanged, which is what "the PHY S6 ran on hardware" means: **110 MHz,
+55 MHz steps**. The probe closes there too (one placement, 0 failing,
++0.007), and the board build closes at 110 MHz:
+[`gs_socket_s7_accel_only_build.md`](gs_socket_s7_accel_only_build.md).
+
 **Memory placement on the HyperRAM board rev (ed, 2026-11-11):** instead of
 putting the accelerator's expansion banks on the HyperRAM beside the DOC,
 **give the DDR3 to the accelerator and move the slot side (framebuffer,
@@ -1446,7 +1456,8 @@ What this result is and is not:
    has only been seen in simulation.
 6. ~~The accelerator's clock: 108 or 100 MHz for the accelerator-only
    build?~~ **Answered 2026-11-12: 108 MHz** (§2d). The step is 54 MHz and
-   the PHY is S6's, already on hardware. In the broker bench the socket
+   the PHY is S6's, already on hardware (which is in fact 110 MHz: see the
+   correction in §2d). In the broker bench the socket
    timing of the 108 MHz near-memory builds is the same as the S6
    configuration's, to the tenth of a nanosecond (tADS 65.6, tBAS 66.6,
    tAH 56.3, tBH 47.0, tMDS 56.3, tDHW 56.3 ns), in native and in fast

@@ -70,3 +70,7 @@ boards/a2mega/captures/
 **/impl/a2mega_cpu_probe_*_resources.json
 **/impl/pnr/a2mega_accel_probe_*
 **/impl/a2mega_accel_probe_*_resources.json
+
+# S7 accelerator-only build (boards/a2mega/docs/gs_socket_s7_accel_only_build.md): not on
+# hardware yet - its bitstream and reports stay local until it has run there
+**/impl/pnr/a2mega_accel_138B*

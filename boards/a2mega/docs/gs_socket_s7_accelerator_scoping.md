@@ -5,7 +5,8 @@ auto-arm, reset sequencing). Sections 0–8 are that scoping as written; the
 numbers in them are from the S4–S6 builds and the bench. **2026-11-11: S7a
 (memory-map replica) and S7b (broker) exist and pass in simulation, with the
 reset rule as a gateware module — §9, which also records every departure
-from sections 2–7.** No board build contains any of it yet.
+from sections 2–7.** **2026-11-12: an accelerator-only board build exists
+(§10.4), not yet flashed.**
 
 ## 0. Summary
 
@@ -812,3 +813,26 @@ part is in the log; the broker's part, none of it visible to the machine:
 At 108 MHz the PHY's timing is the one S6 ran on hardware, and section 2.1's
 "108 / N" is N = 2. **Decided 2026-11-12 (ed): the accelerator-only build
 uses 108 MHz**, 54 MHz steps (exploration log §2d).
+
+### 10.4 The accelerator-only build (2026-11-12)
+
+It exists: `a2mega_accel_138B.gprj`, described in
+[`gs_socket_s7_accel_only_build.md`](gs_socket_s7_accel_only_build.md),
+built and simulated, not flashed. What it settles from the lists above:
+
+- **The top level** of section 9.6: `hdl/twgs/gs_accel.sv` is the
+  accelerator domain as one module, and the broker bench runs it beside
+  its own hand-wired design with every output pin compared in every clk.
+- **The ROM image** of section 2.6: read through the socket by
+  `gs_accel_romcopy`, on request rather than at every arm. The broker
+  gained a hold for it: the core is not stepped past the step in progress,
+  and the socket's idle cycles become the reads. Afterwards the near
+  memory is emptied, which is also the missing "invalidate" of section
+  10.2.
+- **The clock**: the S6 socket PLL unchanged, which is 110 MHz, not the
+  nominal 108: 55 MHz steps.
+- **Control**: the S6 firmware's GS window, with the trace-trigger address
+  registers carrying the accelerator's requests under a key. With no
+  request the card is S6 on the new core.
+
+Still to do: everything of S7d and S7e, ROM 3, and the first hardware run.

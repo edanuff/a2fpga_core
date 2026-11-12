@@ -71,7 +71,9 @@ module tb_gs_broker #(
     parameter int RA_COPIES = 1,       // copies of the read addresses the broker puts out
     parameter bit NEAR      = 1'b0,    // near memory and the two-clk step (DATA_LATE builds, ADDR_CLKS = 2)
     parameter int NEAR_AW   = 14,
-    parameter int NEAR_KW   = 10
+    parameter int NEAR_KW   = 10,
+    parameter bit ROM_PRESET = 1'b1    // 1 = the bench loads the card's ROM image; 0 = it starts empty and
+                                       // +mode=copy has the design read it through the socket
 );
 
     import "DPI-C" function int  mach_load_rom(input string path);
@@ -92,6 +94,8 @@ module tb_gs_broker #(
     localparam real T14    = 69.841;   // 14.31818 MHz
 `ifdef CLK100
     localparam real TCLK   = 10.0;     // 100 MHz accelerator domain
+`elsif CLK110
+    localparam real TCLK   = 9.091;    // 110 MHz: the socket PLL of the board builds (gowin_gs_pll)
 `else
     localparam real TCLK   = 9.259;    // 108 MHz
 `endif
@@ -124,6 +128,22 @@ module tb_gs_broker #(
     longint      max_steps = 60000;
     int          wlog = 0;
     logic        native_i = 1'b1, mem_bypass_i = 1'b1;
+    // +mode=copy: native with every byte from the socket until the ROM image has been
+    // copied through the socket, then fast (what gs_accel grants its control inputs)
+    bit          cfg_copy = 0;
+    logic        copy_req = 1'b0, copy_q = 1'b0, copy_start = 1'b0;
+    logic        copy_hold, copy_held, copy_stb, copy_flush, copy_we, copy_busy, copy_valid;
+    logic [23:0] copy_a;
+    logic [7:0]  copy_d, copy_wd, copy_copies;
+    logic [17:0] copy_wa;
+    logic [15:0] copy_sum;
+    logic [NEAR_AW-1:0] copy_fidx;
+    longint      n_copy = 0, n_copy_tail = 0, n_copy_cur = 0;
+    int          n_copies_want = 1;
+    bit          do_recopy = 0, recopy_done = 0, hold_cyc_q = 0;
+    logic        held_q = 1'b0, copy_busy_q = 1'b0;
+    wire         native_w = cfg_copy ? ~copy_valid : native_i;
+    wire         bypass_w = cfg_copy ? ~copy_valid : mem_bypass_i;
 
     //---------------------------------------------------------------- DUT pins
     logic        gs_ph2_f, gs_rdy_f, gs_irq_n_f, gs_nmi_n_f, gs_res_n_f, gs_abort_n_f, gs_be_f;
@@ -187,8 +207,10 @@ module tb_gs_broker #(
     gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK), .DATA_LATE(DATA_LATE), .RA_COPIES(RA_COPIES), .CE_COPIES(4),
                       .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW)) u_brk (
         .clk(clk), .rst_n(rst_n),
-        .native_i(native_i), .mem_bypass_i(mem_bypass_i),
+        .native_i(native_w), .mem_bypass_i(bypass_w),
         .cxrom_local_i(cfg_cxrom[0]), .exp_banks_i(cfg_exp[6:0]),
+        .hold_i(copy_hold), .idle_a_i(copy_a), .held_o(copy_held), .idle_stb_o(copy_stb), .idle_d_o(copy_d),
+        .nm_flush_i(copy_flush), .nm_flush_idx_i(copy_fidx),
         .phy_enabled_i(enabled), .phy_running_i(running),
         .phy_fall_evt_i(fall_evt), .phy_issue_evt_i(issue_evt),
         .phy_a_o(phy_a), .phy_d_out_o(phy_d_out), .phy_we_n_o(phy_we_n),
@@ -233,6 +255,34 @@ module tb_gs_broker #(
     initial if (DATA_LATE) begin $display("DATA_LATE needs the FAST_CORE build"); $finish; end
 `endif
 
+    // The ROM image through the socket (gs_accel_romcopy), as gs_accel has it: the
+    // request is registered into a one-clk start, the image is the bench's lrom.
+    always_ff @(posedge clk) begin
+        copy_q     <= copy_req;
+        copy_start <= copy_req & ~copy_q;
+        // a copy ends with the near memory empty, and the step that was held does not
+        // trust the byte launched for it
+        held_q      <= copy_held;
+        copy_busy_q <= copy_busy;
+        if (held_q && !copy_held && rst_n && u_brk.run_c && u_brk.nl_ok) begin
+            $display("ERROR: the near memory's byte is trusted in the step after a hold"); $finish;
+        end
+        if (copy_busy_q && !copy_busy && copy_valid) begin
+            int n_left;
+            n_left = 0;
+            for (int i = 0; i < (1<<NEAR_AW); i++) if (nmt[i] != '1) n_left++;
+            if (n_left != 0) begin $display("ERROR: %0d near memory entries left after a ROM copy", n_left); $finish; end
+        end
+    end
+    gs_accel_romcopy #(.NEAR_AW(NEAR_AW), .SIM_PRESET(ROM_PRESET)) u_copy (
+        .clk(clk), .rst_n(rst_n),
+        .start_i(copy_start), .ready_i(enabled & running),
+        .hold_o(copy_hold), .idle_a_o(copy_a), .held_i(copy_held), .idle_stb_i(copy_stb), .idle_d_i(copy_d),
+        .nm_flush_o(copy_flush), .nm_flush_idx_o(copy_fidx),
+        .rom_we_o(copy_we), .rom_wa_o(copy_wa), .rom_wd_o(copy_wd),
+        .busy_o(copy_busy), .valid_o(copy_valid), .sum_o(copy_sum), .copies_o(copy_copies)
+    );
+
     //---------------------------------------------------------------- the card's memories (behavioural)
     logic [7:0] lram [0:(1<<17)-1];              // banks 00/01
     logic [7:0] lrom [0:(1<<18)-1];              // ROM image, FC0000-FFFFFF
@@ -254,6 +304,8 @@ module tb_gs_broker #(
             if (lm_waddr[23:17] == 7'd0) lram[lm_waddr[16:0]] <= lm_wdata;
             else                         lexp[lexp_widx[19:0]] <= lm_wdata;
         end
+        if (copy_we) lrom[copy_wa] <= copy_wd;
+        if (copy_we && lm_ren) begin $display("ERROR: ROM image written in the clk of a read launch"); $finish; end
         if (lm_ren && lm_wen) begin $display("ERROR: local memory read launch and write in the same clk"); $finish; end
         if (lm_ren && (lm_ram_ra_c != {RA_COPIES{lm_ram_ra}} || lm_rom_ra_c != {RA_COPIES{lm_rom_ra}})) begin
             $display("ERROR: the read-address copies differ at a launch"); $finish;
@@ -286,10 +338,12 @@ module tb_gs_broker #(
         if (nm_wen) begin
             nmd[nm_wa] <= nm_wdata;
             nmt[nm_wa] <= nm_wtag;
-            if (u_brk.nfill_r) n_nm_fill <= n_nm_fill + 1; else n_nm_wr <= n_nm_wr + 1;
+            if (copy_flush) begin
+                if (nm_wtag != '1 || nm_wa != copy_fidx) begin $display("ERROR: near memory flush wrote %04h tag %03h", nm_wa, nm_wtag); $finish; end
+            end else if (u_brk.nfill_r) n_nm_fill <= n_nm_fill + 1; else n_nm_wr <= n_nm_wr + 1;
         end
         if ((nm_ren || nm_wen) && !NEAR) begin $display("ERROR: near memory used without NEAR"); $finish; end
-        if (nm_wen && u_brk.nfill_r && (lm_wen || clk_no - t_launch < 2)) begin
+        if (nm_wen && !copy_flush && u_brk.nfill_r && (lm_wen || clk_no - t_launch < 2)) begin
             $display("ERROR: near memory filled %0d clks after the far launch", clk_no - t_launch); $finish;
         end
     end
@@ -586,6 +640,7 @@ module tb_gs_broker #(
     logic [23:0] iss_a;
     logic [7:0]  iss_d;
     logic        iss_we_n, iss_vp_n;
+    logic        iss_hold = 1'b0;         // an idle cycle of a hold: a read the ROM copy asked for
     // (the PHY takes the write data again the clk after the issue: WDATA_LATE)
     logic issue_evt_q = 1'b0;
     always @(posedge clk) begin
@@ -594,6 +649,7 @@ module tb_gs_broker #(
     end
     always @(posedge clk) if (issue_evt) begin
         iss_a <= phy_a; iss_d <= phy_d_out; iss_we_n <= phy_we_n; iss_vp_n <= phy_vp_n;
+        iss_hold <= u_brk.held_r && (u_brk.sel == 2'd0);
         if (trace) $display("[%0t]   issue %06h rw%b kind %0d (0 idle, 1 core, 2 posted) core %s", $realtime, phy_a, phy_we_n,
                              u_brk.sel, cpu_rst_n ? "running" : "in reset");
         // the broker substitutes internal I/O cycles itself; the PHY must
@@ -734,7 +790,22 @@ module tb_gs_broker #(
             if (done) begin
                 // ---- is this the cycle the program is owed, or an idle one?
                 in_run = 1;
-                if (expq.size() > 0 && expq[0].a == a24 && expq[0].we == ~rw_l &&
+                if (iss_hold && !hold_cyc_q) n_copy_cur = 0;      // the first cycle of a hold: a new copy
+                hold_cyc_q = iss_hold;
+                if (iss_hold) begin
+                    // the ROM copy: reads of the image's addresses, in order, nothing else
+                    // (and while the near memory is emptied afterwards: reads of its first byte again)
+                    if (n_copy_cur >= (1 << 17)) begin
+                        if (!rw_l || a24 != 24'hFE0000)
+                            err($sformatf("held after the copy: socket cycle %s %06h", rw_l ? "R" : "W", a24));
+                        n_copy_tail++;
+                    end else begin
+                        if (!rw_l || a24 != 24'hFE0000 + 24'(n_copy_cur))
+                            err($sformatf("held: socket cycle %s %06h is not the next byte of the ROM image (%0d read)", rw_l ? "R" : "W", a24, n_copy_cur));
+                        n_copy++;
+                        n_copy_cur++;
+                    end
+                end else if (expq.size() > 0 && expq[0].a == a24 && expq[0].we == ~rw_l &&
                     (rw_l || expq[0].d == cpu_val)) begin
                     in_run = (longint'(expq[0].step) < max_steps);   // owed by a step inside the run
                     void'(expq.pop_front());
@@ -981,6 +1052,58 @@ module tb_gs_broker #(
                           gs_d_dir_f, s6_d_dir, gs_data_oe_n_f, s6_data_oe_n, gs_addr_oe_n_f, s6_addr_oe_n));
     end
 
+    //---------------------------------------------------------------- gs_accel beside the design
+    // (ACCEL_SHADOW, near-memory builds) The accelerator domain as the board build has
+    // it - one module, block-RAM-shaped memories, its own ROM copy - on the same socket
+    // inputs and the same requests.  Every output pin must equal the hand-wired design's
+    // in every clk.  It has no expansion memory: not compared in runs with +exp.
+    logic [7:0] rom_ref [0:(1<<17)-1];
+    bit         rom_loaded = 0;
+`ifdef ACCEL_SHADOW
+    logic [7:0]  acc_d_o;
+    logic        acc_d_oe, acc_rw, acc_vp, acc_rdy_out, acc_d_dir, acc_data_oe_n, acc_addr_oe_n, acc_ctl_oe_n;
+    logic [15:0] acc_a;
+    logic [7:0]  acc_status, acc_mode;
+    logic [15:0] acc_verify;
+    longint      n_acc_cmp = 0;
+    gs_accel #(.NEAR_KW(NEAR_KW), .SIM_ROM_VALID(ROM_PRESET)) u_acc (
+        .clk(clk), .rst_n(rst_n),
+        .arm_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
+        .cfg_fast_i(cfg_copy | ~native_i), .cfg_cardmem_i(cfg_copy | ~mem_bypass_i),
+        .cfg_cxrom_i(cfg_cxrom[0]), .cfg_copy_i(copy_req), .clear_i(1'b0),
+        .gs_ph2_i(gs_ph2_f), .gs_rdy_i(gs_rdy_f), .gs_irq_n_i(gs_irq_n_f), .gs_nmi_n_i(gs_nmi_n_f),
+        .gs_res_n_i(gs_res_n_f), .gs_abort_n_i(gs_abort_n_f), .gs_be_i(gs_be_f), .gs_d_i(gs_d_i_f),
+        .gs_d_o(acc_d_o), .gs_d_oe_o(acc_d_oe), .gs_a_o(acc_a), .gs_rw_o(acc_rw), .gs_vp_o(acc_vp),
+        .gs_rdy_out_o(acc_rdy_out), .gs_d_dir_o(acc_d_dir), .gs_data_oe_n_o(acc_data_oe_n),
+        .gs_addr_oe_n_o(acc_addr_oe_n), .gs_ctl_oe_n_o(acc_ctl_oe_n),
+        .status_o(acc_status), .mode_o(acc_mode), .cycle_count_o(), .stall_count_o(), .be_count_o(),
+        .ph2_period_o(), .ph2_high_o(), .last_addr_o(), .verify_count_o(acc_verify),
+        .tele_idx_i(6'd0), .tele_word_o()
+    );
+    // the bench's ROM image into its block-shaped ROM memory
+    for (genvar b = 0; b < 8; b++) begin : g_accb
+        for (genvar k = 0; k < 8; k++) begin : g_acck
+            initial begin
+                wait (rom_loaded);
+                #1;
+                if (ROM_PRESET) for (int i = 0; i < 16384; i++) u_acc.g_bit[b].g_rblk[k].mrom[i] = rom_ref[k * 16384 + i][b];
+            end
+        end
+    end
+    always @(negedge clk) if (rst_n && cfg_exp == 0) begin
+        n_acc_cmp++;
+        if (native_i == 1'b0 && mem_bypass_i == 1'b1 && !cfg_copy) begin
+            $display("ERROR: bench: fast with bypass is not a request gs_accel has"); $finish;
+        end
+        if (gs_a_f !== acc_a || gs_rw_f !== acc_rw || gs_vp_f !== acc_vp || gs_d_o_f !== acc_d_o ||
+            gs_d_oe_f !== acc_d_oe || gs_d_dir_f !== acc_d_dir || gs_data_oe_n_f !== acc_data_oe_n ||
+            gs_addr_oe_n_f !== acc_addr_oe_n || gs_ctl_oe_n_f !== acc_ctl_oe_n || gs_rdy_out_f !== acc_rdy_out)
+            err($sformatf("pins differ from gs_accel: A %04h/%04h RW %b/%b VP %b/%b D %02h/%02h oe %b/%b dir %b/%b doe_n %b/%b aoe_n %b/%b",
+                          gs_a_f, acc_a, gs_rw_f, acc_rw, gs_vp_f, acc_vp, gs_d_o_f, acc_d_o, gs_d_oe_f, acc_d_oe,
+                          gs_d_dir_f, acc_d_dir, gs_data_oe_n_f, acc_data_oe_n, gs_addr_oe_n_f, acc_addr_oe_n));
+    end
+`endif
+
     //---------------------------------------------------------------- stimulus
     task automatic wait_cycles(input int n);
         repeat (n) @(negedge ph2_bus);
@@ -1018,6 +1141,7 @@ module tb_gs_broker #(
         if ($test$plusargs("reset")) do_reset = 1;
         if ($test$plusargs("resetw")) begin do_reset = 1; do_resetw = 1; end
         if ($test$plusargs("resetpw")) begin do_reset = 1; do_resetpw = 1; end
+        if ($test$plusargs("recopy")) begin do_recopy = 1; n_copies_want = 2; end
         void'($value$plusargs("mode=%s", mode_s));
         void'($value$plusargs("steps=%d", max_steps));
         void'($value$plusargs("exp=%d", cfg_exp));
@@ -1034,8 +1158,12 @@ module tb_gs_broker #(
             "paced":  begin cfg_native = 1; cfg_bypass = 0; s6cmp = 1; end
             "fast":   begin cfg_native = 0; cfg_bypass = 0; end
             "toggle": begin cfg_native = 0; cfg_bypass = 0; cfg_toggle = 1; end
+            "copy":   begin cfg_native = 0; cfg_bypass = 0; cfg_copy = 1; end
             default:  begin $display("unknown +mode=%s", mode_s); $finish; end
         endcase
+        if (cfg_copy == ROM_PRESET) begin
+            $display("+mode=%s needs a build with ROM_PRESET = %0d", mode_s, !cfg_copy); $finish;
+        end
         if (cfg_exp > EXP_MAX || cfg_exp > cfg_mbexp) begin
             $display("+exp=%0d: at most %0d, and not more than +mbexp", cfg_exp, EXP_MAX); $finish;
         end
@@ -1048,8 +1176,12 @@ module tb_gs_broker #(
             fd = $fopen(rom_path, "rb");
             n = $fread(buf8, fd);
             $fclose(fd);
-            for (i = 0; i < (1<<17); i++) lrom[(1<<17) + i] = buf8[i];      // banks FE/FF
+            for (i = 0; i < (1<<17); i++) begin
+                rom_ref[i] = buf8[i];
+                lrom[(1<<17) + i] = ROM_PRESET ? buf8[i] : 8'h00;           // banks FE/FF
+            end
         end
+        rom_loaded = 1;
         for (i = 0; i < (1<<17); i++) lram[i] = 8'h00;
         for (i = 0; i < EXP_MAX*65536; i++) lexp[i] = 8'h00;
         mach_config(2 + cfg_mbexp);
@@ -1128,6 +1260,17 @@ module tb_gs_broker #(
                 end
                 irqs_done = 0; irq_at = 0;          // the program starts over: interrupt it twice again
             end
+            // +mode=copy: ask for the ROM image a little way into the program
+            if (cfg_copy && !copy_req && steps > 3000 && !recopy_done) copy_req = 1'b1;
+            // +recopy: and once more from fast mode, with idle cycles on the socket
+            if (cfg_copy && do_recopy && !recopy_done && copy_valid && steps > 20000) begin
+                recopy_done = 1;
+                copy_req = 1'b0;
+                wait_cycles(2);
+                // (in the middle of a PHI2 cycle: an idle cycle that is not the copy's is on the bus)
+                @(posedge ph2_bus); #50;
+                copy_req = 1'b1;
+            end
             if (cfg_toggle && cyc_no >= next_toggle) begin
                 lfsr = (lfsr >> 1) ^ ((lfsr & 1) != 0 ? 32'h80200003 : 0);
                 native_i = ~native_i;
@@ -1168,14 +1311,35 @@ module tb_gs_broker #(
                 err($sformatf("WAI: flag %02h, %0d steps waited (want 01, at least 100)", mach_get(1, 0, 24'h000382), n_wai));
             if (!cfg_native || cfg_toggle) begin
                 if (stat_posted == 0) err("no posted write happened");
-                if (stat_pwwait == 0) err("the posted-write buffer was never full (back-to-back forwarding not exercised)");
+                // (+mode=copy runs the part of the program that forwards back to back in native mode, before the copy)
+                if (stat_pwwait == 0 && !cfg_copy) err("the posted-write buffer was never full (back-to-back forwarding not exercised)");
                 if (n_idle == 0) err("no idle cycle seen in fast mode");
             end
         end
         if (do_reset && !reset_done) err("the warm reset never happened");
+        if (cfg_copy) begin
+            int n_bad;
+            n_bad = 0;
+            for (i = 0; i < (1<<17); i++) if (lrom[(1<<17) + i] !== rom_ref[i]) n_bad++;
+            if (!copy_valid || copy_busy || copy_copies != 8'(n_copies_want)) err($sformatf("ROM copy: valid %b busy %b copies %0d", copy_valid, copy_busy, copy_copies));
+            if (n_bad != 0) err($sformatf("ROM copy: %0d bytes of the image differ from the machine's ROM", n_bad));
+            if (n_copy != n_copies_want * (1 << 17)) err($sformatf("ROM copy: %0d socket reads, want %0d", n_copy, n_copies_want * (1 << 17)));
+            if (!brk_fast) err("ROM copy: the design did not go on in fast mode");
+            $display("---- ROM copy: %0d bytes through the socket, sum %04h, image identical to the machine's ROM: %s",
+                     n_copy, copy_sum, n_bad == 0 ? "yes" : "NO");
+        end
         if (verify_count != 0 && !cfg_toggle) err($sformatf("verify count %0d", verify_count));
         if (stall_checks == 0 && do_stall) err("no stalled cycle was checked");
         if (s6cmp && n_s6cmp == 0) err("S6 comparison did not run");
+`ifdef ACCEL_SHADOW
+        if (cfg_exp == 0) begin
+            if (n_acc_cmp == 0) err("gs_accel comparison did not run");
+            if (acc_verify != verify_count) err($sformatf("gs_accel verify count %0d, the design's %0d", acc_verify, verify_count));
+            if (acc_mode[7] != copy_valid || acc_mode[4] != brk_fast)
+                err($sformatf("gs_accel mode %02h: ROM image valid %b, fast %b in the design", acc_mode, copy_valid, brk_fast));
+            $display("---- gs_accel beside the design: %0d clks of pin comparison, mode %02h", n_acc_cmp, acc_mode);
+        end
+`endif
         if (wlog != 0) $fclose(wlog);
 
         $display("---- run: %0d core steps, %0d socket cycles (%0d for the program, %0d idle), %0d local steps; %.2f steps per PHI2 cycle",
@@ -1206,7 +1370,7 @@ module tb_gs_broker #(
     // global timeout: a step can take a whole slow cycle
     initial begin
         #1;
-        #(2_000_000.0 + real'(max_steps) * 1300.0);
+        #(2_000_000.0 + real'(max_steps) * 1300.0 + (cfg_copy ? 120_000_000.0 : 0.0));
         $display("TIMEOUT at step %0d", steps); $display("FAIL: timeout"); $finish;
     end
 
