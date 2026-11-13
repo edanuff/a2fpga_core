@@ -173,6 +173,30 @@ Two things this showed:
   local steps between two reads, and an idle cycle is already on the bus
   when the next read is known.
 
+A benchmark, the same evening, the same build (aoz, without the fix): a
+TML Pascal program that times six tests at the machine's speed, waits for
+the speed to be changed, and times them again. Times in 60ths of a second;
+fast mode was switched on at its prompt (copy, card memory with a verify
+count of 0, then fast).
+
+| test | base | fast mode | ratio |
+|---|---|---|---|
+| 10 iterations of the sieve | 413 | 437 | 0.95 |
+| selection sort of 500 strings | 1159 | 1060 | 1.09 |
+| 100 iterations of a floating-point test | 475 | 49 | 9.7 |
+| 15,000 Gamm units (floating-point mix) | 1545 | 314 | 4.9 |
+| 10 iterations of Fibonacci calls | 2021 | 1794 | 1.13 |
+| 5,000 iterations of integer math | 1564 | 1083 | 1.44 |
+
+The program rates the floating-point test at 26 MHz and the Gamm mix at
+13 MHz against a base it takes as about 2.5 MHz; its average is 8.5 MHz.
+The split is the memory map again. The floating-point work is done by
+SANE in the ROM, on a stack and direct page in bank 00: all the card's.
+The sieve, the sort and the calls are the program's own code and data in
+expansion RAM: every step a socket cycle, and with this build's defect a
+socket step behind a socket step waits a cycle, so the sieve came out
+slower than base. What the fix makes of these numbers is not measured.
+
 After fast mode has run, register 29 must not go back to 00 without a
 reset: the machine's copy of banks 00/01 is stale by design. `0x0A` is the
 way back to PHI2 pacing, and its verify count then means nothing.
