@@ -56,6 +56,7 @@
 //   +resetpw        the same, with /RES falling in the cycle before a native-mode write
 //                   (FAST_CORE builds, +mode=native: the bench waits for such a cycle)
 //   +nostall +nobe  no RDY stalls / no BE (DMA) pause
+//   +stallp=N       a RDY stall every N PHI2 cycles (default 311)
 //   +noturbo        ignore $C036 bit 7: the FPI stays at 1 MHz
 //   +expect         check the test program's result table
 //   +wlog=<file>    write the socket-visible write stream (I/O, Mega II,
@@ -72,6 +73,7 @@ module tb_gs_broker #(
     parameter bit NEAR      = 1'b0,    // near memory and the two-clk step (DATA_LATE builds, ADDR_CLKS = 2)
     parameter int NEAR_AW   = 14,
     parameter int NEAR_KW   = 10,
+    parameter bit SOCK_PRE  = 1'b1,    // broker: socket-only steps requested in their first clk (0: for comparison)
     parameter bit ROM_PRESET = 1'b1    // 1 = the bench loads the card's ROM image; 0 = it starts empty and
                                        // +mode=copy has the design read it through the socket
 );
@@ -122,6 +124,7 @@ module tb_gs_broker #(
     string       mode_s = "fast";
     bit          cfg_native = 0, cfg_bypass = 0, cfg_toggle = 0;
     int          cfg_exp = 0, cfg_mbexp = 0, cfg_cxrom = 0;
+    int          stall_period = 311;      // PHI2 cycles between RDY stalls (+stallp=)
     bit          do_irq = 0, do_stall = 1, do_be = 1, do_expect = 0, s6cmp = 0, do_reset = 0, do_resetw = 0, do_resetpw = 0;
     int          n_dropped = 0;      // posted writes dropped by a reset (documented: at most one each)
     int          n_kept = 0;         // local writes of a step cut short by a reset (documented: they stay written)
@@ -205,7 +208,7 @@ module tb_gs_broker #(
     );
 
     gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK), .DATA_LATE(DATA_LATE), .RA_COPIES(RA_COPIES), .CE_COPIES(4),
-                      .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW)) u_brk (
+                      .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .SOCK_PRE(SOCK_PRE)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(native_w), .mem_bypass_i(bypass_w),
         .cxrom_local_i(cfg_cxrom[0]), .exp_banks_i(cfg_exp[6:0]),
@@ -647,6 +650,17 @@ module tb_gs_broker #(
         issue_evt_q <= issue_evt;
         if (issue_evt_q) iss_d <= phy_d_out;
     end
+    // (the step in progress: a read or a write, not a vector pull, in a Mega II bank,
+    // an expansion bank the card does not back, or any other non-ROM bank from $80 up)
+    wire [7:0] step_bank = u_brk.ea_r[23:16];
+    wire sock_only_step = !u_brk.pl_int && u_brk.pl_vp_n &&
+                          (step_bank[7] ? (step_bank < 8'hFE) : (step_bank >= 8'd2 + 8'(cfg_exp)));
+    logic   rdy_c_q = 1'b1, last_step_sock = 1'b0, last_iss_idle = 1'b0;
+    longint n_ss = 0, n_ss_idle = 0;
+    always @(posedge clk) begin
+        rdy_c_q <= u_brk.rdy_c;
+        if (cpu_ce) last_step_sock <= (u_brk.st == 2'd3) && !u_brk.held_r;
+    end
     always @(posedge clk) if (issue_evt) begin
         iss_a <= phy_a; iss_d <= phy_d_out; iss_we_n <= phy_we_n; iss_vp_n <= phy_vp_n;
         iss_hold <= u_brk.held_r && (u_brk.sel == 2'd0);
@@ -657,6 +671,19 @@ module tb_gs_broker #(
         if (running && !phy_vpa && !phy_vda && phy_a[15:8] == 8'hC0 &&
             (phy_a[23:17] == 7'd0 || phy_a[23:17] == 7'h70))
             err($sformatf("internal I/O-space cycle handed to the PHY: %06h", phy_a));
+        // Near memory, fast mode: a step that is a read or a write in a bank that is
+        // never the card's has its request at the PHY by the issue point two clks
+        // after the core stepped - no idle cycle goes out in front of it.  (The bank
+        // test is the bench's own, not the decode's.)
+        if (NEAR && SOCK_PRE && cpu_rst_n && !u_brk.mode_native && !u_brk.held_r && u_brk.st == 2'd1 && u_brk.ph == 4'd1 &&
+            u_brk.sel == 2'd0 && !u_brk.fl_busy && u_brk.rdy_c && rdy_c_q && sock_only_step)
+            err($sformatf("idle cycle issued in front of a socket-only step at %06h", u_brk.ea_r));
+        // statistics: a core cycle issued for a step that follows a socket step
+        if (cpu_rst_n && u_brk.sel == 2'd1 && !u_brk.fl_busy && last_step_sock) begin
+            n_ss <= n_ss + 1;
+            if (last_iss_idle) n_ss_idle <= n_ss_idle + 1;
+        end
+        if (!u_brk.fl_busy) last_iss_idle <= (u_brk.sel == 2'd0);
     end
 
     real t_addr_change = -1;
@@ -1115,7 +1142,7 @@ module tb_gs_broker #(
     endtask
 
     // expected test-program results ($0300...): -1 = depends on the configuration
-    int expect_tab [0:77] = '{
+    int expect_tab [0:79] = '{
         'hFF, 'h00, 'h5C, 'h3F, 'h11, 'hC3, 'h3C, 'hA5, 'hA6, 'hA7,
         'h77, 'h5A, 'h5A, 'h00, 'h30, 'hEE, 'h00, 'h11, 'h00, 'hB1,
         'hB1, 'hB1, 'h00, 'hB2, 'h00, 'hB3, 'hC8, 'h00, 'hC9, 'hD1,
@@ -1123,7 +1150,7 @@ module tb_gs_broker #(
         'h5E, 'hE1, 'hE2, 'hE1, -1,   -1,   'hFF, 'h05, 'hC3, 'hC1,
         'hC3, 'hC8, 'hCF, 'hFF, 'hC4, 'hC8, 'hFF, 'hC5, 'h1C, 'h1C,
         'h1C, 'h08, 'hA1, 'hA7, 'h28, 'h01, 'hA7, 'hA5, 'h5A, 'h5A,
-        'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01 };
+        'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01, 'h36, 'h13 };
 
     initial begin
         string  rom_path, wpath;
@@ -1136,6 +1163,7 @@ module tb_gs_broker #(
         if ($test$plusargs("noturbo")) noturbo = 1;
         if ($test$plusargs("irq")) do_irq = 1;
         if ($test$plusargs("nostall")) do_stall = 0;
+        void'($value$plusargs("stallp=%d", stall_period));
         if ($test$plusargs("nobe")) do_be = 0;
         if ($test$plusargs("expect")) do_expect = 1;
         if ($test$plusargs("reset")) do_reset = 1;
@@ -1207,11 +1235,11 @@ module tb_gs_broker #(
         @(posedge ph2_bus); #30; res_n_bus = 1'b1;
         t_run_start = $realtime;
 
-        next_stall = cyc_no + 311; next_toggle = cyc_no + 97; irq_at = 0; be_done = 0; reset_done = 0;
+        next_stall = cyc_no + stall_period; next_toggle = cyc_no + 97; irq_at = 0; be_done = 0; reset_done = 0;
         lfsr = 32'h1ACE5;
         while (steps < max_steps) begin
             wait_cycles(1);
-            if (do_stall && cyc_no >= next_stall) begin stall_one(); next_stall = cyc_no + 311; end
+            if (do_stall && cyc_no >= next_stall) begin stall_one(); next_stall = cyc_no + stall_period; end
             if (do_be && !be_done && steps > max_steps / 3) begin
                 be_done = 1;
                 @(posedge ph2_bus); #20; rdy_bus = 1'b0; be_dma = 1'b0;
@@ -1293,7 +1321,7 @@ module tb_gs_broker #(
         if (!final_done) err("no quiet moment at the end of the run (socket cycles still outstanding)");
 
         if (do_expect) begin
-            for (i = 0; i <= 77; i++) begin
+            for (i = 0; i <= 79; i++) begin
                 int want, got;
                 want = expect_tab[i];
                 if (i == 44) want = (cfg_mbexp >= 1) ? 'h21 : 'hFF;
@@ -1346,6 +1374,7 @@ module tb_gs_broker #(
                  steps, cyc_no, n_real, n_idle, n_local_steps, real'(steps) / real'(cyc_no));
         $display("---- time: %.3f ms from the reset release to step %0d: %.3f MHz average step rate",
                  (t_run_end - t_run_start) / 1.0e6, max_steps, real'(max_steps) * 1000.0 / (t_run_end - t_run_start));
+        $display("---- socket steps behind a socket step: %0d, %0d of them behind an idle cycle", n_ss, n_ss_idle);
         $display("---- broker: %0d synchronous socket cycles, %0d posted writes, %0d clks waiting for the write buffer, queue depth max %0d",
                  stat_sock, stat_posted, stat_pwwait, expq_max);
         $display("---- local reads: %0d served by a read launched ahead, %0d launched at the strobe (%.1f %% ahead); DATA_LATE %0d",

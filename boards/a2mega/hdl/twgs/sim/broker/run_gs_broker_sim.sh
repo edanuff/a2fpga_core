@@ -162,6 +162,10 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run y_fast_cx   b110_2x $T +mode=fast   +expect +irq +cxrom=1
     run y_rst_tog   b110_2x $T +mode=toggle +expect +irq +reset +steps=120000
     run y_rstw_fast b110_2x $T +mode=fast   +expect +irq +resetw
+    # ... and with a RDY stall every second and every fifth PHI2 cycle (the socket requests
+    # raised in a step's first clk, with RDY low around them)
+    run y_fast_st2  b110_2x $T +mode=fast   +expect +irq +stallp=2 +steps=120000
+    run y_tog_st5   b110_2x $T +mode=toggle +expect +irq +stallp=5 +steps=120000
     run c_copy      b110_2c $T +mode=copy   +expect +irq
     run c_copy_rst  b110_2c $T +mode=copy   +expect +irq +reset
     run c_recopy    b110_2c $T +mode=copy   +expect +irq +recopy

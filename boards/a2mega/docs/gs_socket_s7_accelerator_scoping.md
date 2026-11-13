@@ -6,7 +6,8 @@ numbers in them are from the S4–S6 builds and the bench. **2026-11-11: S7a
 (memory-map replica) and S7b (broker) exist and pass in simulation, with the
 reset rule as a gateware module — §9, which also records every departure
 from sections 2–7.** **2026-11-12: an accelerator-only board build exists
-(§10.4), not yet flashed.**
+(§10.4); it ran on a ROM 01 machine the same day, and the first defect
+that showed is fixed in the source (§10.5).**
 
 ## 0. Summary
 
@@ -835,4 +836,77 @@ built and simulated, not flashed. What it settles from the lists above:
   registers carrying the accelerator's requests under a key. With no
   request the card is S6 on the new core.
 
-Still to do: everything of S7d and S7e, ROM 3, and the first hardware run.
+Still to do: everything of S7d and S7e, ROM 3. The first hardware run is in
+the build's page.
+
+### 10.5 A socket step behind a socket step (2026-11-12)
+
+**What the first hardware run showed.** In fast mode, Marble Madness (code
+and data in banks 02/03, which the card does not hold) ran at 0.70 of its
+native rate: 1.184 M socket cycles a second for the core in 2.367 M PHY
+cycles. One idle cycle went out behind every cycle of the core.
+
+**Why.** The PHY issues the next cycle two clks after the core steps
+(a native step's request is registered in the step's first clk for that
+reason). A fast-mode step that is not one of the cheap view's is decided
+at the strobe, in the third clk, from the registered full decode. So the
+step behind a socket step always found an idle cycle issued and waited a
+whole PHI2 cycle for the next issue point. Section 3's model has no such
+cost, and the bench did not look for it: its program had some forty socket
+steps in a row in a fast-mode run, and nothing compared the socket's cycle
+count with the model's.
+
+**The change.** `gs_mmu_decode` has a second cheap answer, `fast_sock`: a
+read or a write in this bank is a socket cycle and nothing else, whatever
+the switches say - a Mega II bank, an expansion bank the card does not
+back, any other bank from `$80` up that is not a ROM bank. It is a
+function of the bank and the backed size only, checked against the full
+decode on every vector of the sweep (464,177,802 of 981,101,952 vectors are
+in the class). The broker raises the request of such a step (not an
+internal cycle, not a vector pull) in its first clk, as a native step's is:
+the same registers (`ea_k`, the status, the write data registered in the
+second clk for the PHY to take a clk after the issue). The step is still
+decided at the strobe from the full decode, which must agree; a
+simulation check stops the run if a request raised ahead belongs to a step
+that is not that socket cycle, or if such a step completes without it. No
+cycle reaches the socket that did not before: the same cycles go out, one
+PHI2 cycle sooner. `SOCK_PRE = 0` gives the old timing, for comparison.
+
+RDY needs no term in it. While RDY is low the cycle on the bus is being
+repeated, so the request cannot be issued before the fall that finds RDY
+high, which is also the fall that lets the strobe go. Two mutations that
+added or removed a RDY term changed nothing in 74 + 24 runs, the 24 with a
+stall every 2 to 13 PHI2 cycles; the terms came out, and with them six
+failing paths of the first build.
+
+**In simulation** (110 MHz, the test program with code and 16-bit data in
+bank E1, called from the interrupt-enabled loop):
+
+| | `SOCK_PRE = 0` | `SOCK_PRE = 1` |
+|---|---|---|
+| socket steps behind a socket step | 3,336 | 3,334 |
+| ... of them behind an idle cycle | 3,336 | 6 |
+| 60,000 steps | 14.409 ms | 11.145 ms |
+
+The six that remain are back-to-back accesses to `$C0xx` (R-M-W on a soft
+switch): I/O in banks 00/01 depends on the switches and is not in the
+class. A ROM 01 boot has 79 of those in 3,000,000 steps.
+
+**What it does not do.** An internal cycle between two socket steps still
+costs a PHI2 cycle: the step behind it starts two clks later and misses
+the issue point, as before. The cycle is no longer than the one a native
+step spends on that internal cycle, so code in a bank the card does not
+hold should now run at about its native rate, not above it; S7d is what
+makes it faster. A later issue point (the PHY's `out_extra`) would catch
+the step behind one internal cycle at the cost of address setup on the
+socket; not tried. The idle loop's rate (one `$C019` read per two Mega II
+cycles) is unchanged: six local steps separate its reads.
+
+**Verification.** Suite 88 runs (two new: a RDY stall every second and
+every fifth PHI2 cycle); a bench property (no idle cycle issued in front
+of a socket-only step, with the bench's own bank test); `gs_accel` beside
+the design, 35 runs, 290,331,590 clks; ROM 01 boot hash and write stream
+unchanged (`6012b76169ecc820`); nine mutations of the new logic, seven
+detected, the other two the RDY terms above. Timing: three placements of
+the committed source with no violation (build page). **Not run on
+hardware.**

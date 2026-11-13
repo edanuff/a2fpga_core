@@ -140,7 +140,11 @@ module gs_mmu_decode #(
     output wire        fast_rom,      // fast_rw read: the byte is in the ROM image ...
     output wire [1:0]  fast_rbank,    // ... in its bank rom_addr[17:16]
     output wire        fast_aux,      // fast_rw, RAM: bank bit 0 of the physical address
-    output wire        fast_fold      // fast_rw read, RAM: the language card moves A12
+    output wire        fast_fold,     // fast_rw read, RAM: the language card moves A12
+    // ... and the opposite certainty, from the bank alone: a read or a write here
+    // is a cycle on the socket and nothing else (never local, nothing stored,
+    // nothing to forward), whatever the switches say
+    output wire        fast_sock
 );
 
   localparam [2:0] REGION_RAM  = 3'd0;   // banks 00/01 fast RAM (incl. language-card RAM)
@@ -495,6 +499,9 @@ module gs_mmu_decode #(
   assign fast_rbank = f_romb ? bank_log[1:0] : 2'b11;
   assign fast_aux   = bank_log[0] | f_aux0;
   assign fast_fold  = f_main & (addr_log[15:12] == 4'hD) & ~LCRAM2 & ~RDROM & ~shadow[6];
+  //   the socket's alone: a Mega II bank, an expansion bank the card does not
+  //   back, any other bank from $80 up that is not a ROM bank
+  assign fast_sock  = bank_log[7] ? ~f_romb : (bank_log >= exp_top);
 
 `ifdef VERILATOR
   // ----------------------------------------------------------------------------
@@ -523,6 +530,8 @@ module gs_mmu_decode #(
       $fatal(1, "gs_mmu_decode: local I/O or Mega II access: %02x/%04x", bank_log, addr_log);
     if (forward_write && !(is_local && local_we && we))
       $fatal(1, "gs_mmu_decode: forward_write without a stored local write: %02x/%04x", bank_log, addr_log);
+    if (fast_sock && (is_local || forward_write || local_we))
+      $fatal(1, "gs_mmu_decode: fast_sock for an access the card has a part in: %02x/%04x", bank_log, addr_log);
     if (is_local && region == REGION_RAM && addr_bus[23:17] != 7'd0)
       $fatal(1, "gs_mmu_decode: local RAM outside banks 00/01: %02x/%04x -> %06x", bank_log, addr_log, addr_bus);
   end

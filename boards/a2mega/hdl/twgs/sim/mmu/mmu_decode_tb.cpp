@@ -29,7 +29,7 @@ using namespace iigs;
 
 static Vgs_mmu_decode* dut;
 static long n_tests = 0, n_fail = 0;
-static long n_fast_r = 0, n_fast_w = 0, n_fast_i = 0;      // vectors in the cheap view's classes
+static long n_fast_r = 0, n_fast_w = 0, n_fast_i = 0, n_fast_s = 0;      // vectors in the cheap view's classes
 
 struct Dut { Out o; Ext e; };
 
@@ -165,6 +165,13 @@ static void run_one(const In& s)
         }
     }
     if (dut->fast_int) { n_fast_i++; CHECK(x.side_effect, 0u, "fast_int: side", "%u") }
+    // ... and the socket's alone: never local, nothing stored, nothing forwarded
+    if (dut->fast_sock) {
+        n_fast_s++;
+        CHECK(x.local, 0u, "fast_sock: local", "%u")
+        CHECK(x.forward_write, 0u, "fast_sock: forward", "%u")
+        CHECK(x.local_we, 0u, "fast_sock: local_we", "%u")
+    }
     if (mism) n_fail++;
 }
 
@@ -182,7 +189,7 @@ int main(int argc, char** argv)
     dut = new Vgs_mmu_decode;
 
     static const uint8_t banks[] = {
-        0x00, 0x01, 0x02, 0x03, 0x7E, 0x7F, 0x80, 0xE0, 0xE1, 0xFC, 0xFD, 0xFE, 0xFF
+        0x00, 0x01, 0x02, 0x03, 0x7E, 0x7F, 0x80, 0xE0, 0xE1, 0xE2, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF
     };
     static const uint16_t addrs[] = {
         0x0000, 0x01FF, 0x0200, 0x03FF, 0x0400, 0x05FF, 0x07FF, 0x0800, 0x0BFF, 0x0C00,
@@ -321,8 +328,8 @@ int main(int argc, char** argv)
         printf("mmu_decode_tb: phase 4 done: %ld tests, %ld failures\n", n_tests - before, n_fail - fbefore);
     }
 
-    printf("mmu_decode_tb: cheap view: %ld read, %ld write and %ld internal-cycle vectors checked\n",
-           n_fast_r, n_fast_w, n_fast_i);
+    printf("mmu_decode_tb: cheap view: %ld read, %ld write, %ld internal-cycle and %ld socket-only vectors checked\n",
+           n_fast_r, n_fast_w, n_fast_i, n_fast_s);
     printf("mmu_decode_tb: TOTAL %ld tests, %ld failures -> %s\n",
            n_tests, n_fail, n_fail ? "FAIL" : "PASS");
     delete dut;

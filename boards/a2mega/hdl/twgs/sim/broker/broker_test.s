@@ -472,6 +472,28 @@ t2:     txa
         lda BRKCNT
         res                     ; $01
 
+        ; ---- T21 code and 16-bit data in a Mega II bank: socket cycles back to
+        ;      back (opcode and operand fetches, two-byte reads and writes, a
+        ;      16-bit R-M-W), with internal cycles and stack pushes between
+        lda #$34
+        sta $E16100
+        lda #$12
+        sta $E16101
+        ldx #megacode_end - megacode - 1
+t21:    lda f:$FF0000 + megacode,x
+        sta $E16000,x
+        dex
+        bpl t21
+        jsl $E16000
+        res                     ; $36
+        lda $E16103
+        res                     ; $13
+        ldx #megaloop_end - megaloop - 1
+t21b:   lda f:$FF0000 + megaloop,x
+        sta $E16040,x           ; (the steady-state loop calls it, with interrupts on)
+        dex
+        bpl t21b
+
         lda #$A5
         sta SIG
         cli
@@ -486,6 +508,7 @@ spin:   dex
         bne spin
         lda $C022               ; I/O
         sta $E10450             ; Mega II
+        jsl $E16040             ; a few instructions run from the Mega II bank
         inc LOOPCNT+1
         ; once, after the first interrupt has been served: wait in WAI for the
         ; second (runs without interrupts never get here)
@@ -506,6 +529,38 @@ rcl:    inc $0392
         bne rcl
         rtl
 ramcode_end:
+
+; copied to E1/6000 by T21
+megacode:
+        phb
+        lda #$E1
+        pha
+        plb                     ; data bank E1
+        rep #$20
+        .a16
+        lda $6100               ; $1234
+        clc
+        adc #$0101
+        sta $6102               ; $1335
+        inc $6102               ; $1336: a 16-bit R-M-W in the Mega II bank
+        sep #$20
+        .a8
+        ldx #$40
+mcl:    dex
+        bne mcl
+        lda $6102
+        plb
+        rtl
+megacode_end:
+
+; copied to E1/6040 by T21: eight-bit code only, so an interrupt can land in it
+megaloop:
+        ldx #$06
+mll:    dex
+        bne mll
+        lda $E16100
+        rtl
+megaloop_end:
 
 ; copied to RAM at $1100 by T16b
 ramcode2:

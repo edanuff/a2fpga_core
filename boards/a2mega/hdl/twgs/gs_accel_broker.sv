@@ -195,7 +195,9 @@ module gs_accel_broker #(
     parameter int          NEAR_AW   = 14,           // ... its index bits (>= 14: the tag starts at A14)
     parameter int          NEAR_KW   = 10,           // ... RAM address bits above the index its tag holds (4..10;
                                                      //     10 = all 24 bits; fewer: banks out of reach are never cached)
-    parameter bit          ROM3      = 1'b0          // 0 = ROM 01 machine, 1 = ROM 3
+    parameter bit          ROM3      = 1'b0,         // 0 = ROM 01 machine, 1 = ROM 3
+    parameter bit          SOCK_PRE  = 1'b1          // NEAR, fast mode: raise the request of a step that is certainly a
+                                                     // socket cycle in its first clk (0 = at the strobe, for comparison)
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -453,7 +455,7 @@ module gs_accel_broker #(
     logic [23:0] r_phys;
     logic [17:0] r_rom_addr;
     logic        r_local, r_fwd, r_local_we, r_local_rom, r_side;
-    logic        r_fast_rw, r_fast_int_a, r_fast_rom, r_fast_aux, r_fast_fold;
+    logic        r_fast_rw, r_fast_int_a, r_fast_rom, r_fast_aux, r_fast_fold, r_fast_sock;
     logic [1:0]  r_fast_rbank;
     logic [23:0] pf_phys;
     logic [17:0] pf_rom_addr;
@@ -481,6 +483,7 @@ module gs_accel_broker #(
         .acc_rom_addr_o(r_rom_addr), .acc_side_effect_o(r_side),
         .acc_fast_rw_o(r_fast_rw), .acc_fast_int_o(r_fast_int_a), .acc_fast_rom_o(r_fast_rom),
         .acc_fast_rbank_o(r_fast_rbank), .acc_fast_aux_o(r_fast_aux), .acc_fast_fold_o(r_fast_fold),
+        .acc_fast_sock_o(r_fast_sock),
         .pf_addr_i(cpu_na_i), .pf_phys_o(pf_phys), .pf_rom_addr_o(pf_rom_addr),
         .pf_local_o(pf_local), .pf_local_rom_o(pf_local_rom), .pf_side_o(pf_side),
         .pf_ram_ra_o(pf_ram_ra), .pf_rom_ra_o(pf_rom_ra),
@@ -636,10 +639,28 @@ module gs_accel_broker #(
     logic [CE_COPIES-1:0] fb_c /* synthesis syn_preserve = 1 */;
     logic [CE_COPIES-1:0] fh_c /* synthesis syn_preserve = 1 */;
     wire  fast_q = fa_q | (fb_q & fh_q);
+    logic pre_q;                 // the step's socket request was raised in its first clk (fast_pre, below)
     wire strobe = dec_g & (st == ST_ADDR) & (ph >= t_dec) &
                   ~(post & pw_valid) & (mode_native | rdy_c);
     // a native step's request, registered in the first clk of the step (above)
     wire  nat_pre = DATA_LATE & (ADDR_CLKS >= 2) & mode_native & (st == ST_ADDR) & (ph == 4'd0);
+    // Near memory, fast mode: the same for a step that is certainly a socket cycle
+    // of its own address - a read or a write (not an internal cycle, not a vector
+    // pull) in a bank that is never the card's (the cheap view's fast_sock, from
+    // ea_r).  The sequencer's own decision comes in the third clk, a clk after the
+    // PHY's issue point: a socket step right behind a socket step then found an
+    // idle cycle already issued and waited a whole PHI2 cycle for the next one -
+    // code or data in an expansion bank the card does not back, or in a Mega II
+    // bank, ran at half the socket's rate.  Raised here, the request is the
+    // registers a native step's is (ea_k, the status, the write data a clk after
+    // the issue) and makes that issue point.  What the step does is unchanged: the
+    // strobe still decides it from the full decode, which must agree (checked in
+    // simulation), and no cycle reaches the socket that would not have.  RDY needs
+    // no term here: while it is low the cycle on the bus is being repeated, so the
+    // request cannot be issued before the fall that finds RDY high - the fall that
+    // lets the strobe go, a clk later, long before the cycle can complete.
+    wire  fast_pre = NEAR & SOCK_PRE & ~mode_native & (st == ST_ADDR) & (ph == 4'd0) &
+                     r_fast_sock & ~pl_int & pl_vp_n;
 
     // mem_evt: the step's memory actions (the write, a read that has to be
     // launched now, the verify flag).  With the strobe - except in the
@@ -826,7 +847,7 @@ module gs_accel_broker #(
     kind_t fl_kind_n;
     assign fl_kind_n    = !phy_issue_evt_i ? fl_kind : run_now ? sel : K_IDLE;
     wire   pw_valid_n   = run_now & ((strobe & post) | (pw_valid & ~pw_done_w));
-    wire   sreq_valid_n = run_now & ~cpu_ce_o & (nat_pre | (strobe & need_sock) | sreq_valid);
+    wire   sreq_valid_n = run_now & ~cpu_ce_o & (nat_pre | fast_pre | (strobe & need_sock) | sreq_valid);
     kind_t sel_n;
     assign sel_n        = fl_busy_n ? fl_kind_n : pw_valid_n ? K_PW : sreq_valid_n ? K_SYNC : K_IDLE;
     always_ff @(posedge clk or negedge rst_n) begin
@@ -939,7 +960,7 @@ module gs_accel_broker #(
             pw_valid <= 1'b0; pw_addr <= '0; pw_data <= '0;
             fl_kind <= K_IDLE; fl_busy <= 1'b0; fl_run <= 1'b0; fl_issue_q <= 1'b0;
             fl_addr <= '0; fl_we <= 1'b0; fl_data <= '0;
-            held_r <= 1'b0; fl_hold <= 1'b0;
+            held_r <= 1'b0; fl_hold <= 1'b0; pre_q <= 1'b0;
             use_lm_r <= 1'b0; rom_r <= 1'b0; vfy_r <= 1'b0;
             ld_valid <= 1'b0;
             ml_go <= 1'b0; ml_sel_r <= 1'b0; ml_sel_c <= '0; wen_r <= 1'b0; wen_c <= '0; ren_r <= 1'b0; ren_c <= '0;
@@ -964,7 +985,7 @@ module gs_accel_broker #(
             ce_r <= 1'b0; ce_c <= '0; sc <= '0; pl_fresh <= 1'b0; sw_touch_q <= 1'b0;
             ev_hit <= 1'b0; ev_miss <= 1'b0; ev_pww <= 1'b0;
             near_r <= 1'b0; fill_pend <= 1'b0; nfill_r <= 1'b0;
-            held_r <= 1'b0; fl_hold <= 1'b0;
+            held_r <= 1'b0; fl_hold <= 1'b0; pre_q <= 1'b0;
             // the PHY keeps issuing (idle) cycles during reset
             if (phy_issue_evt_i) begin fl_kind <= K_IDLE; fl_busy <= 1'b1; fl_run <= 1'b0; end
             else if (phy_fall_evt_i) fl_busy <= 1'b0;
@@ -1061,6 +1082,11 @@ module gs_accel_broker #(
             // ---- a native step's request, a clk ahead of its strobe
             // (the request itself is ea_r and the status registers)
             if (nat_pre) sreq_valid <= 1'b1;
+            // ---- fast mode: a step that is certainly a socket cycle, likewise.  Its
+            // write data is registered in the step's second clk, as a native step's
+            // is at its strobe: the PHY takes it a clk after the issue.
+            if (fast_pre) begin sreq_valid <= 1'b1; pre_q <= 1'b1; end
+            if (pre_q & (st == ST_ADDR) & (ph == 4'd1)) sreq_data <= cpu_d_out_i;
 
             // ---- step sequencer
             unique case (st)
@@ -1121,6 +1147,7 @@ module gs_accel_broker #(
                 ph          <= '0;
                 prev_addr   <= eff_addr;
                 sreq_valid  <= 1'b0;
+                pre_q       <= 1'b0;
                 mode_native <= native_s[1];
                 mode_bypass <= bypass_s[1];
             end
@@ -1201,6 +1228,21 @@ module gs_accel_broker #(
             (fresh_ok && !cpu_vp_n_i)) begin
             $display("ERROR: broker step status differs from the core's: int %b/%b io_int %b/%b we %b/%b vp_n %b fresh %b @%0t",
                      internal, internal_l, io_int, io_int_l, eff_we, eff_we_l, cpu_vp_n_i, fresh_ok, $time);
+            $finish;
+        end
+    end
+    // a step whose socket request was raised ahead is that socket cycle and nothing else
+    logic sync_done_q;
+    always @(posedge clk) sync_done_q <= sync_done;
+    always @(posedge clk) if (rst_n && run_now && pre_q) begin
+        if (strobe && !(need_sock && !post && !internal && !lm_write)) begin
+            $display("ERROR: broker raised a socket request ahead for a step that is not one: a=%06h we=%b @%0t",
+                     eff_addr, eff_we, $time);
+            $finish;
+        end
+        if (cpu_ce_o && !sync_done_q) begin
+            $display("ERROR: a step with a socket request raised ahead completed without its socket cycle: a=%06h @%0t",
+                     eff_addr, $time);
             $finish;
         end
     end
