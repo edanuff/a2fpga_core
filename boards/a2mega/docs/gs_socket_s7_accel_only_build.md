@@ -88,7 +88,8 @@ core running, fast.
 
 ## 3. A bring-up ladder (proposal)
 
-Each step is observable before the next is taken. None of it has been done.
+Each step is observable before the next is taken. All four steps were run
+once on 2026-11-12 (below), without video and with the machine idling.
 
 1. **S6 equivalence.** Power up beside the a2p25; let the firmware arm as
    it does for S6; register 29 untouched. The machine should behave exactly
@@ -115,6 +116,35 @@ Things to know before step 3:
   reset keeps a valid image and the card's RAM.
 - The step that was held and every byte in the near memory are not trusted
   after a copy: the near memory is emptied before the core goes on.
+
+### First hardware run, 2026-11-12
+
+ROM 01 IIgs, the card alone (no a2p25: no video, no boot device), slot
+powered, firmware of Sep 13 2026 arming as for S6 (mode 4). Bitstream sha256
+`48c06bbc…c8c04baa`, source 857d136c, flashed over USB with read-back verify.
+Read over telnet with `gs`, `gs events` and `gs trace`.
+
+| step | what was done | result |
+|---|---|---|
+| 1 | power-on, register 29 untouched | startup beep, then the ROM's no-device beep. Signature `5A`, mode 00. The core ran the ROM to the "No device connected!" screen and sat in its sliding-apple loop (FF:A55E–A5AA, polling `$C019`); 280 M steps, one socket cycle each, 0 stalls. Event log: release, arm 36 ms later, no /RESET fall afterwards |
+| 2 | `gs set 31 0xA5`, `gs set 29 0x08` | mode 80, 1 copy, image sum `7EE8` = the sum of a ROM 01 image; the machine carried on |
+| 3 | `gs set 29 0x0A` | mode 88; verify count 0 after 76 M cycles |
+| 4 | `gs set 29 0x0B` | mode 98; rates over 12.7 s of wall clock: 3.566 M steps/s, 0.510 M socket cycles/s for the core, 1.020 M PHY cycles/s, 2.55 M local read hits/s, 0 misses, 119 posted writes/s (the loop's two text-screen writes per frame); 0 stalls; the core stayed in the same loop |
+
+What this does and does not show:
+
+- The loop is bound by the bus, not by the core: each pass reads `$C019`,
+  a slow soft switch, so it runs 7 steps per socket cycle and one socket
+  read per two Mega II cycles (a native pass takes four). It is no measure
+  of the 55 MHz step rate: the longest local run in it is six steps.
+- Fast mode has no byte-for-byte check, and there was no video. The
+  evidence that the core stayed right is that it stayed in the loop, with
+  the expected two forwarded writes per frame.
+- Nothing but the idle loop has run: no program, no disk, no interrupts
+  beyond what the ROM enables at that screen, no reset while fast.
+- The telemetry words are read a byte at a time and are not latched: a
+  word can be off by `0x100` or `0x10000` when a carry lands mid-read. Read
+  twice before trusting a difference.
 
 ## 4. What is verified, and what is not
 
