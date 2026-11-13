@@ -78,6 +78,13 @@ module gs_accel_romcopy #(
     logic [NEAR_AW-1:0] f;
     logic               f2;              // second clk of a near-memory index
     logic [3:0]         we_sr;           // a byte was registered 1, 2, 3, 4 clks ago
+    // the two counts' last values, from registers: n moves once per PHI2 cycle and
+    // f every second clk, and each flag is read a clk or more after its count moved
+    logic               n_last, f_last;
+    always_ff @(posedge clk) begin
+        n_last <= (n[AW-1:0] == '1);
+        f_last <= (f == '1);
+    end
 
     assign hold_o         = (cs != C_IDLE);
     assign busy_o         = (cs != C_IDLE);
@@ -109,7 +116,7 @@ module gs_accel_romcopy #(
                         rom_wd_o <= idle_d_i;
                         sum_o    <= sum_o + {8'h00, idle_d_i};
                         n        <= n + 18'd1;
-                        if (n[AW-1:0] == '1) begin cs <= C_FLUSH; f <= '0; f2 <= 1'b0; end
+                        if (n_last) begin cs <= C_FLUSH; f <= '0; f2 <= 1'b0; end
                     end
                 end
                 default: begin   // C_FLUSH
@@ -117,7 +124,7 @@ module gs_accel_romcopy #(
                     else begin
                         f2 <= ~f2;
                         if (f2) f <= f + 1'b1;
-                        if (f2 && f == '1) begin
+                        if (f2 && f_last) begin
                             cs <= C_IDLE; valid_o <= 1'b1;
                             if (copies_o != 8'hFF) copies_o <= copies_o + 8'd1;
                         end
@@ -126,4 +133,10 @@ module gs_accel_romcopy #(
             endcase
         end
     end
+`ifdef VERILATOR
+    always @(posedge clk) if (rst_n) begin
+        if (cs == C_COPY && idle_stb_i && n_last !== (n[AW-1:0] == '1)) begin $display("ERROR: gs_accel_romcopy: n_last is stale"); $finish; end
+        if (cs == C_FLUSH && f2 && f_last !== (f == '1))                begin $display("ERROR: gs_accel_romcopy: f_last is stale"); $finish; end
+    end
+`endif
 endmodule

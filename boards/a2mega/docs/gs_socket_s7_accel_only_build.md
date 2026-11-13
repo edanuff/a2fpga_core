@@ -1,6 +1,8 @@
 # S7 — the accelerator-only build
 
-Status: built and simulated, 2026-11-12. **Not flashed, never on hardware.**
+Status: on hardware since 2026-11-12 (section 3; the block-RAM build of
+section 3a is on the card). The DDR3 build of section 3b is built and
+simulated, **not flashed**.
 Parents: [`gs_socket_s7_accelerator_scoping.md`](gs_socket_s7_accelerator_scoping.md)
 (what the accelerator is) and
 [`gs_socket_s7_fast_core_exploration.md`](gs_socket_s7_fast_core_exploration.md)
@@ -22,14 +24,16 @@ accelerator and nothing else:
   turned round, no /IRQ, /INH, /DMA or /RDY, the two daisy chains passed
   through. The one slot line the card can drive is /RESET, through the
   ESP32's reset hold, as in the full build.
-- No framebuffer, DDR3, DisplayPort, slot cards, slot ROM or I/O decode, or
-  OSD. The DDR3 and DisplayPort balls are not ports of this top; they take
-  the bitstream's unused-pin default (input with pull-up), as in the DP test
-  builds.
+- No framebuffer, DisplayPort, slot cards, slot ROM or I/O decode, or OSD.
+  The DisplayPort balls are not ports of this top; they take the
+  bitstream's unused-pin default (input with pull-up), as in the DP test
+  builds. The DDR3 was left out the same way until section 3b, which gives
+  it to the accelerator.
 
 Clocks: the 50 MHz crystal; `clk_logic` (the board PLL's 54 MHz) for the
 connector; `clk_gs` for the accelerator, from `gowin_gs_pll`, **the S6 socket
-PLL, unchanged: 110 MHz**, so the core steps at **55 MHz**.
+PLL, unchanged: 110 MHz**, so the core steps at **55 MHz**. (With the DDR3,
+section 3b, the build is at 105 MHz and 52.5 MHz steps.)
 
 > The decision recorded on 2026-11-12 was "108 MHz", made on the statement
 > that S6's PHY had run on hardware at 108 MHz. It ran on this PLL, which is
@@ -307,6 +311,142 @@ fifty samples, and none above it. Where a program is loaded on this
 machine was the thing not known, and two banks do not reach it. Not
 sampled while a test was running.
 
+## 3b. Expansion memory on the DDR3, at 105 MHz (2026-11-13, not flashed)
+
+The benchmark of section 3a runs from bank 04: sampled at PHI2 pace (every
+step on the socket), 70 % of the steps of its sieve, sort, call and integer
+tests are in bank 04 and 30 % in bank 00; four of 1,062 samples are in bank
+7F. Two banks of block RAM stop one short. This build puts every expansion
+bank, 02 to 7F, in the board's DDR3 - S7d as the scoping doc has it.
+
+**What is in the build.** The full build's DDR3: its PLL block
+(`board_plls`, the clock chain calibration was proven with), its reset
+sequencer and calibration watchdog, `DDR3_Memory_Interface_Top`,
+`ddr3_ports` and `ddr3_port_cdc`, with the accelerator as the only client
+(port 1 is tied off). In the accelerator's clock: `gs_accel_exp`, one queue
+of writes and reads in program order, and in the top a byte-to-word
+adapter (the arbiter's words are 32 bits; a read's byte lane is kept until
+its word comes back). `gs_accel` is built with `EXP_DDR = 1`,
+`EXP_BANKS = 126`, `NEAR_KW = 9`.
+
+**The near memory tags every bank.** Its entry is the byte, the tag as it
+was (two bits that say ROM and "A12 moved", and A14–A17), and A18–A22. The
+first fourteen bits are read with the core's next address, in the same
+fourteen blocks as every build before this one, and they are all the
+first-clk decision needs. RAM above bank 03 is marked in the two bits that
+were {ROM, A12 moved}: both set, a pair nothing else uses (ROM is {1, 0},
+and nothing moves A12 above bank 03). A step of the cheap view is never in
+those banks, so its entry matches exactly when the old fourteen bits match.
+The five high address bits are in five blocks of their own, read a clk
+later at the step's address - a register - and written a clk after the
+rest of the entry; only the registered full compare uses them, and it has
+the time. A first version spent a fifteenth bit ("an address bit above A17
+is set") in the first-clk compare; this one costs that compare nothing.
+
+**Waiting for the memory.** A near miss in an expansion bank queues a read
+and waits for it: a fast step in place (the broker's count stands while
+`lm_rwait_i`), about 25 clks in the bench's model. A PHI2-paced step cannot
+stand still, so its socket cycle is not taken as complete until the byte is
+there; the cycle - a read of RAM - is issued again meanwhile. It may not
+take the socket's byte instead: after fast mode the machine's copy is
+stale (a first version did, and a toggling run stopped at once). Writes go
+into the same queue; when it is within six entries of full every fast step
+that could write there waits at its strobe.
+
+**Granted only when it is safe.** Card memory needs the DDR3 calibrated and
+a queue that has never overflowed, as well as a ROM image. If the DDR3
+does not come up, the card is S6 on the new core and stays so. Telemetry
+word 12 is `{EXP_DDR, queue overflowed, memory ready, EXP_BANKS}`: `057E`
+on a good start. The DDR3's sequencer state and retry count are in the
+firmware's debug registers, as in the full build.
+
+**The card's copy is what the core wrote since the socket was armed**, as
+for banks 00/01. The DDR3 does not start at zero. In PHI2-paced card-memory
+mode every byte the near memory gives is compared with the socket's, and
+so is every byte fetched from the DDR3 (the verify count).
+
+**A defect found on the way, never built into a bitstream that ran.** When
+the queue was nearly full the broker held a fast step at its strobe. A
+step whose socket request had been raised ahead (the early request of
+section 3) was held too, its socket cycle completed with the step still
+undecided, and the cycle would have been issued twice. The bench did not
+fill the queue often enough to show it. It does now: `+wbforce` forces
+"nearly full" in long bursts, and a check stops the run if a step's socket
+cycle completes before the step is decided. Six of six such runs failed
+before the fix and pass after it: a step whose request is already at the
+socket is not held by the queue.
+
+**Verification (simulation).** The broker suite, 140 of 140 runs;
+the decode sweep (981,101,952 vectors), the replica benches and both
+socket benches pass on the same source. The bench's
+memory answers reads 8 to 39 clks late and is not always ready
+(`gs_exp_mem_sim`; `+xlat`, `+xgap` make it slower than the core writes);
+both the bench's design and `gs_accel` beside it have one, and the pins
+are compared in every clk. New in the test program: banks 04 and 08
+against bank 00 at one near-memory index; a 96-byte block move into bank
+02; a reset dropped on a step that is waiting for its byte (`+resetx`).
+Seven mutations of the new logic: six detected (the marking of high banks
+among them); the seventh (a byte that comes back to a step a reset removed
+is not dropped) changes nothing at any latency the DDR3 could have - the
+byte is back before the reset is over - and stays as a safeguard. The S6
+pin comparison is off in PHI2-paced runs of this configuration: a cycle
+issued again is not S6. Nine runs are at 105 MHz (`b105_2s`).
+
+**Timing: 110 MHz did not hold, 105 MHz does.** The rule is three
+placements of one source with no failing path, against a clock uncertainty
+of 0.5 ns (so "+0.03" below is 0.53 ns of real margin, and a small negative
+number is a path that works with less than the margin asked for). Seven
+rounds of the source:
+
+| round | what changed | failing paths (worst slack, ns) in each placement |
+|---|---|---|
+| 1 | first build | 560 (−2.529) |
+| 2 | the queue's "nearly full" and "waiting" as registers | 0 (+0.019), 97 (−0.281), 20 (−0.092) |
+| 3 | the queue registered at both ends; high tag bits written a clk late | 0 (+0.018), 0 (+0.028), 88 (−0.986) |
+| 4 | the {1, 1} marking in place of a fifteenth tag bit | 43 (−0.391), 26 (−0.152), 98 (−0.753) |
+| 5 | the PHY's enable as a register; the queue in one block RAM | 11 (−0.031); the others not built |
+| 6 | one write-enable register for the far memories; dead register copies removed | 80 (−0.513), 8 (−0.131), 0 (+0.038) |
+| 7, 110 MHz | the defect's fix; cycle completion from registers a clk ahead | 140 (−1.788), 138 (−1.497), 1 (−0.075) |
+| **7, 105 MHz** | **the same source, `ACC_CLK_105`** | **0 (+0.029), 0 (+0.037), 0 (+0.028)** |
+
+At 110 MHz the same source lands anywhere from one path 0.075 ns short of
+the margin to 140 paths 1.8 ns short, by placement. The DDR3's controller
+sits on the left edge of the device and the socket on the bottom and lower
+right; the accelerator is pulled between them, and its paths are mostly
+wire (5 to 7 ns of 8.5). The failing families differ from placement to
+placement (the core's two-clk loop through the near memory, the far
+memories' write side, the PHY's enable to the broker), which is the sign
+of a design at the edge and not of one bad path. So the build as committed
+runs the accelerator at **105 MHz: 52.5 MHz steps**, from a second PLL
+recipe (`gowin_acc_pll`, 50 MHz × 21 / 10), selected by `ACC_CLK_105` in
+`accel_only_defines.v`; `gen_sdc.py` reads the same line for the period.
+Comment the line out and regenerate the constraints for 110 MHz. The
+block-RAM build of section 3a (on the card today) closed at 110 MHz and
+is unchanged by this.
+
+Changes made for timing that are in every build from now on, each exact
+and checked in simulation where it is a register standing for a function:
+the PHY's `enabled` is a register (asserted equal to the old function in
+every clk); the ROM copy's two terminal comparisons are registered flags;
+the broker's cycle-completion conditions are registered a clk ahead of the
+PHI2 fall event (asserted equal at every fall event); the far memories'
+write enables come from one register; the queue is one block RAM (this
+device has no distributed RAM, so a small memory is otherwise built from
+registers).
+
+Size: 11,131 logic cells, 11,416 FF, 192 of 340 block RAMs (the two banks
+of section 3a are gone; the near memory is 14 + 5 blocks; the queue is
+one). Build k0: stamp `20261113103322`, bitstream sha256
+`4aad21337ff394c4…b620fb41072f`.
+
+**Not known, not done.** Whether the DDR3 calibrates in this build on the
+card: nothing but the full build has run it. The socket PHY has run on
+hardware only at 110 MHz; at 105 MHz its points are the same counts of a
+clk 4.8 % longer (in simulation at 100, 105, 108 and 110 MHz). The round trip's real length.
+What a program's working set does to a 16K-entry cache of single bytes when
+a miss costs 25 clks and brings one byte (the arbiter returns a 32-bit
+word, of which three bytes are dropped). Not run on hardware.
+
 ## 4. What is verified, and what is not
 
 Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):
@@ -314,8 +454,9 @@ Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):
 - `gs_accel` runs beside the bench's hand-wired design on the same socket
   inputs, and **every output pin is compared in every clk** (`ACCEL_SHADOW`),
   in native, paced, fast and toggling modes, with interrupts, RDY stalls, a
-  BE pause, warm resets, at 100, 108 and 110 MHz. ROM 01 boot at 110 MHz:
-  50,850,536 clks, no difference; over the suite's 35 runs with the module beside the design, 290,331,590 clks.
+  BE pause, warm resets, at 100, 105, 108 and 110 MHz. ROM 01 boot at 110 MHz:
+  50,850,536 clks, no difference; over the suite's 79 runs with the module
+  beside the design (2026-11-13), 814,174,211 clks.
 - The ROM copy (`+mode=copy`): the image starts empty, the design runs
   native from the socket, copies 131,072 bytes through the socket, empties
   the near memory and goes on in fast mode. The image is compared with the
@@ -386,12 +527,11 @@ Not verified, not done:
   the slot pins. The slot side's passivity is by inspection of that file.
 - The firmware (Sep 13 2026) arms and controls it, alone and beside an
   a2p25 (section 3); nothing else of the firmware has been looked at
-  against this build (DDR3 ready is tied high; volumes, video, USB and DP
+  against this build (its DDR3-ready input is tied high; volumes, video, USB and DP
   status read as nothing).
 - The build with the early socket request has run on hardware for one
   boot and one benchmark (section 3); nothing longer.
-- Expansion RAM is two banks in block RAM (section 3a), not S7d's DDR3; no
-  speed control or Zip / TransWarp registers (S7e), no ROM 3.
+- No speed control or Zip / TransWarp registers (S7e), no ROM 3.
 - The reset rule's gateware sequencer (`gs_socket_arm_seq`) is not in this
   build; arming is timed by the firmware, as in S6.
 - The timing probes were not rebuilt after the broker gained the hold
@@ -407,6 +547,10 @@ The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of k0 (the DDR3 build at 105 MHz, section 3b): sources = the
+commit that adds this paragraph; the same tool and device; build stamp
+`20261113103322`; bitstream sha256 `4aad21337ff394c4…b620fb41072f`.
 
 Provenance of fx2 (the early socket request, on the card): sources = the
 commit that adds this paragraph; the same tool and device; build stamp

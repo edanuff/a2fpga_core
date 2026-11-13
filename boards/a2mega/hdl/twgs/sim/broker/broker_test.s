@@ -521,12 +521,53 @@ t22e:   lda $6040,x
         lda $026100
         sta $E16104             ; (likewise)
         res                     ; $5A (written only with a bank 02)
+        ; a block move into the bank: writes as fast as a program makes them (a memory
+        ; that takes them more slowly fills the queue in front of it)
+        rep #$30
+        .a16
+        .i16
+        ldx #$0300
+        ldy #$7000
+        lda #$005F
+        .byte $54, $02, $00     ; MVN: 96 bytes 00/0300 -> 02/7000
+        sep #$30
+        .a8
+        .i8
+        lda #$00
+        pha
+        plb                     ; (the move left the data bank at 02)
+        lda $7010               ; bank 00's 7010: the entry of 02/7010 goes
+        lda $027010
+        sta $E16109
         jsl $026040             ; comes back with $E16100
         bra t22r
 t22n:   lda #$00
         res                     ; $00 (written only without a bank 02)
         lda #$00
 t22r:   res                     ; $34, or $00 without a bank 02
+
+        ; ---- T23 banks above 03, where the machine has them: a cache in front of the
+        ;      card's memory must keep 04/6100 and 08/6100 apart from 00/6100 and from
+        ;      each other - they share its index and the low bits of its tag
+        lda #$C3
+        sta $046100
+        lda $046100
+        cmp #$C3
+        bne t23n
+        lda $6100               ; bank 00's byte, not 04's
+        sta $E16106             ; (on the socket)
+        res                     ; $11 (written only with a bank 04)
+        lda #$3C
+        sta $086100
+        lda $086100
+        cmp #$3C
+        bne t23n
+        lda $046100             ; 04's byte, not 08's
+        sta $E16107
+        res                     ; $C3 (written only with a bank 08)
+        lda $086100
+        sta $E16108
+t23n:
 
         lda #$A5
         sta SIG

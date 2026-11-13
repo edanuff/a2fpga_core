@@ -42,6 +42,14 @@
 // With all of them low the module is S6 on the broker: every step a socket
 // cycle, every byte from the socket.
 //
+// Expansion memory (EXP_DDR = 1): EXP_BANKS banks from 02 up (126: to 7F) in a
+// memory outside this module, behind gs_accel_exp's port (m_*: the DDR3,
+// through whatever crosses to its clock).  The near memory then tags every
+// bank it must (NEAR_KW = 9 for all of them; its high tag bits are read a clk
+// late: the broker's NEAR_SPLIT), a near miss in those banks waits for the
+// memory, and cfg_cardmem_i also needs exp_ready_i and a queue that never
+// overflowed.  Or -
+//
 // Expansion memory (EXP_BANKS = 2): banks 02/03 in block RAM, beside banks
 // 00/01 and on the same terms - the card's memory of record under
 // cfg_cardmem_i, following every write of the core from the moment the socket
@@ -68,6 +76,7 @@ module gs_accel #(
     parameter int NEAR_KW = 4,           // address bits above A13 in a near-memory tag: 4 = banks 00/01 and the ROM
                                          // image, which is all this module has (the bench also runs it with 10)
     parameter int EXP_BANKS = 0,         // expansion banks held in block RAM: 0, or 2 (banks 02/03)
+    parameter bit EXP_DDR   = 1'b0,      // 1 = the EXP_BANKS expansion banks (1..126) are in the memory at the m_* port
     parameter bit SIM_ROM_VALID = 1'b0   // SIMULATION ONLY: the bench loaded the ROM image (gs_accel_romcopy SIM_PRESET)
 ) (
     input  logic        clk,
@@ -82,6 +91,17 @@ module gs_accel #(
     input  logic        cfg_cxrom_i,
     input  logic        cfg_copy_i,
     input  logic        clear_i,         // hold the PHI2 measurement at zero
+
+    // expansion memory port (EXP_DDR; clk domain; else tie the inputs low): one
+    // request at a time, reads answered in the order they were taken
+    input  logic        exp_ready_i,     // the memory is initialised (quasi-static)
+    output logic        m_req_o,
+    input  logic        m_ready_i,
+    output logic        m_we_o,
+    output logic [22:0] m_addr_o,
+    output logic [7:0]  m_wdata_o,
+    input  logic        m_rvalid_i,
+    input  logic [7:0]  m_rdata_i,
 
     // socket pins
     input  logic        gs_ph2_i,
@@ -118,15 +138,19 @@ module gs_accel #(
                                          // the write buffer, 4 local reads in place, 5 local reads that waited,
                                          // 6 {verify_count, 8'h00, mode}, 7 {8'h00, verify_addr},
                                          // 8 {copies, 8'h00, ROM image sum}, 9 {shadow, cyareg, sltromsel, statereg},
-                                         // 10 {24'h0, switch misc}, 11 PHY bus cycles, 12 {24'h0, EXP_BANKS}; others 0
+                                         // 10 {24'h0, switch misc}, 11 PHY bus cycles, 12 {.., EXP_DDR, its queue overflowed, its memory ready, EXP_BANKS}; others 0
 );
     localparam int STEP_CLKS = 2, ADDR_CLKS = 2, SLOW_CLKS = 3;
     localparam int NEAR_AW = 14, NTW = NEAR_KW + 2;
     localparam int ROM_BLKS = ROM3 ? 16 : 8;
     localparam int ROM_SELW = $clog2(ROM_BLKS);
-    localparam int RAM_BLKS = (EXP_BANKS == 2) ? 16 : 8;      // 16K x 1 blocks per data bit: banks 00/01 (and 02/03)
+    localparam int RAM_BLKS = (EXP_BANKS == 2 && !EXP_DDR) ? 16 : 8;      // 16K x 1 blocks per data bit: banks 00/01 (and 02/03)
     localparam int RAM_SELW = $clog2(RAM_BLKS);
-    initial if (EXP_BANKS != 0 && EXP_BANKS != 2) $fatal(1, "gs_accel: EXP_BANKS must be 0 or 2");
+    initial if (!EXP_DDR && EXP_BANKS != 0 && EXP_BANKS != 2) $fatal(1, "gs_accel: EXP_BANKS in block RAM must be 0 or 2");
+    initial if (EXP_DDR && !(EXP_BANKS >= 1 && EXP_BANKS <= 126 && NEAR_KW >= 5 && NEAR_KW <= 9 && (2 + EXP_BANKS) <= (1 << (NEAR_KW - 2))))
+        $fatal(1, "gs_accel: EXP_DDR needs 1..126 EXP_BANKS and a NEAR_KW (5..9) that reaches them");
+    localparam int NM_LO = EXP_DDR ? 14 : 8 + NTW;            // near-memory entry bits read with the core's next address
+    localparam int NM_HI = EXP_DDR ? NEAR_KW - 4 : 0;         // ... and a clk later, at the step's address (NEAR_SPLIT)
 
     // ---- socket PHY
     logic [23:0] phy_a;
@@ -152,7 +176,9 @@ module gs_accel #(
 
     // ---- what the control inputs are granted
     logic        rom_valid, copy_busy, copy_start, cfg_copy_q;
-    wire         cardmem = cfg_cardmem_i & rom_valid;
+    logic        x_ovf, x_rwait, x_rsel, x_wbusy;
+    logic [7:0]  x_rdata;
+    wire         cardmem = cfg_cardmem_i & rom_valid & (~EXP_DDR | (exp_ready_i & ~x_ovf));
     wire         fast    = cfg_fast_i & cardmem;
     // (cxrom goes straight into the decode of the step in progress: it is taken only
     // while no step is, with the core in reset or held - so at /RES and at a ROM copy)
@@ -184,6 +210,8 @@ module gs_accel #(
     logic [NEAR_AW-1:0] nm_ra, nm_wa;
     logic [7:0]         nm_rdata, nm_wdata;
     logic [NTW-1:0]     nm_rtag, nm_wtag;
+    logic        nm_ren_hi, lm_rexp;
+    logic [NEAR_AW-1:0] nm_ra_hi;
     logic        brk_fast, held, idle_stb, hold, nm_flush;
     logic [7:0]  idle_d;
     logic [23:0] idle_a, verify_addr;
@@ -192,7 +220,8 @@ module gs_accel #(
     logic [7:0]  r_shadow, r_cyareg, r_sltromsel, r_statereg, r_misc;
 
     gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(8), .CE_COPIES(4),
-                      .NEAR(1'b1), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .ROM3(ROM3), .FAR_CLKS(2)) u_brk (
+                      .NEAR(1'b1), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .ROM3(ROM3), .FAR_CLKS(2), .WEN_ONE(1'b1),
+                      .EXP_WAIT(EXP_DDR), .NEAR_SPLIT(EXP_DDR)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(~fast), .mem_bypass_i(~cardmem),
         .cxrom_local_i(cxrom), .exp_banks_i(7'(EXP_BANKS)),
@@ -213,6 +242,8 @@ module gs_accel #(
         .lm_wen_o(lm_wen), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
         .nm_ren_o(nm_ren), .nm_ra_o(nm_ra), .nm_rdata_i(nm_rdata), .nm_rtag_i(nm_rtag),
         .nm_wen_o(nm_wen), .nm_wa_o(nm_wa), .nm_wdata_o(nm_wdata), .nm_wtag_o(nm_wtag),
+        .nm_ren_hi_o(nm_ren_hi), .nm_ra_hi_o(nm_ra_hi),
+        .lm_rexp_o(lm_rexp), .lm_rwait_i(x_rwait), .lm_wbusy_i(x_wbusy),
         .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(), .pw_busy_o(),
         .verify_miss_o(), .verify_addr_o(verify_addr), .verify_count_o(verify_count_o),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
@@ -296,7 +327,7 @@ module gs_accel #(
             initial for (int i = 0; i < 16384; i++) mrom[i] = 1'b0;
 `endif
         end
-        assign lm_ram_rdata[b] = ram_q[ram_sel] ^ far_bad;
+        assign lm_ram_rdata[b] = x_rsel ? x_rdata[b] : (ram_q[ram_sel] ^ far_bad);
         assign lm_rom_rdata[b] = rom_q[rom_sel] ^ far_bad;
     end
 
@@ -304,11 +335,18 @@ module gs_accel #(
     // address is the core's next address, its latest output; the blocks sit in two
     // rows of block RAM, and those of the second take the core's second copy of it
     // (NA_OUT_B) so that neither copy's net spans both rows.
-    localparam logic [13:0] ROW_B = 14'b11_0000_1100_1100;           // entry bits placed in the second row (NEAR_KW = 4)
-    wire [8+NTW-1:0] nm_wv = {~nm_wtag, nm_wdata};
-    logic [8+NTW-1:0] nm_q;
-    for (genvar b = 0; b < 8 + NTW; b++) begin : g_nb
-        localparam bit SECOND = (NEAR_KW == 4) ? ROW_B[b] : ((b % 4) >= 2);
+    localparam logic [14:0] ROW_B = 15'b111_0000_1100_1100;          // entry bits placed in the second row (up to 15)
+    // With EXP_DDR the entry is {high address bits (A18 up) | ROM, A12, A14-A17, byte}: the
+    // fourteen bits after the bar are exactly the entry of a build without it, read as
+    // before, and are all the cheap view needs (the broker marks a tag with a high
+    // address bit in them: nm_tag); the high address bits are in blocks of their own,
+    // read a clk later at the step's address (a register), and need no floorplan.
+    // Stored inverted, all of it.
+    wire [NM_LO-1:0]  nm_wv  = EXP_DDR ? {~nm_wtag[NTW-1:NTW-2], ~nm_wtag[3:0], nm_wdata}
+                                       : (NM_LO)'({~nm_wtag, nm_wdata});
+    logic [NM_LO-1:0] nm_q;
+    for (genvar b = 0; b < NM_LO; b++) begin : g_nb
+        localparam bit SECOND = (NM_LO <= 15) ? ROW_B[b] : ((b % 4) >= 2);
         logic nmem [0:(1<<NEAR_AW)-1];
         wire [NEAR_AW-1:0] ra = SECOND ? cpu_na_b[NEAR_AW-1:0] : nm_ra;
         always_ff @(posedge clk) if (nm_ren) nm_q[b] <= nmem[ra];
@@ -318,7 +356,43 @@ module gs_accel #(
 `endif
     end
     assign nm_rdata = nm_q[7:0];
-    assign nm_rtag  = ~nm_q[8 +: NTW];
+    if (EXP_DDR) begin : g_split
+        logic [NM_HI-1:0] nh_q;
+        // (their write a clk after the rest of the entry's, from a register of its own:
+        // they are read a clk after the rest, and an entry written in or since the clk
+        // of its launch is not used at all)
+        logic               hq_we;
+        logic [NEAR_AW-1:0] hq_a;
+        logic [NM_HI-1:0]   hq_d;
+        always_ff @(posedge clk) begin hq_we <= nm_wen; hq_a <= nm_wa; hq_d <= ~nm_wtag[NEAR_KW-1:4]; end
+        for (genvar b = 0; b < NM_HI; b++) begin : g_nh
+            logic nmemh [0:(1<<NEAR_AW)-1];
+            always_ff @(posedge clk) if (nm_ren_hi) nh_q[b] <= nmemh[nm_ra_hi];
+            always_ff @(posedge clk) if (hq_we) nmemh[hq_a] <= hq_d[b];
+`ifdef VERILATOR
+            initial begin for (int i = 0; i < (1<<NEAR_AW); i++) nmemh[i] = 1'b0; nh_q[b] = 1'b0; end
+`endif
+        end
+        assign nm_rtag = {~nm_q[13:12], ~nh_q, ~nm_q[11:8]};
+    end else begin : g_whole
+        assign nm_rtag = ~nm_q[8 +: NTW];
+    end
+
+    // ---- expansion memory (EXP_DDR): the queue the far path waits on
+    if (EXP_DDR) begin : g_exp
+        gs_accel_exp #(.AW(23)) u_exp (
+            .clk(clk), .rst_n(rst_n), .run_i(cpu_rst_n),
+            .rd_i(lm_ren[0] & lm_rexp), .rnx_i(lm_ren[0] & ~lm_rexp), .raddr_i(lm_raddr[22:0]),
+            .wr_i(lm_wen[0] & (|lm_waddr[23:17])), .waddr_i(lm_waddr[22:0]), .wdata_i(lm_wdata),
+            .rwait_o(x_rwait), .rsel_o(x_rsel), .rdata_o(x_rdata), .wbusy_o(x_wbusy), .ovf_o(x_ovf), .busy_o(),
+            .m_req_o(m_req_o), .m_ready_i(m_ready_i), .m_we_o(m_we_o), .m_addr_o(m_addr_o), .m_wdata_o(m_wdata_o),
+            .m_rvalid_i(m_rvalid_i), .m_rdata_i(m_rdata_i)
+        );
+    end else begin : g_noexp
+        assign {x_rwait, x_rsel, x_wbusy, x_ovf} = '0;
+        assign x_rdata = '0;
+        assign m_req_o = 1'b0; assign m_we_o = 1'b0; assign m_addr_o = '0; assign m_wdata_o = '0;
+    end
 
     // ---- telemetry
     // PHI2 period / duty: clk ticks per 256 cycles (as gs_socket_ctl)
@@ -368,7 +442,7 @@ module gs_accel #(
             6'd9:    tele_word_o <= {r_shadow, r_cyareg, r_sltromsel, r_statereg};
             6'd10:   tele_word_o <= {24'h0, r_misc};
             6'd11:   tele_word_o <= cycle_count_o;
-            6'd12:   tele_word_o <= {24'h0, 8'(EXP_BANKS)};
+            6'd12:   tele_word_o <= {21'h0, EXP_DDR, x_ovf, exp_ready_i, 8'(EXP_BANKS)};
             default: tele_word_o <= 32'h0;
         endcase
     end

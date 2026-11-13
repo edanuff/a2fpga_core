@@ -185,10 +185,17 @@ def generate_near(PERIOD, fname, pfx="", board=False):
             create_clock -name clk -period 20 -waveform {{0 10}} [get_ports {{clk}}]
             // clk_logic: the board PLL's fractional 54 MHz output, constrained at its worst
             // instantaneous period as in a2mega_138b.sdc
-            create_clock -name clk_logic -period 17.777 -waveform {{0 8.888}} [get_pins {{i_clk_pll/u_pll/PLL_inst/CLKOUT0}}]
+            create_clock -name clk_logic -period 17.777 -waveform {{0 8.888}} [get_pins {{u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT0}}]
             create_clock -name clk_gs -period {PERIOD:.3f} -waveform {{0 {PERIOD / 2:.3f}}} [get_pins {{i_gs_pll/u_pll/PLL_inst/CLKOUT0}}]
             set_clock_uncertainty 0.5 -setup -from [get_clocks {{clk_gs}}]
             set_clock_uncertainty 0.5 -setup -from [get_clocks {{clk_logic}}]
+            // the DDR3 (the card's copy of the expansion banks): its memory clock and its
+            // application clock, as in a2mega_138b.sdc.  The accelerator reaches it only
+            // through ddr3_port_cdc's asynchronous FIFOs; its reset sequencer runs on clk.
+            create_generated_clock -name clk_pixel -source [get_ports {{clk}}] -master_clock clk -divide_by 50 -multiply_by 27 [get_pins {{u_board_plls/clocks_pll/u_pll/PLL_inst/CLKOUT2}}]
+            create_clock -name clk4x -period 3.086 -waveform {{0 1.543}} [get_pins {{u_board_plls/pll_ddr3_inst/u_pll/PLL_inst/CLKOUT2}}]
+            create_clock -name clk1x -period 12.346 -waveform {{0 6.173}} [get_pins {{u_ddr3/gw3_top/u_ddr_phy_top/fclkdiv/CLKOUT}}]
+            set_clock_groups -asynchronous -group [get_clocks {{clk4x}}] -group [get_clocks {{clk1x}}] -group [get_clocks {{clk}}] -group [get_clocks {{clk_pixel}}] -group [get_clocks {{clk_logic}}] -group [get_clocks {{clk_gs}}]
 
             // gs_ph2 (the FPI's PHI2 at the socket) and the three clocks are asynchronous to one
             // another: the socket data byte (d_f, PHI2-fall flops) is registered in the clk_gs
@@ -259,6 +266,11 @@ def generate_near(PERIOD, fname, pfx="", board=False):
     if board:
         # (gs_accel takes it only with the core in reset or held)
         mc(2, regs(f"{pfx}cxrom*"), FULL)
+        # (the entry read at the launch reaches the tag compare made from the full decode in
+        # the step's first clk and is registered at the end of the second - nh_dq, used from
+        # the third.  Not the tag's high address bits, in blocks of their own: they are read
+        # a clk later.)
+        mc(2, NMQ, regs(*b("nh_dq")))
     note("""
         ---- the core's outputs reach the broker's other registers no sooner than the
         step's second clk: write data (registered with the write, with a socket request,
@@ -267,8 +279,9 @@ def generate_near(PERIOD, fname, pfx="", board=False):
     note("""
         ---- a far read: its registered address is presented to the memories for two
         clks and launched in the second""")
-    mc(2, regs(*b("ml_sel_r", "ml_sel_c", "ml_phys", "ml_rom")), FADB)
-    mc(2, regs(*b("ml_sel_r", "ml_sel_c", "ml_phys", "ml_rom")), FSEL)
+    # (not ml_sel_c: with the near memory nothing selects the address, and its copies are constant)
+    mc(2, regs(*b("ml_sel_r", "ml_phys", "ml_rom")), FADB)
+    mc(2, regs(*b("ml_sel_r", "ml_phys", "ml_rom")), FSEL)
     if board:
         note("""
             ---- ... and (gs_accel: FAR_CLKS = 2) its data has two clks from the memories'
@@ -287,6 +300,10 @@ def generate_near(PERIOD, fname, pfx="", board=False):
         CP = f"{pfx}u_copy/"
         mc(2, regs(CP + "rom_wa_o*", CP + "rom_wd_o*", CP + "rom_we_o*"), pins("*mrom_*_s/ADA*", "*mrom_*_s/DI*", "*mrom_*_s/CEA"))
         mc(2, regs(CP + "cs*", CP + "f_*"), pins("*nmem_*_s/ADA*", "*nmem_*_s/DI*", "*nmem_*_s/CEA"))
+        # (held_r gates the flush in the broker; it rises long before a flush and falls a
+        # clk after one has ended, or, at a reset in the middle of one, the copy is void
+        # and the near memory is not used again before a whole flush)
+        mc(2, regs(*b("held_r")), pins("*nmem_*_s/ADA*", "*nmem_*_s/DI*", "*nmem_*_s/CEA"))
         note("""
             ---- the telemetry word's index: quasi-static (the firmware writes it, then reads)""")
         out.append("set_false_path -from [get_regs {gs_ti_s1*}]")
@@ -313,4 +330,7 @@ generate(3, 2, 9.259, "accel_probe_138b.sdc")
 generate(2, 1, 10.000, "accel_probe_138b_s2.sdc")
 generate_near(10.000, "accel_probe_138b_n2.sdc")
 generate_near(9.259, "accel_probe_138b_n8.sdc")      # the same design at 108 MHz: 54 MHz steps
-generate_near(9.091, "accel_only_138b.sdc", pfx="u_acc/", board=True)   # the board build: the S6 socket PLL, 110 MHz
+# the board build: the S6 socket PLL, 110 MHz - or 105 MHz with ACC_CLK_105 in its defines
+_defs = (pathlib.Path(__file__).parent.parent / "accel_only" / "accel_only_defines.v").read_text()
+_p105 = any(l.strip().startswith("`define ACC_CLK_105") for l in _defs.splitlines())
+generate_near(9.524 if _p105 else 9.091, "accel_only_138b.sdc", pfx="u_acc/", board=True)

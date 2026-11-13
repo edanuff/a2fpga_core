@@ -53,10 +53,13 @@
 //   +irq            raise /IRQ twice once the test program reaches its loop
 //   +reset          a warm reset (/RES low for 12 cycles) half way through
 //   +resetw         the same, with /RES falling in the middle of a socket write cycle
+//   +resetx         the same, with /RES falling while a step waits for the expansion memory (EXP_DDR)
 //   +resetpw        the same, with /RES falling in the cycle before a native-mode write
 //                   (FAST_CORE builds, +mode=native: the bench waits for such a cycle)
 //   +nostall +nobe  no RDY stalls / no BE (DMA) pause
 //   +stallp=N       a RDY stall every N PHI2 cycles (default 311)
+//   +wbforce        the expansion queue's "nearly full" forced high in long bursts (it only ever holds
+//                   steps: nothing may change but the time; gs_accel beside the design is not compared)
 //   +noturbo        ignore $C036 bit 7: the FPI stays at 1 MHz
 //   +expect         check the test program's result table
 //   +wlog=<file>    write the socket-visible write stream (I/O, Mega II,
@@ -75,6 +78,8 @@ module tb_gs_broker #(
     parameter int NEAR_KW   = 10,
     parameter bit SOCK_PRE  = 1'b1,    // broker: socket-only steps requested in their first clk (0: for comparison)
     parameter int FAR_CLKS  = 1,       // broker: clks the far memories' data has to reach it (2 with gs_accel beside)
+    parameter bit EXP_DDR   = 1'b0,    // the card's expansion banks are in a memory of varying latency behind
+                                       // gs_accel_exp (the DDR3): here gs_exp_mem_sim; the near memory's tag is split
     parameter int ACC_EXP   = 0,       // ACCEL_SHADOW: gs_accel's expansion banks; it is compared in runs with +exp= this
     parameter bit ROM_PRESET = 1'b1    // 1 = the bench loads the card's ROM image; 0 = it starts empty and
                                        // +mode=copy has the design read it through the socket
@@ -98,6 +103,8 @@ module tb_gs_broker #(
     localparam real T14    = 69.841;   // 14.31818 MHz
 `ifdef CLK100
     localparam real TCLK   = 10.0;     // 100 MHz accelerator domain
+`elsif CLK105
+    localparam real TCLK   = 9.524;    // 105 MHz: the accelerator-only build's alternative (gowin_acc_pll)
 `elsif CLK110
     localparam real TCLK   = 9.091;    // 110 MHz: the socket PLL of the board builds (gowin_gs_pll)
 `else
@@ -127,7 +134,7 @@ module tb_gs_broker #(
     bit          cfg_native = 0, cfg_bypass = 0, cfg_toggle = 0;
     int          cfg_exp = 0, cfg_mbexp = 0, cfg_cxrom = 0;
     int          stall_period = 311;      // PHI2 cycles between RDY stalls (+stallp=)
-    bit          do_irq = 0, do_stall = 1, do_be = 1, do_expect = 0, s6cmp = 0, do_reset = 0, do_resetw = 0, do_resetpw = 0;
+    bit          do_irq = 0, do_stall = 1, do_be = 1, do_expect = 0, s6cmp = 0, do_reset = 0, do_resetw = 0, do_resetpw = 0, do_resetx = 0;
     int          n_dropped = 0;      // posted writes dropped by a reset (documented: at most one each)
     int          n_kept = 0;         // local writes of a step cut short by a reset (documented: they stay written)
     longint      max_steps = 60000;
@@ -191,6 +198,20 @@ module tb_gs_broker #(
     logic [NEAR_AW-1:0] nm_ra, nm_wa;
     logic [7:0]         nm_rdata, nm_wdata;
     logic [NTW-1:0]     nm_rtag, nm_wtag;
+    logic               nm_ren_hi;
+    logic [NEAR_AW-1:0] nm_ra_hi;
+    // expansion memory behind gs_accel_exp (EXP_DDR)
+    logic               lm_rexp, xq_rwait, xq_rsel, xq_wbusy, xq_ovf, xq_req, xq_skip_w;
+    bit                 wb_en = 0;                    // +wbforce
+    logic [15:0]        wb_lfsr = 16'hACE1;
+    logic [4:0]         wb_div = '0;
+    always @(posedge clk) begin
+        wb_div <= wb_div + 5'd1;
+        if (wb_div == '0) wb_lfsr <= {wb_lfsr[14:0], wb_lfsr[15] ^ wb_lfsr[13] ^ wb_lfsr[12] ^ wb_lfsr[10]};
+    end
+    wire                wb_force = wb_en & (wb_lfsr[1:0] != 2'b00);
+    bit                 x_check = 1'b0;
+    logic [7:0]         xq_rdata;
     logic [31:0] stat_rd_hit, stat_rd_miss;
     logic [2:0]  cpu_nst;
     // telemetry
@@ -216,7 +237,8 @@ module tb_gs_broker #(
     );
 
     gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK), .DATA_LATE(DATA_LATE), .RA_COPIES(RA_COPIES), .CE_COPIES(4),
-                      .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .SOCK_PRE(SOCK_PRE), .FAR_CLKS(FAR_CLKS)) u_brk (
+                      .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .SOCK_PRE(SOCK_PRE), .FAR_CLKS(FAR_CLKS),
+                      .EXP_WAIT(EXP_DDR), .NEAR_SPLIT(EXP_DDR)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(native_w), .mem_bypass_i(bypass_w),
         .cxrom_local_i(cfg_cxrom[0]), .exp_banks_i(cfg_exp[6:0]),
@@ -233,7 +255,9 @@ module tb_gs_broker #(
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n),
         .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na), .cpu_nst_i(cpu_nst), .cpu_rdy_i(cpu_rdy_out),
         .lm_ren_o(lm_ren_c), .lm_ram_ra_o(lm_ram_ra_c), .lm_rom_ra_o(lm_rom_ra_c), .lm_raddr_o(lm_raddr),
-        .lm_ram_rdata_i(lm_ram_rdata ^ {8{far_bad}}), .lm_rom_rdata_i(lm_rom_rdata ^ {8{far_bad}}),
+        .lm_ram_rdata_i(xq_rsel ? xq_rdata : (lm_ram_rdata ^ {8{far_bad}})), .lm_rom_rdata_i(lm_rom_rdata ^ {8{far_bad}}),
+        .lm_rexp_o(lm_rexp), .lm_rwait_i(xq_rwait), .lm_wbusy_i(xq_wbusy | wb_force),
+        .nm_ren_hi_o(nm_ren_hi), .nm_ra_hi_o(nm_ra_hi),
         .lm_wen_o(lm_wen_c), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
         .nm_ren_o(nm_ren), .nm_ra_o(nm_ra), .nm_rdata_i(nm_rdata), .nm_rtag_i(nm_rtag),
         .nm_wen_o(nm_wen), .nm_wa_o(nm_wa), .nm_wdata_o(nm_wdata), .nm_wtag_o(nm_wtag),
@@ -294,10 +318,57 @@ module tb_gs_broker #(
         .busy_o(copy_busy), .valid_o(copy_valid), .sum_o(copy_sum), .copies_o(copy_copies)
     );
 
+    //---------------------------------------------------------------- expansion memory of varying latency (EXP_DDR)
+    logic        xm_req, xm_ready, xm_we, xm_rvalid;
+    logic [22:0] xm_addr;
+    logic [7:0]  xm_wdata, xm_rdata;
+    if (EXP_DDR) begin : g_x
+        gs_accel_exp #(.AW(23)) u_xq (
+            .clk(clk), .rst_n(rst_n), .run_i(cpu_rst_n),
+            .rd_i(lm_ren & lm_rexp), .rnx_i(lm_ren & ~lm_rexp), .raddr_i(lm_raddr[22:0]),
+            .wr_i(lm_wen & (|lm_waddr[23:17])), .waddr_i(lm_waddr[22:0]), .wdata_i(lm_wdata),
+            .rwait_o(xq_rwait), .rsel_o(xq_rsel), .rdata_o(xq_rdata), .wbusy_o(xq_wbusy), .ovf_o(xq_ovf), .busy_o(xq_req),
+            .m_req_o(xm_req), .m_ready_i(xm_ready), .m_we_o(xm_we), .m_addr_o(xm_addr), .m_wdata_o(xm_wdata),
+            .m_rvalid_i(xm_rvalid), .m_rdata_i(xm_rdata)
+        );
+        gs_exp_mem_sim #(.AW(23)) u_xmem (
+            .clk(clk), .rst_n(rst_n), .m_req_i(xm_req), .m_ready_o(xm_ready), .m_we_i(xm_we), .m_addr_i(xm_addr),
+            .m_wdata_i(xm_wdata), .m_rvalid_o(xm_rvalid), .m_rdata_o(xm_rdata)
+        );
+        assign xq_skip_w = (u_xq.skip != 4'd0);
+        always @(posedge clk) if (rst_n && xq_ovf) begin $display("ERROR: the expansion memory's queue overflowed"); $finish; end
+        // every byte the broker takes from it is the byte the mirror holds
+        always @(posedge clk) if (rst_n && xm_rvalid && u_xq.skip == 4'd0 && u_xq.pend) begin
+            if (xm_rdata !== lexp[20'(u_brk.ml_phys - 24'h020000)])
+                begin $display("ERROR: expansion memory gave %02h for %06h, the mirror has %02h", xm_rdata, u_brk.ml_phys, lexp[20'(u_brk.ml_phys - 24'h020000)]); $finish; end
+        end
+        // at the end of the run: the memory holds what was written to it
+        always @(posedge x_check) begin
+            int k; k = 0;
+            for (int a = 0; a < cfg_exp * 65536; a++) if (u_xmem.mem[24'h020000 + a] !== lexp[a]) k++;
+            if (k != 0) err($sformatf("the expansion memory differs from what was written to it in %0d bytes", k));
+        end
+    end else begin : g_x
+        assign {xq_rwait, xq_rsel, xq_wbusy, xq_ovf, xq_req, xq_skip_w} = '0;
+        assign xq_rdata = '0;
+        assign {xm_req, xm_ready, xm_we, xm_rvalid} = '0;
+        assign xm_addr = '0; assign xm_wdata = '0; assign xm_rdata = '0;
+    end
+    longint n_xrd = 0, n_xwait = 0, n_xrep = 0, n_xrd_nat = 0, n_xbusy = 0, n_resetx = 0, n_xskip = 0;
+    logic [23:0] last_real_a = '0;
+    bit          last_real_r = 0;
+    always @(posedge clk) begin
+        if (lm_ren && lm_rexp) n_xrd <= n_xrd + 1;
+        if (lm_ren && lm_rexp && u_brk.mode_native) n_xrd_nat <= n_xrd_nat + 1;
+        if (xq_rwait) n_xwait <= n_xwait + 1;
+        if (xq_wbusy) n_xbusy <= n_xbusy + 1;
+        if (xm_rvalid && xq_skip_w) n_xskip <= n_xskip + 1;
+    end
+
     //---------------------------------------------------------------- the card's memories (behavioural)
     logic [7:0] lram [0:(1<<17)-1];              // banks 00/01
     logic [7:0] lrom [0:(1<<18)-1];              // ROM image, FC0000-FFFFFF
-    logic [7:0] lexp [0:EXP_MAX*65536-1];        // expansion banks 02..
+    logic [7:0] lexp [0:EXP_MAX*65536-1];        // expansion banks 02.. (EXP_DDR: a mirror of what was written)
     // Synchronous, as the block RAMs will be: a read launch registers the data
     // of BOTH memories as they are at that edge; a write is a separate port.
     // The broker never launches and writes in the same clk (checked).
@@ -347,8 +418,23 @@ module tb_gs_broker #(
     always_ff @(posedge clk) begin
         if (nm_ren) begin
             nm_rdata <= (nm_wen && nm_wa == nm_ra) ? ~nm_wdata : nmd[nm_ra];
-            nm_rtag  <= (nm_wen && nm_wa == nm_ra) ? nm_wtag   : nmt[nm_ra];
+            if (!EXP_DDR) nm_rtag <= (nm_wen && nm_wa == nm_ra) ? nm_wtag : nmt[nm_ra];
+            else begin
+                // split tag: {ROM, A12} and A14-A17 now
+                logic [NTW-1:0] t;
+                t = (nm_wen && nm_wa == nm_ra) ? nm_wtag : nmt[nm_ra];
+                nm_rtag[NTW-1:NTW-2] <= t[NTW-1:NTW-2];
+                nm_rtag[3:0]         <= t[3:0];
+            end
         end
+        // ... the high address bits a clk later, at the step's own address (a read in the clk
+        // of a write to that entry returns the other value, the worst case)
+        if (EXP_DDR && nm_ren_hi) begin
+            logic [NTW-1:0] t;
+            t = nmt[nm_ra_hi];
+            nm_rtag[NEAR_KW-1:4] <= (nm_wen && nm_wa == nm_ra_hi) ? ~t[NEAR_KW-1:4] : t[NEAR_KW-1:4];
+        end
+        if (nm_ren_hi && !EXP_DDR) begin $display("ERROR: split near-memory read without EXP_DDR"); $finish; end
         if (nm_wen) begin
             nmd[nm_wa] <= nm_wdata;
             nmt[nm_wa] <= nm_wtag;
@@ -369,10 +455,11 @@ module tb_gs_broker #(
         n_bad = 0; n_valid = 0;
         for (int i = 0; i < (1<<NEAR_AW); i++) if (nmt[i] != '1) begin
             n_valid++;
-            if (nmt[i][NTW-1]) begin
+            if (nmt[i][NTW-1] && !(EXP_DDR && nmt[i][NTW-2])) begin
                 want = lrom[{nmt[i][3:0], 14'(i)}];
             end else begin
-                a12  = i[12] ^ nmt[i][NTW-2];
+                // (split tag: {1, 1} marks RAM above bank 03, where nothing moves A12)
+                a12  = (EXP_DDR && nmt[i][NTW-1]) ? i[12] : i[12] ^ nmt[i][NTW-2];
                 ph   = 24'({nmt[i][NEAR_KW-1:0], 14'(i)});
                 ph[12] = a12[0];
                 want = (ph[23:17] == 7'd0) ? lram[ph[16:0]] : lexp[20'(ph - 24'h020000)];
@@ -849,6 +936,12 @@ module tb_gs_broker #(
                     void'(expq.pop_front());
                     n_real++;
                     seen_real = 1;
+                    last_real_a = a24; last_real_r = rw_l;
+                end else if (EXP_DDR && rw_l && last_real_r && a24 == last_real_a && u_brk.mode_native &&
+                             a24[23:16] >= 8'h02 && a24[23:16] < 8'h02 + 8'(cfg_exp)) begin
+                    // a native step waiting for its byte from the expansion memory: its
+                    // socket cycle, a read of that RAM, issued again
+                    n_xrep++;
                 end else if (rw_l && a24 == PARK) begin
                     n_idle++;
                     if (seen_real && !cfg_toggle && cfg_native)
@@ -954,6 +1047,7 @@ module tb_gs_broker #(
         end
         if (n_exp != 0 && !(cfg_native && cfg_bypass))
             err($sformatf("card expansion RAM differs from the ideal machine in %0d bytes", n_exp));
+        x_check = 1'b1;
         if (cfg_native && !cfg_toggle) begin
             // every write went out: the motherboard's fast RAM is complete too
             n_mb = mach_diff(0, 0, (2 + cfg_mbexp) * 65536);
@@ -975,7 +1069,7 @@ module tb_gs_broker #(
         // nothing outstanding: the two machines must agree
         // (the final moment also wants no write of the card's memory in flight: with the
         // near memory the write of the step that just completed is made in this clk)
-        if (expq.size() == 0 && (steps[7:0] == 8'd0 || (final_req && !final_done && !lm_wen))) begin
+        if (expq.size() == 0 && (steps[7:0] == 8'd0 || (final_req && !final_done && !lm_wen && !xq_req))) begin
             check_state_equal("no socket cycle outstanding");
             if (final_req) begin final_checks(); final_done = 1; end
         end
@@ -1107,7 +1201,20 @@ module tb_gs_broker #(
     logic [7:0]  acc_status, acc_mode;
     logic [15:0] acc_verify;
     longint      n_acc_cmp = 0;
-    gs_accel #(.NEAR_KW(NEAR_KW), .EXP_BANKS(ACC_EXP), .SIM_ROM_VALID(ROM_PRESET)) u_acc (
+    logic        am_req, am_ready, am_we, am_rvalid;
+    logic [22:0] am_addr;
+    logic [7:0]  am_wdata, am_rdata;
+    if (EXP_DDR) begin : g_am
+        gs_exp_mem_sim #(.AW(23)) u_amem (
+            .clk(clk), .rst_n(rst_n), .m_req_i(am_req), .m_ready_o(am_ready), .m_we_i(am_we), .m_addr_i(am_addr),
+            .m_wdata_i(am_wdata), .m_rvalid_o(am_rvalid), .m_rdata_o(am_rdata)
+        );
+    end else begin : g_noam
+        assign {am_ready, am_rvalid} = '0; assign am_rdata = '0;
+    end
+    gs_accel #(.NEAR_KW(NEAR_KW), .EXP_BANKS(ACC_EXP), .EXP_DDR(EXP_DDR), .SIM_ROM_VALID(ROM_PRESET)) u_acc (
+        .exp_ready_i(1'b1), .m_req_o(am_req), .m_ready_i(am_ready), .m_we_o(am_we), .m_addr_o(am_addr),
+        .m_wdata_o(am_wdata), .m_rvalid_i(am_rvalid), .m_rdata_i(am_rdata),
         .clk(clk), .rst_n(rst_n),
         .arm_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
         .cfg_fast_i(cfg_copy | ~native_i), .cfg_cardmem_i(cfg_copy | ~mem_bypass_i),
@@ -1131,7 +1238,7 @@ module tb_gs_broker #(
             end
         end
     end
-    always @(negedge clk) if (rst_n && cfg_exp == ACC_EXP) begin
+    always @(negedge clk) if (rst_n && cfg_exp == ACC_EXP && !wb_en) begin
         n_acc_cmp++;
         if (native_i == 1'b0 && mem_bypass_i == 1'b1 && !cfg_copy) begin
             $display("ERROR: bench: fast with bypass is not a request gs_accel has"); $finish;
@@ -1156,7 +1263,7 @@ module tb_gs_broker #(
     endtask
 
     // expected test-program results ($0300...): -1 = depends on the configuration
-    int expect_tab [0:82] = '{
+    int expect_tab [0:84] = '{
         'hFF, 'h00, 'h5C, 'h3F, 'h11, 'hC3, 'h3C, 'hA5, 'hA6, 'hA7,
         'h77, 'h5A, 'h5A, 'h00, 'h30, 'hEE, 'h00, 'h11, 'h00, 'hB1,
         'hB1, 'hB1, 'h00, 'hB2, 'h00, 'hB3, 'hC8, 'h00, 'hC9, 'hD1,
@@ -1164,7 +1271,7 @@ module tb_gs_broker #(
         'h5E, 'hE1, 'hE2, 'hE1, -1,   -1,   'hFF, 'h05, 'hC3, 'hC1,
         'hC3, 'hC8, 'hCF, 'hFF, 'hC4, 'hC8, 'hFF, 'hC5, 'h1C, 'h1C,
         'h1C, 'h08, 'hA1, 'hA7, 'h28, 'h01, 'hA7, 'hA5, 'h5A, 'h5A,
-        'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01, 'h36, 'h13, -1, 'h00, -1 };
+        'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01, 'h36, 'h13, -1, 'h00, -1, -1, -1 };
 
     initial begin
         string  rom_path, wpath;
@@ -1178,11 +1285,13 @@ module tb_gs_broker #(
         if ($test$plusargs("irq")) do_irq = 1;
         if ($test$plusargs("nostall")) do_stall = 0;
         void'($value$plusargs("stallp=%d", stall_period));
+        if ($test$plusargs("wbforce")) wb_en = 1;
         if ($test$plusargs("nobe")) do_be = 0;
         if ($test$plusargs("expect")) do_expect = 1;
         if ($test$plusargs("reset")) do_reset = 1;
         if ($test$plusargs("resetw")) begin do_reset = 1; do_resetw = 1; end
         if ($test$plusargs("resetpw")) begin do_reset = 1; do_resetpw = 1; end
+        if ($test$plusargs("resetx")) begin do_reset = 1; do_resetx = 1; end
         if ($test$plusargs("recopy")) begin do_recopy = 1; n_copies_want = 2; end
         void'($value$plusargs("mode=%s", mode_s));
         void'($value$plusargs("steps=%d", max_steps));
@@ -1197,7 +1306,9 @@ module tb_gs_broker #(
         end
         case (mode_s)
             "native": begin cfg_native = 1; cfg_bypass = 1; s6cmp = 1; end
-            "paced":  begin cfg_native = 1; cfg_bypass = 0; s6cmp = 1; end
+            // (EXP_DDR: a paced step may have its socket cycle issued again while its byte
+            // comes from the expansion memory - S6 does not, so the pins are not S6's)
+            "paced":  begin cfg_native = 1; cfg_bypass = 0; s6cmp = !EXP_DDR; end
             "fast":   begin cfg_native = 0; cfg_bypass = 0; end
             "toggle": begin cfg_native = 0; cfg_bypass = 0; cfg_toggle = 1; end
             "copy":   begin cfg_native = 0; cfg_bypass = 0; cfg_copy = 1; end
@@ -1280,6 +1391,17 @@ module tb_gs_broker #(
                     do begin @(posedge ph2_bus); g++; end
                     while (!(u_brk.mode_native && cpu_nst[1:0] == 2'b00) && g < 200000);
                     if (!(u_brk.mode_native && cpu_nst[1:0] == 2'b00)) err("+resetpw: no native step before a write found");
+                end else if (do_resetx) begin
+                    // +resetx (EXP_DDR): /RES falls while a step waits for its byte from the
+                    // expansion memory - the byte still comes back, to nobody
+                    int g;
+                    g = 0;
+                    // (in fast mode, where the loop's reads of the expansion bank miss the near
+                    // memory: a toggling run stays fast until the reset has been dropped)
+                    if (cfg_toggle) native_i = 1'b0;
+                    do begin @(posedge clk); g++; end while (!xq_rwait && g < 4000000);
+                    if (!xq_rwait) err("+resetx: no read of the expansion memory to drop the reset on");
+                    n_resetx++;
                 end else begin
                     @(posedge ph2_bus);
                 end
@@ -1335,13 +1457,15 @@ module tb_gs_broker #(
         if (!final_done) err("no quiet moment at the end of the run (socket cycles still outstanding)");
 
         if (do_expect) begin
-            for (i = 0; i <= 82; i++) begin
+            for (i = 0; i <= 84; i++) begin
                 int want, got;
                 want = expect_tab[i];
                 if (i == 44) want = (cfg_mbexp >= 1) ? 'h21 : 'hFF;
                 if (i == 45) want = (cfg_mbexp >= 2) ? 'h22 : 'hFF;
                 if (i == 80) want = (cfg_mbexp >= 1) ? 'h5A : 'h00;
                 if (i == 82) want = (cfg_mbexp >= 1) ? 'h34 : 'h00;
+                if (i == 83) want = (cfg_mbexp >= 3) ? 'h11 : 'h00;
+                if (i == 84) want = (cfg_mbexp >= 7) ? 'hC3 : 'h00;
                 got = mach_get(1, 0, 24'h000300 + i);
                 if (want >= 0 && got != want) err($sformatf("test program result %0d ($%04h) = %02h, want %02h", i, 16'h0300 + i, got, want));
             end
@@ -1361,6 +1485,7 @@ module tb_gs_broker #(
             end
         end
         if (do_reset && !reset_done) err("the warm reset never happened");
+        if (do_resetx && n_xskip == 0) err("+resetx: no byte of the expansion memory came back to a step that was gone");
         if (cfg_copy) begin
             int n_bad;
             n_bad = 0;
@@ -1376,7 +1501,7 @@ module tb_gs_broker #(
         if (stall_checks == 0 && do_stall) err("no stalled cycle was checked");
         if (s6cmp && n_s6cmp == 0) err("S6 comparison did not run");
 `ifdef ACCEL_SHADOW
-        if (cfg_exp == ACC_EXP) begin
+        if (cfg_exp == ACC_EXP && !wb_en) begin
             if (n_acc_cmp == 0) err("gs_accel comparison did not run");
             if (acc_verify != verify_count) err($sformatf("gs_accel verify count %0d, the design's %0d", acc_verify, verify_count));
             if (acc_mode[7] != copy_valid || acc_mode[4] != brk_fast)
@@ -1391,6 +1516,8 @@ module tb_gs_broker #(
         $display("---- time: %.3f ms from the reset release to step %0d: %.3f MHz average step rate",
                  (t_run_end - t_run_start) / 1.0e6, max_steps, real'(max_steps) * 1000.0 / (t_run_end - t_run_start));
         $display("---- socket steps behind a socket step: %0d, %0d of them behind an idle cycle", n_ss, n_ss_idle);
+        if (EXP_DDR) $display("---- expansion memory: %0d reads behind the queue (%0d by native steps), %0d clks waited (%.1f per read), %0d native cycles issued again, %0d clks with the queue nearly full", n_xrd, n_xrd_nat, n_xwait,
+                              n_xrd ? real'(n_xwait) / real'(n_xrd) : 0.0, n_xrep, n_xbusy);
         $display("---- broker: %0d synchronous socket cycles, %0d posted writes, %0d clks waiting for the write buffer, queue depth max %0d",
                  stat_sock, stat_posted, stat_pwwait, expq_max);
         $display("---- local reads: %0d served by a read launched ahead, %0d launched at the strobe (%.1f %% ahead); DATA_LATE %0d",

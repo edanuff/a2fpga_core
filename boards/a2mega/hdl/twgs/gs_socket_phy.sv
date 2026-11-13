@@ -202,7 +202,21 @@ module gs_socket_phy #(
         end
     end
 
-    wire enabled = armed & ph2_alive_o & (falls_seen >= 2'd2);
+    // enabled = armed & ph2_alive_o & (falls_seen >= 2), as a register: made from
+    // the next values of the three, so it is that function in every clk and what
+    // reads it (the pin enables, the broker's sequencer, the PH2 domain) reads a
+    // register.
+    logic enabled;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) enabled <= 1'b0;
+        else        enabled <= armed_s[0] & (fall_evt ? (falls_seen != 2'd0)
+                                                      : ((alive_cnt != {ALIVE_BITS{1'b1}}) & ph2_alive_o & (falls_seen >= 2'd2)));
+    end
+`ifdef VERILATOR
+    always @(posedge clk) if (rst_n && enabled !== (armed & ph2_alive_o & (falls_seen >= 2'd2))) begin
+        $display("ERROR: gs_socket_phy: the enable register is not armed & alive & two falls seen"); $finish;
+    end
+`endif
 
     //=========================================================================
     // PH2 domain (the core's clock domain): sample points at the fall

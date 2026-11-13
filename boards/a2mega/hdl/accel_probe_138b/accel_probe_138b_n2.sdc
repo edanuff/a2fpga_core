@@ -81,10 +81,10 @@ set_multicycle_path 1 -hold  -end -from [get_regs {u_cpu/* u_cpu/MCode/* u_cpu/A
 
 // ---- a far read: its registered address is presented to the memories for two
 // clks and launched in the second
-set_multicycle_path 2 -setup -end -from [get_regs {u_brk/ml_sel_r* u_brk/ml_sel_c* u_brk/ml_phys* u_brk/ml_rom*}] -to [get_pins {*mram_*_s/ADB* *mrom_*_s/ADB*}]
-set_multicycle_path 1 -hold  -end -from [get_regs {u_brk/ml_sel_r* u_brk/ml_sel_c* u_brk/ml_phys* u_brk/ml_rom*}] -to [get_pins {*mram_*_s/ADB* *mrom_*_s/ADB*}]
-set_multicycle_path 2 -setup -end -from [get_regs {u_brk/ml_sel_r* u_brk/ml_sel_c* u_brk/ml_phys* u_brk/ml_rom*}] -to [get_regs {*ram_sel_* *rom_sel_*}]
-set_multicycle_path 1 -hold  -end -from [get_regs {u_brk/ml_sel_r* u_brk/ml_sel_c* u_brk/ml_phys* u_brk/ml_rom*}] -to [get_regs {*ram_sel_* *rom_sel_*}]
+set_multicycle_path 2 -setup -end -from [get_regs {u_brk/ml_sel_r* u_brk/ml_phys* u_brk/ml_rom*}] -to [get_pins {*mram_*_s/ADB* *mrom_*_s/ADB*}]
+set_multicycle_path 1 -hold  -end -from [get_regs {u_brk/ml_sel_r* u_brk/ml_phys* u_brk/ml_rom*}] -to [get_pins {*mram_*_s/ADB* *mrom_*_s/ADB*}]
+set_multicycle_path 2 -setup -end -from [get_regs {u_brk/ml_sel_r* u_brk/ml_phys* u_brk/ml_rom*}] -to [get_regs {*ram_sel_* *rom_sel_*}]
+set_multicycle_path 1 -hold  -end -from [get_regs {u_brk/ml_sel_r* u_brk/ml_phys* u_brk/ml_rom*}] -to [get_regs {*ram_sel_* *rom_sel_*}]
 
 // ---- the broker's view of the core's reset changes at a PHI2-fall event; the PHY
 // takes a cycle at its issue point, never sooner than two clks after one

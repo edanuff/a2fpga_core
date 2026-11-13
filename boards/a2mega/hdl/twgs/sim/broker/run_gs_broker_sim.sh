@@ -47,7 +47,7 @@ STOCK=( "$CORE/P65C816_pkg.sv" "$CORE/mcode.sv" "$CORE/bit_adder.v" "$CORE/adder
 FASTF=( "$FAST/F65C816_pkg.sv" "$FAST/mcode.sv" "$FAST/AddSubBCD.sv" "$FAST/ALU.sv" "$FAST/AddrGen.sv"
         "$FAST/AddrBus.sv" "$FAST/F65C816.sv" )
 DUT=( "$TWGS/gs_socket_phy.sv" "$TWGS/gs_mmu_decode.sv" "$TWGS/gs_mmu_replica.sv" "$TWGS/gs_accel_broker.sv"
-      "$TWGS/gs_accel_romcopy.sv"
+      "$TWGS/gs_accel_romcopy.sv" "$TWGS/gs_accel_exp.sv" "$HERE/gs_exp_mem_sim.sv"
       "$HERE/tb_gs_broker.sv" "$SIM/mmu/iigs_machine_dpi.cpp" )
 
 build() {   # name, extra verilator args...
@@ -79,6 +79,12 @@ build b110_2x +define+CLK110 -GNEAR_KW=4 "${NEARX[@]}" & p10=$!
 build b110_2c +define+CLK110 -GNEAR_KW=4 -GROM_PRESET=0 "${NEARX[@]}" & p11=$!
 # ... and gs_accel with banks 02/03 in block RAM (EXP_BANKS = 2), compared in runs with +exp=2
 build b110_2e +define+CLK110 -GNEAR_KW=4 -GACC_EXP=2 "${NEARX[@]}" & p12=$!
+# ... and with the expansion banks in a memory of varying latency behind gs_accel_exp (EXP_DDR:
+# the DDR3 as the bench models it), the near memory tagging every bank with a split tag
+build b110_2r +define+CLK110 -GNEAR_KW=9 -GACC_EXP=2 -GEXP_DDR=1 "${NEARX[@]}" & p13=$!
+build b110_2s +define+CLK110 -GNEAR_KW=9 -GACC_EXP=8 -GEXP_DDR=1 "${NEARX[@]}" & p14=$!
+# ... and at 105 MHz (52.5 MHz steps), the clock the accelerator-only build runs at with the DDR3
+build b105_2s +define+CLK105 -GNEAR_KW=9 -GACC_EXP=8 -GEXP_DDR=1 "${NEARX[@]}" & p15=$!
 bfail=0
 wait $p1 || { echo "verilator FAILED (b108_4) - see $OUT/verilate_b108_4.log"; grep -E "%Error|error:" "$OUT/verilate_b108_4.log" | head -20; bfail=1; }
 wait $p2 || { echo "verilator FAILED (b100_2) - see $OUT/verilate_b100_2.log"; grep -E "%Error|error:" "$OUT/verilate_b100_2.log" | head -20; bfail=1; }
@@ -90,6 +96,9 @@ wait $p9 || { echo "verilator FAILED (b108_2x) - see $OUT/verilate_b108_2x.log";
 wait $p10 || { echo "verilator FAILED (b110_2x) - see $OUT/verilate_b110_2x.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2x.log" | head -20; bfail=1; }
 wait $p11 || { echo "verilator FAILED (b110_2c) - see $OUT/verilate_b110_2c.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2c.log" | head -20; bfail=1; }
 wait $p12 || { echo "verilator FAILED (b110_2e) - see $OUT/verilate_b110_2e.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2e.log" | head -20; bfail=1; }
+wait $p13 || { echo "verilator FAILED (b110_2r) - see $OUT/verilate_b110_2r.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2r.log" | head -20; bfail=1; }
+wait $p14 || { echo "verilator FAILED (b110_2s) - see $OUT/verilate_b110_2s.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2s.log" | head -20; bfail=1; }
+wait $p15 || { echo "verilator FAILED (b105_2s) - see $OUT/verilate_b105_2s.log"; grep -E "%Error|error:" "$OUT/verilate_b105_2s.log" | head -20; bfail=1; }
 [[ $bfail -ne 0 ]] && exit 1
 
 # ---------------------------------------------------------------- runs
@@ -179,6 +188,44 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run z_rst_tog   b110_2e $T +mode=toggle +expect +irq +exp=2 +reset +steps=120000
     run z_fast_st3  b110_2e $T +mode=fast   +expect +irq +exp=2 +stallp=3 +steps=120000
     run z_fast_mb   b110_2e $T +mode=fast   +expect +irq +exp=2 +mbexp=6
+    # ... and with those banks behind the queue, in a memory that answers when it likes
+    run w_native    b110_2r $T +mode=native +expect +irq +exp=2
+    run w_paced     b110_2r $T +mode=paced  +expect +irq +exp=2
+    run w_fast      b110_2r $T +mode=fast   +expect +irq +exp=2
+    run w_toggle    b110_2r $T +mode=toggle +expect +irq +exp=2 +steps=120000
+    run w_tog_cx    b110_2r $T +mode=toggle +expect +irq +exp=2 +cxrom=1 +steps=120000
+    run w_rstw_fast b110_2r $T +mode=fast   +expect +irq +exp=2 +resetw
+    run w_rst_tog   b110_2r $T +mode=toggle +expect +irq +exp=2 +reset +steps=120000
+    run w_fast_st3  b110_2r $T +mode=fast   +expect +irq +exp=2 +stallp=3 +steps=120000
+    run w_tog_st5   b110_2r $T +mode=toggle +expect +irq +exp=2 +stallp=5 +steps=120000
+    run w_fast_mb   b110_2r $T +mode=fast   +expect +irq +exp=2 +mbexp=6
+    run w_fast_slow b110_2r $T +mode=fast   +expect +irq +exp=2 +xgap=40 +xlat=90
+    run w_tog_slow  b110_2r $T +mode=toggle +expect +irq +exp=2 +xgap=40 +xlat=90 +steps=120000
+    # ... eight banks of them: entries of banks 04 and 08 beside bank 00's in the near memory
+    run v_paced     b110_2s $T +mode=paced  +expect +irq +exp=8 +mbexp=8
+    run v_fast      b110_2s $T +mode=fast   +expect +irq +exp=8 +mbexp=8
+    run v_toggle    b110_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +steps=120000
+    run v_rstw_fast b110_2s $T +mode=fast   +expect +irq +exp=8 +mbexp=8 +resetw
+    run v_tog_slow  b110_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +xgap=40 +xlat=90 +steps=120000
+    run v_rstx_fast b110_2s $T +mode=fast   +expect +irq +exp=8 +mbexp=8 +resetx +xlat=300
+    run v_rstx_tog  b110_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +resetx +xlat=300 +steps=120000
+    # the queue's "nearly full" forced high in long bursts: a held step may not see its socket cycle end
+    run v_wb_fast   b110_2s $T +mode=fast   +expect +irq +exp=8 +mbexp=8 +wbforce
+    run v_wb_tog    b110_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +wbforce +steps=120000
+    run v_wb_rstw   b110_2s $T +mode=fast   +expect +irq +exp=8 +mbexp=8 +wbforce +resetw
+    run v_wb_slow   b110_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +wbforce +xgap=40 +xlat=90 +steps=120000
+    run v_wb_st7    b110_2s $T +mode=fast   +expect +irq +exp=8 +mbexp=8 +wbforce +stallp=7 +steps=120000
+    run v_wb_tst5   b110_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +wbforce +stallp=5 +steps=120000
+    # ... and the same design at 105 MHz, the accelerator-only build's clock
+    run v5_native   b105_2s $T +mode=native +expect +irq +exp=8 +mbexp=8
+    run v5_paced    b105_2s $T +mode=paced  +expect +irq +exp=8 +mbexp=8
+    run v5_fast     b105_2s $T +mode=fast   +expect +irq +exp=8 +mbexp=8
+    run v5_toggle   b105_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +steps=120000
+    run v5_rstw     b105_2s $T +mode=fast   +expect +irq +exp=8 +mbexp=8 +resetw
+    run v5_tog_slow b105_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +xgap=40 +xlat=90 +steps=120000
+    run v5_rstx_tog b105_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +resetx +xlat=300 +steps=120000
+    run v5_wb_tog   b105_2s $T +mode=toggle +expect +irq +exp=8 +mbexp=8 +wbforce +steps=120000
+    run v5_wb_st7   b105_2s $T +mode=fast   +expect +irq +exp=8 +mbexp=8 +wbforce +stallp=7 +steps=120000
     run c_copy      b110_2c $T +mode=copy   +expect +irq
     run c_copy_rst  b110_2c $T +mode=copy   +expect +irq +reset
     run c_recopy    b110_2c $T +mode=copy   +expect +irq +recopy
@@ -199,6 +246,8 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run f_native    b110_2e $T +mode=native +expect +exp=2 +wlog=wstream.txt
     run f_paced     b110_2e $T +mode=paced  +expect +exp=2 +wlog=wstream.txt
     run f_fast      b110_2e $T +mode=fast   +expect +exp=2 +wlog=wstream.txt
+    run g_paced     b110_2r $T +mode=paced  +expect +exp=2 +wlog=wstream.txt
+    run g_fast      b110_2r $T +mode=fast   +expect +exp=2 +wlog=wstream.txt
 fi
 DO_ROM=0
 if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
@@ -219,6 +268,8 @@ if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
         run r_copy      b110_2c $R +mode=copy
         run s_native    b110_2e $R +mode=native +exp=2
         run s_fast      b110_2e $R +mode=fast   +exp=2
+        run t_paced     b110_2r $R +mode=paced  +exp=2
+        run t_fast      b110_2r $R +mode=fast   +exp=2
     elif [[ "$SUITE" == "rom" ]]; then
         echo "rom suite: set ROM=<path to a 128 KB ROM 01 image>"; exit 1
     else
@@ -259,14 +310,14 @@ same() {    # label, reference run, other runs...: step hash and write stream mu
 }
 if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     same "test program" e_native e_paced e_fast e_fast100 e_dl108 e_dl100 e_dx100 e_dx108 e_dx110 e_copy
-    same "test program, two expansion banks" f_native f_paced f_fast
+    same "test program, two expansion banks" f_native f_paced f_fast g_paced g_fast
 fi
 if [[ $DO_ROM -eq 1 ]]; then
     same "ROM 01 boot ($STEPS steps)" r_native r_paced r_fast r_fast_cx r_fast100 r_f816 r_dl108 r_dl100 r_dx100 r_dx108 r_dx110 r_copy
-    same "ROM 01 boot, two expansion banks ($STEPS steps)" s_native s_fast
+    same "ROM 01 boot, two expansion banks ($STEPS steps)" s_native s_fast t_paced t_fast
 fi
 for n in "${NAMES[@]}"; do
-    case "$n" in d*|e_dl*|r_dl*|x*|y*|z*|c_*|e_dx*|r_dx*|e_copy|r_copy|f_*|s_*) grep -E '^---- (local reads|near memory|ROM copy|gs_accel)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
+    case "$n" in d*|e_dl*|r_dl*|x*|y*|z*|w*|v*|c_*|e_dx*|r_dx*|e_copy|r_copy|f_*|s_*|g_*|t_*) grep -E '^---- (local reads|near memory|ROM copy|gs_accel|expansion memory)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
 done
 for n in "${NAMES[@]}"; do
     grep -E '^---- socket timing' "$OUT/$n/sim.log" | sed "s/^---- /$n: /"

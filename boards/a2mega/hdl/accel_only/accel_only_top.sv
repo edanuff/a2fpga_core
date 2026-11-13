@@ -104,6 +104,23 @@ module top (
     input         esp_sclk,
     inout  [7:0]  esp_data,
 
+    // DDR3: the card's copy of the expansion banks
+    output [14:0] ddr_addr,
+    output [2:0]  ddr_bank,
+    output        ddr_cs,
+    output        ddr_ras,
+    output        ddr_cas,
+    output        ddr_we,
+    output        ddr_ck,
+    output        ddr_ck_n,
+    output        ddr_cke,
+    output        ddr_odt,
+    output        ddr_reset_n,
+    output [1:0]  ddr_dm,
+    inout  [15:0] ddr_dq,
+    inout  [1:0]  ddr_dqs,
+    inout  [1:0]  ddr_dqs_n,
+
     // IIgs CPU socket
     input         gs_ph2,
     input         gs_rdy,
@@ -126,13 +143,104 @@ module top (
 
     // ---- clocks: clk_logic from the board PLL (the full build's recipe), clk_gs
     // from the socket PLL
+    // (board_plls: the full build's block - the DDR3's clock chain exactly as there)
     wire clk_logic_w, clk_lock_w;
-    clk_pll i_clk_pll (
-        .lock(clk_lock_w), .clkout0(), .clkout1(), .clkout2(clk_logic_w),
-        .clkin(clk), .init_clk(clk)
+    wire memory_clk_w, ddr3_pll_lock_w, pll_stop_w;
+    board_plls u_board_plls (
+        .clk(clk), .pll_stop(pll_stop_w),
+        .clk_pixel(), .clk_hdmi(), .clk_logic(clk_logic_w), .clk_lock(clk_lock_w),
+        .clk_usb(), .usb_pll_lock(),
+        .memory_clk(memory_clk_w), .ddr3_pll_lock(ddr3_pll_lock_w)
     );
     wire clk_gs_w, gs_pll_lock_w;
-    gowin_gs_pll i_gs_pll (.lock(gs_pll_lock_w), .clkout(clk_gs_w), .clkin(clk));
+`ifdef ACC_CLK_105
+    gowin_acc_pll i_gs_pll (.lock(gs_pll_lock_w), .clkout(clk_gs_w), .clkin(clk));   // 105 MHz
+`else
+    gowin_gs_pll i_gs_pll (.lock(gs_pll_lock_w), .clkout(clk_gs_w), .clkin(clk));    // 110 MHz
+`endif
+
+    // ---- expansion memory: the DDR3, alone on its arbiter (the full build's
+    // controller, reset sequencer and clock crossing; port 1 is unused)
+    wire        init_calib_complete_w, ddr_rst_w, clk_x1_w;
+    localparam DDR3_SETTLE_CYC   = 50_000;     // 1 ms @ 50 MHz
+    localparam DDR3_CALIB_CYC    = 5_000_000;  // 100 ms watchdog
+    localparam DDR3_RSTPULSE_CYC = 5_000;      // 100 us reset pulse
+    reg        ddr3_rst_n_r = 1'b0;
+    reg [1:0]  ddr3_seq_state_r = 2'd0;        // 0 wait for lock, 1 settle, 2 watch, 3 pulse
+    reg [22:0] ddr3_seq_timer_r = '0;
+    reg [7:0]  ddr3_retry_cnt_r = '0;          // saturating; nonzero = the watchdog fired
+    reg        calib_s0 = 1'b0, calib_s1 = 1'b0;
+    always @(posedge clk) begin
+        calib_s0 <= init_calib_complete_w; calib_s1 <= calib_s0;
+        if (!ddr3_pll_lock_w) begin
+            ddr3_rst_n_r <= 1'b0; ddr3_seq_state_r <= 2'd0; ddr3_seq_timer_r <= '0;
+        end else begin
+            case (ddr3_seq_state_r)
+                2'd0: begin ddr3_seq_timer_r <= '0; ddr3_seq_state_r <= 2'd1; end
+                2'd1: begin
+                    ddr3_seq_timer_r <= ddr3_seq_timer_r + 1'b1;
+                    if (ddr3_seq_timer_r >= DDR3_SETTLE_CYC) begin
+                        ddr3_rst_n_r <= 1'b1; ddr3_seq_timer_r <= '0; ddr3_seq_state_r <= 2'd2;
+                    end
+                end
+                2'd2: begin
+                    if (!calib_s1 && ddr3_seq_timer_r >= DDR3_CALIB_CYC) begin
+                        ddr3_rst_n_r <= 1'b0; ddr3_seq_timer_r <= '0;
+                        if (!(&ddr3_retry_cnt_r)) ddr3_retry_cnt_r <= ddr3_retry_cnt_r + 1'b1;
+                        ddr3_seq_state_r <= 2'd3;
+                    end else if (calib_s1) ddr3_seq_timer_r <= '0;
+                    else                   ddr3_seq_timer_r <= ddr3_seq_timer_r + 1'b1;
+                end
+                2'd3: begin
+                    ddr3_seq_timer_r <= ddr3_seq_timer_r + 1'b1;
+                    if (ddr3_seq_timer_r >= DDR3_RSTPULSE_CYC) begin ddr3_seq_timer_r <= '0; ddr3_seq_state_r <= 2'd1; end
+                end
+            endcase
+        end
+    end
+
+    wire         ddr3_cmd_ready_w, ddr3_cmd_en_w, ddr3_wr_data_rdy_w, ddr3_wr_data_en_w, ddr3_wr_data_end_w;
+    wire         ddr3_rd_data_valid_w, ddr3_rd_data_end_w;
+    wire [2:0]   ddr3_cmd_w;
+    wire [28:0]  ddr3_addr_w;
+    wire [127:0] ddr3_wr_data_w, ddr3_rd_data_w;
+    wire [15:0]  ddr3_wr_data_mask_w;
+    DDR3_Memory_Interface_Top u_ddr3 (
+        .memory_clk(memory_clk_w), .pll_stop(pll_stop_w), .clk(clk), .rst_n(ddr3_rst_n_r),
+        .cmd_ready(ddr3_cmd_ready_w), .cmd(ddr3_cmd_w), .cmd_en(ddr3_cmd_en_w), .addr(ddr3_addr_w),
+        .wr_data_rdy(ddr3_wr_data_rdy_w), .wr_data(ddr3_wr_data_w), .wr_data_en(ddr3_wr_data_en_w),
+        .wr_data_end(ddr3_wr_data_end_w), .wr_data_mask(ddr3_wr_data_mask_w),
+        .rd_data(ddr3_rd_data_w), .rd_data_valid(ddr3_rd_data_valid_w), .rd_data_end(ddr3_rd_data_end_w),
+        .sr_req(1'b0), .ref_req(1'b0), .sr_ack(), .ref_ack(),
+        .init_calib_complete(init_calib_complete_w), .clk_out(clk_x1_w), .pll_lock(ddr3_pll_lock_w),
+        .burst(1'b1), .ddr_rst(ddr_rst_w),
+        .O_ddr_addr(ddr_addr), .O_ddr_ba(ddr_bank), .O_ddr_cs_n(ddr_cs), .O_ddr_ras_n(ddr_ras),
+        .O_ddr_cas_n(ddr_cas), .O_ddr_we_n(ddr_we), .O_ddr_clk(ddr_ck), .O_ddr_clk_n(ddr_ck_n),
+        .O_ddr_cke(ddr_cke), .O_ddr_odt(ddr_odt), .O_ddr_reset_n(ddr_reset_n), .O_ddr_dqm(ddr_dm),
+        .IO_ddr_dq(ddr_dq), .IO_ddr_dqs(ddr_dqs), .IO_ddr_dqs_n(ddr_dqs_n)
+    );
+
+    mem_port_if #(.PORT_ADDR_WIDTH(21), .DATA_WIDTH(32), .DQM_WIDTH(4), .PORT_OUTPUT_WIDTH(32)) ddr3_mem_ports[0:1]();
+    ddr3_ports #(.NUM_PORTS(2), .DDR_ADDR_WIDTH(29), .PORT_BASE_ADDR('{21'h000000, 21'h000000})) u_ddr3_ports (
+        .clk_client(clk_gs_w), .clk_ddr(clk_x1_w), .rst(ddr_rst_w), .init_complete(init_calib_complete_w),
+        .ports(ddr3_mem_ports), .wide_wr_data_hi(96'd0),
+        .cmd_ready(ddr3_cmd_ready_w), .cmd(ddr3_cmd_w), .cmd_en(ddr3_cmd_en_w), .addr(ddr3_addr_w),
+        .wr_data_rdy(ddr3_wr_data_rdy_w), .wr_data(ddr3_wr_data_w), .wr_data_en(ddr3_wr_data_en_w),
+        .wr_data_end(ddr3_wr_data_end_w), .wr_data_mask(ddr3_wr_data_mask_w),
+        .rd_data_valid(ddr3_rd_data_valid_w), .rd_data(ddr3_rd_data_w), .rd_data_end(ddr3_rd_data_end_w),
+        .dbg_req_pending(), .dbg_arb_state(), .dbg_resp_overflow(), .dbg_test_result(), .dbg_test_done()
+    );
+    assign ddr3_mem_ports[1].rd = 1'b0; assign ddr3_mem_ports[1].wr = 1'b0; assign ddr3_mem_ports[1].addr = '0;
+    assign ddr3_mem_ports[1].data = '0; assign ddr3_mem_ports[1].byte_en = '0; assign ddr3_mem_ports[1].burst = 1'b0;
+
+    // (its status for the firmware's register window: quasi-static, two flops into clk_logic)
+    reg [7:0] ddr3_retry_l0 = '0, ddr3_retry_l1 = '0;
+    reg [4:0] ddr3_seq_l0 = '0, ddr3_seq_l1 = '0;
+    always @(posedge clk_logic_w) begin
+        ddr3_retry_l0 <= ddr3_retry_cnt_r; ddr3_retry_l1 <= ddr3_retry_l0;
+        ddr3_seq_l0 <= {ddr3_rst_n_r, ddr3_pll_lock_w, calib_s1, ddr3_seq_state_r}; ddr3_seq_l1 <= ddr3_seq_l0;
+    end
+
 
     // ---- power-on reset (as the full build)
     localparam RESET_CYCLES = 100;
@@ -241,7 +349,7 @@ module top (
         .volumes(volumes), .hdd_volumes(hdd_volumes),
         .a2bus_control_if(a2bus_control_if),
         .disk_ram_if(disk_ram_if), .hdd_ram_if(hdd_ram_if),
-        .ddr3_ready_i(1'b1),              // (there is no DDR3: nothing waits for it)
+        .ddr3_ready_i(1'b1),              // (the firmware waits for no DDR3 here; card memory does: exp_ready_i)
         .a2_reset_n_i(a2_reset_n), .a2_alive_i(~sleep_w), .gs_res_n_i(gs_res_n),
         .storage_settled_o(),
         .pad_typ_i(2'd0), .pad_connerr_i(1'b0), .pad_report_cnt_i(4'd0),
@@ -250,7 +358,7 @@ module top (
         .dbg_shadow_drop_i(8'h00), .dbg_fb_flags_i(8'h00), .dbg_resp_ovfl_i(8'h00), .dbg_shadow_rd_i(8'h00),
         .dbg_vgc_starved_i(8'h00), .dbg_usb_line_i(8'h00), .dbg_usb_pc_i(8'h00), .dbg_usb_desc_i(48'h0),
         .dbg_usb_flags_i(8'h00), .dbg_usb_cnt_start_i(8'h00), .dbg_usb_cnt_rdy_i(8'h00),
-        .dbg_ddr3_retry_i(8'h00), .dbg_ddr3_seq_i(8'h00),
+        .dbg_ddr3_retry_i(ddr3_retry_l1), .dbg_ddr3_seq_i({3'b0, ddr3_seq_l1}),
         .dbg_dp_caps_i(16'h0), .dbg_dp_status_i(8'h00), .dbg_dp_serdes_i(8'h00),
         .dbg_doc_reqf_i(16'h0), .dbg_doc_missf_i(16'h0), .dbg_doc_tof_i(16'h0),
         .ddr3_reinit_tgl_o(),
@@ -287,8 +395,33 @@ module top (
     wire [15:0] acc_stall_w, acc_be_w, acc_per_w, acc_high_w, acc_verify_w;
     wire [23:0] acc_last_w;
 
-    // (banks 02/03 in block RAM: a stopgap for expansion memory on the DDR3)
-    gs_accel #(.EXP_BANKS(2)) u_acc (
+    // gs_accel's byte port on the arbiter's 32-bit words: a request is taken in the
+    // clk the port is available; a read's byte lane is remembered until its word
+    // comes back (reads come back in order)
+    wire        xm_req_w, xm_we_w;
+    wire [22:0] xm_addr_w;
+    wire [7:0]  xm_wdata_w;
+    wire        xm_take_w = xm_req_w & ddr3_mem_ports[0].available;
+    assign ddr3_mem_ports[0].rd      = xm_take_w & ~xm_we_w;
+    assign ddr3_mem_ports[0].wr      = xm_take_w &  xm_we_w;
+    assign ddr3_mem_ports[0].addr    = xm_addr_w[22:2];
+    assign ddr3_mem_ports[0].data    = {4{xm_wdata_w}};
+    assign ddr3_mem_ports[0].byte_en = 4'b0001 << xm_addr_w[1:0];
+    assign ddr3_mem_ports[0].burst   = 1'b0;
+    reg [1:0] xm_lane_r [0:7];
+    reg [2:0] xm_lw_r = '0, xm_lr_r = '0;
+    always @(posedge clk_gs_w) begin
+        if (xm_take_w & ~xm_we_w) begin xm_lane_r[xm_lw_r] <= xm_addr_w[1:0]; xm_lw_r <= xm_lw_r + 1'b1; end
+        if (ddr3_mem_ports[0].ready) xm_lr_r <= xm_lr_r + 1'b1;
+    end
+    wire [7:0] xm_rdata_w = ddr3_mem_ports[0].q[8 * xm_lane_r[xm_lr_r] +: 8];
+    // (the memory is ready: two flops into the accelerator's clock, quasi-static)
+    reg calib_g0 = 1'b0, calib_g1 = 1'b0;
+    always @(posedge clk_gs_w) begin calib_g0 <= init_calib_complete_w; calib_g1 <= calib_g0; end
+
+    gs_accel #(.EXP_DDR(1'b1), .EXP_BANKS(126), .NEAR_KW(9)) u_acc (
+        .exp_ready_i(calib_g1), .m_req_o(xm_req_w), .m_ready_i(ddr3_mem_ports[0].available), .m_we_o(xm_we_w),
+        .m_addr_o(xm_addr_w), .m_wdata_o(xm_wdata_w), .m_rvalid_i(ddr3_mem_ports[0].ready), .m_rdata_i(xm_rdata_w),
         .clk(clk_gs_w), .rst_n(device_reset_n_w & gs_pll_lock_w),
         .arm_i(gs_ctrl_s1[0]), .listen_i(gs_ctrl_s1[2]), .out_extra_i(gs_oe_s1),
         .cfg_fast_i(rq_key_w & gs_rq_s1[0]), .cfg_cardmem_i(rq_key_w & gs_rq_s1[1]),

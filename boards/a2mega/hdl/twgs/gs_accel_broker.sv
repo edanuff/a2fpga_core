@@ -196,11 +196,19 @@ module gs_accel_broker #(
     parameter int          NEAR_KW   = 10,           // ... RAM address bits above the index its tag holds (4..10;
                                                      //     10 = all 24 bits; fewer: banks out of reach are never cached)
     parameter bit          ROM3      = 1'b0,         // 0 = ROM 01 machine, 1 = ROM 3
+    parameter bit          WEN_ONE   = 1'b0,         // lm_wen_o's copies are registered again by what takes them: all from one register
     parameter bit          SOCK_PRE  = 1'b1,         // NEAR, fast mode: raise the request of a step that is certainly a
                                                      // socket cycle in its first clk (0 = at the strobe, for comparison)
-    parameter int          FAR_CLKS  = 1             // NEAR: clks from the far memories' read ports to alt_q (1 or 2).  With 2
+    parameter int          FAR_CLKS  = 1,            // NEAR: clks from the far memories' read ports to alt_q (1 or 2).  With 2
                                                      // a far read waits a clk longer and the data is not looked at in the
                                                      // clk after its launch: a two-clk path, the blocks can be anywhere
+    parameter bit          EXP_WAIT  = 1'b0,         // NEAR: the expansion banks are in a memory that makes a far read wait
+                                                     // (lm_rwait_i).  A fast step waits in place; a native step's socket
+                                                     // cycle is not taken as complete until the byte is there (the cycle,
+                                                     // a read of RAM, is issued again meanwhile)
+    parameter bit          NEAR_SPLIT = 1'b0         // NEAR, NEAR_KW > 4: the tag's address bits above the low four are read a
+                                                     // clk after the rest, at the step's own address (nm_ren_hi_o), and a
+                                                     // tag with one of them set is marked in the low part - see nm_tag
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -292,6 +300,21 @@ module gs_accel_broker #(
     output logic [NEAR_AW-1:0]   nm_wa_o,
     output logic [7:0]           nm_wdata_o,
     output logic [NEAR_KW+1:0]   nm_wtag_o,
+    // (NEAR_SPLIT) nm_rtag_i[NEAR_KW-1:4] is read by nm_ren_hi_o at nm_ra_hi_o, in the
+    // first clk of the step the launch was for, and is valid from its second.
+    output logic                 nm_ren_hi_o,
+    output logic [NEAR_AW-1:0]   nm_ra_hi_o,
+
+    // expansion memory behind the far path, of any latency (NEAR, FAR_CLKS = 2; tie
+    // the two inputs low if unused).  lm_rexp_o with lm_ren_o: the read launched is of
+    // RAM above bank 01 (lm_raddr_o), not of the ROM image.  lm_rwait_i, from the clk
+    // after such a launch: the byte is not there yet; in the clk it is low the byte is
+    // valid at lm_ram_rdata_i from the next clk on, as a far read's is in its second
+    // clk.  lm_wbusy_i: the memory's write queue is nearly full - fast-mode steps that
+    // are not the cheap view's wait at the strobe (each may still make its one write).
+    output logic                 lm_rexp_o,
+    input  logic                 lm_rwait_i,
+    input  logic                 lm_wbusy_i,
 
     // status / telemetry (clk domain)
     output logic        fast_o,          // the step in progress is a fast-mode step
@@ -342,6 +365,18 @@ module gs_accel_broker #(
         end else if (phy_fall_evt_i) begin
             rdy_c <= rdy_f; irq_c <= irq_f; nmi_c <= nmi_f; abort_c <= abort_f;
         end
+    end
+
+    // rdy_c and "the expansion memory's write queue has room" (EXP_WAIT; lm_wbusy_i is
+    // a register that is a clk and more behind the queue already, and its margin is
+    // entries, not clks) as one register, for the strobe.  The queue does not hold a
+    // step whose socket request was raised ahead (pre_q): that step writes nothing
+    // to it, and its cycle may already be on the bus - held past the end of that
+    // cycle the step would have it issued a second time.
+    logic rw_c;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) rw_c <= 1'b1;
+        else        rw_c <= (phy_fall_evt_i ? rdy_f : rdy_c) & ~lm_wbusy_i;
     end
 
     // Fast mode takes the interrupt lines through ordinary two-flop
@@ -543,6 +578,8 @@ module gs_accel_broker #(
     wire lm_write  = ~internal & eff_we & d_local & d_local_we;
     wire post      = ~mode_native & ~internal & eff_we & d_fwd;
     wire use_lm    = lm_read & ~(mode_native & mode_bypass);
+    wire ld_hit;                         // (assigned below)
+    logic xw_r, xl_r, xq1, xq2;          // EXP_WAIT: a native step waits for its byte (below)
 
     //=========================================================================
     // Socket side: one request at a time, posted write first
@@ -604,9 +641,41 @@ module gs_accel_broker #(
         endcase
     end
 
-    wire cyc_done  = phy_fall_evt_i & fl_busy & (rdy_f | ~fl_run);   // the issued cycle completed
-    wire sync_done = cyc_done & (fl_kind == K_SYNC) & (st == ST_SOCK);
-    wire pw_done   = cyc_done & (fl_kind == K_PW);
+    // (EXP_WAIT, native: not while the step's byte is still on its way from the
+    // expansion memory - the cycle is then issued again, as after RDY low)
+    // (The fall event comes through the PHY's synchroniser and a gate, and everything
+    // the sequencer does at the end of a socket cycle is behind it.  What else these
+    // need is registers, and none of them moves in the clk before a fall event: the
+    // cycle in flight was issued a PHI2 cycle before, its step was decided - or
+    // its read of expansion memory launched - within a few clks of that, and rdy_f
+    // has been steady since the fall itself, two clks before the event.  So that
+    // part is registered a clk ahead (*_arm) and the event is one gate from a
+    // register.  The one input that moves at any time is xw_r, falling when the
+    // byte arrives: a clk late here, the cycle is issued once more, as it would
+    // have been had the byte come a clk later.  Checked at every fall event in
+    // simulation.)
+    wire  fl_ok    = fl_busy & (rdy_f | ~fl_run);
+    wire  cd_arm_n = fl_ok & ~(xw_r & (fl_kind == K_SYNC));
+    wire  sd_arm_n = fl_ok & ~xw_r & (fl_kind == K_SYNC) & (st == ST_SOCK);
+    wire  pd_arm_n = fl_ok & (fl_kind == K_PW);
+    logic cd_arm, sd_arm, pd_arm;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin cd_arm <= 1'b0; sd_arm <= 1'b0; pd_arm <= 1'b0; end
+        else        begin cd_arm <= cd_arm_n; sd_arm <= sd_arm_n; pd_arm <= pd_arm_n; end
+    end
+    wire cyc_done  = phy_fall_evt_i & cd_arm;                         // the issued cycle completed
+    wire sync_done = phy_fall_evt_i & sd_arm;
+    wire pw_done   = phy_fall_evt_i & pd_arm;
+`ifdef VERILATOR
+    always @(posedge clk) if (rst_n && phy_fall_evt_i) begin
+        if (pd_arm !== pd_arm_n || (cd_arm !== cd_arm_n && !(cd_arm_n && !cd_arm && fl_kind == K_SYNC)) ||
+            (sd_arm !== sd_arm_n && !(sd_arm_n && !sd_arm && !cd_arm))) begin
+            $display("ERROR: broker: what a socket cycle's end depends on moved in the clk before the fall event (%b%b%b, now %b%b%b) @%0t",
+                     cd_arm, sd_arm, pd_arm, cd_arm_n, sd_arm_n, pd_arm_n, $time);
+            $finish;
+        end
+    end
+`endif
     assign cyc_stb = cyc_done & (fl_kind != K_IDLE);
 
     //=========================================================================
@@ -644,7 +713,7 @@ module gs_accel_broker #(
     wire  fast_q = fa_q | (fb_q & fh_q);
     logic pre_q;                 // the step's socket request was raised in its first clk (fast_pre, below)
     wire strobe = dec_g & (st == ST_ADDR) & (ph >= t_dec) &
-                  ~(post & pw_valid) & (mode_native | rdy_c);
+                  ~(post & pw_valid) & (mode_native | rw_c | (rdy_c & pre_q));
     // a native step's request, registered in the first clk of the step (above)
     wire  nat_pre = DATA_LATE & (ADDR_CLKS >= 2) & mode_native & (st == ST_ADDR) & (ph == 4'd0);
     // Near memory, fast mode: the same for a step that is certainly a socket cycle
@@ -687,7 +756,14 @@ module gs_accel_broker #(
     localparam int NTW = NEAR_KW + 2;
     function automatic logic [NTW-1:0] nm_tag(input logic rom, input logic [23:0] phys,
                                               input logic [3:0] romhi, input logic a12);
-        nm_tag = rom ? {1'b1, 1'b0, NEAR_KW'(romhi)} : {1'b0, phys[12] ^ a12, phys[14 +: NEAR_KW]};
+        // (NEAR_SPLIT: RAM above bank 03 - an address bit above A17 - is marked {1, 1}
+        // where the ROM has {1, 0} and other RAM {0, A12 moved}.  Nothing moves A12 up
+        // there, so the bit is free; and no tag of the cheap view has {1, 1}, so its
+        // compare of the low part alone can never take such an entry for one of its own.)
+        logic hi;
+        hi = NEAR_SPLIT & (|phys[23:18]);
+        nm_tag = rom ? {1'b1, 1'b0, NEAR_KW'(romhi)} :
+                 hi  ? {2'b11, phys[14 +: NEAR_KW]} : {1'b0, phys[12] ^ a12, phys[14 +: NEAR_KW]};
     endfunction
     function automatic logic nm_far_only(input logic [23:0] phys);      // a RAM byte the tag cannot name
         nm_far_only = (NEAR_KW < 10) ? |(phys >> (14 + NEAR_KW)) : 1'b0;
@@ -713,7 +789,15 @@ module gs_accel_broker #(
     logic                 lw_r;
     logic [NEAR_AW-1:0]   lwa_r;
     wire                  nl_good = nl_ok & ~nl_wr & ~(lw_r & (lwa_r == nl_idx));
-    wire                  nh_d   = nl_good & ~r_nc & (nm_rtag_i == r_tag);
+    // (NEAR_SPLIT: the high address bits of the entry are read a clk after the rest and
+    // have one clk to nh_dq where the rest has two, so their compare is made on its
+    // own, two gates deep, and joins the rest last - the nets are kept for that)
+    localparam logic [NTW-1:0] NH_MASK = NEAR_SPLIT ? NTW'(((1 << NEAR_KW) - 1) & ~15) : '0;
+    logic                 nh_lo /* synthesis syn_keep = 1 */;
+    logic                 nh_hi /* synthesis syn_keep = 1 */;
+    assign                nh_lo  = nl_good & ~r_nc & (((nm_rtag_i ^ r_tag) & ~NH_MASK) == '0);
+    assign                nh_hi  = (((nm_rtag_i ^ r_tag) & NH_MASK) == '0);
+    wire                  nh_d   = nh_lo & nh_hi;
     logic                 nh_dq;            // ... registered for the sequencer (the full decode's tag)
     // the cheap view's tag for the step: ROM bank and A14-A15, or RAM bank bit 0,
     // A14-A15 and the language-card fold (banks 00/01 only, never $Cxxx)
@@ -726,7 +810,7 @@ module gs_accel_broker #(
                                               : nm_tag(1'b0, f_phys, 4'd0, ea_r[12]);
     // (near memory: the far memories' output registers are not reused - a write
     // may still be on its way to them when the next step is decoded)
-    wire  ld_hit    = NEAR ? ((nh_dq ^ aq_bad) & near_r) : (fresh_ok | (DATA_LATE ? aq_hit ^ aq_bad : r_hit));
+    assign ld_hit   = NEAR ? ((nh_dq ^ aq_bad) & near_r) : (fresh_ok | (DATA_LATE ? aq_hit ^ aq_bad : r_hit));
     wire  rd_launch = lm_read & ~ld_hit;                          // this step's read is not there yet
     // data-late: the data-source select the step needs, against what was set
     // ahead.  It matters on steps whose data the core uses: reads.
@@ -759,7 +843,10 @@ module gs_accel_broker #(
                       (internal ? r_fast_int : r_fast_rw);
     wire  fa0       = go0 & (internal | eff_we);
     wire  fb0       = go0 & ~internal & ~eff_we;
-    wire  fh0       = nl_good & (nm_rtag_i == f_tag);
+    // (NEAR_SPLIT: the cheap view's tag has no address bit above the low four set, and an
+    // entry that has one is marked in the low part - nm_tag - so the low part decides)
+    wire  fh0       = nl_good & (!NEAR_SPLIT ? (nm_rtag_i == f_tag) :
+                                 ({nm_rtag_i[NTW-1:NTW-2], nm_rtag_i[3:0]} == {f_tag[NTW-1:NTW-2], f_tag[3:0]}));
     wire [7:0] far_rdata = rom_r ? lm_rom_rdata_i : lm_ram_rdata_i;
     wire [7:0] lm_rdata  = !NEAR ? far_rdata : near_r ? nm_rdata_i : alt_q;
     assign cpu_d_in_o = NEAR ? lm_rdata : use_lm_r ? far_rdata : d_f;
@@ -770,6 +857,7 @@ module gs_accel_broker #(
     // The memories' read address is otherwise always the next-step address,
     // so nothing switches it in the clk of an ordinary launch.
     logic        ml_sel_r, ml_go, ml_apply, ml_use, ml_romsel;
+    logic        ml_isrom, rexp_r;           // the read being launched is of the ROM image; ... of expansion RAM
     logic [23:0] ml_phys;
     logic [17:0] ml_rom;
     // The read launch and the RAM write enable go to every block: with DATA_LATE they are
@@ -821,7 +909,7 @@ module gs_accel_broker #(
                     ((st != ST_RESET) & ~cpu_ce_o & lm_write &
                      (sc == (fresh_ok ? 4'(ADDR_CLKS - 2) : 4'(SLOW - 1))));
     wire   lm_wen         = WREG ? wen_r : mode_native ? wen_nat : (mem_evt & lm_write);
-    assign lm_wen_o       = WREG ? wen_c : {RA_COPIES{lm_wen}};
+    assign lm_wen_o       = !WREG ? {RA_COPIES{lm_wen}} : WEN_ONE ? {RA_COPIES{wen_r}} : wen_c;
     assign nl_wr          = (lm_wen & (widx_r == nl_idx)) | (nfill_r & (fill_idx == nl_idx));
     assign lm_waddr_o     = NEAR ? wa_r : d_phys;
     assign lm_wdata_o     = NEAR ? wd_r : cpu_d_out_i;
@@ -844,7 +932,7 @@ module gs_accel_broker #(
 
     // next values of the registers `sel` is made of (the same as in the block below;
     // compared with `sel` every clk in simulation)
-    wire   pw_done_w    = cyc_done & (fl_kind == K_PW);
+    wire   pw_done_w    = pw_done;
     wire   fl_busy_n    = !run_now ? (phy_issue_evt_i | (fl_busy & ~phy_fall_evt_i))
                                    : (~cyc_done & (phy_issue_evt_i | fl_busy));
     kind_t fl_kind_n;
@@ -898,7 +986,7 @@ module gs_accel_broker #(
     // that its reset condition is not on their enables.
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            ld_phys <= '0; ld_ram <= '0; ld_rom <= '0; ml_phys <= '0; ml_rom <= '0;
+            ld_phys <= '0; ld_ram <= '0; ld_rom <= '0; ml_phys <= '0; ml_rom <= '0; ml_isrom <= 1'b0;
             pl_r_local <= 1'b0; pl_r_rom <= 1'b0; pl_side <= 1'b0;
             pl_w_local <= 1'b0; pl_w_we <= 1'b0; pl_w_fwd <= 1'b0; pl_w_phys <= '0;
             aq_local <= 1'b0; aq_fwd <= 1'b0; aq_local_we <= 1'b0; aq_local_rom <= 1'b0; aq_side <= 1'b0;
@@ -924,6 +1012,7 @@ module gs_accel_broker #(
             if (DATA_LATE & mem_evt & rd_launch) begin
                 ml_phys  <= d_phys;
                 ml_rom   <= d_rom_addr;
+                ml_isrom <= d_local_rom;
                 fill_idx <= eff_addr[NEAR_AW-1:0];
                 fill_tag <= nm_tag(d_local_rom, d_phys, d_rom_addr[17:14], eff_addr[12]);
                 fill_ok  <= ~(~d_local_rom & (((eff_addr[15:12] == 4'hC) & ~|d_phys[23:17]) | nm_far_only(d_phys)));
@@ -964,9 +1053,10 @@ module gs_accel_broker #(
             fl_kind <= K_IDLE; fl_busy <= 1'b0; fl_run <= 1'b0; fl_issue_q <= 1'b0;
             fl_addr <= '0; fl_we <= 1'b0; fl_data <= '0;
             held_r <= 1'b0; fl_hold <= 1'b0; pre_q <= 1'b0;
+            xw_r <= 1'b0; xl_r <= 1'b0; xq1 <= 1'b0; xq2 <= 1'b0;
             use_lm_r <= 1'b0; rom_r <= 1'b0; vfy_r <= 1'b0;
             ld_valid <= 1'b0;
-            ml_go <= 1'b0; ml_sel_r <= 1'b0; ml_sel_c <= '0; wen_r <= 1'b0; wen_c <= '0; ren_r <= 1'b0; ren_c <= '0;
+            ml_go <= 1'b0; ml_sel_r <= 1'b0; ml_sel_c <= '0; wen_r <= 1'b0; wen_c <= '0; ren_r <= 1'b0; ren_c <= '0; rexp_r <= 1'b0;
             ml_apply <= 1'b0; ml_use <= 1'b0; ml_romsel <= 1'b0;
             ce_r <= 1'b0; ce_c <= '0; sc <= '0; pl_fresh <= 1'b0; cfg_q <= '0; sw_touch_q <= 1'b0;
             ev_hit <= 1'b0; ev_miss <= 1'b0; ev_pww <= 1'b0;
@@ -982,13 +1072,14 @@ module gs_accel_broker #(
             ld_valid <= 1'b0; ml_go <= 1'b0; ml_sel_r <= 1'b0; ml_sel_c <= '0; ml_apply <= 1'b0;
             // (near memory: a write registered in this very clk is still made - its step may
             // be completing now; if it is not, it is a write of a step /RESET cuts short)
-            wen_r <= NEAR & wen_set;  wen_c <= {RA_COPIES{NEAR & wen_set}};
-            ren_r <= 1'b0; ren_c <= '0;
+            wen_r <= NEAR & wen_set;  wen_c <= WEN_ONE ? '0 : {RA_COPIES{NEAR & wen_set}};
+            ren_r <= 1'b0; ren_c <= '0; rexp_r <= 1'b0;
             fa_q <= 1'b0; fb_q <= 1'b0; fh_q <= 1'b0; fa_c <= '0; fb_c <= '0; fh_c <= '0; nh_dq <= 1'b0; nl_ok <= 1'b0;
             ce_r <= 1'b0; ce_c <= '0; sc <= '0; pl_fresh <= 1'b0; sw_touch_q <= 1'b0;
             ev_hit <= 1'b0; ev_miss <= 1'b0; ev_pww <= 1'b0;
             near_r <= 1'b0; fill_pend <= 1'b0; nfill_r <= 1'b0;
             held_r <= 1'b0; fl_hold <= 1'b0; pre_q <= 1'b0;
+            xw_r <= 1'b0; xl_r <= 1'b0; xq1 <= 1'b0; xq2 <= 1'b0;
             // the PHY keeps issuing (idle) cycles during reset
             if (phy_issue_evt_i) begin fl_kind <= K_IDLE; fl_busy <= 1'b1; fl_run <= 1'b0; end
             else if (phy_fall_evt_i) fl_busy <= 1'b0;
@@ -1012,11 +1103,12 @@ module gs_accel_broker #(
 
             ml_go    <= ml_sel_r & ~ml_go;
             ml_sel_r <= ml_sel_r & ~ml_go;
-            ml_sel_c <= {RA_COPIES{ml_sel_r & ~ml_go}};
+            ml_sel_c <= NEAR ? '0 : {RA_COPIES{ml_sel_r & ~ml_go}};   // (near memory: the address is ml_phys always, nothing selects)
             wen_r    <= WREG & wen_set;
-            wen_c    <= {RA_COPIES{WREG & wen_set}};
+            wen_c    <= WEN_ONE ? '0 : {RA_COPIES{WREG & wen_set}};
             ren_r    <= DATA_LATE & ren_next;
             ren_c    <= {RA_COPIES{DATA_LATE & ren_next}};
+            rexp_r   <= NEAR & ren_next & ~ml_isrom & (|ml_phys[23:17]) & ~(mode_native & mode_bypass);
             fa_q     <= fa0;  fa_c <= {CE_COPIES{fa0}};
             fb_q     <= fb0;  fb_c <= {CE_COPIES{fb0}};
             fh_q     <= fh0;  fh_c <= {CE_COPIES{fh0}};
@@ -1064,7 +1156,7 @@ module gs_accel_broker #(
                 if (DATA_LATE) begin
                     if (rd_launch) begin
                         ml_sel_r <= 1'b1;
-                        ml_sel_c <= '1;
+                        if (!NEAR) ml_sel_c <= '1;
                         fill_pend <= NEAR;
                     end
                     if (sel_fix) begin
@@ -1074,6 +1166,16 @@ module gs_accel_broker #(
                     end
                 end
             end
+
+            // ---- EXP_WAIT, native (card memory of record): the step's read of expansion
+            // RAM is launched like any far read; its socket cycle may not complete until
+            // the byte has been in alt_q for a clk (rwait low, then two clks)
+            // (set in the clk the launch is registered, from the same registers)
+            if (EXP_WAIT & mode_native & NEAR & ren_next & ~ml_isrom & (|ml_phys[23:17]) & ~mode_bypass) xw_r <= 1'b1;
+            if (rexp_r) xl_r <= 1'b1;
+            xq1 <= xl_r & ~lm_rwait_i;
+            xq2 <= xq1;
+            if (xq2) xw_r <= 1'b0;
 
             // ---- what the memory output registers hold
             if (lm_ren) begin
@@ -1133,7 +1235,8 @@ module gs_accel_broker #(
                 end
 
                 ST_DATA: begin
-                    if (ph != 4'd0) ph <= ph - 4'd1;
+                    // (a far read of expansion memory: the count stands while its byte is on the way)
+                    if (ph != 4'd0 && !lm_rwait_i) ph <= ph - 4'd1;
                 end
 
                 default: begin   // ST_SOCK: wait for sync_done; or the core is held
@@ -1151,6 +1254,7 @@ module gs_accel_broker #(
                 prev_addr   <= eff_addr;
                 sreq_valid  <= 1'b0;
                 pre_q       <= 1'b0;
+                xw_r <= 1'b0; xl_r <= 1'b0; xq1 <= 1'b0; xq2 <= 1'b0;
                 mode_native <= native_s[1];
                 mode_bypass <= bypass_s[1];
             end
@@ -1237,6 +1341,13 @@ module gs_accel_broker #(
     // a step whose socket request was raised ahead is that socket cycle and nothing else
     logic sync_done_q;
     always @(posedge clk) sync_done_q <= sync_done;
+    // a socket cycle that was performed is the step's: it never ends with the step
+    // still undecided (it would be issued a second time)
+    always @(posedge clk) if (rst_n && run_now && cyc_done && fl_kind == K_SYNC && fl_run && !sync_done) begin
+        $display("ERROR: a step's socket cycle completed before the step was decided: a=%06h st=%0d ph=%0d pre=%b @%0t",
+                 eff_addr, st, ph, pre_q, $time);
+        $finish;
+    end
     always @(posedge clk) if (rst_n && run_now && pre_q) begin
         if (strobe && !(need_sock && !post && !internal && !lm_write)) begin
             $display("ERROR: broker raised a socket request ahead for a step that is not one: a=%06h we=%b @%0t",
@@ -1266,6 +1377,21 @@ module gs_accel_broker #(
 
     initial if (FAR_CLKS != 1 && !(NEAR && FAR_CLKS == 2)) $fatal(1, "gs_accel_broker: FAR_CLKS is 1, or 2 with NEAR");
 
+    assign lm_rexp_o   = rexp_r;
+    assign nm_ren_hi_o = NEAR & NEAR_SPLIT & ~dec_ok;         // the first clk of a step
+    assign nm_ra_hi_o  = ea_r[NEAR_AW-1:0];
+    initial if (NEAR_SPLIT && !(NEAR && NEAR_KW > 4 && ADDR_CLKS >= 2)) $fatal(1, "gs_accel_broker: NEAR_SPLIT needs NEAR, NEAR_KW > 4, ADDR_CLKS >= 2");
+`ifdef VERILATOR
+    // the cheap view's tag never has an address bit above the low four, nor the mark of one
+    always @(posedge clk) if (rst_n && NEAR && NEAR_KW > 4 && (fa0 | fb0) && ((|f_tag[NTW-3:4]) || (&f_tag[NTW-1:NTW-2]))) begin
+        $display("ERROR: broker cheap-view tag with a high address bit: %h @%0t", f_tag, $time); $finish;
+    end
+    // nothing moves A12 in RAM above bank 03 (the mark takes that bit's place)
+    always @(posedge clk) if (rst_n && NEAR_SPLIT && mem_evt && (lm_read | lm_write) && ~d_local_rom && (|d_phys[23:18]) &&
+                              (d_phys[12] != eff_addr[12])) begin
+        $display("ERROR: broker: A12 moved in RAM above bank 03: %06h -> %06h @%0t", eff_addr, d_phys, $time); $finish;
+    end
+`endif
     assign fast_o      = run_c & ~mode_native;
     assign step_evt_o  = cpu_ce_o;
     assign held_o      = held_r;

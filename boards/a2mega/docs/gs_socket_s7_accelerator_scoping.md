@@ -8,7 +8,8 @@ reset rule as a gateware module — §9, which also records every departure
 from sections 2–7.** **2026-11-12: an accelerator-only board build exists
 (§10.4); it ran on a ROM 01 machine the same day, and the first defect
 that showed is fixed in the source (§10.5); two expansion banks in block
-RAM as a stopgap for S7d (§10.6).**
+RAM as a stopgap for S7d (§10.6), then S7d itself on the DDR3 (§10.7), built
+at 105 MHz and not run.**
 
 ## 0. Summary
 
@@ -939,3 +940,34 @@ whose data is later still.
 What it does not do: the cheap view does not know expansion banks, so a
 step there is three or four clks. Details, verification and timing: the
 build page, section 3a.
+
+### 10.7 S7d: the expansion banks on the DDR3 (2026-11-12, 11-13)
+
+Built, in simulation and as a board build that meets timing at 105 MHz
+(52.5 MHz steps) on three placements; at 110 MHz it does not hold, and the
+build page (section 3b) has the seven rounds. Not run. The build page has
+the description and the numbers. What differs
+from section 2.2 and the plan of section 7:
+
+- **No separate cache.** The near memory is the cache, for every bank: its
+  tag was widened to A22, with the added bits kept out of the first-clk
+  compare (RAM above bank 03 is marked there in a pair of the old tag's
+  bits that nothing else uses; the bits themselves are read a clk later
+  from the step's address register).
+- **One ordered queue** for writes and reads in front of the DDR3
+  (`gs_accel_exp`), on the full build's `ddr3_ports` / `ddr3_port_cdc`. The
+  crossing is theirs; the accelerator's clock domain ends at the queue.
+- **The broker's far path waits** on a signal instead of counting clks
+  (`EXP_WAIT`), and a PHI2-paced step waits by having its socket cycle
+  issued again.
+- **A read brings one byte.** The 32-bit word the arbiter returns holds
+  three more; filling their entries too is the obvious next step and is
+  not done.
+- **The clock is the price.** With the DDR3's controller on the left edge
+  and the socket at the bottom, the accelerator no longer closes at
+  110 MHz by a margin that survives a change of placement. 105 MHz does.
+  The 1.0a5 board's HyperRAM is the planned home for this memory and has
+  no such controller; whether 110 MHz comes back there is to be measured.
+- **A defect in the first version** (a step held by a full queue after its
+  socket request had been raised ahead) was found by forcing the queue
+  full in the bench, and fixed before any bitstream ran.

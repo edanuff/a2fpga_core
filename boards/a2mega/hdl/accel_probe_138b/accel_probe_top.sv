@@ -143,6 +143,7 @@ module accel_probe_top (
 
     gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(RA_COPIES), .CE_COPIES(4),
                       .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW)) u_brk (
+        .nm_ren_hi_o(), .nm_ra_hi_o(), .lm_rexp_o(), .lm_rwait_i(1'b0), .lm_wbusy_i(1'b0),
         .clk(clk), .rst_n(rst_n),
         .native_i(cfg[0]), .mem_bypass_i(cfg[1]),
         .cxrom_local_i(cfg[3]), .exp_banks_i(cfg[10:4]),
