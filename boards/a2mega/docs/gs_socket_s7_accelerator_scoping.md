@@ -908,5 +908,10 @@ of a socket-only step, with the bench's own bank test); `gs_accel` beside
 the design, 35 runs, 290,331,590 clks; ROM 01 boot hash and write stream
 unchanged (`6012b76169ecc820`); nine mutations of the new logic, seven
 detected, the other two the RDY terms above. Timing: three placements of
-the committed source with no violation (build page). **Not run on
-hardware.**
+the committed source with no violation (build page).
+
+**On hardware** (the build page has the table): the same benchmark before
+and after, every test faster by 1.20 to 1.36 and none below base; the
+tests that run from expansion RAM, which this section said should reach
+about their native rate, came out at 1.28 to 1.44 of it, their stack,
+direct page and ROM calls being the card's.

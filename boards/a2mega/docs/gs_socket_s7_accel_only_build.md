@@ -195,7 +195,27 @@ SANE in the ROM, on a stack and direct page in bank 00: all the card's.
 The sieve, the sort and the calls are the program's own code and data in
 expansion RAM: every step a socket cycle, and with this build's defect a
 socket step behind a socket step waits a cycle, so the sieve came out
-slower than base. What the fix makes of these numbers is not measured.
+slower than base.
+
+**The same benchmark on fx2, the build with the fix** (flashed 19:38 the
+same evening; the same machine, cards and firmware; the base pass run
+again and within one tick of the first on every test):
+
+| test | base | aoz, fast | fx2, fast | fx2 ratio | the program's MHz |
+|---|---|---|---|---|---|
+| 10 iterations of the sieve | 413 | 437 | 322 | 1.28 | 3.24 |
+| selection sort of 500 strings | 1159 | 1060 | 805 | 1.44 | 3.63 |
+| 100 iterations of a floating-point test | 476 | 49 | 41 | 11.6 | 31.35 |
+| 15,000 Gamm units | 1546 | 314 | 253 | 6.1 | 16.25 |
+| 10 iterations of Fibonacci calls | 2020 | 1794 | 1417 | 1.43 | 3.59 |
+| 5,000 iterations of integer math | 1564 | 1083 | 863 | 1.81 | 4.57 |
+
+The program's average went from 8.49 to 10.44 MHz. Every test is faster
+than on aoz, by 1.20 to 1.36, and none is below base. At the program's
+prompt the core takes 0.844 M socket cycles a second of the same 1.86 M
+(aoz: 0.668 M), and steps 12.4 M times a second (aoz: 9.7 M). The build
+ran the boot, the ROM copy (sum `7EE8`) and card memory (verify count 0)
+as aoz did.
 
 After fast mode has run, register 29 must not go back to 00 without a
 reset: the machine's copy of banks 00/01 is stale by design. `0x0A` is the
@@ -246,7 +266,7 @@ accel`):
 | aop2 (changed again) | 0 | +0.030 | 110.18 MHz | 79.1 MHz |
 | **aoz, the source of 857d136c (on the card)** | **0** | **+0.002** | **110.02 MHz** | 72.8 MHz |
 
-With the early socket request (§10.5 of the scoping doc), not flashed:
+With the early socket request (§10.5 of the scoping doc); fx2 is on the card:
 
 | build | failing | worst slack |
 |---|---|---|
@@ -282,7 +302,8 @@ Not verified, not done:
   a2p25 (section 3); nothing else of the firmware has been looked at
   against this build (DDR3 ready is tied high; volumes, video, USB and DP
   status read as nothing).
-- **The build with the early socket request has not run on hardware.**
+- The build with the early socket request has run on hardware for one
+  boot and one benchmark (section 3); nothing longer.
 - No expansion RAM (S7d), no speed control or Zip / TransWarp registers
   (S7e), no ROM 3.
 - The reset rule's gateware sequencer (`gs_socket_arm_seq`) is not in this
@@ -301,7 +322,7 @@ check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
-Provenance of fx2 (the early socket request, not flashed): sources = the
+Provenance of fx2 (the early socket request, on the card): sources = the
 commit that adds this paragraph; the same tool and device; build stamp
 `20261112184610`; bitstream sha256 `cc7d3cb5a33f90d8…2476b571f5`.
 
