@@ -87,8 +87,14 @@ the card, so the Apple still sees the block as written; the log is the evidence.
 in `i_hr_ctrl` (hyperram_ctrl) on clk_mem/clk_hr cross-domain paths: `rq_data_m RAMREG ->
 cal_fail_s1/CE` at −0.382 ns and `req_tgl_s1 -> have_hw0_s1/RESET` at −0.079 ns. Neither touches
 the HDD card (`top/hdd`: LUT +12, REG +7 for the fix, no violated endpoint). CLS is at 97 %, so
-placement moves from build to build; whether these two paths also fail on the unchanged tree is
-being checked with a control build of HEAD. The resource snapshot
+placement moves from build to build. A control build of the unchanged tree (9eb3c8dc, same
+tool, same day) gives **14 setup violations, all in `i_hr_ctrl`, same clk_mem -> clk_hr cone,
+worst −0.783 ns** (`rq_wp_m_1_s4 -> c_len_*_s1/CE`). The a2p25 full core has therefore not
+closed timing since the 2026-11-05 hyperram_ctrl latency-cone retime; the HDD fix neither
+causes nor cures that, and the cone is a separate task (`hdl/hyperram/hyperram_ctrl.sv`,
+clk_mem-domain request/pointer registers feeding clk_hr-domain CE/RESET). Until it is closed
+there is no clean full-core bitstream to flash; the committed `impl/pnr/a2p25.fs` is Ed's
+earlier build and was left in place. The resource snapshot
 (`impl/a2p25_resources.json`) was regenerated; its `i_hr_ctrl` delta (+301 LUT, +142 REG) is the
 2026-11-05 latency-cone retime landing in the snapshot, not this change.
 
