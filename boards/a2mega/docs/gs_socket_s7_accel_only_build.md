@@ -286,9 +286,26 @@ paths are where they were (core → core +0.21, near memory → core +0.08).
 Size: 6,764 logic cells, 3,468 FF, 243 block RAMs. Build stamp
 `20261112202241`, bitstream sha256 `6761a20a0f4d85f3…974a5dfb27`.
 
-Not known: where GS/OS puts a program when only the two lowest expansion
-banks are the card's. Marble Madness ran from 02/03; the TML Pascal
-benchmark was not sampled. Not run on hardware.
+**On hardware** (flashed 21:10 the same evening; telemetry word 12 reads 2;
+ROM copy sum `7EE8`; card memory at PHI2 pace for 17 s, about 24 M bytes
+served and compared, verify count 0; then fast). The same benchmark:
+
+| test | base | fx2, fast | fe2, fast | fe2 ratio | the program's MHz |
+|---|---|---|---|---|---|
+| 10 iterations of the sieve | 413 | 322 | 318 | 1.30 | 3.28 |
+| selection sort of 500 strings | 1159 | 805 | 795 | 1.46 | 3.68 |
+| 100 iterations of a floating-point test | 476 | 41 | 38 | 12.5 | 33.83 |
+| 15,000 Gamm units | 1546 | 253 | 240 | 6.4 | 17.14 |
+| 10 iterations of Fibonacci calls | 2020 | 1417 | 1401 | 1.44 | 3.64 |
+| 5,000 iterations of integer math | 1564 | 863 | 853 | 1.83 | 4.63 |
+
+The program's average went from 10.44 to 11.03 MHz: one to seven percent
+per test. The two banks work (nothing wrong in 24 M compared bytes, a
+clean run), and they are not where this program lives: with the program
+waiting at its prompt the socket shows accesses to bank 04, twice in some
+fifty samples, and none above it. Where a program is loaded on this
+machine was the thing not known, and two banks do not reach it. Not
+sampled while a test was running.
 
 ## 4. What is verified, and what is not
 
