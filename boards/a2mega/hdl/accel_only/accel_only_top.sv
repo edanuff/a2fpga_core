@@ -287,7 +287,8 @@ module top (
     wire [15:0] acc_stall_w, acc_be_w, acc_per_w, acc_high_w, acc_verify_w;
     wire [23:0] acc_last_w;
 
-    gs_accel u_acc (
+    // (banks 02/03 in block RAM: a stopgap for expansion memory on the DDR3)
+    gs_accel #(.EXP_BANKS(2)) u_acc (
         .clk(clk_gs_w), .rst_n(device_reset_n_w & gs_pll_lock_w),
         .arm_i(gs_ctrl_s1[0]), .listen_i(gs_ctrl_s1[2]), .out_extra_i(gs_oe_s1),
         .cfg_fast_i(rq_key_w & gs_rq_s1[0]), .cfg_cardmem_i(rq_key_w & gs_rq_s1[1]),

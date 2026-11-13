@@ -196,8 +196,11 @@ module gs_accel_broker #(
     parameter int          NEAR_KW   = 10,           // ... RAM address bits above the index its tag holds (4..10;
                                                      //     10 = all 24 bits; fewer: banks out of reach are never cached)
     parameter bit          ROM3      = 1'b0,         // 0 = ROM 01 machine, 1 = ROM 3
-    parameter bit          SOCK_PRE  = 1'b1          // NEAR, fast mode: raise the request of a step that is certainly a
+    parameter bit          SOCK_PRE  = 1'b1,         // NEAR, fast mode: raise the request of a step that is certainly a
                                                      // socket cycle in its first clk (0 = at the strobe, for comparison)
+    parameter int          FAR_CLKS  = 1             // NEAR: clks from the far memories' read ports to alt_q (1 or 2).  With 2
+                                                     // a far read waits a clk longer and the data is not looked at in the
+                                                     // clk after its launch: a two-clk path, the blocks can be anywhere
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -741,7 +744,7 @@ module gs_accel_broker #(
     logic ce_r;
     logic [CE_COPIES-1:0] ce_c /* synthesis syn_preserve = 1 */;
     // (near memory: far data goes through alt_q, one clk more)
-    wire [3:0] ph_i = rd_slow ? 4'(STEP_CLKS + 1 + int'(NEAR)) : !DATA_LATE ? 4'(STEP_CLKS - ADDR_CLKS - 1) :
+    wire [3:0] ph_i = rd_slow ? 4'(STEP_CLKS + int'(NEAR) + FAR_CLKS) : !DATA_LATE ? 4'(STEP_CLKS - ADDR_CLKS - 1) :
                       fresh_ok ? 4'(PH_ON) : 4'(PH_SL);           // clks a local step still takes after the strobe
     wire  local_ce  = ce_r & (st == ST_DATA);                     // a local step completes
     wire  pf_launch = DATA_LATE & local_ce;                       // launch the next step's read
@@ -1260,6 +1263,8 @@ module gs_accel_broker #(
         end
     end
 `endif
+
+    initial if (FAR_CLKS != 1 && !(NEAR && FAR_CLKS == 2)) $fatal(1, "gs_accel_broker: FAR_CLKS is 1, or 2 with NEAR");
 
     assign fast_o      = run_c & ~mode_native;
     assign step_evt_o  = cpu_ce_o;

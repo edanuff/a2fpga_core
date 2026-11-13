@@ -28,6 +28,7 @@ SIG     = $037F                 ; $A5 when the walk is complete
 IRQCNT  = $0380                 ; incremented by the IRQ handler
 BRKCNT  = $0381                 ; incremented by the BRK handler
 WAIFLG  = $0382                 ; set once the loop has waited in WAI
+EXPFLG  = $0383                 ; set by T22 if the machine has RAM in bank 02
 LOOPCNT = $0390
 
 resn    .set 0
@@ -48,6 +49,7 @@ main:
         stz IRQCNT
         stz BRKCNT
         stz WAIFLG
+        stz EXPFLG
         lda #$80
         sta $C036               ; FPI fast mode
 
@@ -494,6 +496,38 @@ t21b:   lda f:$FF0000 + megaloop,x
         dex
         bpl t21b
 
+        ; ---- T22 code in an expansion bank, where the machine has one (the card's
+        ;      own memory if it backs the bank, socket cycles if it does not)
+        lda #$5A
+        sta $026100
+        lda $026100
+        cmp #$5A
+        bne t22n                ; nothing there
+        ldx #megaloop_end - megaloop - 1
+t22:    lda f:$FF0000 + megaloop,x
+        sta $026040,x
+        dex
+        bpl t22
+        inc EXPFLG
+        ; the same near-memory indexes read in bank 00: what a cache in front of the
+        ; card's memory holds of 02/6040.. and 02/6100 goes, and the code and the byte
+        ; are then read from the expansion memory itself
+        ldx #megaloop_end - megaloop - 1
+t22e:   lda $6040,x
+        dex
+        bpl t22e
+        lda $6100               ; bank 00's own byte, untouched by the write to 02/6100
+        sta $E16105             ; (on the socket: the byte the card's memory gave)
+        lda $026100
+        sta $E16104             ; (likewise)
+        res                     ; $5A (written only with a bank 02)
+        jsl $026040             ; comes back with $E16100
+        bra t22r
+t22n:   lda #$00
+        res                     ; $00 (written only without a bank 02)
+        lda #$00
+t22r:   res                     ; $34, or $00 without a bank 02
+
         lda #$A5
         sta SIG
         cli
@@ -509,6 +543,12 @@ spin:   dex
         lda $C022               ; I/O
         sta $E10450             ; Mega II
         jsl $E16040             ; a few instructions run from the Mega II bank
+        lda EXPFLG
+        beq noexp
+        lda $6040               ; (its first two bytes out of a cache in front of the card's memory)
+        lda $6041
+        jsl $026040             ; ... and from the expansion bank
+noexp:
         inc LOOPCNT+1
         ; once, after the first interrupt has been served: wait in WAI for the
         ; second (runs without interrupts never get here)
@@ -553,7 +593,7 @@ mcl:    dex
         rtl
 megacode_end:
 
-; copied to E1/6040 by T21: eight-bit code only, so an interrupt can land in it
+; copied to E1/6040 by T21 and to 02/6040 by T22: eight-bit code only, so an interrupt can land in it
 megaloop:
         ldx #$06
 mll:    dex

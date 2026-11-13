@@ -5,7 +5,7 @@
 "alu": 31,
 "bsram": 0,
 "dsp": 0,
-"lut": 28,
+"lut": 29,
 "reg": 449,
 "rom16": 0,
 "ssram": 0
@@ -14,7 +14,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 81,
+"lut": 72,
 "reg": 0,
 "rom16": 0,
 "ssram": 0
@@ -32,7 +32,7 @@
 "alu": 104,
 "bsram": 0,
 "dsp": 0,
-"lut": 309,
+"lut": 301,
 "reg": 74,
 "rom16": 0,
 "ssram": 0
@@ -41,7 +41,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 472,
+"lut": 453,
 "reg": 104,
 "rom16": 0,
 "ssram": 0
@@ -86,7 +86,7 @@
 "alu": 60,
 "bsram": 9,
 "dsp": 0,
-"lut": 832,
+"lut": 805,
 "reg": 975,
 "rom16": 0,
 "ssram": 0
@@ -113,7 +113,7 @@
 "alu": 0,
 "bsram": 2,
 "dsp": 0,
-"lut": 124,
+"lut": 120,
 "reg": 30,
 "rom16": 0,
 "ssram": 0
@@ -149,26 +149,26 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 534,
+"lut": 527,
 "reg": 195,
 "rom16": 0,
 "ssram": 0
 },
 "top/u_acc": {
 "alu": 0,
-"bsram": 142,
+"bsram": 206,
 "dsp": 0,
-"lut": 379,
-"reg": 137,
+"lut": 526,
+"reg": 405,
 "rom16": 0,
 "ssram": 0
 },
 "top/u_brk": {
-"alu": 251,
+"alu": 250,
 "bsram": 0,
 "dsp": 0,
-"lut": 943,
-"reg": 621,
+"lut": 904,
+"reg": 643,
 "rom16": 0,
 "ssram": 0
 },
@@ -176,7 +176,7 @@
 "alu": 22,
 "bsram": 0,
 "dsp": 0,
-"lut": 87,
+"lut": 85,
 "reg": 88,
 "rom16": 0,
 "ssram": 0
@@ -185,7 +185,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 1592,
+"lut": 1624,
 "reg": 228,
 "rom16": 0,
 "ssram": 0
@@ -194,7 +194,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 65,
+"lut": 72,
 "reg": 0,
 "rom16": 0,
 "ssram": 0
@@ -203,7 +203,7 @@
 "alu": 61,
 "bsram": 0,
 "dsp": 0,
-"lut": 116,
+"lut": 115,
 "reg": 151,
 "rom16": 0,
 "ssram": 0
@@ -221,7 +221,7 @@
 "alu": 16,
 "bsram": 0,
 "dsp": 0,
-"lut": 54,
+"lut": 51,
 "reg": 38,
 "rom16": 0,
 "ssram": 0
@@ -230,7 +230,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 90,
+"lut": 81,
 "reg": 39,
 "rom16": 0,
 "ssram": 0
@@ -238,15 +238,15 @@
 },
 "pnr_totals": {
 "BSRAM": [
-179,
+243,
 340
 ],
 "CLS": [
-5015,
+5185,
 69120
 ],
 "Logic": [
-6654,
+6704,
 138240
 ],
 "PLL": [
@@ -254,7 +254,7 @@
 12
 ],
 "Register": [
-3178,
+3468,
 139095
 ]
 },

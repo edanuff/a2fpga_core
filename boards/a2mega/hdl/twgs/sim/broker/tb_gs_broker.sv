@@ -74,6 +74,8 @@ module tb_gs_broker #(
     parameter int NEAR_AW   = 14,
     parameter int NEAR_KW   = 10,
     parameter bit SOCK_PRE  = 1'b1,    // broker: socket-only steps requested in their first clk (0: for comparison)
+    parameter int FAR_CLKS  = 1,       // broker: clks the far memories' data has to reach it (2 with gs_accel beside)
+    parameter int ACC_EXP   = 0,       // ACCEL_SHADOW: gs_accel's expansion banks; it is compared in runs with +exp= this
     parameter bit ROM_PRESET = 1'b1    // 1 = the bench loads the card's ROM image; 0 = it starts empty and
                                        // +mode=copy has the design read it through the socket
 );
@@ -178,6 +180,12 @@ module tb_gs_broker #(
     wire  [16:0] lm_ram_ra = lm_ram_ra_c[16:0];
     wire  [17:0] lm_rom_ra = lm_rom_ra_c[17:0];
     logic [7:0]  lm_wdata, lm_ram_rdata, lm_rom_rdata;
+    // FAR_CLKS = 2: the far memories' data has two clks to reach the broker - it reads
+    // WRONG in the clk after its launch, so that a broker that looked at it then shows
+    logic        far_bad = 1'b0;
+    // (a build may make a RAM write a clk or two after the broker does - gs_accel one:
+    // no read may be launched within two clks of a write)
+    logic        lm_wen_q1 = 1'b0, lm_wen_q2 = 1'b0;
     localparam int NTW = NEAR_KW + 2;
     logic               nm_ren, nm_wen;
     logic [NEAR_AW-1:0] nm_ra, nm_wa;
@@ -208,7 +216,7 @@ module tb_gs_broker #(
     );
 
     gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .PARK_ADDR(PARK), .DATA_LATE(DATA_LATE), .RA_COPIES(RA_COPIES), .CE_COPIES(4),
-                      .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .SOCK_PRE(SOCK_PRE)) u_brk (
+                      .NEAR(NEAR), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .SOCK_PRE(SOCK_PRE), .FAR_CLKS(FAR_CLKS)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(native_w), .mem_bypass_i(bypass_w),
         .cxrom_local_i(cfg_cxrom[0]), .exp_banks_i(cfg_exp[6:0]),
@@ -225,7 +233,7 @@ module tb_gs_broker #(
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n),
         .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na), .cpu_nst_i(cpu_nst), .cpu_rdy_i(cpu_rdy_out),
         .lm_ren_o(lm_ren_c), .lm_ram_ra_o(lm_ram_ra_c), .lm_rom_ra_o(lm_rom_ra_c), .lm_raddr_o(lm_raddr),
-        .lm_ram_rdata_i(lm_ram_rdata), .lm_rom_rdata_i(lm_rom_rdata),
+        .lm_ram_rdata_i(lm_ram_rdata ^ {8{far_bad}}), .lm_rom_rdata_i(lm_rom_rdata ^ {8{far_bad}}),
         .lm_wen_o(lm_wen_c), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
         .nm_ren_o(nm_ren), .nm_ra_o(nm_ra), .nm_rdata_i(nm_rdata), .nm_rtag_i(nm_rtag),
         .nm_wen_o(nm_wen), .nm_wa_o(nm_wa), .nm_wdata_o(nm_wdata), .nm_wtag_o(nm_wtag),
@@ -308,6 +316,9 @@ module tb_gs_broker #(
             else                         lexp[lexp_widx[19:0]] <= lm_wdata;
         end
         if (copy_we) lrom[copy_wa] <= copy_wd;
+        far_bad   <= (FAR_CLKS == 2) & lm_ren;
+        lm_wen_q1 <= lm_wen; lm_wen_q2 <= lm_wen_q1;
+        if (NEAR && lm_ren && (lm_wen_q1 || lm_wen_q2)) begin $display("ERROR: local memory read launched within two clks of a write"); $finish; end
         if (copy_we && lm_ren) begin $display("ERROR: ROM image written in the clk of a read launch"); $finish; end
         if (lm_ren && lm_wen) begin $display("ERROR: local memory read launch and write in the same clk"); $finish; end
         if (lm_ren && (lm_ram_ra_c != {RA_COPIES{lm_ram_ra}} || lm_rom_ra_c != {RA_COPIES{lm_rom_ra}})) begin
@@ -962,7 +973,9 @@ module tb_gs_broker #(
         pk  = mach_peek(1, {8'd0, r_eff_addr}, {31'd0, r_eff_vp});
         ref_din = pk[7:0];
         // nothing outstanding: the two machines must agree
-        if (expq.size() == 0 && (steps[7:0] == 8'd0 || (final_req && !final_done))) begin
+        // (the final moment also wants no write of the card's memory in flight: with the
+        // near memory the write of the step that just completed is made in this clk)
+        if (expq.size() == 0 && (steps[7:0] == 8'd0 || (final_req && !final_done && !lm_wen))) begin
             check_state_equal("no socket cycle outstanding");
             if (final_req) begin final_checks(); final_done = 1; end
         end
@@ -1083,7 +1096,8 @@ module tb_gs_broker #(
     // (ACCEL_SHADOW, near-memory builds) The accelerator domain as the board build has
     // it - one module, block-RAM-shaped memories, its own ROM copy - on the same socket
     // inputs and the same requests.  Every output pin must equal the hand-wired design's
-    // in every clk.  It has no expansion memory: not compared in runs with +exp.
+    // in every clk.  Its expansion memory is a build parameter (ACC_EXP banks): it is
+    // compared in the runs whose +exp is that.
     logic [7:0] rom_ref [0:(1<<17)-1];
     bit         rom_loaded = 0;
 `ifdef ACCEL_SHADOW
@@ -1093,7 +1107,7 @@ module tb_gs_broker #(
     logic [7:0]  acc_status, acc_mode;
     logic [15:0] acc_verify;
     longint      n_acc_cmp = 0;
-    gs_accel #(.NEAR_KW(NEAR_KW), .SIM_ROM_VALID(ROM_PRESET)) u_acc (
+    gs_accel #(.NEAR_KW(NEAR_KW), .EXP_BANKS(ACC_EXP), .SIM_ROM_VALID(ROM_PRESET)) u_acc (
         .clk(clk), .rst_n(rst_n),
         .arm_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
         .cfg_fast_i(cfg_copy | ~native_i), .cfg_cardmem_i(cfg_copy | ~mem_bypass_i),
@@ -1117,7 +1131,7 @@ module tb_gs_broker #(
             end
         end
     end
-    always @(negedge clk) if (rst_n && cfg_exp == 0) begin
+    always @(negedge clk) if (rst_n && cfg_exp == ACC_EXP) begin
         n_acc_cmp++;
         if (native_i == 1'b0 && mem_bypass_i == 1'b1 && !cfg_copy) begin
             $display("ERROR: bench: fast with bypass is not a request gs_accel has"); $finish;
@@ -1142,7 +1156,7 @@ module tb_gs_broker #(
     endtask
 
     // expected test-program results ($0300...): -1 = depends on the configuration
-    int expect_tab [0:79] = '{
+    int expect_tab [0:82] = '{
         'hFF, 'h00, 'h5C, 'h3F, 'h11, 'hC3, 'h3C, 'hA5, 'hA6, 'hA7,
         'h77, 'h5A, 'h5A, 'h00, 'h30, 'hEE, 'h00, 'h11, 'h00, 'hB1,
         'hB1, 'hB1, 'h00, 'hB2, 'h00, 'hB3, 'hC8, 'h00, 'hC9, 'hD1,
@@ -1150,7 +1164,7 @@ module tb_gs_broker #(
         'h5E, 'hE1, 'hE2, 'hE1, -1,   -1,   'hFF, 'h05, 'hC3, 'hC1,
         'hC3, 'hC8, 'hCF, 'hFF, 'hC4, 'hC8, 'hFF, 'hC5, 'h1C, 'h1C,
         'h1C, 'h08, 'hA1, 'hA7, 'h28, 'h01, 'hA7, 'hA5, 'h5A, 'h5A,
-        'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01, 'h36, 'h13 };
+        'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01, 'h36, 'h13, -1, 'h00, -1 };
 
     initial begin
         string  rom_path, wpath;
@@ -1321,11 +1335,13 @@ module tb_gs_broker #(
         if (!final_done) err("no quiet moment at the end of the run (socket cycles still outstanding)");
 
         if (do_expect) begin
-            for (i = 0; i <= 79; i++) begin
+            for (i = 0; i <= 82; i++) begin
                 int want, got;
                 want = expect_tab[i];
                 if (i == 44) want = (cfg_mbexp >= 1) ? 'h21 : 'hFF;
                 if (i == 45) want = (cfg_mbexp >= 2) ? 'h22 : 'hFF;
+                if (i == 80) want = (cfg_mbexp >= 1) ? 'h5A : 'h00;
+                if (i == 82) want = (cfg_mbexp >= 1) ? 'h34 : 'h00;
                 got = mach_get(1, 0, 24'h000300 + i);
                 if (want >= 0 && got != want) err($sformatf("test program result %0d ($%04h) = %02h, want %02h", i, 16'h0300 + i, got, want));
             end
@@ -1360,7 +1376,7 @@ module tb_gs_broker #(
         if (stall_checks == 0 && do_stall) err("no stalled cycle was checked");
         if (s6cmp && n_s6cmp == 0) err("S6 comparison did not run");
 `ifdef ACCEL_SHADOW
-        if (cfg_exp == 0) begin
+        if (cfg_exp == ACC_EXP) begin
             if (n_acc_cmp == 0) err("gs_accel comparison did not run");
             if (acc_verify != verify_count) err($sformatf("gs_accel verify count %0d, the design's %0d", acc_verify, verify_count));
             if (acc_mode[7] != copy_valid || acc_mode[4] != brk_fast)

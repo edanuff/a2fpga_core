@@ -269,6 +269,12 @@ def generate_near(PERIOD, fname, pfx="", board=False):
         clks and launched in the second""")
     mc(2, regs(*b("ml_sel_r", "ml_sel_c", "ml_phys", "ml_rom")), FADB)
     mc(2, regs(*b("ml_sel_r", "ml_sel_c", "ml_phys", "ml_rom")), FSEL)
+    if board:
+        note("""
+            ---- ... and (gs_accel: FAR_CLKS = 2) its data has two clks from the memories'
+            read ports and their block selects to the broker's register""")
+        mc(2, pins("*mram_*_s/CLKB", "*mrom_*_s/CLKB"), ALT)
+        mc(2, FSEL, ALT)
     note("""
         ---- the broker's view of the core's reset changes at a PHI2-fall event; the PHY
         takes a cycle at its issue point, never sooner than two clks after one""")

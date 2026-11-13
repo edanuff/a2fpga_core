@@ -40,7 +40,22 @@
 //                  (the core is held for about 46 ms).
 //
 // With all of them low the module is S6 on the broker: every step a socket
-// cycle, every byte from the socket.  There is no expansion memory here.
+// cycle, every byte from the socket.
+//
+// Expansion memory (EXP_BANKS = 2): banks 02/03 in block RAM, beside banks
+// 00/01 and on the same terms - the card's memory of record under
+// cfg_cardmem_i, following every write of the core from the moment the socket
+// is armed.  A stopgap for the DDR3 (scoping 7, S7d): two banks are what the
+// near memory's tag reaches (NEAR_KW = 4: A14-A17).  The machine must have
+// those banks itself.
+//
+// The far memories (the banks and the ROM image) are many blocks, anywhere on
+// the die, and nothing reaches or leaves them in one clk: the read address is
+// presented for two clks (the broker's far path), the data has two clks to the
+// broker (FAR_CLKS = 2), each data bit's blocks have their own copy of the read
+// and write enables (RA_COPIES = 8), and a RAM write goes through one more
+// register per data bit here, a clk later than the broker makes it - three clks
+// and more before the broker can launch a read (the bench checks that margin).
 //
 // Memories: block RAM, zero at power-up.  The near memory's tags are stored
 // inverted so that zeros read as "no entry".  Banks 00/01 follow every write
@@ -52,6 +67,7 @@ module gs_accel #(
     parameter bit ROM3 = 1'b0,
     parameter int NEAR_KW = 4,           // address bits above A13 in a near-memory tag: 4 = banks 00/01 and the ROM
                                          // image, which is all this module has (the bench also runs it with 10)
+    parameter int EXP_BANKS = 0,         // expansion banks held in block RAM: 0, or 2 (banks 02/03)
     parameter bit SIM_ROM_VALID = 1'b0   // SIMULATION ONLY: the bench loaded the ROM image (gs_accel_romcopy SIM_PRESET)
 ) (
     input  logic        clk,
@@ -102,12 +118,15 @@ module gs_accel #(
                                          // the write buffer, 4 local reads in place, 5 local reads that waited,
                                          // 6 {verify_count, 8'h00, mode}, 7 {8'h00, verify_addr},
                                          // 8 {copies, 8'h00, ROM image sum}, 9 {shadow, cyareg, sltromsel, statereg},
-                                         // 10 {24'h0, switch misc}, 11 PHY bus cycles; others 0
+                                         // 10 {24'h0, switch misc}, 11 PHY bus cycles, 12 {24'h0, EXP_BANKS}; others 0
 );
     localparam int STEP_CLKS = 2, ADDR_CLKS = 2, SLOW_CLKS = 3;
     localparam int NEAR_AW = 14, NTW = NEAR_KW + 2;
     localparam int ROM_BLKS = ROM3 ? 16 : 8;
     localparam int ROM_SELW = $clog2(ROM_BLKS);
+    localparam int RAM_BLKS = (EXP_BANKS == 2) ? 16 : 8;      // 16K x 1 blocks per data bit: banks 00/01 (and 02/03)
+    localparam int RAM_SELW = $clog2(RAM_BLKS);
+    initial if (EXP_BANKS != 0 && EXP_BANKS != 2) $fatal(1, "gs_accel: EXP_BANKS must be 0 or 2");
 
     // ---- socket PHY
     logic [23:0] phy_a;
@@ -154,7 +173,9 @@ module gs_accel #(
     logic [13:0] cpu_na_b;
     logic [2:0]  cpu_nst;
     logic        cpu_we_n, cpu_vp_n, cpu_vpa, cpu_vda, cpu_mlb, cpu_iflag, cpu_rdyo;
-    logic        lm_ren, lm_wen;
+    logic [7:0]  lm_ren, lm_wen;                 // (one copy per data bit: RA_COPIES)
+    logic [8*17-1:0] lm_ram_ra_c;
+    logic [8*18-1:0] lm_rom_ra_c;
     logic [23:0] lm_raddr, lm_waddr;
     logic [16:0] lm_ram_ra;
     logic [17:0] lm_rom_ra;
@@ -170,11 +191,11 @@ module gs_accel #(
     logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait, stat_rd_hit, stat_rd_miss;
     logic [7:0]  r_shadow, r_cyareg, r_sltromsel, r_statereg, r_misc;
 
-    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(1), .CE_COPIES(4),
-                      .NEAR(1'b1), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .ROM3(ROM3)) u_brk (
+    gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(8), .CE_COPIES(4),
+                      .NEAR(1'b1), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .ROM3(ROM3), .FAR_CLKS(2)) u_brk (
         .clk(clk), .rst_n(rst_n),
         .native_i(~fast), .mem_bypass_i(~cardmem),
-        .cxrom_local_i(cxrom), .exp_banks_i(7'd0),
+        .cxrom_local_i(cxrom), .exp_banks_i(7'(EXP_BANKS)),
         .hold_i(hold), .idle_a_i(idle_a), .held_o(held), .idle_stb_o(idle_stb), .idle_d_o(idle_d),
         .nm_flush_i(nm_flush), .nm_flush_idx_i(nm_flush_idx),
         .phy_enabled_i(enabled), .phy_running_i(running),
@@ -187,7 +208,7 @@ module gs_accel #(
         .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),
         .cpu_a_i(cpu_a), .cpu_d_out_i(cpu_d_out), .cpu_we_n_i(cpu_we_n),
         .cpu_vpa_i(cpu_vpa), .cpu_vda_i(cpu_vda), .cpu_vp_n_i(cpu_vp_n), .cpu_na_i(cpu_na), .cpu_nst_i(cpu_nst), .cpu_rdy_i(cpu_rdyo),
-        .lm_ren_o(lm_ren), .lm_ram_ra_o(lm_ram_ra), .lm_rom_ra_o(lm_rom_ra), .lm_raddr_o(lm_raddr),
+        .lm_ren_o(lm_ren), .lm_ram_ra_o(lm_ram_ra_c), .lm_rom_ra_o(lm_rom_ra_c), .lm_raddr_o(lm_raddr),
         .lm_ram_rdata_i(lm_ram_rdata), .lm_rom_rdata_i(lm_rom_rdata),
         .lm_wen_o(lm_wen), .lm_waddr_o(lm_waddr), .lm_wdata_o(lm_wdata),
         .nm_ren_o(nm_ren), .nm_ra_o(nm_ra), .nm_rdata_i(nm_rdata), .nm_rtag_i(nm_rtag),
@@ -225,37 +246,58 @@ module gs_accel #(
     );
 
     // ---- the card's memories of record: for every data bit eight blocks of
-    // 16K x 1 for banks 00/01 and eight (ROM 3: sixteen) for the ROM image, all
-    // read at once, a registered block select picking one of each.  They are read
-    // only from registers (the broker's far path), so they need no floorplan.
-    wire ram_bank = (lm_waddr[23:17] == 7'd0);      // a write to banks 00/01
+    // 16K x 1 for banks 00/01 (sixteen with banks 02/03) and eight (ROM 3: sixteen)
+    // for the ROM image, all read at once, a registered block select picking one of
+    // each.  They are read only from registers (the broker's far path), so they
+    // need no floorplan.  (The RAM's block select is from the full physical address,
+    // lm_raddr: its low 17 bits are lm_ram_ra, the same registers.)
+    wire ram_bank = (lm_waddr[23:14+RAM_SELW] == '0);      // a write to a bank the card holds
+    assign lm_ram_ra = lm_ram_ra_c[16:0];
+    assign lm_rom_ra = lm_rom_ra_c[17:0];
+    // (simulation: the far data reads WRONG in the clk after its launch - it has two
+    // clks, and anything that looked at it sooner would show)
+    logic far_bad;
+`ifdef VERILATOR
+    always_ff @(posedge clk) far_bad <= lm_ren[0];
+`else
+    assign far_bad = 1'b0;
+`endif
     for (genvar b = 0; b < 8; b++) begin : g_bit
-        logic [2:0] ram_sel;
+        logic [RAM_SELW-1:0] ram_sel;
         logic [ROM_SELW-1:0] rom_sel;
-        logic [7:0] ram_q;
+        logic [RAM_BLKS-1:0] ram_q;
         logic [ROM_BLKS-1:0] rom_q;
-        always_ff @(posedge clk) if (lm_ren) begin
-            ram_sel <= lm_ram_ra[16:14];
+        // this bit's copy of a RAM write, a clk after the broker's
+        logic                   wq_we /* synthesis syn_preserve = 1 */;
+        logic [13+RAM_SELW:0]   wq_a  /* synthesis syn_preserve = 1 */;
+        logic                   wq_d;
+        always_ff @(posedge clk) begin
+            wq_we <= lm_wen[b] & ram_bank;
+            wq_a  <= lm_waddr[13+RAM_SELW:0];
+            wq_d  <= lm_wdata[b];
+        end
+        always_ff @(posedge clk) if (lm_ren[b]) begin
+            ram_sel <= lm_raddr[14 +: RAM_SELW];
             rom_sel <= lm_rom_ra[14 +: ROM_SELW];
         end
-        for (genvar k = 0; k < 8; k++) begin : g_blk
+        for (genvar k = 0; k < RAM_BLKS; k++) begin : g_blk
             logic mram [0:16383];
-            always_ff @(posedge clk) if (lm_ren) ram_q[k] <= mram[lm_ram_ra[13:0]];
-            always_ff @(posedge clk) if (lm_wen && ram_bank && lm_waddr[16:14] == 3'(k)) mram[lm_waddr[13:0]] <= lm_wdata[b];
+            always_ff @(posedge clk) if (lm_ren[b]) ram_q[k] <= mram[lm_ram_ra[13:0]];
+            always_ff @(posedge clk) if (wq_we && wq_a[14 +: RAM_SELW] == RAM_SELW'(k)) mram[wq_a[13:0]] <= wq_d;
 `ifdef VERILATOR
             initial for (int i = 0; i < 16384; i++) mram[i] = 1'b0;
 `endif
         end
         for (genvar k = 0; k < ROM_BLKS; k++) begin : g_rblk
             logic mrom [0:16383];
-            always_ff @(posedge clk) if (lm_ren) rom_q[k] <= mrom[lm_rom_ra[13:0]];
+            always_ff @(posedge clk) if (lm_ren[b]) rom_q[k] <= mrom[lm_rom_ra[13:0]];
             always_ff @(posedge clk) if (rom_we && rom_wa[14 +: ROM_SELW] == ROM_SELW'(k)) mrom[rom_wa[13:0]] <= rom_wd[b];
 `ifdef VERILATOR
             initial for (int i = 0; i < 16384; i++) mrom[i] = 1'b0;
 `endif
         end
-        assign lm_ram_rdata[b] = ram_q[ram_sel];
-        assign lm_rom_rdata[b] = rom_q[rom_sel];
+        assign lm_ram_rdata[b] = ram_q[ram_sel] ^ far_bad;
+        assign lm_rom_rdata[b] = rom_q[rom_sel] ^ far_bad;
     end
 
     // ---- near memory: one 16K x 1 block per entry bit, no output mux.  The read
@@ -326,6 +368,7 @@ module gs_accel #(
             6'd9:    tele_word_o <= {r_shadow, r_cyareg, r_sltromsel, r_statereg};
             6'd10:   tele_word_o <= {24'h0, r_misc};
             6'd11:   tele_word_o <= cycle_count_o;
+            6'd12:   tele_word_o <= {24'h0, 8'(EXP_BANKS)};
             default: tele_word_o <= 32'h0;
         endcase
     end

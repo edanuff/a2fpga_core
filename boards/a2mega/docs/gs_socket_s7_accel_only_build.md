@@ -221,6 +221,75 @@ After fast mode has run, register 29 must not go back to 00 without a
 reset: the machine's copy of banks 00/01 is stale by design. `0x0A` is the
 way back to PHI2 pacing, and its verify count then means nothing.
 
+## 3a. Banks 02/03 in block RAM (2026-11-12, not flashed)
+
+`gs_accel` has a parameter `EXP_BANKS`, 0 or 2, and the board top sets 2:
+expansion banks 02 and 03 in block RAM, beside banks 00/01 and on the same
+terms. They follow every write of the core from the moment the socket is
+armed; with card memory on they are the memory of record, and in native
+mode each byte they give the core is compared with the socket's (the same
+verify count). A stopgap for S7d's DDR3: 64 more blocks, 243 of 340.
+
+- **Two banks, not four**, because the near memory's tag (`NEAR_KW = 4`:
+  A14–A17) reaches bank 03 and no further. Four would want a wider tag
+  and a new floorplan for the near blocks.
+- **The machine must have banks 02/03 itself** (a memory card in a ROM 01
+  machine). The card does not add memory the machine lacks.
+- **A step in banks 02/03 is three or four clks, not two**: the first-clk
+  cheap view covers banks 00/01 and the ROM only, so these steps are
+  decided from the full decode. About 27 to 37 MHz against 55.
+- Telemetry word 12 is `EXP_BANKS` (2 on this build, 0 on aoz and fx2).
+
+**The far memories now have two clks in each direction.** The first build
+with the 64 extra blocks failed 44 paths by up to 0.482 ns, everywhere:
+the banks and the ROM image are 192 blocks all over the die, and three of
+their paths were still single-clk, pulling the broker and the core apart.
+
+| path | before | now |
+|---|---|---|
+| read data, blocks → the broker's `alt_q` | one clk | two: the broker waits a clk longer on a far read (`FAR_CLKS = 2`) and does not look at the data in the clk after its launch |
+| RAM write, the broker's registers → blocks | one clk | through one more register per data bit in `gs_accel`: the write lands a clk later |
+| read and write enables | one register to every block | a copy per data bit (`RA_COPIES = 8`) |
+
+A step served by the near memory is unchanged. The late write is safe
+because the broker cannot launch a far read until three clks and more
+after it makes a write; the bench stops any run in which a read is
+launched within two. In simulation the far data reads wrong in the clk it
+is not yet valid, in the bench's model and in `gs_accel`, so a broker that
+looked early would show. Cost: 60,000 steps of the test program take
+9.455 ms against 9.444.
+
+Verification: the suite is 102 runs, 14 of them with `gs_accel` holding two
+banks and compared pin for pin with the bench's design in every clk
+(native, paced, fast, toggling, with internal slot firmware, warm resets, a
+machine with six expansion banks behind it, dense RDY stalls, and a ROM 01
+boot): 247,013,471 clks; over all 49 runs with the module beside the
+design, 535,896,565 clks. The test program runs code from bank 02 and, because
+everything it wrote there stayed in the near memory, pushes those entries
+out and reads the bytes back from the expansion blocks themselves, onto
+the socket. Six mutations of the new logic, all detected (three were not
+until that test existed). A bench fault found on the way: the final
+comparison of the card's RAM could be taken in the clk the last step's
+write was landing.
+
+Timing, three placements of the committed source:
+
+| build | failing | worst slack |
+|---|---|---|
+| fe1 (the far paths as they were) | 44 | −0.482 |
+| **fe2, the committed source** | **0** | **+0.007** |
+| fep1 (a telemetry constant changed) | 0 | +0.003 |
+| fep2 (changed again) | 0 | +0.012 |
+
+In fe2 the far data has 8.96 ns of slack on its two-clk path; the step
+paths are where they were (core → core +0.21, near memory → core +0.08).
+Size: 6,764 logic cells, 3,468 FF, 243 block RAMs. Build stamp
+`20261112202241`, bitstream sha256 `6761a20a0f4d85f3…974a5dfb27`.
+
+Not known: where GS/OS puts a program when only the two lowest expansion
+banks are the card's. Marble Madness ran from 02/03; the TML Pascal
+benchmark was not sampled. Not run on hardware.
+
 ## 4. What is verified, and what is not
 
 Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):
@@ -304,8 +373,8 @@ Not verified, not done:
   status read as nothing).
 - The build with the early socket request has run on hardware for one
   boot and one benchmark (section 3); nothing longer.
-- No expansion RAM (S7d), no speed control or Zip / TransWarp registers
-  (S7e), no ROM 3.
+- Expansion RAM is two banks in block RAM (section 3a), not S7d's DDR3; no
+  speed control or Zip / TransWarp registers (S7e), no ROM 3.
 - The reset rule's gateware sequencer (`gs_socket_arm_seq`) is not in this
   build; arming is timed by the firmware, as in S6.
 - The timing probes were not rebuilt after the broker gained the hold

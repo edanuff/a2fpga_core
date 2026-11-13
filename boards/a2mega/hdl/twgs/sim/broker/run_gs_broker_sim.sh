@@ -71,12 +71,14 @@ build b100_2d +define+FAST_CORE +define+CLK100 -GDATA_LATE=1 -GSTEP_CLKS=2 -GADD
 # design on the same pins (ACCEL_SHADOW: every output pin compared in every clk); at 110 MHz,
 # the board's socket PLL, too; and (b110_2c) with the card's ROM image empty, for +mode=copy
 # (the 110 MHz builds with the board's near-memory tag, A14-A17: -GNEAR_KW=4)
-NEARX=( +define+FAST_CORE +define+F65C816_MCODE_ROM +define+ACCEL_SHADOW -GDATA_LATE=1 -GNEAR=1 -GSTEP_CLKS=2 -GADDR_CLKS=2
+NEARX=( +define+FAST_CORE +define+F65C816_MCODE_ROM +define+ACCEL_SHADOW -GDATA_LATE=1 -GNEAR=1 -GSTEP_CLKS=2 -GADDR_CLKS=2 -GFAR_CLKS=2
         "${FASTF[@]}" "$TWGS/gs_accel.sv" )
 build b100_2x +define+CLK100 "${NEARX[@]}" & p8=$!
 build b108_2x "${NEARX[@]}" & p9=$!
 build b110_2x +define+CLK110 -GNEAR_KW=4 "${NEARX[@]}" & p10=$!
 build b110_2c +define+CLK110 -GNEAR_KW=4 -GROM_PRESET=0 "${NEARX[@]}" & p11=$!
+# ... and gs_accel with banks 02/03 in block RAM (EXP_BANKS = 2), compared in runs with +exp=2
+build b110_2e +define+CLK110 -GNEAR_KW=4 -GACC_EXP=2 "${NEARX[@]}" & p12=$!
 bfail=0
 wait $p1 || { echo "verilator FAILED (b108_4) - see $OUT/verilate_b108_4.log"; grep -E "%Error|error:" "$OUT/verilate_b108_4.log" | head -20; bfail=1; }
 wait $p2 || { echo "verilator FAILED (b100_2) - see $OUT/verilate_b100_2.log"; grep -E "%Error|error:" "$OUT/verilate_b100_2.log" | head -20; bfail=1; }
@@ -87,6 +89,7 @@ wait $p8 || { echo "verilator FAILED (b100_2x) - see $OUT/verilate_b100_2x.log";
 wait $p9 || { echo "verilator FAILED (b108_2x) - see $OUT/verilate_b108_2x.log"; grep -E "%Error|error:" "$OUT/verilate_b108_2x.log" | head -20; bfail=1; }
 wait $p10 || { echo "verilator FAILED (b110_2x) - see $OUT/verilate_b110_2x.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2x.log" | head -20; bfail=1; }
 wait $p11 || { echo "verilator FAILED (b110_2c) - see $OUT/verilate_b110_2c.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2c.log" | head -20; bfail=1; }
+wait $p12 || { echo "verilator FAILED (b110_2e) - see $OUT/verilate_b110_2e.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2e.log" | head -20; bfail=1; }
 [[ $bfail -ne 0 ]] && exit 1
 
 # ---------------------------------------------------------------- runs
@@ -166,6 +169,16 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     # raised in a step's first clk, with RDY low around them)
     run y_fast_st2  b110_2x $T +mode=fast   +expect +irq +stallp=2 +steps=120000
     run y_tog_st5   b110_2x $T +mode=toggle +expect +irq +stallp=5 +steps=120000
+    # gs_accel with two expansion banks of its own, beside the design
+    run z_native    b110_2e $T +mode=native +expect +irq +exp=2
+    run z_paced     b110_2e $T +mode=paced  +expect +irq +exp=2
+    run z_fast      b110_2e $T +mode=fast   +expect +irq +exp=2
+    run z_toggle    b110_2e $T +mode=toggle +expect +irq +exp=2 +steps=120000
+    run z_tog_cx    b110_2e $T +mode=toggle +expect +irq +exp=2 +cxrom=1 +steps=120000
+    run z_rstw_fast b110_2e $T +mode=fast   +expect +irq +exp=2 +resetw
+    run z_rst_tog   b110_2e $T +mode=toggle +expect +irq +exp=2 +reset +steps=120000
+    run z_fast_st3  b110_2e $T +mode=fast   +expect +irq +exp=2 +stallp=3 +steps=120000
+    run z_fast_mb   b110_2e $T +mode=fast   +expect +irq +exp=2 +mbexp=6
     run c_copy      b110_2c $T +mode=copy   +expect +irq
     run c_copy_rst  b110_2c $T +mode=copy   +expect +irq +reset
     run c_recopy    b110_2c $T +mode=copy   +expect +irq +recopy
@@ -183,6 +196,9 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run e_dx108     b108_2x $T +mode=fast   +expect +wlog=wstream.txt
     run e_dx110     b110_2x $T +mode=fast   +expect +wlog=wstream.txt
     run e_copy      b110_2c $T +mode=copy   +expect +wlog=wstream.txt
+    run f_native    b110_2e $T +mode=native +expect +exp=2 +wlog=wstream.txt
+    run f_paced     b110_2e $T +mode=paced  +expect +exp=2 +wlog=wstream.txt
+    run f_fast      b110_2e $T +mode=fast   +expect +exp=2 +wlog=wstream.txt
 fi
 DO_ROM=0
 if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
@@ -201,6 +217,8 @@ if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
         run r_dx108     b108_2x $R +mode=fast
         run r_dx110     b110_2x $R +mode=fast
         run r_copy      b110_2c $R +mode=copy
+        run s_native    b110_2e $R +mode=native +exp=2
+        run s_fast      b110_2e $R +mode=fast   +exp=2
     elif [[ "$SUITE" == "rom" ]]; then
         echo "rom suite: set ROM=<path to a 128 KB ROM 01 image>"; exit 1
     else
@@ -241,12 +259,14 @@ same() {    # label, reference run, other runs...: step hash and write stream mu
 }
 if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     same "test program" e_native e_paced e_fast e_fast100 e_dl108 e_dl100 e_dx100 e_dx108 e_dx110 e_copy
+    same "test program, two expansion banks" f_native f_paced f_fast
 fi
 if [[ $DO_ROM -eq 1 ]]; then
     same "ROM 01 boot ($STEPS steps)" r_native r_paced r_fast r_fast_cx r_fast100 r_f816 r_dl108 r_dl100 r_dx100 r_dx108 r_dx110 r_copy
+    same "ROM 01 boot, two expansion banks ($STEPS steps)" s_native s_fast
 fi
 for n in "${NAMES[@]}"; do
-    case "$n" in d*|e_dl*|r_dl*|x*|y*|c_*|e_dx*|r_dx*|e_copy|r_copy) grep -E '^---- (local reads|near memory|ROM copy|gs_accel)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
+    case "$n" in d*|e_dl*|r_dl*|x*|y*|z*|c_*|e_dx*|r_dx*|e_copy|r_copy|f_*|s_*) grep -E '^---- (local reads|near memory|ROM copy|gs_accel)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
 done
 for n in "${NAMES[@]}"; do
     grep -E '^---- socket timing' "$OUT/$n/sim.log" | sed "s/^---- /$n: /"

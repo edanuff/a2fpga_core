@@ -94,6 +94,13 @@ set_multicycle_path 1 -hold  -end -from [get_regs {u_acc/u_brk/ml_sel_r* u_acc/u
 set_multicycle_path 2 -setup -end -from [get_regs {u_acc/u_brk/ml_sel_r* u_acc/u_brk/ml_sel_c* u_acc/u_brk/ml_phys* u_acc/u_brk/ml_rom*}] -to [get_regs {*ram_sel_* *rom_sel_*}]
 set_multicycle_path 1 -hold  -end -from [get_regs {u_acc/u_brk/ml_sel_r* u_acc/u_brk/ml_sel_c* u_acc/u_brk/ml_phys* u_acc/u_brk/ml_rom*}] -to [get_regs {*ram_sel_* *rom_sel_*}]
 
+// ---- ... and (gs_accel: FAR_CLKS = 2) its data has two clks from the memories'
+// read ports and their block selects to the broker's register
+set_multicycle_path 2 -setup -end -from [get_pins {*mram_*_s/CLKB *mrom_*_s/CLKB}] -to [get_regs {u_acc/u_brk/alt_q*}]
+set_multicycle_path 1 -hold  -end -from [get_pins {*mram_*_s/CLKB *mrom_*_s/CLKB}] -to [get_regs {u_acc/u_brk/alt_q*}]
+set_multicycle_path 2 -setup -end -from [get_regs {*ram_sel_* *rom_sel_*}] -to [get_regs {u_acc/u_brk/alt_q*}]
+set_multicycle_path 1 -hold  -end -from [get_regs {*ram_sel_* *rom_sel_*}] -to [get_regs {u_acc/u_brk/alt_q*}]
+
 // ---- the broker's view of the core's reset changes at a PHI2-fall event; the PHY
 // takes a cycle at its issue point, never sooner than two clks after one
 set_multicycle_path 2 -setup -end -from [get_regs {u_acc/u_brk/run_c*}] -to [get_regs {u_acc/u_phy/*}]

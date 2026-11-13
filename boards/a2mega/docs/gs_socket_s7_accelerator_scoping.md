@@ -7,7 +7,8 @@ numbers in them are from the S4–S6 builds and the bench. **2026-11-11: S7a
 reset rule as a gateware module — §9, which also records every departure
 from sections 2–7.** **2026-11-12: an accelerator-only board build exists
 (§10.4); it ran on a ROM 01 machine the same day, and the first defect
-that showed is fixed in the source (§10.5).**
+that showed is fixed in the source (§10.5); two expansion banks in block
+RAM as a stopgap for S7d (§10.6).**
 
 ## 0. Summary
 
@@ -915,3 +916,26 @@ and after, every test faster by 1.20 to 1.36 and none below base; the
 tests that run from expansion RAM, which this section said should reach
 about their native rate, came out at 1.28 to 1.44 of it, their stack,
 direct page and ROM calls being the card's.
+
+### 10.6 Two expansion banks in block RAM, and the far memories at two clks (2026-11-12)
+
+A stopgap for S7d, in `gs_accel` (`EXP_BANKS = 2`): banks 02/03 as 64 more
+blocks beside banks 00/01, the broker's `exp_banks_i` no longer zero. The
+bench already backed expansion banks with an array; the module now does
+with blocks, and is compared pin for pin in runs with two banks.
+
+It needed the far memories finished as far memories. Section 10.2 has them
+"reached and left only through registers", which was true of the read
+address and of nothing else: read data went to `alt_q` in one clk, a write
+left the broker's registers for every block in one clk, and one register
+enabled them all. With 128 blocks that closed; with 192 it failed 44
+paths. Now: `FAR_CLKS = 2` (a far read waits one clk more; its data is not
+looked at in the clk after the launch), a write register per data bit in
+`gs_accel` (the write lands a clk later; the broker launches no far read
+within three clks of a write, and the bench checks two), and
+`RA_COPIES = 8`. The same three things will be wanted by a DDR3 client,
+whose data is later still.
+
+What it does not do: the cheap view does not know expansion banks, so a
+step there is three or four clks. Details, verification and timing: the
+build page, section 3a.
