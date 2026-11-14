@@ -77,26 +77,36 @@ the card, so the Apple still sees the block as written; the log is the evidence.
 
 | Board | Gateware | Firmware | Status |
 |---|---|---|---|
-| a2p25 displayport1 | `hdd.sv` fix (full core `a2p25.gprj`) | ESP32 225, logging only | built 2026-11-13 (see below), not flashed |
+| a2p25 displayport1 | `hdd.sv` fix (full core `a2p25.gprj`) | ESP32 225, logging only | built clean 2026-11-13, 3 of 3 placements 0/0 (see below); committed `impl/pnr/a2p25.fs`; not flashed |
 | a2mega 1.0a3 | same `hdd.sv` | ESP32 103, logging only | not built here; a2mega timing is knife-edge, build when a bench slot opens |
 | a2n20v2-Enhanced | same `hdd.sv` | BL616 `firmware_host/disk.c` still forces HDD units read-only | containment left in place; lift it after a write test on that board |
 
 ### a2p25 build result (2026-11-13)
 
-`tools/build.sh a2p25` on this branch: bitstream produced, **2 setup violations, 0 hold**, both
-in `i_hr_ctrl` (hyperram_ctrl) on clk_mem/clk_hr cross-domain paths: `rq_data_m RAMREG ->
-cal_fail_s1/CE` at −0.382 ns and `req_tgl_s1 -> have_hw0_s1/RESET` at −0.079 ns. Neither touches
-the HDD card (`top/hdd`: LUT +12, REG +7 for the fix, no violated endpoint). CLS is at 97 %, so
-placement moves from build to build. A control build of the unchanged tree (9eb3c8dc, same
-tool, same day) gives **14 setup violations, all in `i_hr_ctrl`, same clk_mem -> clk_hr cone,
-worst −0.783 ns** (`rq_wp_m_1_s4 -> c_len_*_s1/CE`). The a2p25 full core has therefore not
-closed timing since the 2026-11-05 hyperram_ctrl latency-cone retime; the HDD fix neither
-causes nor cures that, and the cone is a separate task (`hdl/hyperram/hyperram_ctrl.sv`,
-clk_mem-domain request/pointer registers feeding clk_hr-domain CE/RESET). Until it is closed
-there is no clean full-core bitstream to flash; the committed `impl/pnr/a2p25.fs` is Ed's
-earlier build and was left in place. The resource snapshot
-(`impl/a2p25_resources.json`) was regenerated; its `i_hr_ctrl` delta (+301 LUT, +142 REG) is the
-2026-11-05 latency-cone retime landing in the snapshot, not this change.
+The first full-core build with the fix (2 setup violations) and a control build of the unchanged
+tree (14) both failed in `i_hr_ctrl` on the clk_mem -> clk_hr request/pointer cone: the a2p25 full
+core had not closed timing since the 2026-11-05 hyperram_ctrl latency-cone retime, and the HDD
+fix neither caused nor cured that. That cone was closed structurally in `hyperram_ctrl.sv` /
+`hyperram_phy_gw5a.sv` (MODERNIZATION_PLAN.md §4.5, commit c8a1dfb7) and merged into this branch
+(960e7e0e).
+
+Three placements of the merged source (`tools/build.sh a2p25`, Gowin V1.9.12.01), each
+**0 setup, 0 hold, TNS 0 on every clock, every clock above its constraint**:
+
+| Placement | Design worst setup slack | Where | clk_mem Fmax (vs 108) | clk100 Fmax (vs 100) |
+|---|---|---|---|---|
+| 1 | +0.757 ns | `i_hr_ctrl` cyc -> state CE, clk_mem internal | 117.6 MHz | 118.0 MHz |
+| 2 | +0.794 ns | DP AUX `train_interval_r`, clk100 | 124.7 MHz | 108.6 MHz |
+| 3 (committed `impl/pnr/a2p25.fs`, sha256 `6767d681…`) | +0.549 ns | DP PHY `rd_pair` gray-pointer CE, clk_tx | 146.7 MHz | 106.4 MHz |
+
+No `top/hdd` path appears in any roll's top-25 setup table. The HDD card costs +12 LUT / +7 REG
+(`top/hdd` 304 LUT, 166 REG, 1 BSRAM). CLS is at 98 %, so the design-wide worst slack is set by
+thin pre-existing cones outside the controller and still moves roll to roll; the structural
+candidates are listed in MODERNIZATION_PLAN.md §4.5. The resource snapshot
+(`impl/a2p25_resources.json`) is the third placement's.
+
+Benches on the merged source: `sim/disk/run.sh` PASS; `make hyperram` (board-delay sweep 0–4000 ps)
+and `make hyperram_bist` PASS in `boards/a2p25/tests`.
 
 ## What to flash and test (Ed)
 
