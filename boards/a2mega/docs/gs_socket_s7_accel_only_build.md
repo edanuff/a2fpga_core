@@ -1,10 +1,10 @@
 # S7 — the accelerator-only build
 
 Status: on hardware since 2026-11-12 (section 3). The DDR3 build of
-section 3b (k0) is on the card since 2026-11-13 and runs the benchmark 12
-to 14 times faster than the machine (section 3c). That run found a defect
-in the near memory's empty entry; the fix is built and simulated, **not
-flashed** (section 3c).
+section 3b ran on 2026-11-13 and runs the benchmark 12 to 14 times faster
+than the machine (section 3c). That run found a defect in the near
+memory's empty entry; the build with the fix (m0) is on the card since
+18:21 the same day and ran the same benchmark without it (section 3c).
 Parents: [`gs_socket_s7_accelerator_scoping.md`](gs_socket_s7_accelerator_scoping.md)
 (what the accelerator is) and
 [`gs_socket_s7_fast_core_exploration.md`](gs_socket_s7_fast_core_exploration.md)
@@ -558,13 +558,47 @@ front of the DDR3 did not overflow (word 12 still `057E`).
 violation in any (worst slack +0.024, +0.002 and +0.018 ns; the tool
 stops when the constraint is met). Size as k0 (11,050 logic cells, 11,416
 FF, 192 block RAMs). Build m0: stamp `20261113175022`,
-bitstream sha256 `aaa7ca899b7fcd5a…bdfa95db0a7fa73711`. **Not flashed:**
-k0 is on the card. On k0 a ROM copy or a power cycle leaves empty entries
-again. A 64K fill from the monitor after the copy and before card memory
-goes on (`00<02/0000.FFFFZ`: the card follows every write) rewrites every
-index, and is what the run above rested on.
+bitstream sha256 `aaa7ca899b7fcd5a…bdfa95db0a7fa73711`. (On k0 a ROM
+copy or a power cycle leaves empty entries again; a 64K fill from the
+monitor after the copy and before card memory goes on,
+`00<02/0000.FFFFZ`, rewrites every index - the card follows every write -
+and is what the run above rested on.)
 
-**Not known, not done.** The fixed build on hardware. A run longer than
+**The fixed build on hardware** (m0 flashed 18:17 to 18:21 with the IIgs
+off, first attempt, verified; the card power-cycled). Word 12 `057E`, no
+stall, copy sum `7EE8`. Then the step that crashed k0, with nothing
+written from the monitor: GS/OS up, the benchmark at its first prompt,
+card memory at PHI2 pace straight after the copy for 5 s and for 60 s -
+verify count 0, no mismatch address. The benchmark's base pass was run on
+socket bytes (register 29 = `0x08`), so it is the machine's; at the
+program's prompt for the speed, card memory for 20 s more (verify count
+still 0) and fast mode at 18:34:35:
+
+| test | base | m0, fast | ratio | the program's MHz |
+|---|---|---|---|---|
+| 10 iterations of the sieve | 413 | 33 | 12.5 | 31.59 |
+| selection sort of 500 strings | 1159 | 88 | 13.2 | 33.22 |
+| 100 iterations of a floating-point test | 476 | 35 | 13.6 | 36.73 |
+| 15,000 Gamm units | 1546 | 130 | 11.9 | 31.63 |
+| 10 iterations of Fibonacci calls | 2020 | 158 | 12.8 | 32.24 |
+| 5,000 iterations of integer math | 1564 | 114 | 13.7 | 34.61 |
+
+The program's average is 33.34 MHz, and every time is k0's: the fix adds
+no logic and costs nothing. The base pass is the base pass of section 3
+to the tick. Rates at the prompt as on k0 (15.4 M steps a second, 0.45 M
+socket cycles). The build has no stamp that can be read over telnet: that
+m0 is what runs rests on the verified flash, the power cycle (the verify
+count, which only a reconfiguration clears, was back at 0) and the step
+that no longer fails. No access to bank 7F was among the socket samples
+taken during the 65 s, so the bench (T24) and the benchmark are the
+evidence for that RAM, not those seconds alone.
+
+Entered as 52.5 MHz, the program expects the sieve in 19.9 ticks and gets
+33; its average of 33.34 MHz is 64 % of the step rate. What the rest is
+spent on (socket cycles, near misses that bring one byte from the DDR3)
+is not measured yet.
+
+**Not known, not done.** A run longer than
 the benchmark. The round trip's real length, and what a larger working
 set does to the 16K entries. The DDR3's power-on self-test writes sixteen
 bytes of its pattern at 40/0000 before the card is armed; nothing reads
@@ -674,7 +708,7 @@ check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
-Provenance of m0 (the empty-entry fix, section 3c; not flashed): sources
+Provenance of m0 (the empty-entry fix, section 3c; on the card): sources
 = the commit that adds this paragraph; the same tool and device; build
 stamp `20261113175022`; bitstream sha256
 `aaa7ca899b7fcd5a…bdfa95db0a7fa73711`.

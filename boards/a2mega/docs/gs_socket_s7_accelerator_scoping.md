@@ -11,8 +11,8 @@ that showed is fixed in the source (§10.5); two expansion banks in block
 RAM as a stopgap for S7d (§10.6), then S7d itself on the DDR3 (§10.7), built
 at 105 MHz.** **2026-11-13: S7d ran on the machine. Every test of the
 benchmark is 12 to 14 times the machine's speed (the program's average
-33 MHz); the run found a defect in the near memory's empty entry, fixed in
-the source and not yet flashed (§10.7).**
+33 MHz); the run found a defect in the near memory's empty entry, fixed,
+flashed and run the same day (§10.7).**
 
 ## 0. Summary
 
@@ -986,5 +986,6 @@ power-up zeros read as it. Before that fix was built, with every entry
 rewritten by hand from the monitor, the same bitstream ran the benchmark
 in fast mode: 12 to 14 times the machine on every test, the program's own
 code in bank 04 nine times faster than with two banks of block RAM. The
-fixed source meets timing on three placements at 105 MHz and is not
-flashed.
+fixed source meets timing on three placements at 105 MHz. Flashed the
+same evening, it ran card memory under GS/OS straight after the ROM copy
+with a verify count of 0, and the benchmark with the same times.
