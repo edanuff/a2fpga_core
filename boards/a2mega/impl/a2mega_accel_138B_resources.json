@@ -14,7 +14,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 73,
+"lut": 68,
 "reg": 0,
 "rom16": 0,
 "ssram": 0
@@ -32,7 +32,7 @@
 "alu": 104,
 "bsram": 0,
 "dsp": 0,
-"lut": 303,
+"lut": 309,
 "reg": 74,
 "rom16": 0,
 "ssram": 0
@@ -41,7 +41,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 445,
+"lut": 448,
 "reg": 104,
 "rom16": 0,
 "ssram": 0
@@ -95,7 +95,7 @@
 "alu": 60,
 "bsram": 9,
 "dsp": 0,
-"lut": 808,
+"lut": 807,
 "reg": 975,
 "rom16": 0,
 "ssram": 0
@@ -104,13 +104,13 @@
 "alu": 22,
 "bsram": 1,
 "dsp": 0,
-"lut": 45,
+"lut": 46,
 "reg": 60,
 "rom16": 0,
 "ssram": 0
 },
 "top/g_na[0].AddrBusNextInc": {
-"alu": 111,
+"alu": 109,
 "bsram": 0,
 "dsp": 0,
 "lut": 10,
@@ -119,7 +119,7 @@
 "ssram": 0
 },
 "top/g_na[1].AddrBusNextInc": {
-"alu": 110,
+"alu": 111,
 "bsram": 0,
 "dsp": 0,
 "lut": 0,
@@ -149,7 +149,7 @@
 "alu": 0,
 "bsram": 2,
 "dsp": 0,
-"lut": 122,
+"lut": 119,
 "reg": 30,
 "rom16": 0,
 "ssram": 0
@@ -185,7 +185,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 545,
+"lut": 552,
 "reg": 195,
 "rom16": 0,
 "ssram": 0
@@ -209,10 +209,10 @@
 "ssram": 0
 },
 "top/u_brk": {
-"alu": 251,
+"alu": 255,
 "bsram": 0,
 "dsp": 0,
-"lut": 1008,
+"lut": 1047,
 "reg": 669,
 "rom16": 0,
 "ssram": 0
@@ -221,7 +221,7 @@
 "alu": 22,
 "bsram": 0,
 "dsp": 0,
-"lut": 88,
+"lut": 86,
 "reg": 90,
 "rom16": 0,
 "ssram": 0
@@ -230,7 +230,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 1497,
+"lut": 1395,
 "reg": 228,
 "rom16": 0,
 "ssram": 0
@@ -248,7 +248,7 @@
 "alu": 18,
 "bsram": 0,
 "dsp": 0,
-"lut": 217,
+"lut": 220,
 "reg": 343,
 "rom16": 0,
 "ssram": 0
@@ -257,7 +257,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 68,
+"lut": 64,
 "reg": 0,
 "rom16": 0,
 "ssram": 0
@@ -266,7 +266,7 @@
 "alu": 61,
 "bsram": 0,
 "dsp": 0,
-"lut": 117,
+"lut": 118,
 "reg": 152,
 "rom16": 0,
 "ssram": 0
@@ -284,7 +284,7 @@
 "alu": 16,
 "bsram": 0,
 "dsp": 0,
-"lut": 53,
+"lut": 51,
 "reg": 38,
 "rom16": 0,
 "ssram": 0
@@ -293,7 +293,7 @@
 "alu": 0,
 "bsram": 0,
 "dsp": 0,
-"lut": 86,
+"lut": 84,
 "reg": 39,
 "rom16": 0,
 "ssram": 0
@@ -305,11 +305,11 @@
 340
 ],
 "CLS": [
-11671,
+11630,
 69120
 ],
 "Logic": [
-11131,
+11070,
 138240
 ],
 "PLL": [

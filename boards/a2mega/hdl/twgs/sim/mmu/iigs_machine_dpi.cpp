@@ -42,6 +42,13 @@ void mach_config(int ram_banks)
 
 void mach_reset(int m) { M(m).reset(); }
 
+// a byte of fast RAM as it is before anything has written it (both machines)
+void mach_poke(int addr, int data)
+{
+    M(0).fast[(uint32_t)addr & 0x7FFFFF] = (uint8_t)data;
+    M(1).fast[(uint32_t)addr & 0x7FFFFF] = (uint8_t)data;
+}
+
 int mach_peek(int m, int addr, int vpb_n)
 {
     return M(m).peek((uint32_t)addr & 0xFFFFFF, vpb_n != 0);

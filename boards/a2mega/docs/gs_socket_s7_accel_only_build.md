@@ -1,8 +1,10 @@
 # S7 — the accelerator-only build
 
-Status: on hardware since 2026-11-12 (section 3; the block-RAM build of
-section 3a is on the card). The DDR3 build of section 3b is built and
-simulated, **not flashed**.
+Status: on hardware since 2026-11-12 (section 3). The DDR3 build of
+section 3b (k0) is on the card since 2026-11-13 and runs the benchmark 12
+to 14 times faster than the machine (section 3c). That run found a defect
+in the near memory's empty entry; the fix is built and simulated, **not
+flashed** (section 3c).
 Parents: [`gs_socket_s7_accelerator_scoping.md`](gs_socket_s7_accelerator_scoping.md)
 (what the accelerator is) and
 [`gs_socket_s7_fast_core_exploration.md`](gs_socket_s7_fast_core_exploration.md)
@@ -311,7 +313,7 @@ fifty samples, and none above it. Where a program is loaded on this
 machine was the thing not known, and two banks do not reach it. Not
 sampled while a test was running.
 
-## 3b. Expansion memory on the DDR3, at 105 MHz (2026-11-13, not flashed)
+## 3b. Expansion memory on the DDR3, at 105 MHz (2026-11-13)
 
 The benchmark of section 3a runs from bank 04: sampled at PHI2 pace (every
 step on the socket), 70 % of the steps of its sieve, sort, call and integer
@@ -445,7 +447,128 @@ hardware only at 110 MHz; at 105 MHz its points are the same counts of a
 clk 4.8 % longer (in simulation at 100, 105, 108 and 110 MHz). The round trip's real length.
 What a program's working set does to a 16K-entry cache of single bytes when
 a miss costs 25 clks and brings one byte (the arbiter returns a 32-bit
-word, of which three bytes are dropped). Not run on hardware.
+word, of which three bytes are dropped). Not run on hardware. (It has
+been since: section 3c.)
+
+## 3c. The DDR3 build on hardware: a crash, its cause, the benchmark (2026-11-13)
+
+k0 was flashed at 14:14 with the IIgs off (first attempt, verified) and
+the card power-cycled. ROM 01 machine, the a2p25 beside it, as section 3.
+
+**What worked at once.** Telemetry word 12 reads `057E`: the DDR3
+calibrated, the queue never overflowed, 126 banks. The socket PHY at
+105 MHz: armed 22 ms after the slot's /RESET rose, no stall. Key and copy:
+one copy, sum `7EE8`.
+
+**The first switch to card memory crashed the machine.** GS/OS was up and
+the benchmark at its prompt. Register 29 = `0x0A` (card memory at PHI2
+pace, verify on): inside two seconds the verify count was at its ceiling
+(65,535), the core was executing in bank 67, the keyboard dead. Back to
+`0x08` (socket bytes; fast mode had not run) and a reset.
+
+**What the monitor cleared.** From the IIgs monitor, with card memory on
+for the reads: a 64K fill of bank 02 and its dump; single bytes in every
+lane of the DDR3's word in banks 02, 04 and 08; a bank of `EA` executed
+end to end (65,535 steps) and a bank of `AD` (21,845 instructions) in bank
+04. Nothing wrong. Then GS/OS again with the benchmark at its prompt, in
+card memory at PHI2 pace: eleven short pulses, then 7 s, 30 s and 240 s
+without a mismatch. So the DDR3, the queue, the byte lanes and the tagging
+of the high banks are good on hardware, and the crash did not come back.
+
+**The cause: an entry that held nothing carried the tag of RAM at
+7F/C000-FFFF.** An empty near-memory entry was marked by a tag of all
+ones. That was no byte's tag while the tag held A14-A17: RAM has a zero in
+the first of its two leading bits, ROM in the second. Section 3b marks RAM
+above bank 03 with both set, and all ones became a real tag: {1, 1} and
+A14-A22 all ones is the top 16K of bank 7F. The entries are empty at
+power-up (the block RAM's zeros, stored inverted) and after a ROM copy,
+which empties all 16,384. A read of 7F/C000-FFFF then found its index
+empty and took the empty entry's byte for the memory's. GS/OS keeps code
+and data at the top of the last bank (the socket showed `7F/C363` in use),
+so the first card-memory run after the copy went wrong at once. The
+monitor's fills had rewritten every one of the 16,384 indices with real
+entries, which is why nothing failed afterwards: the fault needs an entry
+that is still empty.
+
+The bench did not have it. Its expansion memory stopped at 16 banks, its
+runs used 8, and an empty entry's byte was 00, the same as memory nothing
+had written.
+
+**The fix.** The empty entry has a tag of its own (`NM_EMPTY` in
+`gs_accel_broker`): with the split tag, {1, 1} and A18-A22 all zero, a
+combination no byte has, because {1, 1} is only ever written for RAM with
+one of those bits set. (Without the split tag it stays all ones.) The
+broker writes it on a flush and for a byte the tag cannot name. In
+`gs_accel` the five high address bits are now stored as they are and the
+fourteen others inverted as before, so a block RAM's power-up zeros read
+as exactly that tag. No logic is added; the first-clk compare is as it
+was.
+
+In the bench: the expansion memory reaches bank 7F (`EXP_MAX = 126`); an
+empty entry's byte is `EE`; one byte of bank 7F holds `D9` in every memory
+model before anything runs. The test program has T24: it reads that byte
+(nothing has written it), writes and reads 7F/E100 against bank 00's
+6100 at the same index, and reads both again on every pass of its loop,
+so a ROM copy in the middle of the run (`+recopy`) empties the near memory
+under them. Two builds have all 126 banks at 105 MHz (`b105_2t`, and
+`b105_2k` with the ROM image empty for `+mode=copy`), `gs_accel` beside
+the design in both. And in every simulation build the broker checks at
+elaboration that the empty tag is no RAM page's and no ROM page's, for the
+parameters it is built with.
+
+Before the fix, on those builds: PHI2-paced, fast and toggling runs fail
+at the read of the unwritten byte (the broker delivers the empty entry's
+`EE`), and the copy-again run fails at 7F/E100 in the first loop pass
+after the second copy ("the broker delivered 00, the ideal machine holds
+7e") - the crash of this section. With the broker fixed and `gs_accel`'s storage left as it
+was, the pin comparison fails (`gs_accel` answers 00 out of an entry its
+block RAM powered up with). With the fix, the broker suite passes 152 of
+152 runs (the 140 of section 3b, eight of T24's on the two new builds, and
+a ROM 01 boot with 126 banks in native, paced, fast and copy mode: the
+step hash `6012b76169ecc820` and the 128,393-write stream of every other
+boot). The decode sweep (981,101,952 vectors), the replica benches and
+both socket benches pass.
+
+**The benchmark on k0** (the bitstream with the defect, after the
+monitor's fills, so with no empty entry left; fast mode on at 15:10:41).
+The program was run twice, both passes in fast mode. 60ths of a second;
+"machine" is the base pass of section 3, "fe2" the block-RAM build of
+section 3a:
+
+| test | machine | fe2, fast | k0, first pass | k0, second pass | against the machine | against fe2 | the program's MHz |
+|---|---|---|---|---|---|---|---|
+| 10 iterations of the sieve | 413 | 318 | 33 | 33 | 12.5 | 9.6 | 31.59 |
+| selection sort of 500 strings | 1159 | 795 | 88 | 88 | 13.2 | 9.0 | 33.22 |
+| 100 iterations of a floating-point test | 476 | 38 | 35 | 35 | 13.6 | 1.09 | 36.73 |
+| 15,000 Gamm units | 1546 | 240 | 130 | 130 | 11.9 | 1.85 | 31.63 |
+| 10 iterations of Fibonacci calls | 2020 | 1401 | 158 | 158 | 12.8 | 8.9 | 32.24 |
+| 5,000 iterations of integer math | 1564 | 853 | 115 | 114 | 13.6 | 7.4 | 34.61 |
+
+The program's average is 33.34 MHz (fe2: 11.03). The four tests that run
+the program's own code in bank 04 are nine times faster than on fe2, which
+took every one of those steps from the socket; they are now within ten
+percent of the floating-point test, whose work is in the ROM and bank 00
+and was the card's already. One tick is three percent of the short tests.
+At the program's prompt the core steps 15.4 M times a second and takes
+0.45 M socket cycles a second of the machine's 1.68 M; 9.5 M reads a
+second are answered by the near memory and 0.5 M are not. The queue in
+front of the DDR3 did not overflow (word 12 still `057E`).
+
+**The fixed source, built.** Three placements at 105 MHz, no setup or hold
+violation in any (worst slack +0.024, +0.002 and +0.018 ns; the tool
+stops when the constraint is met). Size as k0 (11,050 logic cells, 11,416
+FF, 192 block RAMs). Build m0: stamp `20261113175022`,
+bitstream sha256 `aaa7ca899b7fcd5a…bdfa95db0a7fa73711`. **Not flashed:**
+k0 is on the card. On k0 a ROM copy or a power cycle leaves empty entries
+again. A 64K fill from the monitor after the copy and before card memory
+goes on (`00<02/0000.FFFFZ`: the card follows every write) rewrites every
+index, and is what the run above rested on.
+
+**Not known, not done.** The fixed build on hardware. A run longer than
+the benchmark. The round trip's real length, and what a larger working
+set does to the 16K entries. The DDR3's power-on self-test writes sixteen
+bytes of its pattern at 40/0000 before the card is armed; nothing reads
+them back before writing, as far as is known, and they are still there.
 
 ## 4. What is verified, and what is not
 
@@ -477,6 +600,9 @@ Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):
   copy.
 - The suite is 88 runs, all passing; the CPU lockstep bench is unchanged by
   this build.
+- The empty near-memory entry (section 3c, found on hardware): all 126
+  banks in two builds at 105 MHz, a byte at the top of bank 7F read before
+  anything wrote it and again after a ROM copy; the suite is 152 runs.
 - The early socket request (scoping doc §10.5): a test of code and 16-bit
   data in a Mega II bank, also called from the interrupt-enabled loop; a
   bench property that no idle cycle is issued in front of a socket-only
@@ -547,6 +673,11 @@ The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of m0 (the empty-entry fix, section 3c; not flashed): sources
+= the commit that adds this paragraph; the same tool and device; build
+stamp `20261113175022`; bitstream sha256
+`aaa7ca899b7fcd5a…bdfa95db0a7fa73711`.
 
 Provenance of k0 (the DDR3 build at 105 MHz, section 3b): sources = the
 commit that adds this paragraph; the same tool and device; build stamp

@@ -341,7 +341,11 @@ module gs_accel #(
     // before, and are all the cheap view needs (the broker marks a tag with a high
     // address bit in them: nm_tag); the high address bits are in blocks of their own,
     // read a clk later at the step's address (a register), and need no floorplan.
-    // Stored inverted, all of it.
+    // The fourteen are stored inverted and the high address bits as they are: a block
+    // RAM powers up all zeros, and that must read as the broker's empty entry
+    // (NM_EMPTY: the mark of a high address bit, with none set).  Stored inverted too,
+    // the zeros read as RAM at the top of bank 7F: a byte there was read out of an
+    // entry that held nothing, after power-up and after every ROM copy.
     wire [NM_LO-1:0]  nm_wv  = EXP_DDR ? {~nm_wtag[NTW-1:NTW-2], ~nm_wtag[3:0], nm_wdata}
                                        : (NM_LO)'({~nm_wtag, nm_wdata});
     logic [NM_LO-1:0] nm_q;
@@ -364,7 +368,7 @@ module gs_accel #(
         logic               hq_we;
         logic [NEAR_AW-1:0] hq_a;
         logic [NM_HI-1:0]   hq_d;
-        always_ff @(posedge clk) begin hq_we <= nm_wen; hq_a <= nm_wa; hq_d <= ~nm_wtag[NEAR_KW-1:4]; end
+        always_ff @(posedge clk) begin hq_we <= nm_wen; hq_a <= nm_wa; hq_d <= nm_wtag[NEAR_KW-1:4]; end
         for (genvar b = 0; b < NM_HI; b++) begin : g_nh
             logic nmemh [0:(1<<NEAR_AW)-1];
             always_ff @(posedge clk) if (nm_ren_hi) nh_q[b] <= nmemh[nm_ra_hi];
@@ -373,7 +377,7 @@ module gs_accel #(
             initial begin for (int i = 0; i < (1<<NEAR_AW); i++) nmemh[i] = 1'b0; nh_q[b] = 1'b0; end
 `endif
         end
-        assign nm_rtag = {~nm_q[13:12], ~nh_q, ~nm_q[11:8]};
+        assign nm_rtag = {~nm_q[13:12], nh_q, ~nm_q[11:8]};
     end else begin : g_whole
         assign nm_rtag = ~nm_q[8 +: NTW];
     end

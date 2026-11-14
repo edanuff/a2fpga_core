@@ -9,7 +9,10 @@ from sections 2–7.** **2026-11-12: an accelerator-only board build exists
 (§10.4); it ran on a ROM 01 machine the same day, and the first defect
 that showed is fixed in the source (§10.5); two expansion banks in block
 RAM as a stopgap for S7d (§10.6), then S7d itself on the DDR3 (§10.7), built
-at 105 MHz and not run.**
+at 105 MHz.** **2026-11-13: S7d ran on the machine. Every test of the
+benchmark is 12 to 14 times the machine's speed (the program's average
+33 MHz); the run found a defect in the near memory's empty entry, fixed in
+the source and not yet flashed (§10.7).**
 
 ## 0. Summary
 
@@ -945,7 +948,7 @@ build page, section 3a.
 
 Built, in simulation and as a board build that meets timing at 105 MHz
 (52.5 MHz steps) on three placements; at 110 MHz it does not hold, and the
-build page (section 3b) has the seven rounds. Not run. The build page has
+build page (section 3b) has the seven rounds. The build page has
 the description and the numbers. What differs
 from section 2.2 and the plan of section 7:
 
@@ -971,3 +974,17 @@ from section 2.2 and the plan of section 7:
 - **A defect in the first version** (a step held by a full queue after its
   socket request had been raised ahead) was found by forcing the queue
   full in the bench, and fixed before any bitstream ran.
+
+**On hardware, 2026-11-13** (build page, section 3c). The DDR3 calibrated
+and the queue never overflowed. The first switch to card memory under
+GS/OS crashed: the widened tag had made "all ones", the mark of an empty
+near-memory entry, the real tag of RAM at 7F/C000-FFFF, so after a ROM
+copy a read there took an empty entry's byte. The bench ran no bank above 09
+and never read that RAM from an empty entry; it now has all 126 banks
+and does. The empty entry has a tag no byte has, and the block RAM's
+power-up zeros read as it. Before that fix was built, with every entry
+rewritten by hand from the monitor, the same bitstream ran the benchmark
+in fast mode: 12 to 14 times the machine on every test, the program's own
+code in bank 04 nine times faster than with two banks of block RAM. The
+fixed source meets timing on three placements at 105 MHz and is not
+flashed.

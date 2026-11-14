@@ -768,6 +768,13 @@ module gs_accel_broker #(
     function automatic logic nm_far_only(input logic [23:0] phys);      // a RAM byte the tag cannot name
         nm_far_only = (NEAR_KW < 10) ? |(phys >> (14 + NEAR_KW)) : 1'b0;
     endfunction
+    // An entry that holds nothing has a tag no byte has.  All ones, where that is one:
+    // not with NEAR_SPLIT, where all ones is RAM in the top 16K of the last bank the tag
+    // reaches (bank 7F with NEAR_KW = 9).  There the mark {1, 1} is only ever on RAM with
+    // an address bit above A17, so {1, 1} with none of them is free: the empty entry, its
+    // low four address bits ones.  (The cheap view never takes it: no tag of its own has
+    // {1, 1}.  The memory that holds the entries must power up with it: gs_accel.)
+    localparam logic [NTW-1:0] NM_EMPTY = NEAR_SPLIT ? NTW'((3 << NEAR_KW) | 15) : '1;
     logic              near_r;            // the core's data is the near memory's (else alt_q)
     logic [7:0]        alt_q;             // far-memory data or the socket byte, registered
     logic              fill_pend, fill_ok, nfill_r;
@@ -920,14 +927,14 @@ module gs_accel_broker #(
     // clk before that), unless the byte is never served from the near memory.
     wire                w_calias = (eff_addr[15:12] == 4'hC) & ~|d_phys[23:17];
     wire [NEAR_AW-1:0]  w_idx    = {eff_addr[NEAR_AW-1:13], eff_addr[12] | w_calias, eff_addr[11:0]};
-    wire [NTW-1:0]      w_tag    = nm_far_only(d_phys) ? '1 : nm_tag(1'b0, d_phys, 4'd0, w_idx[12]);
+    wire [NTW-1:0]      w_tag    = nm_far_only(d_phys) ? NM_EMPTY : nm_tag(1'b0, d_phys, 4'd0, w_idx[12]);
     assign nm_ren_o   = NEAR & cpu_ce_o;
     assign nm_ra_o    = cpu_na_i[NEAR_AW-1:0];
     // (held, nm_flush_i: the entry is made empty)
     wire   nm_flush   = nm_flush_i & held_r;
     assign nm_wen_o   = NEAR & (lm_wen | nfill_r | nm_flush);
     assign nm_wa_o    = nm_flush ? nm_flush_idx_i : nfill_r ? fill_idx : widx_r;
-    assign nm_wtag_o  = nm_flush ? '1 : nfill_r ? fill_tag : wtag_r;
+    assign nm_wtag_o  = nm_flush ? NM_EMPTY : nfill_r ? fill_tag : wtag_r;
     assign nm_wdata_o = nfill_r ? alt_q    : wd_r;
 
     // next values of the registers `sel` is made of (the same as in the block below;
@@ -1298,7 +1305,7 @@ module gs_accel_broker #(
         if (mode_native || st != ST_ADDR || ph != 4'd1 || ce_r ||
             (internal ? r_side : !r_local) || (!internal && eff_we && (r_fwd || !r_local_we || r_phys !== f_phys)) ||
             (!internal && !eff_we && !(near_r && use_lm_r && !r_nc && f_tag === r_tag)) ||
-            (!internal && eff_we && f_tag !== (nm_far_only(r_phys) ? '1 : nm_tag(1'b0, r_phys, 4'd0, w_idx[12])))) begin
+            (!internal && eff_we && f_tag !== (nm_far_only(r_phys) ? NM_EMPTY : nm_tag(1'b0, r_phys, 4'd0, w_idx[12])))) begin
             $display("ERROR: the cheap view completed a step the full decode would not: a=%06h int %b we %b local %b side %b fwd %b @%0t",
                      eff_addr, internal, eff_we, r_local, r_side, r_fwd, $time);
             $finish;
@@ -1385,6 +1392,23 @@ module gs_accel_broker #(
     // the cheap view's tag never has an address bit above the low four, nor the mark of one
     always @(posedge clk) if (rst_n && NEAR && NEAR_KW > 4 && (fa0 | fb0) && ((|f_tag[NTW-3:4]) || (&f_tag[NTW-1:NTW-2]))) begin
         $display("ERROR: broker cheap-view tag with a high address bit: %h @%0t", f_tag, $time); $finish;
+    end
+    // the empty entry's tag is no byte's: not any RAM's the tag can name, nor any ROM's
+    initial if (NEAR) begin
+        for (int k = 0; k < (1 << (10 + 1)); k++) begin
+            logic [23:0] ph;
+            ph = 24'(k >> 1) << 14;
+            if (!nm_far_only(ph) && nm_tag(1'b0, ph, 4'd0, k[0]) === NM_EMPTY)
+                $fatal(1, "gs_accel_broker: the empty near-memory tag is RAM %06h's", ph);
+        end
+        for (int k = 0; k < 16; k++)
+            if (nm_tag(1'b1, 24'd0, 4'(k), 1'b0) === NM_EMPTY) $fatal(1, "gs_accel_broker: the empty near-memory tag is a ROM tag");
+    end
+    // an entry is never written with the empty tag but to empty it
+    // (or for a byte the tag cannot name, whose entry is emptied by its write)
+    always @(posedge clk) if (rst_n && nm_wen_o && !nm_flush && nm_wtag_o === NM_EMPTY &&
+                              (nfill_r || !nm_far_only(wa_r))) begin
+        $display("ERROR: broker: a near-memory entry written with the empty tag: index %h @%0t", nm_wa_o, $time); $finish;
     end
     // nothing moves A12 in RAM above bank 03 (the mark takes that bit's place)
     always @(posedge clk) if (rst_n && NEAR_SPLIT && mem_evt && (lm_read | lm_write) && ~d_local_rom && (|d_phys[23:18]) &&

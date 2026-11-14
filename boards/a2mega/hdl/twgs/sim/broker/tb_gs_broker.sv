@@ -88,6 +88,7 @@ module tb_gs_broker #(
     import "DPI-C" function int  mach_load_rom(input string path);
     import "DPI-C" function void mach_config(input int ram_banks);
     import "DPI-C" function void mach_reset(input int m);
+    import "DPI-C" function void mach_poke(input int addr, input int data);
     import "DPI-C" function int  mach_peek(input int m, input int addr, input int vpb_n);
     import "DPI-C" function void mach_commit(input int m, input int addr, input int we, input int data, input int vpb_n);
     import "DPI-C" function int  mach_class(input int m, input int addr, input int we, input int vpb_n);
@@ -119,7 +120,11 @@ module tb_gs_broker #(
     localparam real T_ACC   = 100.0;   // read data driven this long after the rise
     localparam real T_GARB  = 35.0;    // garbage driven until fall + T_GARB
     localparam logic [23:0] PARK = 24'hFF0000;
-    localparam int EXP_MAX = 16;       // expansion banks the bench can back
+    localparam int EXP_MAX = 126;      // expansion banks the bench can back (02-7F)
+    // RAM does not power up empty: one byte of bank 7F, where the machine has it, that
+    // nothing writes (T24 reads it: out of the memory, not out of an entry that holds nothing)
+    localparam logic [23:0] TOP_A = 24'h7FD955;
+    localparam logic [7:0]  TOP_D = 8'hD9;
 
     //---------------------------------------------------------------- clocks
     logic clk = 1'b0;
@@ -194,6 +199,8 @@ module tb_gs_broker #(
     // no read may be launched within two clks of a write)
     logic        lm_wen_q1 = 1'b0, lm_wen_q2 = 1'b0;
     localparam int NTW = NEAR_KW + 2;
+    // the tag of an entry that holds nothing (the broker's NM_EMPTY)
+    localparam logic [NTW-1:0] NM_EMPTY = EXP_DDR ? NTW'((3 << NEAR_KW) | 15) : '1;
     logic               nm_ren, nm_wen;
     logic [NEAR_AW-1:0] nm_ra, nm_wa;
     logic [7:0]         nm_rdata, nm_wdata;
@@ -305,7 +312,7 @@ module tb_gs_broker #(
         if (copy_busy_q && !copy_busy && copy_valid) begin
             int n_left;
             n_left = 0;
-            for (int i = 0; i < (1<<NEAR_AW); i++) if (nmt[i] != '1) n_left++;
+            for (int i = 0; i < (1<<NEAR_AW); i++) if (nmt[i] != NM_EMPTY) n_left++;
             if (n_left != 0) begin $display("ERROR: %0d near memory entries left after a ROM copy", n_left); $finish; end
         end
     end
@@ -336,11 +343,12 @@ module tb_gs_broker #(
             .m_wdata_i(xm_wdata), .m_rvalid_o(xm_rvalid), .m_rdata_o(xm_rdata)
         );
         assign xq_skip_w = (u_xq.skip != 4'd0);
+        initial begin #100; if (cfg_exp >= 126) u_xmem.mem[TOP_A[22:0]] = TOP_D; end
         always @(posedge clk) if (rst_n && xq_ovf) begin $display("ERROR: the expansion memory's queue overflowed"); $finish; end
         // every byte the broker takes from it is the byte the mirror holds
         always @(posedge clk) if (rst_n && xm_rvalid && u_xq.skip == 4'd0 && u_xq.pend) begin
-            if (xm_rdata !== lexp[20'(u_brk.ml_phys - 24'h020000)])
-                begin $display("ERROR: expansion memory gave %02h for %06h, the mirror has %02h", xm_rdata, u_brk.ml_phys, lexp[20'(u_brk.ml_phys - 24'h020000)]); $finish; end
+            if (xm_rdata !== lexp[23'(u_brk.ml_phys - 24'h020000)])
+                begin $display("ERROR: expansion memory gave %02h for %06h, the mirror has %02h", xm_rdata, u_brk.ml_phys, lexp[23'(u_brk.ml_phys - 24'h020000)]); $finish; end
         end
         // at the end of the run: the memory holds what was written to it
         always @(posedge x_check) begin
@@ -380,11 +388,11 @@ module tb_gs_broker #(
             // expansion memory at the physical address.  (The bench returns whichever
             // RAM the physical address names, as a build's data mux will.)
             lm_rom_rdata <= lrom[lm_rom_ra];
-            lm_ram_rdata <= (lm_raddr[23:17] == 7'd0) ? lram[lm_ram_ra] : lexp[lexp_ridx[19:0]];
+            lm_ram_rdata <= (lm_raddr[23:17] == 7'd0) ? lram[lm_ram_ra] : lexp[lexp_ridx[22:0]];
         end
         if (lm_wen) begin
             if (lm_waddr[23:17] == 7'd0) lram[lm_waddr[16:0]] <= lm_wdata;
-            else                         lexp[lexp_widx[19:0]] <= lm_wdata;
+            else                         lexp[lexp_widx[22:0]] <= lm_wdata;
         end
         if (copy_we) lrom[copy_wa] <= copy_wd;
         far_bad   <= (FAR_CLKS == 2) & lm_ren;
@@ -401,7 +409,8 @@ module tb_gs_broker #(
     end
 
     // The near memory: {tag, byte} entries, one read port and one write port,
-    // tags all ones (no entry) at power-up.  A read launched in the clk of a
+    // every entry empty at power-up (and its byte one the memories do not hold: it
+    // is never the core's).  A read launched in the clk of a
     // write to the same index is undefined in a block RAM: here it returns the
     // NEW tag with the wrong byte, the worst case for a broker that used it.
     logic [7:0]     nmd [0:(1<<NEAR_AW)-1];
@@ -412,8 +421,8 @@ module tb_gs_broker #(
         else if (u_brk.st != 2'd3) n_loc_other <= n_loc_other + 1;      // (not a socket step)
     end
     initial begin
-        for (int i = 0; i < (1<<NEAR_AW); i++) begin nmd[i] = 8'h00; nmt[i] = '1; end
-        nm_rdata = 8'h00; nm_rtag = '1;
+        for (int i = 0; i < (1<<NEAR_AW); i++) begin nmd[i] = 8'hEE; nmt[i] = NM_EMPTY; end
+        nm_rdata = 8'h00; nm_rtag = NM_EMPTY;
     end
     always_ff @(posedge clk) begin
         if (nm_ren) begin
@@ -439,7 +448,7 @@ module tb_gs_broker #(
             nmd[nm_wa] <= nm_wdata;
             nmt[nm_wa] <= nm_wtag;
             if (copy_flush) begin
-                if (nm_wtag != '1 || nm_wa != copy_fidx) begin $display("ERROR: near memory flush wrote %04h tag %03h", nm_wa, nm_wtag); $finish; end
+                if (nm_wtag != NM_EMPTY || nm_wa != copy_fidx) begin $display("ERROR: near memory flush wrote %04h tag %03h", nm_wa, nm_wtag); $finish; end
             end else if (u_brk.nfill_r) n_nm_fill <= n_nm_fill + 1; else n_nm_wr <= n_nm_wr + 1;
         end
         if ((nm_ren || nm_wen) && !NEAR) begin $display("ERROR: near memory used without NEAR"); $finish; end
@@ -453,7 +462,7 @@ module tb_gs_broker #(
         logic [23:0] ph;
         logic [7:0]  want;
         n_bad = 0; n_valid = 0;
-        for (int i = 0; i < (1<<NEAR_AW); i++) if (nmt[i] != '1) begin
+        for (int i = 0; i < (1<<NEAR_AW); i++) if (nmt[i] != NM_EMPTY) begin
             n_valid++;
             if (nmt[i][NTW-1] && !(EXP_DDR && nmt[i][NTW-2])) begin
                 want = lrom[{nmt[i][3:0], 14'(i)}];
@@ -462,7 +471,7 @@ module tb_gs_broker #(
                 a12  = (EXP_DDR && nmt[i][NTW-1]) ? i[12] : i[12] ^ nmt[i][NTW-2];
                 ph   = 24'({nmt[i][NEAR_KW-1:0], 14'(i)});
                 ph[12] = a12[0];
-                want = (ph[23:17] == 7'd0) ? lram[ph[16:0]] : lexp[20'(ph - 24'h020000)];
+                want = (ph[23:17] == 7'd0) ? lram[ph[16:0]] : lexp[23'(ph - 24'h020000)];
             end
             if (nmd[i] !== want) begin
                 if (n_bad < 4) $display("   near memory entry %04h tag %03h = %02h, the card's memory has %02h", i, nmt[i], nmd[i], want);
@@ -1209,6 +1218,7 @@ module tb_gs_broker #(
             .clk(clk), .rst_n(rst_n), .m_req_i(am_req), .m_ready_o(am_ready), .m_we_i(am_we), .m_addr_i(am_addr),
             .m_wdata_i(am_wdata), .m_rvalid_o(am_rvalid), .m_rdata_o(am_rdata)
         );
+        initial begin #100; if (cfg_exp >= 126) u_amem.mem[TOP_A[22:0]] = TOP_D; end
     end else begin : g_noam
         assign {am_ready, am_rvalid} = '0; assign am_rdata = '0;
     end
@@ -1263,7 +1273,7 @@ module tb_gs_broker #(
     endtask
 
     // expected test-program results ($0300...): -1 = depends on the configuration
-    int expect_tab [0:84] = '{
+    int expect_tab [0:85] = '{
         'hFF, 'h00, 'h5C, 'h3F, 'h11, 'hC3, 'h3C, 'hA5, 'hA6, 'hA7,
         'h77, 'h5A, 'h5A, 'h00, 'h30, 'hEE, 'h00, 'h11, 'h00, 'hB1,
         'hB1, 'hB1, 'h00, 'hB2, 'h00, 'hB3, 'hC8, 'h00, 'hC9, 'hD1,
@@ -1271,7 +1281,7 @@ module tb_gs_broker #(
         'h5E, 'hE1, 'hE2, 'hE1, -1,   -1,   'hFF, 'h05, 'hC3, 'hC1,
         'hC3, 'hC8, 'hCF, 'hFF, 'hC4, 'hC8, 'hFF, 'hC5, 'h1C, 'h1C,
         'h1C, 'h08, 'hA1, 'hA7, 'h28, 'h01, 'hA7, 'hA5, 'h5A, 'h5A,
-        'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01, 'h36, 'h13, -1, 'h00, -1, -1, -1 };
+        'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01, 'h36, 'h13, -1, 'h00, -1, -1, -1, -1 };
 
     initial begin
         string  rom_path, wpath;
@@ -1349,6 +1359,11 @@ module tb_gs_broker #(
                  cfg_exp, cfg_mbexp, cfg_cxrom);
 
         cpu_drv_p = 0; cpu_val_p = 0; a_bus_p = 0; rw_bus_p = 1; addr_en_p = 0;
+
+        if (cfg_mbexp >= 126) begin
+            mach_poke({8'd0, TOP_A}, {24'd0, TOP_D});
+            if (cfg_exp >= 126) lexp[23'(TOP_A - 24'h020000)] = TOP_D;
+        end
 
         #200 rst_n = 1'b1;
         wait_cycles(20);
@@ -1457,15 +1472,17 @@ module tb_gs_broker #(
         if (!final_done) err("no quiet moment at the end of the run (socket cycles still outstanding)");
 
         if (do_expect) begin
-            for (i = 0; i <= 84; i++) begin
+            for (i = 0; i <= 85; i++) begin
                 int want, got;
                 want = expect_tab[i];
                 if (i == 44) want = (cfg_mbexp >= 1) ? 'h21 : 'hFF;
                 if (i == 45) want = (cfg_mbexp >= 2) ? 'h22 : 'hFF;
+                if (i == 46) want = (cfg_mbexp >= 63) ? 'h00 : 'hFF;      // (bank 40)
                 if (i == 80) want = (cfg_mbexp >= 1) ? 'h5A : 'h00;
                 if (i == 82) want = (cfg_mbexp >= 1) ? 'h34 : 'h00;
                 if (i == 83) want = (cfg_mbexp >= 3) ? 'h11 : 'h00;
                 if (i == 84) want = (cfg_mbexp >= 7) ? 'hC3 : 'h00;
+                if (i == 85) want = (cfg_mbexp >= 126) ? 'h7E : 'h00;
                 got = mach_get(1, 0, 24'h000300 + i);
                 if (want >= 0 && got != want) err($sformatf("test program result %0d ($%04h) = %02h, want %02h", i, 16'h0300 + i, got, want));
             end

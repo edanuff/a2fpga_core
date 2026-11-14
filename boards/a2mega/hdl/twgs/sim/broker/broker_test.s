@@ -29,6 +29,7 @@ IRQCNT  = $0380                 ; incremented by the IRQ handler
 BRKCNT  = $0381                 ; incremented by the BRK handler
 WAIFLG  = $0382                 ; set once the loop has waited in WAI
 EXPFLG  = $0383                 ; set by T22 if the machine has RAM in bank 02
+TOPFLG  = $0384                 ; set by T24 if the machine has RAM in bank 7F
 LOOPCNT = $0390
 
 resn    .set 0
@@ -50,6 +51,7 @@ main:
         stz BRKCNT
         stz WAIFLG
         stz EXPFLG
+        stz TOPFLG
         lda #$80
         sta $C036               ; FPI fast mode
 
@@ -569,6 +571,24 @@ t22r:   res                     ; $34, or $00 without a bank 02
         sta $E16108
 t23n:
 
+        ; ---- T24 the top 16K of bank 7F, where the machine has it: the last RAM a card
+        ;      can hold, and the highest tag a RAM entry of a cache in front of the
+        ;      card's memory can have.  A byte there is read before anything wrote it
+        ;      (a cache with no entry for it must not answer), and again in the loop
+        ;      (a ROM copy empties the cache: the byte is then the memory's alone)
+        lda $7FD955             ; never written
+        sta $E1610A             ; (on the socket)
+        lda #$7E
+        sta $7FE100
+        lda $7FE100
+        cmp #$7E
+        bne t24n
+        inc TOPFLG
+        lda $6100               ; bank 00's byte: the entry of 7F/E100 goes
+        lda $7FE100
+        res                     ; $7E (written only with a bank 7F)
+t24n:
+
         lda #$A5
         sta SIG
         cli
@@ -590,6 +610,13 @@ spin:   dex
         lda $6041
         jsl $026040             ; ... and from the expansion bank
 noexp:
+        lda TOPFLG
+        beq notop
+        lda $7FE100             ; the top of bank 7F
+        sta $E10451             ; (on the socket)
+        lda $7FD955             ; ... and a byte of it nothing has written
+        sta $E10452
+notop:
         inc LOOPCNT+1
         ; once, after the first interrupt has been served: wait in WAI for the
         ; second (runs without interrupts never get here)
