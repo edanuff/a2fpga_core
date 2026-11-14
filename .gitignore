@@ -63,3 +63,6 @@ src/cardrom/cardrom
 # are the tracked build products.
 boards/*/impl/pnr/*.pr
 boards/a2mega/captures/
+
+# Verilator build output of the simulation benches
+sim/**/obj_dir/
