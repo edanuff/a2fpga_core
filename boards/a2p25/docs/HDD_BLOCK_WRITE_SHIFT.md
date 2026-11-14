@@ -77,7 +77,7 @@ the card, so the Apple still sees the block as written; the log is the evidence.
 
 | Board | Gateware | Firmware | Status |
 |---|---|---|---|
-| a2p25 displayport1 | `hdd.sv` fix (full core `a2p25.gprj`) | ESP32 225, logging only | built clean 2026-11-13, 3 of 3 placements 0/0 (see below); committed `impl/pnr/a2p25.fs`; not flashed |
+| a2p25 displayport1 | `hdd.sv` fix (full core `a2p25.gprj`) | ESP32 225, logging only | built clean 2026-11-13, 3 of 3 placements 0/0 (see below); committed `impl/pnr/a2p25.fs`; **flashed 2026-11-13 evening, IIgs power-cycled after writes and the volume came back and booted** (Ed); block diff of the written image not yet run |
 | a2mega 1.0a3 | same `hdd.sv` | ESP32 103, logging only | not built here; a2mega timing is knife-edge, build when a bench slot opens |
 | a2n20v2-Enhanced | same `hdd.sv` | BL616 `firmware_host/disk.c` still forces HDD units read-only | containment left in place; lift it after a write test on that board |
 
@@ -109,6 +109,10 @@ Benches on the merged source: `sim/disk/run.sh` PASS; `make hyperram` (board-del
 and `make hyperram_bist` PASS in `boards/a2p25/tests`.
 
 ## What to flash and test (Ed)
+
+Status 2026-11-13 evening: step 1 done (fs `6767d681…` in SPI flash, verified); Ed reports the
+IIgs restarted fine after writing to the volume. Step 3 (block diff of the written image
+against the original) is the remaining confirmation.
 
 1. Flash the a2p25 full-core bitstream built from this branch (`boards/a2p25/impl/pnr/a2p25.fs`),
    with the `/flash` skill. The firmware change is optional for the test.
