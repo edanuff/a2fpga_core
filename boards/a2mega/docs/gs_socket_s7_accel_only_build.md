@@ -36,8 +36,9 @@ card memory with the copy, no mismatch, then fast (`1B`): five runs of
 the benchmark average 50.75 MHz, q1's figure.** **Since: the firmware
 brings it to fast mode by itself (section 3l, on the card), and speed
 control is built - paced mode at the machine's pace and the machine's
-speed rules (section 3m: simulated, three placements with no violation,
-not flashed).**
+speed rules (section 3m: simulated, three placements with no violation;
+sc1 and its firmware flashed 2026-11-15 15:43, not yet run on the
+machine).**
 Parents: [`gs_socket_s7_accelerator_scoping.md`](gs_socket_s7_accelerator_scoping.md)
 (what the accelerator is) and
 [`gs_socket_s7_fast_core_exploration.md`](gs_socket_s7_fast_core_exploration.md)
@@ -1724,7 +1725,7 @@ firmware wrote nothing: there is nothing for it to do at a reset.
 - The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
   build its periods read 4.5 % short.
 
-## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; not flashed)
+## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43, not yet run)
 
 Section 3l makes fast mode the card's normal state, and that leaves two
 things wrong. "Off" is slower than the machine (section 3j: paced card
@@ -1836,9 +1837,20 @@ Three placements of the final source, the committed options
 12,755 of 69,120 logic slices, 182 of 340 block RAMs - 34 cells and 13
 flip-flops more than p1.
 
+### Flashed (2026-11-15 15:43)
+
+sc1 written to the card's flash with the machine off, 15:39 to 15:43,
+the first attempt, verified by the loader's read back. Then the
+firmware of section 5 (`4691e43a…`) over the same USB port, the port's
+serial number checked against the test card's first. The firmware
+answers on the network with the machine off: `gs accel` reads "no
+accelerator gateware seen, or the socket is not armed | setting ON",
+and its usage line has `rules on|off`. The gateware has not been loaded
+yet: that wants the board's power off and on.
+
 ### Not done, not known
 
-- **Not on the card.** No drive has been read or written through it, and
+- **Not run on the machine.** No drive has been read or written through it, and
   the bench's machine has no drive. The latches and the detect bits are
   as the MiSTer core's model of the FPI has them (`clock_divider.v`:
   tracked whatever the detect bits say, gated by them); slot 6 holding
@@ -1968,15 +1980,15 @@ Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
 Provenance of sc0, sc1 and sc2 (speed control, section 3m; three
-placements with no violation; none flashed): sources = commit `8df36beb`
+placements with no violation; sc1 flashed 2026-11-15 15:43): sources = commit `8df36beb`
 (the bench alone changed after it); the same tool and device. sc0: build
 stamp `20261115133453`, bitstream sha256
 `40adcdbdd4aba2eb…0ddc1e832d552f46`. sc1: `20261115134447`,
 `05d20b619356a6e0…7407890b74997d20`. sc2: `20261115140000`,
 `a68adb5bf2c634a4…073399cfa4044519`. The firmware to go with it on the
 test card: its own source `e96b40cf` with the four-file change of
-sections 3l and 3m, sha256 `4691e43a65f1207f…3646f055191d74be` (not
-flashed; the card has section 3l's).
+sections 3l and 3m, sha256 `4691e43a65f1207f…3646f055191d74be`
+(flashed 2026-11-15 15:43).
 
 Provenance of p1 and p2 (the closed build of section 3k: section 3j's
 logic, the period counter change, `Place_Option` 1; three placements
