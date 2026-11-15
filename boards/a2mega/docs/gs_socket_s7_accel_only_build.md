@@ -1686,8 +1686,8 @@ with 126 banks; no stall. Counters over 8.6 s a minute later: 33.2 M
 core steps a second, 0.162 M socket cycles a second for the core, 21.95
 M line hits and 0.49 M misses a second - this morning's figures at a
 prompt in fast mode. So the ladder ran inside the boot, where it had
-never run, and the two verify seconds saw no mismatch there. What the
-screen showed through it is Ed's to say.
+never run, and the two verify seconds saw no mismatch there. On the
+screen the machine booted normally (Ed).
 
 **Not done, not known.**
 
