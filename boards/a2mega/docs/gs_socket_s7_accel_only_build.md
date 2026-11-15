@@ -1689,9 +1689,20 @@ prompt in fast mode. So the ladder ran inside the boot, where it had
 never run, and the two verify seconds saw no mismatch there. On the
 screen the machine booted normally (Ed).
 
+**A control-reset in fast mode (the same session).** The first reset
+taken in fast mode on hardware. The card's event log has it whole: the
+slot's /RESET and the socket's /RES fell together, the core went into
+reset in the same 2 us, the lines rose 179.2 ms later and the core ran
+again 2 us after that. Afterwards: still `ACCEL: FAST`, mode 9A, the
+ROM image still the one copy (no second copy, as meant: a warm reset
+keeps the image and the card's memory), no stall, both verify counts 0,
+and the idle rates as before the reset (33.2 M core steps and 0.162 M
+socket cycles a second), the bus in the ROM's banks and E0. The
+firmware wrote nothing: there is nothing for it to do at a reset.
+
 **Not done, not known.**
 
-- One power-up. The model is mine, and only the card can say where it is
+- One power-up and one control-reset. The model is mine, and only the card can say where it is
   wrong; this run agreed with it on the normal path. None of the other
   paths (a mismatch, a /RES in the copy, machine off and on with the
   card powered, an ESP32 restart, `slow` and `fast`, the setting off)
@@ -1703,7 +1714,8 @@ screen the machine booted normally (Ed).
   mode could damage the disk's data. `gs accel slow` before using one,
   until the card does this itself.
 - "Off" is slower than the machine once fast mode has run (section 3j).
-- No reset has been taken in fast mode on hardware; the bench has.
+- A restart through Control-Open-Apple-Reset in fast mode has not been
+  taken on hardware (a control-reset has, above).
 - The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
   build its periods read 4.5 % short.
 
