@@ -1595,6 +1595,85 @@ constant of the test divided by the accelerated time. So the build that
 meets the timing rule on three placements measures what the experiment
 measured, past the Squeezer's 391 ticks by the same margin.
 
+## 3l. Fast by itself: the bring-up in the firmware (2026-11-15; built and tested against a model, not on the card)
+
+Until now fast mode was reached by hand over telnet, one register write
+at a time. The ESP32 firmware now runs the same ladder after every arm
+(`gs_socket.c`, `gs_accel_*`), each step checked before the next:
+
+| step | register 29 | goes on when | if not |
+|---|---|---|---|
+| wait | untouched | the gateware shows its signature and the socket's /RES has been high for 2 s | waits |
+| ROM copy | `00`, `08` | the image is valid | copies again (a /RES cuts a copy short), three tries, then stops on `00` |
+| card memory at the machine's pace | `0A` | 1 s with the verify count unmoved | back to `08`, and it says where the mismatch was |
+| the same with the copy of E0/E1 | `1A` | 1 s with the copy's verify count unmoved | fast without the copy (`0B`) |
+| fast | `1B` | | |
+
+So about 4.5 s after the machine's reset ends it is in fast mode, with a
+second or two at the paced rate on the way (slower than the machine for a
+program in expansion RAM; section 3j). Rules it keeps:
+
+- **The wait is there for the ROM's cold or warm start test**, which
+  must read the machine's own RAM: the card's memory holds only what the
+  core has written since the socket was armed, and after a machine power
+  cycle with the card still powered it holds the last session's bytes.
+- **Machine off clears register 29**, so every power-up starts on the
+  machine's own memory and copies the ROM again.
+- **After fast mode has run, register 29 never goes back to `00` or
+  `08`** while the machine is on. "Off" is paced card memory.
+- A build without the copy of E0/E1, or a copy that is not whole, goes
+  fast without it. A DDR3 that is not ready is "card memory not
+  granted": it stops on `08`.
+- An ESP32 restart under a machine in fast mode adopts what it finds and
+  writes nothing. Gateware without the signature (S6, the full core) is
+  never written to.
+- A hand write of register 29 or 31 (`gs set`) stops the ladder until
+  `gs accel go`.
+
+The setting is one byte of the saved settings, `gs_accel_off`, 0 by
+default: **the accelerator is on unless it is turned off**, as a
+TransWarp GS is. Telnet (`:` for the command line):
+
+| command | |
+|---|---|
+| `gs accel` | state, mode in effect decoded, ROM copies and sum, both verify counts and their last addresses, the expansion memory |
+| `gs accel on` / `off` | the saved setting. `off` with fast mode in effect goes to paced card memory at once; from the next power-up the machine runs at its own pace |
+| `gs accel slow` / `fast` | paced card memory and back, at any time, setting unchanged |
+| `gs accel go` | run the ladder now (also after a failure, a hand write, or with the setting off) |
+| `gs accel delay <ms>`, `verify <ms>` | the wait and the length of each verify step (not saved) |
+
+`gs` gains one line with the state, and each step is logged on the
+console (`ACCEL: ROM IMAGE VALID, SUM 7EE8` ... `ACCEL: FAST`).
+
+**Tested** on the host against a model of the register window
+(`tests/host/test_gs_accel.c`, run by `tests/host/run.sh`): twelve
+scenarios - a normal start, the setting off, a verify mismatch, a
+mismatch in the copy, a build without the copy, a /RES in the ROM copy,
+machine off and on again while fast, an ESP32 restart under fast mode,
+slow and fast and the setting at run time, a hand write, S6 gateware, a
+DDR3 that is not ready - each with the writes to register 29 compared
+and the rule about `00` after fast mode checked on every write. The
+firmware builds for the 1.0a3 board (1,136,343 bytes, 86 % of the slot).
+
+**Not done, not known.**
+
+- Not on the card. The model is mine: it says what I believe the
+  gateware does, and only the card can say otherwise.
+- **The ladder has only ever been run by hand with the machine idle at a
+  prompt.** Here it runs 2 s after reset, in the middle of the boot: the
+  46 ms hold of the ROM copy and two seconds of paced card memory fall
+  where GS/OS is loading. That is the first thing to watch.
+- **No speed control (S7e).** Fast mode does not follow the machine's
+  speed register or slow down for a disk drive: code between accesses to
+  a drive runs at the card's rate. The a2p25's disk cards are polled and
+  do not care; a real 5.25 or 3.5 drive does, and a write to one in fast
+  mode could damage the disk's data. `gs accel slow` before using one,
+  until the card does this itself.
+- "Off" is slower than the machine once fast mode has run (section 3j).
+- No reset has been taken in fast mode on hardware; the bench has.
+- The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
+  build its periods read 4.5 % short.
+
 ## 4. What is verified, and what is not
 
 Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):

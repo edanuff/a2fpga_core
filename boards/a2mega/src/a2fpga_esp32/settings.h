@@ -78,7 +78,12 @@ typedef struct {
      * socket (default; harmless without the ribbon), 1 = never arm. Took one
      * reserved byte so saved v4 blobs load unchanged (0 = auto). */
     uint8_t  gs_socket_off;
-    uint8_t  reserved[14];               /* future fields (shrink as used) */
+    /* S7 accelerator (accelerator-only gateware): 0 = bring it up to fast
+     * mode by itself after every arm (default), 1 = leave register 29 alone
+     * (the machine's own pace; `gs accel go` by hand). One more reserved
+     * byte, so saved blobs load unchanged (0 = on). */
+    uint8_t  gs_accel_off;
+    uint8_t  reserved[13];               /* future fields (shrink as used) */
 
     uint32_t crc;                        /* CRC-32 of everything above */
 } a2_settings_t;

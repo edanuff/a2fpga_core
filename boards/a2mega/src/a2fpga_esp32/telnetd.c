@@ -39,6 +39,7 @@
 #include "fpga_screen.h"
 #include "fpga_link.h"
 #include "gs_socket.h"
+#include "settings.h"
 #include "fpga_jtag.h"
 #include "osd_console.h"
 #include "menu.h"
@@ -123,6 +124,7 @@ static void tn_printf(int fd, const char *fmt, ...)
  *   gs trace                the 64-cycle bus trace (freezes it first)
  *   gs mode <0-3> | gs hold <ms>   bring-up mode / timed hold (gs_socket.h)
  *   gs events | gs evclear  the FPGA bring-up event log (window regs 32-39)
+ *   gs accel [on|off|go|fast|slow|delay <ms>|verify <ms>]   the S7 accelerator (gs_socket.h)
  * Empty line or ESC leaves line mode. */
 #define GS_REG_SEL   0x5F
 #define GS_REG_DATA  0x4F
@@ -185,7 +187,36 @@ static void gs_dump(int fd)
         if (gs_socket_get_autotrig()) tn_puts(fd, "autotrig ON\r\n");
         if (gs_socket_get_late_ms()) tn_printf(fd, "mode 2 late arm = %u ms\r\n", gs_socket_get_late_ms());
     }
+    if (gs_accel_present()) tn_printf(fd, "%s | mode %02X | setting %s\r\n", gs_accel_state_str(), r[15],
+                                      settings()->gs_accel_off ? "OFF" : "ON");
     #undef U16
+}
+
+/* S7 accelerator: what is in effect and the counters of the bring-up ladder
+ * (boards/a2mega/docs/gs_socket_s7_accel_only_build.md, sections 2 and 3l) */
+static void gs_accel_dump(int fd)
+{
+    if (!gs_accel_present()) {
+        tn_printf(fd, "%s (no accelerator gateware seen, or the socket is not armed) | setting %s\r\n",
+                  gs_accel_state_str(), settings()->gs_accel_off ? "OFF" : "ON");
+        return;
+    }
+    uint8_t  mode = gs_rd(15);
+    uint32_t w6 = gs_accel_word(6), w7 = gs_accel_word(7), w8 = gs_accel_word(8);
+    uint32_t w12 = gs_accel_word(12), w13 = gs_accel_word(13), w14 = gs_accel_word(14);
+    tn_printf(fd, "%s | setting %s | delay %u ms, verify %u ms\r\n", gs_accel_state_str(),
+              settings()->gs_accel_off ? "OFF" : "ON", gs_accel_get_delay_ms(), gs_accel_get_verify_ms());
+    tn_printf(fd, "mode %02X:%s%s%s%s%s%s%s\r\n", mode,
+              (mode & 0x80) ? " rom-image" : " no-rom-image", (mode & 0x40) ? " copying" : "", (mode & 0x20) ? " held" : "",
+              (mode & 0x10) ? " FAST" : "", (mode & 0x08) ? " card-memory" : " socket-bytes",
+              (mode & 0x04) ? " cxrom" : "", (mode & 0x02) ? " e0e1-copy" : "");
+    tn_printf(fd, "rom copies %u sum %04X | verify %u (last %02X:%04X) | e0/e1 copy: %s%s verify %u (last %02X:%04X)\r\n",
+              (unsigned)(w8 >> 24), (unsigned)(w8 & 0xFFFF),
+              (unsigned)(w6 >> 16), (unsigned)((w7 >> 16) & 0xFF), (unsigned)(w7 & 0xFFFF),
+              (w13 & 0x08) ? "built" : "not built", (w13 & 0x04) ? ", whole" : "",
+              (unsigned)(w13 >> 16), (unsigned)((w14 >> 16) & 0xFF), (unsigned)(w14 & 0xFFFF));
+    tn_printf(fd, "expansion memory: %s%s%s, %u banks\r\n", (w12 & 0x400) ? "DDR3" : "block RAM",
+              (w12 & 0x100) ? ", ready" : ", NOT READY", (w12 & 0x200) ? ", QUEUE OVERFLOWED" : "", (unsigned)(w12 & 0xFF));
 }
 
 static void gs_trace(int fd)
@@ -314,6 +345,7 @@ static void tn_exec_line(int fd, char *line)
             gs_dump(fd);
         } else if (!strcmp(tok[1], "set") && nt == 4 && parse_num(tok[2], &idx) && idx < 64 && parse_num(tok[3], &val) && val < 256) {
             if (idx == 0) gs_socket_manual();
+            if (idx == 29 || idx == 31) gs_accel_manual();   /* the ladder stops touching the requests */
             gs_wr((uint8_t)idx, (uint8_t)val);
             tn_printf(fd, "gs[%u] <= 0x%02X\r\n", idx, val);
         } else if (!strcmp(tok[1], "arm")) {
@@ -351,12 +383,33 @@ static void tn_exec_line(int fd, char *line)
             gs_events(fd);
         } else if (!strcmp(tok[1], "evclear")) {
             gs_wr(32, 0x80); tn_puts(fd, "event log cleared\r\n");
+        } else if (!strcmp(tok[1], "accel")) {
+            if (nt == 2) {
+                gs_accel_dump(fd);
+            } else if (!strcmp(tok[2], "on") || !strcmp(tok[2], "off")) {
+                bool on = !strcmp(tok[2], "on");
+                gs_accel_set_enabled(on);
+                bool saved = settings_save();
+                tn_printf(fd, "accelerator %s at every power-up%s; now: %s\r\n", on ? "ON" : "OFF",
+                          saved ? "" : " (NOT SAVED)", gs_accel_state_str());
+                if (!on) tn_puts(fd, "(after fast mode has run, off is paced card memory until the machine is switched off)\r\n");
+            } else if (!strcmp(tok[2], "go")) {
+                gs_accel_go(); tn_puts(fd, "bring-up started (gs accel to watch)\r\n");
+            } else if (!strcmp(tok[2], "fast") || !strcmp(tok[2], "slow")) {
+                gs_accel_pace(!strcmp(tok[2], "fast")); tn_printf(fd, "%s\r\n", gs_accel_state_str());
+            } else if (!strcmp(tok[2], "delay") && nt == 4 && parse_num(tok[3], &val)) {
+                gs_accel_set_delay_ms(val); tn_printf(fd, "bring-up starts %u ms after /RES is high (not saved)\r\n", val);
+            } else if (!strcmp(tok[2], "verify") && nt == 4 && parse_num(tok[3], &val)) {
+                gs_accel_set_verify_ms(val); tn_printf(fd, "each verify step lasts %u ms (not saved)\r\n", gs_accel_get_verify_ms());
+            } else {
+                tn_puts(fd, "usage: gs accel | gs accel on|off | gs accel go | gs accel fast|slow | gs accel delay <ms> | gs accel verify <ms>\r\n");
+            }
         } else if (!strcmp(tok[1], "auto")) {
             gs_socket_resume(); tn_puts(fd, "auto-arm resumed\r\n");
         } else if (!strcmp(tok[1], "trace")) {
             gs_trace(fd);
         } else {
-            tn_puts(fd, "usage: gs | gs set <idx> <val> | gs arm|listen|off|auto|mode <0-3>|hold <ms>|clear|freeze|run|trig|untrig | gs trace | gs events|evclear\r\n");
+            tn_puts(fd, "usage: gs | gs set <idx> <val> | gs arm|listen|off|auto|mode <0-3>|hold <ms>|clear|freeze|run|trig|untrig | gs trace | gs events|evclear | gs accel [on|off|go|fast|slow]\r\n");
         }
         return;
     }
