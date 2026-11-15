@@ -1838,10 +1838,26 @@ flip-flops more than p1.
 
 ### Not done, not known
 
-- **Not on the card.** No drive has been read or written through it: the
-  rules are the FPI's as documented and as the MiSTer model has them,
-  and the bench's machine has no drive. A real 5.25 or 3.5 drive is the
-  test, with a disk that can be lost.
+- **Not on the card.** No drive has been read or written through it, and
+  the bench's machine has no drive. The latches and the detect bits are
+  as the MiSTer core's model of the FPI has them (`clock_divider.v`:
+  tracked whatever the detect bits say, gated by them); slot 6 holding
+  without its detect bit is this card's own, for the 3.5 drive. A real
+  5.25 or 3.5 drive is the test, with a disk that can be lost.
+- **An open choice: the first rule.** Scoping 2.5 says the speed
+  register's normal setting paces the card ("the Control Panel's
+  Normal/Fast setting keeps meaning what it means"), and that is what is
+  built. The MiSTer core's accelerator model says the opposite of the
+  real cards: a ZipGS or TransWarp GS stays fast with bit 7 clear and is
+  slowed through its own registers, and the Zip's desk accessory clears
+  the bit in its speed test expecting the card to stay fast. As built,
+  the Control Panel's speed setting is an off switch on the machine's
+  side (Normal: 1 MHz, as on a stock machine) and code that drops to 1
+  MHz to count cycles gets what it asked for; a program that clears the
+  bit and expects an accelerator to ignore it loses its speed until it
+  sets the bit again. Which a TransWarp GS does is Ed's to say; making
+  the first rule a request bit of its own is a small change and a new
+  timing closure.
 - Paced mode at the machine's pace is the bench's figure; the benchmark's
   base pass in paced mode on the card is the measure (section 3j's was
   1.4 to 1.6 times the machine's on four tests).
