@@ -14,15 +14,16 @@
  *   - nothing is written to 29/31 on gateware without the signature.
  *
  * Scenarios:
- *   T1  slot-powered start             -> 00 08 0A 1A 1B, not before /RES was high 2 s
+ *   T1  slot-powered start             -> 00 08 0A 1A 3B (fast, the copy, the speed rules), not before /RES was high 2 s
  *   T2  setting off                    -> no request; `gs accel go` runs the ladder
  *   T3  verify mismatch in card memory -> stops on 08, FAST never asked
- *   T4  mismatch in the copy of E0/E1  -> fast without it (0B)
- *   T5  build without the copy         -> 0B
+ *   T4  mismatch in the copy of E0/E1  -> fast without it (2B)
+ *   T5  build without the copy         -> 2B
  *   T6  /RES during the ROM copy       -> copied again, then the ladder
  *   T7  machine off while fast, on again -> 00 with the machine off, ladder again
  *   T8  ESP32 restart, machine in fast -> adopted, nothing written
- *   T9  slow / fast / setting off at run time -> 1A, 1B, 1A; never 00
+ *   T9  slow / fast / setting off at run time -> 1A, 3B, 1A; never 00
+ *   T13 the speed rules off and on at run time -> 1B, 3B
  *   T10 a hand write of register 29    -> the ladder stops
  *   T11 S6 gateware (no signature)     -> 29 and 31 never written
  *   T12 DDR3 not ready                 -> card memory not granted, stops on 08
@@ -191,7 +192,7 @@ int main(void)
     run_ms(1500);                           /* arm at about 150 ms; the ladder not before 2 s of /RES high */
     CHECK(armed()); CHECK(m.n29 <= 1 && m.req == 0);   /* only the machine-off clear */
     { int before = m.n29; run_ms(5000);
-      static const uint8_t want[] = { 0x00, 0x08, 0x0A, 0x1A, 0x1B };
+      static const uint8_t want[] = { 0x00, 0x08, 0x0A, 0x1A, 0x3B };
       CHECK(m.n29 - before == 5 && memcmp(m.wr29 + before, want, 5) == 0); }
     CHECK(fast() && slow() && m.copies == 1 && !m.rule_broken);
     CHECK(strstr(gs_accel_state_str(), "FAST") != NULL);
@@ -202,7 +203,7 @@ int main(void)
     run_ms(8000);
     CHECK(armed() && m.req == 0 && !m.valid);
     gs_accel_go(); run_ms(3000);
-    CHECK(fast() && m.req == 0x1B && !m.rule_broken);
+    CHECK(fast() && m.req == 0x3B && !m.rule_broken);
     show("T2");
 
     /* T3 */
@@ -216,13 +217,13 @@ int main(void)
     /* T4 */
     fresh(true); m.machine_on = true; m.bad_copy = true;
     run_ms(8000);
-    CHECK(m.req == 0x0B && fast() && !slow() && !m.rule_broken);
+    CHECK(m.req == 0x2B && fast() && !slow() && !m.rule_broken);
     show("T4");
 
     /* T5 */
     fresh(true); m.machine_on = true; m.built = false; m.whole = false;
     run_ms(8000);
-    CHECK(m.req == 0x0B && fast() && !m.rule_broken);
+    CHECK(m.req == 0x2B && fast() && !m.rule_broken);
     { bool asked_slow = false; for (int i = 0; i < m.n29; i++) if (m.wr29[i] & 0x10) asked_slow = true; CHECK(!asked_slow); }
     show("T5");
 
@@ -234,7 +235,7 @@ int main(void)
     m.ext_reset = true; run_ms(30); m.ext_reset = false;     /* a 30 ms /RES in the copy */
     CHECK(!m.valid);
     run_ms(8000);
-    CHECK(m.req == 0x1B && fast() && m.copies == 1 && !m.rule_broken);
+    CHECK(m.req == 0x3B && fast() && m.copies == 1 && !m.rule_broken);
     show("T6");
 
     /* T7 */
@@ -244,11 +245,11 @@ int main(void)
     CHECK(!armed() && m.req == 0x00 && !m.rule_broken);
     m.fast_ran = false;                     /* a power cycle is the reset the rule asks for */
     m.machine_on = true; run_ms(10000);
-    CHECK(armed() && m.req == 0x1B && fast() && m.copies == 2 && !m.rule_broken);
+    CHECK(armed() && m.req == 0x3B && fast() && m.copies == 2 && !m.rule_broken);
     show("T7");
 
     /* T8 */
-    fresh(true); m.machine_on = true; m.ctrl = 0x05; m.key = 0xA5; m.req = 0x1B; m.valid = true; m.fast_ran = true;
+    fresh(true); m.machine_on = true; m.ctrl = 0x05; m.key = 0xA5; m.req = 0x3B; m.valid = true; m.fast_ran = true;
     run_ms(8000);
     CHECK(m.n29 == 0 && m.n31 == 0 && fast() && !m.rule_broken);
     CHECK(strstr(gs_accel_state_str(), "ADOPTED") != NULL);
@@ -256,12 +257,12 @@ int main(void)
 
     /* T9 */
     fresh(true); m.machine_on = true;
-    run_ms(8000); CHECK(m.req == 0x1B);
+    run_ms(8000); CHECK(m.req == 0x3B);
     gs_accel_pace(false); run_ms(200); CHECK(m.req == 0x1A && cardmem() && !fast());
-    gs_accel_pace(true);  run_ms(200); CHECK(m.req == 0x1B && fast());
+    gs_accel_pace(true);  run_ms(200); CHECK(m.req == 0x3B && fast());
     gs_accel_set_enabled(false); run_ms(200); CHECK(m.req == 0x1A && g_cfg.gs_accel_off == 1);
     run_ms(5000); CHECK(m.req == 0x1A);     /* off stays paced: no ladder, no 00 */
-    gs_accel_set_enabled(true); run_ms(200); CHECK(m.req == 0x1B && g_cfg.gs_accel_off == 0);
+    gs_accel_set_enabled(true); run_ms(200); CHECK(m.req == 0x3B && g_cfg.gs_accel_off == 0);
     CHECK(!m.rule_broken);
     show("T9");
 
@@ -269,7 +270,7 @@ int main(void)
     fresh(true); m.machine_on = true;
     run_ms(1000);
     { int before = m.n29; gs_accel_manual(); run_ms(8000); CHECK(m.n29 == before && !m.valid); }
-    gs_accel_go(); run_ms(4000); CHECK(m.req == 0x1B);
+    gs_accel_go(); run_ms(4000); CHECK(m.req == 0x3B);
     show("T10");
 
     /* T11 */
@@ -285,6 +286,15 @@ int main(void)
     CHECK(m.req == 0x08 && !m.fast_ran);
     CHECK(strstr(gs_accel_state_str(), "NOT GRANTED") != NULL);
     show("T12");
+
+    /* T13 */
+    fresh(true); m.machine_on = true;
+    run_ms(8000); CHECK(m.req == 0x3B);
+    gs_accel_set_rules(false); run_ms(100); CHECK(m.req == 0x1B && fast());
+    gs_accel_pace(false); run_ms(100); CHECK(m.req == 0x1A);
+    gs_accel_pace(true);  run_ms(100); CHECK(m.req == 0x1B);
+    gs_accel_set_rules(true);  run_ms(100); CHECK(m.req == 0x3B && fast() && !m.rule_broken);
+    show("T13");
 
     printf(fails ? "%d FAILED\n" : "all gs_accel scenarios pass\n", fails);
     return fails ? 1 : 0;

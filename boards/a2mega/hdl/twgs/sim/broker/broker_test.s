@@ -772,6 +772,31 @@ t24n:
         lda $2BF1
         res                     ; $1E
 
+        ; ---- T27 the speed rules (gs_accel_rules; runs with +rules): stretches of local
+        ;      code the card must run at the machine's pace - CYAREG bit 7 clear; the
+        ;      motor latch of slot 6 set; slot 5's set with its detect bit in CYAREG -
+        ;      and one it must not (slot 5's latch set, its detect bit clear).  Nothing
+        ;      is stored: the bench looks at the mode each stretch ran in.
+        lda #$00
+        sta $C036               ; the machine's normal speed
+        jsr rspin
+        lda #$80
+        sta $C036
+        jsr rspin               ; fast again
+        lda $C0E9               ; slot 6: motor on
+        jsr rspin
+        lda $C0E8
+        jsr rspin
+        lda $C0D9               ; slot 5: motor on, no detect bit - no rule
+        jsr rspin
+        lda #$82
+        sta $C036               ; ... its detect bit: the rule
+        jsr rspin
+        lda $C0D8
+        lda #$80
+        sta $C036
+        jsr rspin
+
         lda #$A5
         sta SIG
         cli
@@ -815,6 +840,12 @@ nohi:
         inc WAIFLG
         wai
 nowai:  jmp loop
+
+; T27: a stretch of local steps
+rspin:  ldx #$30
+rsp1:   dex
+        bne rsp1
+        rts
 
 ; copied to RAM by T16
 ramcode:

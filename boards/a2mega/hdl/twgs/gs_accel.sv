@@ -100,6 +100,7 @@ module gs_accel #(
     input  logic        cfg_cxrom_i,
     input  logic        cfg_copy_i,
     input  logic        cfg_slow_i,      // (SLOW_COPY) reads of banks E0/E1 below $C000 from the card's copy; any time, either way
+    input  logic        cfg_rules_i,     // fast mode gives way to the machine's pace where gs_accel_rules says so; any time
     input  logic        clear_i,         // hold the PHI2 measurement at zero
 
     // expansion memory port (EXP_DDR; clk domain; else tie the inputs low): one
@@ -148,7 +149,7 @@ module gs_accel #(
                                          // the write buffer, 4 local reads in place, 5 local reads that waited,
                                          // 6 {verify_count, 8'h00, mode}, 7 {8'h00, verify_addr},
                                          // 8 {copies, 8'h00, ROM image sum}, 9 {shadow, cyareg, sltromsel, statereg},
-                                         // 10 {24'h0, switch misc}, 11 PHY bus cycles, 12 {.., EXP_DDR, its queue overflowed, its memory ready, EXP_BANKS},
+                                         // 10 {16'h0, motor latches of slots 7-4, 2'b0, speed rules asked, slow by them, switch misc}, 11 PHY bus cycles, 12 {.., EXP_DDR, its queue overflowed, its memory ready, EXP_BANKS},
                                          // 13 {E0/E1 verify count, 8'h00, 4'h0, SLOW_COPY, the copy is whole, asked for, in effect},
                                          // 14 {8'h00, address of the last E0/E1 verify mismatch}; others 0
 );
@@ -194,7 +195,11 @@ module gs_accel #(
     logic        x_ovf, x_rwait, x_rsel, x_wbusy;
     logic [7:0]  x_rdata;
     wire         cardmem = cfg_cardmem_i & rom_ok & (~EXP_DDR | (exp_ready_i & ~x_ovf));
-    wire         fast    = cfg_fast_i & cardmem;
+    // (the machine's speed rules: gs_accel_rules, below.  Paced with the card's memory
+    // still the memory of record is the one way out of fast mode that is always coherent.)
+    logic        rules_slow;
+    logic [3:0]  rules_motor;
+    wire         fast    = cfg_fast_i & cardmem & ~rules_slow;
     // (SLOW_COPY) The copy of Mega II RAM is whole - it has every byte the machine was
     // given since its last reset - if that reset found the expansion memory ready and
     // nothing has been lost from its queue since.  (What the machine's RAM held from
@@ -286,6 +291,18 @@ module gs_accel #(
         .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
         .shadow_o(r_shadow), .cyareg_o(r_cyareg), .sltromsel_o(r_sltromsel),
         .statereg_o(r_statereg), .sw_misc_o(r_misc)
+    );
+
+    // ---- the machine's speed rules, from what the socket shows
+    logic issue_q;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) issue_q <= 1'b0;
+        else        issue_q <= issue_evt;
+    end
+    gs_accel_rules u_rules (
+        .clk(clk), .rst_n(rst_n), .cpu_rst_n_i(cpu_rst_n), .en_i(cfg_rules_i),
+        .bus_evt_i(issue_q), .bus_a_i(last_addr_o), .cyareg_i(r_cyareg),
+        .motor_o(rules_motor), .slow_o(rules_slow)
     );
 
     // ---- core
@@ -604,7 +621,7 @@ module gs_accel #(
             6'd7:    tele_word_o <= {8'h00, verify_addr};
             6'd8:    tele_word_o <= {rom_copies, 8'h00, rom_sum};
             6'd9:    tele_word_o <= {r_shadow, r_cyareg, r_sltromsel, r_statereg};
-            6'd10:   tele_word_o <= {24'h0, r_misc};
+            6'd10:   tele_word_o <= {16'h0, rules_motor, 2'b00, cfg_rules_i, rules_slow, r_misc};
             6'd11:   tele_word_o <= cycle_count_o;
             6'd12:   tele_word_o <= {21'h0, EXP_DDR, x_ovf, exp_ready_i, 8'(EXP_BANKS)};
             6'd13:   tele_word_o <= {verify_scount, 8'h00, 4'h0, SLOW_COPY, slow_whole, cfg_slow_i, brk_slow};

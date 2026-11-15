@@ -94,6 +94,10 @@ void gs_accel_set_enabled(bool on);         /* the setting; saved by the caller 
 void gs_accel_go(void);                     /* run the ladder now (also leaves manual/failed) */
 void gs_accel_pace(bool fast);              /* at run time: fast <-> paced card memory */
 void gs_accel_manual(void);
+/* With fast mode, ask the gateware to follow the machine's speed rules (paced while
+ * the speed register says normal, or a disk drive's motor is on). On by default; not saved. */
+void gs_accel_set_rules(bool on);
+bool gs_accel_get_rules(void);
 void     gs_accel_set_delay_ms(unsigned ms);
 unsigned gs_accel_get_delay_ms(void);
 void     gs_accel_set_verify_ms(unsigned ms);

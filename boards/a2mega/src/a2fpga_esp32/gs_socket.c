@@ -208,6 +208,8 @@ static void set_state(st_t st, const char *why)
 #define ACC_REQ_CARDMEM  0x02
 #define ACC_REQ_COPY     0x08
 #define ACC_REQ_SLOW     0x10      /* reads of E0/E1 RAM from the card's copy */
+#define ACC_REQ_RULES    0x20      /* fast gives way to the machine's pace by its speed rules (gs_accel_rules.sv;
+                                      gateware without them ignores the bit) */
 #define ACC_MODE_VALID   0x80      /* ROM image valid */
 #define ACC_MODE_BUSY    0x40      /* copy in progress */
 #define ACC_MODE_FAST    0x10
@@ -239,6 +241,7 @@ static unsigned s_acc_sbase  = 0;        /* the copy's verify count when it was 
 static uint8_t  s_acc_req    = 0;        /* what we last wrote to register 29 */
 static unsigned s_acc_delay_ms  = ACC_DELAY_MS_DEFAULT;
 static unsigned s_acc_verify_ms = ACC_VERIFY_MS_DEFAULT;
+static bool     s_acc_rules  = true;     /* ask for the speed rules with fast mode (`gs accel rules on|off`) */
 static char     s_acc_str[96] = "ACCEL: -";
 
 void     gs_accel_set_delay_ms(unsigned ms)  { s_acc_delay_ms = ms; }
@@ -283,6 +286,8 @@ static bool acc_sig_now(void)
 
 static void acc_req(uint8_t req)
 {
+    if ((req & ACC_REQ_FAST) && s_acc_rules) req |= ACC_REQ_RULES;
+    else                                     req &= (uint8_t)~ACC_REQ_RULES;
     gs_socket_reg_write(ACC_REG_KEY, ACC_KEY);
     gs_socket_reg_write(ACC_REG_REQ, req);
     s_acc_req = req;
@@ -474,6 +479,13 @@ void gs_accel_pace(bool fast)
         acc_set(ACC_PACED, now, "PACED CARD MEMORY (gs accel fast)");
     }
 }
+
+void gs_accel_set_rules(bool on)
+{
+    s_acc_rules = on;
+    if (s_state == ST_ARMED && s_acc == ACC_FAST) acc_req(s_acc_req);   /* at once: the gateware takes it at any step */
+}
+bool gs_accel_get_rules(void) { return s_acc_rules; }
 
 void gs_accel_set_enabled(bool on)
 {

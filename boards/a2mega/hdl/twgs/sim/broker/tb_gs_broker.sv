@@ -66,6 +66,8 @@
 //   +slow=2         ... the request switched on and off at pseudo-random points
 //                   (the copy itself is kept in every run of such a build, and checked at the end)
 //   +noturbo        ignore $C036 bit 7: the FPI stays at 1 MHz
+//   +rules          fast mode gives way to paced where the machine's speed rules say so (gs_accel_rules:
+//                   the bench's own instance decides for the design, gs_accel's for gs_accel beside it)
 //   +expect         check the test program's result table
 //   +wlog=<file>    write the socket-visible write stream (I/O, Mega II,
 //                   shadowed ranges, slot space) to <file>
@@ -172,7 +174,13 @@ module tb_gs_broker #(
     bit          do_recopy = 0, recopy_done = 0, hold_cyc_q = 0;
     int          recopy_at = 20000;       // +recopyat=N: the second copy is asked for after step N
     logic        held_q = 1'b0, copy_busy_q = 1'b0;
-    wire         native_w = cfg_copy ? ~copy_usable : native_i;
+    // +rules: the machine's speed rules, from what the socket shows - wired as gs_accel wires its own
+    bit          cfg_rules = 0;
+    logic        tr_issue_q = 1'b0, tr_slow;
+    logic [23:0] tr_last = '0;
+    logic [7:0]  tr_cyareg;
+    logic [3:0]  tr_motor;
+    wire         native_w = (cfg_copy ? ~copy_usable : native_i) | tr_slow;
     wire         bypass_w = cfg_copy ? ~copy_usable : mem_bypass_i;
     // +slow: the request (what gs_accel is asked); it is granted where card memory is in effect
     int          cfg_slow = 0;
@@ -302,7 +310,7 @@ module tb_gs_broker #(
         .slow_o(brk_slow), .verify_scount_o(verify_scount), .verify_saddr_o(verify_saddr),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
         .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
-        .shadow_o(), .cyareg_o(), .sltromsel_o(), .statereg_o(), .sw_misc_o()
+        .shadow_o(), .cyareg_o(tr_cyareg), .sltromsel_o(), .statereg_o(), .sw_misc_o()
     );
 
     // The core under test, through its port list: stock P65C816, or the
@@ -883,6 +891,21 @@ module tb_gs_broker #(
     real st_max_tads = 0, st_max_tbas = 0, st_min_tah = 1e9, st_min_tbh = 1e9, st_max_tmds = 0, st_min_tdhw = 1e9, st_max_rel = 0;
     bit  bh_pending = 0, dhw_pending = 0;
 
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin tr_issue_q <= 1'b0; tr_last <= '0; end
+        else begin tr_issue_q <= issue_evt; if (issue_evt) tr_last <= phy_a; end
+    end
+    gs_accel_rules u_rules_tb (
+        .clk(clk), .rst_n(rst_n), .cpu_rst_n_i(cpu_rst_n), .en_i(cfg_rules),
+        .bus_evt_i(tr_issue_q), .bus_a_i(tr_last), .cyareg_i(tr_cyareg),
+        .motor_o(tr_motor), .slow_o(tr_slow)
+    );
+    // what the rules did: a step is paced within three steps of slow rising and fast again
+    // within three of its falling; which causes paced a stretch; and the case that must not
+    int       n_rule_nat = 0, rule_hi = 0, rule_lo = 0;
+    bit [2:0] rule_seen = '0;            // {a detect bit's slot, slot 6's motor, CYAREG bit 7 clear}
+    bit       rule_free_seen = 0;        // a fast step with slot 5's latch set and its detect bit clear
+
     task automatic err(input string s);
         errors++;
         $display("[%0t] ERROR cyc=%0d step=%0d: %s", $realtime, cyc_no, steps, s);
@@ -1270,6 +1293,17 @@ module tb_gs_broker #(
     endtask
 
     // steps the core spent waiting in WAI (it does not take them)
+    always @(posedge clk) if (rst_n && cfg_rules && cpu_rst_n && cpu_ce) begin
+        if (tr_slow) begin rule_hi++; rule_lo = 0; end else begin rule_lo++; rule_hi = 0; end
+        if (rule_hi > 3 && !u_brk.mode_native) err("+rules: slow for more than three steps and the step is not paced");
+        if (rule_lo > 3 && u_brk.mode_native && !cfg_native && !cfg_toggle && !cfg_copy)
+            err("+rules: not slow for more than three steps and the step is still paced");
+        if (u_brk.mode_native && tr_slow) begin
+            n_rule_nat++;
+            rule_seen |= {|(tr_motor & tr_cyareg[3:0] & 4'b1011), tr_motor[2], ~tr_cyareg[7]};
+        end
+        if (!u_brk.mode_native && tr_motor[1] && !tr_cyareg[1] && tr_cyareg[7] && !tr_motor[2]) rule_free_seen = 1;
+    end
     int n_wai = 0;
     always @(posedge clk) if (cpu_rst_n && cpu_ce && !cpu_rdy_out) n_wai++;
 
@@ -1354,7 +1388,7 @@ module tb_gs_broker #(
     // verify mode must stay silent - as long as fast mode has never run: after
     // that the motherboard copy of banks 00/01 is stale by design (only shadowed
     // writes are forwarded), and a mismatch says nothing
-    always @(posedge clk) if (verify_miss && !cfg_toggle)
+    always @(posedge clk) if (verify_miss && !cfg_toggle && !(cfg_rules && !cfg_native))
         err($sformatf("verify: card memory and socket disagree at %06h", verify_addr));
     // ... in the copy of Mega II RAM, always: the machine's is never stale
     always @(posedge clk) if (verify_miss && verify_addr[23:17] == 7'h70)
@@ -1418,7 +1452,7 @@ module tb_gs_broker #(
         .clk(clk), .rst_n(rst_n),
         .arm_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
         .cfg_fast_i(cfg_copy | ~native_i), .cfg_cardmem_i(cfg_copy | ~mem_bypass_i),
-        .cfg_cxrom_i(cfg_cxrom[0]), .cfg_copy_i(copy_req), .cfg_slow_i(slow_req), .clear_i(1'b0),
+        .cfg_cxrom_i(cfg_cxrom[0]), .cfg_copy_i(copy_req), .cfg_slow_i(slow_req), .cfg_rules_i(cfg_rules), .clear_i(1'b0),
         .gs_ph2_i(gs_ph2_f), .gs_rdy_i(gs_rdy_f), .gs_irq_n_i(gs_irq_n_f), .gs_nmi_n_i(gs_nmi_n_f),
         .gs_res_n_i(gs_res_n_f), .gs_abort_n_i(gs_abort_n_f), .gs_be_i(gs_be_f), .gs_d_i(gs_d_i_f),
         .gs_d_o(acc_d_o), .gs_d_oe_o(acc_d_oe), .gs_a_o(acc_a), .gs_rw_o(acc_rw), .gs_vp_o(acc_vp),
@@ -1496,6 +1530,7 @@ module tb_gs_broker #(
 
         if ($test$plusargs("trace")) trace = 1;
         if ($test$plusargs("noturbo")) noturbo = 1;
+        if ($test$plusargs("rules")) cfg_rules = 1;
         if ($test$plusargs("irq")) do_irq = 1;
         if ($test$plusargs("nostall")) do_stall = 0;
         void'($value$plusargs("stallp=%d", stall_period));
@@ -1731,7 +1766,16 @@ module tb_gs_broker #(
             $display("---- ROM copy: %0d bytes through the socket, sum %04h, image identical to the machine's ROM: %s",
                      n_copy, copy_sum, n_bad == 0 ? "yes" : "NO");
         end
-        if (verify_count != 0 && !cfg_toggle) err($sformatf("verify count %0d", verify_count));
+        if (cfg_rules) begin
+            $display("---- speed rules: %0d steps paced by them (causes seen %03b: a detect bit's slot, slot 6's motor, CYAREG bit 7 clear); a fast step with slot 5's latch set and no detect bit: %s",
+                     n_rule_nat, rule_seen, rule_free_seen ? "yes" : "no");
+            if (do_expect && !cfg_native && !do_reset) begin
+                if (rule_seen != 3'b111) err($sformatf("+rules: causes that paced a stretch %03b, want all three", rule_seen));
+                if (!rule_free_seen && !cfg_toggle && !cfg_copy) err("+rules: no fast step with slot 5's motor latch set and its detect bit clear");
+                if (n_rule_nat < 300) err($sformatf("+rules: %0d steps paced by the rules, want 300 or more", n_rule_nat));
+            end
+        end
+        if (verify_count != 0 && !cfg_toggle && !(cfg_rules && !cfg_native)) err($sformatf("verify count %0d", verify_count));
         if (verify_scount != 0) err($sformatf("E0/E1 verify count %0d (last at %06h)", verify_scount, verify_saddr));
         if (SLOW_COPY) begin
             $display("---- copy of Mega II RAM: %0d writes to E0/E1 stored, %0d forwarded writes repeated in it; reads of that RAM: %0d from the copy, %0d from it and compared with the socket's byte (paced), %0d on the socket; request %s",

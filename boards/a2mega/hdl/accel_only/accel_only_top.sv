@@ -468,7 +468,7 @@ module top (
         .arm_i(gs_ctrl_s1[0]), .listen_i(gs_ctrl_s1[2]), .out_extra_i(gs_oe_s1),
         .cfg_fast_i(rq_key_w & gs_rq_s1[0]), .cfg_cardmem_i(rq_key_w & gs_rq_s1[1]),
         .cfg_cxrom_i(rq_key_w & gs_rq_s1[2]), .cfg_copy_i(rq_key_w & gs_rq_s1[3]),
-        .cfg_slow_i(rq_key_w & gs_rq_s1[4]),
+        .cfg_slow_i(rq_key_w & gs_rq_s1[4]), .cfg_rules_i(rq_key_w & gs_rq_s1[5]),
         .clear_i(gs_ctrl_s1[7]),
         .gs_ph2_i(gs_ph2), .gs_rdy_i(gs_rdy), .gs_irq_n_i(gs_irq_n), .gs_nmi_n_i(gs_nmi_n),
         .gs_res_n_i(gs_res_n), .gs_abort_n_i(gs_abort_n), .gs_be_i(gs_be),

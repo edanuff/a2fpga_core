@@ -649,6 +649,7 @@ module gs_accel_broker #(
     wire use_lm    = lm_read & ~(mode_native & mode_bypass);
     wire ld_hit;                         // (assigned below)
     logic xw_r, xl_r, xq1, xq2;          // EXP_WAIT: a native step waits for its byte (below)
+    logic nfr_r, nfl_r, nf1, nf2, nf3;   // NEAR_LINE: a native step's far read fills its line (below)
 
     //=========================================================================
     // Socket side: one request at a time, posted write first
@@ -1233,6 +1234,7 @@ module gs_accel_broker #(
             fl_addr <= '0; fl_we <= 1'b0; fl_data <= '0;
             held_r <= 1'b0; fl_hold <= 1'b0; pre_q <= 1'b0;
             xw_r <= 1'b0; xl_r <= 1'b0; xq1 <= 1'b0; xq2 <= 1'b0;
+            nfr_r <= 1'b0; nfl_r <= 1'b0; nf1 <= 1'b0; nf2 <= 1'b0; nf3 <= 1'b0;
             use_lm_r <= 1'b0; rom_r <= 1'b0; vfy_r <= 1'b0;
             ld_valid <= 1'b0;
             ml_go <= 1'b0; ml_sel_r <= 1'b0; ml_sel_c <= '0; wen_r <= 1'b0; wen_c <= '0; ren_r <= 1'b0; ren_c <= '0; rexp_r <= 1'b0;
@@ -1263,6 +1265,7 @@ module gs_accel_broker #(
             near_r <= 1'b0; fill_pend <= 1'b0; nfill_r <= 1'b0;
             held_r <= 1'b0; fl_hold <= 1'b0; pre_q <= 1'b0;
             xw_r <= 1'b0; xl_r <= 1'b0; xq1 <= 1'b0; xq2 <= 1'b0;
+            nfr_r <= 1'b0; nfl_r <= 1'b0; nf1 <= 1'b0; nf2 <= 1'b0; nf3 <= 1'b0;
             // the PHY keeps issuing (idle) cycles during reset
             if (phy_issue_evt_i) begin fl_kind <= K_IDLE; fl_busy <= 1'b1; fl_run <= 1'b0; end
             else if (phy_fall_evt_i) fl_busy <= 1'b0;
@@ -1305,7 +1308,8 @@ module gs_accel_broker #(
             else if (nl_wt | held_r)                       nl_tk <= 1'b0;
             thit_q   <= NEAR_LINE & thit0;
             tunk_q   <= NEAR_LINE & ~nl_tgood;
-            nfill_r  <= NEAR & fill_pend & fill_ok & (st == ST_DATA) & (ph == 4'd2);
+            nfill_r  <= NEAR & fill_pend & fill_ok &
+                        (((st == ST_DATA) & (ph == 4'd2)) | (nf3 & ~nfill_r & ~cpu_ce_o));
             if (nfill_r | cpu_ce_o) fill_pend <= 1'b0;
             ml_apply <= 1'b0;
             sc       <= cpu_ce_o ? 4'd0 : (sc != 4'd15) ? sc + 4'd1 : sc;
@@ -1364,6 +1368,21 @@ module gs_accel_broker #(
             xq1 <= xl_r & ~lm_rwait_i;
             xq2 <= xq1;
             if (xq2) xw_r <= 1'b0;
+
+            // ---- NEAR_LINE, native (card memory of record): a far read fills its line as a
+            // fast step's does.  Without it a paced program read its expansion RAM from the
+            // expansion memory at every step, each read a socket cycle issued again, and paced
+            // card memory was slower than the machine; with it only the first read of a line
+            // waits.  The line is written once its data has been steady for two clks (the
+            // launch registered, rwait low, then three: a clk after an expansion read's cycle
+            // may complete), once, and not in the clk the step ends - a line written at or
+            // after the next step's launch is not used by it anyway (nl_wr).  Every byte a
+            // line then gives a paced step is compared with the socket's, like any local read.
+            nfr_r <= NEAR & NEAR_LINE & ren_next & mode_native & ~mode_bypass;
+            if (nfr_r) nfl_r <= 1'b1;
+            nf1 <= nfl_r & ~lm_rwait_i;
+            nf2 <= nf1;
+            nf3 <= nf2;
 
             // ---- what the memory output registers hold
             if (lm_ren) begin
@@ -1443,6 +1462,7 @@ module gs_accel_broker #(
                 sreq_valid  <= 1'b0;
                 pre_q       <= 1'b0;
                 xw_r <= 1'b0; xl_r <= 1'b0; xq1 <= 1'b0; xq2 <= 1'b0;
+                nfr_r <= 1'b0; nfl_r <= 1'b0; nf1 <= 1'b0; nf2 <= 1'b0; nf3 <= 1'b0;
                 mode_native <= native_s[1];
                 mode_bypass <= bypass_s[1];
                 slow_q      <= slow_s[1];

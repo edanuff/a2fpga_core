@@ -203,7 +203,7 @@ static void gs_accel_dump(int fd)
     }
     uint8_t  mode = gs_rd(15);
     uint32_t w6 = gs_accel_word(6), w7 = gs_accel_word(7), w8 = gs_accel_word(8);
-    uint32_t w12 = gs_accel_word(12), w13 = gs_accel_word(13), w14 = gs_accel_word(14);
+    uint32_t w10 = gs_accel_word(10), w12 = gs_accel_word(12), w13 = gs_accel_word(13), w14 = gs_accel_word(14);
     tn_printf(fd, "%s | setting %s | delay %u ms, verify %u ms\r\n", gs_accel_state_str(),
               settings()->gs_accel_off ? "OFF" : "ON", gs_accel_get_delay_ms(), gs_accel_get_verify_ms());
     tn_printf(fd, "mode %02X:%s%s%s%s%s%s%s\r\n", mode,
@@ -215,6 +215,10 @@ static void gs_accel_dump(int fd)
               (unsigned)(w6 >> 16), (unsigned)((w7 >> 16) & 0xFF), (unsigned)(w7 & 0xFFFF),
               (w13 & 0x08) ? "built" : "not built", (w13 & 0x04) ? ", whole" : "",
               (unsigned)(w13 >> 16), (unsigned)((w14 >> 16) & 0xFF), (unsigned)(w14 & 0xFFFF));
+    tn_printf(fd, "speed rules: %s%s%s | speed register %02X | motor latches: slot 4 %u, 5 %u, 6 %u, 7 %u\r\n",
+              gs_accel_get_rules() ? "asked with fast" : "not asked", (w10 & 0x200) ? ", on in the gateware" : "",
+              (w10 & 0x100) ? ", PACED BY THEM NOW" : "", (unsigned)((gs_accel_word(9) >> 16) & 0xFF),
+              (unsigned)((w10 >> 12) & 1), (unsigned)((w10 >> 13) & 1), (unsigned)((w10 >> 14) & 1), (unsigned)((w10 >> 15) & 1));
     tn_printf(fd, "expansion memory: %s%s%s, %u banks\r\n", (w12 & 0x400) ? "DDR3" : "block RAM",
               (w12 & 0x100) ? ", ready" : ", NOT READY", (w12 & 0x200) ? ", QUEUE OVERFLOWED" : "", (unsigned)(w12 & 0xFF));
 }
@@ -397,12 +401,15 @@ static void tn_exec_line(int fd, char *line)
                 gs_accel_go(); tn_puts(fd, "bring-up started (gs accel to watch)\r\n");
             } else if (!strcmp(tok[2], "fast") || !strcmp(tok[2], "slow")) {
                 gs_accel_pace(!strcmp(tok[2], "fast")); tn_printf(fd, "%s\r\n", gs_accel_state_str());
+            } else if (!strcmp(tok[2], "rules") && nt == 4 && (!strcmp(tok[3], "on") || !strcmp(tok[3], "off"))) {
+                gs_accel_set_rules(!strcmp(tok[3], "on"));
+                tn_printf(fd, "speed rules %s with fast mode (not saved)\r\n", gs_accel_get_rules() ? "asked" : "not asked");
             } else if (!strcmp(tok[2], "delay") && nt == 4 && parse_num(tok[3], &val)) {
                 gs_accel_set_delay_ms(val); tn_printf(fd, "bring-up starts %u ms after /RES is high (not saved)\r\n", val);
             } else if (!strcmp(tok[2], "verify") && nt == 4 && parse_num(tok[3], &val)) {
                 gs_accel_set_verify_ms(val); tn_printf(fd, "each verify step lasts %u ms (not saved)\r\n", gs_accel_get_verify_ms());
             } else {
-                tn_puts(fd, "usage: gs accel | gs accel on|off | gs accel go | gs accel fast|slow | gs accel delay <ms> | gs accel verify <ms>\r\n");
+                tn_puts(fd, "usage: gs accel | gs accel on|off | gs accel go | gs accel fast|slow | gs accel rules on|off | gs accel delay <ms> | gs accel verify <ms>\r\n");
             }
         } else if (!strcmp(tok[1], "auto")) {
             gs_socket_resume(); tn_puts(fd, "auto-arm resumed\r\n");

@@ -47,7 +47,7 @@ STOCK=( "$CORE/P65C816_pkg.sv" "$CORE/mcode.sv" "$CORE/bit_adder.v" "$CORE/adder
 FASTF=( "$FAST/F65C816_pkg.sv" "$FAST/mcode.sv" "$FAST/AddSubBCD.sv" "$FAST/ALU.sv" "$FAST/AddrGen.sv"
         "$FAST/AddrBus.sv" "$FAST/F65C816.sv" )
 DUT=( "$TWGS/gs_socket_phy.sv" "$TWGS/gs_mmu_decode.sv" "$TWGS/gs_mmu_replica.sv" "$TWGS/gs_accel_broker.sv"
-      "$TWGS/gs_accel_romcopy.sv" "$TWGS/gs_accel_exp.sv" "$HERE/gs_exp_mem_sim.sv"
+      "$TWGS/gs_accel_romcopy.sv" "$TWGS/gs_accel_rules.sv" "$TWGS/gs_accel_exp.sv" "$HERE/gs_exp_mem_sim.sv"
       "$HERE/tb_gs_broker.sv" "$SIM/mmu/iigs_machine_dpi.cpp" )
 
 build() {   # name, extra verilator args...
@@ -296,6 +296,17 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run k_copy      b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=1
     run k_copy_rst  b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=2 +reset
     run k_recopy    b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=1 +recopy
+    # ... and with the machine's speed rules deciding between fast and paced (gs_accel_rules; +rules):
+    # the test program's T27 has a stretch for each cause and one that must stay fast
+    run q_fast      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules
+    run q_fast_c    b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=1
+    run q_fast_sw   b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=2
+    run q_toggle    b105_2t $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +rules +slow=2 +steps=120000
+    run q_1mhz      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=1 +noturbo
+    run q_rst       b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=1 +reset
+    run q_st3       b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=1 +stallp=3 +steps=120000
+    run q_copy      b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +rules +slow=1
+    run q_line      b110_2l $T +mode=fast   +expect +irq +exp=2 +rules
     # ... the line memory with banks 02/03 in block RAM, and with none
     run l_native    b110_2l $T +mode=native +expect +irq +exp=2
     run l_paced     b110_2l $T +mode=paced  +expect +irq +exp=2
@@ -337,6 +348,7 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run j_fast_sw   b105_2t $T +mode=fast   +expect +exp=126 +mbexp=126 +slow=2 +wlog=wstream.txt
     run j_paced_c   b105_2t $T +mode=paced  +expect +exp=126 +mbexp=126 +slow=1 +wlog=wstream.txt
     run j_copy_c    b105_2k $T +mode=copy   +expect +exp=126 +mbexp=126 +slow=1 +wlog=wstream.txt
+    run j_rules     b105_2t $T +mode=fast   +expect +exp=126 +mbexp=126 +slow=1 +rules +wlog=wstream.txt
 fi
 DO_ROM=0
 if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
@@ -367,6 +379,7 @@ if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
         run m_fast_sw   b105_2t $R +mode=fast   +exp=126 +mbexp=126 +slow=2
         run m_paced_c   b105_2t $R +mode=paced  +exp=126 +mbexp=126 +slow=1
         run m_copy_c    b105_2k $R +mode=copy   +exp=126 +mbexp=126 +slow=1
+        run m_rules     b105_2t $R +mode=fast   +exp=126 +mbexp=126 +slow=1 +rules
         run o_native    b110_2l $R +mode=native +exp=2
         run o_fast      b110_2l $R +mode=fast   +exp=2
         run o_fast_cx   b110_2l $R +mode=fast   +exp=2 +cxrom=1
@@ -412,17 +425,17 @@ same() {    # label, reference run, other runs...: step hash and write stream mu
 if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     same "test program" e_native e_paced e_fast e_fast100 e_dl108 e_dl100 e_dx100 e_dx108 e_dx110 e_copy
     same "test program, two expansion banks" f_native f_paced f_fast g_paced g_fast
-    same "test program, 126 expansion banks, Mega II RAM read from the card's copy" j_native j_fast j_fast_c j_fast_sw j_paced_c j_copy_c
+    same "test program, 126 expansion banks, Mega II RAM read from the card's copy" j_native j_fast j_fast_c j_fast_sw j_paced_c j_copy_c j_rules
 fi
 if [[ $DO_ROM -eq 1 ]]; then
     same "ROM 01 boot ($STEPS steps)" r_native r_paced r_fast r_fast_cx r_fast100 r_f816 r_dl108 r_dl100 r_dx100 r_dx108 r_dx110 r_copy
     same "ROM 01 boot, two expansion banks ($STEPS steps)" s_native s_fast t_paced t_fast
-    same "ROM 01 boot, 126 expansion banks ($STEPS steps)" m_native m_paced m_fast m_copy m_fast_c m_fast_sw m_paced_c m_copy_c
+    same "ROM 01 boot, 126 expansion banks ($STEPS steps)" m_native m_paced m_fast m_copy m_fast_c m_fast_sw m_paced_c m_copy_c m_rules
     same "ROM 01 boot, the line memory on block RAM ($STEPS steps)" o_native o_fast o_fast_cx
     same "ROM 01 boot, the line memory, no expansion ($STEPS steps)" r_native o_copy
 fi
 for n in "${NAMES[@]}"; do
-    case "$n" in d*|e_dl*|r_dl*|x*|y*|z*|w*|v*|c_*|e_dx*|r_dx*|e_copy|r_copy|f_*|s_*|g_*|t_*|u_*|m_*|l_*|o_*|k_*|j_*) grep -E '^---- (local reads|near memory|step lengths|ROM copy|gs_accel|expansion memory|copy of Mega II)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
+    case "$n" in d*|e_dl*|r_dl*|x*|y*|z*|w*|v*|c_*|e_dx*|r_dx*|e_copy|r_copy|f_*|s_*|g_*|t_*|u_*|m_*|l_*|o_*|k_*|j_*|q_*) grep -E '^---- (local reads|near memory|step lengths|ROM copy|gs_accel|expansion memory|copy of Mega II|speed rules)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
 done
 for n in "${NAMES[@]}"; do
     grep -E '^---- socket timing' "$OUT/$n/sim.log" | sed "s/^---- /$n: /"
