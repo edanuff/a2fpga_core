@@ -33,7 +33,11 @@ its times is 7 % under the AppleSqueezer GS Turbo's published ones.
 counter without its adder, three placements of three at 105 MHz have no
 violation (p0, p1, p2). p1 flashed 2026-11-15 and brought up to paced
 card memory with the copy, no mismatch, then fast (`1B`): five runs of
-the benchmark average 50.75 MHz, q1's figure.**
+the benchmark average 50.75 MHz, q1's figure.** **Since: the firmware
+brings it to fast mode by itself (section 3l, on the card), and speed
+control is built - paced mode at the machine's pace and the machine's
+speed rules (section 3m: simulated, three placements with no violation,
+not flashed).**
 Parents: [`gs_socket_s7_accelerator_scoping.md`](gs_socket_s7_accelerator_scoping.md)
 (what the accelerator is) and
 [`gs_socket_s7_fast_core_exploration.md`](gs_socket_s7_fast_core_exploration.md)
@@ -98,6 +102,7 @@ Requests in register 29:
 | 2 | CXROM | internal `$C100–$CFFF` firmware served from the image. Taken when the core is in reset or held (so: at /RES, or set it with COPY). |
 | 3 | COPY | 0 → 1: read the ROM image through the socket. The core is held between two steps for about 46 ms. |
 | 4 | SLOW | (section 3h; not in the build on the card) reads of the Mega II's RAM below `$C000` in banks E0/E1 come from the card's copy. Needs CARDMEM. May change at any step. |
+| 5 | RULES | (section 3m; not in the build on the card, which ignores the bit) fast mode gives way to the machine's pace where the speed rules say so. May change at any step. |
 
 Bits 0–2 take effect only once an image has been copied since power-up.
 **With register 29 at 00, or without the key, the card is S6 on the new
@@ -1719,6 +1724,129 @@ firmware wrote nothing: there is nothing for it to do at a reset.
 - The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
   build its periods read 4.5 % short.
 
+## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; not flashed)
+
+Section 3l makes fast mode the card's normal state, and that leaves two
+things wrong. "Off" is slower than the machine (section 3j: paced card
+memory is the only way back from fast mode, and a paced program in
+expansion RAM read every byte from the DDR3). And fast mode runs the
+code between two accesses to the machine at the card's rate, whatever
+that code is: a disk drive's read and write loops count cycles.
+
+### A paced step fills its line
+
+The near memory's lines were filled by fast steps alone: the fill hung
+on the fast step's own count. A paced (native, card memory of record)
+step's far read now fills its line too (`gs_accel_broker`, `nf*`): once
+the data has been steady for two clks after the expansion memory lets
+go, once, and not in the clk the step ends. Fast mode is untouched - the
+new registers are never set in it - and so is paced mode's rule that a
+socket cycle is not taken as complete until the byte is there; only the
+first read of a line waits now. Every byte a line gives a paced step is
+compared with the socket's, as before, so the ladder's verify seconds
+now check line contents and not single bytes.
+
+In the bench, the test program paced with 126 expansion banks:
+
+| | before | now |
+|---|---|---|
+| reads that went to the expansion memory | 9,026 | 289 |
+| socket cycles issued again while a byte was on its way | 4,626 | 139 |
+| line fills | 0 | 614 |
+| time for the 60,000 steps (native: 26.85 ms) | 28.63 ms, 6.6 % over | 26.92 ms, 0.3 % over |
+
+And the ROM 01 boot paced (3 M steps): 2,144,414 reads, each a far read
+before; now 225 line fills and 2,144,189 reads out of lines, every one
+compared with the machine's byte, none different.
+
+### The machine's speed rules
+
+`gs_accel_rules.sv`, asked for by **register 29 bit 5**. With the bit
+clear nothing changes. With it set, fast mode gives way to paced card
+memory - every step a socket cycle, timed by the machine's own PHI2,
+which the FPI slows or not by its own rules - while:
+
+| | |
+|---|---|
+| the speed register (`$C036`) has bit 7 clear | the machine was asked for its normal speed: the Control Panel's setting, or a program's |
+| slot 6's motor latch is set (`$C0E9` on the bus since `$C0E8`) | a 5.25 drive's motor on a Disk II card, and the IWM's enable: the 3.5 drive is served at the machine's fast rate by loops timed for it, so this holds whatever the speed register says |
+| the motor latch of slot 4, 5 or 7 is set and that slot's detect bit in the speed register is set | the FPI's own rule for dropping to 1 MHz |
+
+The latches follow the bus as the FPI's do (any cycle the socket shows
+at those addresses in banks 00, 01, E0, E1; an I/O access is a socket
+cycle in every mode) and clear at /RES. The change of mode is the
+broker's own, at a step boundary, a step or two after the access - the
+switch the bench has always made at random points (`+mode=toggle`).
+Telemetry word 10 is now `{16'h0, motor latches of slots 7-4, 00, rules
+asked, slow by them, the other switches}`; the mode byte's fast bit
+drops while the rules hold.
+
+**Not among the rules:** the speaker (`$C030`: a program that times
+sound with loops plays it too high in fast mode, as on any accelerator
+with that option off), a linger after the motor goes off, slot DMA,
+interrupts. And nothing on the machine's side can ask for a speed yet:
+no Zip or TransWarp registers, no desk accessory (scoping 2.5).
+
+**The firmware** asks for the rules with fast mode (`3B` where section
+3l wrote `1B`; gateware without them ignores the bit); `gs accel rules
+on|off` at run time, and `gs accel` shows the rules, the speed register
+and the four latches.
+
+### Simulated
+
+The test program has a T27: a stretch of local code under each cause,
+and one under slot 5's latch with its detect bit clear, which must stay
+fast. The bench has its own instance of the rules for the hand-wired
+design and compares gs_accel beside it pin for pin (so the two must
+change mode at the same step), checks that a step is paced within three
+steps of the rules' asking and fast again within three of their letting
+go, that each cause paced a stretch, and that the fourth stretch ran
+fast (260 fast steps). Eleven new runs (`q_*`, `j_rules`, `m_rules`):
+with and without the copy of E0/E1, toggling, the FPI held at 1 MHz, a
+warm reset, RDY stalls, `+mode=copy`, the line memory on block RAM, the
+write stream compared with the other modes', and the ROM 01 boot - where
+the rules paced 275,398 of the 3 M steps (the ROM runs that much of its
+start at normal speed) and the run reached the same point with the same
+writes as every other.
+
+**The broker bench: 221 runs, all pass** (210 before), on the final
+source. Three faults planted in copies of the source:
+
+| planted | |
+|---|---|
+| a paced fill that does not wait for the expansion memory's data | 17 runs fail (a stale byte delivered) |
+| the rules forget slot 6's motor | 9 runs fail |
+| any motor latch paces, whatever its detect bit | **passed at first**: the check asked for one fast step in that stretch, and the first step or two after the access are fast before the mode changes. The check counts now (100 or more); 9 runs fail |
+
+Not run again: the decode sweep, the replica, socket, arm and core
+benches (nothing they build was changed), and the 32 earlier faults.
+
+### Timing
+
+Three placements of the final source, the committed options
+(`Place_Option` 1), 105 MHz, the 0.5 ns rule:
+
+| | setup / hold violations | worst slack beyond the rule | on |
+|---|---|---|---|
+| sc0 | 0 / 0 | +0.031 | a line's data into the core's P |
+| sc1 | 0 / 0 | +0.035 | the near memory's index into its hit register |
+| sc2 | 0 / 0 | +0.014 | the PHY's enable into the copy machine's sum |
+
+**Three of three.** Size (sc1): 13,249 logic cells, 11,931 flip-flops,
+12,755 of 69,120 logic slices, 182 of 340 block RAMs - 34 cells and 13
+flip-flops more than p1.
+
+### Not done, not known
+
+- **Not on the card.** No drive has been read or written through it: the
+  rules are the FPI's as documented and as the MiSTer model has them,
+  and the bench's machine has no drive. A real 5.25 or 3.5 drive is the
+  test, with a disk that can be lost.
+- Paced mode at the machine's pace is the bench's figure; the benchmark's
+  base pass in paced mode on the card is the measure (section 3j's was
+  1.4 to 1.6 times the machine's on four tests).
+- A ROM 3 machine; the speaker; anything the machine itself can set.
+
 ## 4. What is verified, and what is not
 
 Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):
@@ -1822,6 +1950,17 @@ The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of sc0, sc1 and sc2 (speed control, section 3m; three
+placements with no violation; none flashed): sources = commit `8df36beb`
+(the bench alone changed after it); the same tool and device. sc0: build
+stamp `20261115133453`, bitstream sha256
+`40adcdbdd4aba2eb…0ddc1e832d552f46`. sc1: `20261115134447`,
+`05d20b619356a6e0…7407890b74997d20`. sc2: `20261115140000`,
+`a68adb5bf2c634a4…073399cfa4044519`. The firmware to go with it on the
+test card: its own source `e96b40cf` with the four-file change of
+sections 3l and 3m, sha256 `4691e43a65f1207f…3646f055191d74be` (not
+flashed; the card has section 3l's).
 
 Provenance of p1 and p2 (the closed build of section 3k: section 3j's
 logic, the period counter change, `Place_Option` 1; three placements
