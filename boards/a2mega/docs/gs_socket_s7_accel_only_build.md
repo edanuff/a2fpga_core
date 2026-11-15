@@ -37,8 +37,10 @@ the benchmark average 50.75 MHz, q1's figure.** **Since: the firmware
 brings it to fast mode by itself (section 3l, on the card), and speed
 control is built - paced mode at the machine's pace and the machine's
 speed rules (section 3m: simulated, three placements with no violation;
-sc1 and its firmware flashed 2026-11-15 15:43, not yet run on the
-machine).**
+sc1 and its firmware flashed 2026-11-15 15:43; one power-up on the
+machine: fast by itself, and a stretch of the boot with the speed
+register at normal seen paced by the rules; no drive, no benchmark
+yet).**
 Parents: [`gs_socket_s7_accelerator_scoping.md`](gs_socket_s7_accelerator_scoping.md)
 (what the accelerator is) and
 [`gs_socket_s7_fast_core_exploration.md`](gs_socket_s7_fast_core_exploration.md)
@@ -1725,7 +1727,7 @@ firmware wrote nothing: there is nothing for it to do at a reset.
 - The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
   build its periods read 4.5 % short.
 
-## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43, not yet run)
+## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; one power-up, the first rule seen at work; no drive yet)
 
 Section 3l makes fast mode the card's normal state, and that leaves two
 things wrong. "Off" is slower than the machine (section 3j: paced card
@@ -1848,9 +1850,34 @@ accelerator gateware seen, or the socket is not armed | setting ON",
 and its usage line has `rules on|off`. The gateware has not been loaded
 yet: that wants the board's power off and on.
 
+### The first power-up (2026-11-15 15:48)
+
+The board's power off and on, then the machine on. The console: ROM
+copy on the first try, sum 7EE8, paced card memory, the same with the
+copy of E0/E1, FAST. No command was typed. Three readings after it:
+
+| when | mode | speed register | what |
+|---|---|---|---|
+| 15:48:36 | - | `82` | the ladder's last line is FAST |
+| a few seconds on | `8A` | `02` | `gs accel`: "paced by them now"; last address 00:C0E1; fast asked, not in effect |
+| 15:49:42 | `9A` | `82` | fast in effect; 33.3 M steps/s, 0.162 M socket cycles/s, 21.96 M hits/s, 0.493 M misses/s |
+
+So something in the start-up cleared bit 7 for a stretch with slot 6's
+soft switches in use, and the card ran that stretch at the machine's
+pace and went back to fast when the bit was set again: the first rule,
+on the machine, with nothing typed. Which code it was has not been
+looked up. The last line's rates are those of section 3l's idle prompt.
+No motor latch was set in any reading. The copy of E0/E1: built, whole,
+verify count 0. The card memory's verify count reads 65535 (last
+7F:F50F, later 00:AE16): once fast mode has run the machine's RAM is
+stale by design and a step paced by the rules is compared with it, so
+that count says nothing after the first fast step; before the rules it
+could not move in fast mode at all. The count for E0/E1 is the one that
+still means something.
+
 ### Not done, not known
 
-- **Not run on the machine.** No drive has been read or written through it, and
+- **One power-up, the first rule only.** No drive has been read or written through it, and
   the bench's machine has no drive. The latches and the detect bits are
   as the MiSTer core's model of the FPI has them (`clock_divider.v`:
   tracked whatever the detect bits say, gated by them); slot 6 holding
