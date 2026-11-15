@@ -1595,7 +1595,7 @@ constant of the test divided by the accelerated time. So the build that
 meets the timing rule on three placements measures what the experiment
 measured, past the Squeezer's 391 ticks by the same margin.
 
-## 3l. Fast by itself: the bring-up in the firmware (2026-11-15; built and tested against a model, not on the card)
+## 3l. Fast by itself: the bring-up in the firmware (2026-11-15; tested against a model; flashed, not yet run with the machine on)
 
 Until now fast mode was reached by hand over telnet, one register write
 at a time. The ESP32 firmware now runs the same ladder after every arm
@@ -1655,10 +1655,30 @@ DDR3 that is not ready - each with the writes to register 29 compared
 and the rule about `00` after fast mode checked on every write. The
 firmware builds for the 1.0a3 board (1,136,343 bytes, 86 % of the slot).
 
+**On the card (2026-11-15, 12:57), and what exactly.** The card's ESP32
+ran the firmware of 2026-09-13 (its banner; commit `e96b40cf`, the S6
+auto-arm). The repository's firmware has moved two months on since - the
+a2p25 variant, the USB host and the stick as the volume, the reset hold
+until media is mounted, self-update with a different partition table -
+and none of that has run against this gateware. So the card was not
+given the repository's firmware: it was given **its own source,
+`e96b40cf`, with this section's change to four files applied** (the diff
+of `gs_socket.c`, `gs_socket.h`, `settings.h`, `telnetd.c` in the commit
+that adds this section; those files but `telnetd.c` are the same in both
+trees, and the patch applies to all four as it is), built with that
+tree's Makefile (BOARD_REV 103, the `no_ota` partition table the card
+has): 1,046,971 bytes, sha256 `d1533014030e9934…591574e8fb77c1f10`.
+Uploaded over the ESP32's USB with the IIgs off, the USB serial number
+checked against the card's network address first. It came up
+(`A2MEGA ESP32 NOV 15 2026 12:55:17`), joined the network with its saved
+settings, and waits for the machine's clock with the socket off;
+`gs accel` answers, setting ON. Moving this card to the repository's
+firmware is a step of its own.
+
 **Not done, not known.**
 
-- Not on the card. The model is mine: it says what I believe the
-  gateware does, and only the card can say otherwise.
+- Not run with the machine on. The model is mine: it says what I believe
+  the gateware does, and only the card can say otherwise.
 - **The ladder has only ever been run by hand with the machine idle at a
   prompt.** Here it runs 2 s after reset, in the middle of the boot: the
   46 ms hold of the ROM copy and two seconds of paced card memory fall
