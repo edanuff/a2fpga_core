@@ -1875,6 +1875,41 @@ that count says nothing after the first fast step; before the rules it
 could not move in fast mode at all. The count for E0/E1 is the one that
 still means something.
 
+### The Control Panel's speed at Normal (15:53), and fourteen mismatches not explained
+
+Ed set the Control Panel's system speed to Normal. Read at 15:53:55 and
+again at 15:55:21, the machine idle:
+
+| | fast, 15:49 | Normal, 15:53 |
+|---|---|---|
+| mode | `9A` | `8A`, "paced by them now" |
+| speed register | `82` | `02` |
+| core steps | 33.3 M/s | 1.085 M/s |
+| socket cycles for the core | 0.162 M/s | 1.016 M/s |
+| PHI2 cycles | 2.449 M/s | 1.023 M/s |
+| line misses | 0.493 M/s | 0.017 M/s |
+
+The rule does what it was built to do: the card runs at the machine's
+1 MHz. About 6 % of the steps are not socket cycles; a guess, not
+checked, is the firmware's interrupt handlers setting the speed bit for
+their own length, which the rule follows both ways.
+
+**Not explained: the count of mismatches in the copy of E0/E1 reads 14
+(last address E1:1D6B), where it read 0 at 15:49:42.** It did not move
+between the two readings ninety seconds apart. The count only moves in
+paced steps, so the fourteen fell between the speed bit clearing and
+15:53:55: the rest of the Control Panel's session, its exit, or the
+first of the idle after it. The bench holds this count at zero in every
+run, the rules' runs too, and a paced pass of the whole benchmark held
+it at zero on q1. ROM 01 has no long reference to E1:1D6B itself (it
+has many to E1:1DB0-1DD6). What it could be, none of it checked: a line
+of the copy stale after the new paced fill; a write in fast mode that
+reached the copy and not the machine, or the reverse; a comparison
+taken before a slow DDR3 read had answered (a false count: the step
+itself waits). The core uses the copy's byte, and the machine went on
+running. Until it is explained, the copy of E0/E1 with the rules is not
+known to be right.
+
 ### Not done, not known
 
 - **One power-up, the first rule only.** No drive has been read or written through it, and
