@@ -1595,7 +1595,7 @@ constant of the test divided by the accelerated time. So the build that
 meets the timing rule on three placements measures what the experiment
 measured, past the Squeezer's 391 ticks by the same margin.
 
-## 3l. Fast by itself: the bring-up in the firmware (2026-11-15; tested against a model; flashed, not yet run with the machine on)
+## 3l. Fast by itself: the bring-up in the firmware (2026-11-15; tested against a model; flashed; one power-up on the card reached fast mode by itself)
 
 Until now fast mode was reached by hand over telnet, one register write
 at a time. The ESP32 firmware now runs the same ladder after every arm
@@ -1675,14 +1675,27 @@ settings, and waits for the machine's clock with the socket off;
 `gs accel` answers, setting ON. Moving this card to the repository's
 firmware is a step of its own.
 
+**The first power-up with it (2026-11-15, about 13:05).** The IIgs was
+switched on with nothing typed at the card. Its console, in order:
+machine clock up, reset released, armed 20 ms after the slot reset read
+high; `ACCEL: WAITING FOR /RES HIGH 2000 MS`, `COPYING THE ROM (TRY 1)`,
+`ROM IMAGE VALID, SUM 7EE8`, card memory at the machine's pace, the same
+with the copy of E0/E1, `ACCEL: FAST`. `gs accel` afterwards: mode 9A,
+one copy, both verify counts 0 with no mismatch address, the DDR3 ready
+with 126 banks; no stall. Counters over 8.6 s a minute later: 33.2 M
+core steps a second, 0.162 M socket cycles a second for the core, 21.95
+M line hits and 0.49 M misses a second - this morning's figures at a
+prompt in fast mode. So the ladder ran inside the boot, where it had
+never run, and the two verify seconds saw no mismatch there. What the
+screen showed through it is Ed's to say.
+
 **Not done, not known.**
 
-- Not run with the machine on. The model is mine: it says what I believe
-  the gateware does, and only the card can say otherwise.
-- **The ladder has only ever been run by hand with the machine idle at a
-  prompt.** Here it runs 2 s after reset, in the middle of the boot: the
-  46 ms hold of the ROM copy and two seconds of paced card memory fall
-  where GS/OS is loading. That is the first thing to watch.
+- One power-up. The model is mine, and only the card can say where it is
+  wrong; this run agreed with it on the normal path. None of the other
+  paths (a mismatch, a /RES in the copy, machine off and on with the
+  card powered, an ESP32 restart, `slow` and `fast`, the setting off)
+  has run on the card.
 - **No speed control (S7e).** Fast mode does not follow the machine's
   speed register or slow down for a disk drive: code between accesses to
   a drive runs at the card's rate. The a2p25's disk cards are polled and
