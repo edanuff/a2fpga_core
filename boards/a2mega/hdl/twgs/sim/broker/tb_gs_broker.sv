@@ -904,7 +904,8 @@ module tb_gs_broker #(
     // within three of its falling; which causes paced a stretch; and the case that must not
     int       n_rule_nat = 0, rule_hi = 0, rule_lo = 0;
     bit [2:0] rule_seen = '0;            // {a detect bit's slot, slot 6's motor, CYAREG bit 7 clear}
-    bit       rule_free_seen = 0;        // a fast step with slot 5's latch set and its detect bit clear
+    int       n_rule_free = 0;           // fast steps with slot 5's latch set and its detect bit clear (more than the
+                                         // few a change of mode takes: a planted "any latch paces" passed a yes/no check)
 
     task automatic err(input string s);
         errors++;
@@ -1302,7 +1303,7 @@ module tb_gs_broker #(
             n_rule_nat++;
             rule_seen |= {|(tr_motor & tr_cyareg[3:0] & 4'b1011), tr_motor[2], ~tr_cyareg[7]};
         end
-        if (!u_brk.mode_native && tr_motor[1] && !tr_cyareg[1] && tr_cyareg[7] && !tr_motor[2]) rule_free_seen = 1;
+        if (!u_brk.mode_native && tr_motor[1] && !tr_cyareg[1] && tr_cyareg[7] && !tr_motor[2]) n_rule_free++;
     end
     int n_wai = 0;
     always @(posedge clk) if (cpu_rst_n && cpu_ce && !cpu_rdy_out) n_wai++;
@@ -1767,11 +1768,11 @@ module tb_gs_broker #(
                      n_copy, copy_sum, n_bad == 0 ? "yes" : "NO");
         end
         if (cfg_rules) begin
-            $display("---- speed rules: %0d steps paced by them (causes seen %03b: a detect bit's slot, slot 6's motor, CYAREG bit 7 clear); a fast step with slot 5's latch set and no detect bit: %s",
-                     n_rule_nat, rule_seen, rule_free_seen ? "yes" : "no");
+            $display("---- speed rules: %0d steps paced by them (causes seen %03b: a detect bit's slot, slot 6's motor, CYAREG bit 7 clear); fast steps with slot 5's latch set and no detect bit: %0d",
+                     n_rule_nat, rule_seen, n_rule_free);
             if (do_expect && !cfg_native && !do_reset) begin
                 if (rule_seen != 3'b111) err($sformatf("+rules: causes that paced a stretch %03b, want all three", rule_seen));
-                if (!rule_free_seen && !cfg_toggle && !cfg_copy) err("+rules: no fast step with slot 5's motor latch set and its detect bit clear");
+                if (n_rule_free < 100 && !cfg_toggle) err($sformatf("+rules: %0d fast steps with slot 5's motor latch set and its detect bit clear, want 100 or more", n_rule_free));
                 if (n_rule_nat < 300) err($sformatf("+rules: %0d steps paced by the rules, want 300 or more", n_rule_nat));
             end
         end
