@@ -344,13 +344,14 @@ static inline Ext ref_ext(const In& s, const Out& o)
 struct SoftSw {
     bool STORE80, RAMRD, RAMWRT, INTCXROM, ALTZP, SLOTC3ROM, PAGE2, HIRES;
     bool RDROM, LCRAM2, LC_WE, LC_PRE, ROMBANK, INTC8ROM, bank_latch;
+    bool sel35;                      // DISKREG ($C031) bit 6: the 3.5 drive selected
     uint8_t shadow, cyareg, sltromsel;
 
     void reset()
     {
         STORE80 = RAMRD = RAMWRT = INTCXROM = ALTZP = SLOTC3ROM = PAGE2 = HIRES = false;
         RDROM = true; LCRAM2 = true; LC_WE = true; LC_PRE = false;
-        ROMBANK = false; INTC8ROM = false; bank_latch = true;
+        ROMBANK = false; INTC8ROM = false; bank_latch = true; sel35 = false;
         shadow = 0x08; cyareg = 0x80; sltromsel = 0x00;
     }
     uint8_t statereg() const
@@ -360,7 +361,7 @@ struct SoftSw {
     }
     uint8_t misc() const
     {
-        return (bank_latch << 6) | (INTC8ROM << 5) | (SLOTC3ROM << 4) | (STORE80 << 3) |
+        return (sel35 << 7) | (bank_latch << 6) | (INTC8ROM << 5) | (SLOTC3ROM << 4) | (STORE80 << 3) |
                (HIRES << 2) | (LC_WE << 1) | (LC_PRE << 0);
     }
     bool iolc_bank(uint8_t b) const
@@ -401,6 +402,8 @@ struct SoftSw {
                 if (!rom3) ROMBANK = !ROMBANK;
             } else if (r == 0x29) {
                 if (we) bank_latch = d & 1;
+            } else if (r == 0x31) {
+                if (we) sel35 = d & 0x40;
             } else if (r == 0x2D) {
                 if (we) sltromsel = d;
             } else if (r == 0x35) {

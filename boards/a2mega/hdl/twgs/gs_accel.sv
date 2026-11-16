@@ -301,7 +301,7 @@ module gs_accel #(
     end
     gs_accel_rules u_rules (
         .clk(clk), .rst_n(rst_n), .cpu_rst_n_i(cpu_rst_n), .en_i(cfg_rules_i),
-        .bus_evt_i(issue_q), .bus_a_i(last_addr_o), .cyareg_i(r_cyareg),
+        .bus_evt_i(issue_q), .bus_a_i(last_addr_o), .cyareg_i(r_cyareg), .sel35_i(r_misc[7]),
         .motor_o(rules_motor), .slow_o(rules_slow)
     );
 

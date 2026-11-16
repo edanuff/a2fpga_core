@@ -178,7 +178,7 @@ module tb_gs_broker #(
     bit          cfg_rules = 0;
     logic        tr_issue_q = 1'b0, tr_slow;
     logic [23:0] tr_last = '0;
-    logic [7:0]  tr_cyareg;
+    logic [7:0]  tr_cyareg, tr_misc;
     logic [3:0]  tr_motor;
     wire         native_w = (cfg_copy ? ~copy_usable : native_i) | tr_slow;
     wire         bypass_w = cfg_copy ? ~copy_usable : mem_bypass_i;
@@ -310,7 +310,7 @@ module tb_gs_broker #(
         .slow_o(brk_slow), .verify_scount_o(verify_scount), .verify_saddr_o(verify_saddr),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
         .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
-        .shadow_o(), .cyareg_o(tr_cyareg), .sltromsel_o(), .statereg_o(), .sw_misc_o()
+        .shadow_o(), .cyareg_o(tr_cyareg), .sltromsel_o(), .statereg_o(), .sw_misc_o(tr_misc)
     );
 
     // The core under test, through its port list: stock P65C816, or the
@@ -897,15 +897,19 @@ module tb_gs_broker #(
     end
     gs_accel_rules u_rules_tb (
         .clk(clk), .rst_n(rst_n), .cpu_rst_n_i(cpu_rst_n), .en_i(cfg_rules),
-        .bus_evt_i(tr_issue_q), .bus_a_i(tr_last), .cyareg_i(tr_cyareg),
+        .bus_evt_i(tr_issue_q), .bus_a_i(tr_last), .cyareg_i(tr_cyareg), .sel35_i(tr_misc[7]),
         .motor_o(tr_motor), .slow_o(tr_slow)
     );
     // what the rules did: a step is paced within three steps of slow rising and fast again
     // within three of its falling; which causes paced a stretch; and the case that must not
     int       n_rule_nat = 0, rule_hi = 0, rule_lo = 0;
-    bit [2:0] rule_seen = '0;            // {a detect bit's slot, slot 6's motor, CYAREG bit 7 clear}
+    bit [3:0] rule_seen = '0;            // {slot 6 by its detect bit, slot 5 by its detect bit, slot 6 with the 3.5 drive
+                                         // selected, CYAREG bit 7 clear}: each as the only cause of a paced step
+    wire [3:0] rule_now = {tr_motor[2] & tr_cyareg[2], tr_motor[1] & tr_cyareg[1], tr_motor[2] & tr_misc[7], ~tr_cyareg[7]};
     int       n_rule_free = 0;           // fast steps with slot 5's latch set and its detect bit clear (more than the
                                          // few a change of mode takes: a planted "any latch paces" passed a yes/no check)
+    int       n_rule_free6 = 0;          // ... and with slot 6's set, its detect bit clear and the 5.25 drive selected
+                                         // (register 9 of a card in slot 6: no rule)
 
     task automatic err(input string s);
         errors++;
@@ -1015,6 +1019,7 @@ module tb_gs_broker #(
     longint n_real = 0, n_idle = 0, n_sock_wr = 0, n_wlog = 0;
     int     expq_max = 0;
     bit     seen_real = 0;
+    bit     bank_stale = 0;          // the bank byte of this cycle is the one kept through a stall
 
     // the FPI at the rise: latch bank/address/RWB, classify, start memory
     always @(posedge ph2_bus) begin
@@ -1023,6 +1028,7 @@ module tb_gs_broker #(
         bh_pending = 1;
         bank_l = d_bus; addr_l = a_bus; rw_l = rw_bus; vp_l = vp_bus;
         if (stall_req) bank_l = prev_bank_l;
+        bank_stale = stall_req;
         if (running && be_dma) begin
             if (!addr_en) err("address shifters not enabled at the rise");
             if (t_addr_change > t_fall && (t_addr_change - t_fall) > T_ADS)
@@ -1126,7 +1132,10 @@ module tb_gs_broker #(
                     // (... or of Mega II RAM below $C000, where the card's copy of it is
                     // in that memory and its reads are the card's: a read of RAM there too)
                     n_xrep++;
-                end else if (rw_l && a24 == PARK) begin
+                end else if (rw_l && (a24 == PARK || (bank_stale && iss_a == PARK && addr_l == PARK[15:0]))) begin
+                    // (... or the park address as the card issued it, behind the bank byte this
+                    // bench's FPI keeps through a stall: the last idle cycle of a hold was stalled
+                    // and the hold ended in it)
                     n_idle++;
                     if (seen_real && !cfg_toggle && cfg_native)
                         err("idle cycle on the socket in native mode");
@@ -1301,9 +1310,10 @@ module tb_gs_broker #(
             err("+rules: not slow for more than three steps and the step is still paced");
         if (u_brk.mode_native && tr_slow) begin
             n_rule_nat++;
-            rule_seen |= {|(tr_motor & tr_cyareg[3:0] & 4'b1011), tr_motor[2], ~tr_cyareg[7]};
+            if ($onehot(rule_now)) rule_seen |= rule_now;
         end
         if (!u_brk.mode_native && tr_motor[1] && !tr_cyareg[1] && tr_cyareg[7] && !tr_motor[2]) n_rule_free++;
+        if (!u_brk.mode_native && tr_motor[2] && !tr_cyareg[2] && tr_cyareg[7] && !tr_misc[7] && !tr_motor[1]) n_rule_free6++;
     end
     int n_wai = 0;
     always @(posedge clk) if (cpu_rst_n && cpu_ce && !cpu_rdy_out) n_wai++;
@@ -1768,12 +1778,13 @@ module tb_gs_broker #(
                      n_copy, copy_sum, n_bad == 0 ? "yes" : "NO");
         end
         if (cfg_rules) begin
-            $display("---- speed rules: %0d steps paced by them (causes seen %03b: a detect bit's slot, slot 6's motor, CYAREG bit 7 clear); fast steps with slot 5's latch set and no detect bit: %0d",
-                     n_rule_nat, rule_seen, n_rule_free);
+            $display("---- speed rules: %0d steps paced by them (causes seen %04b: slot 6 by its detect bit, slot 5 by its detect bit, slot 6 with the 3.5 drive selected, CYAREG bit 7 clear); fast steps with a latch set and no rule: slot 5's %0d, slot 6's %0d",
+                     n_rule_nat, rule_seen, n_rule_free, n_rule_free6);
             if (do_expect && !cfg_native && !do_reset) begin
-                if (rule_seen != 3'b111) err($sformatf("+rules: causes that paced a stretch %03b, want all three", rule_seen));
+                if (rule_seen != 4'b1111) err($sformatf("+rules: causes that paced a stretch %04b, want all four", rule_seen));
+                if (n_rule_free6 < 100 && !cfg_toggle) err($sformatf("+rules: %0d fast steps with slot 6's motor latch set, its detect bit clear and the 5.25 drive selected, want 100 or more", n_rule_free6));
                 if (n_rule_free < 100 && !cfg_toggle) err($sformatf("+rules: %0d fast steps with slot 5's motor latch set and its detect bit clear, want 100 or more", n_rule_free));
-                if (n_rule_nat < 300) err($sformatf("+rules: %0d steps paced by the rules, want 300 or more", n_rule_nat));
+                if (n_rule_nat < 400) err($sformatf("+rules: %0d steps paced by the rules, want 300 or more", n_rule_nat));
             end
         end
         if (verify_count != 0 && !cfg_toggle && !(cfg_rules && !cfg_native)) err($sformatf("verify count %0d", verify_count));

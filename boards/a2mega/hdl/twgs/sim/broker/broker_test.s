@@ -774,18 +774,30 @@ t24n:
 
         ; ---- T27 the speed rules (gs_accel_rules; runs with +rules): stretches of local
         ;      code the card must run at the machine's pace - CYAREG bit 7 clear; the
-        ;      motor latch of slot 6 set; slot 5's set with its detect bit in CYAREG -
-        ;      and one it must not (slot 5's latch set, its detect bit clear).  Nothing
-        ;      is stored: the bench looks at the mode each stretch ran in.
+        ;      motor latch of slot 6 set with the 3.5 drive selected ($C031 bit 6), or
+        ;      with its detect bit in CYAREG; slot 5's set with its detect bit - and two
+        ;      it must not (a latch set, its detect bit clear: slot 6's is then register
+        ;      9 of whatever card is there).  Nothing is stored: the bench looks at the
+        ;      mode each stretch ran in.
         lda #$00
         sta $C036               ; the machine's normal speed
         jsr rspin
         lda #$80
         sta $C036
         jsr rspin               ; fast again
-        lda $C0E9               ; slot 6: motor on
+        lda $C0E9               ; slot 6: its latch, no detect bit, the 5.25 drive selected - no rule
+        jsr rspin
+        lda #$40
+        sta $C031               ; ... the 3.5 drive selected: the rule
+        jsr rspin
+        stz $C031               ; ... and not: fast again, the latch still set
+        jsr rspin
+        lda #$84
+        sta $C036               ; ... its detect bit: the rule
         jsr rspin
         lda $C0E8
+        lda #$80
+        sta $C036
         jsr rspin
         lda $C0D9               ; slot 5: motor on, no detect bit - no rule
         jsr rspin

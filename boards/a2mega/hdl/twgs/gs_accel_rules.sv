@@ -27,13 +27,19 @@
 //
 //   * CYAREG ($C036) bit 7 is clear: the machine was asked for its normal
 //     speed (the Control Panel's setting, or a program's), or
-//   * the motor latch of slot 6 is set: $C0E9 was on the bus since $C0E8.
-//     That is the 5.25 drive's motor on a Disk II card and the enable of the
-//     IWM, whose 3.5 drive the ROM serves at the machine's fast rate with
-//     loops timed for it - so this one holds whatever CYAREG says, or
-//   * the motor latch of slot 4, 5 or 7 is set ($C0n9 since $C0n8, n = 8 +
-//     slot) and CYAREG's motor-detect bit of that slot (bits 0, 1, 3) is set:
-//     the FPI's own rule for dropping to 1 MHz.
+//   * the motor latch of slot 4, 5, 6 or 7 is set ($C0n9 on the bus since
+//     $C0n8, n = 8 + slot) and CYAREG's motor-detect bit of that slot (bits
+//     0 to 3) is set: the FPI's own rule for dropping to 1 MHz, or
+//   * the motor latch of slot 6 is set and the 3.5 drive is selected
+//     (DISKREG, $C031, bit 6): $C0E9 is then the enable of the IWM for a
+//     drive the ROM serves at the machine's fast rate with loops timed for
+//     it.  The ROM's own driver takes slot 6's detect bit out of CYAREG and
+//     sets bit 7 before it selects the drive (ROM 01, FF/5DB3), so the FPI
+//     does not slow for it and the first two rules do not see it.
+//
+// Slot 6's latch by itself is no rule: $C0E9 is whatever register 9 of a card
+// in slot 6 is (the size register of this project's hard disk card, read in
+// every ProDOS STATUS call), and the machine does not slow for it either.
 //
 // The latches follow the bus as the FPI's do: any cycle the socket shows at
 // those addresses in banks 00, 01, E0 or E1, read or write - an I/O access is
@@ -55,6 +61,7 @@ module gs_accel_rules (
     input  logic        bus_evt_i,       // a cycle was issued on the socket a clk ago ...
     input  logic [23:0] bus_a_i,         // ... at this address
     input  logic [7:0]  cyareg_i,        // the replica's $C036
+    input  logic        sel35_i,         // the replica's $C031 bit 6
     output logic [3:0]  motor_o,         // the motor latches of slots 4-7
     output logic        slow_o           // run at the machine's pace
 );
@@ -68,7 +75,7 @@ module gs_accel_rules (
         end else begin
             if (!cpu_rst_n_i)             motor_o <= '0;
             else if (bus_evt_i & mot_hit) motor_o[bus_a_i[5:4]] <= bus_a_i[0];
-            slow_o <= en_i & (~cyareg_i[7] | motor_o[2] | (|(motor_o & cyareg_i[3:0])));
+            slow_o <= en_i & (~cyareg_i[7] | (|(motor_o & cyareg_i[3:0])) | (motor_o[2] & sel35_i));
         end
     end
 endmodule
