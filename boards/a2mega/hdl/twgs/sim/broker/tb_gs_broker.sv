@@ -52,7 +52,7 @@
 //   +cxrom=1        serve internal $C100-$CFFF firmware from the card
 //   +irq            raise /IRQ twice once the test program reaches its loop
 //   +recopy         (+mode=copy) a second copy of the ROM image, asked for from fast mode after step 20000
-//                   (+recopyat=N: after step N)
+//                   (+recopyat=N: after step N; +holdstall: with RDY low on the idle cycle the hold begins in)
 //   +reset          a warm reset (/RES low for 12 cycles) half way through
 //   +resetw         the same, with /RES falling in the middle of a socket write cycle
 //   +resetx         the same, with /RES falling while a step waits for the expansion memory (EXP_DDR)
@@ -171,7 +171,7 @@ module tb_gs_broker #(
     logic [NEAR_AW-1:0] copy_fidx;
     longint      n_copy = 0, n_copy_tail = 0, n_copy_cur = 0;
     int          n_copies_want = 1;
-    bit          do_recopy = 0, recopy_done = 0, hold_cyc_q = 0;
+    bit          do_recopy = 0, do_holdstall = 0, recopy_done = 0, hold_cyc_q = 0;
     int          recopy_at = 20000;       // +recopyat=N: the second copy is asked for after step N
     logic        held_q = 1'b0, copy_busy_q = 1'b0;
     // +rules: the machine's speed rules, from what the socket shows - wired as gs_accel wires its own
@@ -925,6 +925,7 @@ module tb_gs_broker #(
     logic [7:0]  iss_d;
     logic        iss_we_n, iss_vp_n;
     logic        iss_hold = 1'b0;         // an idle cycle of a hold: a read the ROM copy asked for
+    int          n_holdstall = 0;         // holds that began while RDY stalled the idle cycle on the bus
     // (the PHY takes the write data again the clk after the issue: WDATA_LATE)
     logic issue_evt_q = 1'b0;
     always @(posedge clk) begin
@@ -946,7 +947,10 @@ module tb_gs_broker #(
     end
     always @(posedge clk) if (issue_evt) begin
         iss_a <= phy_a; iss_d <= phy_d_out; iss_we_n <= phy_we_n; iss_vp_n <= phy_vp_n;
-        iss_hold <= u_brk.held_r && (u_brk.sel == 2'd0);
+        // (the repeat of a stalled cycle is the cycle it was: the PHY drives no new bank byte, so
+        // a hold that began or ended during the stall does not change whose cycle it is)
+        if (!stall_req) iss_hold <= u_brk.held_r && (u_brk.sel == 2'd0);
+        else if (u_brk.held_r && !iss_hold && u_brk.sel == 2'd0) n_holdstall++;
         if (trace) $display("[%0t]   issue %06h rw%b kind %0d (0 idle, 1 core, 2 posted) core %s", $realtime, phy_a, phy_we_n,
                              u_brk.sel, cpu_rst_n ? "running" : "in reset");
         // the broker substitutes internal I/O cycles itself; the PHY must
@@ -1019,7 +1023,6 @@ module tb_gs_broker #(
     longint n_real = 0, n_idle = 0, n_sock_wr = 0, n_wlog = 0;
     int     expq_max = 0;
     bit     seen_real = 0;
-    bit     bank_stale = 0;          // the bank byte of this cycle is the one kept through a stall
 
     // the FPI at the rise: latch bank/address/RWB, classify, start memory
     always @(posedge ph2_bus) begin
@@ -1028,7 +1031,6 @@ module tb_gs_broker #(
         bh_pending = 1;
         bank_l = d_bus; addr_l = a_bus; rw_l = rw_bus; vp_l = vp_bus;
         if (stall_req) bank_l = prev_bank_l;
-        bank_stale = stall_req;
         if (running && be_dma) begin
             if (!addr_en) err("address shifters not enabled at the rise");
             if (t_addr_change > t_fall && (t_addr_change - t_fall) > T_ADS)
@@ -1132,10 +1134,7 @@ module tb_gs_broker #(
                     // (... or of Mega II RAM below $C000, where the card's copy of it is
                     // in that memory and its reads are the card's: a read of RAM there too)
                     n_xrep++;
-                end else if (rw_l && (a24 == PARK || (bank_stale && iss_a == PARK && addr_l == PARK[15:0]))) begin
-                    // (... or the park address as the card issued it, behind the bank byte this
-                    // bench's FPI keeps through a stall: the last idle cycle of a hold was stalled
-                    // and the hold ended in it)
+                end else if (rw_l && a24 == PARK) begin
                     n_idle++;
                     if (seen_real && !cfg_toggle && cfg_native)
                         err("idle cycle on the socket in native mode");
@@ -1553,6 +1552,7 @@ module tb_gs_broker #(
         if ($test$plusargs("resetpw")) begin do_reset = 1; do_resetpw = 1; end
         if ($test$plusargs("resetx")) begin do_reset = 1; do_resetx = 1; end
         if ($test$plusargs("recopy")) begin do_recopy = 1; n_copies_want = 2; end
+        if ($test$plusargs("holdstall")) do_holdstall = 1;
         void'($value$plusargs("recopyat=%d", recopy_at));
         void'($value$plusargs("mode=%s", mode_s));
         void'($value$plusargs("steps=%d", max_steps));
@@ -1702,8 +1702,13 @@ module tb_gs_broker #(
                 copy_req = 1'b0;
                 wait_cycles(2);
                 // (in the middle of a PHI2 cycle: an idle cycle that is not the copy's is on the bus)
-                @(posedge ph2_bus); #50;
+                @(posedge ph2_bus); #20;
+                // (+holdstall: and RDY stalls it, so the hold begins under a stalled idle cycle - whose
+                // repeat is a read of the park address still, and no byte of the image)
+                if (do_holdstall) rdy_bus = 1'b0;
+                #30;
                 copy_req = 1'b1;
+                if (do_holdstall) begin @(posedge ph2_bus); #20; rdy_bus = 1'b1; end
             end
             // (+slow=2: the request for E0/E1 reads from the copy, on and off, on a
             // schedule of its own)
@@ -1774,6 +1779,10 @@ module tb_gs_broker #(
             if (n_bad != 0) err($sformatf("ROM copy: %0d bytes of the image differ from the machine's ROM", n_bad));
             if (n_copy != n_copies_want * (1 << 17)) err($sformatf("ROM copy: %0d socket reads, want %0d", n_copy, n_copies_want * (1 << 17)));
             if (!brk_fast) err("ROM copy: the design did not go on in fast mode");
+            if (do_holdstall) begin
+                $display("---- ROM copy: %0d holds began under a stalled idle cycle", n_holdstall);
+                if (n_holdstall == 0) err("+holdstall: no hold began under a stalled idle cycle");
+            end
             $display("---- ROM copy: %0d bytes through the socket, sum %04h, image identical to the machine's ROM: %s",
                      n_copy, copy_sum, n_bad == 0 ? "yes" : "NO");
         end

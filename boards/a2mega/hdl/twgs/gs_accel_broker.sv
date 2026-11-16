@@ -51,6 +51,8 @@
 //  * HOLD (hold_i): the core is not stepped past the step in progress.  The
 //    sequencer waits in ST_SOCK with no request; the socket's idle cycles are
 //    then reads of idle_a_i, each reported when it completes (idle_stb_o).
+//    An idle cycle that RDY stalled as the hold began is repeated by the PHY as
+//    the read of PARK_ADDR it was, and is not reported.
 //    gs_accel_romcopy uses it to read the ROM image through the socket; with
 //    nm_flush_i it also empties the near memory.  The step that was held makes
 //    no use of the near-memory byte launched for it.
@@ -1275,7 +1277,10 @@ module gs_accel_broker #(
                 fl_kind <= sel;
                 fl_busy <= 1'b1;
                 fl_run  <= 1'b1;
-                fl_hold <= held_r & (sel == K_IDLE);
+                // (not the repeat of a stalled cycle: the hold may have begun since that cycle
+                // was issued, and the PHY repeats it with the bank byte it went out with - the
+                // park address's - so its byte is not one the hold asked for)
+                if (!fl_busy) fl_hold <= held_r & (sel == K_IDLE);
                 fl_addr <= phy_a_o;
                 fl_we   <= ~phy_we_n_o;
                 fl_data <= phy_d_out_o;
