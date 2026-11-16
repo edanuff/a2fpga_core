@@ -39,8 +39,10 @@ control is built - paced mode at the machine's pace and the machine's
 speed rules (section 3m: simulated, three placements with no violation;
 sc1 and its firmware flashed 2026-11-15 15:43; one power-up on the
 machine: fast by itself, and a stretch of the boot with the speed
-register at normal seen paced by the rules; no drive, no benchmark
-yet). **Found with it, and not of this build: the copy of E0/E1 has
+register at normal seen paced by the rules; the a2p25's emulated
+Disk II booted and read through them, and the motor rule seen pacing by
+itself; a fault of the slot 6 rule seen, not fixed; no write, no real
+drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
 only what the machine was given since the card began to mirror, and
 RAM that nothing has written since power-up reads differently from the
 copy than from the machine - about 23,000 bytes on this power-up, and
@@ -110,7 +112,7 @@ Requests in register 29:
 | 2 | CXROM | internal `$C100–$CFFF` firmware served from the image. Taken when the core is in reset or held (so: at /RES, or set it with COPY). |
 | 3 | COPY | 0 → 1: read the ROM image through the socket. The core is held between two steps for about 46 ms. |
 | 4 | SLOW | (section 3h; not in the build on the card) reads of the Mega II's RAM below `$C000` in banks E0/E1 come from the card's copy. Needs CARDMEM. May change at any step. |
-| 5 | RULES | (section 3m; not in the build on the card, which ignores the bit) fast mode gives way to the machine's pace where the speed rules say so. May change at any step. |
+| 5 | RULES | (section 3m; in the build on the card since sc1) fast mode gives way to the machine's pace where the speed rules say so. May change at any step. |
 
 Bits 0–2 take effect only once an image has been copied since power-up.
 **With register 29 at 00, or without the key, the card is S6 on the new
@@ -1732,7 +1734,7 @@ firmware wrote nothing: there is nothing for it to do at a reset.
 - The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
   build its periods read 4.5 % short.
 
-## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; one power-up, the first rule seen at work; no drive yet)
+## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen)
 
 Section 3l makes fast mode the card's normal state, and that leaves two
 things wrong. "Off" is slower than the machine (section 3j: paced card
@@ -2047,8 +2049,8 @@ text firmware saves it, sets it and restores it, FF/CB8C.) A boot the
 same way with the speed still at Normal, earlier, also read correctly:
 the disk's timing holds in paced mode.
 
-**A fault of the slot 6 rule, found by reading and not yet seen on the
-machine.** The rule paces on slot 6's latch whatever the detect bit
+**A fault of the slot 6 rule, found by reading (seen on the machine
+at 20:05, next section).** The rule paces on slot 6's latch whatever the detect bit
 says, for the 3.5 drive. The a2p25's hard disk card sits in slot 6 by
 the default map and its register 9 is the unit's size
 (`hdl/disk/hdd.sv`, read by the card's ROM in a ProDOS STATUS call):
@@ -2059,9 +2061,45 @@ rule should ask instead: slot 6 like the other slots, by its detect
 bit, and the 3.5 drive by what selects it (`$C031` bit 6), which the
 replica does not track yet. Not built.
 
+### Four reads from the monitor: the motor rule alone, and the slot 6 fault seen (20:05)
+
+To take the speed bit out of it, the latches were set by hand from the
+monitor at the DOS prompt of the same boot, the Control Panel's speed
+still at Fast, the counters read about twice a second:
+
+| read | what it is | mode | speed register | latches (slots 7-4) | steps |
+|---|---|---|---|---|---|
+| before | | `9A` | `82` | 0 | 33.6 M/s |
+| `C0D9` at 20:05:09 | slot 5's motor on | `8A` | `82` | 2 | 1.02 M/s |
+| `C0D8` at 20:05:16 | slot 5's motor off | `9A` | `82` | 0 | 33.6 M/s |
+| `C0E9` at 20:05:27 | the hard disk card's size register | `8A` | `82` | 4 | 2.6 M/s |
+| `C0E8` at 20:05:35 | its data register | `9A` | `82` | 0 | 33.7 M/s |
+
+**The motor rule works by itself.** With the speed register at `82` in
+every reading, slot 5's latch paced the card for the seven seconds it
+was set (fifteen readings) and the card was fast again within half a
+second of the read that cleared it.
+
+**The slot 6 fault is real.** One read of `$C0E9` set slot 6's latch and
+the card stayed paced for the eight seconds until `$C0E8` was read
+(sixteen readings). Nothing else on this machine would have cleared it:
+after a ProDOS STATUS call to the hard disk the card is paced until the
+next block read. The fix is as written above and is not built.
+
+The two paced stretches ran at different rates, 1.02 M and 2.6 M steps
+a second. That fits the machine's own pace in each: the machine slows
+itself to 1 MHz for slot 5's motor (its detect bit is set) and does not
+for slot 6's latch (its detect bit is clear), so the second stretch was
+paced against a machine still at its fast speed. Socket cycles were not
+counted in this log, so that is a reading of the step rate and not a
+measurement of the machine. The count of E0/E1 mismatches did not move
+(47122, section above).
+
 ### Not done, not known
 
-- **One power-up, the first rule only.** No drive has been read or written through it, and
+- **No write, no real drive.** The drive read through the rules is the
+  a2p25's emulated Disk II (a boot, a catalog, and the latches set by
+  hand); nothing has been written through them, and
   the bench's machine has no drive. The latches and the detect bits are
   as the MiSTer core's model of the FPI has them (`clock_divider.v`:
   tracked whatever the detect bits say, gated by them); slot 6 holding
