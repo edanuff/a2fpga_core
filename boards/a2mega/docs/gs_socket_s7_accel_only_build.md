@@ -43,9 +43,9 @@ register at normal seen paced by the rules; the a2p25's emulated
 Disk II booted and read through them, and the motor rule seen pacing by
 itself; a fault of the slot 6 rule seen and the rule changed in the
 source, with the repair of a ROM copy that begins under a RDY stall
-(simulated; **three placements with no violation, se0 to se2**; not
-flashed, sc1 with the old rule is on the card); no write, no real
-drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
+(simulated; **three placements with no violation, se0 to se2**; se2
+flashed 2026-11-16 07:26 and not yet run on the machine); no write, no
+real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
 only what the machine was given since the card began to mirror, and
 RAM that nothing has written since power-up reads differently from the
 copy than from the machine - about 23,000 bytes on this power-up, and
@@ -115,7 +115,7 @@ Requests in register 29:
 | 2 | CXROM | internal `$C100–$CFFF` firmware served from the image. Taken when the core is in reset or held (so: at /RES, or set it with COPY). |
 | 3 | COPY | 0 → 1: read the ROM image through the socket. The core is held between two steps for about 46 ms. |
 | 4 | SLOW | (section 3h; not in the build on the card) reads of the Mega II's RAM below `$C000` in banks E0/E1 come from the card's copy. Needs CARDMEM. May change at any step. |
-| 5 | RULES | (section 3m; in the build on the card since sc1) fast mode gives way to the machine's pace where the speed rules say so. May change at any step. |
+| 5 | RULES | (section 3m; in the builds on the card since sc1) fast mode gives way to the machine's pace where the speed rules say so. May change at any step. |
 
 Bits 0–2 take effect only once an image has been copied since power-up.
 **With register 29 at 00, or without the key, the card is S6 on the new
@@ -1737,7 +1737,7 @@ firmware wrote nothing: there is nothing for it to do at a reset.
 - The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
   build its periods read 4.5 % short.
 
-## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen and the rule changed, three placements with no violation, not flashed)
+## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen and the rule changed, three placements with no violation, se2 flashed 2026-11-16 and not yet run)
 
 Section 3l makes fast mode the card's normal state, and that leaves two
 things wrong. "Off" is slower than the machine (section 3j: paced card
@@ -2104,7 +2104,7 @@ counted in this log, so that is a reading of the step rate and not a
 measurement of the machine. The count of E0/E1 mismatches did not move
 (47122, section above).
 
-### The slot 6 rule changed (2026-11-15, 20:10 to 23:00): simulated; the first round two placements of three, the round with the copy's repair three of three; not flashed
+### The slot 6 rule changed (2026-11-15, 20:10 to 23:00): simulated; the first round two placements of three, the round with the copy's repair three of three; se2 flashed 2026-11-16
 
 **The change.** Slot 6's latch is one of four now: it paces with its
 detect bit (`$C036` bit 2), as the FPI has it, and with the 3.5 drive
@@ -2236,7 +2236,19 @@ margins are hundredths of a nanosecond, and sd1 of the round before -
 the same logic but for one line - missed by 0.231. With `Place_Option`
 1 that is eleven clean placements of twelve. Size (se2): 13,255 logic
 cells, 11,932 flip-flops, 12,666 of 69,120 logic slices, 182 of 340
-block RAMs - 6 cells and 1 flip-flop more than sc1. **Not flashed.**
+block RAMs - 6 cells and 1 flip-flop more than sc1.
+
+### se2 flashed (2026-11-16 07:22 to 07:26)
+
+se2 written to the card's flash over USB with the machine off, the
+first attempt, verified by the loader's read back. The one probe on
+USB had the test card's serial number, and the file written had se2's
+sha256 (section 5). The firmware is as it was (`4691e43a…`): the
+change needs none. **The gateware has not been loaded yet, and nothing
+of this build has run on the machine:** that wants the board's power
+off and on, then the ladder to fast mode, and the four reads of the
+section above again - `C0E9` must leave the card fast now, `C0D9` must
+still pace it.
 
 ### Not done, not known
 
@@ -2248,11 +2260,12 @@ block RAMs - 6 cells and 1 flip-flop more than sc1. **Not flashed.**
   tracked whatever the detect bits say, gated by them); slot 6 holding
   without its detect bit is this card's own, for the 3.5 drive. A real
   5.25 or 3.5 drive is the test, with a disk that can be lost.
-- **The changed slot 6 rule and the copy's repair are not on the card**
-  (se0 to se2 are built and kept; sc1 is what runs). Until one is
-  flashed, a ProDOS STATUS call to a hard disk card in slot 6 leaves
-  the card paced until the next block read. The 3.5 drive's rule is
-  from reading the ROM: no 3.5 drive has been run, with either rule.
+- **The changed slot 6 rule and the copy's repair have not run on the
+  machine** (se2 is in the card's flash since 2026-11-16 07:26; no
+  power-up with it yet). With sc1, a ProDOS STATUS call to a hard disk
+  card in slot 6 left the card paced until the next block read; that
+  se2 does not is simulated, not seen. The 3.5 drive's rule is from
+  reading the ROM: no 3.5 drive has been run, with either rule.
 - **An open choice: the first rule.** Scoping 2.5 says the speed
   register's normal setting paces the card ("the Control Panel's
   Normal/Fast setting keeps meaning what it means"), and that is what is
@@ -2378,7 +2391,7 @@ and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
 Provenance of se0, se1 and se2 (the changed slot 6 rule and the
 repair of a ROM copy begun under a RDY stall, section 3m; three
-placements with no violation; none flashed): sources = commit
+placements with no violation; se2 flashed 2026-11-16 07:26): sources = commit
 `42b046a0`; the same tool and device. se0: build stamp
 `20261115215920`, bitstream sha256
 `175290c2fff44805…0feb6c19749ec7ee`. se1: `20261115222151`,
