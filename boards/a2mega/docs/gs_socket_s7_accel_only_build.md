@@ -1910,6 +1910,39 @@ itself waits). The core uses the copy's byte, and the machine went on
 running. Until it is explained, the copy of E0/E1 with the rules is not
 known to be right.
 
+### The fourteen, narrowed (16:04 to 16:12)
+
+A log of the counters about once a second while Ed worked the Control
+Panel, and then four changes of mode by command with the machine idle
+at Normal:
+
+| what | count for E0/E1 |
+|---|---|
+| speed set back to Fast (Control Panel opened while paced) | 14, unchanged |
+| speed set to Normal, 16:05:41 | 28 within a second |
+| ... again, 16:06:44 | 42 |
+| ... again, 16:07:06 | 56 |
+| ... again, 16:08:01 | 70 |
+| a second or less at Normal, twice (16:06:10, 16:07:03) | unchanged |
+| `gs accel rules off`, then fast and `gs accel slow` four times at the idle prompt, 2 to 16 s of fast between | 70, unchanged |
+
+Fourteen each time the Control Panel sets the speed to Normal and
+leaves it there, the last address E1:1D6B each time, and none from a
+change from fast to paced by itself. So it is not the change of mode
+and it is not chance: some code that runs when that option is set reads
+E1:1D6B, or bytes that end there, and the copy's byte is not the
+machine's. The simplest reading is one byte that differs and stays
+different, read fourteen times at each change of the option; opening
+the Control Panel while paced and setting Fast would not show it,
+because nothing is compared once the card is fast. ROM 01 has no
+absolute or long reference to E1:1D6B (the Desk Manager's own variables
+are at E0:1D61 to 1D74, through its data bank), so the reader has not
+been found. Fast mode with the speed register at Normal (the rules not
+asked) ran here for the first time, sixteen seconds at the longest,
+with nothing seen wrong. Next: the monitor's verify command over E0 and
+E1 with the card paced reads every byte through the comparison, which
+counts the bytes that differ and so audits the whole copy.
+
 ### Not done, not known
 
 - **One power-up, the first rule only.** No drive has been read or written through it, and
