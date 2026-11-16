@@ -2015,6 +2015,50 @@ The card was left at `3B` by `gs set 29 59` (the firmware's ladder in
 its manual state until the next power-up), the Control Panel's speed at
 Normal.
 
+### The a2p25's Disk II in slot 5: a boot and a catalog (17:57 to 18:01)
+
+The first drive through the rules is the a2p25's own (slot 5 by the
+default map; the detect bit of slot 5 is set on this machine, the speed
+register reads `82`). The Control Panel's speed at Fast, the counters
+read about twice a second:
+
+| what | mode | speed register | slot 5's latch | steps |
+|---|---|---|---|---|
+| the prompt, before | `9A` | `82` | 0 | 33.5 M/s |
+| `PR#5`, twenty seconds of drive | `8A` | `02` | 1 (0 in four readings between) | 1.0 M/s |
+| after it; it booted | `9A` | `82` | 0 | 33.5 M/s |
+| `CATALOG`, a second and a half | `8A` | `02` | 1 | 1.0 M/s |
+| after it; it listed | `9A` | `82` | 0 | 33.5 M/s |
+
+Both read correctly, paced at the machine's 1 MHz for as long as the
+drive ran and fast again by themselves. **But neither isolates the
+motor rule:** the speed register read normal in every reading with the
+motor on. The machine's software clears the bit itself. ROM 01 does it
+before it enters the firmware of a slot set to "Your Card" (FE/9C9x:
+the slot's bit of SLTROMSEL, then `TRB` of `$80` on `$C036`; the boot
+path the same at FF/BACD, set again at FF/BA4E), and something did it
+again for the catalog (which code, not looked for; the Disk II firmware
+of `hdl/disk/diskii.hex` has no reference to `$C036`). So for a Disk II
+in a slot the first rule already covers what was run, and that the ROM
+uses the bit on purpose to run card firmware at 1 MHz is an argument
+for the first rule as built. (At the BASIC prompt with the speed at
+Normal the bit reads set in about a third of the readings: the ROM's
+text firmware saves it, sets it and restores it, FF/CB8C.) A boot the
+same way with the speed still at Normal, earlier, also read correctly:
+the disk's timing holds in paced mode.
+
+**A fault of the slot 6 rule, found by reading and not yet seen on the
+machine.** The rule paces on slot 6's latch whatever the detect bit
+says, for the 3.5 drive. The a2p25's hard disk card sits in slot 6 by
+the default map and its register 9 is the unit's size
+(`hdl/disk/hdd.sv`, read by the card's ROM in a ProDOS STATUS call):
+a read of `$C0E9`. That sets the latch, and the card is then paced until
+something touches `$C0E8`, the data register - the next block read.
+The latch for slot 6 has not read set in any log of today. What the
+rule should ask instead: slot 6 like the other slots, by its detect
+bit, and the 3.5 drive by what selects it (`$C031` bit 6), which the
+replica does not track yet. Not built.
+
 ### Not done, not known
 
 - **One power-up, the first rule only.** No drive has been read or written through it, and
