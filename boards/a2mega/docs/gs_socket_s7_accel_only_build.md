@@ -41,8 +41,10 @@ sc1 and its firmware flashed 2026-11-15 15:43; one power-up on the
 machine: fast by itself, and a stretch of the boot with the speed
 register at normal seen paced by the rules; the a2p25's emulated
 Disk II booted and read through them, and the motor rule seen pacing by
-itself; a fault of the slot 6 rule seen, not fixed; no write, no real
-drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
+itself; a fault of the slot 6 rule seen and the rule changed in the
+source (simulated; **two placements of three with no violation, so
+timing is not closed**; not flashed, sc1 with the old rule is on the
+card); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
 only what the machine was given since the card began to mirror, and
 RAM that nothing has written since power-up reads differently from the
 copy than from the machine - about 23,000 bytes on this power-up, and
@@ -1734,7 +1736,7 @@ firmware wrote nothing: there is nothing for it to do at a reset.
 - The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
   build its periods read 4.5 % short.
 
-## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen)
+## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen and the rule changed, two placements of three clean, not flashed)
 
 Section 3l makes fast mode the card's normal state, and that leaves two
 things wrong. "Off" is slower than the machine (section 3j: paced card
@@ -1779,8 +1781,13 @@ which the FPI slows or not by its own rules - while:
 | | |
 |---|---|
 | the speed register (`$C036`) has bit 7 clear | the machine was asked for its normal speed: the Control Panel's setting, or a program's |
-| slot 6's motor latch is set (`$C0E9` on the bus since `$C0E8`) | a 5.25 drive's motor on a Disk II card, and the IWM's enable: the 3.5 drive is served at the machine's fast rate by loops timed for it, so this holds whatever the speed register says |
-| the motor latch of slot 4, 5 or 7 is set and that slot's detect bit in the speed register is set | the FPI's own rule for dropping to 1 MHz |
+| the motor latch of slot 4, 5, 6 or 7 is set (`$C0n9` on the bus since `$C0n8`) and that slot's detect bit in the speed register is set | the FPI's own rule for dropping to 1 MHz |
+| slot 6's motor latch is set and the 3.5 drive is selected (`$C031` bit 6) | the IWM's enable for a drive the ROM serves at the machine's fast rate by loops timed for it; the machine does not slow for it, so the first two rows do not see it |
+
+(As changed on 2026-11-15, "The slot 6 rule changed" below. **sc0 to
+sc2, and so the card, have the rule as first built:** slot 6's latch
+paces by itself whatever its detect bit says, and `$C031` is not
+looked at.)
 
 The latches follow the bus as the FPI's do (any cycle the socket shows
 at those addresses in banks 00, 01, E0, E1; an I/O access is a socket
@@ -1789,7 +1796,8 @@ broker's own, at a step boundary, a step or two after the access - the
 switch the bench has always made at random points (`+mode=toggle`).
 Telemetry word 10 is now `{16'h0, motor latches of slots 7-4, 00, rules
 asked, slow by them, the other switches}`; the mode byte's fast bit
-drops while the rules hold.
+drops while the rules hold. (From the changed rule on, bit 7 of the
+other switches is `$C031` bit 6.)
 
 **Not among the rules:** the speaker (`$C030`: a program that times
 sound with loops plays it too high in fast mode, as on any accelerator
@@ -2095,6 +2103,101 @@ counted in this log, so that is a reading of the step rate and not a
 measurement of the machine. The count of E0/E1 mismatches did not move
 (47122, section above).
 
+### The slot 6 rule changed (2026-11-15, 20:10 to 21:30): simulated; two placements of three clean; not flashed
+
+**The change.** Slot 6's latch is one of four now: it paces with its
+detect bit (`$C036` bit 2), as the FPI has it, and with the 3.5 drive
+selected (`$C031` bit 6), and not by itself. The replica tracks
+`$C031` bit 6 (written in an I/O bank, cleared at /RES) and shows it as
+bit 7 of its switch byte, so nothing has a new port. Three source
+files: `gs_accel_rules.sv`, `gs_mmu_replica.sv`, one line of
+`gs_accel.sv`.
+
+**Why the 3.5 drive by its select bit.** ROM 01's 3.5 driver, on entry
+(FF/5DB3): `LDA $C036`, `AND #$FB`, `ORA #$80`, `STA $C036`, then `LDA
+#$40`, `STA $C031`; the IWM's enable (`$C0E9`) is read a few
+instructions later in the same routine. On the way out (FF/5644): `BIT
+$C0E8`, `STZ $C031`. So the ROM itself takes slot 6's detect bit away
+and asks for the fast speed before it touches the drive - the machine
+does not slow for a 3.5 drive and the first two rules cannot see one -
+and the select bit is set for exactly the call. Read from the ROM
+image; **no 3.5 drive has been run**, and a driver that is not the
+ROM's (GS/OS's) has not been read.
+
+**Simulated.** T27 has six stretches now: the speed register normal;
+slot 6's latch with nothing else (must stay fast: the hard disk's
+case); the same with `$C031` = `$40` (paced); `$C031` cleared again
+(fast); slot 6's detect bit (paced); slot 5's latch without and with
+its detect bit. The bench asks that each of the four causes paced a
+stretch as the only cause, and counts the fast steps under a latch with
+no rule (slot 5's 260, slot 6's 518; 100 or more wanted of each). The
+replica's bench has the bit in its reference model, with directed
+facts and in the random sequences (6 M checks for each ROM, none
+failed).
+
+**The broker bench: 221 runs, all pass**, on the committed source
+(`ba398b71`). The first run of it had one failure, `c_recopy`, and not
+of the rules: the longer test program moved the second ROM copy so
+that a RDY stall fell on the last idle cycle of the hold. The card
+then issues the park address (`FF0000`) while the stalled cycle
+(`FE0000`) repeats on the bus with the bank byte not driven again -
+right, and as it always was - and the bench's FPI, which keeps the
+bank through a stall, called the next cycle `FE0000` and found nobody
+owed it. The bench knows that case now.
+
+Five faults planted in copies of the source, the program suite and
+the replica's bench on each:
+
+| planted | |
+|---|---|
+| the rule as first built (slot 6's latch paces by itself) | 9 runs fail: 1 fast step in the hard disk's stretch |
+| the 3.5 select ignored by the rule | 11 runs fail |
+| slot 6's detect bit ignored | 9 runs fail |
+| `$C031` never tracked | 9 runs fail; the replica's bench fails (1.5 M checks) |
+| `$C031` tracked from bit 7 | 11 runs fail; the replica's bench fails |
+
+**Timing: not closed.** Three placements of `ba398b71`, the committed
+options, 105 MHz, the 0.5 ns rule:
+
+| | setup / hold violations | worst slack beyond the rule | on |
+|---|---|---|---|
+| sd0 | 0 / 0 | +0.024 | the near memory's tag into its hit register |
+| sd1 | **19** / 0 | **-0.231** | the same path; the other eighteen are the line memory's and the broker's usual ones |
+| sd2 | 0 / 0 | +0.003 | a line's data into the line memory's address |
+
+**Two of three.** None of the nineteen paths is of the rules or of the
+new bit; they are the paths every placement of this build has been
+measured on. What it says is what the margins of sc0 to sc2 (+0.031,
++0.035, +0.014) already said: this build closes by hundredths of a
+nanosecond, and a placement can land on the other side. With
+`Place_Option` 1 that is eight clean placements of nine (p0 to p2, sc0
+to sc2, sd0 to sd2). By the rule this page keeps - three of three of
+the final source - sd is not a closed build, and another draw of three
+would not make it one. sd0 and sd2 are each a placement with no
+violation and are kept; neither is flashed.
+
+**Found beside it, older than it, not fixed: a ROM copy that begins
+under a RDY stall takes its first byte from the wrong bank.** The hold
+begins at a step's end; in fast mode an idle cycle (a read of
+`FF0000`) is on the bus then. If RDY is low at that cycle's fall the
+PHY repeats it, with the address lines as the broker now gives them
+(`FE0000`: the same low sixteen bits) and the bank byte not driven
+again, so the bus reads `FF0000` once more - and the broker, which has
+marked the repeat as the copy's first read, hands that byte to the
+copy as the byte of `FE0000`. Made to happen in a scratch copy of
+`ba398b71` (the bench stalls the cycle the second copy is asked in):
+six runs of eight end with one byte of the image different and the
+sum one off; the two others began their hold after a cycle of the
+core's own. The suite never does it (its stalls and its copy request
+come from one loop, never together: sixteen copies under stalls every
+2 to 7 cycles, none wrong). It needs a copy asked for from fast mode -
+the power-up copy is asked for in native mode, where the cycle before
+the hold is the core's own and has completed - and RDY low on that one
+cycle, which on this machine is a slot card's doing; and the
+firmware's check of the sum would see it. In every build with the ROM
+copy. The repair would be that a stalled cycle's repeat is not a byte
+of the copy.
+
 ### Not done, not known
 
 - **No write, no real drive.** The drive read through the rules is the
@@ -2105,6 +2208,13 @@ measurement of the machine. The count of E0/E1 mismatches did not move
   tracked whatever the detect bits say, gated by them); slot 6 holding
   without its detect bit is this card's own, for the 3.5 drive. A real
   5.25 or 3.5 drive is the test, with a disk that can be lost.
+- **The changed slot 6 rule is not on the card** and its timing is not
+  closed (above). Until it is, a ProDOS STATUS call to a hard disk card
+  in slot 6 leaves the card paced until the next block read. The 3.5
+  drive's rule is from reading the ROM: no 3.5 drive has been run, with
+  either rule.
+- **A ROM copy asked for from fast mode under a RDY stall** stores one
+  wrong byte (above). Not fixed.
 - **An open choice: the first rule.** Scoping 2.5 says the speed
   register's normal setting paces the card ("the Control Panel's
   Normal/Fast setting keeps meaning what it means"), and that is what is
@@ -2227,6 +2337,14 @@ The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of sd0, sd1 and sd2 (the changed slot 6 rule, section 3m;
+**two placements of three with no violation: not a closed build**; none
+flashed): sources = commit `ba398b71`; the same tool and device. sd0:
+build stamp `20261115204328`, bitstream sha256
+`fbd43ef7d8b0c212…c45017b7a0aa4cc0`. sd1 (19 setup violations):
+`20261115210940`, `a7563e040fda2d73…f33399564d4e0aa8`. sd2:
+`20261115211624`, `95917a397d038a0f…2c6af4644759ac24`.
 
 Provenance of sc0, sc1 and sc2 (speed control, section 3m; three
 placements with no violation; sc1 flashed 2026-11-15 15:43): sources = commit `8df36beb`
