@@ -40,7 +40,12 @@ speed rules (section 3m: simulated, three placements with no violation;
 sc1 and its firmware flashed 2026-11-15 15:43; one power-up on the
 machine: fast by itself, and a stretch of the boot with the speed
 register at normal seen paced by the rules; no drive, no benchmark
-yet).**
+yet). **Found with it, and not of this build: the copy of E0/E1 has
+only what the machine was given since the card began to mirror, and
+RAM that nothing has written since power-up reads differently from the
+copy than from the machine - about 23,000 bytes on this power-up, and
+the Control Panel reads one such line (section 3m, "The cause"). x0,
+q1 and p1 have it too. Not fixed.**
 Parents: [`gs_socket_s7_accelerator_scoping.md`](gs_socket_s7_accelerator_scoping.md)
 (what the accelerator is) and
 [`gs_socket_s7_fast_core_exploration.md`](gs_socket_s7_fast_core_exploration.md)
@@ -1942,6 +1947,55 @@ asked) ran here for the first time, sixteen seconds at the longest,
 with nothing seen wrong. Next: the monitor's verify command over E0 and
 E1 with the card paced reads every byte through the comparison, which
 counts the bytes that differ and so audits the whole copy.
+
+### The audit, and the cause: RAM the copy never had (16:20 to 16:51)
+
+Ed restarted the machine to BASIC at 16:20 (the card paced, `1A`) and
+ran the monitor's dump and verify with the card paced:
+
+| command | mismatched reads | bytes, about |
+|---|---|---|
+| `E1/1D60.1D6F` | 32 | all 16; the screen shows FF for each |
+| `E1/0000<E1/0000.BFFFV` | 37,044 | 18,500; none above E1:9F0F |
+| `E0/0000<E0/0000.BFFFV` | 9,976 | 5,000; nearly all of 0000-02FF; none above 7FFF |
+
+Then the same lines read three ways:
+
+| line | the machine (`0A`, mode 88) | the copy, paced (`1A`) | the copy, fast (`1B`) |
+|---|---|---|---|
+| E1:1D60-1D6F | 00, all | FF, all | FF, all |
+| E0:0000-000F | 00, all | (counted as different) | `96 D5 8A C8 B4 AD 83 58`, twice |
+| E1:0000-000F | - | - | `5C AF 00 FE 5C A3 00 FE 5C 75 00 FE 5C 69 00 FE`, the machine's vectors |
+
+The fast path, which this build did not change, reads the same FF from
+the DDR3 as the paced path: the paced fill is not at fault (a suspicion
+of an hour, written to Ed, and wrong). The copy is as section 3h built
+it: **there is no pass that reads the machine's RAM into it.** It holds
+the writes the card has mirrored, and section 3h says so ("what the
+machine's RAM held from before that reset the copy does not have: after
+a power-up that is RAM nothing has written"). Where nothing has written
+since the card began to mirror, the machine's RAM holds what it held
+(00 in every byte looked at) and the DDR3 holds what it powered up
+with (FF, or a pattern). Section 3h took it that nothing reads such
+RAM. The Control Panel does: fourteen reads of E1:1D60-1D6F each time
+the speed is set (which of its code, not found), and they get FF where
+the machine gives 00. Whether that changed anything it did is not
+known; nothing was seen.
+
+So the 47,122 are a difference that is real and old, not a fault of the
+rules or of the paced fill: x0, q1 and p1 (on main) have it in fast
+mode, where nothing compares. It is a fault of fidelity all the same -
+a program that reads slow RAM it has not written, and there is at least
+one in the ROM, gets a byte the machine would not give. What would
+close it: a pass at bring-up that reads E0/E1 below $C000 through the
+socket into the copy with the core held, as the ROM image is copied
+(96K slow cycles, about a tenth of a second), "whole" then meaning that
+pass has run; and a bench whose machine RAM and expansion memory do not
+start out equal, which is why no run has ever shown this. Not built.
+
+The card was left at `3B` by `gs set 29 59` (the firmware's ladder in
+its manual state until the next power-up), the Control Panel's speed at
+Normal.
 
 ### Not done, not known
 
