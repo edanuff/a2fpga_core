@@ -1993,6 +1993,24 @@ socket into the copy with the core held, as the ROM image is copied
 pass has run; and a bench whose machine RAM and expansion memory do not
 start out equal, which is why no run has ever shown this. Not built.
 
+Ed's question, and it sharpens this: nothing but this card's core can
+write the machine's RAM, so nothing was "set" there before the
+bring-up, and nothing goes wrong at a change of speed either (four
+changes by command made no mismatch; the change is only when the
+Control Panel reads such a byte with the comparison on). The two
+memories start out different and only written bytes are made equal.
+The bench's ROM 01 boot agrees that these bytes are not written: in
+its three million steps the ROM writes six pages of E1 directly (00-03,
+0F, 15), none of E0, and never 1Dxx. What the DDR3 holds there is
+whatever it held before: the card was without power for a few seconds
+only between the flash and this power-up, and the mismatches in E1 end
+at 9F0F, the end of the super hi-res screen, so much of it is probably
+the copy of the session before (not checked). On the machine itself
+such RAM is whatever its chips came up with, which no program can count
+on either; so this is a narrow difference - a program that reads slow
+RAM nothing has written gets other bytes than this machine's - and not
+a corruption of anything written.
+
 The card was left at `3B` by `gs set 29 59` (the firmware's ladder in
 its manual state until the next power-up), the Control Panel's speed at
 Normal.
