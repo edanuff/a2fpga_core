@@ -42,9 +42,10 @@ machine: fast by itself, and a stretch of the boot with the speed
 register at normal seen paced by the rules; the a2p25's emulated
 Disk II booted and read through them, and the motor rule seen pacing by
 itself; a fault of the slot 6 rule seen and the rule changed in the
-source (simulated; **two placements of three with no violation, so
-timing is not closed**; not flashed, sc1 with the old rule is on the
-card); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
+source, with the repair of a ROM copy that begins under a RDY stall
+(simulated; **three placements with no violation, se0 to se2**; not
+flashed, sc1 with the old rule is on the card); no write, no real
+drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
 only what the machine was given since the card began to mirror, and
 RAM that nothing has written since power-up reads differently from the
 copy than from the machine - about 23,000 bytes on this power-up, and
@@ -1736,7 +1737,7 @@ firmware wrote nothing: there is nothing for it to do at a reset.
 - The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
   build its periods read 4.5 % short.
 
-## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen and the rule changed, two placements of three clean, not flashed)
+## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen and the rule changed, three placements with no violation, not flashed)
 
 Section 3l makes fast mode the card's normal state, and that leaves two
 things wrong. "Off" is slower than the machine (section 3j: paced card
@@ -2103,7 +2104,7 @@ counted in this log, so that is a reading of the step rate and not a
 measurement of the machine. The count of E0/E1 mismatches did not move
 (47122, section above).
 
-### The slot 6 rule changed (2026-11-15, 20:10 to 21:30): simulated; two placements of three clean; not flashed
+### The slot 6 rule changed (2026-11-15, 20:10 to 23:00): simulated; the first round two placements of three, the round with the copy's repair three of three; not flashed
 
 **The change.** Slot 6's latch is one of four now: it paces with its
 detect bit (`$C036` bit 2), as the FPI has it, and with the 3.5 drive
@@ -2156,7 +2157,7 @@ the replica's bench on each:
 | `$C031` never tracked | 9 runs fail; the replica's bench fails (1.5 M checks) |
 | `$C031` tracked from bit 7 | 11 runs fail; the replica's bench fails |
 
-**Timing: not closed.** Three placements of `ba398b71`, the committed
+**Timing, the first round: not closed.** Three placements of `ba398b71`, the committed
 options, 105 MHz, the 0.5 ns rule:
 
 | | setup / hold violations | worst slack beyond the rule | on |
@@ -2195,8 +2196,47 @@ the power-up copy is asked for in native mode, where the cycle before
 the hold is the core's own and has completed - and RDY low on that one
 cycle, which on this machine is a slot card's doing; and the
 firmware's check of the sum would see it. In every build with the ROM
-copy. The repair would be that a stalled cycle's repeat is not a byte
-of the copy.
+copy up to sd.
+
+**Repaired (`42b046a0`).** The broker's mark of a cycle as the hold's
+is not taken again when the PHY repeats a stalled cycle: the repeat
+stays the park read it was, its byte goes to nobody, and the copy's
+first read is the next cycle, with its own bank byte. One line of
+`gs_accel_broker.sv`. The bench has the stall as an option
+(`+holdstall`: RDY low on the cycle the second copy is asked in), four
+runs with it - two on the line memory, the board's configuration - and
+each must count a hold that began under a stalled idle cycle (of ten
+start points tried on the line memory seven are one; the suite uses
+two). The bench also takes a stalled cycle's repeat for the cycle it
+was, which replaces the correction for `c_recopy` above; the idle
+check is as strict as it was.
+
+**The broker bench: 225 runs, all pass**, on `42b046a0`; the four
+runs each with one such hold and the image identical. Three faults
+planted in copies of it:
+
+| planted | |
+|---|---|
+| the repair taken out | 4 runs fail: the four with the stall, and no other |
+| the mark dropped at every repeat (a stalled read in the middle of a copy too) | 22 runs fail |
+| the slot 6 rule as first built, again | 9 runs fail |
+
+**Timing, the round of the final source: three of three.** Three
+placements of `42b046a0`, the committed options, 105 MHz, the 0.5 ns
+rule:
+
+| | setup / hold violations | worst slack beyond the rule | on |
+|---|---|---|---|
+| se0 | 0 / 0 | +0.022 | the PHY's clock toggle into the broker's far-bank copy |
+| se1 | 0 / 0 | +0.029 | a line's data into the line memory's address |
+| se2 | 0 / 0 | +0.039 | the PHY's clock toggle into the record of the issued address |
+
+Closed by the rule of this page, and by no more than the others: the
+margins are hundredths of a nanosecond, and sd1 of the round before -
+the same logic but for one line - missed by 0.231. With `Place_Option`
+1 that is eleven clean placements of twelve. Size (se2): 13,255 logic
+cells, 11,932 flip-flops, 12,666 of 69,120 logic slices, 182 of 340
+block RAMs - 6 cells and 1 flip-flop more than sc1. **Not flashed.**
 
 ### Not done, not known
 
@@ -2208,13 +2248,11 @@ of the copy.
   tracked whatever the detect bits say, gated by them); slot 6 holding
   without its detect bit is this card's own, for the 3.5 drive. A real
   5.25 or 3.5 drive is the test, with a disk that can be lost.
-- **The changed slot 6 rule is not on the card** and its timing is not
-  closed (above). Until it is, a ProDOS STATUS call to a hard disk card
-  in slot 6 leaves the card paced until the next block read. The 3.5
-  drive's rule is from reading the ROM: no 3.5 drive has been run, with
-  either rule.
-- **A ROM copy asked for from fast mode under a RDY stall** stores one
-  wrong byte (above). Not fixed.
+- **The changed slot 6 rule and the copy's repair are not on the card**
+  (se0 to se2 are built and kept; sc1 is what runs). Until one is
+  flashed, a ProDOS STATUS call to a hard disk card in slot 6 leaves
+  the card paced until the next block read. The 3.5 drive's rule is
+  from reading the ROM: no 3.5 drive has been run, with either rule.
 - **An open choice: the first rule.** Scoping 2.5 says the speed
   register's normal setting paces the card ("the Control Panel's
   Normal/Fast setting keeps meaning what it means"), and that is what is
@@ -2337,6 +2375,15 @@ The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of se0, se1 and se2 (the changed slot 6 rule and the
+repair of a ROM copy begun under a RDY stall, section 3m; three
+placements with no violation; none flashed): sources = commit
+`42b046a0`; the same tool and device. se0: build stamp
+`20261115215920`, bitstream sha256
+`175290c2fff44805…0feb6c19749ec7ee`. se1: `20261115222151`,
+`8e7462c044c1a56a…fd8e056c7468c6f0`. se2: `20261115224949`,
+`6053309260dd25bf…eff81916f3c07492`.
 
 Provenance of sd0, sd1 and sd2 (the changed slot 6 rule, section 3m;
 **two placements of three with no violation: not a closed build**; none
