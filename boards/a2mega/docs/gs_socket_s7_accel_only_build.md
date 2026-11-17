@@ -44,8 +44,10 @@ Disk II booted and read through them, and the motor rule seen pacing by
 itself; a fault of the slot 6 rule seen and the rule changed in the
 source, with the repair of a ROM copy that begins under a RDY stall
 (simulated; **three placements with no violation, se0 to se2**; se2
-flashed 2026-11-16 07:26 and not yet run on the machine); no write, no
-real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
+flashed 2026-11-16 07:26; **on a power-up that evening the bring-up
+stopped on a verify mismatch in bank 01 and left the card on socket
+bytes, and Arkanoid locked up in that session: cause not known,
+section 3m**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
 only what the machine was given since the card began to mirror, and
 RAM that nothing has written since power-up reads differently from the
 copy than from the machine - about 23,000 bytes on this power-up, and
@@ -1737,7 +1739,7 @@ firmware wrote nothing: there is nothing for it to do at a reset.
 - The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
   build its periods read 4.5 % short.
 
-## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen and the rule changed, three placements with no violation, se2 flashed 2026-11-16 and not yet run)
+## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen and the rule changed, three placements with no violation, se2 flashed 2026-11-16; a power-up with it stopped on a verify mismatch and Arkanoid locked up, cause not known)
 
 Section 3l makes fast mode the card's normal state, and that leaves two
 things wrong. "Off" is slower than the machine (section 3j: paced card
@@ -2250,6 +2252,47 @@ off and on, then the ladder to fast mode, and the four reads of the
 section above again - `C0E9` must leave the card fast now, `C0D9` must
 still pace it.
 
+### A power-up with se2: the bring-up stopped on a verify mismatch, and Arkanoid locked up (2026-11-16, read 19:57 to 20:03)
+
+Ed, at the machine without a log running: Arkanoid, launched by
+accident, locks up "with the accelerator on"; the machine was left in
+that state. What the card said, read over telnet and changing nothing:
+
+- **The card was not accelerating.** The firmware's console for this
+  power-up: ROM image valid, sum 7EE8; card memory at the machine's
+  pace; the same with the copy of E0/E1; then `ACCEL: VERIFY MISMATCH
+  AT 01:FBC3 (6) - ON SOCKET BYTES`. Mode 80 since: every step a socket
+  cycle, every byte the machine's (2.54 M steps and 2.54 M socket
+  cycles a second). The first second of card memory passed; the count
+  moved in the second with the copy of E0/E1, and it is the main count
+  (banks 00/01 and expansion RAM), not the copy's (0).
+- So six reads in that second gave the core the card's byte where the
+  machine's differed, the last at `01:FBC3`. Which of the two was right
+  is not known, nor the other five addresses, nor the bytes: the
+  telemetry keeps the last address and the count.
+- The event log has one power-up and no reset after it. If the step
+  counter has not wrapped, the core began to run at about 19:54:40,
+  three minutes before Ed's message; the counter wraps every 28
+  minutes, so that is not certain.
+- At 20:03 the program is not stopped: 120 samples of the bus address
+  are 81 in bank 02 and 37 in bank 01, about half of them in
+  `02:8000-81FF` and `01:8000-81FF`, the rest spread over both banks;
+  none in E0/E1 or at `$C0xx`. The replica's switches then: shadow 57
+  (I/O and language card shadowing inhibited in banks 00/01), speed
+  register 92, state register 0C, all four motor latches set.
+
+Not known: whether Arkanoid was running when the count moved (it would
+have to be the boot disk, or started within seconds); whether the lock
+up comes from those six bytes, or happens on socket bytes with no card
+memory at all (which would make it older than this section); whether
+sc1 or p1 does the same. A mismatch of the main count in a bring-up is
+new on this card: every earlier power-up with the ladder read 0, but
+none of them is known to have had this program in the two verify
+seconds. The source differs from sc1's in the speed rule, one tracked
+bit of `$C031` and the copy's first byte under a stall; none of that is
+in the path of a read in paced card memory, and that is reading, not a
+test.
+
 ### Not done, not known
 
 - **No write, no real drive.** The drive read through the rules is the
@@ -2260,9 +2303,10 @@ still pace it.
   tracked whatever the detect bits say, gated by them); slot 6 holding
   without its detect bit is this card's own, for the 3.5 drive. A real
   5.25 or 3.5 drive is the test, with a disk that can be lost.
-- **The changed slot 6 rule and the copy's repair have not run on the
-  machine** (se2 is in the card's flash since 2026-11-16 07:26; no
-  power-up with it yet). With sc1, a ProDOS STATUS call to a hard disk
+- **The changed slot 6 rule and the copy's repair have not been seen
+  at work on the machine** (se2 is in the card's flash since 2026-11-16
+  07:26; the one power-up read with it never reached fast mode, the
+  subsection above). With sc1, a ProDOS STATUS call to a hard disk
   card in slot 6 left the card paced until the next block read; that
   se2 does not is simulated, not seen. The 3.5 drive's rule is from
   reading the ROM: no 3.5 drive has been run, with either rule.
