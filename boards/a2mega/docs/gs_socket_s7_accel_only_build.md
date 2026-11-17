@@ -2293,6 +2293,43 @@ bit of `$C031` and the copy's first byte under a stall; none of that is
 in the path of a read in paced card memory, and that is reading, not a
 test.
 
+**Two more runs, with a log (20:08 and 20:26).** The build stamp read
+from the card is `20261115224949`: se2 runs. The disk in use boots
+straight into Arkanoid (Ed; the first run had started it later, from
+something else).
+
+- *Power cycle, 20:08.* The core runs from 20:08:14 and the game is
+  loading within two seconds (shadow `1E` by 20:08:16.5). Copy done
+  20:08:17, sum 7EE8; card memory on at 20:08:18.08; by 20:08:18.52 the
+  count is 4, last `02:000B`, and the firmware is back on socket bytes.
+  Not the first run's address. The game loads on socket bytes for 70 s
+  (the speed bit and the language card switching as a loader's would),
+  sets shadow `57` and speed register `92` at 20:09:30, all four motor
+  latches read set at 20:09:31, and nothing changes after that: locked,
+  in its attract mode (Ed). The bus profile is the first lock's.
+- *Control-Open-Apple-Reset, 20:26:50* (the firmware does nothing at a
+  reset: mode 80 throughout, the count still 4). The whole load again
+  on socket bytes, shadow `57` / `92` at 20:28:06.9, the latches set by
+  20:28:08.2, locked at the same place (Ed).
+
+**So the lock does not need card memory.** In the second of these runs
+no byte of the card's reached the core between the reset and the lock
+(the machine's RAM was not cleared between them, but the game loads
+itself again). What is left: the core, the broker's native mode and the
+PHY as this build has them; this placement of them; or something
+outside the card. Not separated. The verify mismatches are a second
+fact, not explained either: two power-ups of se2, two addresses
+(`01:FBC3`, `02:000B`), where every power-up of the earlier builds read
+0 - none of them with this disk.
+
+**A gap in the speed rules, seen in passing.** The motor latches take
+`$C0n8/9` in banks 00 and 01 whatever the shadow register says. With
+its bit 6 set there is no I/O in those banks, only RAM, and Arkanoid
+sets the four latches that way; with a detect bit set in the speed
+register (it leaves `92`: slot 5's) that would pace the card in fast
+mode until the same RAM at `$C0n8` is touched. Not fixed, and not the
+lock: the rules do nothing on socket bytes.
+
 ### Not done, not known
 
 - **No write, no real drive.** The drive read through the rules is the
