@@ -2330,6 +2330,20 @@ register (it leaves `92`: slot 5's) that would pace the card in fast
 mode until the same RAM at `$C0n8` is touched. Not fixed, and not the
 lock: the rules do nothing on socket bytes.
 
+**Left for the night (20:41).** se2 on the card. **The card's saved
+setting is OFF** (`gs accel off`, set at 20:10 for a run that was not
+made as planned): the next power-up stays on the machine's own bytes
+with register 29 never written. `gs accel on` with the machine running
+and the ladder stopped runs the ladder at once, so it was not set back
+under Ed's hands; set it back with the machine off. The beside-card
+a2p25 has the hard disk fix (Ed), not the Mockingboard build. Two
+tests are open, neither made: Arkanoid started with the card in paced
+card memory by hand (`gs set 29 10` at an idle prompt) and the verify
+count logged up to the lock - 0 clears the socket's data path, a moving
+count names the RAM that differs from what the core wrote; and sc1
+flashed back with the same disk, then se0, to tell this build from the
+ones before and source from placement.
+
 ### Not done, not known
 
 - **No write, no real drive.** The drive read through the rules is the
