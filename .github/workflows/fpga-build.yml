@@ -73,9 +73,6 @@ jobs:
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 100
-    # Experimental boards (toolchain variance vs the committed 1.9.12.01
-    # builds) report their result but do not block the PR.
-    continue-on-error: ${{ matrix.experimental == true }}
     strategy:
       fail-fast: false
       matrix:
@@ -119,7 +116,13 @@ jobs:
             libx11-6 libx11-xcb1 libxext6 libxrender1 libxft2 libxi6 \
             libxcb1 libsm6 libice6
 
+      # Experimental boards (toolchain variance vs the committed 1.9.12.01
+      # builds, see docs/ci.md#toolchain-variance) tolerate a failed build at
+      # the step level, so the check stays green; the step below surfaces the
+      # real outcome as a warning annotation and in the job summary.
       - name: Build ${{ matrix.name }}
+        id: build
+        continue-on-error: ${{ matrix.experimental == true }}
         env:
           GPRJ: ${{ matrix.gprj }}
           # build.sh's thrash watchdog defaults to 30 min, calibrated to a
@@ -139,6 +142,16 @@ jobs:
           export LD_PRELOAD
           touch "$RUNNER_TEMP/ci-build-start"
           tools/build.sh "${{ matrix.board }}"
+
+      - name: Report experimental result
+        if: always() && matrix.experimental == true
+        run: |
+          if [ "${{ steps.build.outcome }}" = "failure" ]; then
+            echo "::warning title=${{ matrix.name }} (experimental) FAILED::Build failed under the CI toolchain — expected variance vs the local 1.9.12.01 builds of record. See docs/ci.md#toolchain-variance."
+            echo "## :warning: ${{ matrix.name }} — experimental build FAILED (non-blocking)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## :white_check_mark: ${{ matrix.name }} — experimental build passed" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # impl/pnr is tracked in git, so glob uploads would pick up committed
       # bitstreams of sibling project variants — and on an early failure even

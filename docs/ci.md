@@ -54,11 +54,12 @@ consequences (first full matrix run, 2026-11-20):
   GW5AT-60 all reach bitstream generation. Device support is not the problem.
 - **a2n20v2, a2n20v2-Enhanced, a2n20v2-Enhanced-dualrate**: build and close timing
   cleanly on CI. These jobs **block** the PR.
-- **a2n20v2-Enhanced-fb** (11 setup violations) and **a2mega** (7 setup, 1 hold):
-  complete but timing-marginal under the older PnR (the fb variant's committed
-  build is even from 1.9.11.03 Education on macOS — same version, different
-  platform, different roll). Marked `experimental` in the matrix:
-  `continue-on-error`, so the result is visible in the job but doesn't block.
+- **a2n20v2-Enhanced-fb** (11 setup violations on the first roll, clean on the
+  second) and **a2mega** (7 setup, 1 hold): complete but timing-marginal under
+  the older PnR — roll-sensitive rather than broken (the fb variant's committed
+  build is even from 1.9.11.03 Education on macOS). Marked `experimental` in the
+  matrix: the build step runs `continue-on-error`, the check stays green, and a
+  failure surfaces as a warning annotation and in the job summary.
 - **a2p25**: fails hard — `a2p25.cst`'s `INS_LOC` DSP pins (the 2026-11-18 IIR
   placement experiment) reference synthesis-generated names
   (`i_audio_out/IIR_filter/q_h0_0_s0`, …) that the 1.9.11.03 synthesizer does not
