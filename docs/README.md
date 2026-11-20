@@ -32,6 +32,7 @@ follow links into the topic you need.
 | [boards.md](boards.md) | Per-board chip/memory/status matrix, `.gprj` names, flashing |
 | [conventions.md](conventions.md) | SystemVerilog style, naming, `.gprj` path rules, file-add procedure |
 | [gotchas.md](gotchas.md) | Known traps: Gowin synth quirks, CDC bugs, SDRAM/DDR3 lessons |
+| [ci.md](ci.md) | GitHub Actions CI: Education-edition toolchain, build matrix, timing gate |
 | [ROADMAP.md](ROADMAP.md) | Backlog and future direction; how it relates to GitHub issues |
 | [adr/](adr/) | Architecture Decision Records — the *why* behind irreversible choices |
 

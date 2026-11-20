@@ -8,23 +8,24 @@
 
 ## Getting The Software
 
-As of 6/12/26, the direct links to the Gowin Software via their CDN are the ones below:
-
-Full Edition (Requires License and Registration with Gowin)
-
-- Windows V1.9.12.02 SP2: https://cdn.gowinsemi.com.cn/Gowin_V1.9.12.02_SP2_x64_win.zip
-
-- Linux V1.9.12.02 SP2: https://cdn.gowinsemi.com.cn/Gowin_V1.9.12.02_SP2_linux.tar.gz
-
-- Mac V1.9.12.02 SP2: https://cdn.gowinsemi.com.cn/Gowin_V1.9.12.02_SP2_macOS.dmg
+> **Note (11/2026):** the old `cdn.gowinsemi.com.cn` direct links are dead (404) and
+> the official download page at gowinsemi.com now requires a login. The mirror host
+> used by the AUR packages still serves direct downloads — verified working:
 
 Education (No License Required):
 
-- Mac V1.9.11.03 Education: https://cdn.gowinsemi.com.cn/Gowin_V1.9.11.03Education_macOS.dmg
+- Linux V1.9.11.03 Education: https://eda.gowinsemi.cn/Gowin_V1.9.11.03_Education_Linux.tar.gz
+  (sha256 `6fd392f7473b24d847b6f8ebdc7a185c591826ba35d8d0e517961030d446f9f7`,
+  matching the AUR `gowin-eda-edu` package's pinned checksum — this is the build CI
+  uses, see [docs/ci.md](../docs/ci.md))
 
-- Linux V1.9.11.03 Education: https://cdn.gowinsemi.com.cn/Gowin_V1.9.11.03_Education_Linux.tar.gz
+Full Edition (Requires License and Registration with Gowin):
 
-- Windows V1.9.11.03 Education: https://cdn.gowinsemi.com.cn/Gowin_V1.9.11.03_Education_x64_win.zip
+- Linux V1.9.12.04: https://eda.gowinsemi.cn/Gowin_V1.9.12.04_linux.tar.gz
+
+For macOS and Windows installers, download from the
+[Gowin EDA download page](https://www.gowinsemi.com/en/support/download_eda/)
+(free registration required), Education section.
 
 All parts currently used by A2FPGA boards should build with the education version.
 
