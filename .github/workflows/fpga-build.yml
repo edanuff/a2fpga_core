@@ -118,6 +118,9 @@ jobs:
           # slower, so give legitimate builds more headroom here; the job
           # timeout still caps a truly wedged run.
           BUILD_TIMEOUT: "4800"
+          # gw_sh is a Qt app; without a display it aborts trying to load
+          # the xcb platform plugin. Render offscreen instead.
+          QT_QPA_PLATFORM: offscreen
         run: |
           # Gowin bundles an old libfreetype in IDE/lib; the system
           # libfontconfig needs FT_Done_MM_Var from a newer one, so gw_sh
