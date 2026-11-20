@@ -57,8 +57,11 @@ pair in the workflow deliberately and watch a full matrix run.
   location (private release asset, S3/R2 + token), since redistributing the Gowin
   installer publicly is questionable under its EULA.
 - The Ubuntu runner needs a handful of X/font shared libraries even for headless
-  CLI runs; the workflow installs them via apt. If gw_sh fails with a symbol lookup
-  or missing-library error after an Ubuntu image update, compare `ldd $GW_SH` output
-  against the apt list in the workflow.
+  CLI runs; the workflow installs them via apt. Gowin also bundles an old
+  libfreetype in `IDE/lib` that breaks the system libfontconfig (`undefined
+  symbol: FT_Done_MM_Var`), so the build step runs gw_sh with the system
+  `libfreetype.so.6` in `LD_PRELOAD`. If gw_sh fails with another symbol lookup
+  or missing-library error after an Ubuntu image update, compare `ldd $GW_SH`
+  output against the apt list in the workflow.
 - Runners are 2–4 cores; the GW5AT-60 (a2mega) PnR is the slowest job in the matrix.
   The job timeout is 90 minutes.

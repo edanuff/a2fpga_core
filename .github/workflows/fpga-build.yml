@@ -118,21 +118,35 @@ jobs:
           # slower, so give legitimate builds more headroom here; the job
           # timeout still caps a truly wedged run.
           BUILD_TIMEOUT: "4800"
-        run: tools/build.sh "${{ matrix.board }}"
+        run: |
+          # Gowin bundles an old libfreetype in IDE/lib; the system
+          # libfontconfig needs FT_Done_MM_Var from a newer one, so gw_sh
+          # dies with a symbol lookup error unless the system libfreetype
+          # is preloaded ahead of the bundled copy.
+          LD_PRELOAD="$(ldconfig -p | awk '/libfreetype\.so\.6 /{print $NF; exit}')"
+          export LD_PRELOAD
+          touch "$RUNNER_TEMP/ci-build-start"
+          tools/build.sh "${{ matrix.board }}"
 
       # impl/pnr is tracked in git, so glob uploads would pick up committed
-      # bitstreams of sibling project variants; collect only this build's files.
+      # bitstreams of sibling project variants — and on an early failure even
+      # this project's committed files. Collect only files this build wrote
+      # (newer than the marker touched right before build.sh ran).
       - name: Collect build outputs
         if: always()
         env:
           BOARD: ${{ matrix.board }}
           GPRJ: ${{ matrix.gprj }}
         run: |
-          gprj="${GPRJ:-$(cd "boards/$BOARD" && ls *.gprj | head -1)}"
-          proj="${gprj%.gprj}"
+          proj="${GPRJ%.gprj}"
           mkdir -p ci-out
-          cp "boards/$BOARD/impl/pnr/${proj}.fs" ci-out/ 2>/dev/null || true
-          cp "boards/$BOARD/impl/pnr/${proj}_tr_content.html" ci-out/ 2>/dev/null || true
+          for f in "boards/$BOARD/impl/pnr/${proj}.fs" \
+                   "boards/$BOARD/impl/pnr/${proj}_tr_content.html"; do
+            if [ -f "$f" ] && [ -f "$RUNNER_TEMP/ci-build-start" ] && \
+               [ "$f" -nt "$RUNNER_TEMP/ci-build-start" ]; then
+              cp "$f" ci-out/
+            fi
+          done
 
       - name: Upload bitstream and timing report
         if: always()
