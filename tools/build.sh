@@ -142,7 +142,9 @@ if [[ "$stage" == "all" ]]; then
         exit 4
     fi
     # A pre-existing bitstream from an earlier build must not pass as success.
-    fs_mtime="$(stat -f %m "$fs" 2>/dev/null || stat -c %Y "$fs" 2>/dev/null)"
+    # GNU stat first (BSD order breaks on Linux: GNU `stat -f %m <file>` is
+    # filesystem mode, which "succeeds" with multi-line junk on stdout).
+    fs_mtime="$(stat -c %Y "$fs" 2>/dev/null || stat -f %m "$fs" 2>/dev/null)"
     if [[ -n "$fs_mtime" && "$fs_mtime" -lt "$start_epoch" ]]; then
         echo "!! Bitstream is STALE (predates this build) — the run did not produce a new one."
         exit 4
