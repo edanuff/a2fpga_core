@@ -1,6 +1,6 @@
 # A2N20 Tang Nano 20K BL616 Firmware
 
-BL616 microcontroller firmware providing application-tier services to the a2fpga Apple II FPGA design on the Sipeed Tang Nano 20K. Replaces the PicoRV32 soft CPU + SD card SPI currently used in the FPGA with a dedicated MCU solution, freeing FPGA logic and providing significantly more RAM and processing power for filesystem access, USB peripherals, and future extensibility.
+BL616 microcontroller firmware providing application-tier services to the a2fpga Apple II FPGA design on the Sipeed Tang Nano 20K. (History, 2026-10-25 note: it replaced the PicoRV32 soft CPU + SD card SPI that the FPGA used until mid-2026; the comparisons with "PicoRV32 (current)" further down are from that time.) A dedicated MCU solution, freeing FPGA logic and providing significantly more RAM and processing power for filesystem access, USB peripherals, and future extensibility.
 
 ## Goals
 
@@ -106,7 +106,7 @@ MCU polls STATUS register periodically. When a flag is set, MCU reads COMMAND, s
 - **SPI slave**: FPGA exposes register interface on pins 86/13/75/76, MCU polls for requests
 - **Volume interface**: Existing `drive_volume_if.sv` handshake protocol stays — MCU interface translates between SPI registers and volume registers
 - **UART pins** (69/70): Currently used by Super Serial Card emulation in top.sv (lines 409-431). May remain available for SSC or be repurposed.
-- **a2fpga_core location**: `/Users/edanuff/GitHub/a2fpga_core/boards/a2n20v2/`
+- **a2fpga_core location**: `<repo>/boards/a2n20v2/` (this repository; the Enhanced build is `boards/a2n20v2-Enhanced/`)
 
 ## Tang Nano 20K BL616 Pin Map
 

@@ -1,0 +1,37 @@
+# UPSTREAM_EXCLUDE.txt - paths that never leave the edanuff fork.
+# Honoured by tools/upstream_export.sh. One pathspec per line, :(glob) semantics
+# (a trailing slash means the whole directory). Comments and blank lines are ignored.
+# Record every exclusion here rather than in anyone's memory; the export script
+# prints the removed list for review before anything is pushed.
+
+# Private records of the fork's own history
+BRANCH_AUDIT_*.md
+MERGE_RESOLUTIONS_*.md
+docs/archive/merges/
+docs/DOCS_AUDIT_*.md
+
+# Gowin vendor-IP evaluation and reverse-engineering notes (third-party IP)
+boards/a2mega/docs/archive/dp_gowin/
+boards/a2mega/docs/WS4_GOWIN_STACK.md
+boards/a2mega/docs/gowin_serdes_re_findings.md
+boards/a2mega/a2mega_dp_gowin.gprj
+boards/a2mega/hdl/dp_gowin/
+
+# Vendor documents, if any ever reappear (board schematics under boards/*/sch are ours and stay)
+docs/**/*.pdf
+boards/*/docs/**/*.pdf
+
+# Outreach and correspondence drafts
+**/outreach/
+
+# Agent tooling: SHIPPED upstream (ed, 2026-10-25). The skills (/setup, /build, /flash,
+# /flash-mcu) are contributor tooling that AGENTS.md and docs/getting-started.md rely on,
+# and .claude/hooks/guard-mcu-flash.py is the guard against bricking a fused Tang Nano 20K.
+# Nothing private lives there; keep it that way or list the file here.
+
+# Decided 2026-10-25 (ed): the bench journals and AUX captures (test_log.md,
+# bringup_1_0a3_log.md, acquisition_matrix_results.md, archive/dp-bringup-2026-08/)
+# are PUBLIC; the design docs cite them by row.
+
+# Third-party-derived notes (boards/a2mega/docs/twgs_reference.md, adb_micro_rom01_notes.md)
+# are the author's own synthesis and stay PUBLIC (ed, 2026-10-25).

@@ -61,8 +61,8 @@ exit' | /Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh
 
 - `run all` = synthesis + place & route + bitstream. `run syn` = synthesis only.
 - **The `.gprj` filename is not always `<board>.gprj`.** See [boards.md](boards.md) for the
-  exact project file per board (e.g. `a2n20v2-GS` uses `a2n20v2_gs.gprj`).
-- `prebuild.tcl` runs automatically on `open_project`, regenerating `hdl/datetime.svh`.
+  exact project file per board (e.g. `a2n20v2-Enhanced` uses `a2n20v2_enhanced.gprj`; the a2mega has one per SOM).
+- `prebuild.tcl` runs automatically on `open_project`, regenerating the board's `boards/<board>/hdl/datetime.svh`.
 - OpenGL/Chromium warnings on macOS are safe to ignore.
 
 ## 5. Checking timing (REQUIRED after every P&R) {#checking-timing}
@@ -78,9 +78,15 @@ A healthy build has:
 - Actual **Fmax ≥ Constraint** for every clock
 - **TNS = 0.000** for every clock domain
 
-> Note: on the GW5AT, identical designs can yield 0–198 violations between PnR runs.
-> If a clean design suddenly violates, re-run before assuming a logic regression.
-> See [gotchas.md](gotchas.md).
+> Note: on the GW5A parts every full-core build reseeds placement, so marginal paths move
+> by ±0.5 ns between runs. That is a reason to fix the cone, not to re-run until it passes —
+> see [gotchas.md](gotchas.md) and `boards/a2mega/docs/timing_round2.md`.
+>
+> **a2mega reports include a 0.5 ns margin.** The a2mega SDCs apply
+> `set_clock_uncertainty 0.5 -setup` to the fabric clocks, so "0 violations" means ≥ 0.5 ns
+> of real margin on every path and the reported slack is real slack − 0.5 ns. A reported
+> +0.01 is healthy; a violation means the real margin dropped below 0.5 ns and the cone
+> needs a structural fix.
 
 ## 6. Key output files (under `boards/<board>/impl/`)
 

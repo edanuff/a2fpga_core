@@ -108,6 +108,24 @@
 #define A2CARD_HDD          6
 
 // ---------------------------------------------------------------------------
+// DP link debug readback (0x3C-0x3F, read-only)
+// RATE/LANES are the DP sink/converter's OWN DPCD capability bytes, captured
+// verbatim by the gateware AUX engine's caps read at every attach — the
+// adapter census's second gate (the PD/mux layer cannot see them). Both read
+// 0x00 until a DPCD read completes, and clear on HPD-presence loss.
+// ---------------------------------------------------------------------------
+#define A2REG_DBG_DP_RATE   0x3C  // raw DPCD 0x001 MAX_LINK_RATE
+                                  //   (0x06=RBR 0x0A=HBR 0x14=HBR2 0x1E=HBR3)
+#define A2REG_DBG_DP_LANES  0x3D  // raw DPCD 0x002: [3:0] MAX_LANE_COUNT,
+                                  //   [7] enhanced-framing capable
+#define A2REG_DBG_DP_STATUS 0x3E  // {5'b0, wedge_suspect, video_live, link_est}
+#define A2REG_DBG_DP_SERDES 0x3F  // SERDES bring-up status byte
+
+#define A2DP_STAT_LINK_EST  0x01
+#define A2DP_STAT_VIDEO     0x02
+#define A2DP_STAT_WEDGE     0x04
+
+// ---------------------------------------------------------------------------
 // Disk II drive volumes (0x40-0x4F drive 0, 0x50-0x5F drive 1)
 // ---------------------------------------------------------------------------
 #define A2REG_VOL_BASE(d)   ((d) ? 0x50 : 0x40)
@@ -147,3 +165,32 @@
 #define A2DISK_TRACK_BYTES  6656u                       // GCR nibbles per track
 #define A2HDD_WINDOW(u)     ((u) ? 0x200u : 0x000u)     // 512B per unit
 #define A2HDD_BLOCK_BYTES   512u
+
+// GS socket (in-socket 65C816, 138B gateware): two-register window.
+// Write the index to A2REG_GS_SEL, then read/write A2REG_GS_DATA.
+// Index 0 = CTRL {clear, trig-mode, force-slow(diag), trig-en, trace-freeze,
+// listen, sweep, arm}; 1 = STATUS {ph2_alive, running, enabled, be_ok, /RES,
+// RDY, slot /DMA, slot /RDY}. Full map: docs/gs_socket_65816_scoping.md §8b.
+#define A2REG_GS_SEL        0x5F
+#define A2REG_GS_DATA       0x4F
+
+// STATUS (0x07) bits used by the socket auto-arm
+#define A2ST_A2_ALIVE       0x80   // slot PHI1 running (machine powered)
+#define A2ST_A2_RESET_N     0x04   // slot RESET line (1 = out of reset)
+// A2_RST_RELEASE (0x2E) bits: read back {hold, assert, release}
+#define A2RST_RELEASE       0x01   // storage-ready release (sticky in the FPGA)
+#define A2RST_ASSERT        0x02   // hold the Apple II in reset while set
+#define A2RST_PROBE         0x04   // while holding: probe the line every ms, stay released when it floats high
+#define A2RST_AUTOARM       0x08   // on that release, arm the GS socket in hardware (same clock)
+#define A2RST_HOLDING       0x10   // read-only: FPGA is asserting the reset
+#define A2RST_POR_DONE      0x20   // read-only: the probe saw the machine's reset released (sticky until a new assert)
+#define A2RST_ARM_EARLY     0x10   // write: with AUTOARM, arm the GS socket already while we hold (core in reset on a driven bus)
+#define A2RST_ARM_EARLY_RD  0x40   // read-back position of ARM_EARLY (bit 4 reads as HOLDING)
+// GS window regs 32-39: bring-up event log (hdl/esp32/a2_event_log.sv)
+//   32 R {full, count[6:0]}  W 0x80 = clear;  33 R/W read index;  34-37 time[31:0] (54 MHz ticks);
+//   38 event code;  39 context {hold,released,por_done,alive,listen,arm,pins_ours,running} or register value
+#define A2GS_EVT_STATUS     32
+#define A2GS_EVT_IDX        33
+#define A2GS_EVT_T0         34
+#define A2GS_EVT_CODE       38
+#define A2GS_EVT_DATA       39

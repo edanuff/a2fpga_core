@@ -38,13 +38,11 @@
 #include "soc/gpio_struct.h"
 
 #include "fpga_jtag.h"
-
-#define PIN_TCK 40
-#define PIN_TMS 41
-#define PIN_TDI 42
-#define PIN_TDO 45
+#include "board_pins.h"
 
 /* All four pins are >= 32, so they live in the out1/in1 register bank. */
+_Static_assert(PIN_TCK >= 32 && PIN_TMS >= 32 && PIN_TDI >= 32 && PIN_TDO >= 32,
+               "bit-banged JTAG assumes all pins in the out1/in1 bank");
 #define TCK_BIT (1u << (PIN_TCK - 32))
 #define TMS_BIT (1u << (PIN_TMS - 32))
 #define TDI_BIT (1u << (PIN_TDI - 32))
@@ -81,6 +79,10 @@ void fpga_jtag_init_pins(void)
 {
     if (s_pins_ready)
         return;
+    /* Take the pads back from the USB-JTAG peripheral first — while the
+     * bridge is matrix-routed, gpio_config() below does not reclaim them
+     * and every bit-banged edge is lost. */
+    fpga_usb_jtag_bridge_release();
     gpio_config_t out = {
         .pin_bit_mask = (1ULL << PIN_TCK) | (1ULL << PIN_TMS) | (1ULL << PIN_TDI),
         .mode = GPIO_MODE_OUTPUT,
@@ -110,6 +112,8 @@ void fpga_jtag_release_pins(void)
     gpio_set_direction((gpio_num_t)PIN_TDI, GPIO_MODE_INPUT);
     s_pins_ready = false;
     s_spi_mode = false;
+    /* Hand the pads back to the PC-facing USB-JTAG bridge. */
+    fpga_usb_jtag_bridge_restore();
 }
 
 /* Keep every TCK phase comfortably wide for the TAP input path. */
@@ -376,6 +380,17 @@ bool fpga_jtag_flash_enter_keepsram(void)
     gw5a_enable_spi();
     vTaskDelay(pdMS_TO_TICKS(100));
     return true;
+}
+
+/* Leave SPI mode WITHOUT reloading from flash: the (JTAG-loaded) SRAM
+ * fabric keeps running. Pair with fpga_jtag_flash_enter_keepsram() for
+ * flash operations that must not disturb the running bitstream — e.g. the
+ * corrupt-image erase rescue (fpgaupdate_erase_bitstream_region). */
+void fpga_jtag_flash_leave(void)
+{
+    if (s_spi_mode)
+        gw5a_disable_spi();
+    fpga_jtag_reset();
 }
 
 /* Leave SPI mode and reconfigure from external flash. */

@@ -87,7 +87,13 @@
 
 #define CONFIG_USBHOST_MAX_RHPORTS          1
 #define CONFIG_USBHOST_MAX_EXTHUBS          2  /* A2FPGA: allow a hub between board and gamepad */
-#define CONFIG_USBHOST_MAX_EHPORTS          4
+/* A2FPGA: 8, not CherryUSB's default 4. usbh_hub_connect() HARD-FAILS a hub
+ * whose descriptor reports bNbrPorts > this ("Hub nports %u overflow",
+ * -USB_ERR_NOMEM, usbh_hub.c), so the hub never registers and NOTHING behind
+ * it enumerates. The USB 2.0 section of a USB 3.0 hub routinely advertises
+ * more downstream ports than the case has sockets, which put a 4-port limit
+ * squarely in the way. Costs ~2.7 KB per port per hub (roothub + MAX_EXTHUBS). */
+#define CONFIG_USBHOST_MAX_EHPORTS          8
 #define CONFIG_USBHOST_MAX_INTERFACES       8
 #define CONFIG_USBHOST_MAX_INTF_ALTSETTINGS 8
 #define CONFIG_USBHOST_MAX_ENDPOINTS        4
@@ -112,9 +118,13 @@
 #define CONFIG_USBHOST_MSOS_VENDOR_CODE 0x00
 #endif
 
-/* Ep0 max transfer buffer */
+/* Ep0 max transfer buffer. A2FPGA: 1024, not CherryUSB's default 512 — the
+ * other silent -USB_ERR_NOMEM hard limit in usbh_enumerate() is
+ * wTotalLength > this, which kills a compound device (a hub bundled with a
+ * card reader or audio function, common on USB 3.0 hubs) with exactly the
+ * same invisible symptom as the bNbrPorts overflow. One buffer per bus. */
 #ifndef CONFIG_USBHOST_REQUEST_BUFFER_LEN
-#define CONFIG_USBHOST_REQUEST_BUFFER_LEN 512
+#define CONFIG_USBHOST_REQUEST_BUFFER_LEN 1024
 #endif
 
 #ifndef CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT

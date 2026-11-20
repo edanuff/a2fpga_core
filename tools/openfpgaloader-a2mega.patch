@@ -1,0 +1,59 @@
+diff --git a/src/gowin.cpp b/src/gowin.cpp
+index 4c25190..99db3c3 100644
+--- a/src/gowin.cpp
++++ b/src/gowin.cpp
+@@ -1238,6 +1238,17 @@ bool Gowin::prepare_flash_access()
+ 			return false;
+ 		}
+ 		usleep(100000);
++		/* a2fpga patch: revive a flash stuck in deep-power-down /
++		 * continuous-read / QPI mode — states in which single-SPI
++		 * commands (incl. JEDEC 0x9F) are ignored and reads return
++		 * zeros. Sequence: Release-from-DPD (0xAB), then software
++		 * reset enable+reset (0x66/0x99), then settle. Harmless on a
++		 * healthy chip. */
++		spi_put_gw5a(0xAB, NULL, NULL, 0);
++		usleep(1000);
++		spi_put_gw5a(0x66, NULL, NULL, 0);
++		spi_put_gw5a(0x99, NULL, NULL, 0);
++		usleep(1000);
+ 	} else if (!is_gw2a) {
+ 		if (!enableCfg()) {
+ 			return false;
+@@ -1245,7 +1256,10 @@ bool Gowin::prepare_flash_access()
+ 		send_command(0x3D);
+ 	}
+ 
+-	_jtag->setClkFreq(10000000);
++	/* a2fpga patch: 10 MHz hardcode ignored the user's --freq and is
++	 * marginal through the esp_usb_jtag bridge (flash ID reads return
++	 * garbage: "Read ID failed" / "flash chip unknown" / phantom BP bits).
++	 * Keep the user's JTAG frequency for SPI-over-JTAG flash access. */
+ 
+ 	return true;
+ }
+diff --git a/src/jtag.cpp b/src/jtag.cpp
+index 2b528c7..f3975fd 100644
+--- a/src/jtag.cpp
++++ b/src/jtag.cpp
+@@ -230,7 +230,19 @@ Jtag::Jtag(const cable_t &cable, const jtag_pins_conf_t *pin_conf,
+ 		throw std::runtime_error("Error: memory allocation failed");
+ 	memset(_tms_buffer, 0, _tms_buffer_size);
+ 
+-	detectChain(32);
++	/* a2fpga patch: on esp_usb_jtag (and possibly other bridges) the first
++	 * chain scan intermittently reads all-ones when the FPGA sits in an
++	 * autoboot-failed state, while a later in-process scan succeeds (visible
++	 * in --detect output: "empty" followed by a found idcode). Retry a few
++	 * times before accepting an empty chain — prevents downstream flows from
++	 * fake-succeeding against no device. */
++	for (int _attempt = 0; _attempt < 5; ++_attempt) {
++		detectChain(32);
++		if (!_devices_list.empty())
++			break;
++		printInfo("Chain empty, retrying scan...");
++		usleep(200000);
++	}
+ }
+ 
+ Jtag::~Jtag()

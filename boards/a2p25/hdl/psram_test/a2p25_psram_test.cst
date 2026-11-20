@@ -1,0 +1,44 @@
+// a2-p25 (displayport1 rev) standalone HyperRAM test — physical constraints
+// Ball map: boards/a2p25/docs/PINOUT_DISPLAYPORT1.md
+
+IO_LOC  "clk50_in" E2;
+IO_PORT "clk50_in" IO_TYPE=LVCMOS33 PULL_MODE=NONE BANK_VCCIO=3.3;
+
+// HyperRAM U6 (S27KL0642, 3.0 V part on the 3.3 V rail). CK# and RESET# are
+// unconnected on the board (in spec for Infineon/Winbond: CR1[6] default
+// single-ended — the controller never writes CR1).
+IO_LOC  "hr_ck" J11;
+IO_PORT "hr_ck" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "hr_cs_n" C3;
+IO_PORT "hr_cs_n" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "hr_rwds" E3;
+IO_PORT "hr_rwds" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "hr_dq[0]" L4;
+IO_LOC  "hr_dq[1]" L3;
+IO_LOC  "hr_dq[2]" J1;
+IO_LOC  "hr_dq[3]" J2;
+IO_LOC  "hr_dq[4]" G4;
+IO_LOC  "hr_dq[5]" H4;
+IO_LOC  "hr_dq[6]" H1;
+IO_LOC  "hr_dq[7]" H2;
+IO_PORT "hr_dq[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_PORT "hr_dq[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_PORT "hr_dq[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_PORT "hr_dq[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_PORT "hr_dq[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_PORT "hr_dq[5]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_PORT "hr_dq[6]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_PORT "hr_dq[7]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+
+// Console UART — BRING-UP REPURPOSE of the ESP32 OPI lines
+IO_LOC  "uart_tx" C2;      // ESP32_OPI_D0 -> ESP32 IO11
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+IO_LOC  "uart_rx" F2;      // ESP32_OPI_D1 <- ESP32 IO12
+IO_PORT "uart_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC  "led" B10;
+IO_PORT "led" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+
+// Apple bus transceivers held disabled (FPGA_BUS_~OE, also R3 pull-up)
+IO_LOC  "a2_bus_oe_n" H5;
+IO_PORT "a2_bus_oe_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;

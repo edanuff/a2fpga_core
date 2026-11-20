@@ -1,5 +1,8 @@
 # Gotchas & Hard-Won Lessons
 
+> Status (2026-11-13): current (two Gowin synthesis entries added). The Ensoniq-on-DDR3 entry below was rewritten; everything
+> else was reviewed against the code in the 2026-10 audit and stands.
+
 Non-obvious traps that have each cost real debugging time. Read the relevant section before
 working in these areas. **When you discover a new one, add it here** — that's the whole point.
 
@@ -25,6 +28,18 @@ working in these areas. **When you discover a new one, add it here** — that's 
   use explicit wire ports (not interfaces) as defense-in-depth.
 - **`$clog2(1) == 0`** → zero-width register. Avoid parameter values that produce this
   (e.g. `GAP_CYCLES = 1`).
+- **A register whose D input is constant is NOT removed, and nothing behind it is pruned**
+  (GowinSynthesis V1.9.12, GW5A). Feature logic that an unreachable FSM state would enable, or a
+  mode flop that only ever loads a parameter-derived 0, stays in the netlist at full size. Tie the
+  feature off at a *wire* from a parameter (`wire x_xc = XC_EN && x_xc_r;`, `if (XC_EN) begin …
+  end` around the dead states) so synthesis sees the constant combinationally. Found 2026-11-13 in
+  `hdl/hyperram/hyperram_ctrl.sv`: the PROTOCOL 0 a2p25 full core carried the whole Xccela /
+  device-detect layer (+390 LUT in a 97 % CLS design) until the selects were gated at wires.
+- **Closing a cone in a small test project does not close it in the full core.** The a2p25
+  full core runs at 96–97 % CLS; a one-clk_mem-period clk→clk_mem path that had +0.5 ns in
+  `a2p25_psram_test_ck108_xc` missed by 0.8 ns in `a2p25.gprj` (2026-11-05 → 11-13). Any change
+  to a shared module on a knife-edge clock needs the full-core rebuild before it is called closed
+  (see `boards/a2p25/docs/MODERNIZATION_PLAN.md` §8).
 
 ## Interface / array traps
 
@@ -55,8 +70,20 @@ working in these areas. **When you discover a new one, add it here** — that's 
 
 - **Power-cycle between flashes.** Reprogramming without a power cycle can fail DDR3 init,
   producing a black screen that looks like a logic bug but isn't.
-- **PnR variance:** identical designs can yield 0–198 timing violations between runs on GW5AT.
-  Re-run before assuming a regression.
+- **PnR variance is real, but re-running is not closure.** Identical source reseeds placement
+  every full-core build (`datetime.svh`), and marginal paths swing by ±0.5 ns between rolls.
+  A path that passes on one roll and fails on the next is a future heisenbug: fix the cone
+  structurally (register the compare, pre-compute the flag one cycle early, split the mux,
+  replicate the fanout), never by re-rolling or by loosening the SDC. The deterministic
+  `a2mega_dp_test` project is the gate for every DP-core change; the full core is rolled
+  three times on the final source. Method and case history: `boards/a2mega/docs/timing_round2.md`.
+- **a2mega SDCs carry a 0.5 ns setup margin** (`set_clock_uncertainty 0.5 -setup` on clk100,
+  clk_sym, clk_pix and clk_logic, in all five a2mega SDCs since 2026-09-05). "0 setup
+  violations" therefore means every path has at least 0.5 ns of *real* margin, and the
+  reported slack is the real slack minus 0.5 (a reported +0.01 is a real +0.51). This is a
+  stricter target, not an exception: the timing-driven placer finds the margin when asked
+  (builds with a clock tightened by 1 ns closed clean on the 138B). Do not remove or reduce
+  it to "fix" a violation; if the number is ever changed, record it in the timing log.
 - Two distinct display-defect classes have been seen — *slow/stale updates* (port contention,
   fixed with wide 128-bit writes + write port priority) vs. *moving distortion* (timing margin
   at 432 MHz). Diagnose which class before chasing a fix.
@@ -70,12 +97,18 @@ working in these areas. **When you discover a new one, add it here** — that's 
   LUTs; synthesis then grinds for tens of minutes before `ERROR RP0006`). Mux the address by
   direction instead. Two R/W ports with one address each (the `hdd.sv`/`uthernet2.sv` pattern)
   infer fine.
-- **The GW5AT-60 has 118 BSRAMs and the a2mega uses nearly all of them.** Any new BSRAM must
-  reclaim one first. Note the biggest pool — the Ensoniq 64KB wavetable (32 BSRAMs) — is NOT
-  simply movable to DDR3: the DOC has a hard ~838 ns per-fetch deadline (timeout = audible
-  silence) and DDR3 tail latency (burst queue + refresh + CDC) misses it; that is why it was
-  moved to BSRAM in the first place. Much of the a2mega's BSRAM spend (CDC FIFOs, line-buffer
-  lead, DOC wavetable, disk buffers) is deliberate latency insulation against DDR3 variance.
+- **The GW5AT-60 has 118 BSRAMs and the a2mega uses nearly all of them** (107/118 in the
+  2026-10 build). Any new BSRAM must reclaim one first. The Ensoniq 64 KB wavetable (32 BSRAMs)
+  **did** move to DDR3, but not by pointing the baseline DOC at a memory port: the DOC has a
+  hard ~838 ns per-fetch deadline (a missed fetch is audible) and DDR3 tail latency (burst queue
+  + refresh + CDC) misses it, which is why the first attempts failed. What shipped (2026-08-04,
+  hardware-verified) is the **pipelined DOC** (`hdl/sound/doc5503_pipelined.sv`): each
+  oscillator's fetch is issued during its service slot and consumed at its next one, so the
+  deadline becomes the ~3.35 µs service period. The same module runs on the a2p25's HyperRAM
+  with a fetch cache in front and the DOC port at the arbiter's top priority. Design and
+  history: `boards/a2mega/docs/ensoniq_ddr3_pipelined_design.md`; the differential proof:
+  `sim/doc5503/`. The rest of the a2mega's BSRAM spend (CDC FIFOs, line-buffer lead, disk
+  buffers) is still deliberate latency insulation against DDR3 variance.
 - **Do NOT convert `ddr3_port_cdc`'s FIFOs to registers to save BSRAM.** GW5A has no
   distributed RAM, so shallow FIFOs land in BSRAM and look like easy savings — but FF-array
   buffers crossing independent clocks **corrupt data on GW5AT** (the debugged "8-char rippling
@@ -128,3 +161,27 @@ window). Related: the ESP32's bit-bang GW5A SPI-flash path (fpgaupdate /
 fpgaflash CLI) is NOT yet silicon-validated — its status reads returned
 busy/0xFF in both entry modes; do not rely on it until debugged against
 openFPGALoader's working 500 kHz sequence.
+
+## ESP32 telnet console (port 23) is key-driven: never paste commands into it
+
+Every byte sent to the a2mega/a2p25 ESP32 telnet console is a hotkey, dispatched at once.
+A pasted `spireg 0x75` is **s p i r e g** = select, PD status, I2C scan, HPD retrain,
+EQ cycle, **FPGA reload from flash**. On 2026-11-16 a scripted `help` + four `spireg`
+lines reloaded the FPGA four times under a running game and left the mux EQ and lane
+toggles changed. Line commands exist only after `:` (one per line, empty line exits), and
+the serial CLI on USB1 (`+++`) is line-oriented throughout. Key map and safe scripting
+recipes: [boards/a2mega/docs/ESP32_CONSOLE.md](../boards/a2mega/docs/ESP32_CONSOLE.md).
+
+## GW5AT: GROUP/GRP_LOC region constraints can make the placer thrash for HOURS
+
+Attempting to close `clk_sym` (135 MHz DP symbol domain) timing on the
+a2mega by pinning the DP logic into a placement region
+(`GROUP`/`GRP_LOC R[26:46]C[38:70]`) sent Gowin PnR (V1.9.12) into
+pathological legalization: ~50 minutes with the CDC FIFO's 13 BSRAMs in
+the group, and **9+ hours** (killed) with a logic-only group of ~2k
+LUT/FF. A healthy full a2mega build is ~15 min. Do not use region
+constraints on this device/toolchain; close timing in RTL instead
+(registered decision pipelining — see `hdl/displayport/video/
+video_stream_packer.v`). `tools/build.sh` now enforces
+`BUILD_TIMEOUT` (default 30 min) so a thrashing PnR fails loudly instead
+of eating a workday.

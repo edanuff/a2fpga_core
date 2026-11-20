@@ -35,9 +35,7 @@
  "I2C_SLAVE_ADDR" : "00",
  "INCREMENTAL_PLACE_AND_ROUTING" : "0",
  "INCREMENTAL_PLACE_ONLY" : "0",
- "IncludePath" : [
-
- ],
+ "IncludePath" : [],
  "Incremental_Compile" : "",
  "Initialize_Primitives" : false,
  "JTAG" : false,
@@ -71,7 +69,7 @@
  "Route_Option" : "0",
  "Run_Timing_Driven" : true,
  "SECURE_MODE" : false,
- "SECURITY_BIT" : true,
+ "SECURITY_BIT" : false,
  "SEU_HANDLER" : false,
  "SEU_HANDLER_CHECKSUM" : false,
  "SEU_HANDLER_MODE" : "auto",
@@ -80,7 +78,7 @@
  "SerDes_retiming" : false,
  "Show_All_Warnings" : false,
  "Synthesize_tool" : "GowinSyn",
- "TclPre" : "/Users/edanuff/GitHub/a2fpga_core/boards/a2p25/prebuild.tcl",
+ "TclPre" : "prebuild.tcl",
  "TopModule" : "top",
  "USERCODE" : "default",
  "Unused_Pin" : "As_input_tri_stated_with_pull_up",

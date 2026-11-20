@@ -44,10 +44,7 @@ src/cardrom/cardrom
 !/.claude/skills/
 !/.claude/settings.json
 !/.claude/hooks/
-/boards/a2p25/src/esp32/build
-/boards/a2p25/src/a2fpga_esp32/build
 /boards/a2mega/src/a2fpga_esp32/build
-/boards/a2p25/src/esp32_usb_jtag/build
 /boards/a2n20v2-Enhanced/src/a2n20_bl616/firmware/build/*
 !/boards/a2n20v2-Enhanced/src/a2n20_bl616/firmware/build/build_out/
 /boards/a2n20v2-Enhanced/src/a2n20_bl616/firmware/build/build_out/*
@@ -60,3 +57,24 @@ src/cardrom/cardrom
 *.m4a
 *.wav
 *.mov
+
+# Gowin PnR route databases — regenerable intermediates, ~100-140 MB on
+# GW5A parts (exceeds GitHub's file limit). The .fs bitstream and reports
+# are the tracked build products.
+boards/*/impl/pnr/*.pr
+boards/a2mega/captures/
+
+# S7 fast-core Fmax probes (boards/a2mega/docs/gs_socket_s7_fast_core_exploration.md):
+# timing instruments, never flashed — keep their bitstreams and resource snapshots local
+**/impl/pnr/a2mega_cpu_probe_*
+**/impl/a2mega_cpu_probe_*_resources.json
+**/impl/pnr/a2mega_accel_probe_*
+**/impl/a2mega_accel_probe_*_resources.json
+
+# S7 accelerator-only build (boards/a2mega/docs/gs_socket_s7_accel_only_build.md): not on
+# hardware yet - its bitstream and reports stay local until it has run there
+**/impl/pnr/a2mega_accel_138B*
+
+# Verilator build output of the simulation benches
+sim/**/obj_dir/
+sim/**/*_run.log

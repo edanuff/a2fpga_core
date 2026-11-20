@@ -7,8 +7,9 @@ Multicard core for A2FPGA Apple II FPGA co-processor cards.
 The A2FPGA consists of an Apple II peripheral card PCB that can be installed in any Apple II 
 slot (slot-7 recommended) that interfaces a modern FPGA to the Apple II bus. The
 FPGA interfaces with the Apple II bus to capture all accesses to display memory
-in order to drive a 480p HDMI display as well a providing the functionality of
-a number of popular peripheral cards in a single Apple II slot.  The A2FPGA
+in order to drive a 480p HDMI display (1080p over USB-C DisplayPort on the newer
+A2Mega and A2P25 boards) as well as providing the functionality of a number of
+popular peripheral cards in a single Apple II slot.  The A2FPGA
 has been tested with Apple II, II+, //e, and IIgs models.
 
 > **Contributing with AI coding agents:** This project is organized to make authoring
@@ -103,25 +104,30 @@ The A2N20v2 has a 4-switch DIP switch that controls the following settings:
 
 For ROM 00/01 IIgs models (such as the Woz edition), the A2N20v2 must be placed in Slot 3.  For ROM 03 models, it should work in any slot. This is because it requires the M2B0 signal which is only present in Slot 3 of the original IIgs models, but which is present in slots 1-6 of the ROM 03 model. 
 
+**Troubleshooting — intermittent boot or disk failures:** if the card boots unreliably, drops to the monitor after stepping the drive, or shows disk read/write errors, measure your Apple II's 5 V rail under load before suspecting the gateware. A supply that has drifted or is out of trim — even a modern replacement — can sit near 4.75 V, which is low enough to cause marginal bus sampling and present exactly like an intermittent gateware bug. Aim for ~5.05 V; many supplies have a trim potentiometer for this.
+
 [A2N20v2 Board Support Project (Schematics, Project Files)](boards/a2n20v2/)
 
 ### Work-in-progress A2N20v2 variants
 
-Two experimental variants of the A2N20v2 are under active development — these may be what you're
-looking for if you want the newer features, with the usual work-in-progress caveats:
+One variant of the A2N20v2 is under active development — it may be what you're looking for if
+you want the newer features, with the usual work-in-progress caveats:
 
-- **[A2N20v2-GS](boards/a2n20v2-GS/)** — GS-optimized: Ensoniq DOC audio plus a framebuffer so
-  games that use beam-racing techniques display correctly. Intended to become the main A2N20v2
-  release.
-- **[A2N20v2-Enhanced](boards/a2n20v2-Enhanced/)** — adds an external BL616 MCU coprocessor for
-  SD-card disk images and on-screen configuration.
+- **[A2N20v2-Enhanced](boards/a2n20v2-Enhanced/)** — adds an external BL616 MCU coprocessor
+  (USB host, disk images from a USB stick, on-screen menu, networking, self-update) and the
+  GS-specific build features: Ensoniq DOC audio with its wavetable in SDRAM and, in its
+  framebuffer build, a framebuffer so games that use beam-racing techniques display correctly.
 
-Both are experimental and not official releases yet; see each board's README for current status.
+It is a beta, not an official release; see its README for current status. The earlier
+A2N20v2-GS build and the A2N9 / A2N20v1 development boards are kept under
+[boards/deprecated/](boards/deprecated/README.md).
 
 ## Other boards
 
 Other boards live in the [boards/](boards/) directory — earlier hardware (A2N9, A2N20v1) and
-newer boards in development (A2Mega for the Tang Mega 60K, A2P25 for the Tang Primer 25K). See
+newer boards in development: the A2Mega (Tang Mega 60K or 138K SOM, DDR3 framebuffer, USB-C
+DisplayPort output, ESP32-S3 coprocessor) and the A2P25 (Tang Primer 25K, HyperRAM framebuffer,
+USB-C DisplayPort output, ESP32-S3 coprocessor). See
 **[docs/boards.md](docs/boards.md)** for the full board matrix (chip, memory, status) and links
 to each board's documentation.
 
@@ -226,9 +232,11 @@ project-specific code or resources.  Synthesis and PnR output is also in these s
 Common code is in the [hdl/](hdl/) subdirectory and includes all of the Verilog, SystemVerilog, and
 VHDL code for the A2FPGA codebase that is portable across FPGA hardware.
 
-Other source code is in the [src/](src/) subdirectory and contains Apple II utilities, sample code,
-and the PicoSoC firmware and kernel used by board versions that provide the PicoRV32 co-processor
-for handling FAT32 SD-Card access and other functionality.
+Coprocessor firmware and Apple II-side sources live under each board's `src/` directory:
+[boards/a2n20v2-Enhanced/src/](boards/a2n20v2-Enhanced/src/) (BL616 MCU firmware and the CardROM
+6502 source) and [boards/a2mega/src/](boards/a2mega/src/) (the ESP32-S3 firmware shared by the
+a2mega and the a2p25; see [boards/a2p25/src/README.md](boards/a2p25/src/README.md)). The earlier on-FPGA PicoRV32 soft core (PicoSoC) and its firmware have been
+removed; see [boards/a2n20v2-Enhanced/src/README.md](boards/a2n20v2-Enhanced/src/README.md).
 
 ## Credits
 
@@ -270,13 +278,23 @@ the emulation of which was the original impetus for this project.
 
 ## License(s)
 
-A2FPGA an open source hardware project and the A2FPGA Multicard Core gratefully leverages the work
-of other open source authors.  New code that was created specifically for this project
-is made available under the MIT License but many files may have different licenses in their headers 
-from the original authors.  All open source code from other authors that is reused
-in this project is believed to be used consistently with the licenses such code is provided
-under.  If reusing any code from this project, please be sure to check that your intended
-usage is covered by the stated licenses.
+A2FPGA is an open source hardware project, and the A2FPGA Multicard Core
+gratefully leverages the work of other open source authors. Licensing is
+layered — see [LICENSE](LICENSE) for the details:
+
+- Code written for this project is made available under the **MIT License**,
+  and those individual files may be reused elsewhere under MIT terms.
+- Code from other authors retains its original license, stated in each
+  file's header. Several cores (the VIA 6522, TMS5220, audio IIR filter,
+  the 65C816 CPU core, and the AppleWin-derived disk code) are licensed
+  under the **GNU General Public License** (see [LICENSES/](LICENSES/)).
+- Because every board's logic design incorporates GPL-licensed cores, each
+  complete bitstream (and the MCU firmware images that include the
+  AppleWin-derived GCR codec) is a combined work conveyed under the
+  **GPL v3**. This repository is the corresponding source.
+
+If reusing any code from this project, please check the header of each file
+you take to confirm that your intended usage is covered by its license.
 
 ## Contact
 

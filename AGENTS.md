@@ -17,7 +17,10 @@ build environment") — it detects what's installed and guides the rest. Referen
    from `~/bin/`. Before your first build, **read [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md)**.
 2. **Always check timing after every place & route.** A build is not "done" until you
    confirm 0 violated endpoints, Fmax ≥ constraint, and TNS = 0.000. See
-   [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md#checking-timing).
+   [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md#checking-timing). A violation is a
+   cone to fix structurally, never something to re-roll away or to clear by loosening the
+   SDC; on a2mega the SDCs already include a 0.5 ns setup margin, so reported slack is
+   real slack − 0.5 ns (see [docs/gotchas.md](docs/gotchas.md)).
 3. **New HDL is SystemVerilog (`.sv`)**, 4-space indent, `lower_snake_case` files/modules,
    `UPPER_SNAKE_CASE` params. Full rules: [docs/conventions.md](docs/conventions.md).
 4. **`.gprj` paths must be relative**, never absolute. New files must be added to the
@@ -30,11 +33,14 @@ build environment") — it detects what's installed and guides the rest. Referen
 |---|---|
 | Set up your environment / install toolchains (first run) | [docs/getting-started.md](docs/getting-started.md), or run `/setup` |
 | Set up the Gowin CLI (esp. macOS) | [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md) |
+| Turn a feature or instrument on/off for a board; read the per-build resource report | [docs/build_profiles.md](docs/build_profiles.md) (`boards/<board>/hdl/<board>_profile.vh`) |
 | Understand how the codebase is organized | [docs/architecture.md](docs/architecture.md) |
 | Know which board is which (chip, status, quirks) | [docs/boards.md](docs/boards.md) |
 | Avoid known traps / hard-won lessons | [docs/gotchas.md](docs/gotchas.md) |
 | Follow coding & project conventions | [docs/conventions.md](docs/conventions.md) |
 | Understand *why* a design choice was made | [docs/adr/](docs/adr/) (decision records) |
+| Retire a document that no longer matches the code | the archive rule in [docs/conventions.md](docs/conventions.md#archive): `git mv` into the folder's `archive/`, add a README entry, fix every citation in the same commit |
+| Prepare a squash for the public upstream | `tools/upstream_export.sh` (dry run by default) honours `UPSTREAM_EXCLUDE.txt`, the committed list of fork-only paths, and gates on absolute home-directory paths and broken links (`tools/check_doc_links.py`) |
 | Find what to work on next | [docs/ROADMAP.md](docs/ROADMAP.md) + `gh issue list` + `boards/<board>/TODO.md` |
 | Build a board | `/build` skill, or [docs/setup-gowin-cli.md](docs/setup-gowin-cli.md) |
 | Flash a board (FPGA bitstream) | `/flash` skill, or [docs/boards.md](docs/boards.md) |
@@ -46,6 +52,8 @@ build environment") — it detects what's installed and guides the rest. Referen
 1. Identify which **board** the work targets (boards differ in chip, memory, and status —
    see [docs/boards.md](docs/boards.md)). If unclear, **ask the user**.
 2. Check `boards/<board>/TODO.md` for that board's current priorities, blockers, and status.
+   TODO currency varies by board: each carries a dated status line; the a2mega and
+   a2p25 ones defer to their `docs/` plans for the live state.
 3. For feature work, also scan [docs/ROADMAP.md](docs/ROADMAP.md) and `gh issue list`.
 
 ## Commit & PR conventions
@@ -54,3 +62,25 @@ build environment") — it detects what's installed and guides the rest. Referen
 - PRs: state motivation, affected boards, build/tool versions; attach logs or screenshots
   for visual/audio changes. Keep diffs scoped.
 - Before committing `.gprj` changes, verify all paths are relative.
+
+## Multiple agent sessions (IMPORTANT)
+
+Several agent sessions often run against this repo concurrently. Rules for any
+automated/agent session (Claude Code or otherwise):
+
+- **Do not work directly on `main`'s checkout.** For anything beyond reading,
+  create a worktree with its own branch (`git worktree add`) and work there.
+  Exception: a session the user has explicitly designated as the primary/bench
+  session for build-flash-test cycles.
+- **`main` is append-only.** Never `reset`, `rebase`, or force-move `main` or
+  any shared branch — even to clean up your own mistake. A bad commit on a
+  shared branch gets `revert`ed, or you park your work on a branch and ASK THE
+  USER before any history rewrite. (Incident 2026-08-05: a session reset main
+  to drop its own mistaken commit and silently orphaned six commits another
+  session had stacked above it. Recovery required reflog surgery.)
+- **Diagnostic/exploratory work is never committed to `main`** — put it on a
+  `diag/...` branch from the start. If a commit message needs the words "NOT
+  FOR MERGE", it must not be on a shared branch.
+- Merges into `main` happen deliberately, at user direction, from a session
+  that has checked `git status`/`git log` immediately beforehand — other
+  sessions' commits may have landed since you last looked.

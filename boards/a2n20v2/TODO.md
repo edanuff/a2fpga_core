@@ -1,5 +1,8 @@
 # A2N20v2 TODO
 
+> Status (2026-10-25): items current; the build-status section is dated. Current standings
+> (resource snapshots, timing) are in `docs/boards.md`.
+
 ## High Priority
 
 - [ ] Investigate the timing of bus sampling in `apple_bus.sv` - some IIgs systems have sporadic issues with garbage data, specifically around when the data byte is sampled (likely too soon or too late)
@@ -24,6 +27,6 @@
 
 ## Build Status
 
-- Last verified build: 2026-01-16
+- Last verified build: 2026-01-16 (this note); no later snapshot is committed for this project
 - Timing: All constraints met
 - This is the stable/production version for Tang Nano 20K with IIgs support

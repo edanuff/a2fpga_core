@@ -17,6 +17,7 @@
 //
 
 `include "datetime.svh"
+`include "a2n20v2_profile.vh"
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -25,14 +26,14 @@ module top #(
     parameter bit SCANLINES_ENABLE = 0,
     parameter bit APPLE_SPEAKER_ENABLE = 0,
 
-    parameter bit SUPERSPRITE_ENABLE = 1,
+    parameter bit SUPERSPRITE_ENABLE = `A2_FEATURE_SUPERSPRITE,
     parameter bit [7:0] SUPERSPRITE_ID = 1,
     parameter bit SUPERSPRITE_FORCE_VDP_OVERLAY = 0,
 
-    parameter bit MOCKINGBOARD_ENABLE = 1,
+    parameter bit MOCKINGBOARD_ENABLE = `A2_FEATURE_MOCKINGBOARD,
     parameter bit [7:0] MOCKINGBOARD_ID = 2,
 
-    parameter bit SUPERSERIAL_ENABLE = 1,
+    parameter bit SUPERSERIAL_ENABLE = `A2_FEATURE_SUPERSERIAL,
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
@@ -150,7 +151,6 @@ module top #(
     wire sw_scanlines_w = !dip_switches_n_w[0];
     wire sw_apple_speaker_w = !dip_switches_n_w[1];
     wire sw_slot_7_w = !dip_switches_n_w[2];
-    wire sw_gs_w = !dip_switches_n_w[3];
 
     IOBUF a2_bridge_d_iobuf[7:0] (
         .O  (a2_bridge_d_buf_w),
@@ -199,7 +199,8 @@ module top #(
 
         .dip_switches_n_o(dip_switches_n_w),
 
-        .sleep_o(sleep_w)
+        .sleep_o(sleep_w),
+        .gs_status_o()
     );
 
     // Memory
@@ -403,7 +404,7 @@ module top #(
 
             .a2mem_if(a2mem_if),
             .video_control_if(video_control_if),
-            .sw_gs_i(sw_gs_w),
+            .sw_gs_i(a2bus_if.sw_gs),
 
             .pixel_stream(apple_ps),
 
@@ -678,17 +679,15 @@ module top #(
         .speaker_o(speaker_audio_w)
     );
 
-    // Extend all the unsigned audio signals to 13 bits
-    wire [12:0] speaker_audio_ext_w = {speaker_audio_w, 12'b0};
-    wire [12:0] ssp_audio_ext_w = {ssp_audio_w, 3'b0};
-    wire [12:0] mb_audio_l_ext_w = {mb_audio_l, 3'b0};
-    wire [12:0] mb_audio_r_ext_w = {mb_audio_r, 3'b0};
 
     wire signed [15:0] core_audio_l_w;
     wire signed [15:0] core_audio_r_w;
     // Combine all the audio sources into a single 16-bit signed audio signal
-    assign core_audio_l_w = ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
-    assign core_audio_r_w = ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
+    // Saturating mix (hdl/sound/core_audio_mix.sv): Mockingboard gain is a
+    // live select (shift 3 + gain; power-up 2 = << 5 since 2026-11-17, it was
+    // quiet beside the DOC), sum clamped.
+    core_audio_mix i_audio_mix_l (.sg_i(16'sd0), .ssp_i(ssp_audio_w), .mb_i(mb_audio_l), .mb_gain_i(2'd2), .spk_i(speaker_audio_w), .out_o(core_audio_l_w));
+    core_audio_mix i_audio_mix_r (.sg_i(16'sd0), .ssp_i(ssp_audio_w), .mb_i(mb_audio_r), .mb_gain_i(2'd2), .spk_i(speaker_audio_w), .out_o(core_audio_r_w));
 
     // CDC FIFO to shift audio to the pixel clock domain from the logic clock domain
 
@@ -778,7 +777,7 @@ module top #(
     wire [7:0] debug_b_w;
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
-        .ENABLE(1'b1)
+        .ENABLE(`A2_INSTR_DEBUG_OVERLAY)
     ) debug_overlay (
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),

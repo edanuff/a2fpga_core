@@ -21,7 +21,9 @@
  * polls the FPGA pad readback registers (fpga_pad_poll) and does its own
  * edge detection, hold-repeat, and screen painting (all link access is
  * mutex-protected by fpga_link). Settings changes are applied to the live
- * a2_settings_t and persisted immediately (settings_save()).
+ * a2_settings_t and persisted immediately (settings_save()), except on the
+ * SLOT ASSIGNMENTS screen, which edits a draft and validates/saves only on
+ * SAVE (IIgs control-panel style).
  *
  * Screens are builder functions that regenerate their item lists on entry,
  * and the item model (INFO/SUBMENU/ACTION/CHOICE/TOGGLE) covers list-driven
@@ -52,6 +54,14 @@ void menu_input(uint16_t buttons);
 
 /* True when the MCU owns the display (menu or console view). */
 bool menu_mcu_view_active(void);
+
+/* Queue a one-shot button press from another thread (telnet mirror); it is
+ * OR-ed into the next menu_input() and rides the same edge detection. */
+void menu_inject(uint16_t buttons);
+
+/* Force the MENU view on the next menu_input() (the telnet 'm' key: a bare
+ * SELECT would land in whichever MCU view was last active). */
+void menu_request_menu_view(void);
 
 /* ---- hook implemented by the integrator (network glue for the menu) ---- */
 /* Apply the current network settings (DHCP on/off, static address) to the

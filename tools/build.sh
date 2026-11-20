@@ -4,7 +4,8 @@
 #
 # Usage:
 #   tools/build.sh <board> [syn|all]
-#     <board>  board directory under boards/ (e.g. a2mega, a2n20v2-GS)
+#     <board>  board directory under boards/ (e.g. a2mega, a2n20v2-Enhanced); the
+#              deprecated boards under boards/deprecated/ are found by name too
 #     stage    "all" (default: synthesis + place & route + bitstream) or
 #              "syn" (synthesis only)
 #
@@ -13,7 +14,15 @@
 #   GPRJ      project file name to use when a board dir has more than one
 #             .gprj (e.g. GPRJ=a2n20v2_enhanced_dualrate.gprj); default is
 #             the first one alphabetically
+#   BUILD_TIMEOUT  wall-time cap in seconds (default 1800). A healthy full
+#             build is ~15 min; a placer that runs past 30 min is thrashing
+#             (region constraints have produced 9-HOUR runs) and gets
+#             killed with a loud failure instead of eating the day.
 #   DRY_RUN=1 print what would run without invoking gw_sh
+#   RESOURCE_BASELINE  baseline for the per-module resource diff: a git ref,
+#             a snapshot file, or "none" (default HEAD = the committed snapshot)
+#   RESOURCE_FAIL  bsram|lut|reg — fail the build (exit 5) if that resource grew
+#             at the device level versus the baseline (use bsram on the Tang Nanos)
 #
 # Notes:
 #   - Uses the pipe method (the only supported way; never `gw_sh -exit -e`).
@@ -24,6 +33,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+here="$(cd "$(dirname "$0")" && pwd)"
 GW_SH="${GW_SH:-/Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh}"
 
 board="${1:-}"
@@ -31,12 +41,15 @@ stage="${2:-all}"
 
 if [[ -z "$board" ]]; then
     echo "Usage: tools/build.sh <board> [syn|all]"
-    echo "Boards:"; (cd "$REPO/boards" && ls -d */ 2>/dev/null | tr -d '/')
+    echo "Boards:"; (cd "$REPO/boards" && ls -d */ 2>/dev/null | tr -d '/' | grep -v '^deprecated$')
+    echo "Deprecated:"; (cd "$REPO/boards/deprecated" 2>/dev/null && ls -d */ 2>/dev/null | tr -d '/')
     exit 2
 fi
 
-bdir="$REPO/boards/$board"
-[[ -d "$bdir" ]] || { echo "No such board: '$board' (see boards/)"; exit 2; }
+brel="boards/$board"
+[[ -d "$REPO/$brel" ]] || brel="boards/deprecated/$board"
+bdir="$REPO/$brel"
+[[ -d "$bdir" ]] || { echo "No such board: '$board' (see boards/ and boards/deprecated/)"; exit 2; }
 
 gprj="${GPRJ:-$(cd "$bdir" && ls *.gprj 2>/dev/null | head -1)}"
 [[ -n "$gprj" ]] || { echo "No .gprj found in $bdir"; exit 2; }
@@ -68,7 +81,46 @@ fi
 
 start_epoch="$(date +%s)"
 buildlog="$(mktemp "${TMPDIR:-/tmp}/a2fpga_build.XXXXXX")"
-( cd "$bdir" && printf 'open_project %s\n%s\nexit\n' "$gprj" "$run" | "$GW_SH" ) | tee "$buildlog"
+# Per-project default guard. The 138B full core with the IIgs CPU-socket
+# 65C816 (GS_SOCKET) routes a 2.86 MHz fabric clock into ~300 core flops;
+# measured builds of that project take 21-41 minutes and finish clean
+# (boards/a2mega/docs/gs_socket_65816_scoping.md §8b: five rolls, none
+# pathological). Everything else keeps the 30-minute thrash guard.
+default_timeout=1800
+[[ "$proj" == "a2mega_138B" ]] && default_timeout=3600
+BUILD_TIMEOUT="${BUILD_TIMEOUT:-$default_timeout}"
+
+# Run gw_sh under a wall-time cap (macOS has no coreutils `timeout`).
+CAFF=""
+[[ "$(uname)" == "Darwin" ]] && command -v caffeinate >/dev/null && CAFF="caffeinate -i"
+( cd "$bdir" && printf 'open_project %s\n%s\nexit\n' "$gprj" "$run" | $CAFF "$GW_SH" ) | tee "$buildlog" &
+build_pid=$!
+(
+    slept=0
+    while kill -0 "$build_pid" 2>/dev/null && [[ $slept -lt $BUILD_TIMEOUT ]]; do
+        sleep 10; slept=$((slept+10))
+    done
+    if kill -0 "$build_pid" 2>/dev/null; then
+        echo "!! BUILD_TIMEOUT: exceeded ${BUILD_TIMEOUT}s wall time — killing gw_sh (placer thrash?)" | tee -a "$buildlog"
+        pkill -P "$build_pid" 2>/dev/null
+        kill "$build_pid" 2>/dev/null
+        # gw_sh detaches from the subshell pipeline; make sure it dies too
+        pkill -x gw_sh 2>/dev/null
+    fi
+) &
+watchdog_pid=$!
+wait "$build_pid" 2>/dev/null
+kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null
+
+if grep -q 'BUILD_TIMEOUT' "$buildlog"; then
+    echo
+    echo "!! Build KILLED after exceeding BUILD_TIMEOUT=${BUILD_TIMEOUT}s."
+    echo "   A healthy full build is ~15 min. Do not just raise the timeout:"
+    echo "   look for what made PnR pathological (e.g. GROUP/GRP_LOC region"
+    echo "   constraints — see the note in boards/a2mega/hdl/a2mega.cst)."
+    rm -f "$buildlog"
+    exit 5
+fi
 
 # gw_sh exits 0 even when synthesis/PnR fail — detect ERROR lines ourselves.
 if grep -qE '^ERROR' "$buildlog"; then
@@ -95,13 +147,29 @@ if [[ "$stage" == "all" ]]; then
         echo "!! Bitstream is STALE (predates this build) — the run did not produce a new one."
         exit 4
     fi
-    echo ">> Bitstream: boards/$board/impl/pnr/${proj}.fs"
+    echo ">> Bitstream: $brel/impl/pnr/${proj}.fs"
+    # ---- Resource accounting (per-module, diffed against the committed snapshot) ----
+    # Runs BEFORE the timing verdict: a build that just failed timing is the one
+    # whose module deltas you need to see. Writes boards/<board>/impl/<proj>_resources.json
+    # (tracked) and prints the per-module deltas versus the snapshot in git.
+    # RESOURCE_BASELINE=<ref|file|none> picks the baseline (default HEAD);
+    # RESOURCE_FAIL=bsram|lut|reg makes a device-level increase of that resource
+    # fail the build (exit 5, checked after the timing verdict). A board with no
+    # BSRAM to spare should build with RESOURCE_FAIL=bsram.
+    rr_args=( "$board" "$proj" --baseline "${RESOURCE_BASELINE:-HEAD}" )
+    if [[ -n "${RESOURCE_FAIL:-}" ]]; then rr_args+=( --fail-on "$RESOURCE_FAIL" ); fi
+    rr_rc=0
+    python3 "$here/resource_report.py" "${rr_args[@]}" || rr_rc=$?
+    if [[ "$rr_rc" != "0" && "$rr_rc" != "2" ]]; then
+        echo "   (resource report unavailable: exit $rr_rc)"
+    fi
+    echo
     echo ">> Timing summary:"
     if [[ -f "$tr" ]]; then
         sv="$(grep -A1 "Setup Violated Endpoints" "$tr" | sed -E 's/<[^>]+>//g' | grep -Eo '[0-9]+' | head -1)"
         hv="$(grep -A1 "Hold Violated Endpoints"  "$tr" | sed -E 's/<[^>]+>//g' | grep -Eo '[0-9]+' | head -1)"
         echo "   Setup violations: ${sv:-?}    Hold violations: ${hv:-?}"
-        echo "   Full report: boards/$board/impl/pnr/${proj}_tr_content.html"
+        echo "   Full report: $brel/impl/pnr/${proj}_tr_content.html"
         if [[ "${sv:-1}" != "0" || "${hv:-1}" != "0" ]]; then
             echo "   !! TIMING VIOLATIONS PRESENT — build is NOT clean. Inspect the report before using this bitstream."
             exit 4
@@ -110,5 +178,9 @@ if [[ "$stage" == "all" ]]; then
     else
         echo "   Timing report not found at $tr — verify the PnR step completed."
         exit 4
+    fi
+    if [[ "$rr_rc" == "2" ]]; then
+        echo "!! RESOURCE REGRESSION (RESOURCE_FAIL=${RESOURCE_FAIL}) — see the per-module table above."
+        exit 5
     fi
 fi

@@ -6,8 +6,12 @@ The card is based on the WIZnet **W5100** hardware TCP/IP chip; this implementat
 the W5100 the same way the real chip is built — **memory + register front-end** in the
 FPGA, **network engine** on the BL616.
 
-> Status: **MACRAW bridge implemented; hardware validation pending.** FPGA + firmware both
-> build clean. TCP/UDP hardware-socket modes are a future phase (see *Roadmap*).
+> Status (2026-10-25): **shipped and bench-verified** on the Enhanced (IP65, ADTPro, Contiki
+> over a USB-Ethernet adapter; see the board README) and ported to the a2mega, where the ESP32
+> bridges frames to WiFi with MAC NAT. TCP/UDP hardware-socket modes remain a future phase
+> (see *Roadmap*). Agent notes record one DHCP failure on a ROM 01 IIgs that reproduced with a
+> real Uthernet II card against the same router (a W5100/LAN compatibility matter, not this
+> gateware; a 10/100 router worked); that is not recorded elsewhere in this repository.
 
 ## Why MACRAW first
 

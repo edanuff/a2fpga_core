@@ -26,6 +26,7 @@
 
 module apple_bus #(
     parameter int GS = 0,
+    parameter bit GS_AUTODETECT = 1,
     parameter int CLOCK_SPEED_HZ = 54_000_000,                      // 18.52 ns
     parameter int APPLE_HZ = 14_318_181,
     parameter bit ENABLE_DENOISE = 0,
@@ -33,6 +34,11 @@ module apple_bus #(
     parameter int APPLE_14M_CYCLE_COUNT = CLOCK_SPEED_HZ / APPLE_HZ, // 3
     parameter int PHASE_COUNT = CYCLE_COUNT / 2,                    // 26
     parameter int M2B0_COUNT = 19,
+    // M2B0 (IIgs bank-1 qualifier, a ~140 ns pulse) sampling:
+    //   0 = at phi1 & Q3 falling edge (a2mega 1.0a3 level shifters)
+    //   1 = 2FF-synchronised, latched M2B0_COUNT logic clocks into phi1
+    //       (a2p25 carrier: ALVC164245 + LSF0108; rev-0 value 12, SHR-proven)
+    parameter bit M2B0_PHASE_SAMPLE = 0,
     parameter int ADDR_COUNT = 18,                                  // 333ns from Phi1 rising edge
     parameter int DATA_COUNT = 15                                   // 419ns from Phi0 rising edge
 ) (
@@ -45,6 +51,8 @@ module apple_bus #(
     input a2_7M_i,
 
     input sw_gs_i,
+    // {0, sw_gs (effective), iie_detected, gs_autodetect, gs_event_cnt[3:0]} — debug
+    output [7:0] gs_status_o,
 
     a2bus_if.master a2bus_if,
 
@@ -124,14 +132,60 @@ module apple_bus #(
     assign a2bus_if.data = data_r;
     assign a2bus_if.rw_n = rw_n_r;
 
-    wire a2_gs = GS | sw_gs_i;
+    // GS mode: forced by parameter/switch, or auto-detected from the IIgs
+    // firmware's reset-time TSB $C029 R-M-W signature (see gs_detector).
+    // The detector watches the raw latched bus lines because m2sel_n
+    // qualification is only meaningful once GS mode is known.
+    // Reset by device_reset_n only (sticky across Apple /RES): the host
+    // cannot change while powered, and clearing it on /RES flipped the
+    // text palette to the 8-bit row until the ROM touched $C029 again.
+    wire gs_autodetect_w;
+    wire iie_detected_w, gs_event_w;
+
+    generate
+        if (GS_AUTODETECT) begin : gen_gs_detect
+            gs_detector gs_detector_inst (
+                .clk_i(clk_logic_i),
+                .reset_n_i(device_reset_n_i),
+                // Unconditional sampling — a TransWarp GS emits its
+                // detectable $C036 pairs while /RES is still asserted.
+                .phi1_posedge_i(a2bus_if.phi1_posedge),
+                .addr_i(addr_r),
+                .rw_n_i(rw_n_r),
+                .data_i(data_r),
+                .gs_detected_o(gs_autodetect_w),
+                .iie_detected_o(iie_detected_w),
+                .gs_event_o(gs_event_w)
+            );
+        end else begin : gen_no_gs_detect
+            assign gs_autodetect_w = 1'b0;
+            assign iie_detected_w = 1'b0;
+            assign gs_event_w = 1'b0;
+        end
+    endgenerate
+    reg [3:0] gs_event_cnt_r = 4'd0;
+    always @(posedge clk_logic_i) if (gs_event_w) gs_event_cnt_r <= gs_event_cnt_r + 4'd1;
+
+    wire a2_gs = GS | sw_gs_i | gs_autodetect_w;
     assign a2bus_if.sw_gs = a2_gs;
+    assign gs_status_o = {1'b0, a2_gs, iie_detected_w, gs_autodetect_w, gs_event_cnt_r};
+    // NOTE: no /RES masking here — accelerator cards (TransWarp GS) do
+    // legitimate DMA work, including their splash and the $C036 pairs the
+    // auto-detector needs, while /RES is still asserted. Pre-detection
+    // junk is wiped when detection latches (see apple_memory*).
     assign a2bus_if.m2sel_n = a2_gs ? m2sel_n_r : 1'b0;
 
     reg m2b0_r;
-	always @(posedge a2bus_if.clk_logic) begin
-        if (a2bus_if.phi1 && a2bus_if.clk_q3_negedge) m2b0_r <= a2_gs ? a2_mb20 : 1'b0;
-	end
+    reg [5:0] phase_cycles_r = 0;
+    generate if (M2B0_PHASE_SAMPLE) begin : g_m2b0_phase
+        wire a2_m2b0_w;
+        cdc_2ff cdc_2ff_m2b0 (.clk(a2bus_if.clk_logic), .i(a2_gs ? a2_mb20 : 1'b0), .o(a2_m2b0_w));
+        always @(posedge a2bus_if.clk_logic)
+            if (a2bus_if.phi1 && (phase_cycles_r == M2B0_COUNT)) m2b0_r <= a2_m2b0_w;
+    end else begin : g_m2b0_q3
+        always @(posedge a2bus_if.clk_logic)
+            if (a2bus_if.phi1 && a2bus_if.clk_q3_negedge) m2b0_r <= a2_gs ? a2_mb20 : 1'b0;
+    end endgenerate
     assign a2bus_if.m2b0 = m2b0_r; 
 
     assign a2bus_if.control_inh_n = a2_inh_n;
@@ -141,7 +195,6 @@ module apple_bus #(
     assign a2bus_if.control_nmi_n = a2_nmi_n;
     assign a2bus_if.control_reset_n = a2_reset_n;
 
-    reg [5:0] phase_cycles_r = 0;
     assign sleep_o = phase_cycles_r == 6'b111111;
 
     always @(posedge a2bus_if.clk_logic) begin

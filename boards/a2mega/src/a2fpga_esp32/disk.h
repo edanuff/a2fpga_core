@@ -32,6 +32,12 @@ extern "C" {
  * be mounted at /sdcard). The first disk_poll() performs the initial mount. */
 void disk_init(void);
 
+/* True once the Apple II reset has been released by the disk task (media
+ * mounted, or the 10 s deadline). Late-start work that must not compete
+ * with the USB stick's enumeration for internal RAM (the BLE host) waits
+ * for this. */
+bool disk_a2_released(void);
+
 /* Service any pending track/block requests for all drives/units. Call
  * repeatedly from a dedicated task (~2 ms cadence). Never blocks. */
 void disk_poll(void);
@@ -39,6 +45,22 @@ void disk_poll(void);
 /* Request a re-mount on the next poll (e.g. after the menu changes an image
  * selection or the SD card is re-inserted). Safe to call from other tasks. */
 void disk_request_remount(void);
+
+/* Stop serving and close every image file; nothing is served again until
+ * disk_request_remount(). Call BEFORE the FPGA is taken down (JTAG flash
+ * entry, bitstream reload, RECONFIG_N): an unconfigured chip answers
+ * register reads with bus junk, and a junk write request once drove a seek
+ * 4 GB past the end of a .nib (a2p25 stick corruption, 2026-11-17). Safe
+ * from any task: from the disk task it closes inline, from another task it
+ * waits (<= ~500 ms) for the disk task to do it. */
+void disk_quiesce(void);
+bool disk_quiesced(void);
+
+/* disk_quiesce() plus unmount of the USB stick: call right before
+ * esp_restart() so no FAT or directory update can be in flight when the
+ * CPU resets. The restart paths (fpgastream, fpgaupdate, fwupdate, the CLI
+ * 'restart') use this. */
+void disk_release_storage(void);
 
 /* ---- menu accessors ------------------------------------------------------ */
 
@@ -65,8 +87,12 @@ bool disk_remount_pending(void);
  * directory (path relative to the SD root, "" = root); poll returns -1 while
  * pending, else the number of entries filled. Directories are always included
  * (is_dir set); files are filtered by exts, a NULL-terminated list of
- * extensions (no dot, case-insensitive). Directories sort before files. */
-#define DISK_LIST_MAX 24
+ * extensions (no dot, case-insensitive). Directories sort before files and
+ * each group is alphabetized (FAT hands back creation order). A directory
+ * with more than DISK_LIST_MAX matching entries is cut at the cap; the
+ * picker says so. The ESP32-S3 has the RAM for a large cap (the BL616 build
+ * stays at 64). */
+#define DISK_LIST_MAX 128
 typedef struct {
     char name[64];   /* entry name within the directory (LFN; longer skipped) */
     bool is_dir;

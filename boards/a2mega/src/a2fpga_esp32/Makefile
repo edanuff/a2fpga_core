@@ -1,7 +1,11 @@
 # ESP32-S3 Arduino CLI Makefile
-# A2FPGA ESP32 co-processor firmware (a2mega board)
+# A2FPGA ESP32 co-processor firmware (a2mega board; also the a2p25
+# "displayport1" rev — see boards/a2p25/docs/ESP32_FW_A2P25.md)
 
-# Configuration - ESP32-S3-MINI-1-N8 module on the a2mega (8M flash, no PSRAM)
+# Module varies by board revision (BOARD_REV below):
+#   1.0a3   ESP32-S3-MINI-1-N4R2 — 4 MB flash + 2 MB quad PSRAM
+#   1.0a2x  ESP32-S3-MINI-1-N8   — 8 MB flash, no PSRAM
+#   a2p25   ESP32-S3-MINI-1-N4R2 (BOARD_REV=225, same settings as 1.0a3)
 BOARD = esp32s3
 PORT ?= /dev/cu.usbmodem*
 BAUD = 115200
@@ -10,19 +14,59 @@ PROJECT_NAME = a2fpga_esp32
 # Arduino CLI executable (assumes it's in PATH)
 ARDUINO_CLI = arduino-cli
 
-# Board FQBN with specific settings
+# Board revision (see board_pins.h): 103 = 1.0a3 (USB-C DP, N4R2 module),
+# 102 = 1.0a2/1.0a2a (N8 module), 225 = a2p25 displayport1 (N4R2).
+# Set BOARD_REV=102 to build for old boards.
+# a2p25 only: DP_TEST=1 (default) builds the dp_test-bitstream variant
+# (IO10 = HPD to FPGA ball B2, UART1 RX on IO11 = FPGA telemetry, no OSPI);
+# DP_TEST=0 builds for an OSPI-speaking core.
+# NOTE: all revs share ./build; arduino-cli rebuilds fully when the flags
+# change, but run 'make clean' if in doubt before switching BOARD_REV.
+BOARD_REV ?= 103
+DP_TEST ?= 1
+ifeq ($(BOARD_REV),102)
 FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=8M,PSRAM=disabled,PartitionScheme=default_8MB
+REV_FLAGS = --build-property compiler.c.extra_flags=-DA2MEGA_BOARD_REV=102 \
+            --build-property compiler.cpp.extra_flags=-DA2MEGA_BOARD_REV=102
+else ifeq ($(BOARD_REV),225)
+# a2p25 displayport1: same N4R2 module + partition rationale as 1.0a3 below.
+FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=4M,PSRAM=enabled,PartitionScheme=min_spiffs
+REV_FLAGS = --build-property "compiler.c.extra_flags=-DA2MEGA_BOARD_REV=225 -DA2P25_DP_TEST=$(DP_TEST)" \
+            --build-property "compiler.cpp.extra_flags=-DA2MEGA_BOARD_REV=225 -DA2P25_DP_TEST=$(DP_TEST)"
+else
+# min_spiffs partitions (4 MB): two 1,966,080-byte OTA app slots + a 128 KB
+# "spiffs" (LittleFS) + coredump. Decided 2026-11-18 (BLE HID): the BLE host
+# stack pushed the image past the 1,310,720-byte slots of the "default"
+# scheme. The local LittleFS volume is now only the stickless fallback —
+# disk images, FTP drops and FIRMWARE-menu OTA files live on the USB stick,
+# which is assumed present. nvs/otadata/coredump offsets are identical to
+# "default", so settings and bonds survive the switch; the switch itself is a
+# one-time USB `make upload` per card (Apple II off), after which OTA from
+# the stick works as before (fwupdate.c refuses images larger than the slot).
+# FPGA update-from-file streams the bitstream to JTAG (no staging in MCU
+# flash). The board footprint accepts either MINI variant — an N8-fitted
+# 1.0a3 builds with BOARD_REV=103 plus the 102 flash settings if needed.
+FQBN = esp32:esp32:$(BOARD):USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashSize=4M,PSRAM=enabled,PartitionScheme=min_spiffs
+REV_FLAGS =
+endif
 
 # Source files
 SKETCH = a2fpga_esp32.ino
-CPP_FILES = a2fpga_jtag.cpp
-C_FILES = a2fpga_ospi_link.c a2fpga_spi_service.c fpga_link.c fpga_screen.c \
-          osd_console.c menu.c settings.c disk.c gcr_dsk.c w5100.c \
-          wifi_bridge.c fpga_jtag.c fpgaupdate.c ftpd.c
-HEADER_FILES = a2fpga_jtag.h a2fpga_ospi_link.h a2fpga_spi_service.h \
+CPP_FILES = a2fpga_jtag.cpp usbc_glue.cpp usbhost.cpp usbstorage.cpp
+C_FILES = fwupdate.c a2fpga_ospi_link.c a2fpga_spi_service.c fpga_link.c fpga_screen.c wedge_watch.c \
+          osd_console.c idf_log_tee.c menu.c settings.c disk.c gcr_dsk.c w5100.c audio_ctl.c \
+          wifi_bridge.c usbeth.c usbeth_proto.c net_uplink.c \
+          fpga_jtag.c fpgaupdate.c fpgastream.c ftpd.c telnetd.c \
+          fusb302.c usbc_port.c esp32s3_integration.c sn75dp130.c gs_socket.c \
+          hid_map.c ble_hid.c
+HEADER_FILES = a2fpga_jtag.h a2fpga_ospi_link.h a2fpga_spi_service.h wedge_watch.h \
                a2fpga_regs.h fpga_link.h fpga_screen.h osd_console.h menu.h \
-               net_status.h settings.h disk.h gcr_dsk.h w5100.h \
-               wifi_bridge.h fpga_jtag.h fpgaupdate.h ftpd.h
+               net_status.h idf_log_tee.h settings.h disk.h gcr_dsk.h w5100.h audio_ctl.h \
+               wifi_bridge.h usbeth.h usbeth_proto.h net_uplink.h \
+               fpga_jtag.h fpgaupdate.h fpgastream.h ftpd.h telnetd.h \
+               board_pins.h fusb302.h usb_pd.h usbc_port.h usbc_glue.h \
+               esp32s3_integration.h sn75dp130.h usbhost.h usbstorage.h fwupdate.h gs_socket.h \
+               hid_map.h ble_hid.h
 ALL_SOURCES = $(SKETCH) $(CPP_FILES) $(C_FILES) $(HEADER_FILES)
 
 # Default target
@@ -39,7 +83,7 @@ init:
 .PHONY: compile
 compile:
 	@echo "Compiling $(PROJECT_NAME) with files: $(ALL_SOURCES)"
-	$(ARDUINO_CLI) compile --fqbn $(FQBN) --build-path ./build $(SKETCH)
+	$(ARDUINO_CLI) compile --fqbn $(FQBN) $(REV_FLAGS) --build-path ./build $(SKETCH)
 
 # Upload to ESP32
 .PHONY: upload
@@ -108,5 +152,7 @@ help:
 	@echo "Usage examples:"
 	@echo "  make init           # First time setup"
 	@echo "  make compile        # Build only"
+	@echo "  make BOARD_REV=225 compile          # a2p25 displayport1 (dp_test mode)"
+	@echo "  make BOARD_REV=225 DP_TEST=0 compile # a2p25, OSPI core"
 	@echo "  make PORT=/dev/ttyUSB0 upload  # Upload to specific port"
 	@echo "  make flash          # Upload and monitor"

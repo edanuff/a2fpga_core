@@ -1,0 +1,484 @@
+# a2mega 1.0a4 — board revision requirements (rev gate)
+
+**Ship gate (2026-10-25): two bench items remain before the send,
+both listed under *Remaining gates* below — item 4b (the power-path
+DMM) and USB host through the dock. The 2026-08-20 exercise plan that
+used to gate this document is done otherwise (video steadiness, the
+65C816 socket) and is archived at
+`archive/dp-bringup-2026-08/PRE_REV_EXERCISE_PLAN.md`.** (Original gate
+below was Fri 2026-08-22, superseded.) Every item is
+EVIDENCED (links to test log / bringup log) or marked OPEN with the
+experiment that closes it. Nothing goes on the board without a reason;
+no rev until the OPEN items that could change the netlist are closed.
+
+**2026-10-11:** the a2p25 displayport1 board validated the §1 AUX network on
+hardware and produced shared-gateware fixes and HyperRAM results that this rev
+inherits — see [a2p25_carryover_2026-10-11.md](a2p25_carryover_2026-10-11.md).
+
+## Remaining gates (2026-10-25)
+
+1. **Item 4b, power-path DMM** (below): characterize the non-VBUS power path and
+   identify the element that passes the phantom VBUS backfeed. Decides whether
+   the LM66100/TPS2553 arrangement stays (plus item 4's blocking eFuse) or is
+   replaced. Still OPEN, uncharacterized.
+2. **USB host through the dock, on this board.** The a2mega has one port and
+   will never get a second one, so keyboard, gamepad and mass storage must reach
+   the ESP32 through the alt-mode dock's downstream ports while DP video runs.
+   Proven so far: USB 2.0 data through the dock's upstream port with the ESP32
+   as a *device* (firmware reflashed over the Anker hub with DP up, test log
+   row 62, 2026-08-20); the ESP32 *host* stack with hub-class enumeration,
+   XInput, HID and MSC (`usbhost.cpp`, shared firmware) on the a2p25 with a
+   plain hub (2026-10-12). Not yet done: the two together on the a2mega — the
+   port in host role behind the dock (role policy: device for 5 s after boot,
+   then host unless a PC enumerated us; VBUS sourced through the TPS2553 or the
+   dock self-powered). A bench session with the current firmware; any failure
+   that points at the connector, mux or VBUS path is a 1.0a4 netlist item.
+
+## CONFIRMED changes (evidence in hand)
+
+1. **AUX front-end: proper bias + level network on DPAUX_P/N (SBU path).**
+   THE critical fix. 1.0a3 has AC caps with no FPGA-side bias; the
+   LVCMOS pseudo-diff drive is ~2 Vpp (spec ≤1.38 Vpp) and only decodes
+   through channel attenuation (test log #9: breakout-as-attenuator).
+   RX side: replies electrically unreachable at LVCMOS thresholds;
+   TLVDS+pulldown hack reads converter-class sinks only (offset-marginal
+   for monitors). Design: bias divider network setting known common mode
+   + zero standing differential at the receiver, and TX levels within
+   spec (resistor divider/series attenuation, or commit to the TLVDS pad
+   as the driver and bias for it). *(Historical note: the original
+   design sketch said "zero standing differential" — superseded by the
+   RESOLVED DESIGN below, which deliberately parks a standing idle
+   offset; the old OPEN sub-question on values/topology is closed.)*
+   **VENDOR PRECEDENT (08-19, Gowin EDP refdesign cst + DK_DP/DK_VIDEO
+   schematics; CORRECTED reading — the cst's tx/rx pairs are TWO
+   different DP PORTS' AUX channels, source and sink, each a single
+   bidirectional pair like ours)**: (a) Gowin's SOURCE port AUX =
+   LVCMOS18D pair, PULL_MODE=NONE, DRIVE=4, no FPGA-side bias — viable
+   only because their reference source policy is OPEN-LOOP (writes
+   blind, never gates on replies); (b) their SINK port — the one that
+   MUST receive — is the template that matters: D-type differential
+   LVCMOS pair + PULL_MODE=DOWN, i.e. ON-DIE pulls as the bias behind
+   the AC caps, no external bias resistors on either dev board. This is
+   the same family as our TLVDS/LVCMOS33D+pulldown receiver — vendor
+   precedent for a receivable single-pair pad. 1.0a4 design: single
+   bidirectional pair, D-type IO (verify DK_VIDEO's 3.3V Bank-4 AUX
+   port role before citing it as the LVCMOS33D-at-3.3V precedent),
+   internal pulls as RX bias, board network per the DK schematic values
+   sized for 0.4-1.38Vpp TX at the connector; keep our shared-pair park
+   discipline (their source never receives so never faced it).
+   Generational corroboration: Gowin's older (2024, 138K-kit) refdesign
+   used LVCMOS18D with NO pulls on either port; the current one added
+   PULL_MODE=DOWN on the receiving port — they learned the same
+   bias-behind-the-caps lesson our AUX saga did. DK_VIDEO hardware puts
+   source AUX on a 3.3V bank (G12/H12) so 3.3V AUX is vendor-shipped;
+   the matching software project (expected LVCMOS33D) not in our
+   archive — request alongside the ticket, or rely on our own round-6
+   LVCMOS33D input results.
+
+   **RESOLVED DESIGN (08-20, freeze decision — FINAL VALUES, verified
+   by analysis and sim BEFORE fab; no rework or restuffing plan.
+   Packages: 0201 per board standard — hand rework is infeasible below
+   1206 and 1206 doesn't fit this design, so package size buys no
+   contingency and correctness comes from pre-fab verification):** the
+   1.0a3
+   network is correct in kind and stays put; the delta is purely
+   additive. Existing (all stay as-is): C46/C47 0.1 µF AC caps + R31
+   100k→GND (AUX_P) / R32 100k→+3V3 (AUX_N) = the DP-spec source
+   presence bias, correctly on the LINE side of the caps, placed near
+   the mux; R33/R34 2 M→GND on SBU1/2 (TI bleed). Measured: BTB→mux AUX
+   run = **1.75 inches** — past critical length for LVCMOS-class edges,
+   i.e. today's undamped line genuinely rings (why external attenuation
+   "fixed" it).
+
+   **BOM erratum found 2026-10-28 (1.0a3 as built):** R33/R34 were drawn
+   as 2 M but the assembly BOM (export 2026-08-02) carried
+   ERJ-1GNF1003C, the 100 k part number copied from the AUX bias
+   resistors, so every 1.0a3 board has **100 k** SBU bleeds, not 2 M.
+   That makes each bleed as stiff as the DP source presence bias
+   itself: with the crossbar closed, AUX_N idles near half rail instead
+   of near 3V3 and AUX_P sees ≈50 k to ground. All 1.0a3 AUX idle
+   measurements (the 08-13 SBU DC reads, the adapter census) were taken
+   in that condition, so orientation-detection or idle-level oddities
+   seen there should be retested on 1.0a5 before being attributed to
+   anything else. Fixed on 1.0a5 (reannotated R48/R49) with
+   ERJ-1GNJ205C; a2-mega `tools/preflight.py` now fails on a part
+   number shared by parts of different values.
+   Why 2 M is not optional (TUSB1046A-DCI datasheet SLLSF13B): the pin
+   table says SBU1/SBU2 "should be DC coupled to the SBU pin on the
+   Type-C receptacle. A 2-M ohm resistor to GND is also recommended",
+   and the switch electricals (section 6, "AUXp or AUXn and SBU1 or
+   SBU2") specify RON only with VI = 0-0.4 V on the AUXp path and
+   2.7-3.6 V on the AUXn path, with "AUX Channel DC common mode voltage"
+   limits of 0-0.4 V for AUXp/SBU and 2.7-3.6 V for AUXn/SBU. The
+   crossbar is a pair of pass switches biased for AUXp near ground and
+   AUXn near 3V3; a 100 k bleed against the 100 k AUXn pull-up parks the
+   AUXn/SBU line near 1.65 V, outside its characterized window, so the
+   AUXn switch ran out of spec on every 1.0a3 board. That is consistent
+   with (not proof of) the 08-13 "crossbar effectively open" finding and
+   the AUX_SBU_OVR workaround. The a2p25 (R43/R45 on its 2026-09-08
+   assembly BOM, now R45/R47) was built with the correct ERJ-1GNJ205C
+   and never showed the symptom.
+
+   Additions, final values:
+   (a) **Series 100 Ω per leg AT THE BTB PINS** (position is
+   load-bearing: source termination sits at the driver end; the caps'
+   position is a don't-care at 1 Mbps once the source is damped).
+   CORRECTED 08-20 from an earlier 47 Ω draft — 47 Ω is NOT spec-legal
+   for the LVCMOS33D fallback driver (3.3 V into 2·Rs+100 Ω gives
+   1.70 Vpp > the 1.38 Vpp limit); 100 Ω gives 1.10 Vpp mid-window for
+   LVCMOS and is swing-transparent to the current-mode TLVDS driver, so
+   100 Ω is the one value legal for BOTH drivers with no change ever
+   needed. Driver commitment: TLVDS (the configuration that reads
+   converter replies today).
+   (b) **Receiver-bias divider on the PAD side** (between series R and
+   cap), fitted always — this is THE critical fix; the bare on-die-pull
+   configuration is the one proven offset-marginal for monitor-class
+   replies — re-confirmed 2026-09-02 by the adapter census: a known-good
+   USB-C->HDMI dongle (works on Mac/iPhone) gets PD/mux/HPD but ZERO AUX
+   reply edges on 1.0a3, so its DPCD caps (the census second gate) are
+   unreadable; only hub-class sinks census on this rev
+   (adapter_census_results.md). Final values: **AUX_P: 100 k→3V3 / 43 k→GND (parks
+   ≈0.99 V); AUX_N: 100 k→3V3 / 47 k→GND (parks ≈1.05 V)** ⇒ common
+   mode ≈1.0 V (mid-window of the Gowin TLVDS input CM range — confirm
+   the DS window at layout review as a check), per-leg Thevenin ≈30 k
+   (<1% signal loading vs the ~100-200 Ω source impedance, stiff vs
+   leakage, 100 nF cap-node recharge τ ≈ 3 ms — harmless for
+   DC-balanced Manchester bursts), and a **≈65 mV standing idle offset
+   with P BELOW N — sign fixed by design analysis**: the receiver reads
+   logic 0 at idle, matching the DP line-idle convention (AUX_P low /
+   AUX_N high via the 100 k pair) and keeping the RX shift register
+   benign for the sync detector. Corroboration: the aux_interface.v
+   squelch comment (08-15) documents that today's zero-differential
+   idle makes the comparator CHATTER — this offset is the analog
+   squelch that comment says real AUX PHYs have; the digital squelch
+   demotes to belt-and-braces. The sign and levels are verified in the
+   AUX sim harness pre-fab as a CHECK, and the AD2 on the item-6 test
+   pads validates the built board — neither is a tuning step.
+   (c) **Test pads on the LINE-side node** (item 6), one per leg — for
+   validation measurement (the node the sink sees).
+   (d) **Companion cst change (gateware, lands with the board): AUX
+   pair PULL_MODE=NONE.** The on-die pulldown hack that biases 1.0a3
+   would sit in parallel with the divider (tens of kΩ to ground),
+   dragging both park levels down and shrinking the idle offset — the
+   board network replaces the pulls entirely.
+   Schematic review 08-20 (BTB sheet): series 100 Ω R66/R67 correct;
+   pin mapping correct (G15/IOR105A→DPAUX_P, G16/IOR105B→DPAUX_N);
+   ⚠ first draft had the 43 k/47 k lower resistors SWAPPED (parked P
+   above N = receiver idles 1) — 43 k belongs on the DPAUX_P leg, 47 k
+   on DPAUX_N. Caught against tb_aux_idle_bias's verified convention.
+   This closes OPEN A — no remaining data dependency for the schematic.
+
+2. **RECONFIG_N (ball N12) routed to an ESP32 GPIO.** Bench/dev recovery
+   and automated test-reroll. NOT a consumer-facing mechanism (decision
+   of record 2026-08-16: no user-level reconfiguration ever). Weak
+   pull-up; ESP32 pin must be Hi-Z/open-drain at power-on (config guide:
+   keep high during power-on/config; ≥25 ns low pulse = reload).
+
+3. **Keep all four SERDES lanes routed to the mux** (as 1.0a3; uniform
+   P/N swap is fine — tx_pol_invert handles it). 4-lane remains a future
+   option; no change needed, just don't lose it.
+
+3b. **138K SOM compatibility: CLOSED, SILICON-VERIFIED, NO COPPER CHANGE
+   (08-20).** Ball-map audit (`SOM_138B_BALLMAP.md`): 176/180 carrier
+   balls MATCH; the 4 DIFFERs are SERDES lane relabelling of the same
+   pads (Q0 lanes 1↔3 transposed between dies — our pairs are die lanes
+   2+3 on the 60B, 1+2 on the 138B; TX master = die lane 2 on both;
+   REFCLK1 exact match; zero bank-VCCIO conflicts, the 60B's AB13 one
+   disappears). Verified end-to-end same day on B3 (first 138K article):
+   golden C:0177 + colorbars through the Anker hub (test log rows 54-55).
+   Cost of the die difference: one per-die SERDES IP regeneration,
+   config-only. Do not attempt to "fix" lane numbering in copper — the
+   1↔3 transposition means every routing needs per-die IP regen anyway.
+
+4. **VBUS source-path isolation + discharge** (evidence 08-17 eve,
+   instrumented): FUSB302 reads VBUSOK=1 with the port EMPTY — the 5V
+   plane backfeeds the connector VBUS rail, so the vSafe0V source-attach
+   precondition can never be met honestly (root of the in-slot attach
+   flakiness; 98461af3 had to remove the safety veto to attach at all).
+   Fix: real load switch/ideal diode between plane and VBUS pin +
+   discharge path, so VBUS is genuinely 0 V until sourced.
+   **Part-requirements spec (08-20):** eFuse-class device preferred —
+   one package gives all four needs: reverse blocking (kills the
+   backfeed that makes VBUSOK lie), output discharge (honest vSafe0V),
+   adjustable current limit ~2-3 A (bus-powered hub + downstream), and
+   programmable soft-start slew (which is also half of item 5's inrush
+   fix). Shortlist by stock at layout time.
+4b. **Power-source architecture review (NEW 08-20 — user-corrected
+   topology).** Three 5V ingress paths exist: (1) USB-C VBUS — the
+   normal path (via LM66100DCKR? confirm from schematic); (2) Apple II
+   edge connector 5V through a transistor + LM74700 ideal-diode
+   controller; (3) the SOM's JTAG-connector 5V pin (for powering the SOM
+   during configuration), which connects through the BTB and feeds the
+   board. OPEN PROBLEM, uncharacterized on BOTH axes: when 5V arrives
+   via a non-VBUS path (2 or 3), the USB-C connection is "not happy" —
+   the specific failure mode is not recalled/recorded and the cause is
+   unknown; all that is established is that a problem is believed to
+   exist. RESOLVED TO THE DOCUMENTED RECORD (08-20 doc search + user
+   reconciliation): the architecture is slot-5V→LM74700, USB-C
+   VBUS-in→PTC→LM66100, VBUS-out (source role)→TPS2553; the recorded
+   problem is at the PD-ATTACH layer — bringup log 08-17, measured:
+   "FUSB302 VBUSOK=1 with port EMPTY = phantom VBUS backfeed onto the
+   connector rail from the shared 5V plane" when slot-powered ⇒ the
+   vSafe0V source-attach precondition can never be met (in-slot attach
+   1/3 vs bench 9/9; fw had to drop the safety veto). So something in
+   the LM66100/TPS2553 arrangement leaks in reverse. It MANIFESTS
+   downstream as "HPD never arrives" (no attach → no alt-mode → no
+   HPD), which is why it was remembered as HPD-related.
+   1.0a4 actions: (a) BENCH CHARACTERIZATION before the power page is
+   final — DMM the connector VBUS pin vs the 5V plane with the port
+   empty, powered via (1) slot/LM74700 and (2) SOM-JTAG-5V-via-BTB;
+   walk TPS2553-output vs LM66100-cathode nodes to identify WHICH
+   element passes the leak; then attach a hub and record the failure
+   signature via p/u telemetry + HLVC (symptom on the record at last);
+   control run VBUS-powered. Outcome decides: keep LM66100/TPS2553 +
+   add item 4's blocking eFuse, or replace the arrangement. (b) VCONN's
+   role reviewed in the same pass (the 08-17 "powered by VCONN = weird
+   results" anomaly belongs here). (c) Bench interaction: item 4's
+   reverse blocking removes hub-backfeed as the de-facto bench supply,
+   so the bench powering story must be deliberate on 1.0a4, not
+   accidental.
+
+4c. **Apple-off backfeed through the level shifters (NEW 09-14).** With the
+   card on USB power and the Apple off, R65 (549 Ω to `+5V` on `GS_VP`)
+   sources ~8 mA into the unpowered FPI, and the enabled LSF0108 passes
+   ~3-4 mA from the FPGA-side control pull-ups. Rev change: transceiver
+   `VCC(B)`, the LSF bias resistor, R65 and U16's supply move to `BUS_5V`,
+   a `BUS_5V`-present input gates the enables, and the transceiver BOM
+   becomes Nexperia 74ALVC164245 or TI SN74LVC16T245 (never TI
+   SN74ALVC164245, which has no partial-power-down rating). Full analysis,
+   datasheet citations and bench checks:
+   `apple_off_backfeed_level_shifters.md`.
+
+5. **Local bulk capacitance on the VBUS source rail** for bus-powered
+   sink inrush: hub cold-boot inrush through the source switch sagged
+   the shared rail hard enough to kill ESP32 WiFi for ~1 min in-slot
+   (bench supply masked it). Size for a bus-powered hub + downstream
+   devices; consider soft-start on the switch. With item 4's eFuse
+   slew-limiting the start, sizing is forgiving: ~330-470 µF bulk on the
+   VBUS source side + local ceramics, placed so hub-side sag cannot
+   couple into the ESP32's rail.
+
+5b. **TUSB1046A operating-temperature margin (REFRAMED 08-18 night:
+   normal heat, insufficient system margin)** — the mux runs "very hot"
+   on EVERY carrier: 634 mW (datasheet, DP4 mode, all four linear
+   channels always biased) in a 4x6 mm WQFN ≈ 2.6 W/cm² ⇒ case 50-60 °C
+   at bench ambient with correct pad/vias. NOT a defect (voiding theory
+   retired — both carriers identical); TI rates Tj to 105 °C. The defect
+   is SYSTEM margin: link outcomes demonstrably flip with mux-region
+   temperature (compressed-air experiment, rows 37-38), and the product
+   lives in an enclosed Apple II case at 35-40 °C ambient ⇒ die 60-75 °C
+   — the bench is the EASY case. Requirements: (a) maximize thermal
+   pad/via/copper coupling and treat a 6x6 heatsink as standard fitment;
+   (b) characterize and spec the margin-vs-temperature curve (soak test
+   IN AN ENCLOSURE or with pre-warmed mux = the product condition);
+   (c) best-fit mechanism REFINED (08-18/19): the thermal sensitivity is
+   at the sink's ACQUISITION threshold, not tracking — 1-hour warm soak
+   holds rock-solid once established (receiver hysteresis: CDR pull-in/
+   EQ-adapt/descrambler-sync need more eye than tracking); AUX, HPD,
+   refclk all exonerated at temp. User-visible failure mode = "attach
+   fails when warm", never "picture drops". Qualification metric =
+   WARM-ATTACH success rate (heat system THEN attach xN), not warm
+   retention. Note: the scrambler-reset fix (K28.0 per 512 BS) likely
+   strengthens retention further (periodic descrambler re-anchor).
+   Component-level confirmation via selective heating (mux vs cap bank)
+   pending; (d) firmware lever: sweep mux RX
+   EQ at WARM temperature on a good SOM (prior sweeps were on the
+   SOM-limited unit) — a hotter-compensating EQ setting may buy margin
+   in firmware. IR-measured package temperature to be added when
+   available.
+   **08-19/20 data + REFRAMING:** heatsink on B1's mux = 46→40 °C, which
+   clears nothing new (Anker's acquisition bar >40 °C, Ugreen's <40 °C)
+   — copper/heatsinks alone cannot save the strict-sink class. And B3
+   (138K, heatsinked FPGA+mux, morning-ambient, ~90 min runtime) walked
+   the full depth-gauge arc anyway at the 804 mV baseline (row 57).
+   **TOLERANCE VERDICT: small thermal deltas flipping outcomes on a
+   cool, heatsinked board mean the operating point sits ON the margin
+   line — this is a link-budget/tolerance problem wearing a thermal
+   costume.** Board actions stay (pad/via farm, copper, heatsink as
+   standard fitment, keep-out) but the margin itself must come from
+   drive/EQ (804→900 mV A/B in flight) + item 5a SI. Qualification must
+   be margin-based (distance from the line), not pass/fail.
+
+5c. **Mux part grade + main-link AC cap values (decided 08-20):**
+   (a) **TUSB1046AI-DCI (industrial, -40..+85 °C) replaces the
+   commercial grade.** The 0-70 °C commercial rating is ambient; in an
+   enclosed Apple II case (35-40 °C ambient) with 634 mW self-heat, the
+   local ambient at the mux crowds the commercial limit exactly where
+   link margin is thinnest. I-grade removes the out-of-spec question
+   for cents. NOTE: same die, same margin-vs-temperature slope — this
+   guarantees operation, it does NOT buy acquisition margin; the
+   tolerance/drive work (5b) stands unchanged.
+   (b) **Main-link AC caps STAY 100 nF** (mid-window; 75-265 nF legal
+   per TUSB1046A and TUSB1146 datasheets and the alt-mode spec). The
+   TUSB1146 datasheet's 220 nF recommendation is USB3-Gen2-motivated,
+   and TI's caveat (larger caps can fail link with some Gen1 devices)
+   concerns USB3 receiver-detect RC timing — neither applies to a
+   DP-alt-mode-only port (DP discovers via HPD/AUX, not Rx-detect; at
+   2.7 G 8b10b the 100-vs-220 nF corner difference is irrelevant).
+   Changing a proven value with no identified benefit fails the
+   right-first-time rule. 100 nF also stays legal for the TUSB1146
+   BOM-swap option (decision D).
+   Reference: VESA DisplayPort Alt Mode 2.0 spec (local copy):
+   /Volumes/Storage/Downloads/1042674542-6-DisplayPort-Alt-Mode-v2-0-d7-Clean-0-182.pdf
+   — also the authority for pin-assignment C/D/E details (relevant to
+   the UtechSmart pin-assignment-D firmware gap).
+
+5d. **TI app-note intake (08-20: SLLA404 = TUSB1046A config guide,
+   SLLA365 = TUSB546 DP-only application; PDFs in this docs dir):**
+   (a) **AUX SNOOP: already handled — CLOSED.** The app-note lead
+   (snooper powers DP lanes from decoded AUX; disable = reg 0x13 bit7)
+   turned out to be firmware policy since 08-13: usbc_glue.cpp writes
+   TUSB_DP_SNOOP_DIS + AUX_SBU_OVR at every dp_enable, with forensics
+   ("bit us three ways") in the comment. The idle x-dump reading
+   0x13=0x00 is just the pre-attach default — the write lands at
+   alt-mode entry. No action; recorded so the lead isn't re-chased.
+   (b) FIRMWARE — full 16-step DPEQ ladder via I2C (1.0..14.4 dB,
+   SLLA404 Table 1); our 'e' key uses only the 4 pin-strap values
+   (1.0/6.5/9.5/12.3) — finer margin characterization + 2 dB more max
+   gain available; per-lane independent EQ override exists (SLLA365
+   regs 0x10/0x11). (c) EQ-method corroboration of 5a: TI's method =
+   match EQ to pre-mux channel loss; ours is ~2 in ≈ 1.5 dB ⇒ prescribed
+   setting 0-1, yet empirically 6.5+ wins ⇒ the extra EQ compensates
+   reflections/launch, not loss. (d) Layout law: 90 Ω ±15%
+   connector-side, ≤2 vias/pair, GND stitching ≤200 mil at transitions,
+   ≥135° bends, no plane splits; **AC caps max 0402** (0201 std ok);
+   **test points series+symmetric only, NEVER stubs** — hard constraint
+   on item 7's test structure. (e) SLLA365 source-app AUX bias = AUXP
+   100k-down / AUXN 100k-up on the mux side of the caps — verbatim our
+   R31/R32; the 1.0a4 AUX network matches TI's own app note.
+
+5a. **DP main-link channel/launch review — DESIGN-WIDE, not unit** —
+   evidence 08-18: ALL converter-class sinks (3 hubs + a dongle, short
+   captive cables, bridge-grade RX) fail BOTH carriers; monitors (long
+   cables, display-controller RX) work on both; B1/B2 differ only as
+   unit variance straddling one hub's bar. All sw/config variables
+   nulled with instrumented data (C: per-lane, A: adjust, Q: ppm —
+   crystals <10ppm both). Best-fit mechanism: board-side impedance
+   discontinuity whose reflections short captive channels preserve and
+   long lossy cables dissipate. Review for 1.0a4: connector launch,
+   AC-cap selection/placement on the main-link pairs, mux output
+   routing, ground return at the BTB; tighter-tolerance passives;
+   jitter-specified 135M oscillator. NOTE: source-side viability on
+   converter sinks may ultimately come from the supported Gowin IP
+   stack (WS4) rather than board changes — treat this item as SI
+   hygiene, not the sole fix.
+
+## STRONG candidates (cheap, would have saved days)
+
+6. **AUX/SBU test points** (2 pads near the caps) — the entire AUX saga
+   was fought blind; two pads make it an oscilloscope problem.
+7. **DP main-link ground-referenced test structure** if layout allows
+   (even one lane's P/N stubs) — boot-draw/eye debugging.
+8. **Confirm SecurityBit=OFF is process default** in all shipping build
+   configs (process config item, not board — listed so it ships in the
+   same review).
+9. **Per-unit production screening test**: warm-attach against a strict
+   converter sink (the margin-stack model's qualification metric). This
+   is the test that would have caught SOM#1's TX deficit before it cost
+   bench days. Cheap: it's the existing telemetry harness + a heat gun.
+10. **Mux-region thermal probe point** (defined bare-copper spot or pad)
+   — IR guns have been fighting heatsinks and laser offset all week.
+11. **Recovery-ladder reality (process/firmware note, informs margin
+   priority):** 08-20 evidence — a wedged hub survives QUICK power
+   cycles (full PD renegotiation included) and clears only on a ~30 s
+   drain. So the planned virtual-replug firmware feature (PD
+   exit/re-enter) may NOT clear the worst converter wedge class; the
+   only real fix is not entering marginal territory — which is items
+   5a/5b's margin work. Also characterized: marginal acquisitions can
+   latch a rotated frame (offset+wraparound, both axes, sink-independent
+   — test log rows 49/53/56); clean catches always render true.
+12. **GS-socket ribbon presence detect (65816 drop-in).** The gateware only
+   drives the CPU socket when armed; today the firmware auto-arms from a
+   software test (listen mode, PHI2 seen alive for ~50 ms — the PHI2 pin
+   is pulled down, so no ribbon = never arms). Ed's decision 09-08: **do
+   NOT sense BUS_5V** — it is the socket power path and a divider on it
+   complicates the design. Candidates for a proper presence input: (a)
+   read back VP — **correction 09-13: the 549 Ω pull-up on GS_VP is our
+   own (U15's), not the motherboard's, and on 1.0a3 it hangs on the card's
+   +5 V rail; once it is moved to BUS_5V (item 13) VP becomes a genuine
+   "ribbon on a powered socket" level and needs only a 5 V→3.3 V shifter
+   input, which is already on the header** — (b) a dedicated header pin
+   that the DIP plug ties to VSS. Note the NC header positions
+   (VDA/VPA/E/MX/MLB) are CPU *outputs* on the real part and float on the
+   motherboard, so they cannot sense presence.
+
+13. **GS socket: reference every socket-side pull-up and 5 V supply pin to
+   BUS_5V, not the card's +5 V rail (ed, 09-13).** On 1.0a3 the 549 Ω
+   pull-up on U15's GS_VP output goes to the card's +5 V, which sits on the
+   *card* side of the LM74700 ideal diode. Whenever the card is powered
+   from VBUS (dock, monitor hub, bench) with the machine off and the ribbon
+   in the socket, that resistor **back-feeds ≈ 9 mA at up to 5 V through
+   the socket's VP pin into the FPI's input clamp and from there into the
+   unpowered motherboard rail.** Not the cause of any bench failure (the
+   ROM 01 re-assert reproduced with no ribbon fitted) and probably survivable,
+   but it is the one path by which our card powers an unpowered IIgs, and
+   every dock user has it. Fix: pull GS_VP up to BUS_5V (J5-15, the socket's
+   own VDD, upstream of the ideal diode), so the pull-up is dead exactly
+   when the motherboard is. While there, audit the rest of the socket side
+   for the same rule: U13/U14 VCCB and U16 VCC (the 5 V sides of the
+   shifters) — the 74ALVC164245 and SN74LV1T125 both specify Ioff partial-
+   power-down, so their 5 V side can come from BUS_5V and be unpowered with
+   the machine off without back-driving through the 3.3 V side (verify on
+   the datasheets before committing); RDY_OUT has no card pull-up (the
+   motherboard's 4.7 kΩ does it) and needs nothing. Apply the same review
+   to the slot side (2G06 RES_OUT / BUS_OE pull-ups, the LSF0108's 5 V
+   reference): pull-ups toward the Apple bus should reference the slot's
+   own +5 V, except where the card must *sink* with the machine off (the
+   reset hold is an open-drain low and needs no pull-up of ours).
+
+## OPEN questions that could still change the rev (close before Friday)
+
+- **A. AUX network topology/values: CLOSED 08-20** — footprint-superset
+  resolution written into item 1. The AD2 capture stays useful for
+  choosing fitted values at bring-up but no longer gates the schematic.
+- **D. DP redriver footprint: CLOSED 08-20 — NO (withdrawn).** The mux
+  IS a linear redriver; no reference design cascades a second redriver
+  into a redriving mux, for cause (series EQ stages amplify each other's
+  ISI/noise and the settings interact), and a bypassable DNP footprint
+  would add unpopulated-pad/jumper discontinuities on the main link —
+  the exact defect class item 5a exists to remove. Escalation path if
+  margin work ever proves insufficient: substitute a stronger SINGLE
+  stage — the natural candidate is **TUSB1146** (same 4x6 WQFN-40,
+  pin-compatible per family positioning ⇒ a BOM-line swap, zero copper;
+  newer DP2.0/10G-rated part, so our 2.7G sits further inside its linear
+  region). DATASHEET-RESOLVED 08-20 (§7.4.8): "The AEQ feature is NOT
+  supported on ... the DP[3:0] receivers. These receivers only support
+  fixed EQ" — the headline adaptive EQ serves USB DFP RX1/RX2 only
+  (disabled by default, wants I2C mode), which our DP-only port never
+  uses. DP lanes get the same DPEQ0/1-strapped 16-setting fixed ladder
+  as the 1046A. So the swap's only value is newer/wider-BW analog —
+  plausible headroom, NO adaptive feature. The temperature-tracking EQ
+  our margin problem wants does not exist in this family for DP; the
+  available lever remains 5b(d): characterize EQ-vs-temperature and
+  let firmware pick the setting (supported on the existing part). It
+  also drops alt-mode config F (unused by us). Never cascade
+  redrivers. First exhaust: 804→900 mV/FFE A/B (in flight) + mux EQ
+  characterization at warm temperature on a good SOM.
+- **E. RECONFIG_N GPIO: CLOSED 08-20 — ESP32 IO38** (non-strapping,
+  Hi-Z at ESP32 boot), open-drain low-only, never push-pull high.
+  **Board pull-up REQUIRED** (decision: on-board resistor, NOT
+  internal-pulls-only): 10 k (4.7 k acceptable) from RECONFIG_N (ball
+  N12) to the FPGA's CONFIG-BANK VCCIO (the bank rail, not blindly
+  3.3 V), placed at the FPGA/BTB end of the trace. Rationale: the 25 ns
+  reconfig trigger makes a weak-pull-only line a spurious-reconfig
+  antenna, and the ESP32's pull is absent during its boot/reset/reflash/
+  crash windows — exactly when the FPGA must ride through undisturbed.
+  Optional 100 pF-1 nF at the pin for glitch filtering (1-10 µs rise is
+  harmless vs the ms-scale POR timeline). Firmware: pin stays
+  unconfigured until well after boot; reconfig pulse deliberately long
+  (~1 ms), never near the 25 ns threshold.
+- **B. Hub-path re-baseline: CLOSED 08-17 eve** — verdict 0/10 power-on
+  draws (D:2A channel-EQ stall, all sw variables eliminated; Sat '4/5'
+  not replicable). No SI data implicating the board channel yet — the
+  stall is at training, upstream of any margin question. Items 4/5 above
+  (VBUS isolation + bulk cap) are the board-level fallout. Hub-viability
+  hope now rides on WS4 (item C).
+- **C. Gowin IP assessment fallout: CLOSED** (WS4 + the 08-20 parity
+  and 138B builds) — no pin/clock constraints we don't already meet;
+  our core remains production, the Gowin stack is ticket material.
+
+## Explicitly NOT in this rev
+
+- Any user-facing reset/reconfig affordance (decision of record).
+- HyperRAM/TransWarp endgame items (separate planned rev; see
+  a2mega-hyperram-transwarp-plan).

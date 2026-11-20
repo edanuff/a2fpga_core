@@ -96,12 +96,51 @@ module apple_memory_sdram #(
     reg INTC8ROM;
     assign a2mem_if.INTC8ROM = INTC8ROM;
 
+    // Apple ][+ vs IIe/IIgs detection. INTC8ROM is a IIe MMU feature: $C3xx
+    // with SLOTC3ROM=0 maps the internal 80-column firmware over $C800-$CFFF.
+    // A ][+ has no SLOTC3ROM switch, so it reads 0 here and every $C3xx access
+    // would set INTC8ROM -- gating io_strobe for ALL emulated cards (slotmaker)
+    // until the next $CFFF. A slot-3 card that runs out of $C8xx (Videx) keeps
+    // re-arming it. IIe/IIgs software writes the $C00x soft switches almost
+    // immediately; a ][+ treats those writes as no-ops, so a false positive
+    // only restores the previous behavior. Derived from Brent Rector's fork
+    // (docs/UPSTREAM_FIXES.md, Fix 2) minus its non-$CFFF clear, which does
+    // not match the IIe MMU (INTC8ROM clears only on $CFFF or RESET).
+    reg is_iie;
+    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
+        if (!a2bus_if.system_reset_n)
+            is_iie <= 1'b0;
+        else if (!a2bus_if.rw_n && a2bus_if.phi1_posedge &&
+                 (a2bus_if.addr[15:4] == 12'hC00) && !a2bus_if.m2sel_n)
+            is_iie <= 1'b1;
+    end
+
     reg [2:0] SLOTROM;
     assign a2mem_if.SLOTROM = SLOTROM;
+
+    // GS auto-detection state wipe: until detection latches, sw_gs=0 keeps
+    // m2sel_n forced valid, so on a real GS the Mega II side's junk cycles
+    // (especially during the power-on reset hold) can scribble the captured
+    // soft switches. When sw_gs rises (auto-detect latched, microseconds
+    // before the first legitimate video write on both stock-GS and
+    // TransWarp boot paths), discard everything captured so far. On
+    // DIP-forced boards the single rise at FPGA init wipes power-on
+    // defaults — a no-op. The edge register lives on device_reset_n like
+    // the detector itself: sw_gs is sticky across Apple /RES, so a
+    // system_reset_n clear here would fake a rise (and a wipe) on every
+    // warm reset.
+    reg sw_gs_d_r;
+    always @(posedge a2bus_if.clk_logic or negedge a2bus_if.device_reset_n) begin
+        if (!a2bus_if.device_reset_n) sw_gs_d_r <= 1'b0;
+        else sw_gs_d_r <= a2bus_if.sw_gs;
+    end
+    wire sw_gs_rise_w = a2bus_if.sw_gs && !sw_gs_d_r;
 
     // capture the soft switches
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
+            SWITCHES_II <= '{1'b1, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b1};
+        end else if (sw_gs_rise_w) begin
             SWITCHES_II <= '{1'b1, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b0, 1'b1};
         end else if ((a2bus_if.phi1_posedge) && (a2bus_if.addr[15:4] == 12'hC05) && !a2bus_if.m2sel_n) begin
             SWITCHES_II[a2bus_if.addr[3:1]] <= a2bus_if.addr[0];
@@ -112,6 +151,8 @@ module apple_memory_sdram #(
 
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
+            SWITCHES_IIE <= '{8{1'b0}};
+        end else if (sw_gs_rise_w) begin
             SWITCHES_IIE <= '{8{1'b0}};
         end else if (!a2bus_if.rw_n && (a2bus_if.phi1_posedge) && (a2bus_if.addr[15:4] == 12'hC00) && !a2bus_if.m2sel_n) begin
             SWITCHES_IIE[a2bus_if.addr[3:1]] <= a2bus_if.addr[0];
@@ -126,6 +167,9 @@ module apple_memory_sdram #(
         if (!a2bus_if.device_reset_n) begin
             a2mem_if.BACKGROUND_COLOR <= 4'h0;
             a2mem_if.TEXT_COLOR <= 4'hF;
+        end else if (sw_gs_rise_w) begin
+            a2mem_if.BACKGROUND_COLOR <= 4'h0;
+            a2mem_if.TEXT_COLOR <= 4'hF;
         end else if (write_strobe && (a2bus_if.addr == 16'hC022)) begin
             a2mem_if.BACKGROUND_COLOR <= a2bus_if.data[3:0];
             a2mem_if.TEXT_COLOR <= a2bus_if.data[7:4];
@@ -135,6 +179,8 @@ module apple_memory_sdram #(
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.device_reset_n) begin
         if (!a2bus_if.device_reset_n) begin
             a2mem_if.BORDER_COLOR <= 4'h0;
+        end else if (sw_gs_rise_w) begin
+            a2mem_if.BORDER_COLOR <= 4'h0;
         end else if (write_strobe && (a2bus_if.addr == 16'hC034)) begin
             a2mem_if.BORDER_COLOR <= a2bus_if.data[3:0];
         end
@@ -143,6 +189,8 @@ module apple_memory_sdram #(
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
             a2mem_if.MONOCHROME_MODE <= 1'b0;
+        end else if (sw_gs_rise_w) begin
+            a2mem_if.MONOCHROME_MODE <= 1'b0;
         end else if (write_strobe && (a2bus_if.addr == 16'hC021)) begin
             a2mem_if.MONOCHROME_MODE <= a2bus_if.data[7];
         end
@@ -150,6 +198,10 @@ module apple_memory_sdram #(
 
     always @(posedge a2bus_if.clk_logic or negedge a2bus_if.system_reset_n) begin
         if (!a2bus_if.system_reset_n) begin
+            a2mem_if.MONOCHROME_DHIRES_MODE <= 1'b0;
+            a2mem_if.LINEARIZE_MODE <= 1'b0;
+            a2mem_if.SHRG_MODE <= 1'b0;
+        end else if (sw_gs_rise_w) begin
             a2mem_if.MONOCHROME_DHIRES_MODE <= 1'b0;
             a2mem_if.LINEARIZE_MODE <= 1'b0;
             a2mem_if.SHRG_MODE <= 1'b0;
@@ -164,11 +216,15 @@ module apple_memory_sdram #(
         if (!a2bus_if.system_reset_n) begin
             INTC8ROM <= 1'b0;
             SLOTROM <= 3'b0;
+        end else if (sw_gs_rise_w) begin
+            INTC8ROM <= 1'b0;
+            SLOTROM <= 3'b0;
         end else if ((a2bus_if.phi1_posedge) && (a2bus_if.addr == 16'hCFFF) && !a2bus_if.m2sel_n) begin
             INTC8ROM <= 1'b0;
             SLOTROM <= 3'b0;
         end else if ((a2bus_if.phi1_posedge) && (a2bus_if.addr >= 16'hC100) && (a2bus_if.addr < 16'hC800) && !a2bus_if.m2sel_n) begin
-            if (!a2mem_if.SLOTC3ROM && (a2bus_if.addr[15:8] == 8'hC3)) INTC8ROM <= 1'b1; // Slot C3 ROM
+            if (is_iie && !a2mem_if.SLOTC3ROM && (a2bus_if.addr[15:8] == 8'hC3))
+                INTC8ROM <= 1'b1; // Slot C3 ROM (IIe/IIgs only)
             SLOTROM <= a2bus_if.addr[10:8];
         end
     end

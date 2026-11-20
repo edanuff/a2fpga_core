@@ -1,5 +1,7 @@
 # a2mega ESP32 Co-Processor — Enhanced Feature-Set Port
 
+> Status (2026-10-25): the port is live on both ESP32 boards (a2mega 1.0a3, a2p25 displayport1; verified on the IIgs); the firmware is `boards/a2mega/src/a2fpga_esp32/`. The register table in this document predates the 2026-10-22 merge, which remapped the DOC telemetry to window registers 40–45 and moved CORE_BUILD from 0x3F to 0x7E; `a2fpga_regs.h` in the firmware tree is the authoritative map until this table is re-synced. The hardware-differences table was updated for board 1.0a3 on 2026-10-25.
+
 Port of the a2n20v2-Enhanced BL616 feature set (on-screen menu, disk-image
 serving, slot reconfiguration, Apple II reset hold, Uthernet II networking,
 FPGA self-update) to the a2mega's ESP32-S3, continuing the `a2mega-usb-host`
@@ -10,9 +12,9 @@ branch work (FPGA-fabric `usb_hid_host` core).
 | Function          | Enhanced (BL616)                   | a2mega (ESP32-S3-MINI-1-N8)                     |
 |-------------------|------------------------------------|--------------------------------------------------|
 | MCU↔FPGA link     | 4-wire SPI Mode 1, ~20 MHz         | Octal SPI (8-bit parallel), sync-pattern framing |
-| Gamepad / HID     | BL616 USB host (XInput)            | **FPGA-fabric `usb_hid_host`** on the USB-A port; ESP32 polls readback regs |
-| Storage           | USB MSC stick (SD fallback tunnel) | **Micro-SD on ESP32** (native 4-bit SDMMC: CLK=IO36? CMD/D0-D3, DET — see sch p.3) |
-| Networking        | USB Ethernet (CDC-ECM/RTL8152)     | **WiFi STA** (raw-frame bridge with MAC NAT)     |
+| Gamepad / HID     | BL616 USB host (XInput)            | **ESP32-S3 USB host** on the board's USB-C port (feature port item P2; the ESP32 writes the pad/key regs 0x16–0x1B) |
+| Storage           | USB MSC stick (SD fallback tunnel) | **LittleFS on the ESP32 flash** (images by FTP) and USB mass storage on the ESP32's USB port; no SD card on this board |
+| Networking        | USB Ethernet (CDC-ECM/RTL8152)     | **WiFi STA** (raw-frame bridge with MAC NAT) **or a CDC-ECM/NCM USB-Ethernet adapter on USB1** (`usbeth.c`, 2026-11-17; the wire wins when it has carrier) |
 | Track/block buffers | SDRAM windows (0x200000/0x204000) | **BSRAM** buffers inside the OSPI connector spaces |
 | Menu/console text | SDRAM OSD text page (0x020800)     | **Text VRAM BSRAM (SPACE 1)** + pixel-domain OSD overlay renderer |
 | FPGA self-update  | Bit-banged JTAG→W25Q64, GW2AR      | ESP32 JTAG pins (IO40/41/42/45) → GW5AT SPI flash (chip specifics TBV on hardware) |
@@ -43,6 +45,10 @@ Existing a2mega layout is kept (device ID 0x00-0x07, video 0x10-0x15, slots
 | 0x29 | HDD0 ACK | W | Write-any strobe: request served |
 | 0x2A-0x2D | HDD1 * | R/W | Same layout as unit 0 |
 | 0x2E | A2_RST_RELEASE | R/W | Write 1: release Apple II from power-on reset hold |
+| 0x3C | DBG_DP_RATE | R | Raw DPCD 0x001 MAX_LINK_RATE from the sink's caps read (0x06=RBR 0x0A=HBR 0x14=HBR2 0x1E=HBR3; 0x00 = no DPCD read this HPD session). Adapter-census second gate (telnet 'd'). |
+| 0x3D | DBG_DP_LANES | R | Raw DPCD 0x002: [3:0]=MAX_LANE_COUNT, [7]=enhanced framing. Clears with 0x3C on HPD-presence loss. |
+| 0x3E | DBG_DP_STATUS | R | [0]=link_established [1]=video_live [2]=wedge_suspect |
+| 0x3F | DBG_DP_SERDES | R | SERDES bring-up status {fifo_afull, fifo_full, pll_lock, lane_ready[1:0], ~pcs_tx_rst, tx_running[1:0]} |
 | 0x7A | U2_CMD_DOORBELL | R/W | W5100 per-socket Sn_CR pending; write-1-to-clear |
 
 Same addresses as the Enhanced BL616 map for the HDD compact bank (0x26-0x2D),
@@ -111,6 +117,84 @@ chaddr/broadcast-flag fixups included), ingress unicast is rewritten back to
 the Apple II's SHAR. This is required because 802.11 STA links only pass the
 station's own MAC.
 
+### USB-Ethernet uplink (2026-11-17; RTL8152B running on the a2p25 2026-11-18)
+
+Hardware result 2026-11-18 (a2p25, fw 0c0bf6fb, dock with stick, no HID
+dongle): `USB ETH: 0BDA:8152 ECM CFG 2 F4:4D:AD:07:36:0A`, `LINK UP
+(ASSUMED)`, `UTHERNET UPLINK: USB ETHERNET`, `USB ETH: IP 192.168.232.176`;
+from the LAN the wired address answers ping (1.9 ms), telnet, FTP (full
+stick listing) and port 2323 while the WiFi address stays up too. Apple II
+side confirmed the same evening: IP65 DATE65 on the IIgs got its DHCP lease
+and the time over the wire; the NETWORK page afterwards read `USB A2 FRAMES
+RX/TX 576/6`, `WIFI A2 FRAMES RX/TX 0/0` (the 576 are LAN broadcasts copied
+to the Apple II while MACRAW was open). The remote dongle has to be out of
+the dock for this (channel budget, above).
+
+A USB-Ethernet adapter on USB1 (through the same hub/dock as the gamepad and
+stick) is a second uplink. `usbeth.c` is a generic **CDC-ECM / CDC-NCM host
+driver** on ESP-IDF `usb_host` (claim control + data interface,
+SET_INTERFACE to the data alt setting, SET_ETHERNET_PACKET_FILTER, bulk
+IN/OUT, NETWORK_CONNECTION notifications; NCM adds NTB16 framing in
+`usbeth_proto.c`, unit-tested in `tests/host/`). It feeds two consumers:
+
+- the Apple II, through the same MAC-NAT scheme as WiFi (adapter MAC as the
+  outer MAC), so no promiscuous mode or vendor "set MAC" register is needed
+  and any adapter works the same way;
+- the ESP32's own lwIP, through an `esp_netif` attached to the driver
+  (route priority 120, above WiFi STA's 100), so telnet/FTP/port 2323 are
+  reachable over the wire with or without WiFi configured.
+
+`net_uplink.c` owns the `w5100_bridge_*` hooks and routes them: USB when the
+adapter reports carrier, WiFi otherwise; only the active uplink delivers
+frames to the Apple II. The CLI's `net` shows the active uplink and the
+adapter's state; the OSD **NETWORK** page (also over the telnet menu mirror)
+shows `UTHERNET UPLINK`, the adapter's MAC/link/IP and the Apple II frame
+counters per uplink (`USB A2 FRAMES RX/TX`, `WIFI A2 FRAMES RX/TX`) with a
+REFRESH item, so "did that go over the wire?" is answerable on screen. The
+page's WiFi block also shows `SIGNAL <rssi> DBM (EXCELLENT|GOOD|FAIR|WEAK|POOR)`
+for the associated AP (`net_rssi()`), since an Apple II case is a shielded
+box and how much WiFi gets in through the back-panel openings is worth
+seeing. The
+console logs `UTHERNET UPLINK: ...` whenever the choice changes. Caveat: on
+adapters without a usable notification pipe (Realtek, see below) a pulled
+cable is not detected, so the Apple II stays on the wire instead of falling
+back to WiFi; re-plugging the adapter does switch.
+
+Limits and the two 2026-11-18 hardware findings:
+
+- **Eight host channels.** The ESP32-S3 OTG core has 8 host channels and
+  the IDF host library pins one to every pipe for the life of the device:
+  each device's EP0, each claimed endpoint, each hub's EP0 + status
+  interrupt. On the a2p25 dock that is hub 2 + USB stick 3 + the 4842
+  keyboard/remote dongle 3 = 8, so a USB-Ethernet adapter could not even get
+  its EP0 pipe: enumeration failed inside the library with no event to the
+  firmware (`HCD DWC: No more HCD channels available`). An adapter needs
+  EP0 + bulk IN + bulk OUT = 3, so **stick + Ethernet + a HID dongle do not
+  fit together**; the driver claims the data interface first and takes the
+  notification pipe only if a channel is left (otherwise the link is
+  assumed up after 3 s). IDF error lines are now mirrored into the OSD /
+  telnet console by `idf_log_tee.c` (the serial console is USB1, i.e. the
+  host port, so it is unreadable exactly when a dock is attached).
+- **Dual-configuration Realtek parts.** RTL8152B 0BDA:8152 (measured): cfg 1
+  = vendor FF/FF with bulk 0x81/0x02 + interrupt 0x83; cfg 2 = CDC-ECM on
+  the same bulk pair, iMACAddress 3. The library enumerates configuration 1
+  only (its enumeration filter is compiled out of the Arduino libs, and the
+  internal `usbh_dev_set_config_desc()` only works in the addressed state).
+  `usbeth_attach_alt()` reads the other configurations itself, sends
+  SET_CONFIGURATION, then overwrites the library's cached copy of the
+  active configuration (the buffer `usb_host_get_active_config_descriptor()`
+  returns, parsed on every claim/release) with a 32-byte stand-in that lists
+  only the ECM data interface and its two bulk endpoints
+  (`cdc_build_min_config()`), and claims that: exactly two pipes, no
+  endpoint-coincidence requirement, no notification pipe. Host-tested with
+  the captured RTL8152 descriptors.
+
+The ESP32-S3 OTG is **Full Speed** (adapters run at 12 Mbit/s with 64-byte
+bulk packets — fine for the Apple II). The wired netif always uses DHCP (the
+static-IP setting applies to WiFi). Why generic class drivers rather than the BL616's vendor drivers:
+the Enhanced's CDC-ECM failure was a CherryUSB host-side bulk-IN problem,
+not an ECM one, and the IDF bulk-IN path is proven by mass storage.
+
 ## Firmware (boards/a2mega/src/a2fpga_esp32, Arduino CLI build)
 
 Continues the existing sketch + `a2fpga_ospi_link` transport. New modules
@@ -121,7 +205,7 @@ ported from `a2n20_bl616/firmware_host`:
 - `menu.*`, `osd_console.*` — ported UI, gamepad polled from FPGA regs
 - `settings.*` — same blob layout, stored in NVS (Preferences)
 - `disk.*`, `gcr_dsk.*` — image mount/track-serve, FatFS→VFS (`SD_MMC`)
-- `w5100_bridge.*` — W5100 poll loop + WiFi raw-frame MAC-NAT bridge.
+- `w5100.*`, `wifi_bridge.*`, `usbeth.*`, `net_uplink.*` — W5100 poll loop; WiFi raw-frame MAC-NAT bridge; CDC-ECM/NCM USB-Ethernet uplink; uplink selection.
   Configured by `wifi.txt` in the SD card root (line 1 SSID, line 2
   password; optional lines 3-5 = static IP/netmask/gateway, else DHCP)
 - `fpgaupdate.*` — GW5AT JTAG flash writer (reuses `a2fpga_jtag` bit-bang;
@@ -131,6 +215,12 @@ ported from `a2n20_bl616/firmware_host`:
 
 - CardROM/INH bootstrap and the bus-event FIFO (Enhanced debug machinery)
 - Paddle/joystick emulation from gamepad (not in Enhanced either)
-- Bluetooth HID (future; lands as additional writers of the same pad regs)
+- ~~Bluetooth HID~~ — **in since 2026-11-19** (`ble_hid.c` + `hid_map.c`,
+  BLUETOOTH menu with a PAIR screen; one bonded remote / keyboard / gamepad,
+  OR-ed into `menu_tick()` like the USB host). Study, measurements and the
+  partition decision and the first hardware pass (heap!):
+  [BLE_HID_FEASIBILITY.md](BLE_HID_FEASIBILITY.md). The MAIN MENU also
+  gained a **USB DEVICES** page (2026-11-19): every device the ESP32 host
+  enumerated on USB1, as the a2n20v2-Enhanced menu had.
 - MCU firmware self-update from SD (ESP32 reflashes over its own USB-C;
   OTA-from-SD can come later)

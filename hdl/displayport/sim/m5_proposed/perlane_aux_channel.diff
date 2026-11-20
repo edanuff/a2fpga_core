@@ -1,0 +1,16 @@
+--- a/hdl/displayport/auxch/aux_channel.v
++++ b/hdl/displayport/auxch/aux_channel.v
+@@ -86,9 +86,10 @@
+     parameter AFE_ADJUST = 0
+ )(
+         input        clk,
+-        // ready-to-send TRAINING_LANEx_SET value from afe_adjust_seq
+-        // (tie to 8'h06 when AFE_ADJUST == 0)
+-        input  [7:0] train_set_byte,
++        // ready-to-send TRAINING_LANEx_SET values from afe_adjust_seq,
++        // per lane: [7:0] lane 0 (0x103), [15:8] lane 1 (0x104)
++        // (tie to 16'h0606 when AFE_ADJUST == 0)
++        input  [15:0] train_set_byte,
+         output [7:0] debug_pmod,  // = ladder FSM state (see localparams)
+         output [7:0] debug_gate,  // {locks@check_wait[3:0], gate_fails[1:0], timeouts[1:0]}
+         output [7:0] debug_sink,  // DPCD 0x205 SINK_STATUS (latched each status read)

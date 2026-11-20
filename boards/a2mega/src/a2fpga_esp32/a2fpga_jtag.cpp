@@ -32,3 +32,18 @@ void unroute_usb_jtag_to_gpio()
     pinMode(PIN_TDO,  INPUT);
     pinMode(PIN_SRST, INPUT);
 }
+
+// C-linkage shims for the bit-bang JTAG layer (fpga_jtag.c): while the USB
+// bridge is matrix-routed, the TCK/TMS/TDI pads belong to the USB-JTAG
+// peripheral and gpio_config() does NOT steal them back — bit-banging then
+// wiggles nothing (live-hit: fpgaerase idcode garbage, board #1
+// 2026-08-11). init_pins releases the bridge; release_pins restores it.
+extern "C" void fpga_usb_jtag_bridge_release(void)
+{
+    unroute_usb_jtag_to_gpio();
+}
+
+extern "C" void fpga_usb_jtag_bridge_restore(void)
+{
+    route_usb_jtag_to_gpio();
+}

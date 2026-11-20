@@ -31,6 +31,11 @@ All parts currently used by A2FPGA boards should build with the education versio
 
 ## Build & Flash Helper Scripts (recommended)
 
+Every full `tools/build.sh` run ends with `tools/resource_report.py`: the
+per-module LUT/REG/BSRAM table, diffed against the snapshot committed in
+`boards/<board>/impl/<proj>_resources.json`. `RESOURCE_FAIL=bsram` makes a
+BSRAM increase fail the build; see docs/build_profiles.md.
+
 Two scripts wrap the common workflows so you don't have to remember per-board details
 (the `.gprj` filename, the openFPGALoader cable/board tag, the timing check). Run them
 from the repo root:
@@ -42,9 +47,10 @@ tools/flash.sh <board>          # program the bitstream to SPI flash (persistent
 tools/flash.sh <board> --sram   # load to volatile SRAM (lost on power-down)
 ```
 
-`<board>` is a directory under `boards/` (e.g. `a2mega`, `a2n20v2-GS`). Both scripts
-auto-discover the board's `.gprj`/bitstream, so the directory-vs-filename mismatch
-(e.g. `a2n20v2-GS` → `a2n20v2_gs.gprj`) is handled for you. Use `DRY_RUN=1` to preview
+`<board>` is a directory under `boards/` (e.g. `a2mega`, `a2n20v2-Enhanced`) or under
+`boards/deprecated/` (found by name). Both scripts auto-discover the board's `.gprj`/bitstream,
+so the directory-vs-filename mismatch (e.g. `a2n20v2-Enhanced` → `a2n20v2_enhanced.gprj`) is
+handled for you; boards with several projects need `GPRJ=`. Use `DRY_RUN=1` to preview
 the command without running it. `build.sh` reports timing violations and fails if the
 build is not clean.
 
@@ -202,7 +208,7 @@ Then run it:
 
 ### Notes
 
-- The project's `prebuild.tcl` script (if present) runs automatically when opening the project, generating files like `hdl/datetime.svh` with build timestamps.
+- The project's `prebuild.tcl` script (if present) runs automatically when opening the project, generating files like `boards/<board>/hdl/datetime.svh` with build timestamps.
 - Warnings about OpenGL/Chromium on macOS can be safely ignored for command line builds.
 - For the full Tcl command reference, see the Gowin Software Tcl Commands User Guide (SUG1220E.pdf).
 

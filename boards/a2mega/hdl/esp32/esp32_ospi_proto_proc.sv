@@ -1,5 +1,5 @@
 // Octal SPI Protocol Processor for ESP32-S3 to FPGA communication
-// Based on boards/a2p25/docs/ESP32_SPI_PROTOCOL.md but optimized for 8-bit parallel transfer
+// Based on boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md but optimized for 8-bit parallel transfer
 //
 // Key differences from standard SPI:
 // - Transfers 8 bits per SCLK cycle (one byte per clock)

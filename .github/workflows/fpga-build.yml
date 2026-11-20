@@ -44,14 +44,17 @@ jobs:
     steps:
       - id: set
         run: |
+          # gprj is explicit for every entry: several boards carry extra
+          # test/probe projects, and first-alphabetical selection must not
+          # decide what CI builds. a2mega builds the 60K-die project only.
           common='
-            { "name": "a2n20v2",                   "board": "a2n20v2" },
+            { "name": "a2n20v2",                   "board": "a2n20v2",          "gprj": "a2n20v2.gprj" },
             { "name": "a2n20v2-Enhanced",          "board": "a2n20v2-Enhanced", "gprj": "a2n20v2_enhanced.gprj" },
             { "name": "a2n20v2-Enhanced-dualrate", "board": "a2n20v2-Enhanced", "gprj": "a2n20v2_enhanced_dualrate.gprj" },
             { "name": "a2n20v2-Enhanced-fb",       "board": "a2n20v2-Enhanced", "gprj": "a2n20v2_enhanced_fb.gprj" }'
           fork_only='
-            { "name": "a2mega",                    "board": "a2mega" },
-            { "name": "a2p25",                     "board": "a2p25" }'
+            { "name": "a2mega",                    "board": "a2mega",           "gprj": "a2mega.gprj" },
+            { "name": "a2p25",                     "board": "a2p25",            "gprj": "a2p25.gprj" }'
           if [ "$GITHUB_REPOSITORY" = "a2fpga/a2fpga_core" ]; then
             matrix="[ $common ]"
           else
@@ -63,7 +66,7 @@ jobs:
     name: ${{ matrix.name }}
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
@@ -110,6 +113,11 @@ jobs:
       - name: Build ${{ matrix.name }}
         env:
           GPRJ: ${{ matrix.gprj }}
+          # build.sh's thrash watchdog defaults to 30 min, calibrated to a
+          # fast local machine (~15 min healthy build). Hosted runners are
+          # slower, so give legitimate builds more headroom here; the job
+          # timeout still caps a truly wedged run.
+          BUILD_TIMEOUT: "4800"
         run: tools/build.sh "${{ matrix.board }}"
 
       # impl/pnr is tracked in git, so glob uploads would pick up committed

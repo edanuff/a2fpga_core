@@ -1,4 +1,4 @@
-// Re-implementation per boards/a2p25/docs/ESP32_SPI_PROTOCOL.md
+// Re-implementation per boards/a2p25/docs/archive/ESP32_SPI_PROTOCOL.md
 module esp32_spi_proto_proc #(
   parameter USE_SYNC    = 1,
   parameter USE_CRC     = 0,

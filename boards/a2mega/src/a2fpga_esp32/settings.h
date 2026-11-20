@@ -74,7 +74,24 @@ typedef struct {
     char     wifi_ssid[33];              /* max 32-char SSID + NUL */
     char     wifi_psk[65];               /* max 64-char WPA passphrase + NUL */
 
-    uint8_t  reserved[15];               /* future fields (shrink as used) */
+    /* In-socket 65C816 (a2mega 138B): 0 = auto-arm when PHI2 is seen on the
+     * socket (default; harmless without the ribbon), 1 = never arm. Took one
+     * reserved byte so saved v4 blobs load unchanged (0 = auto). */
+    uint8_t  gs_socket_off;
+
+    /* Mockingboard level in the core's audio mix (a2p25 2026-11-17 mixer,
+     * window index 55 bits 3:2): 0 = default (<< 6, the 2026-11-18 ear pick),
+     * 1..4 = AY sum << 3 .. << 6. Took one reserved byte, so saved v4 blobs
+     * load unchanged (0 = default). Applied at boot before the Apple II
+     * reset release and live from SETTINGS. */
+    uint8_t  mb_volume;
+
+    /* BLE HID host (ble_hid.c): 0 = radio on (default), 1 = never start it.
+     * Took one reserved byte (0 = on) so saved v4 blobs load unchanged.
+     * Turning it on from the menu starts the host at once; turning it off
+     * takes effect at the next boot. */
+    uint8_t  ble_off;
+    uint8_t  reserved[12];               /* future fields (shrink as used) */
 
     uint32_t crc;                        /* CRC-32 of everything above */
 } a2_settings_t;

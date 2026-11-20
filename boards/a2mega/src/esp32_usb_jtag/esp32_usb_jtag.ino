@@ -114,10 +114,27 @@ void loop() {
     Serial1.write(Serial.read());
   if(Serial1.available())
     Serial.write(Serial1.read());
+  // usb_serial_jtag_is_connected() rides ESP-IDF's SOF watchdog, which has a
+  // 3 ms tolerance and is documented by Espressif as flapping on healthy
+  // links (arduino-esp32 HWCDC.cpp). Un-routing on a single false
+  // "disconnected" reading drops all JTAG pins to Hi-Z mid-session —
+  // openFPGALoader then sees "TDO is stuck at 0"/"no device found" while
+  // the USB device still enumerates. Debounce: only unroute after the
+  // disconnect has persisted ~500 ms; route back immediately.
+  static uint32_t disconnect_since = 0;
   bool usb_is_connected = usb_serial_jtag_is_connected();
-  if(usb_was_connected == false && usb_is_connected == true)
-    route_usb_jtag_to_gpio();
-  if(usb_was_connected == true && usb_is_connected == false)
-    unroute_usb_jtag_to_gpio();
-  usb_was_connected = usb_is_connected;
+  if(usb_is_connected) {
+    disconnect_since = 0;
+    if(usb_was_connected == false)
+      route_usb_jtag_to_gpio();
+    usb_was_connected = true;
+  } else if(usb_was_connected) {
+    if(disconnect_since == 0) {
+      disconnect_since = millis();
+    } else if(millis() - disconnect_since > 500) {
+      unroute_usb_jtag_to_gpio();
+      usb_was_connected = false;
+      disconnect_since = 0;
+    }
+  }
 }

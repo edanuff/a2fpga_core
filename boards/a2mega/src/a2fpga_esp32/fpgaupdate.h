@@ -25,6 +25,11 @@ bool fpgaupdate_request(const char *path);
 void fpgaupdate_commit(void);
 void fpgaupdate_set_keepsram(bool on);
 
+// Corrupt-flash rescue: erase the bitstream region via keepsram SPI mode,
+// leaving the SRAM-loaded fabric running. Requires a live (JTAG-loaded)
+// fabric so the MSPI boot engine is quiescent. CLI: 'fpgaerase'.
+bool fpgaupdate_erase_bitstream_region(void);
+
 // Cancel from FPU_READY / FPU_ERROR back to idle.
 void fpgaupdate_cancel(void);
 

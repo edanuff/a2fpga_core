@@ -1,63 +1,90 @@
-//Copyright (C)2014-2023 GOWIN Semiconductor Corporation.
-//All rights reserved.
-//File Title: Timing Constraints file
-//GOWIN Version: 1.9.8.11 Education
-//Created Time: 2023-06-02 16:47:45
+// a2mega (1.0a3) timing constraints — DisplayPort output build.
+// History: the HDMI-era file constrained clk_pixel_x5 (TMDS) and clk_usb;
+// both domains are gone on 1.0a3 (DP over USB-C, no USB-A host).
 
-// Board crystal -- 50 MHz (used by clk_pll and DDR3 controller)
+// Board crystal -- 50 MHz (used by clk_pll, DDR3 controller, DP mgmt PLL)
 create_clock -name clk -period 20 -waveform {0 10} [get_ports {clk}]
 
-// PLL-generated clocks from clk_pll (50 MHz -> 27/135/54 MHz)
-create_generated_clock -name clk_pixel -source [get_ports {clk}] -master_clock clk -divide_by 50 -multiply_by 27 [get_pins {clocks_pll/PLLA_inst/CLKOUT0}]
-create_generated_clock -name clk_pixel_x5 -source [get_ports {clk}] -master_clock clk -divide_by 50 -multiply_by 135 [get_pins {clocks_pll/PLLA_inst/CLKOUT1}]
-create_generated_clock -name clk_logic -source [get_ports {clk}] -master_clock clk -divide_by 25 -multiply_by 27 [get_pins {clocks_pll/PLLA_inst/CLKOUT2}]
+// PLL-generated clocks from clk_pll (50 MHz -> 27/54 MHz).
+// clk_pixel here is the BOARD PLL 27 MHz tap: on 1.0a3 it only sources
+// pll_ddr3 (video runs on the DP core's own pixel clock, clk_pix below).
+create_generated_clock -name clk_pixel -source [get_ports {clk}] -master_clock clk -divide_by 50 -multiply_by 27 [get_pins {u_board_plls/clocks_pll/PLLA_inst/CLKOUT0}]
+create_generated_clock -name clk_logic -source [get_ports {clk}] -master_clock clk -divide_by 25 -multiply_by 27 [get_pins {u_board_plls/clocks_pll/PLLA_inst/CLKOUT2}]
 
 // DDR3 internal clocks -- 324 MHz memory, 81 MHz app clock
-create_clock -name clk4x -period 3.086 -waveform {0 1.543} [get_pins {pll_ddr3_inst/PLLA_inst/CLKOUT2}]
+create_clock -name clk4x -period 3.086 -waveform {0 1.543} [get_pins {u_board_plls/pll_ddr3_inst/PLLA_inst/CLKOUT2}]
 create_clock -name clk1x -period 12.346 -waveform {0 6.173} [get_pins {u_ddr3/gw3_top/u_ddr_phy_top/fclkdiv/CLKOUT}]
 
-// DDR3 IP internal clocks: clk1x (app) and clk4x (PHY) are managed by the
-// IP's calibration mechanism. STA cannot verify these internal paths.
-set_clock_groups -asynchronous -group [get_clocks {clk4x}] -group [get_clocks {clk1x}]
+// ---------------------------------------------------------------------
+// DisplayPort clocks (see boards/a2mega/hdl/dp_test/a2mega_dp_test.sdc
+// for the standalone bring-up variant of the same set)
+// ---------------------------------------------------------------------
 
-// Async groups: clk (50 MHz board crystal) vs DDR3 domain
+// 100 MHz management/AUX clock: 50 MHz osc -> gowin_mgmt_pll
+create_clock -name clk100 -period 10.000 -waveform {0 5.000} [get_pins {i_mgmt_pll/PLLA_inst/CLKOUT0}]
+
+// 135 MHz TX word clock from the GTR12 quad (2.7 Gbps / 20), anchored on
+// LANE2 -- the bonding master for the a2mega lane pair
+create_clock -name clk_sym -period 7.407 -waveform {0 3.703} [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/gtr12_quad_inst0/LANE2_PCS_TX_O_FABRIC_CLK}]
+
+// 148.5 MHz video pixel clock: gowin_pixel_pll = 135 MHz * 11/10 (1080p)
+create_clock -name clk_pix -period 6.734 -waveform {0 3.367} [get_pins {i_dp/i_pixel_pll/PLLA_inst/CLKOUT0}]
+
+// cm_life = the GTR12 CM block's internal oscillator-derived clock.
+// MEASURED on hardware 2026-08-31 (138K board, on-screen freq meter,
+// diag bin b0a9c746): 60.4 MHz at power-on cooling to 60.1 MHz warm —
+// a 60 MHz nominal RC-oscillator clock (210 MHz reference class, DS981
+// Table 3-41: +/-5% commercial, +/-10% extended temp). The old 10 ns
+// value had NO provenance ("silence TA1132") and over-constrained by
+// ~66%, manufacturing a -300 ns/68-endpoint phantom family on the 138B.
+// Constraint = 60 MHz * 1.10 fast-corner guard = 66 MHz -> 15.0 ns.
+create_clock -name cm_life -period 15.0 [get_pins {i_dp/i_transceiver_bank/i_dp_serdes/gtr12_quad_inst0/FABRIC_CM_LIFE_CLK_O}]
+
+// ---------------------------------------------------------------------
+// Clock groups. Every cross-domain exchange goes through async FIFOs or
+// 2FF synchronizers (framebuffer write clk_logic -> read clk_pix; DP
+// pixel CDC clk_pix -> clk_sym; quasi-static debug/OSD CDC). Board and
+// DDR3 groups are unchanged from the hardware-proven HDMI-era file.
+// ---------------------------------------------------------------------
+set_clock_groups -asynchronous -group [get_clocks {clk4x}] -group [get_clocks {clk1x}]
 set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk4x}]
 set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk1x}]
-
-// clk_pixel (27 MHz) vs DDR3 domain -- truly async (different PLL sources)
 set_clock_groups -asynchronous -group [get_clocks {clk_pixel}] -group [get_clocks {clk4x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_pixel}] -group [get_clocks {clk1x}]
-
-// clk_logic (54 MHz) vs DDR3 domain -- fully async (independent PLLs)
 set_clock_groups -asynchronous -group [get_clocks {clk_logic}] -group [get_clocks {clk4x}]
 set_clock_groups -asynchronous -group [get_clocks {clk_logic}] -group [get_clocks {clk1x}]
-
-// clk_pixel_x5 (135 MHz TMDS) -- async to all other domains
-set_clock_groups -asynchronous -group [get_clocks {clk_pixel_x5}] -group [get_clocks {clk4x}]
-set_clock_groups -asynchronous -group [get_clocks {clk_pixel_x5}] -group [get_clocks {clk1x}]
-set_clock_groups -asynchronous -group [get_clocks {clk_pixel_x5}] -group [get_clocks {clk_logic}]
-
-// clk <-> clk_pixel / clk_pixel_x5: same PLL but different frequencies
 set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk_pixel}]
-set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk_pixel_x5}]
 set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk_logic}]
-
-// clk_pixel_x5 is related to clk_pixel (same PLL) but runs at 5x for TMDS
-// Keep them in separate async groups since they drive different logic
-set_clock_groups -asynchronous -group [get_clocks {clk_pixel_x5}] -group [get_clocks {clk_pixel}]
-
-// clk_logic and clk_pixel are from the same PLL but at different frequencies.
-// CDC between them uses double-flop synchronizers; mark async for STA.
 set_clock_groups -asynchronous -group [get_clocks {clk_pixel}] -group [get_clocks {clk_logic}]
 
-// USB host clock -- 60 MHz from dedicated pll_usb (50 MHz * 24 / 20)
-create_generated_clock -name clk_usb -source [get_ports {clk}] -master_clock clk -divide_by 5 -multiply_by 6 [get_pins {pll_usb_inst/PLLA_inst/CLKOUT0}]
+// DP domains vs everything else (and each other)
+set_clock_groups -asynchronous -group [get_clocks {clk100}] -group [get_clocks {clk}] -group [get_clocks {clk_logic}] -group [get_clocks {clk_pix}] -group [get_clocks {clk_sym}] -group [get_clocks {cm_life}]
+set_clock_groups -asynchronous -group [get_clocks {clk_pix}] -group [get_clocks {clk4x}]
+set_clock_groups -asynchronous -group [get_clocks {clk_pix}] -group [get_clocks {clk1x}]
+set_clock_groups -asynchronous -group [get_clocks {clk_pix}] -group [get_clocks {clk_pixel}]
+set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk4x}]
+set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk1x}]
+set_clock_groups -asynchronous -group [get_clocks {clk_sym}] -group [get_clocks {clk_pixel}]
+// cm_life vs the 27 MHz board tap (freq-meter diag CDC; 2FF-synced quasi-static)
+set_clock_groups -asynchronous -group [get_clocks {cm_life}] -group [get_clocks {clk_pixel}]
 
-// clk_usb -- own PLL, self-contained USB domain; async to everything.
-// HID outputs must cross into consumer domains via double-flop synchronizers.
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk_logic}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk_pixel}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk_pixel_x5}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk4x}]
-set_clock_groups -asynchronous -group [get_clocks {clk_usb}] -group [get_clocks {clk1x}]
+
+// CSR replay ROM: now a sync BSRAM pROM — no multicycle needed.
+// replay_idx >=16 cycles before the capture — see the dp_test_138b SDC
+// for the full rationale; added to the 60K full core 08-30 when its
+// tighter placement started violating the same path family)
+
+// ---------------------------------------------------------------------
+// Durability margin (timing campaign round 2, 2026-09-05). Setup
+// uncertainty of 0.5 ns on the fabric clocks makes the durability bar a
+// property of the build: "0 setup violations" now means every path has
+// at least 0.5 ns of real margin, and the timing-driven placer optimises
+// against that target (diagnostic builds with a clock tightened by 1 ns
+// closed clean on the 138B, so the margin is there to be found). This is
+// a STRICTER requirement, not an exception; reported slack is after the
+// uncertainty. Do not remove to "fix" a violation.
+// ---------------------------------------------------------------------
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk100}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_sym}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_pix}]
+set_clock_uncertainty 0.5 -setup -from [get_clocks {clk_logic}]

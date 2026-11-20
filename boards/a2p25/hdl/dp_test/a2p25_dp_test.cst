@@ -1,0 +1,32 @@
+// a2-p25 (displayport1 rev) DP bring-up (colorbars) — physical constraints
+// Ball map: boards/a2p25/docs/PINOUT_DISPLAYPORT1.md (netlist-derived,
+// cross-checked against the rev3 a2p25.cst for all 75 legacy signals).
+
+// 50 MHz SOM oscillator
+IO_LOC  "clk50_in" E2;
+IO_PORT "clk50_in" IO_TYPE=LVCMOS33 PULL_MODE=NONE BANK_VCCIO=3.3;
+
+// DP AUX: L2/L1 = IOR18A/B true pair -> 100R + bias dividers -> AC caps ->
+// SN75DP130 AUX_SRC -> AUX_SNK -> TUSB546A -> SBU1/2. Same pad config as the
+// a2mega's proven closed-loop AUX (LVDS25 output is legal at VCCIO 3.3 on
+// GW5A; PULL_MODE=DOWN on both legs). Single differential port entry.
+IO_LOC  "dp_aux_p" L2,L1;
+IO_PORT "dp_aux_p" IO_TYPE=LVDS25 PULL_MODE=DOWN BANK_VCCIO=3.3;
+
+// HPD from the ESP32 — BRING-UP REPURPOSE of ESP32_INT_N (B2). Pull down so
+// HPD idles deasserted while the ESP32 boots.
+IO_LOC  "dp_hpd" B2;
+IO_PORT "dp_hpd" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
+
+// Telemetry UART TX — BRING-UP REPURPOSE of ESP32_OPI_D0 (C2)
+IO_LOC  "uart_tx" C2;
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// Status LED D8 (active high)
+IO_LOC  "led" B10;
+IO_PORT "led" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+
+// MIPI D-PHY M0 quad — dedicated hard-PHY pads, placed by the IP:
+//   D0 A9/B9, D1 A8/B8, CK A7/B7 (NC on board), D2 A6/B6, D3 A5/B5
+// (UG985 MG121N). Board routing: DP lane n = D-PHY lane 3-n, straight
+// polarity (handled in transceiver_bank_dphy).

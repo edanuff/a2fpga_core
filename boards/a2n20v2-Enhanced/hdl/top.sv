@@ -40,6 +40,7 @@
 //`define VIDEO_FRAMEBUFFER
 
 `include "datetime.svh"
+`include "a2n20v2_enhanced_profile.vh"
 
 module top #(
     parameter int CLOCK_SPEED_HZ = 54_000_000,
@@ -48,33 +49,38 @@ module top #(
     parameter bit SCANLINES_ENABLE = 0,
     parameter bit APPLE_SPEAKER_ENABLE = 0,
 
-    parameter bit SUPERSPRITE_ENABLE = 1,
+    parameter bit SUPERSPRITE_ENABLE = `A2_FEATURE_SUPERSPRITE,
     parameter bit [7:0] SUPERSPRITE_ID = 1,
     parameter bit SUPERSPRITE_FORCE_VDP_OVERLAY = 0,
 
-    parameter bit MOCKINGBOARD_ENABLE = 1,
+    parameter bit MOCKINGBOARD_ENABLE = `A2_FEATURE_MOCKINGBOARD,
     parameter bit [7:0] MOCKINGBOARD_ID = 2,
 
-    parameter bit SUPERSERIAL_ENABLE = 1,
+    parameter bit SUPERSERIAL_ENABLE = `A2_FEATURE_SUPERSERIAL,
     parameter bit SUPERSERIAL_IRQ_ENABLE = 1,
     parameter bit [7:0] SUPERSERIAL_ID = 3,
 
-    parameter bit DISK_II_ENABLE = 1,
+    parameter bit DISK_II_ENABLE = `A2_FEATURE_DISK_II,
     parameter bit [7:0] DISK_II_ID = 4,
 
-    parameter bit UTHERNET2_ENABLE = 1,
+    parameter bit UTHERNET2_ENABLE = `A2_FEATURE_UTHERNET2,
     parameter bit [7:0] UTHERNET2_ID = 5,
 
-    parameter bit HDD_ENABLE = 1,
+    parameter bit HDD_ENABLE = `A2_FEATURE_HDD,
     parameter bit [7:0] HDD_ID = 6,
 
-    parameter bit ENSONIQ_ENABLE = 1,
+    // Videx VideoTerm 80-column card: framebuffer (_fb) builds only, and
+    // only ever in slot 3 of an Apple ][+ (enforced in videx_card).
+    parameter bit VIDEX_ENABLE = 1,
+    parameter bit [7:0] VIDEX_ID = 7,
+
+    parameter bit ENSONIQ_ENABLE = `A2_FEATURE_ENSONIQ,
     parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit SHADOW_ALL_MEMORY = 0,        // Shadoow all memory in SDRAM, not just video ram
     parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep HDMI output on CPU stop
-    parameter bit FORCE_DEBUG_OVERLAY = 1,      // Always show the debug overlay on the HDMI output
+    parameter bit FORCE_DEBUG_OVERLAY = `A2_INSTR_FORCE_DEBUG_OVERLAY,  // Always show the debug overlay on the HDMI output
     parameter bit IRQ_OUT_ENABLE = 1,           // Allow driving IRQ to Apple bus
     parameter bit BUS_DATA_OUT_ENABLE = 1,      // Allow driving data to Apple bus
 
@@ -480,7 +486,6 @@ module top #(
     wire sw_scanlines_w = !dip_switches_n_w[0];
     wire sw_apple_speaker_w = !dip_switches_n_w[1];
     wire sw_slot_7_w = !dip_switches_n_w[2];
-    wire sw_gs_w = !dip_switches_n_w[3];
 
     IOBUF a2_bridge_d_iobuf[7:0] (
         .O  (a2_bridge_d_buf_w),
@@ -488,6 +493,8 @@ module top #(
         .I  (a2_bridge_d_o_w),
         .OEN(!a2_bridge_d_oe_w)
     );
+
+    wire [7:0] gs_status_w;
 
     apple_bus #(
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
@@ -522,7 +529,8 @@ module top #(
 
         .dip_switches_n_o(dip_switches_n_w),
 
-        .sleep_o(sleep_w)
+        .sleep_o(sleep_w),
+        .gs_status_o(gs_status_w)
     );
 
     // Memory
@@ -684,6 +692,7 @@ module top #(
     // serves it from a .hdv/.po image into the HDD_MEM_PORT SDRAM window via
     // XFER SPACE 1, then pulses ack and the card streams it to the 6502
     // through its sector buffer.
+    wire storage_settled_w;     // from the connector: MCU mount pass over (or no MCU)
     HDD #(
         .ENABLE(HDD_ENABLE),
         .ID(HDD_ID)
@@ -697,7 +706,8 @@ module top #(
 `else
         .ram_hdd_if(mem_ports[HDD_MEM_PORT]),
 `endif
-        .volumes(hdd_volumes)
+        .volumes(hdd_volumes),
+        .storage_settled_i(storage_settled_w)
     );
 
     // Bus event FIFO
@@ -778,6 +788,7 @@ module top #(
         .mcu_ready_o(mcu_ready_w),
         .standalone_o(standalone_w),
         .mcu_access_stb_o(mcu_access_stb_w),
+        .storage_settled_o(storage_settled_w),
         .scratch_o(mcu_scratch_w),
         .cardrom_active_i(1'b0),        // CardROM excised
         .cardrom_release_o(),           // CardROM excised
@@ -926,6 +937,10 @@ module top #(
     wire [7:0] rgb_b_w;
     wire scanlines_w;
 
+    // Videx bus response (driven inside VIDEO_FRAMEBUFFER, tied off otherwise)
+    wire [7:0] videx_d_w;
+    wire       videx_rd;
+
 `ifdef VIDEO_FRAMEBUFFER
 
     // =====================================================================
@@ -1005,7 +1020,7 @@ module top #(
 
         .a2mem_if(a2mem_if),
         .video_control_if(video_control_if),
-        .sw_gs_i(sw_gs_w),
+        .sw_gs_i(a2bus_if.sw_gs),
 
         .pixel_stream(apple_ps),
 
@@ -1089,6 +1104,96 @@ module top #(
         .ssp_active_i(1'b0)
     );
 
+    // --- Videx VideoTerm 80-column (slot 3, Apple ][+) -> its own writer ---
+    wire        videx_mode_w;
+    wire [7:0]  videx_r10_w, videx_r11_w;
+    wire [10:0] videx_start_w, videx_cursor_w;
+    wire        videx_gen_rd_w;
+    wire [8:0]  videx_gen_addr_w;
+    wire [31:0] videx_gen_data_w;
+    wire        videx_gen_valid_w;
+    wire        videx_rom_en_w;
+
+    videx_card #(
+        .ID(VIDEX_ID),
+        .ENABLE(VIDEX_ENABLE)
+    ) videx_card (
+        .a2bus_if(a2bus_if),
+        .a2mem_if(a2mem_if),
+        .slot_if(slot_if),
+
+        .data_o(videx_d_w),
+        .rd_en_o(videx_rd),
+        .rom_en_o(videx_rom_en_w),
+
+        .videx_mode_o(videx_mode_w),
+        .crtc_r10_o(videx_r10_w),
+        .crtc_r11_o(videx_r11_w),
+        .start_addr_o(videx_start_w),
+        .cursor_addr_o(videx_cursor_w),
+
+        .gen_rd_i(videx_gen_rd_w),
+        .gen_addr_i(videx_gen_addr_w),
+        .gen_data_o(videx_gen_data_w),
+        .gen_valid_o(videx_gen_valid_w)
+    );
+
+    pixel_stream_if videx_ps();
+    wire videx_frame_active_w;
+
+    videx_gen videx_gen (
+        .clk_i(clk_logic_w),
+        .reset_n_i(system_reset_n_w),
+
+        .a2mem_if(a2mem_if),
+        .sw_gs_i(sw_gs_w),
+
+        .pixel_stream(videx_ps),
+
+        .videx_mode_i(videx_mode_w),
+        .crtc_r10_i(videx_r10_w),
+        .crtc_r11_i(videx_r11_w),
+        .start_addr_i(videx_start_w),
+        .cursor_addr_i(videx_cursor_w),
+
+        .vram_rd_o(videx_gen_rd_w),
+        .vram_addr_o(videx_gen_addr_w),
+        .vram_data_i(videx_gen_data_w),
+        .vram_valid_i(videx_gen_valid_w),
+
+        .videx_active_o(videx_frame_active_w)
+    );
+
+    wire        videx_fb_we_w;
+    wire [17:0] videx_fb_data_w;
+    wire        videx_fb_vsync_w;
+
+    framebuffer_writer #(
+        .GAP_CYCLES(4)
+    ) videx_fb_writer (
+        .clk_i(clk_logic_w),
+        .reset_n_i(system_reset_n_w),
+
+        .pixel_stream(videx_ps),
+
+        .scanline_i(scanline_w),
+        .hsync_i(hsync_w),
+        .vsync_i(vsync_w),
+
+        .fb_we_o(videx_fb_we_w),
+        .fb_data_o(videx_fb_data_w),
+        .fb_vsync_o(videx_fb_vsync_w),
+
+        .apple_r_o(),
+        .apple_g_o(),
+        .apple_b_o(),
+        .apple_active_o(),
+        .ssp_r_i(8'd0),
+        .ssp_g_i(8'd0),
+        .ssp_b_i(8'd0),
+        .ssp_active_i(1'b0)
+    );
+
     // Framebuffer source mux — apple or SHR, latched at the frame boundary.
     // Must go through the video_control_if override: when the MCU takeover
     // (boot console / menu) forces text mode while the machine is in SHR
@@ -1096,16 +1201,24 @@ module top #(
     // plane — latching raw SHRG here kept displaying the stale VGC plane
     // as garbage.
     reg use_vgc_r;
+    reg use_videx_r;
     always @(posedge clk_logic_w) begin
-        if (vsync_w) use_vgc_r <= video_control_if.shrg_mode(a2mem_if.SHRG_MODE);
+        if (vsync_w) begin
+            use_vgc_r   <= video_control_if.shrg_mode(a2mem_if.SHRG_MODE);
+            // Videx plane (640x216) whenever the card is live in 80-col mode,
+            // except while the MCU console/menu owns the screen (it renders
+            // into the APPLE plane). Same vsync edge videx_gen latches its
+            // own mode on, so plane and content switch together.
+            use_videx_r <= videx_mode_w && !video_control_if.enable;
+        end
     end
 
-    wire fb_we_mux_w          = use_vgc_r ? vgc_fb_we_w    : fb_we_w;
-    wire [17:0] fb_data_mux_w = use_vgc_r ? vgc_fb_data_w  : fb_data_w;
-    wire fb_vsync_mux_w       = use_vgc_r ? vgc_fb_vsync_w : fb_vsync_w;
+    wire fb_we_mux_w          = use_videx_r ? videx_fb_we_w    : use_vgc_r ? vgc_fb_we_w    : fb_we_w;
+    wire [17:0] fb_data_mux_w = use_videx_r ? videx_fb_data_w  : use_vgc_r ? vgc_fb_data_w  : fb_data_w;
+    wire fb_vsync_mux_w       = use_videx_r ? videx_fb_vsync_w : use_vgc_r ? vgc_fb_vsync_w : fb_vsync_w;
 
-    wire [10:0] fb_width_w  = use_vgc_r ? 11'd640 : 11'd560;
-    wire [9:0]  fb_height_w = use_vgc_r ? 10'd200 : 10'd192;
+    wire [10:0] fb_width_w  = (use_videx_r || use_vgc_r) ? 11'd640 : 11'd560;
+    wire [9:0]  fb_height_w = use_videx_r ? 10'd216 : use_vgc_r ? 10'd200 : 10'd192;
 
     // VDP raster counter for SuperSprite — synced to scan_timer; the f18a
     // `_fb` VHDL variants (selected by this config's file list) take this
@@ -1332,7 +1445,7 @@ module top #(
 
             .a2mem_if(a2mem_if),
             .video_control_if(video_control_if),
-            .sw_gs_i(sw_gs_w),
+            .sw_gs_i(a2bus_if.sw_gs),
 
             .pixel_stream(apple_ps),
 
@@ -1451,6 +1564,9 @@ module top #(
         assign ssp_apple_active_w = ps_active_pix_r;
 
     end endgenerate
+
+    assign videx_d_w = 8'd0;   // Videx is framebuffer-only
+    assign videx_rd  = 1'b0;
 
 `endif  // !VIDEO_FRAMEBUFFER
 
@@ -1642,7 +1758,7 @@ module top #(
 
     // Data output
 
-    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || u2_rd || diskii_rd || hdd_rd;
+    assign data_out_en_w = ssp_rd || mb_rd || ssc_rd || u2_rd || diskii_rd || hdd_rd || videx_rd;
 
     assign data_out_w = ssc_rd ? ssc_d_w :
         ssp_rd ? ssp_d_w :
@@ -1650,6 +1766,7 @@ module top #(
         u2_rd ? u2_d_w :
         diskii_rd ? diskii_d_w :
         hdd_rd ? hdd_d_w :
+        videx_rd ? videx_d_w :
         a2bus_if.data;
 
     // Interrupts
@@ -1666,18 +1783,14 @@ module top #(
         .speaker_o(speaker_audio_w)
     );
 
-    // Extend all the unsigned audio signals to 13 bits
-    wire [12:0] speaker_audio_ext_w = {speaker_audio_w, 12'b0};
-    wire [12:0] ssp_audio_ext_w = {ssp_audio_w, 3'b0};
-    wire [12:0] mb_audio_l_ext_w = {mb_audio_l, 3'b0};
-    wire [12:0] mb_audio_r_ext_w = {mb_audio_r, 3'b0};
 
     wire signed [15:0] core_audio_l_w;
     wire signed [15:0] core_audio_r_w;
-    // Combine all the audio sources into a single 16-bit signed audio signal
-    // This could theoretically overflow by 1 bit and clip, but unlikely
-    assign core_audio_l_w = sg_audio_l + ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
-    assign core_audio_r_w = sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
+    // Saturating mix (hdl/sound/core_audio_mix.sv): Mockingboard gain is a
+    // live select (shift 3 + gain; power-up 2 = << 5 since 2026-11-17, it was
+    // quiet beside the DOC), sum clamped.
+    core_audio_mix i_audio_mix_l (.sg_i(sg_audio_l), .ssp_i(ssp_audio_w), .mb_i(mb_audio_l), .mb_gain_i(2'd2), .spk_i(speaker_audio_w), .out_o(core_audio_l_w));
+    core_audio_mix i_audio_mix_r (.sg_i(sg_audio_r), .ssp_i(ssp_audio_w), .mb_i(mb_audio_r), .mb_gain_i(2'd2), .spk_i(speaker_audio_w), .out_o(core_audio_r_w));
 
     // CDC to shift audio to the pixel clock domain from the logic clock domain
 
@@ -1802,7 +1915,8 @@ module top #(
     wire [7:0] debug_b_w;
     DebugOverlay #(
         .VERSION(`BUILD_DATETIME),  // 14-digit timestamp version
-        .ENABLE(1'b1)
+        .ENABLE(`A2_INSTR_DEBUG_OVERLAY),
+        .NUM_HEX_BYTES(9)
     ) debug_overlay (
         .clk_i          (clk_pixel_w),
         .reset_n (device_reset_n_w),
@@ -1817,7 +1931,9 @@ module top #(
         // (rolling; frozen while an SHR game draws = writes not reaching
         // the bus capture), [3]=CAPTURED M2B0 WRITES (IIgs bank-E1 style),
         // [4]=line not ready, [5]=max line lag, [6]=shadow write-queue
-        // drops, [7]=GLU write-queue drops.
+        // drops, [7]=GLU write-queue drops, [8]=GS autodetect status
+        // (hi nibble 5=auto GS, 4=DIP GS, 2=IIe lockout, 0=none;
+        // lo nibble = detection event count).
         .hex_values ({
             mcu_scratch_w[7:0],
             mcu_scratch_w[31:24],
@@ -1826,7 +1942,8 @@ module top #(
             fb_dbg_line_not_ready_w,
             fb_dbg_line_lag_max_w,
             wq_drops_w,
-            glu_drops_w
+            glu_drops_w,
+            gs_status_w
         }),
 `else
         .hex_values ({
@@ -1837,7 +1954,8 @@ module top #(
             mcu_scratch_w[39:32],   // scratch4: status flag bits
             8'h0,
             8'h0,
-            8'h0
+            8'h0,
+            gs_status_w             // GS autodetect status (5x=auto GS, 2x=IIe)
         }),
 `endif
 

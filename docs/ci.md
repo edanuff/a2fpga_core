@@ -1,5 +1,8 @@
 # Continuous Integration
 
+> Status (2026-11-20): written with the initial CI workflow; not yet validated by a
+> real runner run — the first PR's matrix run is the smoke test.
+
 GitHub Actions builds every active board on each PR and push to `main` that touches
 `hdl/`, `boards/`, or `tools/build.sh`. Workflow: [`.github/workflows/fpga-build.yml`](../.github/workflows/fpga-build.yml).
 
@@ -19,6 +22,14 @@ GitHub Actions builds every active board on each PR and push to `main` that touc
   used locally. It uses the pipe method (inviolable rule #1), detects `ERROR` lines
   (gw_sh exits 0 even on failure), rejects stale bitstreams, and **fails unless
   timing is clean** (0 setup + 0 hold violations), satisfying inviolable rule #2.
+  The per-module resource report runs informationally (`RESOURCE_FAIL` unset).
+  CI sets `BUILD_TIMEOUT=4800`: the script's 30-minute thrash watchdog is
+  calibrated to a fast local machine, and hosted runners are slower; the job-level
+  100-minute timeout still caps a wedged run.
+- **Every matrix entry pins its `.gprj` explicitly** — boards carry extra test and
+  probe projects, and first-alphabetical selection must not decide what CI builds.
+  a2mega builds the 60K-die project (`a2mega.gprj`) only; the 138B-die and
+  probe/test projects are not in CI.
 - **Matrix (repo-aware):** a `plan` job picks the board list from the repo the
   workflow runs in, so the same file works upstream and in forks during the sync:
   - upstream (`a2fpga/a2fpga_core`): a2n20v2 + all three a2n20v2-Enhanced
