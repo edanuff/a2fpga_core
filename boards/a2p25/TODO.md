@@ -34,9 +34,11 @@ IIgs sound is the fabric DOC5503 on PSRAM.
 - [ ] Fold the TOP_INTEGRATION_PLAN section 6 decisions into MODERNIZATION_PLAN and archive it
 - [ ] USB-C-to-HDMI adapters: only RBR-capable, lane-count-honest adapters work (plan section
       6h recipe); document the qualified list for users
-- [ ] USB sticks: USB 3.x sticks (PNY Elite-X Fit, Verbatim Nano 3.2) fail enumeration on the
-      ESP32-S3 full-speed host, USB 2.0 sticks work (2026-11-19, ESP32_FEATURE_PORT.md P3);
-      recommend USB 2.0 to users and keep a tested list
+- [ ] USB sticks: PNY Elite-X Fit and Verbatim Nano 3.2 fail enumeration every time
+      (CHECK_SHORT_DEV_DESC, ESP-IDF's known enumeration-stability bug, esp-idf #15938/#17832;
+      K&ZZ USB 2.0 works) — ESP32_FEATURE_PORT.md P3. Test a failing stick on USB1 without the
+      hub; consider a firmware hub-port power cycle after an external-port ENUM failure; keep a
+      tested-stick list
 
 ## Shipped on displayport1 (2026-10-01 → 10-12)
 

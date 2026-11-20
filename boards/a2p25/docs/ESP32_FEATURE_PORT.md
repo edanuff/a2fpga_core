@@ -80,17 +80,36 @@ first slice that was already ported.
    Apple boots from the stick. Not ported: the BL616 hub supervisor
    (stalled-hub adopt / VBUS cycle), `boot_pref`.
    **Stick compatibility (bench 2026-11-19, Ed, firmware 62153cbf, hub
-   05E3:0610 + remote dongle 1915:1025):** USB 3.x sticks fail before the
-   firmware sees them — PNY 64 GB Elite-X Fit USB 3.0 and Verbatim 32 GB
-   Store 'n' Stay Nano USB 3.2 Gen 1 both die at enumeration (`ENUM: BAD
-   TRANSFER STATUS 1: CHECK_SHORT_DEV_DESC`, the IDF's transaction-error
-   status on the first 8-byte device-descriptor read, then `EXT_PORT: [1:3]
-   PORT DISABLED, RESET ATTEMPTS=1`; replugging repeats it). A K&ZZ 32 GB
-   USB 2.0 stick enumerates (090C:1000), mounts and serves. The S3 host is
-   full-speed only and a hub whose upstream runs at full speed holds the
-   stick at full speed too; some USB 3.x controllers answer that with
-   errors. The single reset attempt is the Arduino core's prebuilt ESP-IDF
-   setting and cannot be raised from this tree. **Recommend USB 2.0 sticks.**
+   05E3:0610 + remote dongle 1915:1025):** two sticks fail before the
+   firmware ever sees them — PNY 64 GB Elite-X Fit USB 3.0 and Verbatim
+   32 GB Store 'n' Stay Nano USB 3.2 Gen 1 both die at enumeration, every
+   plug, FAT32 or exFAT alike: `ENUM: BAD TRANSFER STATUS 1:
+   CHECK_SHORT_DEV_DESC` (the IDF's "device did not reply in time or CRC
+   error" status on the first 8-byte device-descriptor read after the port
+   reset), then `EXT_PORT: [1:3] PORT DISABLED, RESET ATTEMPTS=1`. A K&ZZ
+   32 GB USB 2.0 stick enumerates (090C:1000), mounts and serves. **This is
+   the ESP-IDF host stack's known enumeration-stability problem, not a USB
+   generation or filesystem matter:** espressif/esp-idf
+   [#15938](https://github.com/espressif/esp-idf/issues/15938) (closed
+   without a code fix) and [#17832](https://github.com/espressif/esp-idf/issues/17832)
+   (open; Espressif acknowledged "enumeration stability (timeout/retry/
+   callback)" as future work on 2025-11-19) show the same error with
+   ordinary sticks on the root port; the stack has no host-side transaction
+   timeout, so a device that answers the first GET_DESCRIPTOR late or with
+   errors fails the stage outright. Espressif's suggestions are a longer
+   reset-recovery delay (`CONFIG_USB_HOST_RESET_RECOVERY_MS` /
+   `CONFIG_USB_HOST_EXT_PORT_RESET_RECOVERY_DELAY_MS`, 500 ms instead of 30;
+   one reporter says it did not help) and, for the root port only, an
+   app-level `usb_host_lib_set_root_port_power(false/true)` cycle. The
+   Arduino core 3.3.5 ships ESP-IDF 5.5.1 prebuilt with both recovery
+   delays at 30 ms, one external-port reset attempt and no enumeration
+   filter callback (`esp32-arduino-libs/idf-release_v5.5-*/esp32s3/
+   sdkconfig`), none of it changeable from this tree. Untested so far:
+   whether the failing sticks also fail straight on USB1 without the hub
+   (which would make the root-port power-cycle workaround applicable), and
+   a firmware-side hub-port power cycle (SetPortFeature/ClearPortFeature
+   PORT_POWER on the hub from our own client) after an external-port
+   enumeration failure. Until then: keep a list of sticks that work.
    With no stick the disk task falls back to the empty flash volume,
    releases /RES with `(NO MEDIA)` and leaves the OSD console on screen by
    design (`disk.c`), which reads as a hang although the Apple is running
