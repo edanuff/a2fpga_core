@@ -36,9 +36,9 @@ IIgs sound is the fabric DOC5503 on PSRAM.
       6h recipe); document the qualified list for users
 - [ ] USB sticks: PNY Elite-X Fit and Verbatim Nano 3.2 fail enumeration every time
       (CHECK_SHORT_DEV_DESC, ESP-IDF's known enumeration-stability bug, esp-idf #15938/#17832;
-      K&ZZ USB 2.0 works) — ESP32_FEATURE_PORT.md P3. Test a failing stick on USB1 without the
-      hub; consider a firmware hub-port power cycle after an external-port ENUM failure; keep a
-      tested-stick list
+      K&ZZ USB 2.0 works; the PNY works straight on USB1 without the hub, so it is the
+      external-port path) — ESP32_FEATURE_PORT.md P3. Firmware hub-port power cycle after an
+      external-port ENUM failure is the candidate fix; keep a tested-stick list
 
 ## Shipped on displayport1 (2026-10-01 → 10-12)
 

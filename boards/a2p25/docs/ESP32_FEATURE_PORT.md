@@ -104,12 +104,17 @@ first slice that was already ported.
    Arduino core 3.3.5 ships ESP-IDF 5.5.1 prebuilt with both recovery
    delays at 30 ms, one external-port reset attempt and no enumeration
    filter callback (`esp32-arduino-libs/idf-release_v5.5-*/esp32s3/
-   sdkconfig`), none of it changeable from this tree. Untested so far:
-   whether the failing sticks also fail straight on USB1 without the hub
-   (which would make the root-port power-cycle workaround applicable), and
-   a firmware-side hub-port power cycle (SetPortFeature/ClearPortFeature
-   PORT_POWER on the hub from our own client) after an external-port
-   enumeration failure. Until then: keep a list of sticks that work.
+   sdkconfig`), none of it changeable from this tree. **Same night: the
+   PNY plugged straight into USB1 with the hub removed enumerates at once
+   (13FE:6700 "USB DISK 3.0", STORAGE 59153 MB), mounts and serves
+   DOS33.NIB** — so the failure is specific to the external-port path (the
+   hub driver's single reset attempt and 30 ms recovery), not the stick
+   on its own. Candidate firmware workaround: after an `EXT_PORT … PORT
+   DISABLED` line, power-cycle that hub port from our own client
+   (ClearPortFeature/SetPortFeature PORT_POWER over the hub's control
+   pipe) so the hub driver re-enumerates, bounded to a few attempts.
+   Until then: a hub-less stick, or keep a list of sticks that work behind
+   the hub.
    With no stick the disk task falls back to the empty flash volume,
    releases /RES with `(NO MEDIA)` and leaves the OSD console on screen by
    design (`disk.c`), which reads as a hang although the Apple is running
