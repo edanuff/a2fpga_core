@@ -47,14 +47,20 @@ jobs:
           # gprj is explicit for every entry: several boards carry extra
           # test/probe projects, and first-alphabetical selection must not
           # decide what CI builds. a2mega builds the 60K-die project only.
+          # "experimental": true -> continue-on-error. The committed builds of
+          # these boards were made with Gowin V1.9.12.01, and no license-free
+          # Linux 1.9.12 exists, so CI's 1.9.11.03 Education differs: a2p25's
+          # INS_LOC DSP constraints name 1.9.12-synthesis objects (CT1135),
+          # and a2mega / the fb variant are timing-marginal under the older
+          # PnR. See docs/ci.md#toolchain-variance.
           common='
             { "name": "a2n20v2",                   "board": "a2n20v2",          "gprj": "a2n20v2.gprj" },
             { "name": "a2n20v2-Enhanced",          "board": "a2n20v2-Enhanced", "gprj": "a2n20v2_enhanced.gprj" },
             { "name": "a2n20v2-Enhanced-dualrate", "board": "a2n20v2-Enhanced", "gprj": "a2n20v2_enhanced_dualrate.gprj" },
-            { "name": "a2n20v2-Enhanced-fb",       "board": "a2n20v2-Enhanced", "gprj": "a2n20v2_enhanced_fb.gprj" }'
+            { "name": "a2n20v2-Enhanced-fb",       "board": "a2n20v2-Enhanced", "gprj": "a2n20v2_enhanced_fb.gprj", "experimental": true }'
           fork_only='
-            { "name": "a2mega",                    "board": "a2mega",           "gprj": "a2mega.gprj" },
-            { "name": "a2p25",                     "board": "a2p25",            "gprj": "a2p25.gprj" }'
+            { "name": "a2mega",                    "board": "a2mega",           "gprj": "a2mega.gprj", "experimental": true },
+            { "name": "a2p25",                     "board": "a2p25",            "gprj": "a2p25.gprj", "experimental": true }'
           if [ "$GITHUB_REPOSITORY" = "a2fpga/a2fpga_core" ]; then
             matrix="[ $common ]"
           else
@@ -67,6 +73,9 @@ jobs:
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 100
+    # Experimental boards (toolchain variance vs the committed 1.9.12.01
+    # builds) report their result but do not block the PR.
+    continue-on-error: ${{ matrix.experimental == true }}
     strategy:
       fail-fast: false
       matrix:

@@ -43,6 +43,32 @@ GitHub Actions builds every active board on each PR and push to `main` that touc
   artifacts back — the tracked files in `impl/pnr/` are updated manually/locally
   on purpose (see repo conventions).
 
+## Toolchain variance
+
+The committed `impl/pnr/` artifacts of a2n20v2, a2mega and a2p25 were built locally
+with **Gowin V1.9.12.01**; the newest license-free Linux build is **V1.9.11.03
+Education**, so CI runs an older synthesis/PnR than the builds of record. Verified
+consequences (first full matrix run, 2026-11-20):
+
+- **Education 1.9.11.03 does build every chip in use** — GW2AR-18, GW5A-25 and
+  GW5AT-60 all reach bitstream generation. Device support is not the problem.
+- **a2n20v2, a2n20v2-Enhanced, a2n20v2-Enhanced-dualrate**: build and close timing
+  cleanly on CI. These jobs **block** the PR.
+- **a2n20v2-Enhanced-fb** (11 setup violations) and **a2mega** (7 setup, 1 hold):
+  complete but timing-marginal under the older PnR (the fb variant's committed
+  build is even from 1.9.11.03 Education on macOS — same version, different
+  platform, different roll). Marked `experimental` in the matrix:
+  `continue-on-error`, so the result is visible in the job but doesn't block.
+- **a2p25**: fails hard — `a2p25.cst`'s `INS_LOC` DSP pins (the 2026-11-18 IIR
+  placement experiment) reference synthesis-generated names
+  (`i_audio_out/IIR_filter/q_h0_0_s0`, …) that the 1.9.11.03 synthesizer does not
+  produce (CT1135). Toolchain-portable constraints or a 1.9.12 Education release
+  would fix this. Also `experimental`.
+
+When Gowin publishes a license-free Linux 1.9.12, switch `GOWIN_URL`/`GOWIN_SHA256`
+and re-evaluate the `experimental` flags — matching the local version should make
+these boards candidates for blocking status.
+
 ## Version pinning
 
 CI is pinned to exactly V1.9.11.03 Education via URL + sha256. Some boards are
