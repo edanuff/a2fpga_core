@@ -68,6 +68,106 @@ make BOARD_REV=225 PORT=/dev/cu.usbmodemXXXX upload
   `reconfig` the core reports DONE, link UP, HyperRAM calibrated, and register
   0x7E reads the stamp back. Before this the card ran firmware Oct 15 2026
   09:21 and a core with no version register.
+- **Build + flash (2026-11-20, hub-port enumeration retry):** `make
+  BOARD_REV=225 DP_TEST=0 compile` at 3ffd5108 (clean tree), arduino-cli
+  1.2.2 / esp32 core 3.3.5 → `build/a2fpga_esp32.ino.bin`, 1,338,352 B
+  (sketch 1,338,207 B = 68 % of the min_spiffs slot), no new warnings under
+  `--warnings all`, sha256
+  `ced8953a33f7de427a7525adeb21883f50900981bff2ba4dc0db2123ddd60639`.
+  **Flashed over the air** onto the card at 192.168.232.66 with the K&ZZ
+  USB 2.0 stick on the hub as the volume: `curl -T` to FTP, renamed on the
+  stick to `a2fpga_esp32_225_hubretry_3ffd5108.bin`, then the telnet menu
+  mirror (FIRMWARE → UPDATE MCU → file → INSTALL MCU FIRMWARE NOW; the
+  picker shows `1306K -> APP1`). Rebooted into `MCU NOV 20 2026 08:32:37`,
+  slot APP1; stick remounted, DOS33.NIB served, USB DEVICES lists hub
+  05E3:0610 + dongle 1915:1025 + stick 090C:1000 all in use. PNY test the
+  same morning: the chain fired and the ganged-power guard refused (P3).
+- **Build + flash (2026-11-20, `USB HUB PORT RETRY` setting):** `make
+  BOARD_REV=225 DP_TEST=0 compile` at 18bfd578 (clean tree; the BOARD_REV=103
+  build also clean, no new warnings under `--warnings all`) →
+  `build/a2fpga_esp32.ino.bin`, 1,339,248 B, sha256
+  `8763a288feef2f87eca88703095a9fd92f1164533503c1db9bd3736ec8318c64`.
+  **Flashed over the air** the same way (K&ZZ stick as the volume, file
+  `a2fpga_esp32_225_hubretry2_8763a288.bin`, telnet menu mirror FIRMWARE →
+  UPDATE MCU → INSTALL; picker `1307K -> APP0`). Rebooted into `MCU NOV 20
+  2026 08:57:10`, slot APP0; hub + dongle + K&ZZ enumerated; telnet `usb
+  retry on` answered `hub port retry setting saved`, `usb` shows `hub port
+  retry: ALL PORTS`. Then K&ZZ swapped for the PNY behind the hub: `HUB 1
+  PORT 3 RECOVERED AFTER 2 PORT POWER CYCLES`, STORAGE 59153 MB, DOS33.NIB
+  served (ESP32_FEATURE_PORT.md P3 has the log).
+- **Build (2026-11-20, default flipped to ALL PORTS, `usb_hub_retry_perport`):**
+  `make BOARD_REV=225 DP_TEST=0 compile` from the source of bee90d1a (clean
+  tree) → 1,339,264 B, sha256
+  `348a140bb991f8b8a5f3ae6c644a86318364012ea30de7227132f07b3b0b3016`;
+  `make BOARD_REV=103 compile` clean (sketch 1,345,875 B); `--warnings all`
+  pass shows only the pre-existing hits. **Flash pending:** the OTA upload
+  could not go through the PNY 13FE:6700 as the volume — `curl -T` to FTP
+  broke the data connection after ~6 s three times (full rate twice,
+  150 kB/s once), leaving a 0-byte file, with the card up the whole time
+  (telnet stayed connected, no reboot, no stick drop; the FTP server logged
+  only `CLIENT CONNECTED`). The K&ZZ 090C:1000 took the same 1.3 MB upload
+  twice earlier the same morning, so this is a PNY write-path problem on
+  the full-speed host (reads serve Disk II fine); the flash goes through the
+  K&ZZ. **Flashed** once Ed put the K&ZZ back: `curl -T` onto it as
+  `a2fpga_esp32_225_hubretry3_348a140b.bin` went through first time, telnet
+  menu mirror FIRMWARE → UPDATE MCU → file → INSTALL (`1307K -> APP1`),
+  rebooted into `MCU NOV 20 2026 18:02:30`, slot APP1, hub + dongle + K&ZZ
+  enumerated, DOS33.NIB served. As expected the byte saved under 18bfd578
+  read back as `PER-PORT ONLY`; `usb retry on` saved it, and SETTINGS shows
+  `USB HUB PORT RETRY  ALL PORTS` with `NVS … LD:OK SV:OK`. This is the
+  firmware on the card now. PNY swapped in behind the hub afterwards: the
+  ladder recovered it at the second cycle again (P3).
+- **Build + flash (2026-11-20 evening, storage write diagnostics):** `make
+  BOARD_REV=225 DP_TEST=0 compile` → 1,341,392 B, sha256
+  `4736ba59bbda926b0613947d0e0f21c64e1e3934b32f41cef218b95ed6b3be86`; 103
+  build clean; `--warnings all` only pre-existing hits. Adds: every failed
+  READ(10)/WRITE(10) logged with LBA, SCSI stage (CBW / data phase / CSW
+  missing / CSW malformed / CHECK CONDITION), CSW status and REQUEST SENSE
+  key/ASC/ASCQ (first 5, then every 50th; `usb` prints the totals and the
+  last one); telnet `usb probe <lba> [read]` (one-sector read, and for an
+  all-zero sector a same-zeros WRITE(10) + read-back, each step timed).
+  Purpose: the PNY 13FE:6700 (64 GB) refuses FTP writes while the two 32 GB
+  sticks take them — find the failing stage and bisect the address. Flashed
+  OTA through the Verbatim 18A5:0250 (`a2fpga_esp32_225_probe_4736ba59.bin`,
+  picker `1309K -> APP0`); the Verbatim re-recovered at ladder cycle 2 on
+  the reboot. Baseline on the Verbatim: `usb probe 2048` and `usb probe
+  61439000` (29999 MB in) both PASS, read 3–6 ms, write 5–8 ms.
+  **PNY result + CARD CRASH (same evening):** PNY swapped in (ladder, cycle
+  2 again). `usb probe 2048 read`: ok, 6 ms, zeros. `usb probe 2048`
+  (write): `WRITE FAILED after 1943 ms: WRITE lba 2048 x1: CSW MALFORMED
+  csw=00 data=512` — the 512 data bytes went out, the stick then held the
+  CSW past the 1.5 s wait, the retry read came back malformed. The next
+  command (`usb probe 60000000 read`) never answered: the card REBOOTED
+  (PNY back at addr 3, failure counters zero, console ring restarted,
+  Apple II reset with it). **Root cause (firmware, not the stick):** this
+  IDF's `usb_transfer_t.timeout_ms` is "currently not supported yet"
+  (usb_types_stack.h), so `bulk_xfer` waiting 1.5 s and then
+  `usb_host_transfer_free()` left the CSW transfer in flight; when the PNY
+  finally answered, the host stack completed into freed memory. The two
+  32 GB sticks never held a CSW that long, so the hazard never fired before.
+  So the PNY's symptom is a WRITE(10) whose status takes > 1.5 s (how long,
+  and whether it then succeeds, is what the next build measures), and the
+  crash is ours.
+- **Build (2026-11-20 evening, transfer cancel + reset reason), UNFLASHED:**
+  `bulk_xfer` on its own timeout now halts + flushes the endpoint (the stack
+  completes the transfer as CANCELED, the callback fires), waits for that,
+  clears the endpoint and frees; if the callback still does not come the
+  transfer is leaked, never freed in flight (`usb` prints timeout/leak
+  counts). WRITE(10) gets an 8 s CSW wait (reads keep 1 s); the failure log
+  says `AFTER A TIMEOUT` when that is what happened. Boot logs `RESET
+  REASON: PANIC (FIRMWARE CRASH) / TASK WATCHDOG / …` for anything but
+  power-on, so the next crash names itself. **Built at 98ff773e** → 1,342,256 B,
+  sha256 `70055b45a633b4042356b2bb43dfa0789454866d76014f8610a6121de6ae9c70`;
+  103 clean; warnings pass only pre-existing hits. **Flashed** OTA through the
+  Verbatim (`a2fpga_esp32_225_cancel_70055b45.bin`, picker `1310K -> APP1`),
+  boots as `MCU NOV 20 2026 18:57:11`; Verbatim re-recovered at ladder cycle
+  2; `usb probe 2048` / `usb probe 61439000` PASS (write 6 / 8 ms). This is
+  the firmware on the card. **PNY re-probe on it:** `usb probe 2048` write
+  ok in **1940 ms** (first write after power-up), then 2048 / 2049 / 4096 /
+  67108864 (32 GB) / 121000000 (59 GB) all PASS at 17–47 ms; 8 KB FTP write
+  0.5 s; 1.3 MB FTP write 69 s, read back 9 s, byte-exact; test files
+  deleted; card up throughout, no timeouts counted. The PNY write problem
+  was the firmware's 1.5 s wait plus the in-flight free. Closed.
 
 ## Pin map (ESP32-S3-MINI-1 U5)
 

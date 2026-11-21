@@ -34,11 +34,23 @@ IIgs sound is the fabric DOC5503 on PSRAM.
 - [ ] Fold the TOP_INTEGRATION_PLAN section 6 decisions into MODERNIZATION_PLAN and archive it
 - [ ] USB-C-to-HDMI adapters: only RBR-capable, lane-count-honest adapters work (plan section
       6h recipe); document the qualified list for users
-- [ ] USB sticks: PNY Elite-X Fit and Verbatim Nano 3.2 fail enumeration every time
-      (CHECK_SHORT_DEV_DESC, ESP-IDF's known enumeration-stability bug, esp-idf #15938/#17832;
-      K&ZZ USB 2.0 works; the PNY works straight on USB1 without the hub, so it is the
-      external-port path) — ESP32_FEATURE_PORT.md P3. Firmware hub-port power cycle after an
-      external-port ENUM failure is the candidate fix; keep a tested-stick list
+- [ ] USB sticks: PNY Elite-X Fit and Verbatim Nano 3.2 fail enumeration BEHIND THE HUB on the
+      ESP32-S3 host (CHECK_SHORT_DEV_DESC — ESP-IDF's known enumeration-stability bug, esp-idf
+      #15938/#17832, one external-port reset attempt; the PNY works straight on USB1; the K&ZZ
+      USB 2.0 works anywhere) (2026-11-19, ESP32_FEATURE_PORT.md P3). Firmware 2026-11-20: bounded hub-port power-cycle
+      retry (`usbhub_retry.c`, 3 cycles per plug) + SETTINGS `USB HUB PORT RETRY` (ALL PORTS
+      default since 11-20 / PER-PORT; telnet `usb retry on|off`). Tested 11-20 on the 05E3:0610
+      hub (ganged port power): PER-PORT refuses by design; ALL PORTS RECOVERED THE PNY AFTER 2
+      CYCLES (dongle re-enumerated by itself, P3 has both logs); Verbatim recovers too and the
+      remote works after a ladder (Ed, 11-20 evening). Open: RTL8152B uplink through a ladder
+      (re-enumerates, re-DHCP), unplug mid-ladder, replug after a give-up;
+      PNY WRITES — CLOSED 11-20: the PNY's first WRITE(10) after power-up takes ~1.9 s (then
+      17–47 ms); the old 1.5 s wait cut it off and `bulk_xfer` FREED THE IN-FLIGHT TRANSFER
+      (IDF timeout_ms unimplemented) → broken FTP sessions and one card reboot. Fixed in
+      98ff773e (endpoint halt/flush cancel, 8 s write CSW wait, RESET REASON at boot): 1.3 MB
+      FTP write to the PNY byte-exact (69 s vs 11 s Verbatim). Caveat: first Disk II track
+      flush to a fresh PNY holds the MSC lock ~2 s (P3);
+      recommend USB 2.0 to users and keep a tested list
 
 ## Shipped on displayport1 (2026-10-01 → 10-12)
 

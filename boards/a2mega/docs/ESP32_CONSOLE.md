@@ -25,7 +25,11 @@ every new log line. Since 2026-11-18 the tee also carries every **ESP-IDF
 error-level log line** (`idf_log_tee.c`: `E (ts) TAG: msg` → `TAG: MSG`, in
 40-column pieces), so `usb_host` failures such as `HCD DWC: NO MORE HCD
 CHANNELS AVAILABLE` or `ENUM: STAGE ... FAILED` are readable here; the serial
-console is USB1, the host port, and is unreachable whenever a dock is attached. **Every byte you type is a hotkey**, dispatched
+console is USB1, the host port, and is unreachable whenever a dock is attached.
+The same tee feeds one hook: `EXT_PORT: [h:p] Port disabled` starts the
+hub-port power-cycle retry in `usbhost.cpp` (`USB HOST: HUB h PORT p ENUM
+FAILED, POWER CYCLING PORT (TRY n/3)` ... `RECOVERED` or `FAILED TO
+ENUMERATE, PLUG THE STICK DIRECTLY`; a2p25 ESP32_FEATURE_PORT.md P3). **Every byte you type is a hotkey**, dispatched
 immediately, no Enter needed. There is no `help` command in key mode; the
 banner lists the keys:
 
@@ -90,7 +94,19 @@ ble [pair|cancel|list|connect <n>|forget|radio on|off|map|raw on|off]
                              when their decoded bits change) — the way to find
                              out what a new remote's keys send.
                              Works without the FPGA link (2026-11-19).
-usb                          every device the USB host has enumerated on USB1
+usb [retry on|off]           every device the USB host has enumerated on USB1
+                             (with `retry on|off`: first set USB HUB PORT RETRY =
+                             ALL PORTS (default) / PER-PORT, the SETTINGS toggle,
+                             and save; also prints storage read/write failure
+                             totals and the last failure's SCSI stage/CSW/sense)
+usb probe <lba> [read]       storage sector test at <lba>: READ(10) of one
+                             sector with its time; then, unless `read` is given
+                             and only if the sector is all zeros, a WRITE(10) of
+                             the same zeros and a read-back (PASS/FAIL). A failed
+                             step names the SCSI stage, CSW status and sense.
+                             For bisecting a stick that fails above some address
+                             (2026-11-20, the 64 GB PNY). Non-zero sectors are
+                             refused for writing.
                              (address, VID:PID, kind, speed, product string,
                              [in use] when this firmware claimed it); hubs and
                              unclaimed devices included. Device mode = nothing.
