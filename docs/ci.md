@@ -1,7 +1,7 @@
 # Continuous Integration
 
-> Status (2026-11-20): written with the initial CI workflow; not yet validated by a
-> real runner run — the first PR's matrix run is the smoke test.
+> Status (2026-11-21): first matrix run done 2026-11-20; its a2p25 and a2mega failures
+> are root-caused and fixed in source where the design was at fault (see Toolchain variance).
 
 GitHub Actions builds every active board on each PR and push to `main` that touches
 `hdl/`, `boards/`, or `tools/build.sh`. Workflow: [`.github/workflows/fpga-build.yml`](../.github/workflows/fpga-build.yml).
@@ -47,28 +47,53 @@ GitHub Actions builds every active board on each PR and push to `main` that touc
 
 The committed `impl/pnr/` artifacts of a2n20v2, a2mega and a2p25 were built locally
 with **Gowin V1.9.12.01**; the newest license-free Linux build is **V1.9.11.03
-Education**, so CI runs an older synthesis/PnR than the builds of record. Verified
-consequences (first full matrix run, 2026-11-20):
+Education**, so CI runs an older synthesis/PnR than the builds of record. The
+Education edition is also installed on the development Mac, so every CI result can be
+reproduced locally with the exact CI toolchain (`GW_SH=` the Education bundle's
+`gw_sh`, see [tools/README.md](../tools/README.md#macos-setup)). What the two versions
+do differently, established 2026-11-20/21:
 
 - **Education 1.9.11.03 does build every chip in use** — GW2AR-18, GW5A-25 and
   GW5AT-60 all reach bitstream generation. Device support is not the problem.
+- **The Education synthesizer writes an encrypted netlist** (`impl/gwsynthesis/*.vg`
+  is a `pragma protect` block; 1.9.12 writes plaintext). Synthesis-generated instance
+  names therefore cannot be read, and they differ between versions anyway, so physical
+  constraints must name instances the HDL names itself. a2p25's `INS_LOC` pins for the
+  audio IIR's DSP cells used inferred-multiplier names (`q_h0_0_s0`, …) and failed with
+  CT1135 on CI; the filter now instantiates its MULT12X12 cells by name (`m_q_*`,
+  `m_r_*`, [docs/audio.md](audio.md#filtering)). With that, **a2p25 builds clean on
+  1.9.11.03** (0 setup / 0 hold on the first roll, 2026-11-21) and still clean on 1.9.12.01.
+- **1.9.11.03 infers RAM16 (SSRAM) shift registers and distributed RAM on the GW5AT-60
+  where 1.9.12 keeps flip-flops**: the a2mega Education build has 119–123 SSRAM cells and
+  ~4,600 fewer registers than the committed one (aux-channel FIFOs, the ESP32 scratch RAM,
+  the framebuffer read FIFO, DOC register banks, debug pipelines). Harmless for memories
+  and pipelines, but it also converted the pixel CDC FIFO's two-deep gray-pointer
+  synchronisers, turning the second stage into an asynchronous SSRAM read and routing the
+  gray→binary cone through a cross-die RAM address net: that one path family was CI's
+  "a2mega 7 setup violations" (clk_pix −0.96 ns). The synchronisers now carry
+  `syn_srlstyle = "registers"` + `syn_preserve` (`hdl/displayport/video/pixel_cdc_fifo.v`);
+  a2mega then closes setup on Education (clk_pix +0.66 ns). The documented inference rule
+  (SUG949 §5.1.3, depth > 3) is not what 1.9.11.03 applies — any multi-bit chain is at
+  risk, so mark synchronisers explicitly. A project-wide fallback exists if more turn up:
+  a `.gsc` file (`add_file -type gsc`) containing `GLOBAL syn_srlstyle=registers`.
+  The GW5A-25 (a2p25) showed no SSRAM inference under Education.
+- **a2mega still fails hold under Education by 2–14 ps on three endpoints inside Gowin's
+  DDR3 PHY IP** (`u_ddr_phy_cmd_io/oserdes_d_rr_* → cmd_oserdes_gen[*].u_cmd_gen/D*`,
+  clk1x). The same paths are at +31…+81 ps in the committed 1.9.12.01 build; 1.9.12.01's
+  release note lists updated GW5A(T)-60 delay data, so this is the timing model, not user
+  logic, and nothing in the design can move it. a2mega therefore stays `experimental`
+  in the matrix until CI runs a 1.9.12 Education release.
 - **a2n20v2, a2n20v2-Enhanced, a2n20v2-Enhanced-dualrate**: build and close timing
   cleanly on CI. These jobs **block** the PR.
 - **a2n20v2-Enhanced-fb** (11 setup violations on the first roll, clean on the
-  second) and **a2mega** (7 setup, 1 hold): complete but timing-marginal under
-  the older PnR — roll-sensitive rather than broken (the fb variant's committed
-  build is even from 1.9.11.03 Education on macOS). Marked `experimental` in the
-  matrix: the build step runs `continue-on-error`, the check stays green, and a
-  failure surfaces as a warning annotation and in the job summary.
-- **a2p25**: fails hard — `a2p25.cst`'s `INS_LOC` DSP pins (the 2026-11-18 IIR
-  placement experiment) reference synthesis-generated names
-  (`i_audio_out/IIR_filter/q_h0_0_s0`, …) that the 1.9.11.03 synthesizer does not
-  produce (CT1135). Toolchain-portable constraints or a 1.9.12 Education release
-  would fix this. Also `experimental`.
+  second): roll-sensitive rather than broken (its committed build is even from 1.9.11.03
+  Education on macOS). `experimental`.
 
 When Gowin publishes a license-free Linux 1.9.12, switch `GOWIN_URL`/`GOWIN_SHA256`
 and re-evaluate the `experimental` flags — matching the local version should make
-these boards candidates for blocking status.
+these boards candidates for blocking status. a2p25 is a candidate for blocking status
+now; promote it once a few CI runs confirm the first clean roll was not luck (its clk100
+margin was +0.15 ns).
 
 ## Version pinning
 

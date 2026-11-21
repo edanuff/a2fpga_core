@@ -86,12 +86,22 @@ Two things to know about it:
   infers for them compute wrong results on the GW5A-25 (verified on the a2p25 with the audio
   CDC jump counter, 2026-11-18, while the RTL was bit-exact in simulation and the netlist
   wiring checked out). MULT12X12, the DOC's multiplier, is the one DSP cell with hardware
-  proof here, so that is what the filter uses: 14 DSP blocks and about 1,350 LUT/ALU.
+  proof here, so that is what the filter uses: 16 DSP blocks and about 1,350 LUT/ALU.
   Every DSP block on the GW5A-25 is in one row (`DSP_R19[0..27]`); left unpinned, the filter's
   cells scattered along it and its adder chains displaced the DP channel-management cluster and
-  the HyperRAM PHY's edge flops, costing timing on unrelated clocks. `a2p25.cst` pins the 28
-  cells to `DSP_R19[11..24]` (three clean rolls; the filter's own paths have a 3-cycle budget,
-  so its placement is free). A top that adds this filter on another GW5A should pin likewise.
+  the HyperRAM PHY's edge flops, costing timing on unrelated clocks. `a2p25.cst` pins the 32
+  cells to `DSP_R19[11..26]` (the filter's own paths have a 3-cycle budget, so its placement is
+  free). A top that adds this filter on another GW5A should pin likewise.
+- **The MULT12X12 cells are instantiated by name, not inferred** (`m_q_*` in `IIR_filter`,
+  `m_r_*` in each `iir_filter_tap`, every register stage bypassed). Inferred `*` products get
+  synthesizer-generated names that differ between Gowin versions (`q_h0_0_s0` in 1.9.12; the
+  1.9.11.03 Education edition CI builds with produces different ones and ships an encrypted
+  netlist, so they cannot even be read), and the `INS_LOC` pins broke the CI build with CT1135.
+  The named instances cost two extra DSP blocks: the four products whose `cx` piece is a
+  constant 0 or 1 were folded away when inferred (28 cells / 14 blocks, 2026-11-18) and are
+  not as primitives. The bench needs Gowin's GW5A simulation model for the primitive; `run.sh`
+  finds it in the installed IDE (`GOWIN_SIMLIB=.../IDE/simlib/gw5a/prim_sim.v` overrides) and
+  still shows the GW5A file bit-exact with the GW2A one (2026-11-21).
 
 Where it runs: the Tang Nano tops filter on the 27 MHz pixel clock after the CDC. The a2p25
 filters on **`clk_logic` ahead of the CDC**, so the band-limiting sees the full-rate sources

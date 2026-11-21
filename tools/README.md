@@ -105,6 +105,19 @@ build has resolved this upstream and the script is no longer needed. Pass
 a custom IDE path as the first argument if Gowin is not in the default
 `/Applications/GowinIDE.app` location.
 
+**Building with the Education edition (the CI toolchain) on macOS:** the
+Education `.app` has the same broken CLI links; fix it once by passing its
+IDE directory, then point `build.sh` at its `gw_sh`:
+```bash
+tools/gowin_cli_fix_macos.sh "/Applications/GowinIDE V1.9.11.03 Education.app/Contents/Resources/Gowin_EDA/IDE"
+GW_SH="/Applications/GowinIDE V1.9.11.03 Education.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh" tools/build.sh a2p25
+```
+This is how to reproduce a GitHub Actions result locally — CI pins exactly
+this version (see [docs/ci.md](../docs/ci.md)). Note that the Education
+synthesizer writes an **encrypted** netlist (`impl/gwsynthesis/*.vg` is a
+`pragma protect` block), so synthesis-generated instance names cannot be read
+from it; constraints must name instances the HDL names itself.
+
 **Full GUI install:** To also use the Gowin IDE GUI (and remove the
 Gatekeeper quarantine), apply the complete fixer at install time:
 ```

@@ -42,9 +42,18 @@ module pixel_cdc_fifo #(
     reg [ADDR_BITS:0] wptr_bin  = 0, wptr_gray = 0;
     reg [ADDR_BITS:0] rptr_bin  = 0, rptr_gray = 0;
 
-    // Cross-domain synchronisers
-    (* ASYNC_REG = "TRUE" *) reg [ADDR_BITS:0] rptr_gray_w1 = 0, rptr_gray_w2 = 0;
-    (* ASYNC_REG = "TRUE" *) reg [ADDR_BITS:0] wptr_gray_r1 = 0, wptr_gray_r2 = 0;
+    // Cross-domain synchronisers. They must be two real flip-flops per bit:
+    // GowinSynthesis 1.9.11.03 (the Education edition CI builds with) infers a
+    // RAM16-based shift register for a two-deep chain unless told otherwise,
+    // which turns the second stage into an asynchronous SSRAM read (no
+    // metastability settling) and, on the a2mega, put the gray->binary cone
+    // behind a cross-die RAM address net (clk_pix -0.96 ns, 7 endpoints,
+    // 2026-11-21). 1.9.12 keeps them as flops on its own; the attributes make
+    // every version do so. syn_preserve also keeps them out of register merging.
+    (* ASYNC_REG = "TRUE" *) reg [ADDR_BITS:0] rptr_gray_w1 = 0 /* synthesis syn_srlstyle = "registers" syn_preserve = 1 */,
+                                               rptr_gray_w2 = 0 /* synthesis syn_srlstyle = "registers" syn_preserve = 1 */;
+    (* ASYNC_REG = "TRUE" *) reg [ADDR_BITS:0] wptr_gray_r1 = 0 /* synthesis syn_srlstyle = "registers" syn_preserve = 1 */,
+                                               wptr_gray_r2 = 0 /* synthesis syn_srlstyle = "registers" syn_preserve = 1 */;
 
     function [ADDR_BITS:0] bin2gray(input [ADDR_BITS:0] b);
         bin2gray = b ^ (b >> 1);

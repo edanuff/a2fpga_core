@@ -9,6 +9,9 @@ module tb_audio_out_gw5a;
     localparam real TP = 1.0e9 / CLK_P;
     localparam real TE = 1.0e9 / CLK_E;
     logic clk = 0, clk_e = 0, reset = 1;
+    // Gowin's primitive models read the global set/reset from a top-level
+    // instance named GSR (prim_sim.v: `wire grstn = GSR.GSRO;`)
+    GSR GSR (.GSRI(1'b1));
     always #(TP / 2.0) clk   = ~clk;
     always #(TE / 2.0) clk_e = ~clk_e;
 

@@ -45,12 +45,16 @@
 //                         cy  = s(cy[23:12]) << 12 + u(cy[11:1]) << 1 + cy[0]
 //                                                                    -> 8 products + y
 //
-//  Cost on the a2p25 (2026-11-18): 28 MULT12X12 = 14 DSP blocks after constant
-//  folding (the tops' cx has no bits above 22), about 1,350 LUT/ALU and 550 FF
-//  with audio_out and the DC blockers, vs 11 blocks / 275 LUT for the wrong
-//  27x36 version. The `inp` register is absorbed into the input multipliers'
-//  pipeline registers, so a multicycle exception on these paths must name the
-//  DSP DOUT pins as well as the fabric registers (boards/a2p25/hdl/a2p25.sdc).
+//  Cost on the a2p25: 32 MULT12X12 = 16 DSP blocks (the cells are instantiated,
+//  not inferred, so the four whose cx piece is a constant 0 or 1 are not folded
+//  away -- inferred, 2026-11-18, they were: 28 cells / 14 blocks), about 1,350
+//  LUT/ALU and 550 FF with audio_out and the DC blockers, vs 11 blocks / 275
+//  LUT for the wrong 27x36 version. The instances are named (m_q_*, m_r_*) so
+//  boards/a2p25/hdl/a2p25.cst can pin them in any GowinSynthesis version; the
+//  inferred cells' names differed between 1.9.11.03 and 1.9.12 (2026-11-21).
+//  Every DSP register stage is bypassed, so `inp` stays a fabric register and
+//  the multicycle exception in boards/a2p25/hdl/a2p25.sdc covers the cells'
+//  DOUT pins as well as the fabric registers.
 //
 //  Can be converted to 2-tap (coeff_x2 = 0, coeff_y2 = 0) or 1-tap (coeff_x1,2 = 0, coeff_y1,2 = 0)
 //
@@ -108,14 +112,28 @@ wire signed [11:0] vb_3 = {{5{vcoeff[39]}}, vcoeff[39:33]};
 wire signed [11:0] vb_2 = {1'b0, vcoeff[32:22]};
 wire signed [11:0] vb_1 = {1'b0, vcoeff[21:11]};
 wire signed [11:0] vb_0 = {1'b0, vcoeff[10:0]};
-wire signed [23:0] q_h3 /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ia_h * vb_3;
-wire signed [23:0] q_h2 /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ia_h * vb_2;
-wire signed [23:0] q_h1 /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ia_h * vb_1;
-wire signed [23:0] q_h0 /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ia_h * vb_0;
-wire signed [23:0] q_l3 /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ia_l * vb_3;
-wire signed [23:0] q_l2 /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ia_l * vb_2;
-wire signed [23:0] q_l1 /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ia_l * vb_1;
-wire signed [23:0] q_l0 /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ia_l * vb_0;
+// Each product is an explicitly instantiated MULT12X12 (combinational: every
+// register stage bypassed; the cell is signed 12 x 12 -> 24 on the GW5A) so the
+// instance names below are stable across GowinSynthesis versions. a2p25.cst
+// pins them by these names; an inferred `*` gets a synthesizer-generated name
+// (q_h0_0_s0 in 1.9.12, something else in 1.9.11.03) and the constraint breaks.
+wire signed [23:0] q_h3, q_h2, q_h1, q_h0, q_l3, q_l2, q_l1, q_l0;
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_q_h3 (.DOUT(q_h3), .A(ia_h), .B(vb_3), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_q_h2 (.DOUT(q_h2), .A(ia_h), .B(vb_2), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_q_h1 (.DOUT(q_h1), .A(ia_h), .B(vb_1), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_q_h0 (.DOUT(q_h0), .A(ia_h), .B(vb_0), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_q_l3 (.DOUT(q_l3), .A(ia_l), .B(vb_3), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_q_l2 (.DOUT(q_l2), .A(ia_l), .B(vb_2), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_q_l1 (.DOUT(q_l1), .A(ia_l), .B(vb_1), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_q_l0 (.DOUT(q_l0), .A(ia_l), .B(vb_0), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
 // weights: h*b3 << 44, h*b2 << 33, h*b1 << 22, h*b0 << 11, l*b3 << 33, l*b2 << 22, l*b1 << 11, l*b0 << 0
 wire signed [59:0] inp_mul_s =
       ({{36{q_h3[23]}}, q_h3} <<< 44) + ({{36{q_h2[23]}}, q_h2} <<< 33) + ({{36{q_h1[23]}}, q_h1} <<< 22) + ({{36{q_h0[23]}}, q_h0} <<< 11)
@@ -230,14 +248,24 @@ wire signed [11:0] ya_1 = {1'b0, y[21:11]};
 wire signed [11:0] ya_0 = {1'b0, y[10:0]};
 wire signed [11:0] cb_h = cy[23:12];
 wire signed [11:0] cb_l = {1'b0, cy[11:1]};
-wire signed [23:0] r_3h /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ya_3 * cb_h;
-wire signed [23:0] r_2h /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ya_2 * cb_h;
-wire signed [23:0] r_1h /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ya_1 * cb_h;
-wire signed [23:0] r_0h /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ya_0 * cb_h;
-wire signed [23:0] r_3l /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ya_3 * cb_l;
-wire signed [23:0] r_2l /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ya_2 * cb_l;
-wire signed [23:0] r_1l /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ya_1 * cb_l;
-wire signed [23:0] r_0l /* synthesis syn_use_dsp = 1 syn_keep = 1 */ = ya_0 * cb_l;
+// Explicit MULT12X12 instances with stable names (see IIR_filter above).
+wire signed [23:0] r_3h, r_2h, r_1h, r_0h, r_3l, r_2l, r_1l, r_0l;
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_r_3h (.DOUT(r_3h), .A(ya_3), .B(cb_h), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_r_2h (.DOUT(r_2h), .A(ya_2), .B(cb_h), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_r_1h (.DOUT(r_1h), .A(ya_1), .B(cb_h), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_r_0h (.DOUT(r_0h), .A(ya_0), .B(cb_h), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_r_3l (.DOUT(r_3l), .A(ya_3), .B(cb_l), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_r_2l (.DOUT(r_2l), .A(ya_2), .B(cb_l), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_r_1l (.DOUT(r_1l), .A(ya_1), .B(cb_l), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
+MULT12X12 #(.AREG_CLK("BYPASS"), .BREG_CLK("BYPASS"), .PREG_CLK("BYPASS"), .OREG_CLK("BYPASS"))
+	m_r_0l (.DOUT(r_0l), .A(ya_0), .B(cb_l), .CLK(2'b00), .CE(2'b00), .RESET(2'b00));
 wire signed [60:0] y_s37 = {{24{y[36]}}, y[36:0]};
 wire signed [60:0] y_mul_s =
       ({{37{r_3h[23]}}, r_3h} <<< 45) + ({{37{r_2h[23]}}, r_2h} <<< 34) + ({{37{r_1h[23]}}, r_1h} <<< 23) + ({{37{r_0h[23]}}, r_0h} <<< 12)
