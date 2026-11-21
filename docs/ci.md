@@ -77,12 +77,27 @@ do differently, established 2026-11-20/21:
   risk, so mark synchronisers explicitly. A project-wide fallback exists if more turn up:
   a `.gsc` file (`add_file -type gsc`) containing `GLOBAL syn_srlstyle=registers`.
   The GW5A-25 (a2p25) showed no SSRAM inference under Education.
-- **a2mega still fails hold under Education by 2–14 ps on three endpoints inside Gowin's
-  DDR3 PHY IP** (`u_ddr_phy_cmd_io/oserdes_d_rr_* → cmd_oserdes_gen[*].u_cmd_gen/D*`,
-  clk1x). The same paths are at +31…+81 ps in the committed 1.9.12.01 build; 1.9.12.01's
-  release note lists updated GW5A(T)-60 delay data, so this is the timing model, not user
-  logic, and nothing in the design can move it. a2mega therefore stays `experimental`
-  in the matrix until CI runs a 1.9.12 Education release.
+- **a2mega's remaining Education failure was hold, and it was placement.** With the
+  synchronisers fixed, 1.9.11.03 still missed hold by 2–14 ps on three endpoints inside
+  Gowin's DDR3 PHY IP (`u_ddr_phy_cmd_io/oserdes_d_rr_* → cmd_oserdes_gen[*]/D*`, clk1x).
+  The path's cell delays and clock routes are identical in both versions; 1.9.11.03 simply
+  placed the launching flop one CLS closer to the IO column (142 ps of data route where
+  156 ps is needed, vs 183 ps in 1.9.12.01). Its "Correct Hold Violation" router pass
+  (already on) never adds delay into hard-block inputs (IOLOGIC D, BSRAM DI/AD) — a
+  `set_min_delay` on the paths only produced 131 analysed violations, no fix. The lever
+  that works is the placer algorithm: the project had carried `Place_Option` 2 (a generic
+  "timing-optimised placement" tip adopted in the 2026-08 DP bring-up) and that value
+  lands the command lane short of hold on Education every roll; `Place_Option` 0 (Gowin's
+  default, what a2p25 and a2n20v2-Enhanced use) closed **three of three Education rolls**
+  (setup +0.90/+0.59/+0.82 ns, hold +79/+4/+59 ps) and is clean on 1.9.12.01 too
+  (setup +0.46, hold +44 ps). Options 1 (clean, hold +18 ps), 3 (hold −39 ps elsewhere)
+  and 4 (setup −3.3 ns) lost; `Route_Option` 1 must stay (0 reopens the pixel FIFO read
+  cone, setup −0.55). `impl/a2mega_process_config.json` now says `Place_Option` 0
+  (2026-11-21). Hold margins on flop→hard-block paths are small in every Gowin flow here
+  (+31…+48 ps on 1.9.12.01), so a near-zero positive hold on such a path is normal, not a
+  sign of a problem. ⚠ Placement changes have altered DP link acquisition on the a2mega
+  before without any STA signature (boards/a2mega/docs/test_log.md rows 85/86): the new
+  build of record needs the usual card check before it is trusted.
 - **a2n20v2, a2n20v2-Enhanced, a2n20v2-Enhanced-dualrate**: build and close timing
   cleanly on CI. These jobs **block** the PR.
 - **a2n20v2-Enhanced-fb** (11 setup violations on the first roll, clean on the
@@ -91,9 +106,9 @@ do differently, established 2026-11-20/21:
 
 When Gowin publishes a license-free Linux 1.9.12, switch `GOWIN_URL`/`GOWIN_SHA256`
 and re-evaluate the `experimental` flags — matching the local version should make
-these boards candidates for blocking status. a2p25 is a candidate for blocking status
-now; promote it once a few CI runs confirm the first clean roll was not luck (its clk100
-margin was +0.15 ns).
+these boards candidates for blocking status. a2p25 and a2mega are candidates for
+blocking status now; promote them once a few CI runs confirm the clean local rolls
+(a2p25's clk100 margin was +0.15 ns; a2mega's hold margins are tens of ps by nature).
 
 ## Version pinning
 
