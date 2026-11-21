@@ -18,12 +18,21 @@ Education (No License Required):
   (sha256 `6fd392f7473b24d847b6f8ebdc7a185c591826ba35d8d0e517961030d446f9f7`,
   matching the AUR `gowin-eda-edu` package's pinned checksum — this is the build CI
   uses, see [docs/ci.md](../docs/ci.md))
+- macOS V1.9.11.03 Education: https://eda.gowinsemi.cn/Gowin_V1.9.11.03Education_macOS.dmg
+  (~687 MB; note the filename has **no underscore** before `Education`)
+- Windows x64 V1.9.11.03 Education: https://eda.gowinsemi.cn/Gowin_V1.9.11.03_Education_x64_win.zip
+  (~443 MB)
+
+  All three verified HTTP 200 on 2026-11-20. The macOS `.app` launcher has an
+  unquoted `cd` bug: if the installed bundle name contains spaces (e.g.
+  `GowinIDE V1.9.11.03 Education.app`), edit `Contents/MacOS/gowinide` and change
+  `cd $GOWIN_EDA_BIN_DIR` to `cd "$GOWIN_EDA_BIN_DIR"`, or it silently fails to launch.
 
 Full Edition (Requires License and Registration with Gowin):
 
 - Linux V1.9.12.04: https://eda.gowinsemi.cn/Gowin_V1.9.12.04_linux.tar.gz
 
-For macOS and Windows installers, download from the
+For other versions, download from the
 [Gowin EDA download page](https://www.gowinsemi.com/en/support/download_eda/)
 (free registration required), Education section.
 
