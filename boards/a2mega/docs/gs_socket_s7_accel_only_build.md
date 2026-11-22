@@ -55,7 +55,8 @@ found no mouse firmware, and the game does not test ReadMouse's error;
 with slot 4 back on the mouse port it runs (Ed)**; **tv1 - the trace
 build with the speed rules' gap closed and the over-held path at its
 two clks, three placements with no violation - flashed 2026-11-22
-09:01, not yet loaded; the setting off**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
+09:01 and loaded (its stamp read from the card); the setting on again
+since then, with the machine off; nothing has run on it**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
 only what the machine was given since the card began to mirror, and
 RAM that nothing has written since power-up reads differently from the
 copy than from the machine - about 23,000 bytes on this power-up, and
@@ -2710,7 +2711,13 @@ the machine's clock stopped), first attempt, read-back verified; the
 card checked by its USB serial number and the file by its sha256
 before. Not yet loaded: the card has not been power-cycled, the stamp
 is not read from it, and nothing has run on it. The saved accelerator
-setting is still off. What this build has that no build on the card
+setting is still off. **Later the same morning:** the card power-cycled
+(Ed), the stamp read from it is `20261121223112`, tv1's; then, on Ed's
+word and with the machine off (the card's report: clock stopped, reset
+held, socket off), `gs accel on`: the setting reads ON, and the next
+power-up of the machine runs the bring-up by itself. Nothing has run
+on tv1 yet. With the accelerator on the trace cannot be loaded (its
+slots share register 31 with the request key): it is for mode 00. What this build has that no build on the card
 had: the rules' shadow bit and the constraint; se2's slot 6 rule is in
 it and is not yet confirmed on the machine either.
 
@@ -2832,7 +2839,7 @@ Kept in `impl/pnr` by name. (tu0 to tu2 there are of the dropped change
 of logic, each with violations: of no use.)
 **tv1 flashed 2026-11-22 09:01** over USB with the machine off, first
 attempt, read-back verified, the card checked by its serial number
-before it. Not yet loaded.
+before it. Loaded the same morning, the stamp read from the card.
 
 Provenance of ts0, ts1 and ts2 (the trace project with the speed
 rules' shadow bit, section 3n; **two placements of three with no
