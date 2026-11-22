@@ -3242,6 +3242,26 @@ FPGA's PH2 pin has an edge too many in such a cycle. That is a counter
 and a few samples of the pin in the build with the trace; and the
 broker taking for a cycle's end only the fall the PHY takes is a
 change the capture asks for whatever the count turns out to be.
+   **The log of verify mismatches (built 2026-11-22; simulated; two
+placements of three with no violation: not a closed build; not
+flashed).** In the build with the trace, `gs_accel` keeps the first
+four mismatches since card memory was last taken, three telemetry
+words each (18 to 29, the number logged in 30): `{address, the card's
+byte}`, `{where the card read it - RAM's physical address or the ROM
+image's - , the socket's byte}`, `{shadow, state register, speed
+register, source}`, the source being the broker's `{near memory, card
+memory selected, ROM selected, the decode's local, local ROM, side,
+slow, bypass}`. The broker registers these at the mismatch (four
+outputs more); nothing reads back into it. The bench compares the log
+at the end of a run with its own broker's first four mismatches (a
+toggling run must make at least one): 231 runs pass. A first build
+(tw0) had 561 setup violations: the log was emptied in the clk card
+memory's grant moved, which hung its 384 enables on the request's key;
+the grant goes through two registers now. Timing of the three
+placements of that source: tx0 +0.034 and tx1 +0.012, none; **tx2 34
+violations, -0.288** (a step register into the cheap view's clock
+enable, a path of every round). So this is two clean placements, to be
+used as x0 and q1 were if at all, by Ed's decision.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
@@ -3352,6 +3372,18 @@ The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of tx0, tx1 and tx2 (the trace project with the log of
+verify mismatches, section 3n; **two placements of three with no
+violation: not a closed build**; none flashed): sources = the commit
+that adds this paragraph; the same tool and device. tx0: build stamp
+`20261122122636`, bitstream sha256 `8ab342a00ab18363...0beaa732cb6a97d8`,
+of the lines that are not header `203cb0d5f124f03e...2848a412111e12c3`.
+tx1: `20261122124750`, `3415a2cf1f75ac14...6357fee867b8958a9f`,
+`0c33da48ce822cf4...5f6922f922e3f9`. tx2 (34 setup violations):
+`20261122125335`, `40b692c94bdeea40...43bdb53d6bd576e`,
+`9d62561603c37bf8...89193adc67ec24f`. Kept in `impl/pnr` by name. (tw0
+there is the first build of it, 561 violations, of no use.)
 
 Provenance of tv0, tv1 and tv2 (the trace project, the speed rules'
 shadow bit, and `nl_idx` to `nh_dq` at two clks, section 3n; three

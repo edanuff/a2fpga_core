@@ -381,6 +381,11 @@ module gs_accel_broker #(
     output logic        slow_o,          // SLOW_COPY: reads of Mega II RAM are the card's, in the step in progress
     output logic [15:0] verify_scount_o, // ... mismatches in banks E0/E1 (they are counted in verify_count_o too)
     output logic [23:0] verify_saddr_o,  // ... the address of the last one
+    // (for a log of mismatches, gs_accel's: of the mismatch verify_miss_o reports)
+    output logic [7:0]  verify_card_o,   // the card's byte
+    output logic [7:0]  verify_sock_o,   // the socket's
+    output logic [23:0] verify_phys_o,   // where the card read it: RAM's physical address, or {6'h3F, the ROM image's}
+    output logic [7:0]  verify_src_o,    // {near memory, card memory selected, ROM selected, decode: local, local ROM, side, slow, bypass}
     output logic [31:0] stat_steps_o,    // core steps
     output logic [31:0] stat_sock_o,     // socket cycles run for the core (reads, synchronous writes)
     output logic [31:0] stat_posted_o,   // posted writes completed
@@ -1493,6 +1498,7 @@ module gs_accel_broker #(
         if (!rst_n) begin
             verify_miss_o <= 1'b0; verify_addr_o <= '0; verify_count_o <= '0;
             verify_scount_o <= '0; verify_saddr_o <= '0;
+            verify_card_o <= '0; verify_sock_o <= '0; verify_phys_o <= '0; verify_src_o <= '0;
             stat_steps_o <= '0; stat_sock_o <= '0; stat_posted_o <= '0; stat_pwwait_o <= '0;
             stat_rd_hit_o <= '0; stat_rd_miss_o <= '0;
         end else begin
@@ -1500,6 +1506,10 @@ module gs_accel_broker #(
             if (vfy_miss) begin
                 verify_addr_o <= DATA_LATE ? eff_addr : sreq_addr;
                 if (verify_count_o != 16'hFFFF) verify_count_o <= verify_count_o + 16'd1;
+                verify_card_o <= vfy_d;
+                verify_sock_o <= d_f;
+                verify_phys_o <= aq_local_rom ? {6'h3F, aq_rom_addr} : aq_phys;
+                verify_src_o  <= {near_r, use_lm_r, rom_r, aq_local, aq_local_rom, aq_side, slow_q, mode_bypass};
                 // (ea_k: the step's address from a register - it has been that since the
                 // step's second clk)
                 if (SLOW_COPY && DATA_LATE && ea_k[23:17] == 7'h70) begin

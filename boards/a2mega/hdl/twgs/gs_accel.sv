@@ -261,6 +261,9 @@ module gs_accel #(
     logic [7:0]  idle_d;
     logic [23:0] idle_a, verify_addr, verify_saddr;
     logic [15:0] verify_scount;
+    logic        vm_evt;
+    logic [7:0]  vm_card, vm_sock, vm_src;
+    logic [23:0] vm_phys;
     logic        lm_wfwd, brk_slow;
     logic [NEAR_AW-1:0] nm_flush_idx;
     logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait, stat_rd_hit, stat_rd_miss;
@@ -295,7 +298,8 @@ module gs_accel #(
         .nm_dwen_o(nm_dwen), .nm_lfill_o(nm_lfill), .lm_risrom_o(lm_risrom),
         .lm_rexp_o(lm_rexp), .lm_rwait_i(x_rwait), .lm_wbusy_i(x_wbusy),
         .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(), .pw_busy_o(),
-        .verify_miss_o(), .verify_addr_o(verify_addr), .verify_count_o(verify_count_o),
+        .verify_miss_o(vm_evt), .verify_addr_o(verify_addr), .verify_count_o(verify_count_o),
+        .verify_card_o(vm_card), .verify_sock_o(vm_sock), .verify_phys_o(vm_phys), .verify_src_o(vm_src),
         .slow_o(brk_slow), .verify_scount_o(verify_scount), .verify_saddr_o(verify_saddr),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
         .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
@@ -637,6 +641,54 @@ module gs_accel #(
         assign trace_stat_o = 2'b10;
     end
 
+    // ---- (TRACE) the first verify mismatches since card memory was last taken: each read
+    // where the card's byte was not the socket's, with both bytes, where the card read
+    // its own and the replica's switches then.  Words 18 to 29, three an entry:
+    //   {address, card's byte}, {physical address, socket's byte}, {shadow, state register, speed register, source}
+    // and word 30 the number logged.  The broker's outputs are registered at the
+    // mismatch and its event is a clk behind them.
+    localparam int VML = 4;
+    logic [31:0] vml_a [0:VML-1], vml_b [0:VML-1], vml_c [0:VML-1];
+    logic [2:0]  vml_n;
+    // (the log is emptied from registers: card memory's grant is behind the request's key
+    // and must not reach these enables in the clk it moves)
+    logic        cardmem_q, cardmem_q2, vml_clr;
+    if (TRACE) begin : g_vml
+        always_ff @(posedge clk or negedge rst_n) begin
+            if (!rst_n) begin
+                vml_n <= '0; cardmem_q <= 1'b0; cardmem_q2 <= 1'b0; vml_clr <= 1'b0;
+                for (int i = 0; i < VML; i++) begin vml_a[i] <= '0; vml_b[i] <= '0; vml_c[i] <= '0; end
+            end else begin
+                cardmem_q  <= cardmem;
+                cardmem_q2 <= cardmem_q;
+                vml_clr    <= cardmem_q & ~cardmem_q2;
+                if (vml_clr) vml_n <= '0;
+                else if (vm_evt && vml_n != 3'(VML)) begin
+                    vml_a[vml_n[1:0]] <= {verify_addr, vm_card};
+                    vml_b[vml_n[1:0]] <= {vm_phys, vm_sock};
+                    vml_c[vml_n[1:0]] <= {r_shadow, r_statereg, r_cyareg, vm_src};
+                    vml_n <= vml_n + 3'd1;
+                end
+            end
+        end
+    end else begin : g_novml
+        always_comb begin
+            vml_n = '0; cardmem_q = 1'b0; cardmem_q2 = 1'b0; vml_clr = 1'b0;
+            for (int i = 0; i < VML; i++) begin vml_a[i] = '0; vml_b[i] = '0; vml_c[i] = '0; end
+        end
+    end
+    logic [31:0] vml_w;
+    always_comb begin
+        unique case (tele_idx_i)
+            6'd18: vml_w = vml_a[0];  6'd19: vml_w = vml_b[0];  6'd20: vml_w = vml_c[0];
+            6'd21: vml_w = vml_a[1];  6'd22: vml_w = vml_b[1];  6'd23: vml_w = vml_c[1];
+            6'd24: vml_w = vml_a[2];  6'd25: vml_w = vml_b[2];  6'd26: vml_w = vml_c[2];
+            6'd27: vml_w = vml_a[3];  6'd28: vml_w = vml_b[3];  6'd29: vml_w = vml_c[3];
+            6'd30: vml_w = {29'h0, vml_n};
+            default: vml_w = 32'h0;
+        endcase
+    end
+
     assign status_o = {ph2_alive, running, enabled, be_ok, gs_res_n_i, gs_rdy_i, 2'b00};
     assign mode_o   = {rom_valid, copy_busy, held, brk_fast, cardmem, cxrom, brk_slow, 1'b0};
     always_ff @(posedge clk) begin
@@ -659,7 +711,7 @@ module gs_accel #(
             6'd15:   tele_word_o <= tr_s0;        // (TRACE: gs_accel_trace's stat0 to stat2; else 0)
             6'd16:   tele_word_o <= tr_s1;
             6'd17:   tele_word_o <= tr_s2;
-            default: tele_word_o <= 32'h0;
+            default: tele_word_o <= TRACE ? vml_w : 32'h0;
         endcase
         tele_flags_o <= 5'b00111;
         if (TRACE && tele_idx_i[5]) begin tele_word_o <= tr_word; tele_flags_o <= tr_flags; end

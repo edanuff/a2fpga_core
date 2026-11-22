@@ -1504,6 +1504,15 @@ module tb_gs_broker #(
                               {iss_vda, iss_vpa, mt_vp, u_brk.irq_f, mt_rw, mt_a, u_brk.d_f}));
             n_trc_cmp++;
         end
+        // the log of verify mismatches: the first four of the run, as this bench's own
+        // broker made them (its compare, its two bytes, its address in the clk of the miss)
+        logic [23:0] tl_a [0:3];
+        logic [7:0]  tl_c [0:3], tl_s [0:3];
+        int          tl_n = 0;
+        always @(posedge clk) if (rst_n && u_brk.vfy_miss && tl_n < 4) begin
+            tl_a[tl_n] = u_brk.eff_addr; tl_c[tl_n] = u_brk.vfy_d; tl_s[tl_n] = u_brk.d_f;
+            tl_n++;
+        end
 `endif
     // the bench's ROM image into its block-shaped ROM memory
     for (genvar b = 0; b < (NEAR_LINE ? 0 : 8); b++) begin : g_accb
@@ -1862,6 +1871,18 @@ module tb_gs_broker #(
             if (n_trc_cmp < 1000) err($sformatf("gs_accel trace: only %0d entries compared", n_trc_cmp));
             if (u_acc.g_trace.u_trace.count == 0) err("gs_accel trace kept nothing");
             $display("---- gs_accel trace: %0d entries compared with the machine's cycles, %0d kept", n_trc_cmp, u_acc.g_trace.u_trace.count);
+            // (a second ROM copy takes card memory again and empties gs_accel's log: not compared then)
+            if (!cfg_copy) begin
+                if (u_acc.vml_n != 3'(tl_n)) err($sformatf("gs_accel mismatch log has %0d entries, the design made %0d (of the first four)", u_acc.vml_n, tl_n));
+                for (int i = 0; i < tl_n; i++) begin
+                    if (u_acc.vml_a[i] !== {tl_a[i], tl_c[i]} || u_acc.vml_b[i][7:0] !== tl_s[i] || tl_c[i] === tl_s[i])
+                        err($sformatf("gs_accel mismatch log entry %0d: %08h / %08h, the design's %06h card %02h socket %02h",
+                                      i, u_acc.vml_a[i], u_acc.vml_b[i], tl_a[i], tl_c[i], tl_s[i]));
+                    $display("---- mismatch log %0d: %06h card %02h socket %02h, read at %06h, switches/source %08h", i,
+                             u_acc.vml_a[i][31:8], u_acc.vml_a[i][7:0], u_acc.vml_b[i][7:0], u_acc.vml_b[i][31:8], u_acc.vml_c[i]);
+                end
+                if (cfg_toggle && tl_n == 0) err("gs_accel mismatch log: a toggling run made no verify mismatch to log");
+            end
 `endif
             if (acc_verify != verify_count) err($sformatf("gs_accel verify count %0d, the design's %0d", acc_verify, verify_count));
             if (acc_mode[7] != copy_valid || acc_mode[4] != brk_fast || acc_mode[1] != brk_slow)
