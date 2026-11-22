@@ -180,7 +180,7 @@ module tb_gs_broker #(
     bit          cfg_rules = 0;
     logic        tr_issue_q = 1'b0, tr_slow;
     logic [23:0] tr_last = '0;
-    logic [7:0]  tr_cyareg, tr_misc;
+    logic [7:0]  tr_cyareg, tr_misc, tr_shadow;
     logic [3:0]  tr_motor;
     wire         native_w = (cfg_copy ? ~copy_usable : native_i) | tr_slow;
     wire         bypass_w = cfg_copy ? ~copy_usable : mem_bypass_i;
@@ -312,7 +312,7 @@ module tb_gs_broker #(
         .slow_o(brk_slow), .verify_scount_o(verify_scount), .verify_saddr_o(verify_saddr),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
         .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
-        .shadow_o(), .cyareg_o(tr_cyareg), .sltromsel_o(), .statereg_o(), .sw_misc_o(tr_misc)
+        .shadow_o(tr_shadow), .cyareg_o(tr_cyareg), .sltromsel_o(), .statereg_o(), .sw_misc_o(tr_misc)
     );
 
     // The core under test, through its port list: stock P65C816, or the
@@ -899,9 +899,17 @@ module tb_gs_broker #(
     end
     gs_accel_rules u_rules_tb (
         .clk(clk), .rst_n(rst_n), .cpu_rst_n_i(cpu_rst_n), .en_i(cfg_rules),
-        .bus_evt_i(tr_issue_q), .bus_a_i(tr_last), .cyareg_i(tr_cyareg), .sel35_i(tr_misc[7]),
+        .bus_evt_i(tr_issue_q), .bus_a_i(tr_last), .cyareg_i(tr_cyareg), .sel35_i(tr_misc[7]), .shadow6_i(tr_shadow[6]),
         .motor_o(tr_motor), .slow_o(tr_slow)
     );
+    // (a cycle at slot 5's motor-on address in bank 00/01 while I/O shadowing is inhibited there
+    // is RAM: the latch must not have moved a clk later)
+    int n_rule_ram = 0, n_rule_ram_set = 0;
+    bit rule_ram_q = 0;
+    always @(posedge clk) begin
+        rule_ram_q <= rst_n && tr_issue_q && tr_shadow[6] && tr_last[23:17] == 7'h00 && tr_last[15:0] == 16'hC0D9;
+        if (rule_ram_q) begin n_rule_ram++; if (tr_motor[1]) n_rule_ram_set++; end
+    end
     // what the rules did: a step is paced within three steps of slow rising and fast again
     // within three of its falling; which causes paced a stretch; and the case that must not
     int       n_rule_nat = 0, rule_hi = 0, rule_lo = 0;
@@ -1818,6 +1826,8 @@ module tb_gs_broker #(
                 if (rule_seen != 4'b1111) err($sformatf("+rules: causes that paced a stretch %04b, want all four", rule_seen));
                 if (n_rule_free6 < 100 && !cfg_toggle) err($sformatf("+rules: %0d fast steps with slot 6's motor latch set, its detect bit clear and the 5.25 drive selected, want 100 or more", n_rule_free6));
                 if (n_rule_free < 100 && !cfg_toggle) err($sformatf("+rules: %0d fast steps with slot 5's motor latch set and its detect bit clear, want 100 or more", n_rule_free));
+                if (n_rule_ram == 0) err("+rules: no cycle at 00:C0D9 with I/O shadowing inhibited");
+                if (n_rule_ram_set != 0) err($sformatf("+rules: slot 5's motor latch set by RAM at $C0D9 (I/O shadowing inhibited), %0d times", n_rule_ram_set));
                 if (n_rule_nat < 400) err($sformatf("+rules: %0d steps paced by the rules, want 300 or more", n_rule_nat));
             end
         end

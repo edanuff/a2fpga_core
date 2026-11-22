@@ -2643,6 +2643,38 @@ And `gs`'s `last_addr` is three bytes read at different times: its bank
 and address can be of different cycles ("01:8000-81FF" in section 3m
 was that, and "lines 153 to 156" there is wrong).
 
+### The speed rules where I/O shadowing is inhibited (2026-11-21 evening; simulated; two placements of three: not a closed build; not flashed)
+
+The gap of section 3m: `gs_accel_rules` moved a slot's motor latch on
+any socket cycle at `$C0n8`/`$C0n9` in banks 00 and 01, also while the
+shadow register's bit 6 has taken I/O out of those banks and the
+address is RAM. Changed: banks 00 and 01 count only while bit 6 is
+clear (`shadow6_i`, the replica's register); E0 and E1 as before.
+   What the gap was worth, found while testing it: in fast mode that
+RAM is the card's own and the access is not a socket cycle, so the
+rules never saw it - Arkanoid in fast mode would not have been paced by
+it. It bites while the card runs at the machine's pace (the speed
+register at normal, or another rule): every cycle is then on the
+socket, the old rule set the latch from RAM, and with that slot's
+detect bit set the card stayed paced after the program asked for fast.
+   Bench: T27 has a stretch for it (I/O shadowing inhibited, normal
+speed, a write and a read of `$C0D9`, then fast with slot 5's detect
+bit), and the bench fails a run in which that cycle is not seen on the
+socket or the latch has moved. **231 runs of 231 pass**; with the old
+rule planted the +rules runs fail on it ("slot 5's motor latch set by
+RAM at $C0D9"). The stretch moved the test program's steps: the two
+runs that need a recopy to begin under a RDY stall (`l_recopy_hs`,
+`l_recopy_hs2`) are at steps 20020 and 20115 now, found by a sweep.
+   Timing, in the trace project (section 3n's, with this change):
+**ts0 no violation (+0.039), ts1 no violation (+0.016), ts2 63 setup
+violations (worst -0.548, the near memory's index into the broker's
+`nh_dq`)**. Two of three is not a closed build by the rule of section
+3k, and none is flashed. The change itself is one term in a registered
+compare; the path that failed is the one that has been tightest or
+failing in other rounds (sd1, tr1), and is where a closure that does
+not hang on the placement has to be made. With `Place_Option` 1 the
+count is now sixteen placements of eighteen without a violation.
+
 ## 4. What is verified, and what is not
 
 Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):
@@ -2747,6 +2779,17 @@ The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of ts0, ts1 and ts2 (the trace project with the speed
+rules' shadow bit, section 3n; **two placements of three with no
+violation: not a closed build**; none flashed): sources = the commit
+that adds this paragraph; the same tool and device. ts0: build stamp
+`20261121202035`, bitstream sha256 `5cf9201ec3a7f875…ddd4678c7c4a483e`,
+of the lines that are not header `fddd4459be7c4730…91e02e34a21612e8`.
+ts1: `20261121202745`, `07641f1a9b3d3377…56edb5536b2bbe81`,
+`376baac51cfe2759…f47a940b90a151dc`. ts2 (63 setup violations):
+`20261121204450`, `d3cbf1071b8464ce…9ad428a2facf940b`,
+`85d20d63a9da94da…5f922c3717202789`. Kept in `impl/pnr` by name.
 
 Provenance of tr0, tr1 and tr2 (the trace build of section 3n,
 `a2mega_accel_138B_trace.gprj`; three placements with no violation;

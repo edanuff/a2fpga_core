@@ -808,6 +808,31 @@ t24n:
         lda #$80
         sta $C036
         jsr rspin
+        ; ... and with I/O and language card shadowing inhibited in banks 00/01 ($C035 bit 6):
+        ;     $C0D9 there is RAM and no drive's motor.  At the machine's normal speed, so that
+        ;     every cycle is on the socket (in fast mode that RAM is the card's own and the rules
+        ;     never see it): no latch, and fast again when the speed register says so, slot 5's
+        ;     detect bit set
+        php
+        sei
+        lda $C035
+        pha
+        ora #$40
+        sta $E0C035
+        lda #$02
+        sta $E0C036             ; normal speed, slot 5's detect bit
+        jsr rspin
+        lda #$5A
+        sta $C0D9               ; RAM
+        lda $C0D9
+        lda #$82
+        sta $E0C036             ; fast
+        jsr rspin               ; fast: no rule
+        pla
+        sta $E0C035
+        lda #$80
+        sta $C036
+        plp
 
         lda #$A5
         sta SIG

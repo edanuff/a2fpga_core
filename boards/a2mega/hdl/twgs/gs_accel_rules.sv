@@ -42,8 +42,11 @@
 // every ProDOS STATUS call), and the machine does not slow for it either.
 //
 // The latches follow the bus as the FPI's do: any cycle the socket shows at
-// those addresses in banks 00, 01, E0 or E1, read or write - an I/O access is
-// always a socket cycle, in every mode.  They clear at /RES.  With en_i low
+// those addresses in banks E0 or E1, or in banks 00 or 01 while I/O is shadowed
+// there, read or write - an I/O access is always a socket cycle, in every mode.
+// With I/O and language card shadowing inhibited (the shadow register's bit 6)
+// $C0xx of banks 00 and 01 is RAM, and a program that keeps data there (Arkanoid:
+// every frame) moves no latch.  They clear at /RES.  With en_i low
 // slow_o is low and nothing changes; the latches are kept in any case, so the
 // rules can be switched on at any time.
 //
@@ -62,11 +65,12 @@ module gs_accel_rules (
     input  logic [23:0] bus_a_i,         // ... at this address
     input  logic [7:0]  cyareg_i,        // the replica's $C036
     input  logic        sel35_i,         // the replica's $C031 bit 6
+    input  logic        shadow6_i,       // the replica's $C035 bit 6: no I/O in banks 00/01
     output logic [3:0]  motor_o,         // the motor latches of slots 4-7
     output logic        slow_o           // run at the machine's pace
 );
     // $C0C8-$C0F9 with a low nibble of 8 or 9, in a bank where I/O is
-    wire io_bank = (bus_a_i[23:17] == 7'h00) | (bus_a_i[23:17] == 7'h70);
+    wire io_bank = ((bus_a_i[23:17] == 7'h00) & ~shadow6_i) | (bus_a_i[23:17] == 7'h70);
     wire mot_hit = io_bank & (bus_a_i[15:6] == 10'b1100_0000_11) & (bus_a_i[3:1] == 3'b100);
 
     always_ff @(posedge clk or negedge rst_n) begin
