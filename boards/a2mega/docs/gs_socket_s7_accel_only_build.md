@@ -3124,6 +3124,16 @@ the same stop.
       card's, it repeats, and it keeps the accelerator from coming on
       by itself on this boot; the machine is unharmed by it. Open
       since 2026-11-16.
+   **Two more power-ups without the cable, the same (11:50, 11:51;
+Ed):** both boot to Arkanoid, and the last one's console is the
+first's - ROM copied, the verify second clean, `VERIFY MISMATCH AT
+01:FBC3 (6)` with the copy of E0/E1, socket bytes. Three of three
+without USB against none of five with it and a bring-up. The counts at
+01:FBC3 over a week: 6, 7, 6 today, 6 on 2026-11-16.
+   **Next: the mismatch itself.** The telemetry keeps a count and the
+last address; what is wanted is each of those reads - its address, the
+card's byte and the machine's - which is a few registers in the build
+with the trace.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
