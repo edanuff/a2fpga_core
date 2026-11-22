@@ -2832,6 +2832,20 @@ start-up's and not the break's, and the break is the second fault.
    None of the three other entries gives A = BFBF either: with the
 work area zero and 00:B1E7 zero, `BF86`, `BF83` and `BF80` all leave A
 0000. **How A came to BFBF and the core to `BF89` is not explained.**
+   **Who called it (Ed, `00/01F8.01FF`: FE 46 00 FE 69 68 00 30):**
+`46 00 FE` is the return of `FE:0043 JSL $E10000` with X `$0101`, in
+the ROM's entry `FE:0000` that sets the dispatch vectors and the table
+pointers in E1 and then starts the tool system; and `69 68 00` under
+it is the return of the call to `FE:0000` itself, made from RAM at
+00:6866. So **the loader called it, not the ROM's start-up: the
+machine had not restarted, and the break is the first fault.** Tool
+sets 3 to 6 had their BootInit before it without one.
+   **The routine run by hand (Ed, `FF/BF71X` in the Monitor, 10:00,
+the card paced):** it returns to the prompt, no break. Then the card
+set fast again (10:02, `gs accel fast`, mode `9A`) for the same line
+in fast mode. (The verify count is 35 now, its last address 5C:AACF:
+the Monitor's dumps of memory the machine's own RAM does not have as
+the card has it. Not a finding.)
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
