@@ -2806,6 +2806,32 @@ dispatcher's return for this call is to `BF71`, its low byte on the
 stack 70; `BF80` is that byte read as 7F. Which, if any, the Monitor
 can show: 00:B1E7 and 00:5DB0, the work area table's entry 7 at
 7F:FF98, and the stack above `$01DF`.
+   **The Monitor's dumps (Ed):** 00:B1E0 to B1EF all 00, 00:5DB0 to
+5DB7 all 00, 7F:FF90 to FF9F all 00 (the work area of set 7 is zero),
+and the stack
+
+    00/01D8: FF 04 DF 01 3D BA FF 6B
+    00/01E0: C4 8B BF FF 2D 01 FE 5A
+    00/01E8: 02 FE 07 01 00 00 2F 01
+    00/01F0: FE 00 7C FF 7F 00 2D 01
+
+`C4 8B BF FF` at 01E0 is the break's own push: P, then FF:BF8B. So the
+stack stood at `$01E3` at the break (the Monitor's S is after the
+push), which is where the dispatcher leaves it at a routine's entry:
+above it `2D 01 FE`, the dispatcher's return for the routine, then `5A
+02 FE`, the caller. The caller is ROM: `FE:0257 JSL $E10000` in the
+loop at `FE:0251` that calls every tool set's BootInit from `$0103` up
+(the `07 01` at 01EA is its counter), after `FE:0243` cleared the work
+area table through the pointer `7F:FF7C` that lies at 01F2. That loop
+is the Tool Locator's own BootInit. **So a start of the whole tool
+system was running, in fast mode, when the core left the stream** -
+the ROM's start-up, or a call of it by GS/OS's loader; which, the
+stack above 01F8 says, not read yet. If it is the ROM's, the machine
+had restarted by itself before this, the second beep may be the
+start-up's and not the break's, and the break is the second fault.
+   None of the three other entries gives A = BFBF either: with the
+work area zero and 00:B1E7 zero, `BF86`, `BF83` and `BF80` all leave A
+0000. **How A came to BFBF and the core to `BF89` is not explained.**
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
