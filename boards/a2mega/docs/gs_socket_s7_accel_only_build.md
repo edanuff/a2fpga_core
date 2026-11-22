@@ -3154,6 +3154,26 @@ firmware the bring-up's waits and its MANUAL state. Which of it does
 the harm is not found. The first power-up of the day belongs here
 too: the card had been power-cycled by its cable minutes before, and
 was up and waiting when the machine came on.
+   **The card up on USB for 27 minutes before the machine: se2 fails
+as at 11:13 (12:27).** The cable had been put back with the machine
+off about 12:00 (the card's counts read zero: it started afresh
+there), the machine turned on at 12:27:10. /RES waited for 2 s, the
+ROM copied (7EE8), and in the first reading with card memory **125
+verify mismatches, the last at `FF:ABFB`** - 130 and the same address
+at 11:13 - then socket bytes. The screen is the Monitor printing
+addresses and colons down the page (Ed's photo); at 11:13 it was the
+ROM's fatal error display. `FF:ABFB` is in the ROM's own listing code,
+the fetch after `STA $40`.
+   So this repeats to the address: **a card that was started afresh
+and then stood on USB with the machine off, 2 minutes or 27, and the
+machine's own ROM is not read right through it** - before the card's
+memory is asked for anything, since the machine is already in the
+Monitor's code when the bring-up begins at 2 s. Against it, the same
+build and the same disk, the card starting with the machine: three of
+three clean of it. What is not yet separated: whether it is something
+the gateware or the firmware gets into while it waits, or the waiting
+card itself. Next: with the cable in and the machine off, the FPGA
+loaded again from its flash over telnet just before the power-on.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
