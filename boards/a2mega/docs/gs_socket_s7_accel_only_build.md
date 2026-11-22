@@ -3174,6 +3174,27 @@ three clean of it. What is not yet separated: whether it is something
 the gateware or the firmware gets into while it waits, or the waiting
 card itself. Next: with the cable in and the machine off, the FPGA
 loaded again from its flash over telnet just before the power-on.
+   **The FPGA loaded again just before the power-on: it fails all the
+same (12:31).** Cable in, machine off, `g` on the card's console at
+12:29:53 (se2's stamp read back, every count zero), the machine on at
+12:31:02. ROM copied, and in the first reading with card memory 77
+verify mismatches, 132 by the next, the last at 00:0200 - the
+Monitor's input line - then socket bytes; the Welcome screen and a beep
+(Ed). (After the reload the hold register stood at its default until
+the clock came, the firmware not knowing of the reload; the event log
+has the start as otherwise usual: the a2p25's 10 s, the socket taken
+23 ms after /RESET.)
+   So it is **not state the gateware gathers while it waits**: that
+was thirty seconds old. Left: the firmware, up for half an hour and
+not restarted; and what a configured card does to a machine that is
+off. On the second the source says this: `a2_bus_oe = 1'b0`, the
+slot's level shifters enabled from the moment the FPGA is loaded, with
+no gate on the machine being alive - what the note of 2026-09-14 on
+these shifters calls the leak into a dead Apple and names an enable
+interlock as the remedy for. Not shown to be the cause. The test that
+tells the two apart from the outside: the cable put in and the machine
+turned on at the same moment, so that the card has not stood
+configured against a dead machine.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
