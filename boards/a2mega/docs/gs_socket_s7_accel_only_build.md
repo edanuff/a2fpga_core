@@ -3268,6 +3268,28 @@ machine off (the card's report: clock stopped), first attempt,
 read-back verified, the card checked by its serial number and the file
 by its sha256 (`8ab342a0...`). Not yet loaded. For the stop on
 01:FBC3, with the cable out for the power-ups.
+   **The stop on 01:FBC3 read from the log (tx0, 15:50; the cable out,
+its stamp read from the card).** The bring-up as on se2: ROM copied,
+the verify second clean, `VERIFY MISMATCH AT 01:FBC3 (8)` with the copy
+of E0/E1. The log's four:
+
+    01:FBC8  card 00  socket FF  read at 01:FBC8  shadow 1E state 00 speed 82  source 52
+    01:FBC9  card 00  socket FF  read at 01:FBC9                              source D2
+    01:FBC6  card 00  socket FF  read at 01:FBC6                              source D2
+    01:FBC7  card 00  socket FF  read at 01:FBC7                              source D2
+
+and the count's last address FBC3: eight bytes, FBC9 down to FBC2, in
+words from the top. The card read its own RAM at the address asked for
+(no fold, not the ROM, not the copy of E0/E1: the decode says local
+RAM, the first from the far memory and the rest from the line it
+filled), the state register 00 - language card RAM read, bank 1 of
+bank 01. **The card has 00 there and the machine FF.** So either
+nothing has written those eight bytes since power-up and the two start
+from different contents (block RAM from zero, the machine's as its
+chips come up), or a write the machine took did not reach the card's
+RAM, or one the card took did not reach the machine's. The bytes above
+FBC9 agreed, the words being read downward. A trace of the first cycle
+at 01:FBC8 says which: a write before the read, or the read alone.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
