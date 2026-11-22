@@ -3075,6 +3075,32 @@ the bring-up was run with GS/OS already up, or the machine was not in
 this loader at two seconds. **Next, with nothing flashed: the wait
 before the bring-up set to 20 s (`gs accel delay 20000`, kept until
 the ESP32 restarts), so that it runs after the loader.**
+   **With the wait at 20 s the bring-up is clean and the boot is not
+(se2, 11:34).** The bring-up: the ROM copied 20.0 s after /RES, card
+memory and the copy of E0/E1 each verified for a second with no
+mismatch added to the 130, fast at 22.1 s, and from then the speed
+rules pacing and letting go as the program writes the speed register.
+But the machine had stopped before any of it: the screen is GS/OS's
+"Welcome to the IIGS" with its bar empty (Ed's photo), no beep, and the
+log has the speed register going between 02 and 82 about eight times a
+second from 5 s after the start on, the same before the bring-up as
+after. A sample of the last address (torn, as that reading is) is
+mostly the ROM's interrupt code, `FF:B7xx`, `FF:BAxx`, `FF:BBxx`. The
+a2p25's console is as on a good boot: stick mounted, the Arkanoid
+image on unit 1, reset released.
+   **So "the bring-up two seconds after the start" is not the whole of
+it:** this power-up went wrong on socket bytes with the card asked for
+nothing, as S6 runs. Of today's eight power-ups with a card that ran:
+three stop in tv1's break, one (se2) in the ROM's 0911, one (se2) here,
+one never left reset, two (tv1, never asked for anything) boot. What
+they share is not a build and not a mode. What the two captures say -
+a fall event that the bus had not earned, 130 samples of ROM that were
+not the ROM's - is the card taking the pads at the wrong moment, and
+the Desktop Bus errors and the reset that fell back are the same day's.
+Not explained. Things of today that were not so on the days it worked:
+the card on USB from the Mac through every power-up (Ed's question at
+10:10), plugged and unplugged several times; the trace's taps (not in
+se2). **Next: the same boot with the card's USB out.**
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
