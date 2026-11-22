@@ -3290,6 +3290,33 @@ chips come up), or a write the machine took did not reach the card's
 RAM, or one the card took did not reach the machine's. The bytes above
 FBC9 agreed, the words being read downward. A trace of the first cycle
 at 01:FBC8 says which: a write before the read, or the read alone.
+   **The first cycle at 01:FBC8 is a read (tx0, 15:54; the trigger
+set as the card came up with the machine, before the socket was taken;
+`captures/gsos_lock_1122/fbc8_first_dump.txt`).** (This power-up's
+bring-up, started by hand at the take, stopped at once on reads of
+page zero and a screen hole that hold what the machine's RAM had kept
+over ten seconds without power and the card's block RAM had not -
+00:0000, 0001, 04FB, 0024: the same kind of stop, and it left the
+machine on its own bytes, every cycle on the socket.) 4.2 s after the
+start, code of GS/OS in bank 01's language card:
+
+    01:DADC  AD C8 FB   LDA $FBC8    R 01:FBC8=00  R 01:FBC9=07
+    01:DADF  48         PHA
+    01:DAE0  AD C6 FB   LDA $FBC6    R 01:FBC6=19  R 01:FBC7=0A
+    01:DAE4  AD C4 FB   LDA $FBC4    R 01:FBC4=14  R 01:FBC5=58
+    01:DAE8  AD C2 FB   LDA $FBC2    R 01:FBC2=00  R 01:FBC3=15
+
+four words of its own variables pushed for a call - the eight bytes
+and the order of the mismatch log. **No cycle at 01:FBC8 came before
+it on the socket, from before the core's first step: and the bytes are
+not a power-up's.** So they were put there under another address -
+bank 00's language card with ALTZP set is the same RAM - and the
+machine's hold 0700, 0A19, 5814, 1500 in this power-up where the one
+before read FF FF FF FF at the same code a second sooner in its boot.
+   So it is not memory nobody wrote: **the machine takes a write to
+those bytes that the card's RAM does not show** - the card had 00
+there. Which write, and what the replica made of it, is the next
+capture: the trigger on the same bytes in bank 00.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
