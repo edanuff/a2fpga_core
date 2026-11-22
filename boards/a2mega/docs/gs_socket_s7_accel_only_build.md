@@ -2588,6 +2588,29 @@ game would lock the same way on the machine's own CPU. If one is, the
 ROM's flag at `$E100E0` is the thing to follow: it is set at boot, by
 the ROM's search for the mouse through the keyboard micro.
 
+**With the mouse port switched on in the Control Panel (Ed), the same
+(19:40 to 19:50).** Ed: a mouse is connected; slot 4 had been set to
+Your Card; set back to the mouse port and the machine power-cycled, it
+hangs the same. Capture 7 is capture 6 again, cycle for cycle:
+`$E100E0` = 80, ReadMouse = 0309. Capture 8 (the ring stopped on the
+first cycle at `00:C4FB`) is the ROM's search for mouse firmware
+(`FF:A25B`): for each slot page C1 to C7 it compares four bytes with a
+table at `FF:FB67`; at offset FB it wants D6 and reads 4F, 00, 95,
+**A0**, 00 in slots 1 to 5 - slot 4's byte is not the mouse firmware's.
+And the card's copy of the slot register (`$C02D`, telemetry word 9)
+reads **F0**: slots 4 to 7 are all still "Your Card" as the machine's
+register was last written. So the ROM searched a slot 4 that is still
+switched to the card side, found no mouse firmware there, and said so;
+the a2p25 answering or not in slot 4 does not enter into it (Ed set it
+to empty there for one more run: the same hang).
+   What is not known: why the register still says Your Card after the
+Control Panel was changed. Either the change is not what the Control
+Panel now shows, or it was not kept (the battery RAM is written through
+the clock chip's serial port at `$C033`/`$C034`, by the ROM, on leaving
+the Control Panel) - and if it is not kept with this card in the
+socket, that is a fault of the card's to find. The write of `$C02D` at
+boot has not been captured yet.
+
 **What the trace turned out not to have.** VPA and VDA at the socket
 are both 1 for every cycle that is not internal (the broker issues
 them so; only the substituted I/O cycle differs): the trace cannot
