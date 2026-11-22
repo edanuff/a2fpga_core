@@ -2721,6 +2721,33 @@ slots share register 31 with the request key): it is for mode 00. What this buil
 had: the rules' shadow bit and the constraint; se2's slot 6 rule is in
 it and is not yet confirmed on the machine either.
 
+### tv1's first power-up: fast by itself, then GS/OS's boot stops in the firmware's key wait (2026-11-22, 09:19; open)
+
+The bring-up ran by itself to fast: ROM copy sum 7EE8, the verify step
+and the one with the copy of E0/E1 with no mismatch, mode `9A`, the
+rules on, the DDR3 ready with 126 banks. Then GS/OS's boot stopped on
+its "Welcome to the IIGS" screen with a second beep (Ed).
+   What the card shows of it, the machine left as it was and no mode
+changed: the socket still cycles, the status is all good, and in
+fourteen readings of the trace's first page (the ring runs in fast mode
+too with its power-up settings; only that page can be read there, the
+slots share register 31 with the key) the only cycles that are not idle
+are, in this order and over and over, a read of `$C000` (1F, no key), a
+write of `$C036` (82), a read of it (82), a write (82). That is ROM
+01's key wait at `FF:CEFC` to `FF:CF58` with `FF:CF6B`: the speed
+register saved and set fast, `INC $4E`, the Event Manager asked
+(`$0606`), the keyboard read, the speed register put back. Shadow 1E,
+speed 82, slot register E0 (slot 4 is the mouse port), state register
+09. So the machine is not locked: **it sits at a firmware prompt
+waiting for a key, with the super hi-res screen still shown** - the
+Monitor after a break is the likely one (it beeps), not yet seen.
+   **Not known:** what broke, and whether the card did it. This is the
+first boot of GS/OS on tv1, and tv1 differs from se2 by the trace's
+taps, the rules' shadow bit and the constraint of this section; none
+of se2's own boots of GS/OS in fast mode is on record as complete
+either (its two bring-ups stopped on verify mismatches). Captures:
+`boards/a2mega/captures/gsos_lock_1122/`.
+
 ## 4. What is verified, and what is not
 
 Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):
