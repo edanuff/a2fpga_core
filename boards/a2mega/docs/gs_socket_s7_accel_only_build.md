@@ -2900,6 +2900,23 @@ and registers 29 to 31 had been written with it off (they reach the
 accelerator's requests and the trace's slots only; no path from them
 to the reset logic is in the source). The card's event log was full
 since the morning and has nothing of it; cleared now.
+   **A fourth power-up boots, and that is the control, not a pass
+(10:34).** Off 20 s, the trigger set again with the machine off. The
+event log, cleared before it, has the start whole: our hold off 445 ms
+after the clock, the 48 us blip of /RESET 35 ms later, /RESET up for
+good 10.2 s after that, the socket taken 11.8 ms on. The machine boots
+into Arkanoid (Ed) - **with the accelerator not in it**: writing the
+trace's slots by hand leaves the bring-up at MANUAL, a machine going
+off clears that and a machine coming on does not, so the card stayed
+on the machine's own bytes, mode 00. (The helper was to send `gs accel
+go` and looked for MANUAL in `gs`, which does not print the
+accelerator's line in that state; `gs accel` does.) So: the same disk,
+the same card, the same power-up, no accelerator: no fault. And the
+third power-up's reset fault did not come back, with the registers
+written the same way: they are not its cause.
+   The trigger stays set in the FPGA across a power cycle. So the next
+one is made with nothing written while the machine is off: the
+bring-up then runs by itself, as in the two that broke.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
