@@ -3195,6 +3195,25 @@ interlock as the remedy for. Not shown to be the cause. The test that
 tells the two apart from the outside: the cable put in and the machine
 turned on at the same moment, so that the card has not stood
 configured against a dead machine.
+   **The cable in and the machine on in the same moment: it fails
+(12:34).** The card's event log of this start is the log of a start
+without the cable, line for line: the clock alive 0.15 ms after the
+gateware's first event (the machine was on before the FPGA was
+loaded), MCU ready at 302 ms, our hold off at 477 ms, the slot's /RESET
+up at 10.47 s, the socket taken 21 ms on. Then the bring-up: ROM
+copied, `VERIFY MISMATCH AT 00:02DC (48)`, 101 by the time it had let
+go, the last at 00:02E0, socket bytes; the machine fails (Ed).
+   So neither a card that has stood waiting nor one configured against
+a dead machine is needed: **the card started with the machine, as
+without the cable, and with the cable in it fails.** The shifters'
+enable is not the cause of this either, then. What the cable is to a
+card in this state: its 5 V from VBUS in place of the slot; the Mac as
+a USB partner (the console has `USBC: DR_SWAP REJECTED`: the port's
+power-delivery code talks to it, and the ESP32's own USB serial is
+enumerated); and the Mac's ground. Which, not known; three guesses of
+mine at this have been wrong today. Told apart from the outside by
+what is on the other end of the cable: a charger gives the 5 V with no
+partner.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
