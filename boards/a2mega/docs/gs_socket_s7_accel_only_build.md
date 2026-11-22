@@ -2562,6 +2562,32 @@ from `00:1BB2` by `LDA $B2` / `STA $B0` at `02:6EC9`.
   has patched `SEI`, `RTS` into the end of its shadow routine
   (`LDA #$6078` / `STA $026D66`), so that is the I flag, not the core.
 
+**The zero is the mouse's, and the ROM says there is no mouse
+(capture 6, 18:57).** The ring stopped on the next access to `00:1BB2`
+after the write of 0030 (`gs_trace.py arm --when-speed 92 --again 1`).
+It is the routine at `02:6EC9` again, called fifty times in a row
+(`LDX #$0032` at `02:652E`), this time with `$2E` = 0: it pushes three
+zero words and calls the toolbox, `LDX #$1703` / `JSL $E10000` -
+Miscellaneous Tools, ReadMouse. The dispatcher (`FE:00AF`) finds the
+function at `FE:9964`; that calls `FE:9B6A`, which reads `$E100E0`,
+finds bit 7 set (80) and returns carry set with X = 0309; the call
+leaves through the error exit (`FE:FF90`, `FF:BF0B`) with A = 0309,
+the three result words still zero. 0309 is the Miscellaneous Tools'
+"device not connected". The game does not test the error: it pulls the
+status (0000), stores zero in `$B6`, pulls the two positions, and
+`STA $D0` / `LSR A` / `STA $B2` puts 0000 in the paddle's column -
+fifty times. The next frames refresh the strip from column 0 and the
+loop of the first capture never ends.
+   So every cycle the card ran is what a 65C816 does with what the
+machine gave it, and the lock follows from one answer of the ROM: no
+mouse. Whether that answer is right - whether a mouse is plugged into
+this machine, and whether the ROM finds one when the machine's own CPU
+boots it - is not known here; it is the next thing to learn, and it
+decides whether this is the card's at all. If no mouse is connected the
+game would lock the same way on the machine's own CPU. If one is, the
+ROM's flag at `$E100E0` is the thing to follow: it is set at boot, by
+the ROM's search for the mouse through the keyboard micro.
+
 **What the trace turned out not to have.** VPA and VDA at the socket
 are both 1 for every cycle that is not internal (the broker issues
 them so; only the substituted I/O cycle differs): the trace cannot
