@@ -3008,6 +3008,40 @@ begins" was mine and not seen: fast came 4.2 s after the start there,
 and if the loader makes this call at the same moment of every boot
 they broke at 2.3 s too, in the verify step, with no mismatch
 counted. Not shown either way.
+   **What the doubled cycle is and is not (the source, and the card's
+counters after it; 10:58).**
+   - *Not a RDY stall.* The PHY repeats a cycle only when RDY was low
+     at its fall, and counts each (`stall_count`): the count is 0, as
+     it was all day. So the PHY put `FF:BF7B` on the bus once.
+   - *Not the verify mismatch.* The bring-up's failure of this
+     power-up is mismatch 36 at 00:0000 (the telemetry's last address);
+     no read of 00:0000 is in the ring, so it was more than the ring's
+     few ms before the break, and the card was on socket bytes at the
+     break (which is why the core has the pad's byte at all).
+   - *Two fall events in one bus cycle.* The ring takes an entry at
+     every fall event with the address of the last issue. One issue,
+     two entries: the first with FF, which is the bank byte the card
+     itself drives through the low phase and past the rise, the second
+     with the ROM's byte. The broker ends a cycle at a fall event, on
+     the pad flops clocked by that same edge, and stepped the core
+     with FF; the PHY, which takes a fall only when it waits for one,
+     was still in the cycle and ignored it; at the real fall the
+     broker had nothing in flight. That gives the core FF, then the
+     bytes at BF7C to BF7E, as seen. **So PH2 as the FPGA has it fell
+     twice in that cycle - an edge in the low phase or on the rise -
+     or something in the card made a second event.** Which, not known.
+   - *Why not everywhere.* 150 stores to E0/E1 in the ring, the same
+     store from another caller among them, and one such cycle. The
+     two power-ups without the bring-up ran the same code on socket
+     bytes with none.
+   **se2 was in this very state on 2026-11-16 and did not break:** two
+power-ups whose bring-up stopped on a verify mismatch and left the
+card on socket bytes, and the loader went through to Arkanoid both
+times (section 3m). So this is either of tv1 - its placement, the
+trace's taps on the pad flops, the constraint - or of today. The
+builds kept in `impl/pnr` can say which: se2 for the base, tv0 and tv2
+for the same netlist placed otherwise, ts0 for it without the
+constraint.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
