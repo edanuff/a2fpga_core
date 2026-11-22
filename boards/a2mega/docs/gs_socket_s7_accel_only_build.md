@@ -2643,7 +2643,7 @@ And `gs`'s `last_addr` is three bytes read at different times: its bank
 and address can be of different cycles ("01:8000-81FF" in section 3m
 was that, and "lines 153 to 156" there is wrong).
 
-### The speed rules where I/O shadowing is inhibited (2026-11-21 evening; simulated; two placements of three: not a closed build; not flashed)
+### The speed rules where I/O shadowing is inhibited, and a path that had two clks all along (2026-11-21 evening; simulated; three placements with no violation, tv0 to tv2; not flashed)
 
 The gap of section 3m: `gs_accel_rules` moved a slot's motor latch on
 any socket cycle at `$C0n8`/`$C0n9` in banks 00 and 01, also while the
@@ -2674,6 +2674,33 @@ compare; the path that failed is the one that has been tightest or
 failing in other rounds (sd1, tr1), and is where a closure that does
 not hang on the placement has to be made. With `Place_Option` 1 the
 count is now sixteen placements of eighteen without a violation.
+
+**The path that failed ts2 was held to one clk and has two.** `nh_dq`,
+the near memory's hit from the full decode, is used from a step's third
+clk, and the constraints say so for what reaches it from the step
+registers, the memory-map switches and the near memory's read port:
+two clks each. The launch's index, `nl_idx`, is a step register too -
+loaded when the core steps - and on its way to `nh_dq` through the
+compares with the write, fill and launch-clk indices it was left at one.
+That path failed sd1 and ts2 and was the tightest of tr1 and ts0.
+`gen_sdc.py` now gives it the two clks, from `nl_idx` alone: the other
+indices on that path and `nl_ok` move in the step's first clk and keep
+one. No logic changed.
+   The premise, tested and not taken from the comment: with `nh_dq`
+inverted in the clk after a step's first, in a copy of the broker, 202
+runs of 202 pass (nothing reads it there); inverted in the third clk
+instead, 129 fail.
+   Before that, a change of the logic was tried and dropped: the three
+compares made a clk ahead and registered (the bench comparing them
+with the registers in every clk, 231 of 231, a planted stale compare
+failing 159 runs). The compare made in the clk of a step is then on
+the end of the core's next address, which comes from the near memory
+through the core with its two clks already spent: tu0 to tu2 failed by
+8 to 10 ns on exactly that. Nothing of it is in the source.
+   **Timing with the constraint: three placements of three with no
+violation** - tv0 +0.027 (the launch's index into `fh_c`), tv1 +0.036,
+tv2 +0.006 (a line's data into the core's P). The source is that of ts0
+to ts2 with the one constraint; its regression is theirs, 231 of 231.
 
 ## 4. What is verified, and what is not
 
@@ -2779,6 +2806,18 @@ The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of tv0, tv1 and tv2 (the trace project, the speed rules'
+shadow bit, and `nl_idx` to `nh_dq` at two clks, section 3n; three
+placements with no violation; none flashed): sources = the commit that
+adds this paragraph; the same tool and device. tv0: build stamp
+`20261121221658`, bitstream sha256 `dcd1f110c646a5e8…b4c08eac956491cf`,
+of the lines that are not header `bf4e2dabc84117a6…7dbee9629a1b484e`.
+tv1: `20261121223112`, `be14c761fcea03ea…299f4d2673093c43`,
+`641ae8385debbcc5…aa617e69fa9c0d31`. tv2: `20261121224216`,
+`207f7b2819018b9b…27796acfc4761788`, `3e9d60338b87c3e5…59fbe6745c839f39`.
+Kept in `impl/pnr` by name. (tu0 to tu2 there are of the dropped change
+of logic, each with violations: of no use.)
 
 Provenance of ts0, ts1 and ts2 (the trace project with the speed
 rules' shadow bit, section 3n; **two placements of three with no

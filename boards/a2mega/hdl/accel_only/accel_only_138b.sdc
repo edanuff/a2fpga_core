@@ -83,6 +83,8 @@ set_max_delay 9.524 -from [get_regs {u_acc/u_brk/ce_c* u_acc/u_brk/ce_r* u_acc/u
 // copy and the tag compare made from it, used from the step's third clk
 set_multicycle_path 2 -setup -end -from [get_regs {u_acc/u_brk/ea_r* u_acc/u_brk/ea_k* u_acc/u_brk/pl_int* u_acc/u_brk/pl_we* u_acc/u_brk/pl_vp_n* u_acc/u_brk/pl_io_int*}] -to [get_regs {u_acc/u_brk/aq_* u_acc/u_brk/nh_dq*}]
 set_multicycle_path 1 -hold  -end -from [get_regs {u_acc/u_brk/ea_r* u_acc/u_brk/ea_k* u_acc/u_brk/pl_int* u_acc/u_brk/pl_we* u_acc/u_brk/pl_vp_n* u_acc/u_brk/pl_io_int*}] -to [get_regs {u_acc/u_brk/aq_* u_acc/u_brk/nh_dq*}]
+set_multicycle_path 2 -setup -end -from [get_regs {u_acc/u_brk/nl_idx*}] -to [get_regs {u_acc/u_brk/nh_dq*}]
+set_multicycle_path 1 -hold  -end -from [get_regs {u_acc/u_brk/nl_idx*}] -to [get_regs {u_acc/u_brk/nh_dq*}]
 set_multicycle_path 2 -setup -end -from [get_regs {u_acc/u_brk/u_replica/*}] -to [get_regs {u_acc/u_brk/aq_* u_acc/u_brk/nh_dq*}]
 set_multicycle_path 1 -hold  -end -from [get_regs {u_acc/u_brk/u_replica/*}] -to [get_regs {u_acc/u_brk/aq_* u_acc/u_brk/nh_dq*}]
 set_multicycle_path 2 -setup -end -from [get_regs {u_acc/cxrom*}] -to [get_regs {u_acc/u_brk/aq_* u_acc/u_brk/nh_dq*}]

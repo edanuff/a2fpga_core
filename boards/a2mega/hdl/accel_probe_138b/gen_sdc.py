@@ -265,6 +265,12 @@ def generate_near(PERIOD, fname, pfx="", board=False):
     FULL = regs(*b("aq_", "nh_dq"))
     # (not nl_ok: a write in the step's first clk clears it, and the compare must see that in the second)
     mc(2, regs(*b("ea_r", "ea_k", "pl_int", "pl_we", "pl_vp_n", "pl_io_int")), FULL)
+    # (the launch's index is a step register too - loaded when the core steps, compared with the
+    # write, fill and launch-clk write indices on the way to nh_dq.  From it, two clks; from
+    # those other indices and from nl_ok, which move in the step's first clk, still one.  This
+    # was the path left at one clk that failed placements sd1 and ts2 and was the tightest of
+    # others: docs/gs_socket_s7_accel_only_build.md, section 3n.)
+    mc(2, regs(*b("nl_idx")), regs(*b("nh_dq")))
     mc(2, regs(f"{pfx}u_brk/u_replica/*"), FULL)
     if board:
         # (gs_accel takes it only with the core in reset or held)
