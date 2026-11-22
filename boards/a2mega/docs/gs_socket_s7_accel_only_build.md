@@ -2917,6 +2917,23 @@ written the same way: they are not its cause.
    The trigger stays set in the FPGA across a power cycle. So the next
 one is made with nothing written while the machine is off: the
 bring-up then runs by itself, as in the two that broke.
+   **A fifth power-up boots too, again without the accelerator
+(10:40), and shows what the trigger does at power-off.** With nothing
+written the trigger was still set when the machine went off at
+10:39:51 - and fired there: the ring ends with a vector pull at
+00:FFE6/FFE7 (71 C0), the fetch at 00:C071 to C078 and then reads of
+E1:0010 on that are not what is there (EC EC E7...), /IRQ low
+throughout: the machine's memory going away under a core that is
+still clocked, a 00 taken for an opcode. So the trigger works as
+meant on a native BRK, and **a machine going off in mode 00 fires
+it**: it has to be set again after the power-off, which is a hand
+write, which leaves MANUAL. The helper then read the ring out while Ed
+turned the machine on, its writes kept the bring-up at MANUAL, and the
+machine booted on its own bytes a second time. So the trigger is set
+with the machine off after all, and `gs accel go` sent when the socket
+is taken (the helper now asks `gs accel` for MANUAL): the ROM copy
+then starts at once, not 2 s later, and fast mode comes about 2 s
+sooner than in the power-ups that broke.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
