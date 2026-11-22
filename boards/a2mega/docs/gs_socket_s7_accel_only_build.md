@@ -3134,6 +3134,26 @@ without USB against none of five with it and a bring-up. The counts at
 last address; what is wanted is each of those reads - its address, the
 card's byte and the machine's - which is a few registers in the build
 with the trace.
+   **Corrected (Ed, 12:10): what the cable changes is state, not
+electricity.** With the card on USB a power cycle of the machine
+leaves the card as it was - the FPGA configured, its block RAM and
+the DDR3 with what the last session left in them, the replica, the
+broker and the PHY wherever they stood, the firmware running. With
+the cable out the same power cycle clears all of it. So item 1 above
+reads wrongly where it says the card "takes the pads wrong on USB" and
+looks to the rail and the ground: nothing measured says that, and it
+was a guess. What the eight power-ups say is that **a card that stays
+up across the machine's power cycle, or is up before the machine,
+does not start that machine cleanly, and a card that starts with it
+does** - which is gateware or firmware. What survives, as the source
+has it: banks 00/01 in block RAM and the expansion memory with the
+copy of E0/E1 (the copy called whole at the next /RES if the DDR3 is
+ready, though the machine's own RAM is now a power-up's); the ROM
+image and its valid bit; the verify counts; the trace's setup; in the
+firmware the bring-up's waits and its MANUAL state. Which of it does
+the harm is not found. The first power-up of the day belongs here
+too: the card had been power-cycled by its cable minutes before, and
+was up and waiting when the machine came on.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
