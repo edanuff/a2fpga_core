@@ -2516,6 +2516,25 @@ check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
+Provenance of p1r (p1 built again on 2026-11-21, after the scratch
+directory with the kept bitstreams was emptied; for the comparison of
+section 3m; not flashed): sources = commit `43cf0c96` in a separate
+tree, with `prebuild.tcl` writing p1's own build stamp
+`20261114213411` in place of the time of day, so the netlist is the one
+p1 was placed from; tool V1.9.12.01, the same device. The report
+repeats p1's to the last figure: no violation on any clock, worst slack
+beyond the 0.5 ns +0.009 on the same path (the broker's run copy into
+the last-address telemetry register), 13,215 logic cells, 11,918
+flip-flops, 12,644 slices, 182 block RAMs; built in 4 minutes. The
+file's sha256 is not p1's (`0be57353dadfe56f…0d5eddbc84d62e9e` against
+`53133d79…`): the bitstream's header carries its time of creation, and
+only the whole file's sum of p1 was recorded, so that the bits are p1's
+is likely and not proven. The sum of the lines that are not header:
+`4eb46b8e6092f363…31b4cbdd4c63c32b` (se2's, for the next time:
+`f00f0e2151d1e4a6…bf3d103d2c3fad86`). Kept as
+`impl/pnr/a2mega_accel_138B_p1r.fs`, with its timing report beside it;
+se2 as `a2mega_accel_138B_se2.fs`.
+
 Provenance of se0, se1 and se2 (the changed slot 6 rule and the
 repair of a ROM copy begun under a RDY stall, section 3m; three
 placements with no violation; se2 flashed 2026-11-16 07:26): sources = commit
