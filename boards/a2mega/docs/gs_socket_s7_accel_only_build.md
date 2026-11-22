@@ -3101,6 +3101,29 @@ Not explained. Things of today that were not so on the days it worked:
 the card on USB from the Mac through every power-up (Ed's question at
 10:10), plugged and unplugged several times; the trace's taps (not in
 se2). **Next: the same boot with the card's USB out.**
+   **The card's USB out: se2 boots (11:47; one power-up).** The card
+comes up with the machine (its own hold and the a2p25's as always, the
+socket taken 9.6 s after the clock), the bring-up runs by itself with
+its 2000 ms: ROM copied (7EE8), **card memory at the machine's pace
+for its second with no mismatch** - where the power-up on USB an hour
+before had 130 in a twentieth of that - then, with the copy of E0/E1,
+`VERIFY MISMATCH AT 01:FBC3 (7) - ON SOCKET BYTES`, and the machine
+goes on to Arkanoid on its own bytes (Ed). That is 2026-11-16's first
+power-up to the address (section 3m): the same build, the same disk,
+the same stop.
+   So there are two things, and today mixed them:
+   1. **On USB from the Mac the card takes the pads wrong** - tv1's
+      extra fall event, se2's 130 ROM bytes that were not the ROM's,
+      and whatever stalled the boot that never got to the bring-up.
+      One power-up without the cable is clean of it; that is one. What
+      of the cable does it - the card's rail fed from VBUS in place of
+      the slot, the Mac's ground through the hubs - is not looked at.
+   2. **The bring-up stops on 01:FBC3 with the copy of E0/E1** on this
+      disk, as it did on se2 a week ago: seven reads there that the
+      card's memory and the machine's do not agree on. That one is the
+      card's, it repeats, and it keeps the accelerator from coming on
+      by itself on this boot; the machine is unharmed by it. Open
+      since 2026-11-16.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
