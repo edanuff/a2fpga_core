@@ -2796,6 +2796,16 @@ then the `00` at `BF89`. It leaves X and Y as the dispatcher gave them
 them, and A what 5C:AAC3 holds. Whether that is BFBF can be read from
 the Monitor. Other readings are not excluded (a return into `BF86`
 with A the work area pointer).
+   **That reading is wrong as it stands (Ed, `5C/AAC0.AACF`):** all
+sixteen bytes there are FF, so that load would have left FFFF in A,
+not BFBF. Three other ways onto `BF89` exist in these bytes, each
+through `BF86 CPY #$658F`: a return into `BF86` itself (A the work
+area's low word), into `BF83` (`LDY $5CA9,X` first: Y from 00:5DB0),
+or into `BF80` (`ORA $B0E0,X` before that: A or'ed with 00:B1E7). The
+dispatcher's return for this call is to `BF71`, its low byte on the
+stack 70; `BF80` is that byte read as 7F. Which, if any, the Monitor
+can show: 00:B1E7 and 00:5DB0, the work area table's entry 7 at
+7F:FF98, and the stack above `$01DF`.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
