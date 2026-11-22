@@ -2934,6 +2934,80 @@ with the machine off after all, and `gs accel go` sent when the socket
 is taken (the helper now asks `gs accel` for MANUAL): the ROM copy
 then starts at once, not 2 s later, and fast mode comes about 2 s
 sooner than in the power-ups that broke.
+   **The break caught (sixth power-up, 10:43; `captures/gsos_lock_1122/
+boot6_fast_dump.txt`).** The trigger set after the power-off, `gs
+accel go` sent as the socket was taken. The card's event log: core
+running, and the trigger 2316.9 ms after it. The ring has every cycle
+of the 8,000 before the break - the card was not in fast mode - and
+it reads as the ROM's code does, the dispatcher at `FE:00E9` to `011B`
+for call `$0107`, the return to `FF:BF71`, with one place that does
+not:
+
+    8123 FF:BF77 8F R      STA $E100FF
+    8124 FF:BF78 FF R
+    8125 FF:BF79 00 R
+    8126 FF:BF7A E1 R
+    8127 E1:00FF 00 W
+    8128 E1:0100 00 W
+    8129 FF:BF7B FF R      <- the ROM has A9 here
+    8130 FF:BF7B A9 R      <- the same address again, now A9
+    8131 FF:BF7C FF R
+    8132 FF:BF7D 00 R
+    8133 FF:BF7E 8F R
+    8134 8F:0206 8F R      a read at $8F00FF,X: the core is in SBC long,X (opcode FF)
+    8135 8F:0207 8F R
+    8136 FF:BF7F EF R      SBC $B0E01D
+    8137 FF:BF80 1D R
+    8138 FF:BF81 E0 R
+    8139 FF:BF82 B0 R
+    8140 B0:E01D B0 R
+    8141 B0:E01E B0 R
+    8142 FF:BF83 BC R      LDY $5CA9,X
+    8143 FF:BF84 A9 R
+    8144 FF:BF85 5C R
+    8145 00:5DB0 00 R
+    8146 00:5DB1 00 R
+    8147 FF:BF86 C0 R      CPY #$658F
+    8148 FF:BF87 8F R
+    8149 FF:BF88 65 R
+    8150 FF:BF89 00 R      BRK
+    8151 FF:BF8A E1 R
+    8152 00:01E3 FF W      K, PC BF8B, P C4 pushed
+    ...
+    8156 00:FFE6 71 R VP
+    8157 00:FFE7 C0 R VP
+    8158 00:C071 E2 R      the trigger
+
+**One socket cycle, the opcode fetch after the routine's first store
+to E1, ends with FF on the data pads where the ROM has A9; the same
+address is put on the bus a second time and reads A9; and the core
+has taken the FF.** From there it is `SBC $8F00FF,X` (the three bytes
+of the `LDA #$00FF` and the `STA`'s opcode for its address), `SBC
+$B0E01D`, `LDY $5CA9,X`, `CPY #$658F`, `BRK`: two subtractions of
+bytes from banks nothing answers in leave A = BFBF, and every other
+register of the break's display follows. It is the one place in the
+ring where an address is read twice (three others are a read and a
+write of one address, read-modify-write), among 150 writes to E0/E1
+of which the pair at 727/728 is this very store, from another caller,
+followed by one fetch as it should be.
+   **So the card repeats a socket cycle it holds not to have counted,
+and has already clocked the core with what was on the pads.** Why the
+cycle did not count (FF is a bus nobody drives), and why here each
+time, is the open part.
+   **And it was not fast mode.** The console of this power-up: ROM
+copied, card memory at the machine's pace, then `VERIFY MISMATCH AT
+00:0000 (36) - ON SOCKET BYTES` - the count one above the 35 it stood
+at - and no step after it: the bring-up had failed and given the
+machine its own bytes back (mode 80) before the break, which the
+verify step's 1000 ms put at 1.2 s after the start at the latest, the
+break being at 2.3 s. So the break needs neither fast mode nor card
+memory in effect; it needs a card that the bring-up has been through
+(the two power-ups in mode 00, never asked for anything, booted). And
+of the first two it follows that "a few seconds after fast mode
+begins" was mine and not seen: fast came 4.2 s after the start there,
+and if the loader makes this call at the same moment of every boot
+they broke at 2.3 s too, in the verify step, with no mismatch
+counted. Not shown either way.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
