@@ -2518,7 +2518,7 @@ and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
 Provenance of p1r (p1 built again on 2026-11-21, after the scratch
 directory with the kept bitstreams was emptied; for the comparison of
-section 3m; not flashed): sources = commit `43cf0c96` in a separate
+section 3m; flashed the same day): sources = commit `43cf0c96` in a separate
 tree, with `prebuild.tcl` writing p1's own build stamp
 `20261114213411` in place of the time of day, so the netlist is the one
 p1 was placed from; tool V1.9.12.01, the same device. The report
@@ -2534,6 +2534,10 @@ is likely and not proven. The sum of the lines that are not header:
 `f00f0e2151d1e4a6…bf3d103d2c3fad86`). Kept as
 `impl/pnr/a2mega_accel_138B_p1r.fs`, with its timing report beside it;
 se2 as `a2mega_accel_138B_se2.fs`.
+**p1r flashed 2026-11-21** over USB with the machine off, first
+attempt, read-back verified, after the card on the cable was checked
+by its serial number (the first cable offered was the a2p25's). Not
+yet loaded: the board has to be power-cycled.
 
 Provenance of se0, se1 and se2 (the changed slot 6 rule and the
 repair of a ROM copy begun under a RDY stall, section 3m; three
