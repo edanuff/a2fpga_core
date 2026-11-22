@@ -2855,6 +2855,17 @@ apart: the speed rules going between paced and fast under the code
 while the disk is read (the Monitor has no motor on), what the near
 memory held, the DDR3's traffic, and plain margin (a rare wrong step
 anywhere, which would not stop twice at the same place).
+   **A second power-up, the same (10:08; the card on USB before the
+machine, as the first time).** Logged from the card at twenty readings
+a second (`captures/gsos_lock_1122/boot2_log.txt`): /RES waited for at
+10:08:30, the ROM copied at :32, the two verify steps, **fast at
+10:08:34**, and then nothing changes: the speed register stays 82, no
+motor latch is ever set, the rules never pace. The machine stops as
+before (Ed), and the socket shows the same key wait, the same shadow,
+speed, slot and state registers. So **it stops twice of two, a few
+seconds after fast mode begins, and the speed rules take no part that
+the log can see** (a paced stretch under 50 ms would escape it). The
+address of this second break is not read yet.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
