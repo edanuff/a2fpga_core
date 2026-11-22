@@ -2883,6 +2883,23 @@ ring holds what the three stores of the routine put on the bus, which
 is A at each - and read with the machine off again. A helper does the
 whole of it on one telnet connection (`captures/gscap.py`, not in the
 tree).
+   **A third power-up with the trigger set did not get as far (10:30;
+not of the accelerator).** Machine off 10:29:15, the trigger set a
+second later (setup 39 at 00:C071, taken), on at 10:30:02. The card
+held reset its 300 ms, let go and waited for the slot's /RESET to be
+high for 20 ms before taking the socket, as every time. /RESET came up
+at 10:30:13 - when the a2p25 beside it had its stick mounted after two
+power cycles of its hub port and let go of the line, as its console
+says - and was low again within 30 ms, and stayed low: two minutes
+later the card still waits, socket off, not holding the line itself
+(register 2E 01, hold 0), the socket's own /RES pin high. No CPU ran;
+the screen is the video of memory nobody has written (Ed's photo). Who
+pulled the line down again is not known. What was different from the
+two power-ups before: the machine was off 47 s where it had been 16,
+and registers 29 to 31 had been written with it off (they reach the
+accelerator's requests and the trace's slots only; no path from them
+to the reset logic is in the source). The card's event log was full
+since the morning and has nothing of it; cleared now.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
