@@ -2846,6 +2846,15 @@ set fast again (10:02, `gs accel fast`, mode `9A`) for the same line
 in fast mode. (The verify count is 35 now, its last address 5C:AACF:
 the Monitor's dumps of memory the machine's own RAM does not have as
 the card has it. Not a finding.)
+   **In fast mode by hand (Ed, 10:05): `FF/BF71X` five times and
+`FE/0000X` once - the whole chain as the loader called it - all return
+to the prompt, no break.** So neither the routine nor the chain breaks
+by itself in fast mode on this placement: the fault needs something of
+the moment the loader made the call. What differs then, not yet told
+apart: the speed rules going between paced and fast under the code
+while the disk is read (the Monitor has no motor on), what the near
+memory held, the DDR3's traffic, and plain margin (a rare wrong step
+anywhere, which would not stop twice at the same place).
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
