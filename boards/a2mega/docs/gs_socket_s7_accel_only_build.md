@@ -3042,6 +3042,11 @@ trace's taps on the pad flops, the constraint - or of today. The
 builds kept in `impl/pnr` can say which: se2 for the base, tv0 and tv2
 for the same netlist placed otherwise, ts0 for it without the
 constraint.
+   **se2 flashed back for the comparison (2026-11-22, 11:05 to
+11:09).** `impl/pnr/a2mega_accel_138B_se2.fs`, sha256 `60533092...`
+as on record, over USB with the machine off (the card's report: clock
+stopped), first attempt, read-back verified, the card checked by its
+serial number. Not yet loaded. tv1 is no longer in the card's flash.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
