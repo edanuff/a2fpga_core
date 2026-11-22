@@ -3047,6 +3047,34 @@ constraint.
 as on record, over USB with the machine off (the card's report: clock
 stopped), first attempt, read-back verified, the card checked by its
 serial number. Not yet loaded. tv1 is no longer in the card's flash.
+   **se2 does not get through either (11:13; its stamp read from the
+card first, the bring-up running by itself, logged at twenty readings
+a second).** /RES waited for at 11:13:27, the ROM copied at
+11:13:29.81 (sum 7EE8), card memory at the machine's pace at :29.86 -
+and in that same reading **130 verify mismatches, the last at
+`FF:ABFB`**, the bring-up failed and the machine given its own bytes
+back at :29.91. The screen: `Fatal system error -> 0911` (Ed's
+photo), the ROM's own failure display; 0911 is the Desktop Bus tool
+set's "cannot synchronize". The PHY's count of stalled cycles is 0
+here too.
+   So **the fault is not tv1's**: not its placement, not the trace's
+taps, not the constraint of this section. What the three power-ups
+that failed with a bring-up have in common, tv1's two and this one, is
+*when*: the bring-up waits 2000 ms after /RES, then holds the core for
+the ROM copy and switches memory, and about two seconds after the
+start is where this disk's loader starts the tool system again (the
+Scheduler's BootInit in tv1's breaks; the Desktop Bus one is two tool
+sets after it). 130 mismatches at ROM addresses inside 50 ms are not
+the ROM image (its sum is right, and a wrong byte there would have
+been seen in every earlier power-up): they are the pads not holding
+the ROM's byte at the fall the broker took - the same thing as the FF
+in tv1's ring, many times over.
+   What was different in every use of the accelerator that worked
+(the benchmarks of sections 3f to 3k, the Disk II boots of 3l and 3m):
+the bring-up was run with GS/OS already up, or the machine was not in
+this loader at two seconds. **Next, with nothing flashed: the wait
+before the bring-up set to 20 s (`gs accel delay 20000`, kept until
+the ESP32 restarts), so that it runs after the loader.**
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
