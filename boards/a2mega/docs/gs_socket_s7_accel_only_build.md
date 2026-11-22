@@ -2864,8 +2864,25 @@ motor latch is ever set, the rules never pace. The machine stops as
 before (Ed), and the socket shows the same key wait, the same shadow,
 speed, slot and state registers. So **it stops twice of two, a few
 seconds after fast mode begins, and the speed rules take no part that
-the log can see** (a paced stretch under 50 ms would escape it). The
-address of this second break is not read yet.
+the log can see** (a paced stretch under 50 ms would escape it).
+   **The second break is the first to the last digit (Ed's photo):**
+`FF/BF89`, A=BFBF X=0107 Y=0000 S=01DF D=01ED P=C4, B=00 K=FF M=0C
+Q=9E. So it is not a rare wrong step somewhere: **the same step goes
+wrong in the same way every time this code runs in this state.** That
+is logic, or a path that fails for one pattern of data; it is not
+noise.
+   **How it is to be caught.** The native BRK vector of ROM 01 is
+`$C071`, in the I/O page, and nothing else is fetched there (IRQ
+enters at `$C074`); an I/O page fetch is a socket cycle in every mode.
+So the trace's trigger on any cycle at 00:C071 fires at the break and
+at nothing before it, in fast mode too. Set with the machine off (the
+slots need the key, and after fast mode the requests must not be
+dropped under a running machine), keeping only cycles that are not
+idle - in fast mode those are the I/O and the writes to E0/E1, so the
+ring holds what the three stores of the routine put on the bus, which
+is A at each - and read with the machine off again. A helper does the
+whole of it on one telnet connection (`captures/gscap.py`, not in the
+tree).
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
