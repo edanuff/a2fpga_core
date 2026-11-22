@@ -3214,6 +3214,34 @@ enumerated); and the Mac's ground. Which, not known; three guesses of
 mine at this have been wrong today. Told apart from the outside by
 what is on the other end of the cable: a charger gives the 5 V with no
 partner.
+   **On a power bank: three power-ups, none good (12:50 to 12:53;
+Ed; each with the bank taken off and put back, so the card afresh).**
+Two never leave reset - the screen of the third power-up of the
+morning. The third runs: the bring-up by itself, ROM copied, card
+memory, and 0.2 s on `VERIFY MISMATCH AT FF:BFFA (1) - ON SOCKET
+BYTES`; then the Monitor: `FF/B8B3: 02 29  COP 29`, A=F3FF X=0000
+Y=0083 S=01EF D=0000 P=B4 B=E1 K=FF m=1 x=1 e=0.
+   Two things in that are this morning's capture again. `FF:BFFA` is
+the fetch after `STA $E100FF` (`FF:BFF6`, the busy flag's routine) -
+the store before tv1's doubled fetch, from another caller: there the
+pads had FF at a fall that was not the cycle's end, here the card's
+byte and the pad's differ at the same fetch. And `FF:B8B3` is not an
+instruction: it is the second byte of `BPL` at `B8B2`, the fetch after
+`LDX $C018` - the core one byte off its stream again, after a cycle
+that the machine stretches. So **the fault is the same on se2 and on
+tv1, on the Mac and on a bank: the fetch behind a stretched cycle is
+taken wrong**, and a card fed by its slot alone has not shown it in
+three power-ups.
+   What the bank rules out: the Mac. The two things found in the
+firmware that a USB host changes (log writes waiting on a reader, the
+JTAG bridge's pins) need a host, and a bank is none; they are not the
+cause. What all the failures of today share is a card with its USB
+port fed, and I have no account of that which the board itself can
+check - so no account is given. What the board can check: whether the
+FPGA's PH2 pin has an edge too many in such a cycle. That is a counter
+and a few samples of the pin in the build with the trace; and the
+broker taking for a cycle's end only the fall the PHY takes is a
+change the capture asks for whatever the count turns out to be.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
