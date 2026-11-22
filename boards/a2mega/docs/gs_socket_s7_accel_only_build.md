@@ -2344,6 +2344,38 @@ count names the RAM that differs from what the core wrote; and sc1
 flashed back with the same disk, then se0, to tell this build from the
 ones before and source from placement.
 
+**A fourth lock, with the setting off (2026-11-21, read 08:30 to
+08:40).** Ed booted the same disk with the card as it was left and
+Arkanoid hung as before. Read without changing anything: `ACCEL: OFF BY
+SETTING`, **mode 00** (no ROM image, no ROM copy made, sum 0000), every
+verify count 0, the socket armed by the automatic sequence as in every
+run. Register 29 was never written in this power-up. The lock is the
+same one: shadow 57, speed register 92, state 0C, all four motor
+latches set, 2.546 M socket cycles a second, and of 200 bus samples 64
+in `02:8000-81FF` and 34 in `01:8000-81FF`, the rest spread over banks
+01 and 02, none in E0/E1 and none at `$C0xx`. So the lock needs nothing
+of the accelerator beyond what every power-up of this build does: the
+F65C816 core stepping on socket cycles through the broker and the PHY.
+The first open test above (paced card memory with the verify count)
+no longer bears on the lock; it still bears on the two verify
+mismatches. `01:8000-81FF` is super hi-res pixel memory (lines 153 to
+156) and super hi-res shadowing is on in shadow 57, so the program may
+be drawing there from bank 02; that is a reading of the addresses, the
+program has not been read. What it is waiting for is not known. Still
+not known: whether this disk runs on this machine with its own CPU, and
+whether any earlier build of the card runs it.
+
+**The scratch directory was emptied by the system between 11-16 and
+11-21** (macOS clears files under `/tmp` that have not been read for
+three days; every directory is there, no file is). Gone: the kept
+bitstreams of every round (p1, p2, sc0 to sc2, sd0, sd2, se0, se1), the
+test card's firmware binary, the logs named in this page, and the
+telnet helpers. se2 is on the card and in `impl/pnr`. A build before
+se2 for the second open test has to be made again from its commit, and
+its placement will not be the one that was measured. Bitstreams to keep
+go beside the others in `boards/a2mega/impl/pnr` from here on, as
+`a2mega_accel_138B_<round>.fs` (that pattern is ignored by git).
+
 ### Not done, not known
 
 - **No write, no real drive.** The drive read through the rules is the
