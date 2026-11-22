@@ -2376,6 +2376,29 @@ its placement will not be the one that was measured. Bitstreams to keep
 go beside the others in `boards/a2mega/impl/pnr` from here on, as
 `a2mega_accel_138B_<round>.fs` (that pattern is ignored by git).
 
+**p1 locks too (2026-11-21, 16:40 to 17:00).** p1 was built again from
+its commit (p1r, section 5: the report repeats p1's to the last figure)
+and flashed with the machine off; the stamp read from the running card
+is `20261114213411`. Ed booted the same disk with the setting still
+off: Arkanoid hung at the same place. Read: mode 00, verify 0, shadow
+57, speed register 92, state 0C, 2.542 M socket cycles a second, and of
+200 bus samples 69 in `02:8000-81FF` and 36 in `01:8000-81FF`, none in
+E0/E1 or at `$C0xx` - the lock of se2 to the sample counts. (The motor
+latches read 0: p1 has no speed rules.) So the lock is not of the speed
+control, the slot 6 rule, the copy's repair or se2's placement: the
+build that was benchmarked and merged has it. What is left is what p1
+and se2 share - the F65C816 core, the broker's socket steps, the PHY -
+or something outside the card. One thing not yet tried on hardware and
+in Arkanoid's path: the program inhibits I/O and language card
+shadowing (shadow bit 6), and a machine in that state gives a vector
+pull ROM only if its FPI reads the socket's VP pin, which the card
+drives through U15 (`gs_socket_65816_scoping.md` section 3.3 took the
+motherboard not to use VP; the S7 scoping page, decision 13, left it to
+be checked). That is a suspicion; no vector pull of this program has
+been seen. Not known still: whether the disk runs on this machine with
+its own CPU. p1r is on the card, the setting off; se2 is in
+`impl/pnr` as the default file and by name.
+
 ### Not done, not known
 
 - **No write, no real drive.** The drive read through the rules is the
