@@ -2747,6 +2747,13 @@ taps, the rules' shadow bit and the constraint of this section; none
 of se2's own boots of GS/OS in fast mode is on record as complete
 either (its two bring-ups stopped on verify mismatches). Captures:
 `boards/a2mega/captures/gsos_lock_1122/`.
+   **`C029:01` and Return typed blind (Ed, 09:35): the screen did not
+change.** The keys were taken: `$C000` reads 0D with its strobe
+cleared where it read 1F, and the same loop goes on; one reading has
+the ROM's interrupt handler in it (`$C03C`, `$C046`, `$C041`, `$C047`,
+`$C027`, writes to E1:00C3 to 00DD), so interrupts are served. So a
+prompt takes keys, and either it is not the Monitor's or the line was
+not the command; which, not known.
 
 ## 4. What is verified, and what is not
 
