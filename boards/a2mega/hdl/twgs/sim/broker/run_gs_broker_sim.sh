@@ -72,7 +72,7 @@ build b100_2d +define+FAST_CORE +define+CLK100 -GDATA_LATE=1 -GSTEP_CLKS=2 -GADD
 # the board's socket PLL, too; and (b110_2c) with the card's ROM image empty, for +mode=copy
 # (the 110 MHz builds with the board's near-memory tag, A14-A17: -GNEAR_KW=4)
 NEARX=( +define+FAST_CORE +define+F65C816_MCODE_ROM +define+ACCEL_SHADOW -GDATA_LATE=1 -GNEAR=1 -GSTEP_CLKS=2 -GADDR_CLKS=2 -GFAR_CLKS=2
-        "${FASTF[@]}" "$TWGS/gs_bram16be.sv" "$TWGS/gs_accel.sv" )
+        "${FASTF[@]}" "$TWGS/gs_bram16be.sv" "$TWGS/gs_accel_trace.sv" "$TWGS/gs_accel.sv" )
 build b100_2x +define+CLK100 "${NEARX[@]}" & p8=$!
 build b108_2x "${NEARX[@]}" & p9=$!
 build b110_2x +define+CLK110 -GNEAR_KW=4 "${NEARX[@]}" & p10=$!
@@ -96,6 +96,9 @@ build b105_2s +define+CLK105 -GNEAR_KW=9 -GACC_EXP=8 -GEXP_DDR=1 "${NEARX[@]}" &
 # reads of that RAM come from it in the runs with +slow (the k_ runs, below)
 build b105_2t +define+CLK105 -GNEAR_KW=9 -GACC_EXP=126 -GEXP_DDR=1 -GNEAR_LINE=1 -GSLOW_COPY=1 "${NEARX[@]}" & p16=$!
 build b105_2k +define+CLK105 -GNEAR_KW=9 -GACC_EXP=126 -GEXP_DDR=1 -GNEAR_LINE=1 -GSLOW_COPY=1 -GROM_PRESET=0 "${NEARX[@]}" & p17=$!
+# ... and (b105_2a) with gs_accel's trace of the socket's cycles in it (gs_accel_trace, the trace
+# build): the pins must still be the design's in every clk, and every entry the cycle the machine saw
+build b105_2a +define+CLK105 -GNEAR_KW=9 -GACC_EXP=126 -GEXP_DDR=1 -GNEAR_LINE=1 -GSLOW_COPY=1 -GACC_TRACE=1 +define+ACC_TRACE_TB "${NEARX[@]}" & p20=$!
 # ... and the line memory in front of block RAM alone (banks 02/03 in it), and with no expansion
 # memory in the design at all (the bench's own, a byte wide, read a line at a time)
 build b110_2l +define+CLK110 -GNEAR_KW=4 -GACC_EXP=2 -GNEAR_LINE=1 "${NEARX[@]}" & p18=$!
@@ -118,6 +121,7 @@ wait $p16 || { echo "verilator FAILED (b105_2t) - see $OUT/verilate_b105_2t.log"
 wait $p17 || { echo "verilator FAILED (b105_2k) - see $OUT/verilate_b105_2k.log"; grep -E "%Error|error:" "$OUT/verilate_b105_2k.log" | head -20; bfail=1; }
 wait $p18 || { echo "verilator FAILED (b110_2l) - see $OUT/verilate_b110_2l.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2l.log" | head -20; bfail=1; }
 wait $p19 || { echo "verilator FAILED (b110_2m) - see $OUT/verilate_b110_2m.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2m.log" | head -20; bfail=1; }
+wait $p20 || { echo "verilator FAILED (b105_2a) - see $OUT/verilate_b105_2a.log"; grep -E "%Error|error:" "$OUT/verilate_b105_2a.log" | head -20; bfail=1; }
 [[ $bfail -ne 0 ]] && exit 1
 
 # ---------------------------------------------------------------- runs
@@ -296,6 +300,13 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run k_copy      b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=1
     run k_copy_rst  b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=2 +reset
     run k_recopy    b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=1 +recopy
+    # ... and with the trace of the socket's cycles in gs_accel (the trace build)
+    run a_native    b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126
+    run a_paced     b105_2a $T +mode=paced  +expect +irq +exp=126 +mbexp=126 +slow=1
+    run a_fast      b105_2a $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +slow=2 +rules
+    run a_toggle    b105_2a $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +slow=1 +steps=120000
+    run a_rstw      b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126 +resetw
+    run a_st3       b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126 +stallp=3 +steps=120000
     # ... and with the machine's speed rules deciding between fast and paced (gs_accel_rules; +rules):
     # the test program's T27 has a stretch for each cause and one that must stay fast
     run q_fast      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules
@@ -441,7 +452,7 @@ if [[ $DO_ROM -eq 1 ]]; then
     same "ROM 01 boot, the line memory, no expansion ($STEPS steps)" r_native o_copy
 fi
 for n in "${NAMES[@]}"; do
-    case "$n" in d*|e_dl*|r_dl*|x*|y*|z*|w*|v*|c_*|e_dx*|r_dx*|e_copy|r_copy|f_*|s_*|g_*|t_*|u_*|m_*|l_*|o_*|k_*|j_*|q_*) grep -E '^---- (local reads|near memory|step lengths|ROM copy|gs_accel|expansion memory|copy of Mega II|speed rules)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
+    case "$n" in d*|e_dl*|r_dl*|x*|y*|z*|w*|v*|c_*|e_dx*|r_dx*|e_copy|r_copy|f_*|s_*|g_*|t_*|u_*|m_*|l_*|o_*|k_*|j_*|q_*|a_*) grep -E '^---- (local reads|near memory|step lengths|ROM copy|gs_accel|expansion memory|copy of Mega II|speed rules)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
 done
 for n in "${NAMES[@]}"; do
     grep -E '^---- socket timing' "$OUT/$n/sim.log" | sed "s/^---- /$n: /"

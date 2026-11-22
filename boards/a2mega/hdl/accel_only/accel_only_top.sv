@@ -398,6 +398,8 @@ module top (
     wire [31:0] acc_cycle_w, acc_word_w;
     wire [15:0] acc_stall_w, acc_be_w, acc_per_w, acc_high_w, acc_verify_w;
     wire [23:0] acc_last_w;
+    wire [4:0]  acc_flags_w;
+    wire [1:0]  acc_tstat_w;
 
     // gs_accel's port on the arbiter's 32-bit words: a request is taken in the clk
     // the port is available.  A write is one byte of a word.  A read is of the
@@ -461,7 +463,15 @@ module top (
 `else
     localparam bit ACC_SLOW = ACC_LINE;       // (it has only been run with the line memory)
 `endif
-    gs_accel #(.EXP_DDR(1'b1), .EXP_BANKS(126), .NEAR_KW(9), .NEAR_LINE(ACC_LINE), .SLOW_COPY(ACC_SLOW)) u_acc (
+    // (ACC_TRACE, a2mega_accel_138B_trace.gprj: the socket's cycles in a ring - gs_accel_trace;
+    // `gs freeze` / `gs run` stop and start it, registers 29 to 31 under the keys 50 to 52
+    // set it up, `gs trace` reads a page of it at lines 32 to 63)
+`ifdef ACC_TRACE
+    localparam bit ACC_TRACE_P = 1'b1;
+`else
+    localparam bit ACC_TRACE_P = 1'b0;
+`endif
+    gs_accel #(.EXP_DDR(1'b1), .EXP_BANKS(126), .NEAR_KW(9), .NEAR_LINE(ACC_LINE), .SLOW_COPY(ACC_SLOW), .TRACE(ACC_TRACE_P)) u_acc (
         .exp_ready_i(calib_g1), .m_req_o(xm_req_w), .m_ready_i(ddr3_mem_ports[0].available), .m_we_o(xm_we_w),
         .m_addr_o(xm_addr_w), .m_wdata_o(xm_wdata_w), .m_rvalid_i(xm_rvalid_w), .m_rdata_i(xm_rdata_w),
         .clk(clk_gs_w), .rst_n(device_reset_n_w & gs_pll_lock_w),
@@ -469,7 +479,7 @@ module top (
         .cfg_fast_i(rq_key_w & gs_rq_s1[0]), .cfg_cardmem_i(rq_key_w & gs_rq_s1[1]),
         .cfg_cxrom_i(rq_key_w & gs_rq_s1[2]), .cfg_copy_i(rq_key_w & gs_rq_s1[3]),
         .cfg_slow_i(rq_key_w & gs_rq_s1[4]), .cfg_rules_i(rq_key_w & gs_rq_s1[5]),
-        .clear_i(gs_ctrl_s1[7]),
+        .clear_i(gs_ctrl_s1[7]), .trace_freeze_i(gs_ctrl_s1[3]), .trace_rq_i(gs_rq_s1),
         .gs_ph2_i(gs_ph2), .gs_rdy_i(gs_rdy), .gs_irq_n_i(gs_irq_n), .gs_nmi_n_i(gs_nmi_n),
         .gs_res_n_i(gs_res_n), .gs_abort_n_i(gs_abort_n), .gs_be_i(gs_be),
         .gs_d_i(gs_d), .gs_d_o(gs_d_o_w), .gs_d_oe_o(gs_d_oe_w),
@@ -480,13 +490,15 @@ module top (
         .cycle_count_o(acc_cycle_w), .stall_count_o(acc_stall_w), .be_count_o(acc_be_w),
         .ph2_period_o(acc_per_w), .ph2_high_o(acc_high_w), .last_addr_o(acc_last_w),
         .verify_count_o(acc_verify_w),
-        .tele_idx_i(gs_ti_s1), .tele_word_o(acc_word_w)
+        .tele_idx_i(gs_ti_s1), .tele_flags_o(acc_flags_w), .trace_stat_o(acc_tstat_w), .tele_word_o(acc_word_w)
     );
 
     // ---- telemetry: accelerator domain -> connector domain (two flops per bit; a wide
     // counter may tear between bytes, as the full build's does)
     reg [159:0] gs_tele_s0, gs_tele_s1;
     reg [31:0]  gs_word_s0, gs_word_s1;
+    reg [4:0]   gs_flags_s0, gs_flags_s1;
+    reg [1:0]   gs_tstat_s0, gs_tstat_s1;
     always @(posedge clk_logic_w) begin
         // STATUS bits 1:0 carry the SLOT-side /DMA and /RDY levels, as in the full build
         gs_tele_s0 <= {acc_last_w, acc_high_w, acc_per_w, {acc_mode_w, 8'h5A}, acc_verify_w, acc_be_w, acc_stall_w,
@@ -494,11 +506,14 @@ module top (
         gs_tele_s1 <= gs_tele_s0;
         gs_word_s0 <= acc_word_w;
         gs_word_s1 <= gs_word_s0;
+        gs_flags_s0 <= acc_flags_w;   gs_flags_s1 <= gs_flags_s0;
+        gs_tstat_s0 <= acc_tstat_w;   gs_tstat_s1 <= gs_tstat_s0;
     end
     assign gs_tele_w  = gs_tele_s1;
     // the trace window as a table of words: {frozen, not triggered, write pointer 0} and
-    // an entry {flags 07 = read, no stall, BE ok; bank:address:data = the word}
-    assign gs_trace_w = {8'h80, 8'h07, gs_word_s1};
+    // an entry {flags 07 = read, no stall, BE ok; bank:address:data = the word}.  (ACC_TRACE:
+    // frozen and triggered are the ring's, and lines 32 to 63 are its entries with their flags.)
+    assign gs_trace_w = {gs_tstat_s1, 6'd0, 3'b000, gs_flags_s1, gs_word_s1};
 
     // ---- LEDs (active low): heartbeat, socket ours, core running, fast
     reg [2:0] led_s0, led_s1;

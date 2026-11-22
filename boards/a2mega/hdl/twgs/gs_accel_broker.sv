@@ -391,7 +391,10 @@ module gs_accel_broker #(
     output logic [7:0]  cyareg_o,
     output logic [7:0]  sltromsel_o,
     output logic [7:0]  statereg_o,
-    output logic [7:0]  sw_misc_o
+    output logic [7:0]  sw_misc_o,
+    // (the trace build, gs_accel_trace: the data pads and /IRQ at the fall - the PHI2-fall flops)
+    output logic [7:0]  tr_d_f_o,
+    output logic        tr_irq_f_o
 );
 
     //=========================================================================
@@ -410,6 +413,8 @@ module gs_accel_broker #(
         nmi_f   <= gs_nmi_n_i;
         abort_f <= gs_abort_n_i;
     end
+    assign tr_d_f_o   = d_f;
+    assign tr_irq_f_o = irq_f;
 
     // clk-domain copies, loaded at the fall event; in the fall-event clk
     // itself the PH2-domain flops are read directly (they have been stable

@@ -47,7 +47,10 @@ source, with the repair of a ROM copy that begins under a RDY stall
 flashed 2026-11-16 07:26; **on a power-up that evening the bring-up
 stopped on a verify mismatch in bank 01 and left the card on socket
 bytes, and Arkanoid locked up in that session: cause not known,
-section 3m**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
+section 3m; **2026-11-21: the lock happens with the accelerator off by
+its setting, mode 00, and on p1 built again - it is not of the speed
+control work; a trace build to read it is built, three placements with
+no violation, not flashed: section 3n**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
 only what the machine was given since the card began to mirror, and
 RAM that nothing has written since power-up reads differently from the
 copy than from the machine - about 23,000 bytes on this power-up, and
@@ -2435,6 +2438,84 @@ its own CPU. p1r is on the card, the setting off; se2 is in
   1.4 to 1.6 times the machine's on four tests).
 - A ROM 3 machine; the speaker; anything the machine itself can set.
 
+## 3n. A trace of the socket's cycles, to read Arkanoid's lock (2026-11-21; simulated; three placements with no violation; not flashed)
+
+Section 3m ends with the lock on two builds, in mode 00, and nothing
+that shows what the program is doing when it stops. The telemetry has
+one bus address at a time. This build puts the S6 bench's bus trace
+back, deeper, in the accelerator's clock domain.
+
+**What it is.** `hdl/twgs/gs_accel_trace.sv`, in `gs_accel` under its
+`TRACE` parameter, on in a project of its own:
+`a2mega_accel_138B_trace.gprj` (the accelerator-only project's sources
+with `hdl/accel_only/accel_trace_defines.v`; `Place_Option` 1 as that
+project). A ring of 8,192 entries in block RAM, one for a cycle the core
+had on the socket: bank and address as the broker issued them, R/W, VP,
+VPA and VDA from the issue, and the data pads and /IRQ as the broker's
+PHI2-fall flops had them at the fall that ended the cycle. Local steps
+of fast mode are not socket cycles and are not in it. It only reads:
+the one change in the design it sits in is two outputs on the broker,
+the PHI2-fall flops of the data pads and /IRQ, so that no second set of
+flops hangs on the pads. The source of se2 is otherwise as it was; the
+project without `ACC_TRACE` synthesises as before (checked; not placed
+again).
+
+**What is kept and when it stops** is set through window registers 29
+to 31 under keys of their own (31 = 50, 51, 52; the accelerator's
+requests are the same registers under A5, so the setup is for a card
+that is not asked for card memory - mode 00, as the lock is): every
+cycle, opcode fetches, vector pulls, or vector pulls and the opcode
+fetches that do not follow the one before; a trigger that stops the
+ring a chosen number of kept entries later - an opcode fetch at an
+address, any cycle at an address, a vector pull with shadow bit 6 set,
+or 131,072 cycles with none in an I/O page (what the lock looks like
+from outside). CTRL bit 3 (`gs freeze`, `gs run`; `gs trace` sets it)
+stops it by hand. At power-up it keeps every cycle and has no trigger,
+so a machine that has locked needs only `gs freeze`.
+
+**Read** with the firmware the card has: `gs trace` shows telemetry
+words at lines 0 to 31 as before (15 to 17 are the ring's state) and a
+page of 32 entries at lines 32 to 63, oldest first, in the S6 trace's
+form; its STALL column reads "/IRQ low" and BE0 "vector pull". `gs`
+shows the ring standing still and the trigger fired where the S6 trace
+showed them. `boards/a2mega/tools/gs_trace.py` does the setup, reads
+the whole ring over telnet (256 pages) and lists it as 65C816
+instructions with the data cycles beside them.
+
+**Simulated.** The module's own bench (`hdl/twgs/sim/trace`): a
+program-shaped stream of 593,357 cycles against the bench's model of
+the filter, the triggers and the ring, 64,000 entries read back through
+the page and index, no difference; eight planted faults (the flow test's
+window, the count after the trigger, the quiet count by one, the oldest
+entry's place, the entry taken two clks late, the slot key without its
+sixteen clks, the I/O test without bit 6, /IRQ stuck) each fail it. The
+broker bench with `gs_accel` and its trace beside the hand-wired design
+(`b105_2a`, six runs: native, paced, fast, toggling, a reset in a
+write, RDY stalls): about 350,000 entries compared with the cycle the
+machine's side of the bench latched - no difference - and gs_accel's
+pins equal to the design's in every clk as in every such build. The
+whole regression with the six: **231 runs of 231 pass**, the ROM 01
+boots and the test program at the same points with the same write
+streams.
+
+**Timing: three placements of three with no violation** on any clock
+(105 MHz, the 0.5 ns rule as committed):
+
+| placement | setup | hold | worst slack beyond the 0.5 ns | the tightest path |
+|---|---|---|---|---|
+| tr0 | 0 | 0 | +0.011 | the microcode row into the broker's internal-I/O flag |
+| tr1 | 0 | 0 | +0.010 | the near memory's index into the broker's `nh_dq` |
+| tr2 | 0 | 0 | +0.017 | the PHI2 high-time counter into its telemetry register |
+
+No tight path is the trace's. 13,587 logic cells, 12,267 flip-flops,
+201 of 340 block RAMs (tr2): 19 blocks are the ring. The socket's pin
+flops are where they were (61 I/O logic cells, as p1 and se2).
+
+**What it has not done.** It has not run on the card. The trace shows
+what the core issued and what the pads read at the fall; it is not an
+instrument on the pins themselves, and a fault between the pin flops
+and the motherboard would show only by what the machine answers.
+
 ## 4. What is verified, and what is not
 
 Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):
@@ -2533,11 +2614,24 @@ Not verified, not done:
 ## 5. Building
 
     GPRJ=a2mega_accel_138B.gprj RESOURCE_BASELINE=none tools/build.sh a2mega all
+    GPRJ=a2mega_accel_138B_trace.gprj RESOURCE_BASELINE=none tools/build.sh a2mega all   (section 3n)
 
 The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of tr0, tr1 and tr2 (the trace build of section 3n,
+`a2mega_accel_138B_trace.gprj`; three placements with no violation;
+none flashed): sources = the commit that adds this paragraph; tool
+V1.9.12.01, the same device. tr0: build stamp `20261121170651`,
+bitstream sha256 `beed63d597b3af4d…39c5e123d4ecb81f`, of the lines that
+are not header `738cf8356621cc10…ec856ac257004b89`. tr1:
+`20261121172603`, `7d42b80e79f2585e…f51c52cacb5c0fb5`,
+`6dea409032bff951…130768bc8d5b7f6a`. tr2: `20261121173753`,
+`bbd358d2c686487a…2ed38234c5db4dca`, `06b286dcd9d43f9a…ce9a4f2396f43757`.
+Kept as `impl/pnr/a2mega_accel_138B_tr0.fs` to `_tr2.fs` with their
+reports.
 
 Provenance of p1r (p1 built again on 2026-11-21, after the scratch
 directory with the kept bitstreams was emptied; for the comparison of

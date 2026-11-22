@@ -86,6 +86,8 @@ module gs_accel #(
     parameter bit SLOW_COPY  = 1'b0,     // EXP_DDR: a copy of the Mega II's RAM below $C000 (banks E0/E1) in the expansion
                                          // memory, in the 128K below its bank 02 that nothing else uses; cfg_slow_i then
                                          // has reads of that RAM served from the copy (gs_accel_broker SLOW_COPY)
+    parameter bit TRACE      = 1'b0,     // the trace build: a ring of the socket's cycles (gs_accel_trace), read at
+                                         // telemetry indices 32 to 63
     parameter bit SIM_ROM_VALID = 1'b0   // SIMULATION ONLY: the bench loaded the ROM image (gs_accel_romcopy SIM_PRESET)
 ) (
     input  logic        clk,
@@ -102,6 +104,8 @@ module gs_accel #(
     input  logic        cfg_slow_i,      // (SLOW_COPY) reads of banks E0/E1 below $C000 from the card's copy; any time, either way
     input  logic        cfg_rules_i,     // fast mode gives way to the machine's pace where gs_accel_rules says so; any time
     input  logic        clear_i,         // hold the PHI2 measurement at zero
+    input  logic        trace_freeze_i,  // (TRACE; else tie low) the ring stands still
+    input  logic [23:0] trace_rq_i,      // (TRACE; else tie low) window registers {31, 30, 29}: gs_accel_trace's slots
 
     // expansion memory port (EXP_DDR; clk domain; else tie the inputs low): one
     // request at a time, reads answered in the order they were taken
@@ -145,13 +149,17 @@ module gs_accel #(
     output logic [23:0] last_addr_o,     // address of the last cycle put on the bus
     output logic [15:0] verify_count_o,
     input  logic [5:0]  tele_idx_i,      // quasi-static: selects tele_word_o
+    output logic [4:0]  tele_flags_o,    // 5'b00111 with a telemetry word; with a trace entry (TRACE, indices 32 to 63)
+                                         // its {VDA, VPA, VP, /IRQ, R/W}
+    output logic [1:0]  trace_stat_o,    // (TRACE) {the ring stands still, the trigger fired}
     output logic [31:0] tele_word_o      // 0 steps, 1 socket cycles for the core, 2 posted writes, 3 clks waited for
                                          // the write buffer, 4 local reads in place, 5 local reads that waited,
                                          // 6 {verify_count, 8'h00, mode}, 7 {8'h00, verify_addr},
                                          // 8 {copies, 8'h00, ROM image sum}, 9 {shadow, cyareg, sltromsel, statereg},
                                          // 10 {16'h0, motor latches of slots 7-4, 2'b0, speed rules asked, slow by them, switch misc}, 11 PHY bus cycles, 12 {.., EXP_DDR, its queue overflowed, its memory ready, EXP_BANKS},
                                          // 13 {E0/E1 verify count, 8'h00, 4'h0, SLOW_COPY, the copy is whole, asked for, in effect},
-                                         // 14 {8'h00, address of the last E0/E1 verify mismatch}; others 0
+                                         // 14 {8'h00, address of the last E0/E1 verify mismatch};
+                                         // (TRACE) 15 to 17 the trace's state, 32 to 63 its entries; others 0
 );
     localparam int STEP_CLKS = 2, ADDR_CLKS = 2, SLOW_CLKS = 3;
     localparam int NEAR_AW = 14, NTW = NEAR_KW + 2;
@@ -257,6 +265,8 @@ module gs_accel #(
     logic [NEAR_AW-1:0] nm_flush_idx;
     logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait, stat_rd_hit, stat_rd_miss;
     logic [7:0]  r_shadow, r_cyareg, r_sltromsel, r_statereg, r_misc;
+    logic [7:0]  tr_d_f;
+    logic        tr_irq_f;
 
     gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(8), .CE_COPIES(4),
                       .NEAR(1'b1), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .ROM3(ROM3), .FAR_CLKS(2), .WEN_ONE(1'b1),
@@ -290,7 +300,8 @@ module gs_accel #(
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
         .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
         .shadow_o(r_shadow), .cyareg_o(r_cyareg), .sltromsel_o(r_sltromsel),
-        .statereg_o(r_statereg), .sw_misc_o(r_misc)
+        .statereg_o(r_statereg), .sw_misc_o(r_misc),
+        .tr_d_f_o(tr_d_f), .tr_irq_f_o(tr_irq_f)
     );
 
     // ---- the machine's speed rules, from what the socket shows
@@ -607,6 +618,25 @@ module gs_accel #(
         end
     end
 
+    // ---- (TRACE) the socket's cycles in a ring, read at indices 32 to 63
+    logic [31:0] tr_word, tr_s0, tr_s1, tr_s2;
+    logic [4:0]  tr_flags;
+    if (TRACE) begin : g_trace
+        gs_accel_trace u_trace (
+            .clk(clk), .rst_n(rst_n),
+            .run_i(enabled & running), .issue_evt_i(issue_evt), .fall_evt_i(fall_evt),
+            .a_i(last_addr_o), .we_n_i(phy_we_n), .vp_n_i(phy_vp_n), .vpa_i(phy_vpa), .vda_i(phy_vda),
+            .d_f_i(tr_d_f), .irq_f_i(tr_irq_f), .shadow6_i(r_shadow[6]),
+            .freeze_i(trace_freeze_i), .rq_i(trace_rq_i), .idx_i(tele_idx_i[4:0]),
+            .word_o(tr_word), .flags_o(tr_flags), .frozen_o(trace_stat_o[1]), .trigd_o(trace_stat_o[0]),
+            .stat0_o(tr_s0), .stat1_o(tr_s1), .stat2_o(tr_s2)
+        );
+    end else begin : g_notrace
+        assign {tr_word, tr_s0, tr_s1, tr_s2} = '0;
+        assign tr_flags = 5'b00111;
+        assign trace_stat_o = 2'b10;
+    end
+
     assign status_o = {ph2_alive, running, enabled, be_ok, gs_res_n_i, gs_rdy_i, 2'b00};
     assign mode_o   = {rom_valid, copy_busy, held, brk_fast, cardmem, cxrom, brk_slow, 1'b0};
     always_ff @(posedge clk) begin
@@ -626,7 +656,12 @@ module gs_accel #(
             6'd12:   tele_word_o <= {21'h0, EXP_DDR, x_ovf, exp_ready_i, 8'(EXP_BANKS)};
             6'd13:   tele_word_o <= {verify_scount, 8'h00, 4'h0, SLOW_COPY, slow_whole, cfg_slow_i, brk_slow};
             6'd14:   tele_word_o <= {8'h00, verify_saddr};
+            6'd15:   tele_word_o <= tr_s0;        // (TRACE: gs_accel_trace's stat0 to stat2; else 0)
+            6'd16:   tele_word_o <= tr_s1;
+            6'd17:   tele_word_o <= tr_s2;
             default: tele_word_o <= 32'h0;
         endcase
+        tele_flags_o <= 5'b00111;
+        if (TRACE && tele_idx_i[5]) begin tele_word_o <= tr_word; tele_flags_o <= tr_flags; end
     end
 endmodule

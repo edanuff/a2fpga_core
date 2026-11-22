@@ -94,6 +94,8 @@ module tb_gs_broker #(
     parameter bit SLOW_COPY = 1'b0,    // EXP_DDR, not NEAR_SPLIT: the card keeps a copy of the Mega II's RAM below $C000
                                        // in the expansion memory's first 128K, and serves reads of it with +slow
     parameter int ACC_EXP   = 0,       // ACCEL_SHADOW: gs_accel's expansion banks; it is compared in runs with +exp= this
+    parameter bit ACC_TRACE = 1'b0,    // ACCEL_SHADOW: gs_accel with its trace of the socket's cycles (gs_accel_trace);
+                                       // every entry is compared with the cycle the machine saw
     parameter bit ROM_PRESET = 1'b1    // 1 = the bench loads the card's ROM image; 0 = it starts empty and
                                        // +mode=copy has the design read it through the socket
 );
@@ -1456,13 +1458,14 @@ module tb_gs_broker #(
     end else begin : g_noam
         assign {am_ready, am_rvalid} = '0; assign am_rdata = '0;
     end
-    gs_accel #(.NEAR_KW(NEAR_KW), .EXP_BANKS(ACC_EXP), .EXP_DDR(EXP_DDR), .NEAR_SPLIT(NEAR_SPLIT), .NEAR_LINE(NEAR_LINE), .SLOW_COPY(SLOW_COPY), .SIM_ROM_VALID(ROM_PRESET)) u_acc (
+    gs_accel #(.NEAR_KW(NEAR_KW), .EXP_BANKS(ACC_EXP), .EXP_DDR(EXP_DDR), .NEAR_SPLIT(NEAR_SPLIT), .NEAR_LINE(NEAR_LINE), .SLOW_COPY(SLOW_COPY), .TRACE(ACC_TRACE), .SIM_ROM_VALID(ROM_PRESET)) u_acc (
         .exp_ready_i(1'b1), .m_req_o(am_req), .m_ready_i(am_ready), .m_we_o(am_we), .m_addr_o(am_addr),
         .m_wdata_o(am_wdata), .m_rvalid_i(am_rvalid), .m_rdata_i(am_rdata),
         .clk(clk), .rst_n(rst_n),
         .arm_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
         .cfg_fast_i(cfg_copy | ~native_i), .cfg_cardmem_i(cfg_copy | ~mem_bypass_i),
         .cfg_cxrom_i(cfg_cxrom[0]), .cfg_copy_i(copy_req), .cfg_slow_i(slow_req), .cfg_rules_i(cfg_rules), .clear_i(1'b0),
+        .trace_freeze_i(1'b0), .trace_rq_i(24'h0),
         .gs_ph2_i(gs_ph2_f), .gs_rdy_i(gs_rdy_f), .gs_irq_n_i(gs_irq_n_f), .gs_nmi_n_i(gs_nmi_n_f),
         .gs_res_n_i(gs_res_n_f), .gs_abort_n_i(gs_abort_n_f), .gs_be_i(gs_be_f), .gs_d_i(gs_d_i_f),
         .gs_d_o(acc_d_o), .gs_d_oe_o(acc_d_oe), .gs_a_o(acc_a), .gs_rw_o(acc_rw), .gs_vp_o(acc_vp),
@@ -1470,8 +1473,30 @@ module tb_gs_broker #(
         .gs_addr_oe_n_o(acc_addr_oe_n), .gs_ctl_oe_n_o(acc_ctl_oe_n),
         .status_o(acc_status), .mode_o(acc_mode), .cycle_count_o(), .stall_count_o(), .be_count_o(),
         .ph2_period_o(), .ph2_high_o(), .last_addr_o(), .verify_count_o(acc_verify),
-        .tele_idx_i(6'd0), .tele_word_o()
+        .tele_idx_i(6'd0), .tele_flags_o(), .trace_stat_o(), .tele_word_o()
     );
+    // (ACC_TRACE) gs_accel's trace: each entry, as its own register has it two clks after the
+    // fall, against the cycle the machine saw end - the bank, address, RWB and VP it latched -
+    // and against the hand-wired design's own record: VPA and VDA as its broker issued them,
+    // the data pads and /IRQ as its PHI2-fall flops have them
+    longint      n_trc_cmp = 0;
+    logic [23:0] mt_a;
+    logic        mt_rw, mt_vp, mt_ok = 1'b0, iss_vpa, iss_vda;
+    always @(posedge clk) if (issue_evt) {iss_vpa, iss_vda} <= {phy_vpa, phy_vda};
+    always @(negedge ph2_bus) begin
+        mt_a = {bank_l, addr_l}; mt_rw = rw_l; mt_vp = vp_l;
+        mt_ok = running && be_dma && res_n_bus;
+    end
+`ifdef ACC_TRACE_TB     // (with -GACC_TRACE=1: the scope is not there without it)
+        always @(posedge clk) if (rst_n && u_acc.g_trace.u_trace.f2 && mt_ok) begin
+            logic [36:0] e;
+            e = u_acc.g_trace.u_trace.rec_q;
+            if (e !== {iss_vda, iss_vpa, mt_vp, u_brk.irq_f, mt_rw, mt_a, u_brk.d_f})
+                err($sformatf("gs_accel trace entry %010h, the cycle was %010h", e,
+                              {iss_vda, iss_vpa, mt_vp, u_brk.irq_f, mt_rw, mt_a, u_brk.d_f}));
+            n_trc_cmp++;
+        end
+`endif
     // the bench's ROM image into its block-shaped ROM memory
     for (genvar b = 0; b < (NEAR_LINE ? 0 : 8); b++) begin : g_accb
         for (genvar k = 0; k < 8; k++) begin : g_acck
@@ -1823,6 +1848,11 @@ module tb_gs_broker #(
 `ifdef ACCEL_SHADOW
         if (cfg_exp == ACC_EXP && !wb_en) begin
             if (n_acc_cmp == 0) err("gs_accel comparison did not run");
+`ifdef ACC_TRACE_TB
+            if (n_trc_cmp < 1000) err($sformatf("gs_accel trace: only %0d entries compared", n_trc_cmp));
+            if (u_acc.g_trace.u_trace.count == 0) err("gs_accel trace kept nothing");
+            $display("---- gs_accel trace: %0d entries compared with the machine's cycles, %0d kept", n_trc_cmp, u_acc.g_trace.u_trace.count);
+`endif
             if (acc_verify != verify_count) err($sformatf("gs_accel verify count %0d, the design's %0d", acc_verify, verify_count));
             if (acc_mode[7] != copy_valid || acc_mode[4] != brk_fast || acc_mode[1] != brk_slow)
                 err($sformatf("gs_accel mode %02h: ROM image valid %b, fast %b, E0/E1 from the copy %b in the design", acc_mode, copy_valid, brk_fast, brk_slow));
