@@ -2772,6 +2772,35 @@ out. (The verify count went from 0 to 2 at 00:004F with the change of
 mode: the machine's own RAM is behind the card's after fast mode, as
 expected, not a finding.) Readings:
 `captures/gsos_lock_1122/paced_all_cycles.txt`.
+   **The text screen (Ed, `E1/C029:01`; the two lines without a bank
+went to bank FF, the break's):** the ROM's banner and under it
+
+    FF/BF89: 00 E1        BRK E1
+     A=BFBF X=0107 Y=0000 S=01DF D=01ED P=C4
+     B=00 K=FF M=0C Q=9E L=1 m=0 x=0 e=0
+
+So it is the Monitor after a break, in the ROM, in the Scheduler's
+BootInit (tool call `$0107`, which X still holds; the routine is
+`FF:BF71` to `BFA0`). **`FF:BF89` is not an instruction there**: it is
+the third byte of `STA $E10065` at `BF87`. The stream that is in the
+ROM is `BF7E STA $E01DEF / BF82 BCS $BF40 / BF84 LDA #$C05C / BF87 STA
+$E10065 / BF8B LDA #$BFEA`, and on it A is 0000, 00FF, C05C in turn,
+never BFBF. So the core left the stream between the routine's entry
+and `BF89`.
+   **A reading that fits every register, not shown:** one byte wrong,
+the opcode at `BF82` taken as BF where the ROM has B0 - `LDA
+$5CA9BC,X` (four bytes, to `BF86`) in place of `BCS`, then `BF86 CPY
+#$658F` (the ROM's own bytes, read from the middle of the `LDA #`),
+then the `00` at `BF89`. It leaves X and Y as the dispatcher gave them
+(Y the work area's high word, 0000), N set and Z and C clear as P has
+them, and A what 5C:AAC3 holds. Whether that is BFBF can be read from
+the Monitor. Other readings are not excluded (a return into `BF86`
+with A the work area pointer).
+   **What it is not known to be:** of tv1 alone. No boot of GS/OS from
+power-up in fast mode is on record for any build: the benchmarks ran
+with GS/OS brought up first and the card switched after, and the
+power-ups that went fast by themselves booted a Disk II. So this may
+be the first time this stretch runs in fast mode at all.
 
 ## 4. What is verified, and what is not
 
