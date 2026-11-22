@@ -49,8 +49,11 @@ stopped on a verify mismatch in bank 01 and left the card on socket
 bytes, and Arkanoid locked up in that session: cause not known,
 section 3m; **2026-11-21: the lock happens with the accelerator off by
 its setting, mode 00, and on p1 built again - it is not of the speed
-control work; a trace build to read it is built, three placements with
-no violation, not flashed: section 3n**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
+control work; read with a trace build (section 3n): **not the card's -
+slot 4 was set to Your Card for another program's Mockingboard, the ROM
+found no mouse firmware, and the game does not test ReadMouse's error;
+with slot 4 back on the mouse port it runs (Ed)**; tr2, the trace
+build, is on the card, the setting off**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
 only what the machine was given since the card began to mirror, and
 RAM that nothing has written since power-up reads differently from the
 copy than from the machine - about 23,000 bytes on this power-up, and
@@ -2610,6 +2613,22 @@ the clock chip's serial port at `$C033`/`$C034`, by the ROM, on leaving
 the Control Panel) - and if it is not kept with this card in the
 socket, that is a fault of the card's to find. The write of `$C02D` at
 boot has not been captured yet.
+
+**Closed (Ed, 2026-11-21 evening).** The mouse port setting had not
+been saved the first time; set and saved, the machine restarted,
+Arkanoid no longer locks. Slot 4 had been switched to Your Card for a
+program that needs a Mockingboard (Nox Archaist), and Arkanoid was
+tried after it. So: slot 4 on the card side, no mouse firmware for the
+ROM to find, ReadMouse answering "device not connected", a game that
+does not test for it, a paddle at column 0 and a loop that cannot end.
+It would lock the same way on the machine's own CPU with that setting.
+The card ran every cycle of it rightly, and the battery RAM is not in
+question: the setting had not been saved.
+   What stays open from section 3m is not of this: the two verify
+mismatches of the bring-up on se2 (`01:FBC3`, `02:000B`), and the speed
+rules counting `$C0n9` in banks 00/01 while I/O shadowing is inhibited,
+which this game does in every frame - to be fixed before it is run in
+fast mode.
 
 **What the trace turned out not to have.** VPA and VDA at the socket
 are both 1 for every cycle that is not internal (the broker issues
