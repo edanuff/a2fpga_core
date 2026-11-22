@@ -52,8 +52,10 @@ its setting, mode 00, and on p1 built again - it is not of the speed
 control work; read with a trace build (section 3n): **not the card's -
 slot 4 was set to Your Card for another program's Mockingboard, the ROM
 found no mouse firmware, and the game does not test ReadMouse's error;
-with slot 4 back on the mouse port it runs (Ed)**; tr2, the trace
-build, is on the card, the setting off**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
+with slot 4 back on the mouse port it runs (Ed)**; **tv1 - the trace
+build with the speed rules' gap closed and the over-held path at its
+two clks, three placements with no violation - flashed 2026-11-22
+09:01, not yet loaded; the setting off**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
 only what the machine was given since the card began to mirror, and
 RAM that nothing has written since power-up reads differently from the
 copy than from the machine - about 23,000 bytes on this power-up, and
@@ -2643,7 +2645,7 @@ And `gs`'s `last_addr` is three bytes read at different times: its bank
 and address can be of different cycles ("01:8000-81FF" in section 3m
 was that, and "lines 153 to 156" there is wrong).
 
-### The speed rules where I/O shadowing is inhibited, and a path that had two clks all along (2026-11-21 evening; simulated; three placements with no violation, tv0 to tv2; not flashed)
+### The speed rules where I/O shadowing is inhibited, and a path that had two clks all along (2026-11-21 evening; simulated; three placements with no violation, tv0 to tv2; tv1 flashed 2026-11-22, not yet loaded)
 
 The gap of section 3m: `gs_accel_rules` moved a slot's motor latch on
 any socket cycle at `$C0n8`/`$C0n9` in banks 00 and 01, also while the
@@ -2701,6 +2703,16 @@ through the core with its two clks already spent: tu0 to tu2 failed by
 violation** - tv0 +0.027 (the launch's index into `fh_c`), tv1 +0.036,
 tv2 +0.006 (a line's data into the core's P). The source is that of ts0
 to ts2 with the one constraint; its regression is theirs, 231 of 231.
+
+**tv1 flashed (2026-11-22, 08:57 to 09:01).** Written to the card's
+flash over USB with the machine off (the card's own report before it:
+the machine's clock stopped), first attempt, read-back verified; the
+card checked by its USB serial number and the file by its sha256
+before. Not yet loaded: the card has not been power-cycled, the stamp
+is not read from it, and nothing has run on it. The saved accelerator
+setting is still off. What this build has that no build on the card
+had: the rules' shadow bit and the constraint; se2's slot 6 rule is in
+it and is not yet confirmed on the machine either.
 
 ## 4. What is verified, and what is not
 
@@ -2809,8 +2821,8 @@ and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
 Provenance of tv0, tv1 and tv2 (the trace project, the speed rules'
 shadow bit, and `nl_idx` to `nh_dq` at two clks, section 3n; three
-placements with no violation; none flashed): sources = the commit that
-adds this paragraph; the same tool and device. tv0: build stamp
+placements with no violation; tv1 flashed 2026-11-22): sources = commit
+`5673b885`; the same tool and device. tv0: build stamp
 `20261121221658`, bitstream sha256 `dcd1f110c646a5e8…b4c08eac956491cf`,
 of the lines that are not header `bf4e2dabc84117a6…7dbee9629a1b484e`.
 tv1: `20261121223112`, `be14c761fcea03ea…299f4d2673093c43`,
@@ -2818,6 +2830,9 @@ tv1: `20261121223112`, `be14c761fcea03ea…299f4d2673093c43`,
 `207f7b2819018b9b…27796acfc4761788`, `3e9d60338b87c3e5…59fbe6745c839f39`.
 Kept in `impl/pnr` by name. (tu0 to tu2 there are of the dropped change
 of logic, each with violations: of no use.)
+**tv1 flashed 2026-11-22 09:01** over USB with the machine off, first
+attempt, read-back verified, the card checked by its serial number
+before it. Not yet loaded.
 
 Provenance of ts0, ts1 and ts2 (the trace project with the speed
 rules' shadow bit, section 3n; **two placements of three with no
