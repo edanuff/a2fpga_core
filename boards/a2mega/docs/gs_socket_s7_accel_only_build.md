@@ -2754,6 +2754,24 @@ the ROM's interrupt handler in it (`$C03C`, `$C046`, `$C041`, `$C047`,
 `$C027`, writes to E1:00C3 to 00DD), so interrupts are served. So a
 prompt takes keys, and either it is not the Monitor's or the line was
 not the command; which, not known.
+   **Paced, to see the code (09:29, `gs accel slow`, mode `8A`; the
+machine left as it was).** Every step is then a socket cycle, and 303
+readings of the trace's first page (32 cycles each, at random places of
+the loop) give the whole of it: `FF:B336 JSR $CEFC / BPL $B336`, which
+is the 40 column `KEYIN` (`FF:B327`: `LDY $24`, `STA ($28),Y`, the
+cursor shown, then this loop), with the call `$0606` through the
+dispatcher at `FE:00AF` (the user's tool table at 7F:FF7C read as zero
+for set 6, as it should be, then the system's in ROM at FE:012F) and
+now and then the interrupt handler. The stack is read up to `$01CA`
+(return to `B339`); what called `KEYIN` is above it and is not read
+while no key ends the wait. So: **a line or a key is being asked for
+on the 40 column text screen**, by the Monitor, by BASIC or by a
+program; the first command typed had no bank, and the Monitor's `:`
+stores into the bank it last used, so it does not rule the Monitor
+out. (The verify count went from 0 to 2 at 00:004F with the change of
+mode: the machine's own RAM is behind the card's after fast mode, as
+expected, not a finding.) Readings:
+`captures/gsos_lock_1122/paced_all_cycles.txt`.
 
 ## 4. What is verified, and what is not
 
