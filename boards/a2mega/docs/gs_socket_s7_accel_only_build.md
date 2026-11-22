@@ -2516,6 +2516,65 @@ what the core issued and what the pads read at the fall; it is not an
 instrument on the pins themselves, and a fault between the pin flops
 and the motherboard would show only by what the machine answers.
 
+### tr2 on the card: what the lock is (2026-11-21, 18:10 to 18:50)
+
+tr2 flashed 18:08, its stamp read from the card; Arkanoid hung on it as
+on se2 and p1r, the setting off, mode 00. Five captures, each after a
+Control-Apple-Reset, in `boards/a2mega/captures/arkanoid_1121/` (not
+committed: the program's code is in them).
+
+**The lock is one loop, and a real CPU would not leave it either.** At
+`02:80C8`, data bank 01, direct page 1B00: ten pairs of `LDA $93A0,X` /
+`STA $93A0,X` (rows `$93A0` to `$9940`, 160 apart: super hi-res lines
+185 to 194 of bank 01, each word read and written in place so that the
+shadowing just switched on puts it on the screen), then `DEX`, `DEX`,
+`CPX $B0`, `BCS $80C8`. It is entered with X = `$B0` + `$BA` - 2 and
+runs while X >= `$B0`. `$B0` holds 0000: the carry is then always set, X
+passes zero and the loop sweeps `01:93A0+X` with the 24-bit carry into
+bank 02 for ever (the samples "in banks 01 and 02" of section 3m). The
+strip is the paddle's: 18 bytes wide (`$BA` = 12), its left edge taken
+from `00:1BB2` by `LDA $B2` / `STA $B0` at `02:6EC9`.
+
+**What the captures show of the way in.**
+- The frame that locks begins normally: the game waits for the vertical
+  blank by polling `$E1C019`, sets the border, runs its objects, draws
+  the ball (new column 38, old column 08, line B5) and refreshes two
+  strips through its routines at `02:6D52` and `02:6D6C`, which write
+  the shadow register 1E or 57 and the speed register 82 or 92 around
+  each. Every I/O cycle in it is one of those, with the values the
+  program wrote: no soft switch answers wrongly in that frame.
+- `00:1BB2` is 0000 from the first instruction of that frame.
+- About half a second earlier (the first access to `00:1BB2` after the
+  game starts; the ring stopped on it) the game's own start-of-round
+  code at `02:D88B` writes 0030 there and draws the paddle at column
+  30. The ball's new column 38 in the frame that locks is that paddle's.
+  So between that frame and the one that locks something writes zero
+  to the paddle's column, or the code that keeps it is not run as on
+  the machine's own CPU. Not yet seen.
+- Interrupts are taken and the machine answers them rightly: 11,721
+  vector pulls in one boot and game, every one `00:FFEE` or `00:FFFE`
+  answered `C074`; the reset's `00:FFFC` answered `FA62`; the vector
+  pull flag low on each. One interrupt read in full: taken at the
+  vertical blank inside the polling loop, through `E1:0010` into the
+  ROM at `FF:B7CC` and back by RTI to the instruction it left. (The
+  suspicion of section 3m about VP is withdrawn.) In the frame that
+  locks /IRQ goes low at the vertical blank and is not taken: the game
+  has patched `SEI`, `RTS` into the end of its shadow routine
+  (`LDA #$6078` / `STA $026D66`), so that is the I flag, not the core.
+
+**What the trace turned out not to have.** VPA and VDA at the socket
+are both 1 for every cycle that is not internal (the broker issues
+them so; only the substituted I/O cycle differs): the trace cannot
+tell an opcode fetch from data, its "opcode" filter keeps every
+non-internal cycle, and its opcode trigger is the any-cycle one.
+`tools/gs_trace.py` lists by the order of the addresses instead, with
+the register widths followed from REP, SEP and pulled P bytes; the
+8,192 cycles of each capture list with no instruction out of step. The
+VP flag, R/W, the address, the data and /IRQ are as the bench has them.
+And `gs`'s `last_addr` is three bytes read at different times: its bank
+and address can be of different cycles ("01:8000-81FF" in section 3m
+was that, and "lines 153 to 156" there is wrong).
+
 ## 4. What is verified, and what is not
 
 Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):

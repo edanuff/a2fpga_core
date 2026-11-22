@@ -5,10 +5,15 @@ through the firmware's telnet command line, and lists what it holds.
 
   gs_trace.py --host <card> status
   gs_trace.py --host <card> arm [--keep all|op|pull|flow] [--trig op|pull6|quiet|any]
-                                [--addr BB:AAAA] [--post 32|1024|4096|max]
+                                [--addr BB:AAAA] [--post 32|1024|4096|max] [--when-speed HH]
   gs_trace.py --host <card> freeze | run
   gs_trace.py --host <card> dump [-o file] [--last N]      (freezes the ring; N = newest entries)
   gs_trace.py list <file> [--raw]                           (a dump as instructions)
+
+arm --when-speed HH stages the setup with the trigger off, waits until the machine's speed
+register (CYAREG, from `gs accel`) has been something else and then reads HH, arms the
+trigger with one register write, and waits for it to fire: for a trigger that a program's
+loader would fire, armed when the program itself starts.
 
 The ring's setup goes through window registers 29 to 31 under the keys 50 to 52, where
 the accelerator's requests live under the key A5: the tool refuses unless the card is
@@ -117,6 +122,9 @@ def main():
     a.add_argument("--trig", choices=TRIG)
     a.add_argument("--addr", default="00:0000")
     a.add_argument("--post", choices=POST, default="1024")
+    a.add_argument("--when-speed", help="arm the trigger when the speed register reads this (hex), after it has read otherwise")
+    a.add_argument("--again", type=int, default=0, help="with --when-speed: when the trigger has fired, arm it again at once, this many times (the access after the first)")
+    a.add_argument("--wait", type=int, default=900, help="seconds to wait for --when-speed and then for the trigger")
     d = sub.add_parser("dump"); d.add_argument("-o", "--out"); d.add_argument("--last", type=int)
     l = sub.add_parser("list"); l.add_argument("file"); l.add_argument("--raw", action="store_true")
     args = ap.parse_args()
@@ -143,6 +151,8 @@ def main():
             st = state(read_window(card)); need_mode00(st, args.force)
             bank, addr = (int(x, 16) for x in args.addr.split(":"))
             cfg = KEEP[args.keep] | (POST[args.post] << 6) | ((TRIG[args.trig] << 4) | 8 if args.trig else 0)
+            if args.when_speed:
+                return arm_when(card, args, cfg, bank, addr)
             slot(card, 0, addr)
             slot(card, 1, ((cfg | 4) << 8) | bank)
             slot(card, 1, (cfg << 8) | bank)
@@ -187,6 +197,49 @@ def main():
             return
     finally:
         card.close()
+
+def speed_reg(card):
+    m = re.search(r"speed register ([0-9A-F]{2})", card.cmd("gs accel"))
+    return int(m.group(1), 16) if m else None
+
+def arm_when(card, args, cfg, bank, addr):
+    want = int(args.when_speed, 16)
+    slot(card, 0, addr)
+    slot(card, 1, ((cfg | 4) << 8) | bank)
+    slot(card, 1, ((cfg & ~8) << 8) | bank)          # running, the trigger off
+    for line in ("gs set 31 0", f"gs set 29 {bank}", f"gs set 30 {cfg}", "gs run"):
+        card.cmd(line)                               # staged: the key alone is left to write
+    t0, seen_other, n = time.time(), False, 0
+    print(f"staged; waiting for the speed register to leave {want:02X} and come back to it", flush=True)
+    while True:
+        v = speed_reg(card); n += 1
+        if v is not None and v != want and not seen_other:
+            seen_other = True; print(f"  {time.time() - t0:6.1f} s: speed register {v:02X}", flush=True)
+        if seen_other and v == want:
+            card.cmd(f"gs set 31 {0x51}")
+            ta = time.time(); print(f"  {ta - t0:6.1f} s: speed register {want:02X}: trigger armed", flush=True)
+            break
+        if time.time() - t0 > args.wait:
+            card.cmd("gs set 31 0"); raise SystemExit("gave up waiting; the trigger is not armed")
+    again = args.again
+    if not again:
+        time.sleep(0.1); card.cmd("gs set 31 0")
+    while time.time() - ta < args.wait:
+        g = card.cmd("gs")
+        if "TRIGGERED" in g and "FROZEN" in g:
+            print(f"  {time.time() - t0:6.1f} s: the trigger fired and the ring stands still ({time.time() - ta:.1f} s after arming)", flush=True)
+            if again:
+                # (the slot's key is still there: the trigger off and on again is two writes)
+                card.cmd(f"gs set 30 {cfg & ~8}"); card.cmd(f"gs set 30 {cfg}")
+                again -= 1
+                print(f"  {time.time() - t0:6.1f} s: armed again", flush=True)
+                if not again:
+                    time.sleep(0.1); card.cmd("gs set 31 0")
+                continue
+            show(state(read_window(card))); return
+        if not again:
+            time.sleep(0.2)
+    raise SystemExit("armed, not fired in the time given")
 
 # ---------------------------------------------------------------- listing
 M = """BRK s|ORA dxi|COP s|ORA sr|TSB d|ORA d|ASL d|ORA dl|PHP|ORA #|ASL A|PHD|TSB a|ORA a|ASL a|ORA al
@@ -234,6 +287,8 @@ def listing(path, raw):
             print(l.rstrip()); continue
         f = l.split()
         rows.append((int(f[0]), int(f[1][:2], 16), int(f[1][3:], 16), int(f[2], 16), f[3], f[4], "VP" in f[5:], "irq" in f[5:]))
+    if not raw and not any(r[5] == "opr" for r in rows):
+        return listing_by_order(rows)      # (the socket's VPA/VDA do not tell an opcode from data: by address order)
     if raw:
         for r in rows:
             print(f"{r[0]:5d} {r[1]:02X}:{r[2]:04X} {r[3]:02X} {r[4]} {r[5]:3s}{' VP' if r[6] else ''}{' irq' if r[7] else ''}")
@@ -261,6 +316,89 @@ def listing(path, raw):
         low = any(r[7] for r in rows[i:j])
         code = " ".join(f"{x:02X}" for x in [d] + opr)
         print(f"{n:5d} {b:02X}:{a:04X}  {code:11s}  {dis(a, d, opr):22s} {'  '.join(data)}{'   /IRQ low' if low else ''}")
+        i = j
+
+A_OPS = {"ORA", "AND", "EOR", "ADC", "STA", "LDA", "CMP", "SBC", "BIT", "STZ", "INC", "DEC", "ASL", "LSR", "ROL", "ROR", "TSB", "TRB"}
+X_OPS = {"LDX", "LDY", "STX", "STY", "CPX", "CPY"}
+RMW = {"INC", "DEC", "ASL", "LSR", "ROL", "ROR", "TSB", "TRB"}
+OPRS = {"": 0, "A": 0, "d": 1, "dx": 1, "dy": 1, "di": 1, "dxi": 1, "diy": 1, "dl": 1, "dly": 1, "sr": 1, "sry": 1, "a": 2,
+        "ax": 2, "ay": 2, "ai": 2, "axi": 2, "ail": 2, "al": 3, "alx": 3, "r": 1, "rl": 2, "mv": 2, "s": 1}
+PTR = {"di": 2, "dxi": 2, "diy": 2, "sry": 2, "dl": 3, "dly": 3}
+FIXED = {"PHP": 1, "PHB": 1, "PHK": 1, "PHD": 2, "PLP": 1, "PLB": 1, "PLD": 2, "RTS": 2, "RTL": 3, "RTI": 4, "PER": 2,
+         "BRK": 6, "COP": 6}
+FLOW = {"JMP", "JML", "JSR", "JSL", "RTS", "RTL", "RTI", "BRK", "COP", "BRA", "BRL", "BPL", "BMI", "BVC", "BVS", "BCC", "BCS",
+        "BNE", "BEQ", "MVN", "MVP", "WAI", "STP"}
+
+def listing_by_order(rows):
+    """Instructions from the order of the addresses.  The widths of A and of X, Y follow the
+    REP, SEP and pulled P bytes seen; where an instruction does not end at the next fetch
+    with the widths as they stand, the other widths are tried and kept if they fit.
+    '!' = no widths fit (an interrupt, or a cycle the decoder does not know)."""
+    n = len(rows)
+    def nxt(j):                       # the next cycle that is not internal
+        while j < n and rows[j][5] == "int":
+            j += 1
+        return j
+    def decode(i, m, x):
+        num, b, a, d, rw, kind, vp, irq = rows[i]
+        name, mode = OPS[d][0], (OPS[d][1] if len(OPS[d]) > 1 else "")
+        no = (1 if name in ("REP", "SEP") else 2 - m if name in A_OPS else 2 - x) if mode == "#" else OPRS[mode]
+        if name == "PEA": no = 2
+        j, opr, data = i + 1, [], []
+        def take(j, k, what):
+            for _ in range(k):
+                j = nxt(j)
+                if j >= n: break
+                what.append(rows[j]); j += 1
+            return j
+        if name == "JSL":
+            seq = []; j = take(j, 6, seq)
+            opr = [r for k, r in enumerate(seq) if k in (0, 1, 3)]; data = [r for k, r in enumerate(seq) if k in (2, 4, 5)]
+        else:
+            j = take(j, no, opr)
+            w = 2 - m if name in A_OPS else 2 - x
+            if name in FIXED: nd = FIXED[name]
+            elif name in ("PHA", "PLA"): nd = 2 - m
+            elif name in ("PHX", "PHY", "PLX", "PLY"): nd = 2 - x
+            elif name == "PEA": nd = 2
+            elif name == "PEI": nd = 4
+            elif name == "JSR": nd = 2 + (2 if mode == "axi" else 0)
+            elif name in ("JMP", "JML"): nd = {"ai": 2, "axi": 2, "ail": 3}.get(mode, 0)
+            elif name in ("MVN", "MVP"): nd = 2
+            elif mode in ("", "A", "#", "r", "rl", "s"): nd = 0
+            else: nd = PTR.get(mode, 0) + (2 * w if name in RMW else w)
+            j = take(j, nd, data)
+        ok = name == "JSL" or all((r[1], r[2]) == (b, (a + 1 + k) & 0xFFFF) for k, r in enumerate(opr))
+        k = nxt(j)
+        if ok and name not in FLOW and k < n and (rows[k][1], rows[k][2]) != (b, (a + 1 + len(opr)) & 0xFFFF):
+            ok = False
+        # (a data cycle is not a fetch from the program: its address is not the next of this instruction's)
+        if ok and any((r[1], r[2]) == (b, (a + 1 + len(opr)) & 0xFFFF) for r in data) and name not in FLOW:
+            ok = False
+        return ok, j, name, opr, data
+    m = x = 0
+    i = 0
+    while True:
+        i = nxt(i)
+        if i >= n:
+            break
+        num, b, a, d, rw, kind, vp, irq = rows[i]
+        if vp:
+            print(f"{num:5d}                               VECTOR PULL {b:02X}:{a:04X} = {d:02X}"); i += 1; continue
+        for mm, xx in ((m, x), (m ^ 1, x), (m, x ^ 1), (m ^ 1, x ^ 1)):
+            ok, j, name, opr, data = decode(i, mm, xx)
+            if ok:
+                m, x = mm, xx; break
+        else:
+            ok, j, name, opr, data = decode(i, m, x)
+        ob = [r[3] for r in opr]
+        if name == "REP" and ob: m, x = m & ~(ob[0] >> 5) & 1, x & ~(ob[0] >> 4) & 1
+        if name == "SEP" and ob: m, x = m | (ob[0] >> 5) & 1, x | (ob[0] >> 4) & 1
+        if name in ("PLP", "RTI") and data: m, x = (data[0][3] >> 5) & 1, (data[0][3] >> 4) & 1
+        dd = "  ".join(f"{'VP ' if r[6] else ''}{r[4]} {r[1]:02X}:{r[2]:04X}={r[3]:02X}" for r in data)
+        low = any(r[7] for r in rows[i:j])
+        code = " ".join(f"{v:02X}" for v in [d] + ob)
+        print(f"{num:5d} {b:02X}:{a:04X}  {code:11s}  {dis(a, d, ob):22s} {dd}{'' if ok else '  !'}{'   irq' if low else ''}")
         i = j
 
 if __name__ == "__main__":
