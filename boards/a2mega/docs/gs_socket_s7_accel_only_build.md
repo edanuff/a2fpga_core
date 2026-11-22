@@ -3262,6 +3262,12 @@ placements of that source: tx0 +0.034 and tx1 +0.012, none; **tx2 34
 violations, -0.288** (a step register into the cheap view's clock
 enable, a path of every round). So this is two clean placements, to be
 used as x0 and q1 were if at all, by Ed's decision.
+   **tx0 flashed as a diagnostic (2026-11-22, 15:45 to 15:49; Ed's
+decision, the build not being a closed one).** Over USB with the
+machine off (the card's report: clock stopped), first attempt,
+read-back verified, the card checked by its serial number and the file
+by its sha256 (`8ab342a0...`). Not yet loaded. For the stop on
+01:FBC3, with the cable out for the power-ups.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
@@ -3379,6 +3385,8 @@ violation: not a closed build**; none flashed): sources = the commit
 that adds this paragraph; the same tool and device. tx0: build stamp
 `20261122122636`, bitstream sha256 `8ab342a00ab18363...0beaa732cb6a97d8`,
 of the lines that are not header `203cb0d5f124f03e...2848a412111e12c3`.
+**tx0 flashed 2026-11-22 15:49** as a diagnostic, over USB with the
+machine off, first attempt, read-back verified.
 tx1: `20261122124750`, `3415a2cf1f75ac14...6357fee867b8958a9f`,
 `0c33da48ce822cf4...5f6922f922e3f9`. tx2 (34 setup violations):
 `20261122125335`, `40b692c94bdeea40...43bdb53d6bd576e`,
