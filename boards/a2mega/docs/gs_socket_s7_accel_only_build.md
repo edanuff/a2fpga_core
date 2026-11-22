@@ -2623,7 +2623,7 @@ and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
 Provenance of tr0, tr1 and tr2 (the trace build of section 3n,
 `a2mega_accel_138B_trace.gprj`; three placements with no violation;
-none flashed): sources = the commit that adds this paragraph; tool
+tr2 flashed 2026-11-21): sources = the commit that adds this paragraph; tool
 V1.9.12.01, the same device. tr0: build stamp `20261121170651`,
 bitstream sha256 `beed63d597b3af4d…39c5e123d4ecb81f`, of the lines that
 are not header `738cf8356621cc10…ec856ac257004b89`. tr1:
@@ -2632,6 +2632,9 @@ are not header `738cf8356621cc10…ec856ac257004b89`. tr1:
 `bbd358d2c686487a…2ed38234c5db4dca`, `06b286dcd9d43f9a…ce9a4f2396f43757`.
 Kept as `impl/pnr/a2mega_accel_138B_tr0.fs` to `_tr2.fs` with their
 reports.
+**tr2 flashed 2026-11-21** over USB with the machine off, first
+attempt, read-back verified, the card checked by its serial number
+before it. Not yet loaded.
 
 Provenance of p1r (p1 built again on 2026-11-21, after the scratch
 directory with the kept bitstreams was emptied; for the comparison of
