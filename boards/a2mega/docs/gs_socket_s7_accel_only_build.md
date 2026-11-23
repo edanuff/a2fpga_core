@@ -3421,6 +3421,21 @@ card's own next bank byte is what +6 sees) and that the window is wide
 about the sample with the card on the slot's supply; it does not yet
 compare the ROM's code fetches with RAM's. That needs every cycle on
 the socket: the card paced.
+   **A beep, about three minutes into that session (Ed, 21:18): the
+machine is at the Monitor's key wait, the card still fast.** Read with
+status queries only: mode `9A` in 150 samples of 150, the speed
+register 82, 2.8 M socket cycles a second, and the last address is the
+idle read with `$C000` and `$C036` among it - the ROM's key wait, as on
+the morning's breaks. No reset in the event log. So Arkanoid, running
+accelerated with the speed rules moving the card between fast and
+paced several times a second, broke; where, the text screen will say.
+   What had been sent to the card in that session: the sweep (register
+3, the tap, twenty-two values; CTRL's bit 3 on and off for each
+reading, twenty-five times in all, the last about a minute before Ed
+wrote) and status reads. None of it reaches the accelerator: the tap
+goes to the sweep's counters, the bit to the trace and the telemetry's
+choice of words. That is reading the source, not a test; no mode was
+changed.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
