@@ -227,6 +227,8 @@ module gs_accel_broker #(
     parameter int          SLOW_CLKS = 3,            // DATA_LATE: ... for a step whose decode was not registered ahead (>= 2, >= ADDR_CLKS)
     parameter logic [23:0] PARK_ADDR = 24'hFF0000,   // idle-cycle read address (must be ROM)
     parameter bit          DATA_LATE = 1'b0,         // 1 = launch the next step's read one step ahead (needs cpu_na_i)
+    parameter bit          VFY_RAM   = 1'b0,         // 1 = a verify mismatch of card RAM counts as one of the ROM image does
+                                                     //     (verify_count_o, verify_scount_o); 0 = it is counted apart (below)
     parameter int          RA_COPIES = 1,            // copies of the two memories' read addresses (one per group of blocks a
                                                      // build places together; each copy has its own last mux)
     parameter int          CE_COPIES = 1,            // extra copies of the core's clock enable (F65C816 CE_X)
@@ -381,7 +383,18 @@ module gs_accel_broker #(
     output logic        slow_o,          // SLOW_COPY: reads of Mega II RAM are the card's, in the step in progress
     output logic [15:0] verify_scount_o, // ... mismatches in banks E0/E1 (they are counted in verify_count_o too)
     output logic [23:0] verify_saddr_o,  // ... the address of the last one
-    // (for a log of mismatches, gs_accel's: of the mismatch verify_miss_o reports)
+    // Verify compares what the card would give the core with the socket's byte.  For
+    // the ROM image the two cannot differ unless the image or the sample is wrong.  For
+    // RAM they differ wherever nothing has written since power-up: the card's starts
+    // from its own contents, the machine's from what its chips hold - a difference no
+    // program can count on, and one a boot does read (GS/OS, its own variables, before
+    // it sets them).  So (VFY_RAM = 0) verify_miss_o, verify_addr_o and verify_count_o
+    // are of the ROM image only, verify_scount_o stays zero, and a RAM mismatch is
+    // counted here and reported with every other in verify_any_o, for a log:
+    output logic        verify_any_o,    // any mismatch (a clk behind it, as verify_miss_o)
+    output logic [15:0] verify_rcount_o, // mismatches of card RAM (banks 00/01, expansion, the copy of E0/E1)
+    output logic [23:0] verify_laddr_o,  // the address of the last mismatch of any kind
+    // (of the mismatch verify_any_o reports)
     output logic [7:0]  verify_card_o,   // the card's byte
     output logic [7:0]  verify_sock_o,   // the socket's
     output logic [23:0] verify_phys_o,   // where the card read it: RAM's physical address, or {6'h3F, the ROM image's}
@@ -1493,23 +1506,31 @@ module gs_accel_broker #(
     logic [7:0] vfy_d;
     always_ff @(posedge clk) vfy_d <= lm_rdata;
     wire vfy_miss = sync_done & vfy_r & (d_f != vfy_d);
+    // (the step's read is of the ROM image: the decode's view, good long before a socket cycle ends)
+    wire vfy_gate = vfy_miss & (VFY_RAM | d_local_rom);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             verify_miss_o <= 1'b0; verify_addr_o <= '0; verify_count_o <= '0;
             verify_scount_o <= '0; verify_saddr_o <= '0;
             verify_card_o <= '0; verify_sock_o <= '0; verify_phys_o <= '0; verify_src_o <= '0;
+            verify_any_o <= 1'b0; verify_rcount_o <= '0; verify_laddr_o <= '0;
             stat_steps_o <= '0; stat_sock_o <= '0; stat_posted_o <= '0; stat_pwwait_o <= '0;
             stat_rd_hit_o <= '0; stat_rd_miss_o <= '0;
         end else begin
-            verify_miss_o <= vfy_miss;
+            verify_miss_o <= vfy_gate;
+            verify_any_o  <= vfy_miss;
             if (vfy_miss) begin
-                verify_addr_o <= DATA_LATE ? eff_addr : sreq_addr;
-                if (verify_count_o != 16'hFFFF) verify_count_o <= verify_count_o + 16'd1;
+                verify_laddr_o <= DATA_LATE ? eff_addr : sreq_addr;
                 verify_card_o <= vfy_d;
                 verify_sock_o <= d_f;
                 verify_phys_o <= aq_local_rom ? {6'h3F, aq_rom_addr} : aq_phys;
                 verify_src_o  <= {near_r, use_lm_r, rom_r, aq_local, aq_local_rom, aq_side, slow_q, mode_bypass};
+                if (!vfy_gate && verify_rcount_o != 16'hFFFF) verify_rcount_o <= verify_rcount_o + 16'd1;
+            end
+            if (vfy_gate) begin
+                verify_addr_o <= DATA_LATE ? eff_addr : sreq_addr;
+                if (verify_count_o != 16'hFFFF) verify_count_o <= verify_count_o + 16'd1;
                 // (ea_k: the step's address from a register - it has been that since the
                 // step's second clk)
                 if (SLOW_COPY && DATA_LATE && ea_k[23:17] == 7'h70) begin
@@ -1525,6 +1546,17 @@ module gs_accel_broker #(
             if (ev_pww) stat_pwwait_o <= stat_pwwait_o + 32'd1;
         end
     end
+
+`ifdef VERILATOR
+    // Verify: a compared read in the ROM's own banks is the ROM image's (what stops a
+    // bring-up hangs on this view of the step), and nothing below bank 02's $C000 is.
+    always @(posedge clk) if (rst_n && sync_done && vfy_r) begin
+        if ((eff_addr[23:17] == 7'h7F) != d_local_rom && !(eff_addr[23:17] == 7'h00 && eff_addr[15:14] == 2'b11)) begin
+            $display("ERROR: verify: read of %06h classed %s the ROM image @%0t", eff_addr, d_local_rom ? "as" : "as not", $time);
+            $finish;
+        end
+    end
+`endif
 
 `ifdef VERILATOR
     // Near memory: a step completed from the cheap view is one the full decode

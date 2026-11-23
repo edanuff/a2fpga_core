@@ -3351,6 +3351,48 @@ copy of the machine's but a record of what was written since the card
 began. The remedy that keeps to the machine is to make it a copy: read
 banks 00/01 (and E0/E1 for the copy of the Mega II's RAM) through the
 socket in the hold that reads the ROM.
+   **The check looked at again, and two instruments (Ed, 2026-11-22;
+simulated; two placements of three with no violation: not a closed
+build; not flashed).** Ed's question of the stop on unwritten RAM was
+not how to make the card pass the check but whether the check is
+right: a thing of bring-up days that would be onerous to work around.
+So the bring-up is stopped by the ROM image alone. A compare of the
+ROM cannot differ unless the image or the sample is wrong; a compare
+of RAM differs wherever nothing has written since power-up. The
+broker's `verify_miss_o`, `verify_addr_o` and `verify_count_o` - what
+the firmware watches - are of reads the decode says are the ROM
+image's (`VFY_RAM = 0`), `verify_scount_o` stays zero, and a mismatch
+of card RAM is counted apart (`verify_rcount_o`, word 30's high half,
+its last address in word 31) and goes into the log with the rest. No
+firmware change. The bench holds every run to no ROM mismatch at all,
+and the runs whose card memory is still a copy to none of RAM either;
+a check in the broker stops any run where a compared read in banks
+FE/FF is not classed as the ROM's.
+   And of the failures with the card's USB fed, Ed's two readings: its
+supply, which he sets aside as vague and not testable (the bank is 5 V
+3 A); and **the PHY's sample being marginal for the ROM, whose setup
+and hold are not RAM's** - which what is on record fits: every wrong
+sample with an address is a ROM read (`FF:BF7B`, `FF:BFFA`, `FF:ABFB`
+twice), every RAM mismatch unwritten memory. For that, in the trace
+build (words 0 to 5 while the ring is told to stand still):
+   - *the read-data sweep*, the S6 instrument of `gs_socket_ctl` made
+     two-sided and split by what is read. The pads are sampled in every
+     clk; for each read cycle the sample of one clk - connector
+     register 3, signed, -12 to +8, tap -1 the last clk edge before the
+     fall and tap 0 the first after - is compared with the byte the
+     core took (`d_f`), and mismatches and cycles are counted for the
+     ROM (banks FC to FF), fast RAM (00 to 7F below `$C000`) and the
+     Mega II's side (E0/E1 and I/O). In the bench, whose machine gives
+     both the same timing: half the cycles differ at -12, none from -8
+     to +1, nine in ten at +2, all from +3 (`captures/build_ty/
+     sweep_sim.txt`).
+   - *falls the PHY did not wait for*: their count, and of the first
+     the PH2 pin as sampled 24 clks before and 8 after, the PHY's state
+     and the address. (The broker taking a cycle's end only from a fall
+     the PHY takes is not made: that answers a cause not shown.)
+   231 runs pass. Timing of three placements: **ty0 267 violations,
+-1.277** (the PHY's enable into the sweep's counters - the instrument's
+own path); ty1 +0.001 and ty2 +0.001, none.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
@@ -3461,6 +3503,18 @@ The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
+stopped by the ROM image alone, the read-data sweep and the count of
+falls the PHY did not wait for, section 3n; **two placements of three
+with no violation: not a closed build**; none flashed): sources = the
+commit that adds this paragraph; the same tool and device. ty0 (267
+setup violations): build stamp `20261122164147`, bitstream sha256
+`5fe7891aacfd39c7...05ab1f57d66ca97c`, of the lines that are not header
+`3e1a7ded6f617600...da1a61dff6188110`. ty1: `20261122170201`,
+`df7b639e5aaf2dca...f4d85c4e30ab5563`, `eadf507a073e69e5...04cf8fea531cf27`.
+ty2: `20261122172831`, `40a5687780d6aa39...2e0f34dabd8d8dd`,
+`c8d6f596370b3f7e...969b24228f2620d`. Kept in `impl/pnr` by name.
 
 Provenance of tx0, tx1 and tx2 (the trace project with the log of
 verify mismatches, section 3n; **two placements of three with no

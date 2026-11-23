@@ -332,6 +332,7 @@ module top (
 
     wire [7:0]   gs_ctrl_w;        // {clear,0,0,0,0,listen,0,arm}
     wire [3:0]   gs_out_extra_w;
+    wire [4:0]   gs_hold_tap_w;    // here: the tap of gs_accel's read-data sweep (trace build)
     wire [159:0] gs_tele_w;
     wire [5:0]   gs_trace_idx_w;   // here: index of the telemetry word
     wire [23:0]  gs_trig_addr_w;   // here: the accelerator's requests
@@ -366,7 +367,7 @@ module top (
         .dbg_dp_caps_i(16'h0), .dbg_dp_status_i(8'h00), .dbg_dp_serdes_i(8'h00),
         .dbg_doc_reqf_i(16'h0), .dbg_doc_missf_i(16'h0), .dbg_doc_tof_i(16'h0),
         .ddr3_reinit_tgl_o(),
-        .gs_ctrl_o(gs_ctrl_w), .gs_out_extra_o(gs_out_extra_w), .gs_hold_tap_o(),
+        .gs_ctrl_o(gs_ctrl_w), .gs_out_extra_o(gs_out_extra_w), .gs_hold_tap_o(gs_hold_tap_w),
         .gs_tele_i(gs_tele_w), .gs_trace_idx_o(gs_trace_idx_w), .gs_trig_addr_o(gs_trig_addr_w),
         .gs_trace_i(gs_trace_w),
         .dbg_mem_addr_o(), .dbg_mem_go_o(), .dbg_mem_busy_i(1'b0), .dbg_mem_data_i(32'h0),
@@ -381,7 +382,9 @@ module top (
     reg [3:0]  gs_oe_s0, gs_oe_s1;
     reg [23:0] gs_rq_s0, gs_rq_s1;
     reg [5:0]  gs_ti_s0, gs_ti_s1;
+    reg [4:0]  gs_ht_s0, gs_ht_s1;
     always @(posedge clk_gs_w) begin
+        gs_ht_s0   <= gs_hold_tap_w;  gs_ht_s1   <= gs_ht_s0;
         gs_ctrl_s0 <= gs_ctrl_w;      gs_ctrl_s1 <= gs_ctrl_s0;
         gs_oe_s0   <= gs_out_extra_w; gs_oe_s1   <= gs_oe_s0;
         gs_rq_s0   <= gs_trig_addr_w; gs_rq_s1   <= gs_rq_s0;
@@ -479,7 +482,7 @@ module top (
         .cfg_fast_i(rq_key_w & gs_rq_s1[0]), .cfg_cardmem_i(rq_key_w & gs_rq_s1[1]),
         .cfg_cxrom_i(rq_key_w & gs_rq_s1[2]), .cfg_copy_i(rq_key_w & gs_rq_s1[3]),
         .cfg_slow_i(rq_key_w & gs_rq_s1[4]), .cfg_rules_i(rq_key_w & gs_rq_s1[5]),
-        .clear_i(gs_ctrl_s1[7]), .trace_freeze_i(gs_ctrl_s1[3]), .trace_rq_i(gs_rq_s1),
+        .clear_i(gs_ctrl_s1[7]), .trace_freeze_i(gs_ctrl_s1[3]), .trace_rq_i(gs_rq_s1), .sweep_tap_i(gs_ht_s1),
         .gs_ph2_i(gs_ph2), .gs_rdy_i(gs_rdy), .gs_irq_n_i(gs_irq_n), .gs_nmi_n_i(gs_nmi_n),
         .gs_res_n_i(gs_res_n), .gs_abort_n_i(gs_abort_n), .gs_be_i(gs_be),
         .gs_d_i(gs_d), .gs_d_o(gs_d_o_w), .gs_d_oe_o(gs_d_oe_w),

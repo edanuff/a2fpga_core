@@ -133,6 +133,9 @@ module gs_socket_phy #(
     output logic        fall_evt_o,     // one clk per PHI2 fall (synchronised)
     output logic        issue_evt_o,    // one clk when a cycle is put on the bus
     output logic        ended_read_o,   // valid with fall_evt_o: the cycle that ended was a running read
+    output logic        xfall_evt_o,    // a fall event with the pins ours and the sequencer not waiting for one:
+                                        // the sequencer takes no notice of it (an instrument; see gs_accel)
+    output logic [2:0]  state_o,        // the sequencer's state (as xfall_evt_o: for an instrument)
     output logic [31:0] cycle_count_o,  // bus cycles the core advanced through
     output logic [15:0] stall_count_o,  // cycles repeated because RDY was low
     output logic [15:0] be_count_o      // clk cycles spent with BE low
@@ -409,6 +412,8 @@ module gs_socket_phy #(
     assign fall_evt_o     = fall_evt;
     assign issue_evt_o    = (state == S_ISSUE);
     assign ended_read_o   = ~write_q & run_q & ~stall_last;
+    assign xfall_evt_o    = fall_evt & enabled & (state != S_WAIT_FALL) & (state != S_OFF);
+    assign state_o        = state;
 
     logic [15:0] be_cnt;
     always_ff @(posedge clk or negedge rst_n) begin

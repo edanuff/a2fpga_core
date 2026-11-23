@@ -263,6 +263,14 @@ module tb_gs_broker #(
     logic        brk_fast, verify_miss;
     logic [23:0] verify_addr;
     logic [15:0] verify_count;
+    // (verify_miss, verify_addr and verify_count are of the ROM image alone; a mismatch
+    // of card RAM is in these - and this bench's memories begin alike, so that it must
+    // see neither kind where the card's memory is still a copy)
+    logic        verify_any;
+    logic [23:0] verify_laddr;
+    logic [15:0] verify_rcount;
+    int          n_any_slow = 0;
+    logic [4:0]  tb_tap = 5'd0;       // gs_accel's read-data sweep (its instrument is not checked here)
     logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait;
 
     gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself
@@ -309,6 +317,7 @@ module tb_gs_broker #(
         .nm_wen_o(nm_wen), .nm_wa_o(nm_wa), .nm_wdata_o(nm_wdata), .nm_wtag_o(nm_wtag),
         .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(), .pw_busy_o(),
         .verify_miss_o(verify_miss), .verify_addr_o(verify_addr), .verify_count_o(verify_count),
+        .verify_any_o(verify_any), .verify_rcount_o(verify_rcount), .verify_laddr_o(verify_laddr),
         .slow_o(brk_slow), .verify_scount_o(verify_scount), .verify_saddr_o(verify_saddr),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
         .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
@@ -1408,11 +1417,16 @@ module tb_gs_broker #(
     // verify mode must stay silent - as long as fast mode has never run: after
     // that the motherboard copy of banks 00/01 is stale by design (only shadowed
     // writes are forwarded), and a mismatch says nothing
-    always @(posedge clk) if (verify_miss && !cfg_toggle && !(cfg_rules && !cfg_native))
-        err($sformatf("verify: card memory and socket disagree at %06h", verify_addr));
+    always @(posedge clk) if (verify_any && !cfg_toggle && !(cfg_rules && !cfg_native))
+        err($sformatf("verify: card memory and socket disagree at %06h", verify_laddr));
+    // (the ROM image is the machine's ROM in every run: never, whatever the mode has been)
+    always @(posedge clk) if (verify_miss)
+        err($sformatf("verify: the ROM image and the socket disagree at %06h", verify_addr));
     // ... in the copy of Mega II RAM, always: the machine's is never stale
-    always @(posedge clk) if (verify_miss && verify_addr[23:17] == 7'h70)
-        err($sformatf("verify: the card's copy of Mega II RAM and the socket disagree at %06h", verify_addr));
+    always @(posedge clk) if (verify_any && verify_laddr[23:17] == 7'h70) begin
+        n_any_slow++;
+        err($sformatf("verify: the card's copy of Mega II RAM and the socket disagree at %06h", verify_laddr));
+    end
 
     // ---- S6 beside the design: every pin, every clk (native modes)
     longint n_s6cmp = 0;
@@ -1473,7 +1487,7 @@ module tb_gs_broker #(
         .arm_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
         .cfg_fast_i(cfg_copy | ~native_i), .cfg_cardmem_i(cfg_copy | ~mem_bypass_i),
         .cfg_cxrom_i(cfg_cxrom[0]), .cfg_copy_i(copy_req), .cfg_slow_i(slow_req), .cfg_rules_i(cfg_rules), .clear_i(1'b0),
-        .trace_freeze_i(1'b0), .trace_rq_i(24'h0),
+        .trace_freeze_i(1'b0), .trace_rq_i(24'h0), .sweep_tap_i(tb_tap),
         .gs_ph2_i(gs_ph2_f), .gs_rdy_i(gs_rdy_f), .gs_irq_n_i(gs_irq_n_f), .gs_nmi_n_i(gs_nmi_n_f),
         .gs_res_n_i(gs_res_n_f), .gs_abort_n_i(gs_abort_n_f), .gs_be_i(gs_be_f), .gs_d_i(gs_d_i_f),
         .gs_d_o(acc_d_o), .gs_d_oe_o(acc_d_oe), .gs_a_o(acc_a), .gs_rw_o(acc_rw), .gs_vp_o(acc_vp),
@@ -1597,6 +1611,7 @@ module tb_gs_broker #(
         if ($test$plusargs("holdstall")) do_holdstall = 1;
         void'($value$plusargs("recopyat=%d", recopy_at));
         void'($value$plusargs("mode=%s", mode_s));
+        void'($value$plusargs("tap=%d", tb_tap));
         void'($value$plusargs("steps=%d", max_steps));
         void'($value$plusargs("exp=%d", cfg_exp));
         cfg_mbexp = cfg_exp;
@@ -1840,8 +1855,9 @@ module tb_gs_broker #(
                 if (n_rule_nat < 400) err($sformatf("+rules: %0d steps paced by the rules, want 300 or more", n_rule_nat));
             end
         end
-        if (verify_count != 0 && !cfg_toggle && !(cfg_rules && !cfg_native)) err($sformatf("verify count %0d", verify_count));
-        if (verify_scount != 0) err($sformatf("E0/E1 verify count %0d (last at %06h)", verify_scount, verify_saddr));
+        if (verify_rcount != 0 && !cfg_toggle && !(cfg_rules && !cfg_native)) err($sformatf("verify count of card RAM %0d", verify_rcount));
+        if (verify_count != 0) err($sformatf("verify count of the ROM image %0d (last at %06h)", verify_count, verify_addr));
+        if (verify_scount != 0 || n_any_slow != 0) err($sformatf("E0/E1 verify count %0d, %0d seen (last at %06h)", verify_scount, n_any_slow, verify_saddr));
         if (SLOW_COPY) begin
             $display("---- copy of Mega II RAM: %0d writes to E0/E1 stored, %0d forwarded writes repeated in it; reads of that RAM: %0d from the copy, %0d from it and compared with the socket's byte (paced), %0d on the socket; request %s",
                      n_slow_wr, n_slow_fwd, n_slow_rd, n_slow_vfy, n_slow_sock,
@@ -1871,6 +1887,13 @@ module tb_gs_broker #(
             if (n_trc_cmp < 1000) err($sformatf("gs_accel trace: only %0d entries compared", n_trc_cmp));
             if (u_acc.g_trace.u_trace.count == 0) err("gs_accel trace kept nothing");
             $display("---- gs_accel trace: %0d entries compared with the machine's cycles, %0d kept", n_trc_cmp, u_acc.g_trace.u_trace.count);
+            // the read-data sweep and the falls the PHY did not wait for (an instrument: shown,
+            // and held to this - reads were counted, and the bench's clock has no fall too many)
+            $display("---- sweep tap %0d: ROM %0d of %0d, RAM %0d of %0d, Mega II side %0d of %0d differ from the byte at the fall; unexpected falls %0d",
+                     $signed(tb_tap), u_acc.g_diag.sw_mis[0], u_acc.g_diag.sw_n[0], u_acc.g_diag.sw_mis[1], u_acc.g_diag.sw_n[1],
+                     u_acc.g_diag.sw_mis[2], u_acc.g_diag.sw_n[2], u_acc.g_diag.xf_n);
+            if (u_acc.g_diag.sw_n[0] + u_acc.g_diag.sw_n[1] + u_acc.g_diag.sw_n[2] == 0) err("gs_accel read-data sweep counted no read");
+            if (u_acc.g_diag.xf_n != 0) err($sformatf("gs_accel counted %0d falls the PHY did not wait for", u_acc.g_diag.xf_n));
             // (a second ROM copy takes card memory again and empties gs_accel's log: not compared then)
             if (!cfg_copy) begin
                 if (u_acc.vml_n != 3'(tl_n)) err($sformatf("gs_accel mismatch log has %0d entries, the design made %0d (of the first four)", u_acc.vml_n, tl_n));
@@ -1885,6 +1908,7 @@ module tb_gs_broker #(
             end
 `endif
             if (acc_verify != verify_count) err($sformatf("gs_accel verify count %0d, the design's %0d", acc_verify, verify_count));
+            if (u_acc.verify_rcount != verify_rcount) err($sformatf("gs_accel verify count of card RAM %0d, the design's %0d", u_acc.verify_rcount, verify_rcount));
             if (acc_mode[7] != copy_valid || acc_mode[4] != brk_fast || acc_mode[1] != brk_slow)
                 err($sformatf("gs_accel mode %02h: ROM image valid %b, fast %b, E0/E1 from the copy %b in the design", acc_mode, copy_valid, brk_fast, brk_slow));
             if (u_acc.verify_scount != verify_scount) err($sformatf("gs_accel E0/E1 verify count %0d, the design's %0d", u_acc.verify_scount, verify_scount));
