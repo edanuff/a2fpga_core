@@ -3503,6 +3503,45 @@ shadow in E1) and nothing was lost. The state register at the break
 does not hold 80STORE or HIRES. To be looked at before anything is
 built on "card memory read two ways": the same addresses in banks 01,
 E1 and 02.
+   **The frame is in bank 01: "card memory read two ways" is taken
+back (Ed's dumps, 21:40).**
+
+    01/2E60: 0E 00 00 00 00 33 31 33 33 55 55 E1 E1 55 C4 80
+    01/2E70: 58 53 02 55 55 55 55 22 22 22 22 65 55 55 53 55
+
+`80 58 53 02` at 01:2E6F - P, the PC and K of the break as the Monitor
+printed them - and under it the handler's own pushes, `C4`, `55` (B),
+`E1 E1`; around it the picture's bytes. Nothing was lost. The card put
+the stack's pushes into bank 01, as it does for `$2000-$3FFF` of bank
+00 when the replica has the auxiliary bank selected for writes there,
+and the handler pulled them from where they had gone. (The card's copy
+of E1 at the same place has picture only: super hi-res shadowing is
+inhibited, shadow 1E, as a game that draws off screen has it.)
+   What stands in its place: **the machine's state register at that
+moment was 0C** - the handler reads `$C068` from the socket a few
+instructions after the push, and prints it as M - which has RAMRD,
+RAMWRT and PAGE2 all clear: by the machine's own switches those pushes
+belonged in bank 00. So the card's replica of the switches and the
+machine's switches did not agree: the replica still had the auxiliary
+bank for that region, the machine had gone back to the main one. The
+game draws through the stack with the auxiliary bank selected and then
+puts the map and the stack pointer back; a replica that keeps the
+auxiliary bank past that reads the game's own page-zero and stack from
+the wrong bank from then on, which is a core that ends up in the middle
+of an instruction with its stack pointer still in the picture. That
+fits every register of the break; it is one break, and which write the
+replica and the machine took differently is not seen.
+   **These breaks are new (Ed): Arkanoid and other programs ran
+accelerated many times before, for long.** What the card has now that
+those runs had not, newest first: this evening's (the verify outputs,
+the sweep, the log - none in the path of a switch); the constraint of
+this section (2026-11-21); the trace's taps; and the speed rules'
+motor latches leaving banks 00/01 alone while I/O shadowing is
+inhibited there (2026-11-21) - which changes this very game: it
+inhibits that shadowing and writes at `$C0n8/9`, so until last night
+its "motors" were on and now they are not, and the card now goes
+between paced and fast with each write of the speed register where it
+did not before. The break is beside such a write.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
