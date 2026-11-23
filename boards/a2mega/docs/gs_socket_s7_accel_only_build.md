@@ -3709,6 +3709,24 @@ check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
+Provenance of tz1 and tz2 (the trace project of ty with one change:
+page `$C0` of an expansion bank is I/O under the all-banks bit only
+while the shadow register allows I/O in banks 00/01, section 3n; **one
+placement of three with no violation: not a closed build**; none
+flashed): sources = commit `1af9e29f`; the same tool and device. tz0:
+no bitstream - the placement did not end in the 3,600 s the build
+script allows and was stopped. (The round's script then copied the
+project's previous output under tz0's name: those three files are
+ty2's, byte for byte, and are renamed `..._tz0_NOT_A_BUILD_copy_of_ty2`;
+the script wants a delete of the project's output before each build.)
+tz1 (no violation, worst +0.010): build stamp `20261122225221`,
+bitstream sha256 `211cdfd941080d65...f22f25f312fdbf0`, of the lines
+that are not header `625195cced23b510...c623e2c8a2643d559a`. tz2 (219
+setup violations, worst -0.823, the sweep's own enable again -
+`u_phy/enabled` to `g_diag.sw_mis`/`sw_n` - as in ty0; none in the
+map): `20261122233709`, `6716962633f665a6...f000f0a46d0bf709`,
+`f6eff98b031f08cd...e50eee5a50f7b479c3`. Kept in `impl/pnr` by name.
+
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
 falls the PHY did not wait for, section 3n; **two placements of three
