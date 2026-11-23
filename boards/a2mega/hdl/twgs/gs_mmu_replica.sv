@@ -147,7 +147,7 @@ module gs_mmu_replica #(
     wire cyc_iolc = (cyc_main && !shadow[6]) || cyc_mega;
     // $C000-$C0FF where it decodes as I/O (gs_mmu_decode: IO | EXTERNAL_IO)
     wire cyc_io   = (ca[15:8] == 8'hC0) &&
-                    (cyc_iolc || (cyareg[4] && cb >= 8'h02 && cb <= 8'h7F));
+                    (cyc_iolc || (cyareg[4] && !shadow[6] && cb >= 8'h02 && cb <= 8'h7F));
     // $C100-$CFFF slot space
     wire cyc_cx   = (ca[15:12] == 4'hC) && (ca[11:8] != 4'h0) && cyc_iolc;
 

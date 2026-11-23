@@ -158,8 +158,26 @@ static void directed()
     expect("DISKREG: a read changes nothing", MI(0x80, 0x80));
     WR(0xE1C031, 0x80);
     expect("DISKREG: cleared again", MI(0x80, 0x00));
+    // all-banks shadow (CYAREG bit 4, set above) with I/O still inhibited in
+    // banks 00/01 (SHADOW $5F): page $C0 of an expansion bank is its RAM
+    {
+        const uint8_t st0 = dut->statereg_o, mi0 = dut->misc_o;
+        WR(0x05C035, 0x08);
+        expect("all-banks shadow with I/O inhibited ($C035 bit 6): $C035 of bank 05 is RAM", dut->shadow_o == 0x5F, gold.shadow == 0x5F);
+        RD(0x02C055); RD(0x02C057); WR(0x02C001, 0); WR(0x02C003, 0); WR(0x02C005, 0); WR(0x02C009, 0);
+        RD(0x02C081); RD(0x02C081); WR(0x02C068, 0xF0);
+        expect("... no switch moves from $C0xx of bank 02 then",
+               dut->statereg_o == st0 && dut->misc_o == mi0, gold.statereg() == st0 && gold.misc() == mi0);
+        WR(0x02C036, 0x80);
+        expect("... nor the speed register", dut->cyareg_o == 0x94, gold.cyareg == 0x94);
+    }
+    WR(0xE0C035, 0x08);
+    WR(0x05C035, 0x18);
+    expect("all-banks shadow (CYAREG bit 4), the inhibit off: I/O answers in bank 05", dut->shadow_o == 0x18, gold.shadow == 0x18);
+    RD(0x02C055);
+    expect("... and PAGE2 from bank 02", ST(0x40, 0x40));
+    RD(0x02C054);
     WR(0x05C035, 0x08);
-    expect("all-banks shadow (CYAREG bit 4): I/O answers in bank 05", dut->shadow_o == 0x08, gold.shadow == 0x08);
     WR(0x00C036, 0x80);
     WR(0x05C035, 0x7F);
     expect("... and not once the bit is clear", dut->shadow_o == 0x08, gold.shadow == 0x08);

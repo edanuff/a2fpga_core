@@ -833,6 +833,28 @@ t24n:
         lda #$80
         sta $C036
         plp
+        ; ---- T28 all-banks shadow (CYAREG bit 4) with I/O and language card
+        ;      shadowing inhibited in banks 00/01 ($C035 bit 6): page $C0 of an
+        ;      expansion bank is that bank's RAM, and the switches do not move.
+        ;      (A program with its code in bank 02 runs in this state: Arkanoid.)
+        lda $E0C068
+        pha
+        lda #$48
+        sta $E0C035
+        lda #$90
+        sta $E0C036
+        lda $02C055             ; not PAGE2
+        lda $02C057             ; not HIRES
+        sta $02C001             ; not 80STORE
+        sta $02C003             ; not RAMRD
+        sta $02C005             ; not RAMWRT
+        lda #$80
+        sta $E0C036
+        lda #$08
+        sta $E0C035
+        pla
+        eor $E0C068
+        res                     ; $00: the state register as it was
 
         lda #$A5
         sta SIG

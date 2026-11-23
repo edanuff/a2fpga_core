@@ -3542,6 +3542,62 @@ inhibits that shadowing and writes at `$C0n8/9`, so until last night
 its "motors" were on and now they are not, and the card now goes
 between paced and fast with each write of the speed register where it
 did not before. The break is beside such a write.
+   **A place where the card's map and the machine can differ in exactly
+this game's state: page `$C0` of the expansion banks (21:50; source and
+the captures of 2026-11-21; a hypothesis for the break, a fact about
+the map).** The game's own stack is at `00:2E6x` (its JSRs push there
+in every capture of 11-21; D is `1B00`/`1C00`), so the frame in bank 01
+is the game's ordinary stack sent to the auxiliary bank, not a drawing
+trick. What sends `$2000-$3FFF` of bank 00 there: RAMRD/RAMWRT, or
+80STORE with HIRES and PAGE2 - and the replica read after the break has
+80STORE and HIRES both set (word 10 `6F`), so PAGE2 alone would do it.
+   The map (`gs_mmu_decode`, from the MiSTer core's; the replica's
+tracker; and the bench's model of the machine, all three alike) put
+I/O at `$C0xx` of banks 02 to 7F whenever the speed register's bit 4
+(shadowing in all banks) is set - **whatever the shadow register's bit
+6 says**. The replica's own test wrote `$05C035` with the shadow
+register at `5F` and expected the register to change. In the game's
+running state - shadow `57`, speed `92`, state `0C`, read at the lock
+on 11-16 and 11-21 - I/O is inhibited in banks 00/01 and bit 4 is set;
+and the game's code runs through `$Cxxx` of bank 02 (`02:C74D`,
+`02:CC3D-CC58` in `captures/arkanoid_1121/first_1bb2.txt`). With the
+old map any access at `02:C0xx` in that state is (a) a socket cycle
+answered by the machine, where in fast mode the program's bytes are in
+the card's memory and not the machine's, and (b) a soft switch to the
+replica: a read of `$C055` sets PAGE2, of `$C057` HIRES, a write at
+`$C001/3/5/9` sets 80STORE, RAMRD, RAMWRT, ALTZP, and `$C035`, `$C036`,
+`$C068` and the language card's page likewise. On the machine's own
+bytes (mode 00 or 80) none of it matters, which is how the game ran
+for minutes through this card on 11-21.
+   Not shown: that the game touches `02:C000-C0FF` in that state (no
+capture has such a cycle; each is 8,192 cycles); that the machine has
+RAM there then (inferred: the game runs on it, and the inhibit is one
+term of the decode in any reading of the Hardware Reference); what the
+machine does with bit 4 set and bit 6 clear (left as it was, I/O in
+every bank; a border write at `$02C034` from the Monitor would say).
+   **Changed (round tz):** `all_bank_io` in `gs_mmu_decode` and the
+tracker's `cyc_io` take `!shadow[6]`; the bench's machine
+(`iigs_mmu_model.h`, three places) the same; the replica's directed
+test now has both cases (inhibited: `$C0xx` of banks 02/05 moves no
+switch and no register; not inhibited: it does), and the broker's test
+program a stretch for it (T28: reads of `$02C055`, `$02C057`, writes
+at `$02C001/3/5` with shadow `48` and speed `90`; the state register
+as it was). The bench cannot say which map is the machine's - its
+machine is the same model - only that the card and the model agree
+and nothing else moved. The map's bench passes (the decode's sweep,
+1,875 M vectors; the replica's 127 directed checks and 6 M random
+ones, both ROMs). The broker's: 230 runs of 231 pass, and the one that
+did not is a run whose own condition is tied to a step number
+(`l_recopy_hs2`, a hold that must begin under a stalled idle cycle):
+T28 moved the program's steps by 55, a sweep finds the narrow window at
+20169 to 20171 now, and at 20170 the run passes with every check. The
+full set has not been run again with that number.
+   On "new": this decode is of 2026-11-11, not of this week. By this
+record tonight is the first time this game ran in fast mode on this
+card: on se2 every boot of this disk stopped the ladder at the verify
+(`01:FBC3`) and ran on the machine's bytes with the setting on, and
+11-21's runs were with the setting off. If accelerated runs of it were
+made on another build, they are not in this record.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the

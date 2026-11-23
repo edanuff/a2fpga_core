@@ -331,10 +331,10 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run l_copy_rst  b110_2m $T +mode=copy   +expect +irq +reset
     run l_recopy    b110_2m $T +mode=copy   +expect +irq +recopy
     # (... with RDY low on the idle cycle the second hold begins in: at these two steps it is one)
-    # (the steps move with the test program: 20007 to 20036 and 20114 to 20116 as of T27's stretch with
-    # I/O shadowing inhibited; a sweep of +recopyat on this build finds them)
+    # (the steps move with the test program: 20000 to 20071 and 20169 to 20171 as of T28;
+    # a sweep of +recopyat on this build finds them)
     run l_recopy_hs  b110_2m $T +mode=copy  +expect +irq +recopy +holdstall +recopyat=20020
-    run l_recopy_hs2 b110_2m $T +mode=copy  +expect +irq +recopy +holdstall +recopyat=20115
+    run l_recopy_hs2 b110_2m $T +mode=copy  +expect +irq +recopy +holdstall +recopyat=20170
     run c_copy      b110_2c $T +mode=copy   +expect +irq
     run c_copy_rst  b110_2c $T +mode=copy   +expect +irq +reset
     run c_recopy    b110_2c $T +mode=copy   +expect +irq +recopy

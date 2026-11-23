@@ -1574,7 +1574,7 @@ module tb_gs_broker #(
     endtask
 
     // expected test-program results ($0300...): -1 = depends on the configuration
-    int expect_tab [0:107] = '{
+    int expect_tab [0:108] = '{
         'hFF, 'h00, 'h5C, 'h3F, 'h11, 'hC3, 'h3C, 'hA5, 'hA6, 'hA7,
         'h77, 'h5A, 'h5A, 'h00, 'h30, 'hEE, 'h00, 'h11, 'h00, 'hB1,
         'hB1, 'hB1, 'h00, 'hB2, 'h00, 'hB3, 'hC8, 'h00, 'hC9, 'hD1,
@@ -1584,7 +1584,8 @@ module tb_gs_broker #(
         'h1C, 'h08, 'hA1, 'hA7, 'h28, 'h01, 'hA7, 'hA5, 'h5A, 'h5A,
         'h00, 'h22, 'h11, 'hE1, -1,   'hE1, 'hE2, 'h01, 'h36, 'h13, -1, 'h00, -1, -1, -1, -1,
         'h71, 'h72, 'h12, 'h33, 'h66, 'h55, 'h66, 'h44, 'h88, 'hA4,
-        'h00, 'h16, 'h00, 'h00, 'h1C, 'h00, 'h1A, 'h00, 'hD1, 'hD4, 'hD1, 'h1E };
+        'h00, 'h16, 'h00, 'h00, 'h1C, 'h00, 'h1A, 'h00, 'hD1, 'hD4, 'hD1, 'h1E,
+        'h00 };
 
     initial begin
         string  rom_path, wpath;
@@ -1797,7 +1798,7 @@ module tb_gs_broker #(
         if (!final_done) err("no quiet moment at the end of the run (socket cycles still outstanding)");
 
         if (do_expect) begin
-            for (i = 0; i <= 107; i++) begin
+            for (i = 0; i <= 108; i++) begin
                 int want, got;
                 want = expect_tab[i];
                 if (i == 44) want = (cfg_mbexp >= 1) ? 'h21 : 'hFF;
