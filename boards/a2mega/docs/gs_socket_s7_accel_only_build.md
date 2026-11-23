@@ -3515,6 +3515,9 @@ setup violations): build stamp `20261122164147`, bitstream sha256
 `df7b639e5aaf2dca...f4d85c4e30ab5563`, `eadf507a073e69e5...04cf8fea531cf27`.
 ty2: `20261122172831`, `40a5687780d6aa39...2e0f34dabd8d8dd`,
 `c8d6f596370b3f7e...969b24228f2620d`. Kept in `impl/pnr` by name.
+**ty1 flashed 2026-11-22 20:55** as a diagnostic (Ed's decision), over
+USB with the machine off, first attempt, read-back verified, the card
+checked by its serial number and the file by its sha256.
 
 Provenance of tx0, tx1 and tx2 (the trace project with the log of
 verify mismatches, section 3n; **two placements of three with no
