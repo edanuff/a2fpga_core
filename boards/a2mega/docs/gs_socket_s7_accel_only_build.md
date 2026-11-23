@@ -3447,6 +3447,21 @@ break is beside a write of the speed register, which is where the
 rules turn the card between paced and fast. Whether `02:5356` is an
 instruction or the inside of one is in the bytes around it, which the
 Monitor can show.
+   The bytes about it (Ed, `02/5340.536F`):
+
+    02/5340: 10 A0 00 01 B7 B4 85 11 A9 00 00 87 B4 97 B4 A6
+    02/5350: 10 20 90 53 A0 02 00 A9 10 00 AA 97 90 A0 04 00
+    02/5360: B7 90 C9 50 00 F0 03 8A 97 90 20 30 53 A9 FD FF
+
+which is `534F LDX $10 / 5351 JSR $5390 / 5354 LDY #$0002 / 5357 LDA
+#$0010 / 535A TAX / 535B STA [$90],Y`. **`02:5356` is the third byte
+of `LDY #$0002`** - the core off its stream once more, here in fast
+mode, on the card's own memory, with the cable out. And Y is 0000, not
+0002: that `LDY` was not run as two bytes and then broken into, it was
+not run. The core came to `5356` from elsewhere - the return of the
+`JSR $5390` just before it is two bytes short of that (it returns to
+`5354`). What the subroutine at `5390` does, and what is left on the
+stack, the Monitor can show.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
