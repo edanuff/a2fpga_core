@@ -3317,6 +3317,40 @@ before read FF FF FF FF at the same code a second sooner in its boot.
 those bytes that the card's RAM does not show** - the card had 00
 there. Which write, and what the replica made of it, is the next
 capture: the trigger on the same bytes in bank 00.
+   **The trigger on the same bytes in bank 00, and the last paragraph
+taken back (tx0, 16:01; `fbc8_bank00_dump.txt`).** The first cycle at
+00:FBC8 is 4.0 s after the start and is the loader's block move:
+
+    00:7D2B  54 00 7E   MVN $7E,$00    R 7E:5F30=1F  W 00:FBC2=1F
+                                       R 7E:5F31=06  W 00:FBC3=06
+                                       ...
+                                       R 7E:5F36=00  W 00:FBC8=00
+                                       R 7E:5F37=00  W 00:FBC9=00
+
+a file's image going from bank 7E into bank 00's language card - 1F 06
+00 08 00 00 00 00 at FBC2 to FBC9, which is not what 01:FBC2 to FBC9
+reads 0.2 s later (00 15 14 58 19 0A 00 07). So that move is to bank
+00's own RAM and has nothing to do with the bytes in question; and of
+those the two captures leave this: no cycle at 01:FBC8 and none at
+00:FBC8 before GS/OS reads them. **What the last paragraph concluded
+from "the bytes are not a power-up's" does not follow.** They are
+what the machine's RAM kept: this machine had been off ten seconds,
+and its RAM holds much of a session through that - the same power-ups
+stopped on page zero bytes the ROM reads before it writes (00:0024 =
+1B, the cursor's column of the session before). The power-up at 15:50,
+after three hours off, read FF FF FF FF at the same code. So GS/OS
+reads eight bytes of its own variables before it has written them,
+the machine answers with whatever its chips hold, the card with the
+zeros its block RAM starts from: **the known gap after all, not a
+write the card missed.** One power-up can check it: after ten seconds
+off, the bring-up left to itself, the log's socket bytes at 01:FBC6 to
+FBC9 should be a session's and not FF.
+   What it means for the bring-up is unchanged and now plain: it will
+stop on this disk at every power-up, because the card's RAM is not a
+copy of the machine's but a record of what was written since the card
+began. The remedy that keeps to the machine is to make it a copy: read
+banks 00/01 (and E0/E1 for the copy of the Mega II's RAM) through the
+socket in the hold that reads the ROM.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
