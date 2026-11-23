@@ -3462,6 +3462,35 @@ not run. The core came to `5356` from elsewhere - the return of the
 `JSR $5390` just before it is two bytes short of that (it returns to
 `5354`). What the subroutine at `5390` does, and what is left on the
 stack, the Monitor can show.
+   The subroutine and the stack (Ed, `02/5390.53DF`, `00/2E60.2E8F`):
+
+    02/5390: A0 06 00 B7 90 A0 09 00 D7 90 D0 06 8A A0 06 00
+    02/53A0: 97 90 8A A0 09 00 97 90 60 9C 2C 14 9C 2E 14 20
+    02/53B0: 88 45 90 01 60 A7 B8 85 10 A0 00 01 B7 B8 29 FF
+    02/53C0: 00 85 11 A9 00 00 87 B8 97 B8 20 30 53 A6 10 20
+    02/53D0: 90 53 A0 02 00 A9 20 00 AA 97 90 A0 04 00 B7 90
+
+    00/2E60: 06 03 93 8B 02 6B 8B 00 00 FE FF 02 7F 8B C4 83
+    00/2E70: 04 2A 83 00 1B 1F 64 5C C3 02 FC C2 02 62 63 02
+    00/2E80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+`5390` is `LDY #6 / LDA [$90],Y / LDY #9 / CMP [$90],Y / BNE / TXA /
+STA [$90],Y ... / RTS` - nothing but loads, stores and a return, and
+it leaves Y = 9, which the break has not: Y = 0000, X = 53D5 (the
+address after the `LDY #$0002` of the same lines' twin at `53D2`), so
+the registers are not those of a core that has just come back from it.
+   **And the break's own frame is not on the stack.** The Monitor's S
+is the pointer after the push (the morning's breaks: S 01DF, the frame
+at 01E0), so P, PC and K - 80, 58 53, 02, which the Monitor printed -
+belong at 00:2E6F to 2E72. The bytes there are 83 04 2A 83. The
+break's handler pulled the right ones from that RAM moments after the
+core pushed them, and the Monitor's dump, minutes later and with
+nothing written there since, reads others. Banks 00/01 are the card's
+own in fast mode, behind the near memory's lines. **So the same four
+bytes of card memory have read two ways**: what was pushed did not
+stay, or what is read now is not what is stored. A return address read
+back as it was not written is enough for a core in the middle of
+`LDY #$0002`. Not shown which; and one break.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
