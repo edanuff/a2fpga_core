@@ -3393,6 +3393,34 @@ build (words 0 to 5 while the ring is told to stand still):
    231 runs pass. Timing of three placements: **ty0 267 violations,
 -1.277** (the PHY's enable into the sweep's counters - the instrument's
 own path); ty1 +0.001 and ty2 +0.001, none.
+   **ty1 on the card, the cable out (2026-11-22, 21:15): the bring-up
+goes through to fast by itself on this disk, the first time.** The
+stamp read from the card is ty1's. The console: ROM copied (7EE8), card
+memory at the machine's pace, the same with the copy of E0/E1, `FAST`.
+The count the firmware watches - the ROM image's - is 0; card RAM's is
+15959 by then (last at 00:01E5; most of it is of paced stretches after
+fast mode has run, where the machine's own RAM is behind by design),
+the log's four as before. Arkanoid is up (Ed) and runs with the speed
+rules moving the card between fast and paced as it writes the speed
+register.
+   **The sweep there, a first pass (`captures/gsos_lock_1122/
+sweep_usb_out_1.txt`; 0.6 s a tap, the game in a loop on `$E1C019` in
+fast mode):**
+
+    tap    ROM            Mega II side
+    -12    68.7 % differ   0
+    -11 .. +5    0         0
+    +6     100 %          99.9 %
+    +7, +8 100 %          100 %
+
+65535 cycles a tap in each; no fall the PHY did not wait for. In fast
+mode the ROM's cycles are the idle read of `FF:0000`, one address and
+one byte, and no read of fast RAM is on the socket at all - so this
+says the pads hold a byte from 11 clks before the fall to 5 after (the
+card's own next bank byte is what +6 sees) and that the window is wide
+about the sample with the card on the slot's supply; it does not yet
+compare the ROM's code fetches with RAM's. That needs every cycle on
+the socket: the card paced.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
