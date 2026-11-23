@@ -3436,6 +3436,17 @@ wrote) and status reads. None of it reaches the accelerator: the tap
 goes to the sweep's counters, the bit to the trace and the telemetry's
 choice of words. That is reading the source, not a test; no mode was
 changed.
+   The text screen (Ed, `E1/C029:01`):
+
+    02/5356: 00 A9        BRK A9
+     A=0082 X=53D5 Y=0000 S=2E6E D=1C00 P=80 B=55 K=02 M=0C Q=9E L=1 m=0 x=0 e=0
+
+The game's own code in bank 02 - expansion RAM, the card's DDR3 - and
+A holds 0082, the value the speed register has had all session: the
+break is beside a write of the speed register, which is where the
+rules turn the card between paced and fast. Whether `02:5356` is an
+instruction or the inside of one is in the bytes around it, which the
+Monitor can show.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
