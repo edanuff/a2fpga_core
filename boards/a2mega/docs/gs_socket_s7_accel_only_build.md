@@ -3491,6 +3491,18 @@ bytes of card memory have read two ways**: what was pushed did not
 stay, or what is read now is not what is stored. A return address read
 back as it was not written is enough for a core in the middle of
 `LDY #$0002`. Not shown which; and one break.
+   The same dump again a few minutes on reads the same bytes: the
+read is steady. And before the last paragraph is leaned on, what it
+left out: S = 2E6E is in `$2000-$3FFF`, where a write in bank 00 goes
+to bank 01 under the display's switches (80STORE with PAGE2 and HIRES)
+or RAMWRT - and this game draws by pushing, its stack pointer laid
+into the picture. If the frame was pushed under such a map and the
+Monitor now reads with another, the four bytes are in bank 01 (or its
+shadow in E1) and nothing was lost. The state register at the break
+(M=0C) has PAGE2 and RAMWRT clear, which speaks against it, but it
+does not hold 80STORE or HIRES. To be looked at before anything is
+built on "card memory read two ways": the same addresses in banks 01,
+E1 and 02.
    **What it is not known to be:** of tv1 alone. No boot of GS/OS from
 power-up in fast mode is on record for any build: the benchmarks ran
 with GS/OS brought up first and the card switched after, and the
