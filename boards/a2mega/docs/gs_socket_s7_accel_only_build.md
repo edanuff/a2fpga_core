@@ -3729,8 +3729,25 @@ map): `20261122233709`, `6716962633f665a6...f000f0a46d0bf709`,
 **tz1 flashed 2026-11-23 20:24** as a diagnostic (Ed: "Flash tz1"), over
 USB with the machine off (the card said so: no clock, reset held), first
 attempt, read-back verified, the card checked by its serial number and
-the file by its sha256. Not loaded yet: the card was still running ty1
-from before the write; its stamp is to be read after the power cycle.
+the file by its sha256.
+   **tz1 running, the cable out (2026-11-23, 21:18 on): Arkanoid in
+fast mode for twelve minutes and more with no break, left in its
+attract mode** (Ed: last night's break was in attract mode too). The
+stamp read from the card is tz1's; the ladder went to fast by itself
+(sum 7EE8, the ROM image's count 0, mode `9A`). Logged by status reads
+only (`captures/arkanoid_1123/tz1_watch.log`, 12,893 polls in 720 s):
+mode `9A` at every one; the speed register `82`, and `92` in five of
+them (21:23:15, 21:25:14, 21:26:34, 21:26:58, 21:29:08), each gone by
+the next poll 50 ms later; one read of the replica between: shadow
+`1E`, state `0C`. So the state the map change is about - bit 4 of the
+speed register set - is not the game's steady state, as section 3n
+took it to be from readings made in the mouse lock: it comes in short
+bursts, minutes apart at the polling's resolution. Whether the shadow
+register's bit 6 is set in those bursts has not been read. One run
+with no break against one run with a break at about three minutes
+(ty1) is not a proof of the change. A longer watch is running, with
+the socket's last address every 5 s so that a stop in the Monitor
+would show (`tz1_watch2.log`).
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
