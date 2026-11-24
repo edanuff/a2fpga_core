@@ -3709,6 +3709,35 @@ check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
+Provenance of ua0, ua1 and ua2 (the trace project of tz with the
+diagnostics' counters on registers of their own - the sweep's, the
+count of falls nobody waited for, the broker's count of card-RAM
+mismatches; **one placement of three with no violation: not a closed
+build**; none flashed): sources = commit `f790f4d9`; the same tool and
+device. Bench 231 runs of 231; the simulated sweep the same, number
+for number, as before the change in fifteen runs (native, fast and
+paced at taps -12, -3, 0, 2, 5). ua0 (no violation, worst +0.019,
+built in 11 minutes where tz's took 20 to 60): build stamp
+`20261123231937`, bitstream sha256
+`70c5ddf3a79a54e2...ea374c028b8a783`, of the lines that are not header
+`93c6c13c7a7e705c...721ba09cfbc78a83`. ua1 (77 setup violations, worst
+-0.472): `20261123233100`, `3e2ec7262cd8babc...aef1ea4c2bcec1c`,
+`baf7c73db051954f...f433b9358b6dfd05`. ua2 (9, worst -0.036):
+`20261123235342`, `4ff49dbc55105cd8...2d99510003dd173`,
+`763560829e1dd97c...2038702427e20b9c`. Kept in `impl/pnr` by name.
+   What fails now is no longer the sweep's enable (ty0 -1.277, tz2
+-0.823). It is the core's own loop - the near memory to itself, the
+launch's index to `nh_dq` and `fh_c`, the PHY's `enabled` into the
+broker's step - with, behind it, what else was added since tv, the
+last round that closed: the sweep's class into its counts (-0.189),
+the verify compare into the E0/E1 count and address (-0.337), the
+mismatch log, the trace's count. Every failed placement since tv has
+the core's loop in it (tx2 had nothing else): the loop closes at
++0.01 to +0.04 when it closes, and each addition beside it costs
+rolls. The round's script is `captures/build_ua/build_round.sh`: it
+removes the project's outputs before each build, so no stale file can
+take a round's name.
+
 Provenance of tz1 and tz2 (the trace project of ty with one change:
 page `$C0` of an expansion bank is I/O under the all-banks bit only
 while the shadow register allows I/O in banks 00/01, section 3n; **one
