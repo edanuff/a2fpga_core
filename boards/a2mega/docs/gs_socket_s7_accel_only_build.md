@@ -3726,6 +3726,11 @@ setup violations, worst -0.823, the sweep's own enable again -
 `u_phy/enabled` to `g_diag.sw_mis`/`sw_n` - as in ty0; none in the
 map): `20261122233709`, `6716962633f665a6...f000f0a46d0bf709`,
 `f6eff98b031f08cd...e50eee5a50f7b479c3`. Kept in `impl/pnr` by name.
+**tz1 flashed 2026-11-23 20:24** as a diagnostic (Ed: "Flash tz1"), over
+USB with the machine off (the card said so: no clock, reset held), first
+attempt, read-back verified, the card checked by its serial number and
+the file by its sha256. Not loaded yet: the card was still running ty1
+from before the write; its stamp is to be read after the power cycle.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
