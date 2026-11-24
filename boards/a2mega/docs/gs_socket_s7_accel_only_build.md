@@ -3709,6 +3709,25 @@ check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
 
+Provenance of ub0, ub1 and ub2 (**the project without the trace**,
+`a2mega_accel_138B.gprj`, from the same source as ua: the map change
+of section 3n, the bring-up stopped by the ROM image alone, the speed
+rules' fix and the two-clk constraint of 2026-11-21; no ring, no
+mismatch log, no sweep; **three placements of three with no
+violation**; none flashed, none run on hardware - what has run is tz1,
+the trace project's): sources = commit `f790f4d9`; the same tool and
+device. ub0 (worst +0.014): build stamp `20261124002541`, bitstream
+sha256 `9d03c2e12591392d...421029bed0dd272`, of the lines that are not
+header `326e18ec8db868a6...73734b742040b5a9`. ub1 (+0.056):
+`20261124004336`, `84de29033f8d1e52...5963077c8cb6826`,
+`d98122a88f29baef...37507d5cff6a3735`. ub2 (+0.011): `20261124005439`,
+`5c3f96f04b4bfa17...4226a1467ac5a1bc`, `deebc55a8ddf4f94...1b8b937c6103f15`.
+Built in 11 to 18 minutes each. Kept in `impl/pnr` by name
+(`a2mega_accel_138B.fs` itself is ub2 now; se2 is kept as
+`a2mega_accel_138B_se2.fs`). So the change closes where it would ship,
+and the trace project - the same source with the ring, the log and the
+sweep beside the core - is what does not (ua: one of three).
+
 Provenance of ua0, ua1 and ua2 (the trace project of tz with the
 diagnostics' counters on registers of their own - the sweep's, the
 count of falls nobody waited for, the broker's count of card-RAM
