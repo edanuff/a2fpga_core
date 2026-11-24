@@ -3748,6 +3748,17 @@ with no break against one run with a break at about three minutes
 (ty1) is not a proof of the change. A longer watch is running, with
 the socket's last address every 5 s so that a stop in the Monitor
 would show (`tz1_watch2.log`).
+   **That watch, an hour (21:32 to 22:32): no break.** 64,048 polls,
+mode `9A` at every one; the speed register at `92` in 27 of them, each
+a single poll; the ROM image's count 0 at the end; no reset. The
+socket's last address, 719 samples: the vertical blank's register
+(`$C019`) in 554, the keyboard's in most of the rest, and never more
+than 8 samples in a row (40 s) without the first - the game's loop,
+to the last sample. With the twelve minutes before it: 75 minutes of
+attract mode in fast mode on tz1, against a break at about three
+minutes on ty1, one run each. That is strong enough to keep the
+change and not enough to call the break's cause shown: ty1 was run
+once.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
