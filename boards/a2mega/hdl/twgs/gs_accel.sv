@@ -712,6 +712,14 @@ module gs_accel #(
         logic [7:0]  sw_ref;
         logic [1:0]  sw_cls;                 // 0 ROM, 1 fast RAM, 2 Mega II side, 3 not counted
         logic [15:0] sw_mis [0:2], sw_n [0:2];
+        // (Everything the counters take is a register of its own, a clk behind: the
+        // cycle's end, the byte and the class, the tap's change, the compare, the
+        // counts being full.  Nothing here is in a hurry, and the PHY's and the
+        // broker's flops are not to carry its enables.)
+        logic        arm_q, tap_chg, cmp_v, cmp_ne;
+        logic [7:0]  ref_q;
+        logic [1:0]  cls_q;
+        logic [2:0]  sw_full;
         // (tap t is the pad as sampled at the clk edge M + t, M the first edge after the
         // fall; ten clks after the fall event that sample is dh[9 - t])
         wire signed [5:0] tap_s = {tap_q[4], tap_q};
@@ -723,9 +731,9 @@ module gs_accel #(
         logic [31:0] ph2_h, xf_h;
         logic [15:0] xf_n;
         logic [3:0]  xf_cnt;
-        logic        xf_arm, xf_got, en_q;
-        logic [2:0]  xf_state;
-        logic [23:0] xf_addr;
+        logic        xf_arm, xf_got, en_q, en_q2, xfall_q, xf_full;
+        logic [2:0]  xf_state, xst_q;
+        logic [23:0] xf_addr, xad_q;
         always_ff @(posedge clk or negedge rst_n) begin
             if (!rst_n) begin
                 dp0 <= '0; dp1 <= '0; tap_q <= '0; sw_cnt <= '0; sw_arm <= 1'b0; sw_ref <= '0; sw_cls <= 2'd3;
@@ -733,34 +741,47 @@ module gs_accel #(
                 for (int i = 0; i < 3; i++) begin sw_mis[i] <= '0; sw_n[i] <= '0; end
                 ph2_h <= '0; xf_h <= '0; xf_n <= '0; xf_cnt <= '0; xf_arm <= 1'b0; xf_got <= 1'b0; en_q <= 1'b0;
                 xf_state <= '0; xf_addr <= '0;
+                arm_q <= 1'b0; tap_chg <= 1'b0; cmp_v <= 1'b0; cmp_ne <= 1'b0; ref_q <= '0; cls_q <= 2'd3;
+                sw_full <= '0; en_q2 <= 1'b0; xfall_q <= 1'b0; xf_full <= 1'b0; xst_q <= '0; xad_q <= '0;
             end else begin
                 dp0 <= gs_d_i; dp1 <= dp0;
                 dh[0] <= dp1;
                 for (int i = 1; i < 22; i++) dh[i] <= dh[i-1];
-                tap_q <= sweep_tap_i;
-                if (tap_q != sweep_tap_i) begin
+                tap_q   <= sweep_tap_i;
+                tap_chg <= (tap_q != sweep_tap_i);
+                arm_q   <= fall_evt & phy_ended_read & enabled & running;
+                ref_q   <= tr_d_f;
+                cls_q   <= cls_n;
+                cmp_v   <= 1'b0;
+                for (int i = 0; i < 3; i++) sw_full[i] <= (sw_n[i] == 16'hFFFF);
+                if (tap_chg) begin
                     for (int i = 0; i < 3; i++) begin sw_mis[i] <= '0; sw_n[i] <= '0; end
                     sw_arm <= 1'b0;
-                end else if (fall_evt & phy_ended_read & enabled & running) begin
-                    sw_arm <= 1'b1; sw_cnt <= 4'd9; sw_ref <= tr_d_f; sw_cls <= cls_n;
-                end else if (sw_arm) begin
-                    if (sw_cnt != 4'd0) sw_cnt <= sw_cnt - 4'd1;
-                    else begin
-                        sw_arm <= 1'b0;
-                        if (sw_cls != 2'd3 && sw_n[sw_cls] != 16'hFFFF) begin
-                            sw_n[sw_cls] <= sw_n[sw_cls] + 16'd1;
-                            if (dh[sw_idx] != sw_ref) sw_mis[sw_cls] <= sw_mis[sw_cls] + 16'd1;
+                end else begin
+                    // (arm_q is the clk after the fall event: the count is one shorter)
+                    if (arm_q) begin
+                        sw_arm <= 1'b1; sw_cnt <= 4'd8; sw_ref <= ref_q; sw_cls <= cls_q;
+                    end else if (sw_arm) begin
+                        if (sw_cnt != 4'd0) sw_cnt <= sw_cnt - 4'd1;
+                        else begin
+                            sw_arm <= 1'b0; cmp_v <= 1'b1; cmp_ne <= (dh[sw_idx] != sw_ref);
                         end
+                    end
+                    if (cmp_v && sw_cls != 2'd3 && !sw_full[sw_cls]) begin
+                        sw_n[sw_cls] <= sw_n[sw_cls] + 16'd1;
+                        if (cmp_ne) sw_mis[sw_cls] <= sw_mis[sw_cls] + 16'd1;
                     end
                 end
                 // the clock pin, and the falls nobody waited for
                 ph2_h <= {ph2_h[30:0], ph2_s[1]};
-                en_q  <= enabled;
-                if (enabled & ~en_q) begin xf_n <= '0; xf_got <= 1'b0; xf_arm <= 1'b0; end
+                en_q  <= enabled; en_q2 <= en_q;
+                xfall_q <= phy_xfall; xst_q <= phy_state; xad_q <= last_addr_o;
+                xf_full <= (xf_n == 16'hFFFF);
+                if (en_q & ~en_q2) begin xf_n <= '0; xf_got <= 1'b0; xf_arm <= 1'b0; end
                 else begin
-                    if (phy_xfall && xf_n != 16'hFFFF) xf_n <= xf_n + 16'd1;
-                    if (phy_xfall && !xf_got && !xf_arm) begin
-                        xf_arm <= 1'b1; xf_cnt <= 4'd7; xf_state <= phy_state; xf_addr <= last_addr_o;
+                    if (xfall_q && !xf_full) xf_n <= xf_n + 16'd1;
+                    if (xfall_q && !xf_got && !xf_arm) begin
+                        xf_arm <= 1'b1; xf_cnt <= 4'd6; xf_state <= xst_q; xf_addr <= xad_q;
                     end else if (xf_arm) begin
                         if (xf_cnt != 4'd0) xf_cnt <= xf_cnt - 4'd1;
                         else begin xf_arm <= 1'b0; xf_got <= 1'b1; xf_h <= ph2_h; end

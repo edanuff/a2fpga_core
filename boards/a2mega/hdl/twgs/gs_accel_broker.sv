@@ -1526,8 +1526,9 @@ module gs_accel_broker #(
                 verify_sock_o <= d_f;
                 verify_phys_o <= aq_local_rom ? {6'h3F, aq_rom_addr} : aq_phys;
                 verify_src_o  <= {near_r, use_lm_r, rom_r, aq_local, aq_local_rom, aq_side, slow_q, mode_bypass};
-                if (!vfy_gate && verify_rcount_o != 16'hFFFF) verify_rcount_o <= verify_rcount_o + 16'd1;
             end
+            // (counted the clk after, off the two flops above: the count is no part of the compare's path)
+            if (verify_any_o && !verify_miss_o && verify_rcount_o != 16'hFFFF) verify_rcount_o <= verify_rcount_o + 16'd1;
             if (vfy_gate) begin
                 verify_addr_o <= DATA_LATE ? eff_addr : sreq_addr;
                 if (verify_count_o != 16'hFFFF) verify_count_o <= verify_count_o + 16'd1;
