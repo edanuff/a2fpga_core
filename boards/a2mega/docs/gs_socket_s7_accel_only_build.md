@@ -3868,6 +3868,36 @@ cable put in while the machine runs cannot make the failing boots'
 condition, and I should not have proposed it as the short way; which
 way the 5 V goes on that cable in this state, not read. The sweep that
 is owed needs a start with the cable in, the Mac enumerating the card.
+   **The machine off with the cable in, then on: it never leaves
+reset, and the event log has the line pulled down 9.950 ms after it
+rose (2026-11-24, 18:25 to 18:28; tz1;
+`captures/usbin_1124/boot_usb_in_1830_state.txt`).** When the machine
+went off the card started afresh: at 18:25:36 the console is a boot's
+(`USBC: PD STACK UP`, the firmware's banner, `DR_SWAP REJECTED`), the
+event log begins at zero, the Mac has `usbmodem4101`. So until then
+the Mac had not been feeding the card, and from then it does. The
+machine came on 49.6 s after the gateware's start. The log: clock
+alive at 49568.5 ms, our hold off 411.9 ms on, the 51 us blip of
+/RESET 68.7 ms after that (a good start has it too, 2026-11-22
+10:34), /RESET up 10.2275 s later (the a2p25's release), **and down
+again 9.950 ms after that rise, for good**. The card takes the socket
+when the line has read high for its wait (11.8 ms after the rise in
+the good start of 2026-11-22); the line did not last that long, so it
+waits still, socket off, not holding the line (2E 01, hold 0), no
+cycle counted. No CPU ran: the screen is memory nobody wrote, no beep
+(Ed's photo).
+   This is the power-up of 2026-11-22 10:30 again ("low again within
+30 ms... who pulled the line down is not known") and likely the two
+on the power bank that never left reset; now with the time to 10 us.
+That time is the one measured in September for the IIgs's keyboard
+micro pulling /RESET after a release (9.952 to 9.990 ms after the
+edge, for good; test log G71 to G74) - then seen only for a release
+within some 20 ms of the machine's own at 283 ms, never later. Here
+the release is 10.7 s after the clock. So: the same delay to the
+figure, which points at the same puller; not shown to be it; and the
+September rule for when it happens does not cover this one. It is a
+second way a start with the cable in fails, apart from the ROM read
+wrong: nothing was read here at all, so there was nothing to sweep.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
