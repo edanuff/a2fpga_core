@@ -3855,10 +3855,19 @@ of the card's (no `usbmodem`, nothing of Espressif's in `ioreg`), and
 the card's console repeats `USBC: STALE-SESSION GUARD: NO RP ON EITHER
 CC`: the port's own reading is that no source is on the cable (the
 line the firmware gives an empty port whose VBUS pin reads as present
-from the card's own 5 V). So by the Mac and by the card nothing is
-attached; whether the cable is seated at both ends, or on a hub's
-port, not known from here. The sweep with the Mac attached as it was
-in the failing boots is still to do.
+from the card's own 5 V). The same after Ed had taken the cable out
+and put it back at both ends (18:19).
+   Why (Ed's point, and the firmware's rule agrees): the port's role
+is settled at the ESP32's start - a device for the first seconds, a
+host from then on unless a computer enumerated it. This card started
+with the machine and no cable, so it is a host, and a cable put in
+later gives the Mac nothing to enumerate. The Mac's side says as much:
+its USB-C port 6 has a connection on CC and no USB transport on it
+(`ioreg`: `ConnectionActive = Yes`, `TransportsActive = ("CC")`). So a
+cable put in while the machine runs cannot make the failing boots'
+condition, and I should not have proposed it as the short way; which
+way the 5 V goes on that cable in this state, not read. The sweep that
+is owed needs a start with the cable in, the Mac enumerating the card.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
