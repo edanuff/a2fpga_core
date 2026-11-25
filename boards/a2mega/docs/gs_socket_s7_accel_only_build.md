@@ -4177,6 +4177,21 @@ valid, no mismatch, the cycle count advancing minutes later, and on
 the screen a normal start (Ed: "Yes, normal"). One
 start, not a count of them; that reset's 48 us blip was there too and
 no pull followed it.
+   **Five more such starts, 15:13 to 15:26 (Ed: "Done, all normal";
+`usbin_1125/ue0_after_5cycles_*`).** The firmware's count of ROM
+copies went 7 to 12 with no mismatch: five bring-ups, five in fast
+mode. The count of falls is cleared at each arm and its snapshot is
+not: the last start counted none, and the snapshot it left is not the
+one before the five - state 04 at `FF:B7DF`, so at least one of the
+first four had such a fall, and at a second place in the ROM: the
+opcode fetch after `FF:B7DC STA $0119`, a 16-bit store with the data
+bank E1 (the value stored not known). The counts of the first four
+are not known, and the event log was full by then (128 entries; not
+cleared before the five, it should have been), so those starts'
+resets were not logged. **With the bank feeding the card: seven
+starts from power-on on ue0, all seven normal, a fall that is no
+cycle's end on at least two of them; on the build before, three
+starts with such a fall and none survived.**
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
