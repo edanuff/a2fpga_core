@@ -3918,6 +3918,69 @@ rise. The start of 2026-11-22 10:34, with the cable, took the socket
 So this failure is the September one met again through another card's
 late release, on a card that was up first; why the mark is live at
 10.7 s when it was dead at 0.3 to 1.6 s, not known.
+   **A third start leaves reset and fails the other way; the sweep on
+it has the same window, and 472 falls of PH2 the PHY was not waiting
+for (18:35 to 18:39; `boot_usb_in_3_state.txt`,
+`boot_usb_in_3_trace_words.txt`, `sweep_usb_in_mode80.txt`).** /RESET
+up 10.17 s after our hold, no pull, the socket taken 23.8 ms on. The
+bring-up by itself: ROM copied (7EE8), card memory at the machine's
+pace, `VERIFY MISMATCH AT FF:ABFB (1) - ON SOCKET BYTES`, mode 80; the
+Welcome screen and beeps (Ed). FF:ABFB is the address of 2026-11-22's
+two failures. The log's first entry: the card's byte 84, the socket's
+byte FF, shadow 1E, state 09, speed 82.
+   The sweep, the Mac enumerating the card, mode 80 (every cycle the
+socket's):
+
+    tap         ROM       fast RAM    Mega II side
+    -12        94.5 %     75.6 %       0.35 %
+    -11         5.0 %     74.6 %       0
+    -10         0          1.2 %       0
+    -9 .. +5    0          0           0
+    +6         25.9 %     43.7 %      36.3 %
+    +7         95.7 %     76.8 %      87.4 %
+
+65,535 cycles a tap for ROM and RAM, 45,000 for the Mega II side. The
+clean span is the span with the cable out: **the data pads are not
+sampled any nearer their edge with the USB fed. That reading of the
+fault is refuted.**
+   The other instrument is not at zero: **472 fall events with the
+pins ours and the sequencer not in its wait for a fall**, where both
+sweeps on the slot's supply had 0 (the count is cleared when the
+socket is taken, so those zeros held the whole start, the bring-up and
+nine hours after). The first: sequencer state 4 (`S_LOW`: the cycle
+issued, waiting for the rise), address FF:BFFA, and the pin's samples
+around it `11111111111111111000000000000001` - high, the fall, then
+low for fourteen clks through the event and after it. So the pin was
+never sampled high between the cycle's fall and this event, and yet
+the flop that PH2's falling edge clocks toggled a second time, about
+six clks (57 ns) after the first: **a pulse on the FPGA's PH2 input
+narrower than a clk, in the low phase, a clk or so after the card puts
+the next address and the bank byte on the bus** (the issue is three
+clks after the fall event; two more for the toggle to cross). What
+makes the pulse is not measured - the card's own outputs switching is
+the reading the time suggests, no more.
+   What it does, from the source: the broker ends the cycle in flight
+at any fall event (`cyc_done = phy_fall_evt_i & cd_arm`, armed from
+the issue), and its read byte is the pad's at PH2's falling edge - at
+this edge the bank byte the card is driving. Both verify failures
+named here are fetches in bank FF with the socket's byte FF
+(FF:ABFB today and on 2026-11-22; FF:BFFA on the power bank, the
+address of today's first event). That is the cycle "ended" by the
+pulse, the bank byte taken for the opcode. It is also tv1's doubled
+fetch with FF on the pads "at a fall that was not the cycle's end".
+   The count did not move after: 472 at 18:36, 18:38:51 and 18:39:13,
+over 540 million cycles of the halted machine in mode 80. So the
+events fell between the take of the socket and the first reading,
+through the ROM's start and the bring-up, and not in the idle loop
+after. Not separated: whether that is what was on the bus then, the
+card's memory being in the cycle, or the first minute itself.
+   Where this leaves it. Measured: the data window is the same; the
+PH2 input takes an edge that is not a cycle's, with the USB fed and
+not without; the bytes of the failures are what such an edge gives.
+Not measured: why the cable makes it. The gateware has the remedy
+whichever it is - a fall event counts only when the sequencer waits
+for one (and the PH2-clocked flops read only then), with hysteresis
+on the pin - and the count is there to say if it holds.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
