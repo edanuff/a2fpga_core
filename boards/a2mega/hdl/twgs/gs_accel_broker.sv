@@ -93,11 +93,17 @@
 // PHY cannot write during reset): at most one byte of a shadowed page, which
 // the card's own memory still holds.  The card's memory is kept (warm reset).
 //
-// Clocking / CDC.  One domain: clk.  The socket pads (D0-7, RDY, /IRQ, /NMI,
-// /ABORT) are sampled by flops clocked on the PHI2 fall (the instant a 65816
-// samples them) and read here only at or after phy_fall_evt_i, at least one
-// clk later - the same quasi-static crossing gs_socket_phy uses for the
-// core's outputs.  A native step uses exactly those samples.  In fast mode
+// Clocking / CDC.  One domain: clk, and no flop on any other clock.  The
+// socket pads (D0-7, RDY, /IRQ, /NMI, /ABORT) are sampled in every clk, and
+// the sample a cycle's end uses is the one of the last clk edge at which the
+// PHY's PH2 sample still read high: 0 to 1 clk before the fall, where a 65816
+// samples them at it (the pads hold the byte from 9 clks before the fall to
+// 5 after: measured, see gs_socket_phy).  They were flops clocked by the
+// pin's fall until 2026-11-24, when the pin was seen to take a falling edge
+// that ended no cycle, and they took the bank byte at it.  The samples are
+// read in the clk of phy_fall_evt_i and the clk before it, as those flops
+// were, and what must last longer is registered at the event.  A native
+// step uses exactly those samples.  In fast mode
 // the three interrupt lines go through ordinary two-flop synchronisers
 // instead, so the core never acts on a level that is a PHI2 cycle old.  The
 // PHY reads this module's phy_* outputs only in its issue clock
@@ -290,8 +296,7 @@ module gs_accel_broker #(
     output logic        phy_vda_o,
     output logic        phy_vp_n_o,
 
-    // socket pads, sampled here at the PHI2 fall
-    input  logic        gs_ph2_i,
+    // socket pads, sampled here in every clk
     input  logic [7:0]  gs_d_i,
     input  logic        gs_rdy_i,
     input  logic        gs_irq_n_i,
@@ -416,33 +421,50 @@ module gs_accel_broker #(
 );
 
     //=========================================================================
-    // PH2 domain: the pads at the fall
+    // The pads at the fall
     //=========================================================================
-    logic [7:0] d_f     = 8'h00;
-    logic       rdy_f   = 1'b1;
-    logic       irq_f   = 1'b1;
-    logic       nmi_f   = 1'b1;
-    logic       abort_f = 1'b1;
-
-    always_ff @(negedge gs_ph2_i) begin
-        d_f     <= gs_d_i;
-        rdy_f   <= gs_rdy_i;
-        irq_f   <= gs_irq_n_i;
-        nmi_f   <= gs_nmi_n_i;
-        abort_f <= gs_abort_n_i;
+    // Sampled in every clk ([0] the newest).  The PHY's fall event is in the clk
+    // after the second edge at which its PH2 sample read low, so in that clk [2] is
+    // the sample of the last edge at which it read high, and in the clk before, [1]
+    // is.  *_f is that sample in both - the two clks in which the pin-clocked flops
+    // were read for a cycle's end (the clk before: what a cycle's end depends on is
+    // registered a clk ahead, and the core's next state hangs off the lines and the
+    // byte).  What reads them in the event's clk alone reads [2] itself, a register
+    // (the verify, the idle byte, the copies below, the trace): the event is the
+    // deepest thing here and is not to be in front of them as well.  d_h is the byte
+    // from the event on, until the next (a core without the near memory).
+    logic [7:0] d_p0, d_p1, d_p2, d_c;
+    logic [2:0] rdy_p, irq_p, nmi_p, abort_p;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            d_p0 <= 8'h00; d_p1 <= 8'h00; d_p2 <= 8'h00; d_c <= 8'h00;
+            rdy_p <= 3'b111; irq_p <= 3'b111; nmi_p <= 3'b111; abort_p <= 3'b111;
+        end else begin
+            d_p0    <= gs_d_i; d_p1 <= d_p0; d_p2 <= d_p1;
+            rdy_p   <= {rdy_p[1:0],   gs_rdy_i};
+            irq_p   <= {irq_p[1:0],   gs_irq_n_i};
+            nmi_p   <= {nmi_p[1:0],   gs_nmi_n_i};
+            abort_p <= {abort_p[1:0], gs_abort_n_i};
+            if (phy_fall_evt_i) d_c <= d_p2;
+        end
     end
-    assign tr_d_f_o   = d_f;
-    assign tr_irq_f_o = irq_f;
+    wire [7:0] d_f     = phy_fall_evt_i ? d_p2       : d_p1;
+    wire [7:0] d_h     = phy_fall_evt_i ? d_p2       : d_c;
+    wire       rdy_f   = phy_fall_evt_i ? rdy_p[2]   : rdy_p[1];
+    wire       irq_f   = phy_fall_evt_i ? irq_p[2]   : irq_p[1];
+    wire       nmi_f   = phy_fall_evt_i ? nmi_p[2]   : nmi_p[1];
+    wire       abort_f = phy_fall_evt_i ? abort_p[2] : abort_p[1];
+    assign tr_d_f_o   = d_p2;        // (read for the clk of the fall event)
+    assign tr_irq_f_o = irq_p[2];
 
-    // clk-domain copies, loaded at the fall event; in the fall-event clk
-    // itself the PH2-domain flops are read directly (they have been stable
-    // for at least a clk), so a native step sees the pads of ITS fall.
+    // Copies loaded at the fall event; in the fall-event clk itself the
+    // samples are read directly, so a native step sees the pads of ITS fall.
     logic rdy_c, irq_c, nmi_c, abort_c;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             rdy_c <= 1'b1; irq_c <= 1'b1; nmi_c <= 1'b1; abort_c <= 1'b1;
         end else if (phy_fall_evt_i) begin
-            rdy_c <= rdy_f; irq_c <= irq_f; nmi_c <= nmi_f; abort_c <= abort_f;
+            rdy_c <= rdy_p[2]; irq_c <= irq_p[2]; nmi_c <= nmi_p[2]; abort_c <= abort_p[2];
         end
     end
 
@@ -455,7 +477,7 @@ module gs_accel_broker #(
     logic rw_c;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) rw_c <= 1'b1;
-        else        rw_c <= (phy_fall_evt_i ? rdy_f : rdy_c) & ~lm_wbusy_i;
+        else        rw_c <= (phy_fall_evt_i ? rdy_p[2] : rdy_c) & ~lm_wbusy_i;
     end
 
     // Fast mode takes the interrupt lines through ordinary two-flop
@@ -479,10 +501,10 @@ module gs_accel_broker #(
     // copies hold the pads of its fall)
     // (near memory: ... and held from one core step to the next, irq_h below - the
     // core's next status hangs off the lines, and the step registers off that)
-    // (near memory, native: irq_e - the PH2-domain flops registered in every clk,
-    // like alt_q for the data byte.  They show the pads of a fall from the second
-    // clk edge after it, the fall event is the clk after that and the step the clk
-    // after the event: the same sample irq_c has at the step, two clks sooner.)
+    // (near memory, native: irq_e - the samples above registered in every clk, like
+    // alt_q for the data byte.  They show the pads of a fall in the clk of the fall
+    // event and the step is the clk after the event: the same sample irq_c has at
+    // the step, a clk sooner.)
     logic irq_h, nmi_h, abort_h;
     logic irq_e, nmi_e, abort_e;
     always_ff @(posedge clk or negedge rst_n) begin
@@ -1014,7 +1036,7 @@ module gs_accel_broker #(
     wire  fh0       = fhd0 & fhx0;
     wire [7:0] far_rdata = rom_r ? lm_rom_rdata_i : lm_ram_rdata_i;
     wire [7:0] lm_rdata  = !NEAR ? far_rdata : near_r ? nm_rdata_i : alt_q;
-    assign cpu_d_in_o = NEAR ? lm_rdata : use_lm_r ? far_rdata : d_f;
+    assign cpu_d_in_o = NEAR ? lm_rdata : use_lm_r ? far_rdata : d_h;
 
     // a missing read: two-edge step - launched at the strobe from the decode;
     // data-late - its addresses are registered at mem_evt, presented to the
@@ -1212,7 +1234,7 @@ module gs_accel_broker #(
                 fill_ok  <= ~(~d_local_rom & (((eff_addr[15:12] == 4'hC) & ~|d_phys[23:17]) | nm_sfar_only(d_phys)));
             end
             // the core's other data source: far memory data, or the socket byte (d_f:
-            // PHI2-fall flops, steady for a clk and more before the core takes it)
+            // the pads of the fall, in the clk before the fall event and in its own)
             alt_q <= use_lm_r ? far_rdata : d_f;
             // (loaded in every clk: they are used in the clk after wen_set alone, with
             // wen_r, so the write decision - the PHY's fall event in native mode, the
@@ -1505,7 +1527,7 @@ module gs_accel_broker #(
     // before the PHI2 fall, and the compare hangs off the near memory's output otherwise)
     logic [7:0] vfy_d;
     always_ff @(posedge clk) vfy_d <= lm_rdata;
-    wire vfy_miss = sync_done & vfy_r & (d_f != vfy_d);
+    wire vfy_miss = sync_done & vfy_r & (d_p2 != vfy_d);
     // (the step's read is of the ROM image: the decode's view, good long before a socket cycle ends)
     wire vfy_gate = vfy_miss & (VFY_RAM | d_local_rom);
 
@@ -1523,7 +1545,7 @@ module gs_accel_broker #(
             if (vfy_miss) begin
                 verify_laddr_o <= DATA_LATE ? eff_addr : sreq_addr;
                 verify_card_o <= vfy_d;
-                verify_sock_o <= d_f;
+                verify_sock_o <= d_p2;
                 verify_phys_o <= aq_local_rom ? {6'h3F, aq_rom_addr} : aq_phys;
                 verify_src_o  <= {near_r, use_lm_r, rom_r, aq_local, aq_local_rom, aq_side, slow_q, mode_bypass};
             end
@@ -1719,7 +1741,7 @@ module gs_accel_broker #(
     assign step_evt_o  = cpu_ce_o;
     assign held_o      = held_r;
     assign idle_stb_o  = cyc_done & (fl_kind == K_IDLE) & fl_hold & held_r;
-    assign idle_d_o    = d_f;
+    assign idle_d_o    = d_p2;        // (with idle_stb_o: the clk of the fall event)
     assign sock_evt_o  = cyc_stb;
     assign sock_idle_o = fl_busy & (fl_kind == K_IDLE);
     assign pw_busy_o   = pw_valid;

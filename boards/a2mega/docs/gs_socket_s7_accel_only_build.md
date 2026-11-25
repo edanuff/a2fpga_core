@@ -3981,6 +3981,160 @@ Not measured: why the cable makes it. The gateware has the remedy
 whichever it is - a fall event counts only when the sequencer waits
 for one (and the PH2-clocked flops read only then), with hysteresis
 on the pin - and the count is there to say if it holds.
+   **The evening's starts on a power bank, each read from the card
+(2026-11-24, 19:53 to 20:33; tz1; `captures/usbin_1124/boot_1953_*`,
+`boot_bank_4_*`, `bank_in_5resets_*`, `bank_hold13s_*`,
+`bank_quick_start1_*` to `3_*`).** Ed's test that began it: bank on a
+dead machine's card, count to five, power on - good; machine off and on
+with the bank left in - halt at Welcome. Then, each with its log:
+
+    start                                        order by the log   result               falls not waited for
+    19:53 bank out                               machine first      fast, 9A             0
+    19:57 bank in, count to five                 card first         fast, 9A, halt       1, at FF:BF7B
+    20:09 bank in, our hold 13 s (below)         card first         /RESET pulled low    socket not taken
+    20:16 bank out till dark, in, on at once     machine first      fast, booting        0
+    20:17 machine off 1.4 s, bank in throughout  card first         fast                 0
+    20:32 bank out till dark, in, on at once     machine first      fast, 9A, halt       1, at FF:BF7B
+
+("Machine first": the clock already running when the FPGA configured,
+`clock alive` at 0.15 ms of the log. The two halts sit in a loop that
+reads the keyboard; both passed the verify.) With the two starts on
+the Mac's cable before them: **a fall that is no cycle's end on every
+start that failed this way, with the card's USB fed and in either
+order of power; none on any start or in any hour on the slot's supply.**
+   What was tried and did not hold:
+ - *State kept through the machine's power cycle* (Ed's reading of his
+   test): a card fresh on the bank failed twice, and at 20:32 a card
+   that configured after the machine's clock was up failed.
+ - *The 48 us of /RESET high that every card-first start has* (our hold
+   released 410 ms after the clock, the line high 62 to 83 ms on and
+   low again 48 to 51 us later - the a2p25 taking its own hold, by the
+   seven to ten seconds that follow): with `gs mode 2`, `gs hold 13000`
+   the card held through the a2p25's hold and the machine saw one edge,
+   our release at 13.1 s - and /RESET fell 9.990 ms after it for good.
+   So the pull of the keyboard micro's delay needs no second edge; it
+   has come only on card-first starts with the machine off 4.6 s or
+   more (three of them), never on a machine-first one. Not explained.
+ - *The order of power, for the falls*: 20:16 good, 20:32 not, both
+   machine first on the bank.
+ - *The supply alone*: six Control-Open Apple-Resets with the bank
+   feeding the card (paced card memory, 8A; five of them 1.5 s apart,
+   the last left to run) added no fall to the one of the start; nor did
+   300 million cycles of the halted machine. Ed, the same with the bank
+   put on after a start without it: the restart completes. (A bank put
+   on a card that started without one may not feed it: the port is a
+   host by then.)
+   What is found: **where on the bus the fall comes.** ROM 01 at the
+   three addresses the first event of a start has had:
+
+    FF:BF74  LDA #$0000          FF:BFEF  LDA $E100FF
+    FF:BF77  STA $E100FF         FF:BFF3  DEC A
+    FF:BF7B  LDA #$00FF          FF:BFF6  STA $E100FF
+                                 FF:BFFA  BEQ ...
+
+The event is the cycle issued right after a sixteen-bit store of zero
+to E1:00FF (the busy flag: set to zero, or counted down to it): the
+data pads go from the write's 00 to the bank byte FF with no release
+between, the address from 0100 to BF7B or BFFA - **some twenty of the
+card's outputs rising in one clk, one falling** - and the flop on the
+pin toggles within the clk after (the event is six clks after the
+fall's own: three to the issue, one for the pads, two to cross). So
+the pulse is tied to the card's own outputs moving, to a clk; whether
+it is on the board or in the FPGA's input, and why the margin is gone
+with the USB fed and only in a start from power-on - an arm of the
+socket and the firmware's bring-up, which a reset of the machine is
+not (Ed: a machine reset does not reset the card) - is not known. It
+is not a flop gone metastable: such an event is one clk late, not a
+second one five clks on, and not at one address of the ROM twice.
+   Why one such fall halts a start that has passed the verify, on
+card memory: every flop the pin clocked took its pad again at it -
+RDY, /IRQ, /NMI, /ABORT with the bus in mid-change among them - and
+the broker ended the cycle in flight. Which of these the two halts
+were is not read.
+   **The change (round uc, the trace project; round ud, the project
+without it).** No flop of the accelerator is clocked by the PH2 pin
+(`gs_socket_phy`, `PH2_SAMPLED = 1`; `gs_accel_broker`). The pin is
+sampled in every clk: a fall is a low sample after eight and more high
+ones in a row, a rise two high samples after a low one with the bank
+byte held one clk less - the pins move in the clks they moved in, and
+a pulse narrower than a clk is one sample at most and is neither. The
+pads that were taken at the fall (D0-7, RDY, /IRQ, /NMI, /ABORT,
+/RES) are sampled in every clk as well, and a cycle's end uses the
+sample of the last clk edge at which the pin still read high: tap -1
+of the sweep, 0 to 1 clk before the fall, in a window measured from
+-9 to +5 on this machine for the ROM, fast RAM and the Mega II's side
+alike. They are read in the clk of the fall event and the clk before
+it, as the pin-clocked flops were (what ends a cycle is registered a
+clk ahead, and the core's next state hangs off the lines and the
+byte); the byte is registered at the event for what reads it later.
+"The core runs" is a register made a clk ahead and another loaded at
+the event, so the event's own gate is as deep as it was. The flop
+that toggles at the pin's falls is kept for the count alone, which
+now leaves out a toggle within a clk of a fall event (the two reach
+the sequencer through different flops). The S6 design, whose core is
+clocked by the pin, is as it was (`PH2_SAMPLED = 0`). An earlier form
+of the change - the fall event passed on only while the sequencer
+waits for one - failed the bench below: the pin-clocked flops had
+still taken the pads at the pulse.
+   Simulated: the bench has a pulse of 3 ns on the FPGA's PH2 input
+alone (`+ph2pulse=<n>`: after every n-th issue of a cycle, a clk and
+2 to 8 ns after its clk edge; `+ph2pulsefall=<ns>`: that long after a
+fall instead), the S6 reference and the bench's own checks on the
+socket's clock. The design as it was fails every such run (the bank
+byte delivered for a read, "verify: card memory and socket disagree"
+among the errors - the card's failure). With the change all twelve
+pass with every check of the run standing, from 3,672 to 150,019
+pulses each, and in the three on the trace build the count of falls
+that are no fall is the bench's count of its pulses.
+   The whole bench on the final source: **243 runs of 243 pass** (the
+231 and the twelve with pulses, the ROM 01 suite among them: every
+mode at the same point with the same write stream), and the socket's
+pin timing is the old design's to the tenth of a nanosecond (105 MHz:
+tADS 67.1, tBAS 68.1, tAH 57.6, tBH 48.1, tMDS 57.6, tDHW 57.6,
+release 58.6 ns - the control run before and after). The S6 socket
+bench, whose PHY is the pin-clocked one, passes as it did.
+   **The arm and the bring-up again without a power cycle (21:11 to
+21:13; `rearm_1_state.txt`, `rearm_log.txt`, `captures/rearm_loop.py`).**
+`gs off; gs auto` has the firmware release the socket, hold the slot's
+reset 127 ms, take the socket 36 ms after the rise and run the ladder
+from the ROM copy on - what a start from power-on does and a machine
+reset does not. Four of four reached fast mode with no fall counted.
+**Not the test it is meant to be yet:** that session began machine
+first without the bank's state known, and a bank put on after such a
+start may not feed the card. Owed on a start where the bank is seen
+to feed it.
+   Timing. The fall event is the deepest thing the sequencer has and
+was already among the tightest paths (tz1: +0.048 from the toggle's
+synchroniser). The change's first form put it in front of what had
+read a plain register - the byte "from the event on" as a select of
+two, read by the verify's compare and the ROM copy's sum - and the
+trace project's three placements had 182, 312 and 267 violations, the
+worst -1.5 to -1.8 ns, from the PH2 samples to those (uc0 to uc2: of
+that source, of no use). As it stands, what reads the pads in the
+event's clk alone reads the sample's register itself, and the event
+selects between two samples only where the clk before it must have
+the same one (the core's other data source, the three interrupt lines
+ahead of a native step, RDY ahead of a cycle's end). Bench as above,
+again in full on this source: 243 of 243. **The project without the
+trace: three placements of three with no violation (ud).** In it no
+flop is on the PH2 pin at all - the tool's note that the pin's net is
+routed as a clock is gone from its log.
+
+Provenance of ud0, ud1 and ud2 (**the project without the trace**,
+`a2mega_accel_138B.gprj`, with PH2 and the socket's pads sampled in
+clk and no flop on the pin, this section; **three placements of three
+with no violation**; none flashed, none run on hardware): sources =
+the commit that adds this paragraph; tool V1.9.12.01, the same device.
+ud0 (worst +0.088): build stamp `20261124215019`, bitstream sha256
+`e8c1107a1f92cc43...27392338740aa0d7`, of the lines that are not header
+`bd5e3fd4dec5c55e...ab42055f743a4595dd`. ud1 (+0.000):
+`20261124220831`, `aa5481a796b6e21e...cfeef844d9a3c630`,
+`23fdbd204e7c6007...2a9ea4708f0921dc`. ud2 (+0.032): `20261124223951`,
+`f669715dc7936843...81a2db04a0cd2f42`, `61fc941099b3f1cb...09171f1e84992a15`.
+Built in 18 to 31 minutes each. Kept in `impl/pnr` by name
+(`a2mega_accel_138B.fs` itself is ud2 now). uc0 to uc2 there are the
+trace project on the change's first form, each with violations: of no
+use.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of

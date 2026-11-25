@@ -201,6 +201,9 @@ module tb_gs_broker #(
     logic        gs_rw_f, gs_vp_f, gs_rdy_out_f, gs_d_dir_f, gs_data_oe_n_f, gs_addr_oe_n_f, gs_ctl_oe_n_f;
     logic        armed = 1'b0;
     logic        ph2_alive, running, enabled, fall_evt, issue_evt;
+    int          ph2_pulse_n = 0;     // +ph2pulse=<n> (below, at the socket nets)
+    wire         gs_ph2_s6;
+    wire         run_tb;
     logic [31:0] cycle_count;
     logic [15:0] stall_count, be_count;
 
@@ -273,7 +276,7 @@ module tb_gs_broker #(
     logic [4:0]  tb_tap = 5'd0;       // gs_accel's read-data sweep (its instrument is not checked here)
     logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait;
 
-    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself
+    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1), .PH2_SAMPLED(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself; no flop on the PH2 pin
         .force_slow_i(1'b0),
         .clk(clk), .rst_n(rst_n), .armed_i(armed), .listen_i(1'b0), .out_extra_i(4'd0),
         .cpu_clk_o(), .cpu_rst_n_o(),
@@ -301,7 +304,7 @@ module tb_gs_broker #(
         .phy_fall_evt_i(fall_evt), .phy_issue_evt_i(issue_evt),
         .phy_a_o(phy_a), .phy_d_out_o(phy_d_out), .phy_we_n_o(phy_we_n),
         .phy_vpa_o(phy_vpa), .phy_vda_o(phy_vda), .phy_vp_n_o(phy_vp_n),
-        .gs_ph2_i(gs_ph2_f), .gs_d_i(gs_d_i_f), .gs_rdy_i(gs_rdy_f),
+        .gs_d_i(gs_d_i_f), .gs_rdy_i(gs_rdy_f),
         .gs_irq_n_i(gs_irq_n_f), .gs_nmi_n_i(gs_nmi_n_f), .gs_abort_n_i(gs_abort_n_f),
         .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_ce_c_o(cpu_ce_c), .cpu_d_in_o(cpu_d_in),
         .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),
@@ -767,7 +770,7 @@ module tb_gs_broker #(
         .cpu_clk_o(s6_clk), .cpu_rst_n_o(s6_rst_n),
         .cpu_a_i(s6_cpu_a), .cpu_d_out_i(s6_dout), .cpu_we_n_i(s6_we_n), .cpu_vp_n_i(s6_vp_n),
         .cpu_vpa_i(s6_vpa), .cpu_vda_i(s6_vda),
-        .gs_ph2_i(gs_ph2_f), .gs_rdy_i(gs_rdy_f), .gs_res_n_i(gs_res_n_f), .gs_be_i(gs_be_f),
+        .gs_ph2_i(gs_ph2_s6), .gs_rdy_i(gs_rdy_f), .gs_res_n_i(gs_res_n_f), .gs_be_i(gs_be_f),
         .gs_d_o(s6_d_o), .gs_d_oe_o(s6_d_oe),
         .gs_a_o(s6_a), .gs_rw_o(s6_rw), .gs_vp_o(s6_vp), .gs_rdy_out_o(),
         .gs_d_dir_o(s6_d_dir), .gs_data_oe_n_o(s6_data_oe_n), .gs_addr_oe_n_o(s6_addr_oe_n),
@@ -809,7 +812,26 @@ module tb_gs_broker #(
     logic [7:0] d_bus;
     always_comb d_bus = cpu_drv ? cpu_val : (mem_drv ? mem_val : 8'hFF);
 
-    assign #(T_XCVR) gs_ph2_f     = ph2_bus;
+    // the FPGA's PH2 input: the socket's clock through the transceiver and, with +ph2pulse, a
+    // pulse narrower than a clk on that input alone (the machine's clock does not have it):
+    // what the card's pin showed with its USB fed, 2026-11-24 - a falling edge more in the
+    // low phase, a clk or so after the cycle was issued, the pin sampled low throughout
+    logic ph2_pulse = 1'b0;
+    wire  gs_ph2_x;
+    assign gs_ph2_s6 = (ph2_pulse_n != 0) ? gs_ph2_x : gs_ph2_f;
+    assign #(T_XCVR) gs_ph2_x     = ph2_bus;
+    assign gs_ph2_f               = gs_ph2_x | ph2_pulse;
+    // (The S6 design beside it is the reference of the native runs and its core is clocked by
+    // the pin itself: in a pulse run it has the socket's clock, as do the bench's own checks
+    // of "the core is running" - run_tb, the S6 PHY's pin-clocked flops on that clock.)
+    logic       run_res_q = 1'b0, run_res_ok = 1'b0;
+    logic [1:0] run_en = 2'b00;
+    always @(negedge gs_ph2_x) begin
+        run_res_q  <= gs_res_n_f;
+        run_res_ok <= run_res_q & gs_res_n_f;
+        run_en     <= {run_en[0], enabled};
+    end
+    assign run_tb    = (ph2_pulse_n != 0) ? (rst_n & run_en[1] & run_res_ok) : running;
     assign #(T_XCVR) gs_rdy_f     = rdy_bus;
     assign #(T_XCVR) gs_irq_n_f   = irq_n_bus;
     assign #(T_XCVR) gs_nmi_n_f   = nmi_n_bus;
@@ -839,6 +861,40 @@ module tb_gs_broker #(
 
     logic ph2_int = 1'b0;
     assign #(32.0) ph2_bus = ph2_int;
+    // +ph2pulse=<n>: a 3 ns pulse on the FPGA's PH2 input after every n-th issue of a cycle,
+    // a clk and 2 to 8 ns after the issue's clk edge (the outputs just out); with
+    // +ph2pulsefall=<ns> that long after every n-th fall of the input instead
+    real ph2_pulse_fall = 0.0;
+    int  n_pulse_ev = 0, n_pulse = 0;
+    real ph2_pulse_d = 0.0;      // (one pulse pending at most: the calls are a cycle apart)
+    task automatic ph2_pulse_go();
+        fork
+            begin
+                #(ph2_pulse_d);
+                if (!gs_ph2_x && !ph2_pulse) begin
+                    ph2_pulse = 1'b1;
+                    #(3.0);
+                    ph2_pulse = 1'b0;
+                    n_pulse = n_pulse + 1;
+                end
+            end
+        join_none
+    endtask
+    always @(posedge clk) if (ph2_pulse_n != 0 && ph2_pulse_fall == 0.0 && enabled && issue_evt) begin
+        n_pulse_ev <= n_pulse_ev + 1;
+        if ((n_pulse_ev % ph2_pulse_n) == 0) begin
+            ph2_pulse_d = TCLK + 2.0 + (n_pulse_ev % 7);
+            ph2_pulse_go();
+        end
+    end
+    always @(negedge gs_ph2_x) if (ph2_pulse_n != 0 && ph2_pulse_fall != 0.0 && enabled) begin
+        n_pulse_ev <= n_pulse_ev + 1;
+        if ((n_pulse_ev % ph2_pulse_n) == 0) begin
+            ph2_pulse_d = ph2_pulse_fall;
+            ph2_pulse_go();
+        end
+    end
+
     task automatic be_pulse();
         fork
             begin
@@ -974,7 +1030,7 @@ module tb_gs_broker #(
                              u_brk.sel, cpu_rst_n ? "running" : "in reset");
         // the broker substitutes internal I/O cycles itself; the PHY must
         // never be asked to
-        if (running && !phy_vpa && !phy_vda && phy_a[15:8] == 8'hC0 &&
+        if (run_tb && !phy_vpa && !phy_vda && phy_a[15:8] == 8'hC0 &&
             (phy_a[23:17] == 7'd0 || phy_a[23:17] == 7'h70))
             err($sformatf("internal I/O-space cycle handed to the PHY: %06h", phy_a));
         // Near memory, fast mode: a step that is a read or a write in a bank that is
@@ -1000,7 +1056,7 @@ module tb_gs_broker #(
             if (ph2_bus) err($sformatf("address/RWB changed while PHI2 high (%04h rw=%b)", a_bus, rw_bus));
             else begin
                 if ($realtime - t_fall < T_AH) err($sformatf("tAH: address changed %.1f ns after the fall", $realtime - t_fall));
-                if (running && ($realtime - t_fall) < st_min_tah) st_min_tah = $realtime - t_fall;
+                if (run_tb && ($realtime - t_fall) < st_min_tah) st_min_tah = $realtime - t_fall;
             end
         end
         a_bus_p = a_bus; rw_bus_p = rw_bus; addr_en_p = addr_en;
@@ -1018,7 +1074,7 @@ module tb_gs_broker #(
                 err($sformatf("tBH: bank byte changed/released %.1f ns after the rise", $realtime - t_rise));
             if (!ph2_bus && ($realtime - t_fall) < T_DHW && wr_l_valid)
                 err($sformatf("tDHW: write data changed %.1f ns after the fall", $realtime - t_fall));
-            if (running) begin
+            if (run_tb) begin
                 if (ph2_bus && bh_pending && t_rise > t_fall) begin
                     if (($realtime - t_rise) < st_min_tbh) st_min_tbh = $realtime - t_rise;
                     bh_pending = 0;
@@ -1050,7 +1106,7 @@ module tb_gs_broker #(
         bh_pending = 1;
         bank_l = d_bus; addr_l = a_bus; rw_l = rw_bus; vp_l = vp_bus;
         if (stall_req) bank_l = prev_bank_l;
-        if (running && be_dma) begin
+        if (run_tb && be_dma) begin
             if (!addr_en) err("address shifters not enabled at the rise");
             if (t_addr_change > t_fall && (t_addr_change - t_fall) > T_ADS)
                 err($sformatf("tADS: address settled %.1f ns after the fall", t_addr_change - t_fall));
@@ -1106,7 +1162,7 @@ module tb_gs_broker #(
         done = rdy_bus;                     // RDY high at the fall: the cycle completes
         if (!res_n_bus) mach_reset(0);
         // a cycle that ends on the fall where /RES is sampled low is void
-        if (running && be_dma && res_n_bus) begin
+        if (run_tb && be_dma && res_n_bus) begin
             if (!rw_l) begin
                 if (!cpu_drv) err("write cycle: data not driven at the fall");
                 if (t_cpu_d_change > t_rise + T_MDS)
@@ -1191,7 +1247,7 @@ module tb_gs_broker #(
                                 this_slow ? " sync" : "", cycle_is_refresh ? " refresh" : "",
                                 done ? "" : " STALL");
         end
-        wr_l_valid = running && !rw_l;
+        wr_l_valid = run_tb && !rw_l;
         stall_req = ~rdy_bus;
         prev_addr_l = addr_l; prev_bank_l = bank_l; prev_rw_l = rw_l;
     end
@@ -1205,7 +1261,7 @@ module tb_gs_broker #(
         end
     end
 
-    always @(posedge ph2_bus) if (running && be_dma && stall_req) begin
+    always @(posedge ph2_bus) if (run_tb && be_dma && stall_req) begin
         stall_checks++;
         if (addr_l != prev_addr_l || bank_l != prev_bank_l || rw_l != prev_rw_l)
             err($sformatf("stalled cycle did not repeat: %02h:%04h rw%b vs %02h:%04h rw%b", bank_l, addr_l, rw_l, prev_bank_l, prev_addr_l, prev_rw_l));
@@ -1500,22 +1556,22 @@ module tb_gs_broker #(
     // (ACC_TRACE) gs_accel's trace: each entry, as its own register has it two clks after the
     // fall, against the cycle the machine saw end - the bank, address, RWB and VP it latched -
     // and against the hand-wired design's own record: VPA and VDA as its broker issued them,
-    // the data pads and /IRQ as its PHI2-fall flops have them
+    // the data pads and /IRQ as it took them at the fall (its copies of the fall event)
     longint      n_trc_cmp = 0;
     logic [23:0] mt_a;
     logic        mt_rw, mt_vp, mt_ok = 1'b0, iss_vpa, iss_vda;
     always @(posedge clk) if (issue_evt) {iss_vpa, iss_vda} <= {phy_vpa, phy_vda};
     always @(negedge ph2_bus) begin
         mt_a = {bank_l, addr_l}; mt_rw = rw_l; mt_vp = vp_l;
-        mt_ok = running && be_dma && res_n_bus;
+        mt_ok = run_tb && be_dma && res_n_bus;
     end
 `ifdef ACC_TRACE_TB     // (with -GACC_TRACE=1: the scope is not there without it)
         always @(posedge clk) if (rst_n && u_acc.g_trace.u_trace.f2 && mt_ok) begin
             logic [36:0] e;
             e = u_acc.g_trace.u_trace.rec_q;
-            if (e !== {iss_vda, iss_vpa, mt_vp, u_brk.irq_f, mt_rw, mt_a, u_brk.d_f})
+            if (e !== {iss_vda, iss_vpa, mt_vp, u_brk.irq_c, mt_rw, mt_a, u_brk.d_c})
                 err($sformatf("gs_accel trace entry %010h, the cycle was %010h", e,
-                              {iss_vda, iss_vpa, mt_vp, u_brk.irq_f, mt_rw, mt_a, u_brk.d_f}));
+                              {iss_vda, iss_vpa, mt_vp, u_brk.irq_c, mt_rw, mt_a, u_brk.d_c}));
             n_trc_cmp++;
         end
         // the log of verify mismatches: the first four of the run, as this bench's own
@@ -1524,7 +1580,7 @@ module tb_gs_broker #(
         logic [7:0]  tl_c [0:3], tl_s [0:3];
         int          tl_n = 0;
         always @(posedge clk) if (rst_n && u_brk.vfy_miss && tl_n < 4) begin
-            tl_a[tl_n] = u_brk.eff_addr; tl_c[tl_n] = u_brk.vfy_d; tl_s[tl_n] = u_brk.d_f;
+            tl_a[tl_n] = u_brk.eff_addr; tl_c[tl_n] = u_brk.vfy_d; tl_s[tl_n] = u_brk.d_p2;
             tl_n++;
         end
 `endif
@@ -1613,6 +1669,8 @@ module tb_gs_broker #(
         void'($value$plusargs("recopyat=%d", recopy_at));
         void'($value$plusargs("mode=%s", mode_s));
         void'($value$plusargs("tap=%d", tb_tap));
+        void'($value$plusargs("ph2pulse=%d", ph2_pulse_n));
+        void'($value$plusargs("ph2pulsefall=%f", ph2_pulse_fall));
         void'($value$plusargs("steps=%d", max_steps));
         void'($value$plusargs("exp=%d", cfg_exp));
         cfg_mbexp = cfg_exp;
@@ -1880,6 +1938,10 @@ module tb_gs_broker #(
                 err($sformatf("+slow=1: %0d of %0d reads of the copy of Mega II RAM were far reads", n_slow_far, n_slow_rd));
         end
         if (stall_checks == 0 && do_stall) err("no stalled cycle was checked");
+        if (ph2_pulse_n != 0) begin
+            $display("---- +ph2pulse: %0d pulses on the FPGA's PH2 input", n_pulse);
+            if (n_pulse < 100) err($sformatf("+ph2pulse: only %0d pulses were made", n_pulse));
+        end
         if (s6cmp && n_s6cmp == 0) err("S6 comparison did not run");
 `ifdef ACCEL_SHADOW
         if (cfg_exp == ACC_EXP && !wb_en) begin
@@ -1894,7 +1956,11 @@ module tb_gs_broker #(
                      $signed(tb_tap), u_acc.g_diag.sw_mis[0], u_acc.g_diag.sw_n[0], u_acc.g_diag.sw_mis[1], u_acc.g_diag.sw_n[1],
                      u_acc.g_diag.sw_mis[2], u_acc.g_diag.sw_n[2], u_acc.g_diag.xf_n);
             if (u_acc.g_diag.sw_n[0] + u_acc.g_diag.sw_n[1] + u_acc.g_diag.sw_n[2] == 0) err("gs_accel read-data sweep counted no read");
-            if (u_acc.g_diag.xf_n != 0) err($sformatf("gs_accel counted %0d falls the PHY did not wait for", u_acc.g_diag.xf_n));
+            // (with +ph2pulse the count is the bench's own count of its pulses; the last of
+            // them may still be on its way through the instrument's registers)
+            if (u_acc.g_diag.xf_n != 16'((n_pulse > 65535) ? 65535 : n_pulse) &&
+                !(n_pulse != 0 && n_pulse <= 65535 && u_acc.g_diag.xf_n == 16'(n_pulse - 1)))
+                err($sformatf("gs_accel counted %0d falls the PHY did not wait for, the bench made %0d", u_acc.g_diag.xf_n, n_pulse));
             // (a second ROM copy takes card memory again and empties gs_accel's log: not compared then)
             if (!cfg_copy) begin
                 if (u_acc.vml_n != 3'(tl_n)) err($sformatf("gs_accel mismatch log has %0d entries, the design made %0d (of the first four)", u_acc.vml_n, tl_n));

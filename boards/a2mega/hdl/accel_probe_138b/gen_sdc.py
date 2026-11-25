@@ -65,9 +65,10 @@ def generate(STEP, ADDR, PERIOD, fname):
         create_clock -name clk{mhz} -period {PERIOD:.3f} -waveform {{0 {PERIOD / 2:.3f}}} [get_ports {{clk50_in}}]
         set_clock_uncertainty 0.5 -setup -from [get_clocks {{clk{mhz}}}]
 
-        // gs_ph2 and the sequencer clock are asynchronous (hdl/twgs/gs_socket.sdc).  The
-        // socket data byte (u_brk/d_f, PHI2-fall flops) is taken by the core the clk after
-        // the synchronised fall event: at least three clks after the fall.
+        // gs_ph2 and the sequencer clock are asynchronous (hdl/twgs/gs_socket.sdc).  Nothing
+        // but an instrument's flop is clocked by the pin (gs_socket_phy, PH2_SAMPLED): the pin
+        // and the socket's pads are sampled in the sequencer clock, and the socket data byte
+        // is taken by the core the clk after the fall event.
         create_clock -name gs_ph2 -period 349.0 -waveform {{209.4 349.0}} [get_ports {{gs_ph2}}]
         set_clock_groups -asynchronous -group [get_clocks {{gs_ph2}}] -group [get_clocks {{clk{mhz}}}]""").rstrip("\n"))
 
@@ -198,8 +199,9 @@ def generate_near(PERIOD, fname, pfx="", board=False):
             set_clock_groups -asynchronous -group [get_clocks {{clk4x}}] -group [get_clocks {{clk1x}}] -group [get_clocks {{clk}}] -group [get_clocks {{clk_pixel}}] -group [get_clocks {{clk_logic}}] -group [get_clocks {{clk_gs}}]
 
             // gs_ph2 (the FPI's PHI2 at the socket) and the three clocks are asynchronous to one
-            // another: the socket data byte (d_f, PHI2-fall flops) is registered in the clk_gs
-            // domain a clk and more after the fall; control and telemetry between clk_logic and
+            // another.  Nothing but an instrument's flop is clocked by the pin (gs_socket_phy,
+            // PH2_SAMPLED; none at all without the trace): the pin and the socket's pads are
+            // sampled in the clk_gs domain.  Control and telemetry between clk_logic and
             // clk_gs are quasi-static and two-flopped (accel_only_top.sv).
             create_clock -name gs_ph2 -period 349.0 -waveform {{209.4 349.0}} [get_ports {{gs_ph2}}]
             set_clock_groups -asynchronous -group [get_clocks {{gs_ph2}}] -group [get_clocks {{clk_gs}}] -group [get_clocks {{clk}}] -group [get_clocks {{clk_logic}}]""").rstrip("\n"))
@@ -216,9 +218,10 @@ def generate_near(PERIOD, fname, pfx="", board=False):
             create_clock -name clk{mhz} -period {PERIOD:.3f} -waveform {{0 {PERIOD / 2:.3f}}} [get_ports {{clk50_in}}]
             set_clock_uncertainty 0.5 -setup -from [get_clocks {{clk{mhz}}}]
 
-            // gs_ph2 and the sequencer clock are asynchronous (hdl/twgs/gs_socket.sdc).  The
-            // socket data byte (u_brk/d_f, PHI2-fall flops) is registered in the clk domain
-            // (alt_q) a clk and more after the fall, and steady there when the core takes it.
+            // gs_ph2 and the sequencer clock are asynchronous (hdl/twgs/gs_socket.sdc).  Nothing
+            // but an instrument's flop is clocked by the pin (gs_socket_phy, PH2_SAMPLED): the
+            // socket data byte is sampled in the clk domain, registered there again (alt_q) in
+            // the clk before the fall event and in its own, and steady when the core takes it.
             create_clock -name gs_ph2 -period 349.0 -waveform {{209.4 349.0}} [get_ports {{gs_ph2}}]
             set_clock_groups -asynchronous -group [get_clocks {{gs_ph2}}] -group [get_clocks {{clk{mhz}}}]""").rstrip("\n"))
     CORE = regs(f"{pfx}u_cpu/*", f"{pfx}u_cpu/MCode/*", f"{pfx}u_cpu/AddrGen/*")

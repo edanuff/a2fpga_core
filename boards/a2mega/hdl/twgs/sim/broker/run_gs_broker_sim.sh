@@ -307,6 +307,23 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run a_toggle    b105_2a $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +slow=1 +steps=120000
     run a_rstw      b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126 +resetw
     run a_st3       b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126 +stallp=3 +steps=120000
+    # ... and with a pulse narrower than a clk on the FPGA's PH2 input alone (+ph2pulse=<n>: after
+    # every n-th issue of a cycle, a clk and 2 to 8 ns after its clk edge - where the card's pin
+    # showed one with its USB fed, 2026-11-24; +ph2pulsefall=<ns>: that long after a fall instead).
+    # Every check of the run stands as without it, and the trace build's count of falls that are
+    # no fall is the bench's count of its pulses.
+    run h_native    b105_2t $T +mode=native +expect +irq +exp=126 +mbexp=126 +ph2pulse=1
+    run h_paced     b105_2t $T +mode=paced  +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=1
+    run h_fast      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +slow=2 +rules +ph2pulse=1
+    run h_toggle    b105_2t $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=3 +steps=120000
+    run h_copy      b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=1
+    run h_st3       b105_2t $T +mode=native +expect +irq +exp=126 +mbexp=126 +stallp=3 +ph2pulse=1 +steps=120000
+    run h_rstw      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +resetw +ph2pulse=2
+    run h_fall12    b105_2t $T +mode=native +expect +irq +exp=126 +mbexp=126 +ph2pulse=1 +ph2pulsefall=12
+    run h_fall25    b105_2t $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +slow=2 +ph2pulse=1 +ph2pulsefall=25 +steps=120000
+    run h_a_nat     b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126 +ph2pulse=1
+    run h_a_paced   b105_2a $T +mode=paced  +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=2
+    run h_a_tog     b105_2a $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=1 +steps=120000
     # ... and with the machine's speed rules deciding between fast and paced (gs_accel_rules; +rules):
     # the test program's T27 has a stretch for each cause and one that must stay fast
     run q_fast      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules

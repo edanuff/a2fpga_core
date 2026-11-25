@@ -22,8 +22,9 @@ create_clock -name clk1x -period 12.346 -waveform {0 6.173} [get_pins {u_ddr3/gw
 set_clock_groups -asynchronous -group [get_clocks {clk4x}] -group [get_clocks {clk1x}] -group [get_clocks {clk}] -group [get_clocks {clk_pixel}] -group [get_clocks {clk_logic}] -group [get_clocks {clk_gs}]
 
 // gs_ph2 (the FPI's PHI2 at the socket) and the three clocks are asynchronous to one
-// another: the socket data byte (d_f, PHI2-fall flops) is registered in the clk_gs
-// domain a clk and more after the fall; control and telemetry between clk_logic and
+// another.  Nothing but an instrument's flop is clocked by the pin (gs_socket_phy,
+// PH2_SAMPLED; none at all without the trace): the pin and the socket's pads are
+// sampled in the clk_gs domain.  Control and telemetry between clk_logic and
 // clk_gs are quasi-static and two-flopped (accel_only_top.sv).
 create_clock -name gs_ph2 -period 349.0 -waveform {209.4 349.0} [get_ports {gs_ph2}]
 set_clock_groups -asynchronous -group [get_clocks {gs_ph2}] -group [get_clocks {clk_gs}] -group [get_clocks {clk}] -group [get_clocks {clk_logic}]

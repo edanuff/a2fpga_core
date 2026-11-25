@@ -185,7 +185,7 @@ module gs_accel #(
     logic        phy_ended_read, phy_xfall;
     logic [2:0]  phy_state;
 
-    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself
+    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1), .PH2_SAMPLED(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself; no flop on the PH2 pin
         .force_slow_i(1'b0),
         .clk(clk), .rst_n(rst_n), .armed_i(arm_i), .listen_i(listen_i), .out_extra_i(out_extra_i),
         .cpu_clk_o(), .cpu_rst_n_o(),
@@ -289,7 +289,7 @@ module gs_accel #(
         .phy_fall_evt_i(fall_evt), .phy_issue_evt_i(issue_evt),
         .phy_a_o(phy_a), .phy_d_out_o(phy_d_out), .phy_we_n_o(phy_we_n),
         .phy_vpa_o(phy_vpa), .phy_vda_o(phy_vda), .phy_vp_n_o(phy_vp_n),
-        .gs_ph2_i(gs_ph2_i), .gs_d_i(gs_d_i), .gs_rdy_i(gs_rdy_i),
+        .gs_d_i(gs_d_i), .gs_rdy_i(gs_rdy_i),
         .gs_irq_n_i(gs_irq_n_i), .gs_nmi_n_i(gs_nmi_n_i), .gs_abort_n_i(gs_abort_n_i),
         .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_ce_c_o(cpu_ce_c), .cpu_d_in_o(cpu_d_in),
         .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),
@@ -688,8 +688,9 @@ module gs_accel #(
     // ---- (TRACE) two instruments on the socket's read data and clock, read where the
     // statistics are (words 0 to 5) while the ring is told to stand still (`gs trace`):
     //
-    // The read-data sweep.  The byte the core takes is the pads' at the PHI2 fall, in
-    // flops clocked by that edge (the broker's d_f).  Here the pads are also sampled in
+    // The read-data sweep.  The byte the core takes is the pads' at the last clk edge
+    // before the PHI2 fall (the broker's d_h; tap -1 here: it was a flop clocked by the
+    // fall itself when the windows were measured).  Here the pads are also sampled in
     // every clk, and for every read cycle the sample of one clk - sweep_tap_i, signed,
     // -12 to +8 - is compared with that byte: tap -1 is the last clk edge before the
     // fall (0 to 1 clk before it), tap 0 the first after it, tap t the one t clks on.

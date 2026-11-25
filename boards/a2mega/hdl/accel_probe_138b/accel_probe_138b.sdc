@@ -9,9 +9,10 @@
 create_clock -name clk108 -period 9.259 -waveform {0 4.630} [get_ports {clk50_in}]
 set_clock_uncertainty 0.5 -setup -from [get_clocks {clk108}]
 
-// gs_ph2 and the sequencer clock are asynchronous (hdl/twgs/gs_socket.sdc).  The
-// socket data byte (u_brk/d_f, PHI2-fall flops) is taken by the core the clk after
-// the synchronised fall event: at least three clks after the fall.
+// gs_ph2 and the sequencer clock are asynchronous (hdl/twgs/gs_socket.sdc).  Nothing
+// but an instrument's flop is clocked by the pin (gs_socket_phy, PH2_SAMPLED): the pin
+// and the socket's pads are sampled in the sequencer clock, and the socket data byte
+// is taken by the core the clk after the fall event.
 create_clock -name gs_ph2 -period 349.0 -waveform {209.4 349.0} [get_ports {gs_ph2}]
 set_clock_groups -asynchronous -group [get_clocks {gs_ph2}] -group [get_clocks {clk108}]
 

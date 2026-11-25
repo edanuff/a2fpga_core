@@ -77,6 +77,32 @@
 // been seen toggling (ph2_alive_o).  Unarmed, every enable is inactive -
 // the card behaves exactly as it does today.
 //
+// PH2_SAMPLED = 1 (the accelerator, whose core runs on clk): no flop is
+// clocked by the pin.  PH2 is a signal sampled in every clk, and the pads
+// that were taken at its fall (RDY and /RES here; D0-7, RDY and the
+// interrupt lines in gs_accel_broker) are sampled in every clk as well.
+//  * A fall is a low sample after FALL_HIGH and more high ones in a row; a
+//    rise is two high samples in a row after a low one, and the bank byte
+//    is then held one clk less, so the pins move in the clks they did.  A
+//    pulse narrower than a clk is one sample at most and is neither.  The
+//    fall event is in the clk it was: the second clk edge after the first
+//    low sample.
+//  * The pads "at the fall" are the samples of the last clk edge at which
+//    the pin still read high - 0 to 1 clk before the fall, where the pads
+//    have been measured to hold the byte from 9 clks before it to 5 after
+//    (2026-11-24, ROM, fast RAM and the Mega II's side alike).  They are
+//    read where the pin-clocked flops were: in the clk of the fall event
+//    and, by the broker, in the clk before it.
+// Why: the pin was seen to take a falling edge that is no cycle's end - a
+// pulse narrower than a clk in the low phase, in the clk after the card
+// has put a cycle on the bus (2026-11-24, with the card's USB fed: 472 on
+// one start, 1 on two others, each of them after a store of zero to
+// E1:00FF with the fetch at FF:BFxx next, some twenty pads rising at once;
+// none on the slot's supply).  Every flop the pin clocked was clocked by
+// it: the broker ended the cycle in flight and took the bank byte for its
+// read.  The flop that toggles at the pin's falls is kept for one thing,
+// the count of them that are no fall (xfall_evt_o, an instrument).
+//
 module gs_socket_phy #(
     parameter int OUT_DELAY  = 2,   // clks after the synchronised fall before core outputs are sampled
     parameter int RISE_HOLD  = 1,   // extra clks the bank byte is held after the synchronised rise
@@ -84,8 +110,12 @@ module gs_socket_phy #(
     parameter int ALIVE_BITS = 17,  // no PH2 fall for 2^ALIVE_BITS clks => not alive
     parameter bit CORE_SUBST = 1'b1,// 1 = substitute internal cycles aimed at I/O space here (S6: the core's
                                     // outputs come straight in); 0 = the caller already did (gs_accel_broker)
-    parameter bit WDATA_LATE = 1'b0 // 1 = take the write data again the clk after the issue (it is not driven
+    parameter bit WDATA_LATE = 1'b0,// 1 = take the write data again the clk after the issue (it is not driven
                                     // before the PHI2 rise, so the caller gets one more clk for it)
+    parameter bit PH2_SAMPLED = 1'b0,// 1 = no flop clocked by the PH2 pin (see above); cpu_clk_o / cpu_rst_n_o
+                                    // are then not for a core clocked by the pin
+    parameter int FALL_HIGH  = 8    // PH2_SAMPLED: high samples in a row before a low one is a fall (PHI2 is
+                                    // high for 200 ns and more; the pads move in the first four clks of it)
 ) (
     input  logic        clk,            // pin-sequencer clock (~108 MHz)
     input  logic        rst_n,          // system reset, active low
@@ -133,8 +163,8 @@ module gs_socket_phy #(
     output logic        fall_evt_o,     // one clk per PHI2 fall (synchronised)
     output logic        issue_evt_o,    // one clk when a cycle is put on the bus
     output logic        ended_read_o,   // valid with fall_evt_o: the cycle that ended was a running read
-    output logic        xfall_evt_o,    // a fall event with the pins ours and the sequencer not waiting for one:
-                                        // the sequencer takes no notice of it (an instrument; see gs_accel)
+    output logic        xfall_evt_o,    // a falling edge of the pin with the pins ours that is no cycle's end:
+                                        // the sequencer not waiting for one (an instrument; see gs_accel)
     output logic [2:0]  state_o,        // the sequencer's state (as xfall_evt_o: for an instrument)
     output logic [31:0] cycle_count_o,  // bus cycles the core advanced through
     output logic [15:0] stall_count_o,  // cycles repeated because RDY was low
@@ -145,7 +175,7 @@ module gs_socket_phy #(
     // clk domain: synchronisers, edge events, liveness, enable
     //=========================================================================
     logic [2:0] tog_s;
-    logic [2:0] ph2_s;
+    logic [3:0] ph2_s;
     logic [1:0] be_s;
     logic [1:0] armed_s;
     logic [1:0] listen_s;
@@ -160,15 +190,33 @@ module gs_socket_phy #(
             listen_s <= 2'b00;
         end else begin
             tog_s   <= {tog_s[1:0], cap_tog};
-            ph2_s   <= {ph2_s[1:0], gs_ph2_i};
+            ph2_s   <= {ph2_s[2:0], gs_ph2_i};
             be_s    <= {be_s[0], gs_be_i};
             armed_s <= {armed_s[0], armed_i};
             listen_s <= {listen_s[0], listen_i};
         end
     end
 
-    wire fall_evt = tog_s[2] ^ tog_s[1];       // a PH2 falling edge happened
-    wire rise_evt = ph2_s[1] & ~ph2_s[2];      // PH2 rising edge
+    // PH2_SAMPLED: the run of high samples behind the newest one (ph2_s[1])
+    logic [3:0] hi_cnt;
+    logic       hi_ok;                         // FALL_HIGH and more of them
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)          begin hi_cnt <= '0; hi_ok <= 1'b0; end
+        else if (!ph2_s[1])  begin hi_cnt <= '0; hi_ok <= 1'b0; end
+        else begin
+            if (hi_cnt != 4'd15) hi_cnt <= hi_cnt + 4'd1;
+            hi_ok <= (hi_cnt >= 4'(FALL_HIGH - 1));
+        end
+    end
+    initial if (PH2_SAMPLED && (FALL_HIGH < 2 || FALL_HIGH > 15 || RISE_HOLD < 1))
+        $fatal(1, "gs_socket_phy: PH2_SAMPLED needs 2 <= FALL_HIGH <= 15 and RISE_HOLD >= 1");
+
+    wire tog_evt  = tog_s[2] ^ tog_s[1];       // the pin took a falling edge
+    wire fall_evt = PH2_SAMPLED ? (ph2_s[2] & ~ph2_s[1] & hi_ok)      // a PH2 falling edge happened
+                                : tog_evt;
+    wire rise_evt = PH2_SAMPLED ? (ph2_s[1] & ph2_s[2] & ~ph2_s[3])   // PH2 rising edge
+                                : (ph2_s[1] & ~ph2_s[2]);
+    localparam int RISE_WAIT = PH2_SAMPLED ? RISE_HOLD - 1 : RISE_HOLD;
     wire armed    = armed_s[1];
 
     // BE filter.  Measured on a ROM 01 IIgs: the FPI pulses BE low ~66 ns
@@ -229,20 +277,65 @@ module gs_socket_phy #(
     logic       res_ok  = 1'b0;    // /RES high at the last two falls
     logic [1:0] en_s    = 2'b00;   // 'enabled' brought into this domain
 
-    always_ff @(negedge gs_ph2_i) begin
-        cap_tog <= ~cap_tog;
-        rdy_q   <= gs_rdy_i;
-        res_q   <= gs_res_n_i;
-        res_ok  <= res_q & gs_res_n_i;
-        en_s    <= {en_s[0], enabled};
+    logic       stall_last;        // the cycle that just ended did not advance the core
+    logic       stall_evt;         // the same, as read in the clk of the fall event
+
+    if (!PH2_SAMPLED) begin : g_pin
+        always_ff @(negedge gs_ph2_i) begin
+            cap_tog <= ~cap_tog;
+            rdy_q   <= gs_rdy_i;
+            res_q   <= gs_res_n_i;
+            res_ok  <= res_q & gs_res_n_i;
+            en_s    <= {en_s[0], enabled};
+        end
+        assign cpu_rst_n_o = rst_n & en_s[1] & res_ok;
+        // Views for the clk domain (quasi-static; read >= 2 clks after the fall)
+        assign stall_last  = ~rdy_q;
+        assign stall_evt   = ~rdy_q;
+    end else begin : g_smp
+        // the pin's falls, for the count of those that are no fall and nothing else
+        always_ff @(negedge gs_ph2_i) cap_tog <= ~cap_tog;
+        // The same four, in clk: loaded at the fall event with the pads of the last
+        // clk edge at which the pin read high ([2] in that clk: [0] is the edge that
+        // made the event, [1] the first low sample's), and read through in that clk
+        // as the pin-clocked ones were, which had them from the fall itself.
+        // (run_nx: what "the core runs" becomes at the next fall event, made a clk ahead
+        // from [1] - nothing else in it moves between falls - so that the flag is one of
+        // two registers by the event and no deeper than it was)
+        logic [2:0] rdy_p, res_p;
+        logic       run_nx, run_q;
+        always_ff @(posedge clk or negedge rst_n) begin
+            if (!rst_n) begin
+                rdy_p <= 3'b111; res_p <= 3'b000;
+                rdy_q <= 1'b1; res_q <= 1'b0; res_ok <= 1'b0; en_s <= 2'b00;
+                run_nx <= 1'b0; run_q <= 1'b0;
+            end else begin
+                rdy_p  <= {rdy_p[1:0], gs_rdy_i};
+                res_p  <= {res_p[1:0], gs_res_n_i};
+                run_nx <= en_s[0] & res_q & res_p[1];
+                if (fall_evt) begin
+                    rdy_q  <= rdy_p[2];
+                    res_q  <= res_p[2];
+                    res_ok <= res_q & res_p[2];
+                    en_s   <= {en_s[0], enabled};
+                    run_q  <= run_nx;
+                end
+            end
+        end
+        assign cpu_rst_n_o = fall_evt ? run_nx : run_q;
+        // (two names, so that nothing has the event in front of its RDY that need not)
+        assign stall_last  = ~rdy_q;
+        assign stall_evt   = ~rdy_p[2];
+`ifdef VERILATOR
+        always @(posedge clk) if (rst_n && (run_q !== (en_s[1] & res_ok) ||
+                                            (fall_evt && run_nx !== (en_s[0] & res_q & res_p[2])))) begin
+            $display("ERROR: gs_socket_phy: the run flag's registers are not /RES high at two falls with the pins ours"); $finish;
+        end
+`endif
     end
 
     assign cpu_clk_o   = ~gs_ph2_i;
-    assign cpu_rst_n_o = rst_n & en_s[1] & res_ok;
-
-    // Views for the clk domain (quasi-static; read >= 2 clks after the fall)
     wire core_run   = cpu_rst_n_o;
-    wire stall_last = ~rdy_q;      // the cycle that just ended did not advance the core
 
     //=========================================================================
     // Pin sequencer (clk domain)
@@ -304,12 +397,12 @@ module gs_socket_phy #(
                     if (fall_evt) begin
                         // Book-keeping for the cycle that just ended
                         if (state == S_WAIT_FALL && run_q) begin
-                            if (stall_last) stall_count_o <= stall_count_o + 1'b1;
+                            if (stall_evt)  stall_count_o <= stall_count_o + 1'b1;
                             else            cycle_count_o <= cycle_count_o + 1'b1;
                         end
                         // A completed read leaves the shifter in receive;
                         // take it off the bus ahead of the bank byte.
-                        if (!write_q && !(stall_last && run_q)) data_oe_n_seq <= 1'b1;
+                        if (!write_q && !(stall_evt && run_q)) data_oe_n_seq <= 1'b1;
                         wait_cnt <= 4'(OUT_DELAY - 1) + out_extra_i;
                         state    <= S_OUT_WAIT;
                     end
@@ -355,7 +448,7 @@ module gs_socket_phy #(
 
                 S_LOW: begin
                     if (rise_evt) begin
-                        wait_cnt <= 4'(RISE_HOLD);
+                        wait_cnt <= 4'(RISE_WAIT);
                         state    <= S_RISEH;
                     end
                 end
@@ -411,8 +504,18 @@ module gs_socket_phy #(
     assign be_ok_o        = be_ok;
     assign fall_evt_o     = fall_evt;
     assign issue_evt_o    = (state == S_ISSUE);
-    assign ended_read_o   = ~write_q & run_q & ~stall_last;
-    assign xfall_evt_o    = fall_evt & enabled & (state != S_WAIT_FALL) & (state != S_OFF);
+    assign ended_read_o   = ~write_q & run_q & ~stall_evt;
+    // (PH2_SAMPLED: the pin's own falling edge reaches here through another flop than the
+    // sample does and may be a clk to either side of the fall event; it is taken a clk
+    // late and is a cycle's end if the event is in that clk or one of the two before it)
+    logic       tog_q;
+    logic [1:0] fall_q;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin tog_q <= 1'b0; fall_q <= 2'b00; end
+        else        begin tog_q <= tog_evt; fall_q <= {fall_q[0], fall_evt}; end
+    end
+    assign xfall_evt_o    = PH2_SAMPLED ? (tog_q & enabled & ~(fall_evt | fall_q[0] | fall_q[1]))
+                                        : (fall_evt & enabled & (state != S_WAIT_FALL) & (state != S_OFF));
     assign state_o        = state;
 
     logic [15:0] be_cnt;
