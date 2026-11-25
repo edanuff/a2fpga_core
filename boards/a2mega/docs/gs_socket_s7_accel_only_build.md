@@ -4158,6 +4158,10 @@ falls: the count of falls that are no cycle's end is what a run of
 this build on a start with the cable in would show - falls counted
 and the machine running on is the change holding, no falls counted is
 no test of it.
+**ue0 flashed 2026-11-25 14:57** as a diagnostic (Ed: "Flash ue0"), over
+USB with the machine off (the card said so: clock stopped, reset
+held), first attempt, read-back verified, the card checked by its
+serial number and the file by its sha256.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
