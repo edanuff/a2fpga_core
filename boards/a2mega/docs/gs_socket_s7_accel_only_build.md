@@ -4141,6 +4141,11 @@ machine off (the card said so: clock stopped, reset held), first
 attempt, read-back verified, the card checked by its serial number
 and the file by its sha256. This build has no count of falls: what
 it can show on a start with the cable in is the start, not the fall.
+First start on it, 15:34, the bank in first (`usbin_1125/ud0_bank_start1_state.txt`):
+build stamp read from the card `20261124215019`; the ROM image valid
+(sum 7EE8), no mismatch, fast mode; /RESET up once, 7.28 s after our
+hold, no pull after it; on the screen a normal start (Ed: "It's up,
+normal").
 
 Provenance of ue0, ue1 and ue2 (**the trace project**,
 `a2mega_accel_138B_trace.gprj`, on the same source as ud - PH2 and the
