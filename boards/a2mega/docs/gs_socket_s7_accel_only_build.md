@@ -3807,6 +3807,31 @@ attract mode in fast mode on tz1, against a break at about three
 minutes on ty1, one run each. That is strong enough to keep the
 change and not enough to call the break's cause shown: ty1 was run
 once.
+   **The sweep with every cycle on the socket: the card paced, the
+cable out (tz1, 2026-11-24 17:05; `captures/usbin_1124/
+sweep_usb_out_paced.txt`; Arkanoid's attract mode, mode `8A` by the
+firmware's `gs accel slow`, back to fast after).** Share of read cycles
+whose pad sample at the tap differs from the byte taken at the fall:
+
+    tap         ROM       fast RAM    Mega II side
+    -12        84.2 %     49.9 %       0.16 %
+    -11         5.5 %     79.3 %       0
+    -10         0          0.07 %      0
+    -9 .. +5    0          0           0
+    +6         15.3 %     39.1 %       1.3 %
+    +7         97.9 %     91.0 %      99.1 %
+
+Up to 65,535 cycles a tap in each class, never fewer than 14,000; no
+fall the PHY did not wait for. So with the card on the slot's supply
+the ROM's code fetches and the RAM's reads hold their byte over the
+same window - from nine or ten clks before the fall to five after -
+and the sample at the fall sits well inside it for both: here the two
+do not differ in any way that could cost a byte. The other half is
+the same sweep with the card's USB fed.
+   (A slip of mine in this: the pacing command had been sent at 08:14,
+in a call Ed stopped by accident and that I then reported as not run.
+Its first step had run: the card was at the machine's pace from 08:14
+to 17:05, the game slow all day, the ROM image's count still 0.)
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
