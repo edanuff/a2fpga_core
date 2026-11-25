@@ -3898,6 +3898,26 @@ figure, which points at the same puller; not shown to be it; and the
 September rule for when it happens does not cover this one. It is a
 second way a start with the cable in fails, apart from the ROM read
 wrong: nothing was read here at all, so there was nothing to sweep.
+   **A second start, the card kept up by the cable across the
+machine's 5 s off: the same (18:30; `boot_usb_in_2_state.txt`).** Our
+hold on 3 ms after the clock was lost, the clock alive 5.5 s later,
+hold off 408.2 ms on, the 48 us blip 72.2 ms after, /RESET up
+10.2314 s later and **down 9.977 ms after the rise, for good**; socket
+off, no cycle. Two of two today, 9.950 and 9.977 ms: inside the span
+of September's thirteen (9.95 to 9.98). What `adb_micro_rom01_notes.md`
+and the scoping page (section 8b) have on it: the puller is the ROM 01
+machine's keyboard micro by its Control-Reset path, with the IIe
+keyboard on J13, the card in and no CPU executing at the mark; about
+half the time with the card powered first and the socket empty (12 of
+22), never seen on a card started by its slot with the 20 ms arm. What
+they do not have: the pull after an edge this late - it was 0 of 27
+for a release 306 ms or more after the clock. The edge here is not
+ours: the a2p25 holds the line some 10 s and its release is the last
+rise. The start of 2026-11-22 10:34, with the cable, took the socket
+11.8 ms after that rise and ran: the same start, the pull not made.
+So this failure is the September one met again through another card's
+late release, on a card that was up first; why the mark is live at
+10.7 s when it was dead at 0.3 to 1.6 s, not known.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
