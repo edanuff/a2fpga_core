@@ -4123,7 +4123,7 @@ routed as a clock is gone from its log.
 Provenance of ud0, ud1 and ud2 (**the project without the trace**,
 `a2mega_accel_138B.gprj`, with PH2 and the socket's pads sampled in
 clk and no flop on the pin, this section; **three placements of three
-with no violation**; none flashed, none run on hardware): sources =
+with no violation**): sources =
 the commit that adds this paragraph; tool V1.9.12.01, the same device.
 ud0 (worst +0.088): build stamp `20261124215019`, bitstream sha256
 `e8c1107a1f92cc43...27392338740aa0d7`, of the lines that are not header
@@ -4135,6 +4135,12 @@ Built in 18 to 31 minutes each. Kept in `impl/pnr` by name
 (`a2mega_accel_138B.fs` itself is ud2 now). uc0 to uc2 there are the
 trace project on the change's first form, each with violations: of no
 use.
+**ud0 flashed 2026-11-25 15:32** as the build on the card (Ed: "Flash
+ud0"), after ue0's starts on the power bank (below), over USB with the
+machine off (the card said so: clock stopped, reset held), first
+attempt, read-back verified, the card checked by its serial number
+and the file by its sha256. This build has no count of falls: what
+it can show on a start with the cable in is the start, not the fall.
 
 Provenance of ue0, ue1 and ue2 (**the trace project**,
 `a2mega_accel_138B_trace.gprj`, on the same source as ud - PH2 and the
