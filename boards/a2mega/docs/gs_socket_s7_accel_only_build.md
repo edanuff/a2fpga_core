@@ -4173,7 +4173,8 @@ the machine off 4.7 s and on again: one fall that is no cycle's end
 counted, its snapshot state 04 at `FF:BF7B` - the event and the
 address of the two starts of the evening before that the old build
 did not survive - and the machine runs on:** fast mode, the ROM image
-valid, no mismatch, the cycle count advancing minutes later. One
+valid, no mismatch, the cycle count advancing minutes later, and on
+the screen a normal start (Ed: "Yes, normal"). One
 start, not a count of them; that reset's 48 us blip was there too and
 no pull followed it.
 
