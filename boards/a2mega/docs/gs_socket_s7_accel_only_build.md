@@ -4162,6 +4162,20 @@ no test of it.
 USB with the machine off (the card said so: clock stopped, reset
 held), first attempt, read-back verified, the card checked by its
 serial number and the file by its sha256.
+   **ue0 on the machine, 2026-11-25 15:05 to 15:12, the power bank
+feeding the card** (seen: the card's lights stay on with the machine
+off, and the firmware's count of ROM copies runs on through the power
+cycle; build stamp read from the card `20261124230426`; captures
+`usbin_1125/`). A start with the bank in first: fast mode, no fall
+counted - no test. Five times the arm and the bring-up again from the
+console: five of five in fast mode, no fall counted - no test. **Then
+the machine off 4.7 s and on again: one fall that is no cycle's end
+counted, its snapshot state 04 at `FF:BF7B` - the event and the
+address of the two starts of the evening before that the old build
+did not survive - and the machine runs on:** fast mode, the ROM image
+valid, no mismatch, the cycle count advancing minutes later. One
+start, not a count of them; that reset's 48 us blip was there too and
+no pull followed it.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
