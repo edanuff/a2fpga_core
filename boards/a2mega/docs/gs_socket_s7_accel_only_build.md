@@ -3832,6 +3832,33 @@ the same sweep with the card's USB fed.
 in a call Ed stopped by accident and that I then reported as not run.
 Its first step had run: the card was at the machine's pace from 08:14
 to 17:05, the game slow all day, the ROM image's count still 0.)
+   **The same sweep with a cable in the card's USB port, put in while
+the machine ran (2026-11-24, 18:15; tz1, Arkanoid's attract mode, the
+card paced from 18:15:01 to 18:15:33 and read back at 9A after;
+`captures/usbin_1124/sweep_usb_hotplug_paced.txt`): the same window.**
+
+    tap         ROM       fast RAM    Mega II side
+    -12        89.5 %     49.3 %       0.16 %
+    -11         2.7 %     47.6 %       0
+    -10         0          0.16 %      0
+    -9 .. +5    0          0           0
+    +6         15.8 %     64.8 %       4.6 %
+    +7         96.9 %     99.0 %      99.7 %
+
+No fall the PHY did not wait for. The shares at the two edges move
+with which bytes the game reads next to one another; the clean span is
+the one of the table above.
+   What this run is not: the failing boots' condition. In those the
+Mac had enumerated the ESP32's USB serial and the port's code had
+talked to it (`USBC: DR_SWAP REJECTED`). Here the Mac lists no device
+of the card's (no `usbmodem`, nothing of Espressif's in `ioreg`), and
+the card's console repeats `USBC: STALE-SESSION GUARD: NO RP ON EITHER
+CC`: the port's own reading is that no source is on the cable (the
+line the firmware gives an empty port whose VBUS pin reads as present
+from the card's own 5 V). So by the Mac and by the card nothing is
+attached; whether the cable is seated at both ends, or on a hub's
+port, not known from here. The sweep with the Mac attached as it was
+in the failing boots is still to do.
 
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
