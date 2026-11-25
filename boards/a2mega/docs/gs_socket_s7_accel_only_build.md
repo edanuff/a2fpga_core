@@ -4136,6 +4136,29 @@ Built in 18 to 31 minutes each. Kept in `impl/pnr` by name
 trace project on the change's first form, each with violations: of no
 use.
 
+Provenance of ue0, ue1 and ue2 (**the trace project**,
+`a2mega_accel_138B_trace.gprj`, on the same source as ud - PH2 and the
+socket's pads sampled in clk, this section; **two placements of three
+with no violation: not a closed build**; none flashed, none run on
+hardware): sources = the commit before the one that adds this
+paragraph; the same tool and device. ue0 (no violation, worst
++0.054): build stamp `20261124230426`, bitstream sha256
+`05c43de31b05b038...ff4e96224377536f`, of the lines that are not header
+`aeed608ec890d7c1...1ed0ba8c90256c3b`. ue1 (28 setup violations, worst -0.174, ten of
+them from the PH2 samples to the ROM copy's sum and its state, the
+rest spread over the mismatch log, the ring's count and the broker):
+`20261124235717`, `7a4d14c6a3473786...fb87a30f0043100d`,
+`e22af14d6558d310...de6c9e6e8f11795e`. ue2 (no violation, worst +0.003):
+`20261125004100`, `9bd5b0d66c61c7ce...baea87a2d54a07ad`,
+`e1430aafc48d5371...cd03810252ecbe1e`. Built in 43 to 53 minutes each. Kept in
+`impl/pnr` by name. This project closed one placement of three before
+the change (tz) and two of three before that (ty). In it one flop is
+still on the PH2 pin, the instrument's toggle that counts the pin's
+falls: the count of falls that are no cycle's end is what a run of
+this build on a start with the cable in would show - falls counted
+and the machine running on is the change holding, no falls counted is
+no test of it.
+
 Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
 stopped by the ROM image alone, the read-data sweep and the count of
 falls the PHY did not wait for, section 3n; **two placements of three
