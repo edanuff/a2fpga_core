@@ -8,23 +8,33 @@
 
 ## Getting The Software
 
-As of 6/12/26, the direct links to the Gowin Software via their CDN are the ones below:
-
-Full Edition (Requires License and Registration with Gowin)
-
-- Windows V1.9.12.02 SP2: https://cdn.gowinsemi.com.cn/Gowin_V1.9.12.02_SP2_x64_win.zip
-
-- Linux V1.9.12.02 SP2: https://cdn.gowinsemi.com.cn/Gowin_V1.9.12.02_SP2_linux.tar.gz
-
-- Mac V1.9.12.02 SP2: https://cdn.gowinsemi.com.cn/Gowin_V1.9.12.02_SP2_macOS.dmg
+> **Note (11/2026):** the old `cdn.gowinsemi.com.cn` direct links are dead (404) and
+> the official download page at gowinsemi.com now requires a login. The mirror host
+> used by the AUR packages still serves direct downloads — verified working:
 
 Education (No License Required):
 
-- Mac V1.9.11.03 Education: https://cdn.gowinsemi.com.cn/Gowin_V1.9.11.03Education_macOS.dmg
+- Linux V1.9.11.03 Education: https://eda.gowinsemi.cn/Gowin_V1.9.11.03_Education_Linux.tar.gz
+  (sha256 `6fd392f7473b24d847b6f8ebdc7a185c591826ba35d8d0e517961030d446f9f7`,
+  matching the AUR `gowin-eda-edu` package's pinned checksum — this is the build CI
+  uses, see [docs/ci.md](../docs/ci.md))
+- macOS V1.9.11.03 Education: https://eda.gowinsemi.cn/Gowin_V1.9.11.03Education_macOS.dmg
+  (~687 MB; note the filename has **no underscore** before `Education`)
+- Windows x64 V1.9.11.03 Education: https://eda.gowinsemi.cn/Gowin_V1.9.11.03_Education_x64_win.zip
+  (~443 MB)
 
-- Linux V1.9.11.03 Education: https://cdn.gowinsemi.com.cn/Gowin_V1.9.11.03_Education_Linux.tar.gz
+  All three verified HTTP 200 on 2026-11-20. The macOS `.app` launcher has an
+  unquoted `cd` bug: if the installed bundle name contains spaces (e.g.
+  `GowinIDE V1.9.11.03 Education.app`), edit `Contents/MacOS/gowinide` and change
+  `cd $GOWIN_EDA_BIN_DIR` to `cd "$GOWIN_EDA_BIN_DIR"`, or it silently fails to launch.
 
-- Windows V1.9.11.03 Education: https://cdn.gowinsemi.com.cn/Gowin_V1.9.11.03_Education_x64_win.zip
+Full Edition (Requires License and Registration with Gowin):
+
+- Linux V1.9.12.04: https://eda.gowinsemi.cn/Gowin_V1.9.12.04_linux.tar.gz
+
+For other versions, download from the
+[Gowin EDA download page](https://www.gowinsemi.com/en/support/download_eda/)
+(free registration required), Education section.
 
 All parts currently used by A2FPGA boards should build with the education version.
 
@@ -94,6 +104,19 @@ re-run, and is idempotent — if it reports "nothing to fix", a newer Gowin
 build has resolved this upstream and the script is no longer needed. Pass
 a custom IDE path as the first argument if Gowin is not in the default
 `/Applications/GowinIDE.app` location.
+
+**Building with the Education edition (the CI toolchain) on macOS:** the
+Education `.app` has the same broken CLI links; fix it once by passing its
+IDE directory, then point `build.sh` at its `gw_sh`:
+```bash
+tools/gowin_cli_fix_macos.sh "/Applications/GowinIDE V1.9.11.03 Education.app/Contents/Resources/Gowin_EDA/IDE"
+GW_SH="/Applications/GowinIDE V1.9.11.03 Education.app/Contents/Resources/Gowin_EDA/IDE/bin/gw_sh" tools/build.sh a2p25
+```
+This is how to reproduce a GitHub Actions result locally — CI pins exactly
+this version (see [docs/ci.md](../docs/ci.md)). Note that the Education
+synthesizer writes an **encrypted** netlist (`impl/gwsynthesis/*.vg` is a
+`pragma protect` block), so synthesis-generated instance names cannot be read
+from it; constraints must name instances the HDL names itself.
 
 **Full GUI install:** To also use the Gowin IDE GUI (and remove the
 Gatekeeper quarantine), apply the complete fixer at install time:

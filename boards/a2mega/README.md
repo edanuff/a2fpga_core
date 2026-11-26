@@ -42,7 +42,9 @@ JTAG bridge (`openFPGALoader -c esp32s3`); the GW5A rules (SecurityBit off in ev
 `docs/gotchas.md` and applied by `tools/flash.sh`. Every a2mega build is held to the timing
 policy in [docs/timing_round2.md](docs/timing_round2.md): no re-rolls, +0.5 ns on every clock,
 three clean rolls of the final source. Over the network, the ESP32 can stream a bitstream to
-the FPGA (`tools/fpga_stream.py`, port 2323) and reload it from the telnet console.
+the FPGA (`tools/fpga_stream.py`, port 2323) and reload it from the telnet console. The
+consoles themselves (serial CLI, the **key-driven** telnet console, FTP, port 2323) are in
+[docs/ESP32_CONSOLE.md](docs/ESP32_CONSOLE.md); read it before typing at port 23.
 
 ## ESP32-S3 coprocessor
 
@@ -58,7 +60,9 @@ and the a2mega port of the a2n20v2-Enhanced feature set over the 8-bit OSPI link
   file picker; images live on the ESP32's flash filesystem and arrive by FTP (no SD card on 1.0a3)
 - Uthernet II (W5100) networking: the FPGA emulates the W5100 in MACRAW mode and the ESP32
   bridges frames to WiFi with MAC NAT (`wifi.txt` on the filesystem: SSID, password, optional
-  static address)
+  static address) or, when a CDC-ECM/NCM USB-Ethernet adapter is plugged into the USB-C port,
+  to the wire (the adapter also gives the ESP32 a wired address for telnet/FTP; hardware test
+  pending)
 - runtime slot configuration and the Apple II reset hold until media is mounted
 - FPGA core self-update from a bitstream file, over JTAG to the config flash
 

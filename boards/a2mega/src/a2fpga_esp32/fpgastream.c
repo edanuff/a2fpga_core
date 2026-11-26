@@ -32,12 +32,14 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "lwip/sockets.h"
 
 #include "osd_console.h"
 #include "fpga_jtag.h"
 #include "fpgaupdate.h"
 #include "fpgastream.h"
+#include "disk.h"
 
 static const char *TAG = "fpgastrm";
 
@@ -166,7 +168,7 @@ static const char *validate_hdr(const uint8_t *hdr, uint32_t n, uint32_t size,
 }
 
 /* ---- one streaming session ----------------------------------------------- */
-static uint8_t s_hdr[FS_HDR_SCAN];
+static uint8_t *s_hdr;              /* FS_HDR_SCAN bytes, PSRAM (heap diet) */
 static uint8_t s_page[FS_PAGE];
 static uint8_t s_back[FS_PAGE];
 
@@ -212,6 +214,15 @@ static void serve_one(int fd)
     osd_log("FPGASTREAM: %lu BYTES - SCREEN GOES DARK",
             (unsigned long)size);
     ESP_LOGI(TAG, "stream install: %lu bytes", (unsigned long)size);
+
+    /* Close the disk images and stop the disk task serving BEFORE the fabric
+     * can go away (a full flash entry erases it; the reload below always
+     * does). With the fabric gone, every register read returns bus junk and
+     * the disk task used to act on it — on 2026-11-17 a junk write request
+     * seeked 4 GB past the end of disk1.nib during the reload wait below and
+     * FatFS extended the file into the stick's root directory
+     * (boards/a2p25/docs/STICK_CORRUPTION_2026-11-17.md). */
+    disk_quiesce();
 
     /* GW5A auto-boot scanner race (native edition of the openFPGALoader
      * saga): an UNCONFIGURED chip — e.g. after an interrupted stream
@@ -271,6 +282,7 @@ static void serve_one(int fd)
     }
     if (!entered) {
         fpga_jtag_release_pins();
+        disk_request_remount();   /* fabric may still be alive (keepsram) */
         char em[64];
         osd_log("FS TRYEND ID %08lX JEDEC %02X%02X%02X",
                 (unsigned long)id, jedec[0], jedec[1], jedec[2]);
@@ -293,6 +305,7 @@ static void serve_one(int fd)
         fpga_jtag_release_pins();
         send_str(fd, "ERR ERASE\n");
         osd_log("FPGASTREAM: ERASE FAILED");
+        disk_request_remount();   /* serve again if the fabric survived */
         return;
     }
     send_str(fd, "E\n");
@@ -331,6 +344,7 @@ static void serve_one(int fd)
         send_str(fd, "ERR PROGRAM/VERIFY\n");
         osd_log("FPGASTREAM: FAILED AT %luK - RERUN OR fpgaerase",
                 (unsigned long)(addr >> 10));
+        disk_request_remount();   /* serve again if the fabric survived */
         return;
     }
 
@@ -340,6 +354,7 @@ static void serve_one(int fd)
     close(fd);
     fpga_jtag_reload();                  /* boot the new bitstream */
     vTaskDelay(pdMS_TO_TICKS(2000));
+    disk_release_storage();              /* images closed above; detach the stick's FAT */
     esp_restart();                       /* clean full-system bring-up */
 }
 
@@ -384,6 +399,16 @@ static void fpgastream_task(void *arg)
 
 void fpgastream_start(void)
 {
-    xTaskCreatePinnedToCore(fpgastream_task, "fpgastream", 8192, NULL, 3,
-                            NULL, 1);
+    /* lwIP copies into the header buffer and the programming loop only reads
+     * it from the CPU (JTAG bit-bang), so PSRAM is fine. The task never writes
+     * ESP flash (the bitstream goes to the FPGA's flash over JTAG), so its
+     * stack may live in PSRAM too (CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY). */
+    if (!s_hdr) {
+        s_hdr = (uint8_t *)heap_caps_malloc(FS_HDR_SCAN, MALLOC_CAP_SPIRAM);
+        if (!s_hdr) s_hdr = (uint8_t *)malloc(FS_HDR_SCAN);
+        if (!s_hdr) return;
+    }
+    if (xTaskCreatePinnedToCoreWithCaps(fpgastream_task, "fpgastream", 8192, NULL, 3,
+                                        NULL, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS)
+        xTaskCreatePinnedToCore(fpgastream_task, "fpgastream", 8192, NULL, 3, NULL, 1);
 }

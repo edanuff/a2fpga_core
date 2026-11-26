@@ -21,8 +21,11 @@ logic-bound at ~97% CLS and 52/56 BSRAM):
   cache at the arbiter's top priority)
 - Disk II (slot 5) and ProDOS hard disk (slot 6) images served by the ESP32
 - IIgs autodetect on the bus; the Apple's reset is held by the ESP32 until media is mounted
-- Off for the first fit: SuperSprite, Mockingboard (resource budget), Super Serial Card (no
-  UART pins on this revision), Uthernet II (BSRAM budget)
+- Mockingboard (slot 4) and Uthernet II (slot 3, ESP32 WiFi bridge, or a CDC-ECM/NCM
+  USB-Ethernet adapter on USB1) since the 2026-11-15
+  BSRAM pass (`docs/RESOURCE_AUDIT.md` §8)
+- Off: SuperSprite (16 BSRAM + ~5k logic, does not fit), Super Serial Card (no UART pins on
+  this revision)
 
 ## Building and flashing
 
@@ -62,7 +65,8 @@ the ESP32's LittleFS plus USB mass storage on the ESP32's own USB port; there is
   - [PSRAM_TEST.md](docs/PSRAM_TEST.md) — the HyperRAM eye-scan test and its results
   - [RESOURCE_AUDIT.md](docs/RESOURCE_AUDIT.md) — per-module resource accounting on the GW5A-25, the DOC fetch cache, the port-priority decision; read before adding anything
   - [TOP_INTEGRATION_PLAN.md](docs/TOP_INTEGRATION_PLAN.md) — how the new top was derived from the a2mega top (memory map, resource scoping, decisions)
-  - [ESP32_FW_A2P25.md](docs/ESP32_FW_A2P25.md) · [ESP32_FEATURE_PORT.md](docs/ESP32_FEATURE_PORT.md) — the firmware on this board and the Enhanced feature port
+  - [HDD_BLOCK_WRITE_SHIFT.md](docs/HDD_BLOCK_WRITE_SHIFT.md) · [STICK_CORRUPTION_2026-11-17.md](docs/STICK_CORRUPTION_2026-11-17.md) — the two disk-path corruption root causes: the `hdd.sv` one-word write shift (11-13) and the ESP32 firmware serving a junk write request from an unconfigured FPGA during a reload, which extended a `.nib` to 4 GB and took the stick's directory with it (11-17); read before touching `disk.c` or a restart/reload path
+  - [ESP32_FW_A2P25.md](docs/ESP32_FW_A2P25.md) · [ESP32_FEATURE_PORT.md](docs/ESP32_FEATURE_PORT.md) — the firmware on this board and the Enhanced feature port; its consoles (serial CLI, key-driven telnet, FTP, port 2323) are in [../a2mega/docs/ESP32_CONSOLE.md](../a2mega/docs/ESP32_CONSOLE.md)
   - [HyperRAM bandwidth budget (§3)](../../docs/memory_bandwidth_analysis.md#3-a2p25--hyperram-bandwidth-budget) — the original budget, revised by the modernization plan's section 4
   - [docs/archive/](docs/archive/README.md) — the previous revision's material: the LCAM capture-link notes (the link is proven lossless transfer work and may be reused; its ES5503 use is abandoned), the 3-wire SPI protocol
 - [src/README.md](src/README.md) — points at the shared ESP32 firmware in `boards/a2mega/src/` (the previous revision's firmware was deleted 2026-10-25)

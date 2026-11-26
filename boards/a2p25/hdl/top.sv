@@ -65,7 +65,7 @@ module top #(
     parameter bit ENSONIQ_MONO_MIX = 0, // If true, mono mix is used instead of stereo
 
     parameter int GS = 0,                       // IIgs mode is autodetected (apple_bus); forcing it did not change SHR/DOC (10-11)
-    parameter int ENABLE_FILTER = 0,            // Enable audio filtering
+    parameter int ENABLE_FILTER = 1,            // audio_out IIR low-pass + DC blocker on clk_logic ahead of the CDC
     parameter int ENABLE_DENOISE = 0,           // Enable denoise of clocks
     parameter bit CLEAR_APPLE_VIDEO_RAM = 1,    // Clear video ram on startup
     parameter bit HDMI_SLEEP_ENABLE = 0,        // Sleep video output on CPU stop
@@ -396,8 +396,12 @@ module top #(
     localparam GLU_MEM_PORT      = 3;
     localparam FB_WRITE_PORT   = 4;
     localparam FB_READ_PORT    = 5;
+    // The ESP32 memory-peek reader gets a 7th port only when the profile
+    // asks for it (A2_INSTR_MEM_PEEK): each port is a 2-slot x 155-bit
+    // request queue in flops plus its share of the 7:1 muxes.
+    localparam MEM_PEEK          = `A2_INSTR_MEM_PEEK;
     localparam DBG_MEM_PORT      = 6;
-    localparam NUM_DDR3_PORTS    = 7;   // (name kept from the a2mega: the port roles are identical)
+    localparam NUM_DDR3_PORTS    = 6 + MEM_PEEK;   // (name kept from the a2mega: the port roles are identical)
 
     // DDR3 memory map — word address offsets (32-bit word addressing)
     // Applied per-port inside ddr3_ports via PORT_BASE_ADDR parameter.
@@ -734,26 +738,35 @@ module top #(
     wire        dbg_mem_rd_w;
     wire [20:0] dbg_mem_port_addr_w;
 
-    assign hr_mem_ports[DBG_MEM_PORT].rd      = dbg_mem_rd_w;
-    assign hr_mem_ports[DBG_MEM_PORT].wr      = 1'b0;
-    assign hr_mem_ports[DBG_MEM_PORT].addr    = dbg_mem_port_addr_w;
-    assign hr_mem_ports[DBG_MEM_PORT].data    = 32'd0;
-    assign hr_mem_ports[DBG_MEM_PORT].byte_en = 4'b1111;
-    assign hr_mem_ports[DBG_MEM_PORT].burst   = 1'b0;
+    generate if (MEM_PEEK) begin : g_mem_peek
+        assign hr_mem_ports[DBG_MEM_PORT].rd      = dbg_mem_rd_w;
+        assign hr_mem_ports[DBG_MEM_PORT].wr      = 1'b0;
+        assign hr_mem_ports[DBG_MEM_PORT].addr    = dbg_mem_port_addr_w;
+        assign hr_mem_ports[DBG_MEM_PORT].data    = 32'd0;
+        assign hr_mem_ports[DBG_MEM_PORT].byte_en = 4'b1111;
+        assign hr_mem_ports[DBG_MEM_PORT].burst   = 1'b0;
 
-    ddr3_debug_reader u_ddr3_dbg_reader (
-        .clk    (clk_logic_w),
-        .rst_n  (device_reset_n_w),
-        .mem_rd_o        (dbg_mem_rd_w),
-        .mem_addr_o      (dbg_mem_port_addr_w),
-        .mem_available_i (hr_mem_ports[DBG_MEM_PORT].available),
-        .mem_ready_i     (hr_mem_ports[DBG_MEM_PORT].ready),
-        .mem_q_i         (hr_mem_ports[DBG_MEM_PORT].q),
-        .addr_i (dbg_mem_addr_w),
-        .req_i  (dbg_mem_go_w),
-        .busy_o (dbg_mem_busy_w),
-        .data_o (dbg_mem_data_w)
-    );
+        ddr3_debug_reader u_ddr3_dbg_reader (
+            .clk    (clk_logic_w),
+            .rst_n  (device_reset_n_w),
+            .mem_rd_o        (dbg_mem_rd_w),
+            .mem_addr_o      (dbg_mem_port_addr_w),
+            .mem_available_i (hr_mem_ports[DBG_MEM_PORT].available),
+            .mem_ready_i     (hr_mem_ports[DBG_MEM_PORT].ready),
+            .mem_q_i         (hr_mem_ports[DBG_MEM_PORT].q),
+            .addr_i (dbg_mem_addr_w),
+            .req_i  (dbg_mem_go_w),
+            .busy_o (dbg_mem_busy_w),
+            .data_o (dbg_mem_data_w)
+        );
+    end else begin : g_no_mem_peek
+        // Window regs 0x34-0x3B still exist in the connector; GO never
+        // reports busy and the data reads back as a marker.
+        assign dbg_mem_rd_w        = 1'b0;
+        assign dbg_mem_port_addr_w = 21'd0;
+        assign dbg_mem_busy_w      = 1'b0;
+        assign dbg_mem_data_w      = 32'hDEAD_BEEF;
+    end endgenerate
 
     // SuperSprite
 
@@ -945,18 +958,91 @@ module top #(
         .speaker_o(speaker_audio_w)
     );
 
-    // Extend all the unsigned audio signals to 13 bits
-    wire [12:0] speaker_audio_ext_w = {speaker_audio_w, 12'b0};
-    wire [12:0] ssp_audio_ext_w = {ssp_audio_w, 3'b0};
-    wire [12:0] mb_audio_l_ext_w = {mb_audio_l, 3'b0};
-    wire [12:0] mb_audio_r_ext_w = {mb_audio_r, 3'b0};
 
     wire signed [15:0] core_audio_l_w;
     wire signed [15:0] core_audio_r_w;
-    // Combine all the audio sources into a single 16-bit signed audio signal
-    // This could theoretically overflow by 1 bit and clip, but unlikely
-    assign core_audio_l_w = sg_audio_l + ssp_audio_ext_w + mb_audio_l_ext_w + speaker_audio_ext_w;
-    assign core_audio_r_w = sg_audio_r + ssp_audio_ext_w + mb_audio_r_ext_w + speaker_audio_ext_w;
+    // Saturating mix (hdl/sound/core_audio_mix.sv): Mockingboard gain is a
+    // live select (shift 3 + gain; power-up 2 = << 5 since 2026-11-17, it was
+    // quiet beside the DOC), sum clamped.
+    core_audio_mix i_audio_mix_l (.sg_i(sg_audio_l), .ssp_i(ssp_audio_w), .mb_i(mb_audio_l), .mb_gain_i(aud_ctl_w[3:2]), .spk_i(speaker_audio_w), .out_o(core_audio_l_w));
+    core_audio_mix i_audio_mix_r (.sg_i(sg_audio_r), .ssp_i(ssp_audio_w), .mb_i(mb_audio_r), .mb_gain_i(aud_ctl_w[3:2]), .spk_i(speaker_audio_w), .out_o(core_audio_r_w));
+
+    // -----------------------------------------------------------------
+    // Audio output filter (clk_logic domain)
+    // -----------------------------------------------------------------
+    // The a2n20 tops run audio_out (Sorgelig's 3-tap IIR low-pass with a DC
+    // blocker at the sample rate) between the mix and the output; this top
+    // fed the mix straight into the CDC because the IIR's 16x40 and 37x24
+    // products did not map onto the GW5A DSP (MULT12X12 / MULT27X36 only,
+    // signed operands). hdl/support/iir_filter_gw5a.v is the same filter
+    // with every product written as a signed <= 27 x <= 36 piece, bit-exact
+    // with the GW2A file (sim/audio_out/run.sh); the project lists it in
+    // place of hdl/support/iir_filter.v.
+    //
+    // It runs here on clk_logic, AHEAD of the CDC, so the band-limiting sees
+    // the full-rate sources (the 1-bit speaker, the AY square waves, the DOC
+    // at ~26 kHz per oscillator) rather than the 48 kHz capture, where their
+    // aliases are already folded in. The DC blocker's sample strobe is
+    // 54 MHz / 1125 = 48.000 kHz exactly; the pixel-domain strobe below is
+    // the same frequency (every clock here descends from the one 50 MHz
+    // oscillator), so the mailbox CDC carries one new word per period.
+    //
+    // flt_rate: audio_out's accumulator drops its increment on the cycle it
+    // fires, so the filter ce runs at clk / (CLK_RATE / (2 flt_rate) + 1),
+    // not at 2 flt_rate. The Tang Nano tops (27 MHz, 7,056,000) therefore
+    // filter at a 9.268 MHz ce = 4.634 MHz per channel; 5,594,066 at 54 MHz
+    // gives the same ce rate and so the same cutoff with the same
+    // coefficients (the Tang Nano tuning, unchanged; the bench prints both
+    // responses). The ce fires at most every fifth clk54; every register in
+    // the IIR is ce-enabled, and a2p25.sdc gives their paths three cycles
+    // (set_multicycle_path) for the two cascaded MULT27X36 of a tap update.
+    localparam AUDIO_RATE = 48000;
+    localparam [31:0] aflt_rate = 5_594_066;
+    localparam [39:0] acx  = 4258969;
+    localparam  [7:0] acx0 = 3;
+    localparam  [7:0] acx1 = 3;
+    localparam  [7:0] acx2 = 1;
+    localparam [23:0] acy0 = -24'd6216759;
+    localparam [23:0] acy1 =  24'd6143386;
+    localparam [23:0] acy2 = -24'd2023767;
+    localparam int AUD_STROBE_DIV = CLOCK_SPEED_HZ / AUDIO_RATE;   // 1125
+
+    reg [$clog2(AUD_STROBE_DIV)-1:0] aud_strobe_cnt_r = '0;
+    reg clk_audio_logic_r = 1'b0;
+    always_ff @(posedge clk_logic_w) begin
+        clk_audio_logic_r <= 1'b0;
+        if (aud_strobe_cnt_r == AUD_STROBE_DIV - 1) begin
+            aud_strobe_cnt_r  <= '0;
+            clk_audio_logic_r <= 1'b1;
+        end else begin
+            aud_strobe_cnt_r <= aud_strobe_cnt_r + 1'b1;
+        end
+    end
+
+    wire [15:0] flt_audio_l_w;
+    wire [15:0] flt_audio_r_w;
+    audio_out #(
+        .CLK_RATE   (CLOCK_SPEED_HZ),
+        .AUDIO_RATE (AUDIO_RATE),
+        .ENABLE     (ENABLE_FILTER)
+    ) i_audio_out (
+        .reset     (~device_reset_n_w),
+        .clk       (clk_logic_w),
+        .flt_rate  (aflt_rate),
+        .cx        (acx),
+        .cx0       (acx0),
+        .cx1       (acx1),
+        .cx2       (acx2),
+        .cy0       (acy0),
+        .cy1       (acy1),
+        .cy2       (acy2),
+        .is_signed (1'b1),
+        .core_l    (core_audio_l_w),
+        .core_r    (core_audio_r_w),
+        .audio_clk (clk_audio_logic_r),
+        .audio_l   (flt_audio_l_w),
+        .audio_r   (flt_audio_r_w)
+    );
 
     // =========================================================================
     // DDR3 + Framebuffer + HDMI Output (480p)
@@ -1108,17 +1194,22 @@ module top #(
         .hr_ck (hr_ck), .hr_cs_n (hr_cs_n), .hr_rwds (hr_rwds), .hr_dq (hr_dq)
     );
 
-    hyperram_ports_if #(
-        .NUM_PORTS        (NUM_DDR3_PORTS),
-        // packed tables, port 0 in the LOW field (see hyperram_ports.sv)
-        .PORT_BASE_ADDR   ({21'd0,               // [6] debug reader (absolute)
+    // packed tables, port 0 in the LOW field (see hyperram_ports.sv); the
+    // 7-port tables are sliced to the ports actually built
+    localparam [7*21-1:0] HR_PORT_BASES_7 =
+                           {21'd0,               // [6] debug reader (absolute, MEM_PEEK only)
                             FB_WORD_BASE,        // [5] FB read
                             FB_WORD_BASE,        // [4] FB write
                             ENSONIQ_WORD_BASE,   // [3] GLU sound-RAM write
                             SHADOW_WORD_BASE,    // [2] shadow write
                             SHADOW_WORD_BASE,    // [1] shadow read
-                            ENSONIQ_WORD_BASE}), // [0] DOC wavetable read
-        .PORT_BURST_WORDS ({5'd4, 5'd8, 5'd4, 5'd4, 5'd4, 5'd4, 5'd4}),
+                            ENSONIQ_WORD_BASE};  // [0] DOC wavetable read
+    localparam [7*5-1:0]  HR_PORT_BURSTS_7 = {5'd4, 5'd8, 5'd4, 5'd4, 5'd4, 5'd4, 5'd4};
+
+    hyperram_ports_if #(
+        .NUM_PORTS        (NUM_DDR3_PORTS),
+        .PORT_BASE_ADDR   (HR_PORT_BASES_7[NUM_DDR3_PORTS*21-1:0]),
+        .PORT_BURST_WORDS (HR_PORT_BURSTS_7[NUM_DDR3_PORTS*5-1:0]),
         .WIDE_WR_PORT     (FB_WRITE_PORT)
     ) u_hr_ports (
         .clk (clk_logic_w), .rst_n (hr_rst_n_w),
@@ -1170,6 +1261,7 @@ module top #(
     framebuffer_1080p #(
         .COLOR_BITS(18),
         .FB_READ_BURST_WORDS(8),
+        .LINE_BANKS(4),            // 4 BSRAM blocks, not 8 (RESOURCE_AUDIT B3)
         .TEST_PATTERN(0)
     ) u_framebuffer (
         .clk              (clk_logic_w),
@@ -1228,30 +1320,54 @@ module top #(
     // Audio clock generation (27 MHz pixel clock domain)
     // -----------------------------------------------------------------
 
-    localparam AUDIO_RATE = 48000;
+    // AUDIO_RATE is declared with the filter stage above (48 kHz).
     // 48 kHz strobe from the 148.5 MHz pixel clock via a sign-bit phase
     // accumulator (exact for any ratio; 148.5M/48k = 3093.75 is not an
-    // integer, so the old divider+frac scheme no longer applies)
+    // integer, so the old divider+frac scheme no longer applies). The
+    // constants are reduced by their GCD (12,000): +4 / -12,375 in 15 bits
+    // makes the identical sign-test sequence as +48,000 / -148,500,000 in
+    // 29 bits, and the 29-bit carry chain was this core's worst clk_pix
+    // path (+0.33 ns, 9 logic levels, 2026-11-15) — same form as the a2mega.
     logic clk_audio;
-    logic signed [28:0] aud_acc = -29'sd148_500_000;
+    logic signed [14:0] aud_acc = -15'sd12_375;
     always_ff @(posedge clk_pixel_w) begin
         clk_audio <= 1'b0;
-        if (!aud_acc[28]) begin
-            aud_acc   <= aud_acc + 29'sd48_000 - 29'sd148_500_000;
+        if (!aud_acc[14]) begin
+            aud_acc   <= aud_acc + 15'sd4 - 15'sd12_375;
             clk_audio <= 1'b1;
         end else begin
-            aud_acc <= aud_acc + 29'sd48_000;
+            aud_acc <= aud_acc + 15'sd4;
         end
     end
 
-    // Audio CDC: clk_logic (54 MHz) -> clk_pixel (27 MHz) via double-flop
-    reg [15:0] audio_sample_word [1:0], audio_sample_word0 [1:0];
-    always @(posedge clk_pixel_w) begin
-        audio_sample_word0[0] <= core_audio_l_w;
-        audio_sample_word[0]  <= audio_sample_word0[0];
-        audio_sample_word0[1] <= core_audio_r_w;
-        audio_sample_word[1]  <= audio_sample_word0[1];
-    end
+    // Audio CDC: clk_logic (54 MHz) -> clk_pixel (148.5 MHz). The two clocks
+    // come from different PLLs and the SDC declares them asynchronous, so the
+    // old double flop per bit captured mixed words when the sample changed
+    // near a pixel-clock edge (Arkanoid pops, 2026-11-16). audio_sample_cdc
+    // keeps that raw path, adds a request/acknowledge mailbox, and counts
+    // mixed captures; a write to debug-window index 55 (select 0x5F = 55,
+    // data 0x4F) sets the control byte: bit 0 selects the mailbox word, bit 1
+    // clears the counters (readback 48-55). Not a scratch register: the W5100
+    // bridge firmware rewrites scratch1-4 on every poll (found 2026-11-16).
+    wire [7:0]  aud_ctl_w;              // driven by esp32_ospi_connector below
+    wire [63:0] aud_cdc_dbg_w;
+    reg  [15:0] audio_sample_word [1:0];
+    // RAW_PATH 0 since 2026-11-18: mailbox only (bit 0 of index 55 is read
+    // back but ignored, indices 48-51 read 0); the raw flops and the mixed
+    // detector went for logic budget once the filter stage took the core to
+    // 83 %. The consumed-stream jump / max-step counters (52-54) stay.
+    audio_sample_cdc #(.W(16), .JUMP_THRESH(2048), .RAW_PATH(0)) i_audio_cdc (
+        .clk_src    (clk_logic_w),
+        .l_src      (flt_audio_l_w),
+        .r_src      (flt_audio_r_w),
+        .clk_dst    (clk_pixel_w),
+        .strobe_dst (clk_audio),
+        .sel_safe   (aud_ctl_w[0]),
+        .clear      (aud_ctl_w[1]),
+        .l_dst      (audio_sample_word[0]),
+        .r_dst      (audio_sample_word[1]),
+        .dbg        (aud_cdc_dbg_w)
+    );
 
     // -----------------------------------------------------------------
     // DisplayPort TX — 1920x1080p 59.94 Hz over 2-lane HBR (Phase 3b)
@@ -1323,7 +1439,8 @@ module top #(
         .LANE_COUNT       (4),
         .LINK_RATE_MBPS   (1620),
         .RGB_LATENCY      (2),
-        .FIFO_LINES       (1),       // 512 x 97 = 3 BSRAM (was 11); level swings +-60 at prefill
+        .FIFO_LINES       (1),       // 512 words (was 11 lines); level swings +-60 at prefill
+        .PIXEL_BITS       (16),      // RGB565 through the CDC FIFO: 512 x 65 = 4 blocks, not 6 (B4)
         .PREFILL_WORDS    (256),     // half a line
         .BLIND_SINK       (0),
         .HPD_DISCONNECT_RESETS(1),
@@ -1601,7 +1718,7 @@ module top #(
         dbg_hex_sync0[0] <= ddr3_dbg_arb_state_w;
                                                 dbg_hex_sync1[0] <= dbg_hex_sync0[0];
         // Hex 1: req_pending bitmask for all 6 ports
-        dbg_hex_sync0[1] <= {2'b0, ddr3_dbg_req_pending_w};
+        dbg_hex_sync0[1] <= 8'(ddr3_dbg_req_pending_w);
                                                 dbg_hex_sync1[1] <= dbg_hex_sync0[1];
         // Hex 2: DOC REQUESTS PER FRAME, high byte (count >> 8). Ground
         // truth of DOC memory demand, comparable across configs. Expected:
@@ -1838,7 +1955,7 @@ module top #(
     // sticky, so multi-bit skew is harmless)
     reg [7:0] dbg_resp_ovfl_sync0, dbg_resp_ovfl_sync1;
     always @(posedge clk_logic_w) begin
-        dbg_resp_ovfl_sync0 <= {2'b00, ddr3_dbg_resp_ovfl_w};
+        dbg_resp_ovfl_sync0 <= 8'(ddr3_dbg_resp_ovfl_w);
         dbg_resp_ovfl_sync1 <= dbg_resp_ovfl_sync0;
     end
 
@@ -1849,7 +1966,8 @@ module top #(
         .USE_CRC(0),
         .IDLE_TO_CYC(5_400_000),  // ~100ms at 54MHz
         .CLOCK_SPEED_HZ(CLOCK_SPEED_HZ),
-        .EVT_LOG(`A2_INSTR_EVENT_LOG)   // a2p25_profile.vh
+        .EVT_LOG(`A2_INSTR_EVENT_LOG),  // a2p25_profile.vh
+        .TEST_MEM(`A2_INSTR_TEST_MEM)   // a2p25_profile.vh
     ) esp32_ospi (
         .clk(clk_logic_w),
         .rst_n(device_reset_n_w),
@@ -1902,6 +2020,10 @@ module top #(
         .dbg_doc_reqf_i(doc_dbg_req_frame_r),
         .dbg_doc_missf_i(doc_dbg_miss_frame_r),
         .dbg_doc_tof_i(doc_dbg_to_frame_r),
+        .dbg_glu_drops_i(glu_wq_drops_w),
+        .dbg_doc_fdrop_i(doc_dbg_fetch_drop_w),
+        .dbg_aud_i(aud_cdc_dbg_w),
+        .aud_ctl_o(aud_ctl_w),
         // a2mega-only debug sources, tied off (2026-10-22 merge): DP SERDES /
         // link readback and the IIgs CPU-socket window. The a2p25 could
         // feed dbg_dp_caps_i from dp_transmitter's debug_sink_caps (census

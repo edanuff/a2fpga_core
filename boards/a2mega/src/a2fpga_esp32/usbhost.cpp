@@ -1,5 +1,6 @@
 /*
- * usbhost.cpp — ESP32-S3 USB host for gamepads and HID input (see usbhost.h).
+ * usbhost.cpp — ESP32-S3 USB host for gamepads, HID input, mass storage and
+ * (via usbeth.c) CDC-ECM/NCM Ethernet adapters (see usbhost.h).
  *
  * Ported from the a2n20v2-Enhanced BL616 firmware (CherryUSB):
  *   firmware_host/usbh_xinput.c   — XInput class match (FF/5D/01), report layout
@@ -22,17 +23,23 @@
 #include "board_pins.h"
 #include "usbhost.h"
 #include "a2fpga_regs.h"
+#include "hid_map.h"
 
 #if A2MEGA_HAS_OSPI_LINK
 
 #include "driver/usb_serial_jtag.h"
 #include "esp_private/usb_phy.h"
 #include "usb/usb_host.h"
+#include "usb/usb_types_ch11.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "usbstorage.h"
+#include "usbeth.h"
+#include "usbhub_retry.h"
+#include "idf_log_tee.h"
+#include "settings.h"
 
 #include "osd_console.h"   /* osd_log (C linkage) */
 
@@ -54,7 +61,10 @@ static usb_host_client_handle_t  s_client = NULL;
  * the control transfers of the XInput init) is ever delivered — doing the
  * work inside the client callback deadlocked and watchdog-reset the chip
  * (a2p25 10-12: Apple reset loop on gamepad attach). */
-struct work_item { uint8_t is_gone; uint8_t addr; usb_device_handle_t dev; };
+/* kind: 0 = new device at addr, 1 = device gone, 2 = hub port failed to
+ * enumerate (addr = hub, port = 1-based downstream port; from the log hook) */
+struct work_item { uint8_t kind; uint8_t addr; uint8_t port; usb_device_handle_t dev; };
+enum { WORK_NEW = 0, WORK_GONE = 1, WORK_HUB_PORT_FAILED = 2 };
 static QueueHandle_t s_work = NULL;
 
 /* ---- XInput ---------------------------------------------------------------
@@ -105,102 +115,12 @@ static const uint8_t k_xbox_ep2[4][3] = {
 };
 
 /* ---- HID keyboard / consumer (usbh_hidinput.c) ---------------------------- */
-/* Keyboard usages -> menu buttons. The ESP32 menu's OK is A and back is B
- * (BTN_OK / BTN_BACK in menu.c); SELECT = Apple II <-> MCU; Y = menu <->
- * console. Arrows/OK/Menu arrive as keyboard usages on the known remotes. */
-static uint16_t map_kbd_usage(uint8_t u)
-{
-    switch (u) {
-    case 0x52: return A2PAD_U;        /* Up arrow */
-    case 0x51: return A2PAD_D;        /* Down arrow */
-    case 0x50: return A2PAD_L;        /* Left arrow */
-    case 0x4F: return A2PAD_R;        /* Right arrow */
-    case 0x28:                        /* Enter (remote OK button) */
-    case 0x58: return A2PAD_A;        /* Keypad Enter        -> OK */
-    case 0x29:                        /* Esc */
-    case 0x2A: return A2PAD_B;        /* Backspace           -> back */
-    case 0x65:                        /* Application ("menu" key) */
-    case 0x2B: return A2PAD_SELECT;   /* Tab      -> Apple II <-> MCU */
-    case 0x1C: return A2PAD_Y;        /* Y        -> menu <-> console */
-    default:   return 0;
-    }
-}
-static uint16_t map_consumer_usage(uint16_t u)
-{
-    switch (u) {
-    case 0x223:                       /* AC Home (remote Home button) */
-    case 0x040: return A2PAD_SELECT;  /* Menu     -> Apple II <-> MCU */
-    case 0x224: return A2PAD_B;       /* AC Back             -> back */
-    case 0x041: return A2PAD_A;       /* Menu Pick           -> OK */
-    case 0x042: return A2PAD_U;       /* Menu Up */
-    case 0x043: return A2PAD_D;       /* Menu Down */
-    case 0x044: return A2PAD_L;       /* Menu Left */
-    case 0x045: return A2PAD_R;       /* Menu Right */
-    default:    return 0;             /* volume keys: no menu meaning here */
-    }
-}
-
-/* consumer-page input report layout, from the report descriptor */
-struct consumer_layout {
-    bool     valid;
-    bool     is_array;     /* array of usage codes vs 1-bit-per-usage bitmap */
-    uint8_t  rid;          /* report ID (0 = none) */
-    uint8_t  field_bits;   /* array: bits per entry (8/16); bitmap: 1 */
-    uint8_t  field_count;  /* array: entries; bitmap: bits */
-    uint16_t usages[16];   /* bitmap only: usage per bit position */
-    uint8_t  nusages;
-};
-
-/* Minimal HID report-descriptor parse: for each Input item on the Consumer
- * page record the report ID, entry size/count and (for bitmaps) the per-bit
- * usage list. Prefers a usage-code ARRAY over a bitmap (usbh_hidinput.c). */
-static void parse_consumer_layout(const uint8_t *d, uint32_t len, consumer_layout *out)
-{
-    uint16_t usage_page = 0, rcount = 0, rsize = 0, usage_min = 0;
-    uint8_t  rid = 0;
-    uint16_t usages[16]; uint8_t nus = 0; bool have_min = false;
-    memset(out, 0, sizeof(*out));
-    uint32_t i = 0;
-    while (i < len) {
-        uint8_t  b   = d[i++];
-        uint8_t  sz  = b & 3; if (sz == 3) sz = 4;
-        uint8_t  typ = (b >> 2) & 3, tag = b >> 4;
-        uint32_t val = 0;
-        for (uint8_t k = 0; k < sz && i < len; k++) val |= (uint32_t)d[i++] << (8 * k);
-        if (typ == 1) {              /* global */
-            switch (tag) {
-            case 0: usage_page = (uint16_t)val; break;
-            case 7: rsize = (uint16_t)val; break;
-            case 9: rcount = (uint16_t)val; break;
-            case 8: rid = (uint8_t)val; break;
-            }
-        } else if (typ == 2) {       /* local */
-            switch (tag) {
-            case 0: if (nus < 16) usages[nus++] = (uint16_t)val; break;
-            case 1: usage_min = (uint16_t)val; have_min = true; break;
-            case 2:                  /* usage max: bitmap declared as a range */
-                if (have_min) { for (uint16_t u = 0; u < 16 && usage_min + u <= val; u++) if (nus < 16) usages[nus++] = usage_min + u; }
-                break;
-            }
-        } else if (typ == 0) {       /* main */
-            if (tag == 8 && usage_page == 0x0C && !out->valid) {   /* Input, Consumer page */
-                bool is_array = (val & 0x02) == 0;                   /* bit1: 0 = array, 1 = variable */
-                if (is_array && (rsize == 8 || rsize == 16)) {
-                    out->valid = true; out->is_array = true; out->rid = rid;
-                    out->field_bits = (uint8_t)rsize; out->field_count = (uint8_t)rcount;
-                } else if (!is_array && rsize == 1 && nus > 0) {
-                    out->valid = true; out->is_array = false; out->rid = rid;
-                    out->field_bits = 1; out->field_count = (uint8_t)rcount;
-                    out->nusages = nus; memcpy(out->usages, usages, sizeof(usages));
-                }
-            }
-            if (tag == 8 || tag == 9 || tag == 11) { nus = 0; have_min = false; }   /* Input/Output/Feature clear locals */
-        }
-    }
-}
+/* Usage -> button tables and the consumer-page layout parser live in
+ * hid_map.c (shared with the BLE HID host since 2026-11-19). */
+typedef hid_consumer_layout_t consumer_layout;
 
 /* ---- per-device bookkeeping ------------------------------------------------ */
-enum devkind { DK_NONE, DK_XINPUT, DK_KBD, DK_CONSUMER, DK_MSC };
+enum devkind { DK_NONE, DK_XINPUT, DK_KBD, DK_CONSUMER, DK_MSC, DK_ETH };
 /* one serviced interface of a device (composite remotes carry a keyboard
  * interface AND a consumer-page interface; both must be read) */
 struct hintf {
@@ -226,6 +146,8 @@ struct hdev {
     uint16_t mps_bulk;
     uint32_t msc_blocks, msc_bsize;
     uint32_t msc_tag;
+    /* CDC-ECM/NCM Ethernet adapter owned by usbeth.c */
+    bool     eth;
 };
 #define MAX_DEV 4
 static hdev s_devs[MAX_DEV];
@@ -238,10 +160,11 @@ static SemaphoreHandle_t s_msc_lock = NULL;
 
 static void recompute_presence(void)
 {
-    bool pad = false, hid = false, msc = false;
+    bool pad = false, hid = false, msc = false, eth = false;
     for (auto &d : s_devs) {
         if (!d.dev) continue;
         if (d.msc) msc = true;
+        if (d.eth) eth = true;
         for (uint8_t i = 0; i < d.nin; i++) {
             if (d.in[i].kind == DK_XINPUT) pad = true;
             if (d.in[i].kind == DK_KBD || d.in[i].kind == DK_CONSUMER) hid = true;
@@ -250,7 +173,7 @@ static void recompute_presence(void)
     s_pad_present = pad; s_hid_present = hid;
     if (!pad) s_pad_buttons = 0;
     if (!hid) { s_kbd_buttons = 0; s_con_buttons = 0; }
-    snprintf(s_status, sizeof(s_status), "HOST%s%s%s", pad ? " PAD" : "", hid ? " HID" : "", msc ? " STICK" : "");
+    snprintf(s_status, sizeof(s_status), "HOST%s%s%s%s", pad ? " PAD" : "", hid ? " HID" : "", msc ? " STICK" : "", eth ? " ETH" : "");
 }
 
 /* buttons = OR over every serviced interface of every device */
@@ -274,9 +197,21 @@ static esp_err_t ctrl_xfer(hdev *d, uint8_t bmRT, uint8_t bReq, uint16_t wVal, u
  * Blocking helpers usable from any task except the client task: completions
  * are delivered by the client task's event pump and wake the caller. */
 static void blk_done_cb(usb_transfer_t *t) { xTaskNotifyGive((TaskHandle_t)t->context); }
+/* The host library ignores usb_transfer_t.timeout_ms (usb_types_stack.h:
+ * "currently not supported yet"), so a transfer the device never answers
+ * stays in flight for ever. Until 2026-11-20 bulk_xfer freed it when its own
+ * wait ran out; when the PNY 13FE:6700 finally answered a WRITE(10) CSW the
+ * stack completed into freed memory and the card rebooted. Now: halt +
+ * flush the endpoint (the stack completes the transfer as CANCELED and
+ * blk_done_cb fires), wait for that, clear the endpoint, then free. If the
+ * callback still does not come the transfer is leaked, which beats a crash.
+ * Counts shown by `usb`. */
+static uint32_t s_blk_timeouts, s_blk_leaked;
+static bool     s_blk_timed_out;                     /* last bulk_xfer failure was a timeout */
 static bool bulk_xfer(hdev *d, uint8_t ep, uint8_t *buf, size_t len, size_t *done, uint32_t timeout_ms)
 {
     usb_transfer_t *t = NULL;
+    s_blk_timed_out = false;
     /* IN transfers must be a whole multiple of the endpoint's max packet
      * size (usb_host rejects the submit otherwise); round up and copy the
      * actual length back. OUT transfers go as-is. */
@@ -289,7 +224,16 @@ static bool bulk_xfer(hdev *d, uint8_t ep, uint8_t *buf, size_t len, size_t *don
     t->callback = blk_done_cb; t->context = (void *)xTaskGetCurrentTaskHandle(); t->timeout_ms = timeout_ms;
     ulTaskNotifyTake(pdTRUE, 0);                         /* clear stale notifications */
     if (usb_host_transfer_submit(t) != ESP_OK) { usb_host_transfer_free(t); return false; }
-    if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout_ms + 500))) { usb_host_transfer_free(t); return false; }
+    if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout_ms + 500))) {
+        s_blk_timed_out = true; s_blk_timeouts++;
+        usb_host_endpoint_halt(d->dev, ep);
+        usb_host_endpoint_flush(d->dev, ep);
+        bool completed = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)) != 0;
+        usb_host_endpoint_clear(d->dev, ep);
+        if (completed) usb_host_transfer_free(t);
+        else s_blk_leaked++;
+        return false;
+    }
     bool ok = (t->status == USB_TRANSFER_STATUS_COMPLETED);
     if (ok && (ep & 0x80) && len) memcpy(buf, t->data_buffer, t->actual_num_bytes > len ? len : t->actual_num_bytes);
     if (done) *done = t->actual_num_bytes;
@@ -300,31 +244,72 @@ static bool bulk_xfer(hdev *d, uint8_t ep, uint8_t *buf, size_t len, size_t *don
     return ok;
 }
 
+/* Where the last SCSI command failed (msc_rw turns it into a console line;
+ * `usb probe` reads it too). Set by scsi_cmd, read right after it fails. */
+enum scsi_stage { SC_OK = 0, SC_CBW, SC_DATA, SC_CSW_XFER, SC_CSW_BAD, SC_CSW_STATUS };
+static struct { uint8_t stage; uint8_t csw_status; uint32_t data_done; bool timed_out; } s_scsi_err;
+static const char *scsi_stage_str(uint8_t st)
+{
+    switch (st) {
+    case SC_CBW:        return "CBW (COMMAND NOT ACCEPTED)";
+    case SC_DATA:       return "DATA PHASE (TIMEOUT/STALL)";
+    case SC_CSW_XFER:   return "CSW NEVER CAME (TIMEOUT)";
+    case SC_CSW_BAD:    return "CSW MALFORMED";
+    case SC_CSW_STATUS: return "CSW STATUS (CHECK CONDITION)";
+    default:            return "OK";
+    }
+}
+
 /* one SCSI command: CBW, optional data phase, CSW. Returns true on a good CSW. */
-static bool scsi_cmd(hdev *d, const uint8_t *cb, uint8_t cblen, uint8_t *data, uint32_t dlen, bool data_in)
+/* csw_ms: how long the device may take to return the status after the data
+ * phase. 1 s suits reads; a WRITE(10) may hold the CSW while the stick
+ * programs flash, and the PNY 13FE:6700 holds it past 1.5 s. */
+static bool scsi_cmd(hdev *d, const uint8_t *cb, uint8_t cblen, uint8_t *data, uint32_t dlen, bool data_in, uint32_t csw_ms = 1000)
 {
     uint8_t cbw[31]; memset(cbw, 0, sizeof(cbw));
     uint32_t tag = ++d->msc_tag;
     cbw[0]='U'; cbw[1]='S'; cbw[2]='B'; cbw[3]='C';
     memcpy(&cbw[4], &tag, 4); memcpy(&cbw[8], &dlen, 4);
     cbw[12] = data_in ? 0x80 : 0x00; cbw[13] = 0; cbw[14] = cblen; memcpy(&cbw[15], cb, cblen);
-    if (!bulk_xfer(d, d->bulk_out, cbw, 31, NULL, 1000)) return false;
+    s_scsi_err.stage = SC_OK; s_scsi_err.csw_status = 0; s_scsi_err.data_done = 0; s_scsi_err.timed_out = false;
+    if (!bulk_xfer(d, d->bulk_out, cbw, 31, NULL, 1000)) { s_scsi_err.stage = SC_CBW; s_scsi_err.timed_out = s_blk_timed_out; return false; }
     if (dlen) {
         /* data phase in chunks the host library accepts */
         uint32_t off = 0;
         while (off < dlen) {
             uint32_t n = dlen - off; if (n > 4096) n = 4096;
             size_t got = 0;
-            if (!bulk_xfer(d, data_in ? d->bulk_in : d->bulk_out, data + off, n, &got, 3000)) return false;
+            if (!bulk_xfer(d, data_in ? d->bulk_in : d->bulk_out, data + off, n, &got, 3000)) {
+                s_scsi_err.stage = SC_DATA; s_scsi_err.data_done = off; s_scsi_err.timed_out = s_blk_timed_out; return false;
+            }
             off += data_in ? (got ? got : n) : n;
             if (data_in && got < n) break;               /* short read: device sent less */
         }
+        s_scsi_err.data_done = off;
     }
     uint8_t csw[13]; size_t got = 0;
-    if (!bulk_xfer(d, d->bulk_in, csw, 13, &got, 1000)) {
-        if (!bulk_xfer(d, d->bulk_in, csw, 13, &got, 1000)) return false;   /* one retry after a STALL clear */
+    if (!bulk_xfer(d, d->bulk_in, csw, 13, &got, csw_ms)) {
+        bool timed_out = s_blk_timed_out;
+        /* one retry after a STALL clear; after a timeout the endpoint was
+         * flushed, so a quick second look is all that is reasonable */
+        if (!bulk_xfer(d, d->bulk_in, csw, 13, &got, timed_out ? 200 : csw_ms)) {
+            s_scsi_err.stage = SC_CSW_XFER; s_scsi_err.timed_out = timed_out || s_blk_timed_out; return false;
+        }
+        s_scsi_err.timed_out = timed_out;             /* remembered if the CSW then turns out malformed */
     }
-    return got == 13 && csw[0]=='U' && csw[1]=='S' && csw[2]=='B' && csw[3]=='S' && csw[12] == 0;
+    if (!(got == 13 && csw[0]=='U' && csw[1]=='S' && csw[2]=='B' && csw[3]=='S')) { s_scsi_err.stage = SC_CSW_BAD; return false; }
+    if (csw[12] != 0) { s_scsi_err.stage = SC_CSW_STATUS; s_scsi_err.csw_status = csw[12]; return false; }
+    return true;
+}
+
+/* REQUEST SENSE after a CHECK CONDITION: key/ASC/ASCQ, or false. */
+static bool scsi_request_sense(hdev *d, uint8_t *key, uint8_t *asc, uint8_t *ascq)
+{
+    uint8_t cb[16]; memset(cb, 0, 16); cb[0] = 0x03; cb[4] = 18;
+    uint8_t sense[18]; memset(sense, 0, sizeof(sense));
+    if (!scsi_cmd(d, cb, 6, sense, 18, true)) return false;
+    *key = sense[2] & 0x0F; *asc = sense[12]; *ascq = sense[13];
+    return true;
 }
 
 static bool msc_init(hdev *d)
@@ -357,6 +342,30 @@ bool usbhost_msc_capacity(uint32_t *blocks, uint32_t *bsize)
     if (bsize)  *bsize  = s_msc->msc_bsize;
     return true;
 }
+/* Failed READ(10)/WRITE(10) go to the console: the first 5, then every
+ * 50th (a dying stick must not flood the OSD). `usb` prints the totals. */
+static uint32_t s_msc_fail_rd, s_msc_fail_wr;
+static char     s_msc_last_fail[112];
+static void msc_log_failure(hdev *d, bool write, uint32_t lba, uint32_t n)
+{
+    uint8_t stage = s_scsi_err.stage, csw = s_scsi_err.csw_status; uint32_t done = s_scsi_err.data_done;
+    uint32_t cnt = write ? ++s_msc_fail_wr : ++s_msc_fail_rd;
+    uint8_t key = 0, asc = 0, ascq = 0; bool have_sense = false;
+    if (stage == SC_CSW_STATUS) have_sense = scsi_request_sense(d, &key, &asc, &ascq);
+    snprintf(s_msc_last_fail, sizeof(s_msc_last_fail), "%s lba %lu x%lu: %s%s csw=%02X data=%lu sense=%X/%02X/%02X",
+             write ? "WRITE" : "READ", (unsigned long)lba, (unsigned long)n, scsi_stage_str(stage),
+             s_scsi_err.timed_out ? " after TIMEOUT" : "", csw, (unsigned long)done, have_sense ? key : 0xF, asc, ascq);
+    if (cnt <= 5 || cnt % 50 == 0) {
+        osd_log("USB HOST: %s LBA %lu X%lu FAILED", write ? "WRITE" : "READ", (unsigned long)lba, (unsigned long)n);
+        osd_log("  %s%s", scsi_stage_str(stage), s_scsi_err.timed_out ? " AFTER A TIMEOUT" : "");
+        if (stage == SC_CSW_STATUS)
+            osd_log("  CSW %02X SENSE KEY %X ASC %02X/%02X%s", csw, key, asc, ascq, have_sense ? "" : " (NO SENSE)");
+        else if (stage == SC_DATA)
+            osd_log("  %lu OF %lu BYTES MOVED", (unsigned long)done, (unsigned long)n * 512);
+        if (cnt == 5) osd_log("  (FURTHER FAILURES: EVERY 50TH)");
+    }
+}
+
 static bool msc_rw(uint32_t lba, uint32_t count, uint8_t *buf, bool write)
 {
     hdev *d = s_msc;
@@ -369,11 +378,52 @@ static bool msc_rw(uint32_t lba, uint32_t count, uint8_t *buf, bool write)
         cb[0] = write ? 0x2A : 0x28;                                   /* WRITE(10) / READ(10) */
         cb[2] = lba >> 24; cb[3] = lba >> 16; cb[4] = lba >> 8; cb[5] = lba;
         cb[7] = n >> 8; cb[8] = n;
-        ok = scsi_cmd(d, cb, 10, buf, n * 512, !write);
+        ok = scsi_cmd(d, cb, 10, buf, n * 512, !write, write ? 8000 : 1000);
+        if (!ok && s_msc == d) msc_log_failure(d, write, lba, n);
         buf += n * 512; lba += n; count -= n;
     }
     xSemaphoreGive(s_msc_lock);
     return ok;
+}
+
+/* `usb probe <lba> [read]`: one-sector read at lba, and unless read-only
+ * and only if the sector is all zeros (free space, nothing to lose), a
+ * WRITE(10) of the same zeros followed by a read-back. Reports each step
+ * with its time; the MSC lock serialises it against FatFS. For bisecting a
+ * stick that fails above some address (the 64 GB PNY, 2026-11-20). */
+void usbhost_msc_probe(uint32_t lba, bool allow_write, void (*out)(void *ctx, const char *line), void *ctx)
+{
+    char b[120];
+    uint32_t blocks = 0, bsize = 0;
+    if (!usbhost_msc_capacity(&blocks, &bsize)) { out(ctx, "probe: no storage device"); return; }
+    snprintf(b, sizeof(b), "probe: device has %lu blocks of %lu (%lu MB), lba %lu = %lu MB in",
+             (unsigned long)blocks, (unsigned long)bsize, (unsigned long)((uint64_t)blocks * bsize >> 20),
+             (unsigned long)lba, (unsigned long)((uint64_t)lba * bsize >> 20));
+    out(ctx, b);
+    if (lba >= blocks) { out(ctx, "probe: lba beyond the device"); return; }
+    static uint8_t sec[512];
+    uint32_t t0 = millis();
+    bool ok = usbhost_msc_read(lba, 1, sec);
+    uint32_t t1 = millis();
+    if (!ok) { snprintf(b, sizeof(b), "probe: READ FAILED after %lu ms:", (unsigned long)(t1 - t0)); out(ctx, b); out(ctx, s_msc_last_fail); return; }
+    bool zero = true; for (int i = 0; i < 512; i++) if (sec[i]) { zero = false; break; }
+    snprintf(b, sizeof(b), "probe: read ok in %lu ms, sector is %s", (unsigned long)(t1 - t0), zero ? "all zeros" : "NOT zero (in use?)");
+    out(ctx, b);
+    if (!allow_write) return;
+    if (!zero) { out(ctx, "probe: refusing to write a non-zero sector; pick another lba or add 'read'"); return; }
+    t0 = millis();
+    ok = usbhost_msc_write(lba, 1, sec);
+    t1 = millis();
+    if (!ok) { snprintf(b, sizeof(b), "probe: WRITE FAILED after %lu ms:", (unsigned long)(t1 - t0)); out(ctx, b); out(ctx, s_msc_last_fail); return; }
+    snprintf(b, sizeof(b), "probe: write (same zeros) ok in %lu ms", (unsigned long)(t1 - t0)); out(ctx, b);
+    memset(sec, 0xA5, sizeof(sec));
+    t0 = millis();
+    ok = usbhost_msc_read(lba, 1, sec);
+    t1 = millis();
+    if (!ok) { snprintf(b, sizeof(b), "probe: READ-BACK FAILED after %lu ms:", (unsigned long)(t1 - t0)); out(ctx, b); out(ctx, s_msc_last_fail); return; }
+    zero = true; for (int i = 0; i < 512; i++) if (sec[i]) { zero = false; break; }
+    snprintf(b, sizeof(b), "probe: read-back ok in %lu ms, %s", (unsigned long)(t1 - t0), zero ? "still all zeros: PASS" : "NOT zeros: FAIL (data changed!)");
+    out(ctx, b);
 }
 bool usbhost_msc_read(uint32_t lba, uint32_t count, uint8_t *buf)        { return msc_rw(lba, count, buf, false); }
 bool usbhost_msc_write(uint32_t lba, uint32_t count, const uint8_t *buf) { return msc_rw(lba, count, (uint8_t *)buf, true); }
@@ -390,30 +440,13 @@ static void in_xfer_cb(usb_transfer_t *t)
             if (n >= 14 && buf[0] == 0x00 && buf[1] == 0x14)
                 f->buttons = xinput_to_a2pad((uint16_t)buf[2] | ((uint16_t)buf[3] << 8));
             break;
-        case DK_KBD: {               /* boot report: [mods, reserved, key1..key6] */
-            uint16_t bits = 0;
-            for (int k = 2; k < 8 && k < n; k++) if (buf[k] > 0x01) bits |= map_kbd_usage(buf[k]);
-            f->buttons = bits;
+        case DK_KBD:                 /* boot report: [mods, reserved, key1..key6] */
+            f->buttons = hid_decode_boot_kbd(buf, n);
             break;
-        }
-        case DK_CONSUMER: {
-            const consumer_layout *c = &f->con; uint16_t bits = 0; int off = 0;
-            if (c->rid) { if (n < 1 || buf[0] != c->rid) break; off = 1; }
-            if (c->is_array) {
-                int bytes = c->field_bits / 8;
-                for (int f = 0; f < c->field_count && off + bytes <= n; f++, off += bytes) {
-                    uint16_t u = buf[off] | (bytes == 2 ? (uint16_t)buf[off + 1] << 8 : 0);
-                    if (u) bits |= map_consumer_usage(u);
-                }
-            } else {
-                for (int f = 0; f < c->field_count && f < c->nusages; f++) {
-                    int byte = off + f / 8, bit = f % 8;
-                    if (byte < n && (buf[byte] >> bit) & 1) bits |= map_consumer_usage(c->usages[f]);
-                }
-            }
-            f->buttons = bits;
+        case DK_CONSUMER:
+            if (f->con.rid && (n < 1 || buf[0] != f->con.rid)) break;   /* another report ID: keep state */
+            f->buttons = hid_decode_consumer(&f->con, buf, n);
             break;
-        }
         default: break;
         }
         recompute_buttons();
@@ -468,6 +501,160 @@ static void arm_in(hintf *f)
     usb_host_transfer_submit(f->xin);
 }
 
+/* ---- hub-port enumeration retry (usbhub_retry.h) ------------------------------
+ * Enumeration of a device behind a hub runs entirely inside the IDF hub
+ * driver (ext_hub/ext_port + enum, prebuilt): our client only hears of a
+ * device once it HAS enumerated, so nothing we do on NEW_DEV -- a delay, an
+ * extra reset -- can change a port that fails before that. The one lever
+ * left is the hub itself: the IDF driver opens hubs through usbh_devs_open
+ * (no client; checked in libusb.a's ext_hub.c.obj), so a client may open a
+ * hub too (usbhost_list already does) and talk to it over EP0. When the
+ * driver logs "EXT_PORT: [hub:port] Port disabled" we power-cycle that one
+ * port (ClearPortFeature / SetPortFeature PORT_POWER); the hub reports a
+ * fresh connection and the driver debounces, resets and enumerates again.
+ * The ladder (how many times, which delays, when it is a new plug) is the
+ * pure usbhub_retry module; this is the plumbing. It never touches a port
+ * whose device enumerated (PORT_ENABLE set), never a hub that switches all
+ * ports together, adds no channels and holds the hub open only during a
+ * cycle. The hook runs in the IDF daemon task: it only posts to the queue. */
+static usbhub_retry_t s_hubr;
+
+static void hub_retry_hook(const char *tag_msg)
+{
+    uint8_t hub, port;
+    if (!s_work || !usbhub_retry_parse_disabled(tag_msg, &hub, &port)) return;
+    work_item w = {}; w.kind = WORK_HUB_PORT_FAILED; w.addr = hub; w.port = port;
+    xQueueSend(s_work, &w, 0);
+}
+
+enum hubcyc_result { HC_OK, HC_NO_HUB, HC_NOT_HUB, HC_PORT_EMPTY, HC_PORT_ENABLED, HC_GANGED, HC_NO_SWITCH, HC_XFER };
+
+static bool hub_open(uint8_t addr, usb_device_handle_t *h)
+{
+    /* usbhost_list() opens and closes devices on this same client from the
+     * menu/console tasks and the library refuses a second open by the same
+     * client, so a collision makes one open fail: try a few times */
+    for (int i = 0; i < 5; i++) {
+        if (usb_host_device_open(s_client, addr, h) == ESP_OK) return true;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    *h = NULL;
+    return false;
+}
+
+static bool hub_port_status(hdev *d, uint8_t port, usb_port_status_t *st)
+{
+    memset(st, 0, sizeof(*st));
+    return ctrl_xfer(d, USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_PORT, USB_B_REQUEST_HUB_GET_PORT_STATUS,
+                     0, port, USB_PORT_STATUS_SIZE, (uint8_t *)st) == ESP_OK;
+}
+
+/* One power cycle of hub:port (off for off_ms). Blocking; worker task only.
+ * A hub with ganged power switching drops every port on the request; that
+ * is refused only when settings()->usb_hub_retry_perport is set (*ganged = true
+ * when it was done). */
+static hubcyc_result hub_port_cycle(uint8_t hub, uint8_t port, uint16_t off_ms, bool *ganged)
+{
+    *ganged = false;
+    hdev d; memset(&d, 0, sizeof(d)); d.addr = hub;
+    if (!hub_open(hub, &d.dev)) return HC_NO_HUB;
+    hubcyc_result r = HC_XFER;
+    const usb_device_desc_t *dd = NULL;
+    usb_hub_descriptor_t hd; usb_port_status_t st;
+    if (usb_host_get_device_descriptor(d.dev, &dd) != ESP_OK || !dd || dd->bDeviceClass != 0x09) { r = HC_NOT_HUB; goto out; }
+    if (ctrl_xfer(&d, USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_HUB, USB_B_REQUEST_HUB_GET_DESCRIPTOR,
+                  (uint16_t)(USB_CLASS_DESCRIPTOR_TYPE_HUB << 8), 0, USB_HUB_DESCRIPTOR_SIZE, (uint8_t *)&hd) != ESP_OK) goto out;
+    if (port < 1 || port > hd.bNbrPorts) { r = HC_NOT_HUB; goto out; }
+    /* ganged switching cuts the HID dongle / Ethernet adapter too (they
+     * re-enumerate in under a second); refused when SETTINGS USB HUB PORT
+     * RETRY = PER-PORT */
+    if (hd.wHubCharacteristics.power_switching == USB_W_HUB_CHARS_PORT_PWR_CTRL_ALL) {
+        if (settings()->usb_hub_retry_perport) { r = HC_GANGED; goto out; }
+        *ganged = true;
+    }
+    if (!hub_port_status(&d, port, &st)) goto out;
+    if (!st.wPortStatus.PORT_CONNECTION) { r = HC_PORT_EMPTY; goto out; }     /* unplugged meanwhile */
+    if (st.wPortStatus.PORT_ENABLE)      { r = HC_PORT_ENABLED; goto out; }   /* it enumerated after all: hands off */
+    if (ctrl_xfer(&d, USB_BM_REQUEST_TYPE_PORT, USB_B_REQUEST_HUB_CLEAR_FEATURE, USB_FEATURE_PORT_POWER, port, 0, NULL) != ESP_OK) goto out;
+    vTaskDelay(pdMS_TO_TICKS(50));
+    /* a hub without power switching may answer the request and change
+     * nothing; then the cycle is a no-op and we say so instead of looping */
+    {
+        bool changed = hub_port_status(&d, port, &st) && (!st.wPortStatus.PORT_POWER || !st.wPortStatus.PORT_CONNECTION);
+        if (off_ms > 50) vTaskDelay(pdMS_TO_TICKS(off_ms - 50));
+        if (ctrl_xfer(&d, USB_BM_REQUEST_TYPE_PORT, USB_B_REQUEST_HUB_SET_PORT_FEATURE, USB_FEATURE_PORT_POWER, port, 0, NULL) != ESP_OK) goto out;
+        r = changed ? HC_OK : HC_NO_SWITCH;
+    }
+out:
+    usb_host_device_close(s_client, d.dev);
+    return r;
+}
+
+static void hub_port_failed(uint8_t hub, uint8_t port)
+{
+    usbhub_retry_plan_t plan = {};
+    usbhub_retry_action_t act = usbhub_retry_on_failure(&s_hubr, hub, port, millis(), &plan);
+    if (act == USBHUB_RETRY_IGNORE) return;
+    if (act == USBHUB_RETRY_GIVE_UP) {
+        osd_log("USB HOST: HUB %u PORT %u FAILED TO", hub, port);
+        osd_log("  ENUMERATE, PLUG THE STICK DIRECTLY");
+        ESP_LOGW(TAG, "hub %u port %u: gave up after %u port power cycles", hub, port, USBHUB_RETRY_MAX);
+        return;
+    }
+    osd_log("USB HOST: HUB %u PORT %u ENUM FAILED,", hub, port);
+    osd_log("  POWER CYCLING PORT (TRY %u/%u)", plan.attempt, USBHUB_RETRY_MAX);
+    vTaskDelay(pdMS_TO_TICKS(plan.settle_ms));          /* let the driver finish recycling the port */
+    bool ganged = false;
+    hubcyc_result r = hub_port_cycle(hub, port, plan.off_ms, &ganged);
+    switch (r) {
+    case HC_OK:
+        usbhub_retry_cycled(&s_hubr, hub, port, millis());
+        if (ganged) osd_log("  GANGED HUB: ALL ITS PORTS WERE CYCLED");
+        ESP_LOGI(TAG, "hub %u port %u: power cycled (%u ms off%s), waiting for the driver", hub, port, plan.off_ms, ganged ? ", all ports" : "");
+        return;
+    case HC_PORT_EMPTY:
+        usbhub_retry_resolved(&s_hubr, hub, port);
+        osd_log("USB HOST: HUB %u PORT %u IS EMPTY NOW", hub, port);
+        return;
+    case HC_PORT_ENABLED:
+        usbhub_retry_resolved(&s_hubr, hub, port);
+        ESP_LOGI(TAG, "hub %u port %u: enabled meanwhile, not touched", hub, port);
+        return;
+    case HC_NO_HUB:    osd_log("USB HOST: CANNOT OPEN HUB %u FROM OUR", hub); osd_log("  CLIENT, NO PORT RETRY:"); break;
+    case HC_NOT_HUB:   osd_log("USB HOST: ADDR %u IS NOT A HUB WITH", hub);   osd_log("  PORT %u, NO PORT RETRY:", port); break;
+    case HC_GANGED:    osd_log("USB HOST: HUB %u SWITCHES PORT POWER", hub); osd_log("  GANGED (ALL PORTS), NO PORT RETRY:");
+                       osd_log("  (SETTINGS: USB HUB PORT RETRY=ALL PORTS)"); break;
+    case HC_NO_SWITCH: osd_log("USB HOST: HUB %u IGNORED PORT POWER OFF,", hub); osd_log("  NO PORT RETRY:"); break;
+    default:           osd_log("USB HOST: HUB %u CONTROL TRANSFER FAILED,", hub); osd_log("  NO PORT RETRY:"); break;
+    }
+    osd_log("  PLUG THE STICK DIRECTLY");
+    usbhub_retry_abort(&s_hubr, hub, port, millis());
+}
+
+/* NEW_DEV while a cycle of ours awaits its verdict: is this the device on
+ * that hub port? Device handles are the library's device objects, so the
+ * hub opened by address compares equal to the new device's parent handle. */
+static void hub_retry_check_recovered(hdev *d)
+{
+    if (!usbhub_retry_pending(&s_hubr)) return;
+    usb_device_info_t info;
+    if (usb_host_device_info(d->dev, &info) != ESP_OK || !info.parent.dev_hdl) return;
+    for (int i = 0; i < USBHUB_RETRY_SLOTS; i++) {
+        const usbhub_retry_slot_t *s = &s_hubr.slot[i];
+        if (s->state != USBHUB_SLOT_WAITING || s->port != info.parent.port_num) continue;
+        uint8_t hub = s->hub, port = s->port;
+        usb_device_handle_t hh = NULL;
+        if (usb_host_device_open(s_client, hub, &hh) != ESP_OK) continue;
+        bool match = (hh == info.parent.dev_hdl);
+        usb_host_device_close(s_client, hh);
+        if (!match) continue;
+        int n = usbhub_retry_resolved(&s_hubr, hub, port);
+        osd_log("USB HOST: HUB %u PORT %u RECOVERED AFTER", hub, port);
+        osd_log("  %d PORT POWER CYCLE%s", n, n == 1 ? "" : "S");
+        return;
+    }
+}
+
 /* ---- device attach --------------------------------------------------------- */
 static void attach_device(uint8_t addr)
 {
@@ -475,6 +662,7 @@ static void attach_device(uint8_t addr)
     if (!d) return;
     if (usb_host_device_open(s_client, addr, &d->dev) != ESP_OK) { d->dev = NULL; return; }
     d->addr = addr;
+    hub_retry_check_recovered(d);
     const usb_device_desc_t *dd = NULL;
     const usb_config_desc_t *cfg = NULL;
     char ifs[96] = ""; int ifl = 0;   /* composite devices list several interfaces */
@@ -491,8 +679,18 @@ static void attach_device(uint8_t addr)
         else if (id->bInterfaceClass == 0x03 && id->bInterfaceSubClass == 0x01 && id->bInterfaceProtocol == 0x01) k = DK_KBD;
         else if (id->bInterfaceClass == 0x03) k = DK_CONSUMER;
         else if (id->bInterfaceClass == 0x08 && id->bInterfaceSubClass == 0x06 && id->bInterfaceProtocol == 0x50 && !s_msc && !d->msc) k = DK_MSC;
+        /* CDC Ethernet (ECM 02/06 or NCM 02/0D) control interface: the
+         * adapter's data interface (class 0x0A) is claimed by usbeth.c */
+        else if (id->bInterfaceClass == 0x02 && (id->bInterfaceSubClass == 0x06 || id->bInterfaceSubClass == 0x0D) && !d->eth) k = DK_ETH;
         if (k == DK_NONE || d->nin >= MAX_INTF) continue;
         hintf *f = &d->in[d->nin]; memset(f, 0, sizeof(*f)); f->dev = d; f->intf = i;
+        if (k == DK_ETH) {
+            if (usbeth_attach(s_client, d->dev, (const uint8_t *)cfg, cfg->wTotalLength, i,
+                              dd ? dd->idVendor : 0, dd ? dd->idProduct : 0)) {
+                f->kind = k; d->eth = true; d->nin++;      /* interfaces released by usbeth_detach */
+            }
+            continue;
+        }
         if (k == DK_MSC) {
             for (uint8_t e = 0; e < id->bNumEndpoints; e++) {
                 int eoff = off;
@@ -523,7 +721,7 @@ static void attach_device(uint8_t addr)
             if (hd && hd->bLength >= 9) { const uint8_t *hb = (const uint8_t *)hd; rlen = hb[7] | ((uint16_t)hb[8] << 8); }
             static uint8_t rdesc[512];
             if (rlen && rlen <= 512 && ctrl_xfer(d, 0x81, 0x06, 0x2200, i, rlen, rdesc) == ESP_OK)
-                parse_consumer_layout(rdesc, rlen, &f->con);
+                hid_parse_consumer_layout(rdesc, rlen, &f->con);
             if (!f->con.valid) {
                 /* not a consumer-page report: a non-boot keyboard or something
                  * else on this interface — leave it claimed but unread */
@@ -534,9 +732,19 @@ static void attach_device(uint8_t addr)
         f->kind = k; d->nin++;
     }
     osd_log("USB HOST: %04X:%04X [%s]", dd ? dd->idVendor : 0, dd ? dd->idProduct : 0, ifs);
+    if (d->nin == 0 && dd && dd->bNumConfigurations > 1) {
+        /* Nothing we drive in the active configuration: a dual-configuration
+         * Ethernet adapter (Realtek) keeps its CDC-ECM function in another one */
+        hintf *f = &d->in[0]; memset(f, 0, sizeof(*f)); f->dev = d; f->intf = 0;
+        if (usbeth_attach_alt(s_client, d->dev, (const uint8_t *)cfg, cfg->wTotalLength,
+                              dd->bNumConfigurations, dd->idVendor, dd->idProduct)) {
+            f->kind = DK_ETH; d->eth = true; d->nin = 1;
+        }
+    }
     if (d->nin == 0) goto drop;
     for (uint8_t n = 0; n < d->nin; n++) {
         hintf *f = &d->in[n];
+        if (f->kind == DK_ETH) continue;                  /* running already (usbeth_attach) */
         if (f->kind == DK_MSC) {
             if (!msc_init(d)) {
                 osd_log("USB HOST: STORAGE DEVICE NOT READY");
@@ -579,6 +787,7 @@ static void detach_device(usb_device_handle_t h)
         usbstorage_on_msc(false);
         if (s_msc_lock) { xSemaphoreTake(s_msc_lock, portMAX_DELAY); xSemaphoreGive(s_msc_lock); }
     }
+    if (d->eth) { usbeth_detach(d->dev); d->eth = false; }
     for (uint8_t n = 0; n < d->nin; n++) {
         hintf *f = &d->in[n];
         if (f->xin) { usb_host_transfer_free(f->xin); f->xin = NULL; }
@@ -595,8 +804,8 @@ static void client_cb(const usb_host_client_event_msg_t *m, void *arg)
 {
     (void)arg;
     work_item w = {};
-    if (m->event == USB_HOST_CLIENT_EVENT_NEW_DEV) { w.is_gone = 0; w.addr = m->new_dev.address; }
-    else if (m->event == USB_HOST_CLIENT_EVENT_DEV_GONE) { w.is_gone = 1; w.dev = m->dev_gone.dev_hdl; }
+    if (m->event == USB_HOST_CLIENT_EVENT_NEW_DEV) { w.kind = WORK_NEW; w.addr = m->new_dev.address; }
+    else if (m->event == USB_HOST_CLIENT_EVENT_DEV_GONE) { w.kind = WORK_GONE; w.dev = m->dev_gone.dev_hdl; }
     else return;
     if (s_work) xQueueSend(s_work, &w, 0);
 }
@@ -607,8 +816,11 @@ static void worker_task(void *arg)
     work_item w;
     for (;;) {
         if (xQueueReceive(s_work, &w, portMAX_DELAY) != pdTRUE) continue;
-        if (w.is_gone) detach_device(w.dev);
-        else           attach_device(w.addr);
+        switch (w.kind) {
+        case WORK_GONE:            detach_device(w.dev); break;
+        case WORK_HUB_PORT_FAILED: hub_port_failed(w.addr, w.port); break;
+        default:                   attach_device(w.addr); break;
+        }
     }
 }
 
@@ -646,6 +858,8 @@ static bool engage_host_mode(void)
     s_work = xQueueCreate(8, sizeof(work_item));
     s_msc_lock = xSemaphoreCreateMutex();
     xTaskCreatePinnedToCore(worker_task, "usbh_work", 6144, NULL, 5, NULL, 0);
+    usbhub_retry_init(&s_hubr);
+    idf_log_tee_set_hook(hub_retry_hook);              /* "EXT_PORT: [h:p] Port disabled" -> port power cycle */
     s_active = true;
     snprintf(s_status, sizeof(s_status), "HOST");
     return true;
@@ -702,6 +916,142 @@ bool     usbhost_hid_present(void) { return s_hid_present; }
 uint16_t usbhost_buttons(void)     { return (uint16_t)(s_pad_buttons | s_kbd_buttons | s_con_buttons); }
 const char *usbhost_status_str(void) { return s_status; }
 
+/* SETTINGS / console: allow (true, default) or refuse (false) cycling a ganged hub */
+bool usbhost_set_hub_retry(bool all_ports)
+{
+    settings()->usb_hub_retry_perport = all_ports ? 0 : 1;
+    return settings_save();
+}
+
+/* ---- device listing (USB DEVICES screen, `usb` console) ------------------- */
+static void str16_to_ascii(const usb_str_desc_t *sd, char *out, int cap)
+{
+    int n = 0;
+    if (sd && sd->bLength >= 2) {
+        int chars = (sd->bLength - 2) / 2;
+        for (int i = 0; i < chars && n < cap - 1; i++) {
+            uint16_t c = sd->wData[i];
+            char ch = (c >= 32 && c < 127) ? (char)c : '?';
+            if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 32);
+            out[n++] = ch;
+        }
+    }
+    out[n] = 0;
+}
+
+static const char *intf_kind(uint8_t cls, uint8_t sub, uint8_t proto)
+{
+    switch (cls) {
+    case 0x09: return "HUB";
+    case 0x08: return (sub == 0x06 && proto == 0x50) ? "STORAGE" : "STORAGE?";
+    case 0x03: return (sub == 0x01 && proto == 0x01) ? "KEYBOARD" :
+                      (sub == 0x01 && proto == 0x02) ? "MOUSE" : "HID";
+    case 0x02: return sub == 0x06 ? "ETHERNET ECM" : sub == 0x0D ? "ETHERNET NCM" :
+                      sub == 0x02 ? "CDC SERIAL" : "CDC";
+    case 0x0A: return NULL;                              /* CDC data: look at the control intf */
+    case 0x01: return "AUDIO";
+    case 0x0E: return "VIDEO";
+    case 0xE0: return "WIRELESS";
+    case 0xFF: return (sub == 0x5D && proto == 0x01) ? "XINPUT PAD" : "VENDOR";
+    default:   return NULL;
+    }
+}
+
+int usbhost_list(usbhost_devinfo_t *out, int max)
+{
+    if (!s_active || !s_client || max <= 0) return 0;
+    uint8_t addrs[8]; int num = 0;
+    if (usb_host_device_addr_list_fill(8, addrs, &num) != ESP_OK) return 0;
+    int n = 0;
+    for (int i = 0; i < num && n < max; i++) {
+        /* A device our worker already serves is open on s_client, and the
+         * host library refuses a second open by the same client: reuse the
+         * worker's handle for those and only open (and later close) the rest. */
+        usb_device_handle_t h = NULL;
+        bool ours = false;
+        for (auto &d : s_devs) if (d.dev && d.addr == addrs[i]) { h = d.dev; ours = true; break; }
+        if (!ours && usb_host_device_open(s_client, addrs[i], &h) != ESP_OK) continue;
+        usbhost_devinfo_t *o = &out[n];
+        memset(o, 0, sizeof(*o));
+        o->addr = addrs[i];
+        const usb_device_desc_t *dd = NULL;
+        if (usb_host_get_device_descriptor(h, &dd) == ESP_OK && dd) {
+            o->vid = dd->idVendor; o->pid = dd->idProduct;
+            if (dd->bDeviceClass == 0x09) strcpy(o->kind, "HUB");
+        }
+        /* A dual-configuration Ethernet adapter (Realtek) switched to its CDC
+         * configuration after usbeth.c claimed it; the config walk below sees
+         * neither, so name it from the driver's own flag. */
+        if (!o->kind[0]) for (auto &d : s_devs) if (d.dev && d.addr == o->addr && d.eth) { strcpy(o->kind, "ETHERNET"); break; }
+        usb_device_info_t info;
+        if (usb_host_device_info(h, &info) == ESP_OK) {
+            str16_to_ascii(info.str_desc_product, o->product, sizeof(o->product));
+            o->speed = (uint8_t)info.speed;
+        }
+        const usb_config_desc_t *cfg = NULL;
+        if (!o->kind[0] && usb_host_get_active_config_descriptor(h, &cfg) == ESP_OK && cfg) {
+            /* Composite devices (the remote dongle is audio + HID): name the
+             * device after the interface we would serve, not the first one. */
+            char classes[14] = "";
+            int best = 0;
+            for (uint8_t k = 0; k < cfg->bNumInterfaces; k++) {
+                int off = 0;
+                const usb_intf_desc_t *id = usb_parse_interface_descriptor(cfg, k, 0, &off);
+                if (!id) continue;
+                const char *kd = intf_kind(id->bInterfaceClass, id->bInterfaceSubClass, id->bInterfaceProtocol);
+                if (!kd) { if (!classes[0]) snprintf(classes, sizeof(classes), "CLASS %02X", id->bInterfaceClass); continue; }
+                int rank = 1;
+                switch (id->bInterfaceClass) {
+                case 0x08: rank = 5; break;                          /* storage */
+                case 0x03: rank = 4; break;                          /* HID */
+                case 0xFF: rank = (id->bInterfaceSubClass == 0x5D) ? 4 : 1; break; /* XInput */
+                case 0x02: rank = 3; break;                          /* CDC / Ethernet */
+                default:   rank = 2; break;
+                }
+                if (rank > best) { best = rank; snprintf(o->kind, sizeof(o->kind), "%s", kd); }
+            }
+            if (!o->kind[0]) snprintf(o->kind, sizeof(o->kind), "%s", classes[0] ? classes : "NO INTERFACE");
+        }
+        if (!o->kind[0]) strcpy(o->kind, "UNKNOWN");
+        for (auto &d : s_devs) if (d.dev && d.addr == o->addr && d.nin) o->served = true;
+        if (!ours) usb_host_device_close(s_client, h);
+        n++;
+    }
+    return n;
+}
+
+void usbhost_console(void (*out)(void *ctx, const char *line), void *ctx)
+{
+    char b[112];
+    snprintf(b, sizeof(b), "usb: %s%s", s_status, s_active ? "" : " (device mode: no host enumeration)");
+    out(ctx, b);
+    snprintf(b, sizeof(b), "  hub port retry: %s (usb retry on|off; SETTINGS -> USB HUB PORT RETRY)",
+             settings()->usb_hub_retry_perport ? "PER-PORT ONLY (ganged hubs refused)" : "ALL PORTS (ganged hubs cycled too, default)");
+    out(ctx, b);
+    if (s_msc_fail_rd || s_msc_fail_wr) {
+        snprintf(b, sizeof(b), "  storage failures: %lu read, %lu write; last:",
+                 (unsigned long)s_msc_fail_rd, (unsigned long)s_msc_fail_wr);
+        out(ctx, b);
+        out(ctx, s_msc_last_fail);
+    }
+    if (s_blk_timeouts) {
+        snprintf(b, sizeof(b), "  bulk transfer timeouts: %lu (cancelled), %lu leaked",
+                 (unsigned long)s_blk_timeouts, (unsigned long)s_blk_leaked);
+        out(ctx, b);
+    }
+    if (!s_active) return;
+    usbhost_devinfo_t devs[8];
+    int n = usbhost_list(devs, 8);
+    if (!n) { out(ctx, "  (no devices enumerated)"); return; }
+    static const char *const spd[] = { "LS", "FS", "HS" };
+    for (int i = 0; i < n; i++) {
+        snprintf(b, sizeof(b), "  addr %u  %04X:%04X  %-13s %s  %s%s", devs[i].addr, devs[i].vid, devs[i].pid,
+                 devs[i].kind, devs[i].speed < 3 ? spd[devs[i].speed] : "??",
+                 devs[i].product[0] ? devs[i].product : "-", devs[i].served ? "  [in use]" : "");
+        out(ctx, b);
+    }
+}
+
 #else  /* !A2MEGA_HAS_OSPI_LINK: dp_test builds keep the port in device mode */
 
 void     usbhost_start(void)       {}
@@ -710,9 +1060,13 @@ bool     usbhost_pad_present(void) { return false; }
 bool     usbhost_hid_present(void) { return false; }
 uint16_t usbhost_buttons(void)     { return 0; }
 const char *usbhost_status_str(void) { return "DEVICE MODE"; }
+int      usbhost_list(usbhost_devinfo_t *o, int m) { (void)o; (void)m; return 0; }
+void     usbhost_console(void (*out)(void *ctx, const char *line), void *ctx) { out(ctx, "usb: not built into this variant"); }
+bool     usbhost_set_hub_retry(bool all_ports) { (void)all_ports; return false; }
 bool     usbhost_msc_present(void) { return false; }
 bool     usbhost_msc_capacity(uint32_t *b, uint32_t *s) { (void)b; (void)s; return false; }
 bool     usbhost_msc_read(uint32_t l, uint32_t c, uint8_t *b) { (void)l; (void)c; (void)b; return false; }
+void     usbhost_msc_probe(uint32_t l, bool w, void (*out)(void *ctx, const char *line), void *ctx) { (void)l; (void)w; out(ctx, "probe: not built into this variant"); }
 bool     usbhost_msc_write(uint32_t l, uint32_t c, const uint8_t *b) { (void)l; (void)c; (void)b; return false; }
 
 #endif

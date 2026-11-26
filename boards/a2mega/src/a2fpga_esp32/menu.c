@@ -1,7 +1,8 @@
 /*
  * menu.c — see menu.h for the model. 40x24 Apple II text overlay renderer,
  * gamepad navigation, screens for status / disk images / slots / network /
- * firmware / settings, and a generic file picker (no text input anywhere).
+ * bluetooth / firmware / settings, and a generic file picker (no text input
+ * anywhere).
  *
  * a2mega ESP32 port of the a2n20v2-Enhanced firmware_host/menu.c:
  *   - input comes from the FPGA pad readback regs (fpga_pad_poll) instead of
@@ -24,6 +25,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 
 #include "fpga_link.h"
 #include "fpga_screen.h"
@@ -35,7 +37,12 @@
 #include "net_status.h"
 #include "menu.h"
 #include "usbhost.h"
+#include "ble_hid.h"
 #include "fwupdate.h"
+#include "audio_ctl.h"
+#include "net_uplink.h"
+#include "usbeth.h"
+#include "wifi_bridge.h"
 
 static const char *TAG = "menu";
 
@@ -68,7 +75,9 @@ typedef enum {
     MI_TOGGLE,    /* LEFT/RIGHT/A flip: on_change(id, dir)                */
 } mi_type_t;
 
-#define MENU_MAX_ITEMS 64
+/* A full picker listing plus its fixed rows (DIR/UP or AUTO/EJECT) must fit,
+ * or mi_add() silently overwrites the last row. */
+#define MENU_MAX_ITEMS (DISK_LIST_MAX + 8)
 #define MENU_LABEL_LEN 38          /* full row when the value is empty */
 #define MENU_VALUE_COL 26          /* label clip when a value is shown */
 #define MENU_VALUE_LEN 12
@@ -85,9 +94,10 @@ typedef struct menu_item {
 typedef struct menu_screen {
     const char *title;
     void (*build)(void);               /* regenerate items on entry/refresh */
+    bool (*on_back)(void);             /* optional: B pressed; true = stay */
 } menu_screen_t;
 
-static menu_item_t s_items[MENU_MAX_ITEMS];
+static menu_item_t *s_items;           /* MENU_MAX_ITEMS, PSRAM (menu_init) */
 static int         s_nitems;
 
 /* navigation stack */
@@ -287,6 +297,13 @@ static bool fpga_core_version(char *out, size_t cap)
 }
 
 /* ======================= SCREEN: SLOTS ==================================== */
+/* IIgs-control-panel model: this screen edits a DRAFT copy of the slot
+ * map. LEFT/RIGHT only step the draft; nothing is checked, saved or applied
+ * until SAVE, so moving a card from one slot to another never clobbers the
+ * other slots while you step through the choices. SAVE refuses a map that
+ * resolves one card to two slots (the slotmaker decode answers in one slot
+ * only) and names the pair; B (back) with unsaved edits warns once, then
+ * drops the draft, like Esc in the IIgs control panel. */
 static const char *card_name(uint8_t id)
 {
     switch (id) {
@@ -306,11 +323,42 @@ static const char *card_name(uint8_t id)
 static const uint8_t k_slot_choices[] = { 0xFF, 0, 1, 2, 3, 4, 5, 6 };
 #define N_SLOT_CHOICES ((int)sizeof(k_slot_choices))
 
-/* Effective card for a slot (DEFAULT resolves to the hardware map). */
-static uint8_t slot_effective(int i)
+static uint8_t s_slot_draft[8];        /* edited map; 0xFF = hw default */
+static bool    s_slot_back_warned;     /* B pressed once with unsaved edits */
+
+/* Effective card for slot i given a map entry (DEFAULT resolves to the
+ * hardware map). */
+static uint8_t slot_resolve(uint8_t c, int i)
 {
-    uint8_t c = settings()->slot_cards[i];
     return (c == 0xFF) ? settings_slot_hw_defaults[i] : c;
+}
+
+static bool slots_dirty(void)
+{
+    return memcmp(s_slot_draft, settings()->slot_cards,
+                  sizeof(s_slot_draft)) != 0;
+}
+
+/* Conflict scan of a map: returns a bitmask of the slots whose effective
+ * card also sits in another slot. When a pair exists, *card, *a and *b
+ * describe the first one (lowest slots) for the status line. */
+static uint8_t slots_conflicts(const uint8_t *map, uint8_t *card,
+                               int *a, int *b)
+{
+    uint8_t mask = 0;
+    *card = 0; *a = -1; *b = -1;
+    for (int i = 0; i < 8; i++) {
+        uint8_t eff = slot_resolve(map[i], i);
+        if (eff == 0)
+            continue;
+        for (int j = i + 1; j < 8; j++) {
+            if (slot_resolve(map[j], j) != eff)
+                continue;
+            mask |= (uint8_t)((1u << i) | (1u << j));
+            if (*a < 0) { *card = eff; *a = i; *b = j; }
+        }
+    }
+    return mask;
 }
 
 /* Live card in a slot, via the SELECT/STATUS register pair. */
@@ -325,88 +373,151 @@ static uint8_t slot_live_card(int i)
 
 static void slots_change(int id, int dir)
 {
-    uint8_t *sc = &settings()->slot_cards[id];
+    uint8_t *sc = &s_slot_draft[id];
     int idx = 0;
     for (int i = 0; i < N_SLOT_CHOICES; i++)
         if (k_slot_choices[i] == *sc)
             idx = i;
     idx = (idx + dir + N_SLOT_CHOICES) % N_SLOT_CHOICES;
     *sc = k_slot_choices[idx];
+    s_slot_back_warned = false;
 
-    /* A card id may only answer in ONE slot (the slotmaker decode cannot
-     * duplicate it). If this slot now holds a real card that another slot
-     * also resolves to, empty the other slot explicitly. */
-    uint8_t eff = slot_effective(id);
-    int moved_from = -1;
+    /* Advisory only: say when this card now also sits in another slot.
+     * Nothing else changes; SAVE is where it is enforced. */
+    char msg[41] = "";
+    uint8_t eff = slot_resolve(*sc, id);
     if (eff != 0) {
         for (int i = 0; i < 8; i++) {
-            if (i != id && slot_effective(i) == eff) {
-                settings()->slot_cards[i] = 0;   /* explicit EMPTY */
-                moved_from = i;
+            if (i != id && slot_resolve(s_slot_draft[i], i) == eff) {
+                snprintf(msg, sizeof(msg), " %s ALSO IN SLOT %d",
+                         card_name(eff), i);
+                break;
             }
         }
     }
-
-    save_settings_status();
-    if (moved_from >= 0) {
-        char msg[41];
-        snprintf(msg, sizeof(msg), " %s MOVED - SLOT %d NOW EMPTY",
-                 card_name(eff), moved_from);
-        set_status(msg);
-    }
+    if (!msg[0] && slots_dirty())
+        snprintf(msg, sizeof(msg), " UNSAVED - SAVE TO KEEP");
+    set_status(msg);
     screen_refresh();
+}
+
+/* Validate the draft and persist it. Returns -1 on a card-in-two-slots
+ * conflict (nothing written), 0 when copied but the flash save failed,
+ * 1 when saved. Sets the status line in every case. */
+static int slots_commit(void)
+{
+    uint8_t dup; int a, b;
+    if (slots_conflicts(s_slot_draft, &dup, &a, &b)) {
+        char msg[41];
+        snprintf(msg, sizeof(msg), " NOT SAVED: %s IN %d AND %d",
+                 card_name(dup), a, b);
+        set_status(msg);
+        return -1;
+    }
+    memcpy(settings()->slot_cards, s_slot_draft, sizeof(s_slot_draft));
+    s_slot_back_warned = false;
+    if (!settings_save()) {
+        set_status(" SAVE FAILED (RAM ONLY)");
+        return 0;
+    }
+    set_status(" SAVED - APPLIES AT NEXT BOOT");
+    return 1;
+}
+
+static void slots_save(int id)
+{
+    (void)id;
+    slots_commit();
+    screen_refresh();
+}
+
+/* Program the saved map into the slotmaker and strobe a reconfig. */
+static void slots_program_hw(void)
+{
+    fpga_link_lock();
+    for (int i = 0; i < 8; i++) {
+        fpga_reg_write(A2REG_SLOT_SELECT, (uint8_t)i);
+        fpga_reg_write(A2REG_SLOT_CARD, slot_resolve(settings()->slot_cards[i], i));
+    }
+    fpga_reg_write(A2REG_SLOT_RECONFIG, 1);
+    fpga_link_unlock();
+    ESP_LOGI(TAG, "slot map applied (reconfig strobe)");
 }
 
 static void slots_apply_now(int id)
 {
     (void)id;
-    fpga_link_lock();
-    for (int i = 0; i < 8; i++) {
-        uint8_t c = settings()->slot_cards[i];
-        if (c == 0xFF)
-            c = settings_slot_hw_defaults[i];
-        fpga_reg_write(A2REG_SLOT_SELECT, (uint8_t)i);
-        fpga_reg_write(A2REG_SLOT_CARD, c);
+    int rc = slots_commit();
+    if (rc >= 0) {
+        slots_program_hw();
+        set_status(rc ? " SAVED + APPLIED - REBOOT APPLE II"
+                      : " APPLIED, SAVE FAILED (RAM ONLY)");
     }
-    fpga_reg_write(A2REG_SLOT_RECONFIG, 1);
-    fpga_link_unlock();
-    ESP_LOGI(TAG, "slot map applied (reconfig strobe)");
-    set_status(" APPLIED - REBOOT APPLE II");
     screen_refresh();
 }
 
-static void slots_restore_defaults(int id)
+static void slots_load_defaults(int id)
 {
     (void)id;
-    memset(settings()->slot_cards, 0xFF, sizeof(settings()->slot_cards));
-    save_settings_status();
-    slots_apply_now(0);   /* re-seed the hardware map + reconfig */
+    memset(s_slot_draft, 0xFF, sizeof(s_slot_draft));
+    s_slot_back_warned = false;
+    set_status(slots_dirty() ? " DEFAULTS LOADED - SAVE TO KEEP"
+                             : " ALREADY AT HW DEFAULTS");
+    screen_refresh();
+}
+
+/* B with unsaved edits: warn once and stay; the second B leaves and the
+ * draft is dropped. */
+static bool slots_on_back(void)
+{
+    if (!slots_dirty() || s_slot_back_warned)
+        return false;
+    s_slot_back_warned = true;
+    set_status(" UNSAVED EDITS - B AGAIN TO DISCARD");
+    return true;
 }
 
 static void slots_build(void)
 {
+    uint8_t dup; int a, b;
+    uint8_t bad = slots_conflicts(s_slot_draft, &dup, &a, &b);
     for (int i = 0; i < 8; i++) {
         char label[MENU_LABEL_LEN + 1];
-        uint8_t live = slot_live_card(i);
-        uint8_t cfg  = settings()->slot_cards[i];
-        snprintf(label, sizeof(label), "SLOT %d  (NOW:%s)", i, card_name(live));
-        menu_item_t *m = mi_add(MI_CHOICE, label, card_name(cfg));
+        char mark = ' ';
+        if (bad & (1u << i))
+            mark = '!';
+        else if (s_slot_draft[i] != settings()->slot_cards[i])
+            mark = '*';
+        snprintf(label, sizeof(label), "%cSLOT %d (NOW:%s)", mark, i,
+                 card_name(slot_live_card(i)));
+        menu_item_t *m = mi_add(MI_CHOICE, label, card_name(s_slot_draft[i]));
         m->on_change = slots_change;
         m->id = i;
     }
     mi_add(MI_INFO, "", "");
-    menu_item_t *m = mi_add(MI_ACTION, "APPLY NOW (RECONFIG)", "");
+    menu_item_t *m = mi_add(MI_ACTION, "SAVE (APPLIES AT NEXT BOOT)", "");
+    m->action = slots_save;
+    m = mi_add(MI_ACTION, "SAVE + APPLY NOW (RECONFIG)", "");
     m->action = slots_apply_now;
-    m = mi_add(MI_ACTION, "RESTORE HW DEFAULTS", "");
-    m->action = slots_restore_defaults;
-    mi_add(MI_INFO, "SAVED MAP APPLIES AT BOOT", "");
+    m = mi_add(MI_ACTION, "LOAD HW DEFAULTS INTO DRAFT", "");
+    m->action = slots_load_defaults;
+    mi_add(MI_INFO, "* = UNSAVED EDIT   ! = CARD IN 2 SLOTS", "");
 }
 
-static const menu_screen_t SCR_SLOTS = { "SLOT ASSIGNMENTS", slots_build };
+static const menu_screen_t SCR_SLOTS = { "SLOT ASSIGNMENTS", slots_build,
+                                         slots_on_back };
+
+/* Entry from the root menu: seed the draft from the saved map. */
+static void slots_enter(void)
+{
+    memcpy(s_slot_draft, settings()->slot_cards, sizeof(s_slot_draft));
+    s_slot_back_warned = false;
+    screen_push(&SCR_SLOTS);
+}
 
 /* ======================= SCREEN: FILE PICKER ============================== */
 /* Generic list-of-files picker: fills a target settings name field. */
-static disk_list_ent_t s_pick_ents[DISK_LIST_MAX];
+static disk_list_ent_t *s_pick_ents;   /* DISK_LIST_MAX, PSRAM (menu_init) */
 static int   s_pick_count;
 static bool  s_pick_fpga;                      /* FPGA bitstream picker mode */
 static bool  s_pick_mcu;                       /* MCU firmware (.bin) picker mode */
@@ -536,6 +647,8 @@ static void picker_build(void)
     }
     if (!s_pick_count)
         mi_add(MI_INFO, "NO MATCHING IMAGES OR FOLDERS", "");
+    else if (s_pick_count >= DISK_LIST_MAX)
+        mi_add(MI_INFO, "(LIST FULL - MORE FILES NOT SHOWN)", "");
 }
 
 static const menu_screen_t SCR_PICKER = { "CHOOSE IMAGE", picker_build };
@@ -678,9 +791,44 @@ static void fmt_ip(char *out, int cap, const uint8_t ip[4])
     snprintf(out, cap, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
 }
 
+static void status_refresh(int id);
+
 static void net_build(void)
 {
     a2_settings_t *st = settings();
+    char v[MENU_VALUE_LEN + 8];
+
+    /* Which uplink carries the Apple II's (Uthernet II) frames right now,
+     * and how many have gone each way: the on-screen answer to "did that
+     * go over the wire or over WiFi?" */
+    mi_add(MI_INFO, "UTHERNET UPLINK", net_uplink_name());
+    {
+        uint32_t rx = 0, tx = 0;
+        usbeth_apple_counts(&rx, &tx);
+        if (usbeth_present()) {
+            uint8_t mac[6] = {0};
+            usbeth_mac(mac);
+            char l[MENU_LABEL_LEN + 1];
+            snprintf(l, sizeof(l), "USB ETH %02X:%02X:%02X:%02X:%02X:%02X",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            mi_add(MI_INFO, l, usbeth_link_up() ? "LINK UP" : "NO LINK");
+            uint32_t ip = usbeth_ip();
+            snprintf(l, sizeof(l), "USB ETH IP %u.%u.%u.%u",
+                     (unsigned)(ip & 0xFF), (unsigned)((ip >> 8) & 0xFF),
+                     (unsigned)((ip >> 16) & 0xFF), (unsigned)((ip >> 24) & 0xFF));
+            mi_add(MI_INFO, ip ? l : "USB ETH IP -", "");
+        } else {
+            mi_add(MI_INFO, "USB ETH", "NO ADAPTER");
+        }
+        snprintf(v, sizeof(v), "%lu/%lu", (unsigned long)rx, (unsigned long)tx);
+        mi_add(MI_INFO, "USB A2 FRAMES RX/TX", v);
+        wifi_bridge_apple_counts(&rx, &tx);
+        snprintf(v, sizeof(v), "%lu/%lu", (unsigned long)rx, (unsigned long)tx);
+        mi_add(MI_INFO, "WIFI A2 FRAMES RX/TX", v);
+    }
+    menu_item_t *r = mi_add(MI_ACTION, "REFRESH", "");
+    r->action = status_refresh;
+    mi_add(MI_INFO, "", "");
 
     /* WiFi STA status (read-only; SSID/password come from wifi.txt / CLI) */
     mi_add(MI_INFO, "WIFI", net_connected() ? "CONNECTED" : "OFFLINE");
@@ -692,12 +840,27 @@ static void net_build(void)
         mi_add(MI_INFO, l, "");
     }
     {
+        /* signal strength: an Apple II case is a shielded box, and whether
+         * WiFi gets in (it does, via the back-panel openings) is worth seeing */
+        int rssi = net_rssi();
+        if (net_connected() && rssi) {
+            const char *q = rssi > -50 ? "EXCELLENT" : rssi > -60 ? "GOOD" :
+                            rssi > -70 ? "FAIR"      : rssi > -80 ? "WEAK" : "POOR";
+            char l[MENU_LABEL_LEN + 1];
+            snprintf(l, sizeof(l), "SIGNAL %d DBM (%s)", rssi, q);
+            mi_add(MI_INFO, l, "");
+        } else {
+            mi_add(MI_INFO, "SIGNAL -", "");
+        }
+    }
+    {
+        /* in the label: a 15-character address does not fit the value column */
         uint32_t ip = net_ip();
-        char v[MENU_VALUE_LEN + 4];
-        snprintf(v, sizeof(v), "%u.%u.%u.%u",
+        char l[MENU_LABEL_LEN + 1];
+        snprintf(l, sizeof(l), "IP ADDRESS %u.%u.%u.%u",
                  (unsigned)(ip & 0xFF), (unsigned)((ip >> 8) & 0xFF),
                  (unsigned)((ip >> 16) & 0xFF), (unsigned)((ip >> 24) & 0xFF));
-        mi_add(MI_INFO, "IP ADDRESS", (net_connected() && ip) ? v : "-");
+        mi_add(MI_INFO, (net_connected() && ip) ? l : "IP ADDRESS -", "");
     }
     mi_add(MI_INFO, "", "");
 
@@ -705,7 +868,6 @@ static void net_build(void)
     m->on_change = net_change;
 
     if (!st->dhcp_enable) {
-        char v[16];
         fmt_ip(v, sizeof(v), st->static_ip);
         m = mi_add(MI_SUBMENU, "STATIC IP", v);
         m->action = net_edit; m->id = 0;
@@ -748,8 +910,10 @@ static void status_build(void)
         mi_add(MI_INFO, "GAMEPAD",
                usbhost_pad_present() ? "USB HOST PAD" :
                usbhost_hid_present() ? "USB HOST HID" :
+               ble_hid_connected()   ? "BLUETOOTH" :
                !pad.present ? "NONE" : pad.is_pad ? "PRESENT" : "OTHER HID");
         mi_add(MI_INFO, "USB PORT", usbhost_status_str());
+        mi_add(MI_INFO, "BLUETOOTH", ble_hid_state_str());
     }
     mi_add(MI_INFO, "WIFI", net_connected() ? "CONNECTED" : "OFFLINE");
     mi_add(MI_INFO, "", "");
@@ -965,13 +1129,54 @@ static void gs_socket_change(int id, int dir)
     screen_refresh();
 }
 
+static void mb_volume_change(int id, int dir)
+{
+    (void)id;
+    int sh = audio_mb_shift() + (dir < 0 ? -1 : 1);
+    if (sh < AUDIO_MB_SHIFT_MIN) sh = AUDIO_MB_SHIFT_MAX;
+    if (sh > AUDIO_MB_SHIFT_MAX) sh = AUDIO_MB_SHIFT_MIN;
+    settings()->mb_volume = (uint8_t)(sh - AUDIO_MB_SHIFT_MIN + 1);
+    save_settings_status();
+    audio_ctl_apply();                    /* live, no reload */
+    screen_refresh();
+}
+
+static void hub_retry_change(int id, int dir)
+{
+    (void)id; (void)dir;
+    settings()->usb_hub_retry_perport = !settings()->usb_hub_retry_perport;
+    save_settings_status();
+    screen_refresh();
+}
+
 static void settings_build(void)
 {
+    {
+        menu_item_t *v = mi_add(MI_CHOICE, "MOCKINGBOARD VOLUME", audio_mb_label());
+        v->on_change = mb_volume_change;
+        char info[MENU_LABEL_LEN + 1];
+        snprintf(info, sizeof(info), "AY SUM << %d  (CORE POWER-UP << 5)", audio_mb_shift());
+        mi_add(MI_INFO, info, "");
+        mi_add(MI_INFO, "", "");
+    }
     {
         menu_item_t *g = mi_add(MI_TOGGLE, "GS SOCKET 65816",
                                 settings()->gs_socket_off ? "OFF" : "AUTO");
         g->on_change = gs_socket_change;
         mi_add(MI_INFO, gs_socket_state_str(), "");
+        mi_add(MI_INFO, "", "");
+    }
+    {
+        menu_item_t *u = mi_add(MI_TOGGLE, "USB HUB PORT RETRY",
+                                settings()->usb_hub_retry_perport ? "PER-PORT" : "ALL PORTS");
+        u->on_change = hub_retry_change;
+        if (!settings()->usb_hub_retry_perport) {
+            mi_add(MI_INFO, "A GANGED HUB CYCLES EVERY PORT: DONGLE", "");
+            mi_add(MI_INFO, "AND ETHERNET REATTACH (<1 S, MAX 3X)", "");
+        } else {
+            mi_add(MI_INFO, "A HUB WITH GANGED POWER IS REFUSED;", "");
+            mi_add(MI_INFO, "ALL PORTS: CYCLE IT, DONGLE REATTACHES", "");
+        }
         mi_add(MI_INFO, "", "");
     }
     mi_add(MI_INFO, "STORAGE", "SD CARD");
@@ -993,16 +1198,215 @@ static void settings_build(void)
 
 static const menu_screen_t SCR_SETTINGS = { "SETTINGS", settings_build };
 
+/* ======================= SCREEN: BLUETOOTH ================================ */
+/* BLE HID host (ble_hid.c): one paired remote / keyboard / gamepad. The
+ * PAIR screen lists HID advertisers while a 60 s scan runs; A on an entry
+ * connects + bonds, or the strongest is taken automatically after a
+ * countdown (a BLE-only user has no other way to pick). Both screens
+ * repaint on ble_hid_take_dirty() from menu_input(). */
+static const menu_screen_t SCR_BLE_PAIR;
+
+static void blepair_pick(int id)
+{
+    ble_hid_pair_select(id);           /* -1 = strongest */
+    screen_refresh();
+}
+
+static void blepair_again(int id)
+{
+    (void)id;
+    ble_hid_pair_begin();
+    screen_refresh();
+}
+
+static void blepair_build(void)
+{
+    menu_item_t *m;
+    bool scanning = ble_hid_pairing() && ble_hid_state() == BLEH_PAIR_SCAN;
+    if (scanning) {
+        mi_add(MI_INFO, "SCANNING - PUT THE DEVICE IN ITS", "");
+        mi_add(MI_INFO, "PAIRING MODE NOW", "");
+    } else {
+        mi_add(MI_INFO, ble_hid_message(), "");
+    }
+    mi_add(MI_INFO, "", "");
+    if (scanning) {
+        int n = ble_hid_candidates();
+        if (n) {
+            char b[MENU_LABEL_LEN + 1];
+            int secs = ble_hid_pair_auto_seconds();
+            if (secs >= 0)
+                snprintf(b, sizeof(b), "CONNECT STRONGEST (AUTO IN %2d S)", secs);
+            else
+                snprintf(b, sizeof(b), "CONNECT STRONGEST");
+            m = mi_add(MI_ACTION, b, "");
+            m->action = blepair_pick;
+            m->id = -1;
+            mi_add(MI_INFO, "", "");
+            for (int i = 0; i < n; i++) {
+                char name[MENU_LABEL_LEN + 1], rssi[MENU_VALUE_LEN + 1];
+                int r = 0;
+                if (!ble_hid_candidate(i, name, sizeof(name), NULL, 0, &r))
+                    continue;
+                snprintf(rssi, sizeof(rssi), "%d DBM", r);
+                m = mi_add(MI_ACTION, name, rssi);
+                m->action = blepair_pick;
+                m->id = i;
+            }
+        } else {
+            mi_add(MI_INFO, "(NO DEVICES FOUND YET)", "");
+        }
+    } else if (!ble_hid_pairing()) {
+        m = mi_add(MI_ACTION, "SCAN AGAIN", "");
+        m->action = blepair_again;
+    }
+    mi_add(MI_INFO, "", "");
+    mi_add(MI_INFO, ble_hid_pairing() ? "B: CANCEL" : "B: BACK", "");
+}
+
+static bool blepair_back(void)
+{
+    if (ble_hid_pairing())
+        ble_hid_pair_cancel();
+    return false;                      /* and leave the screen */
+}
+
+static const menu_screen_t SCR_BLE_PAIR = { "PAIR BLUETOOTH DEVICE", blepair_build, blepair_back };
+
+static void blepair_enter(int id)
+{
+    (void)id;
+    if (!ble_hid_available()) {
+        set_status(" BLUETOOTH HOST IS NOT RUNNING");
+        return;
+    }
+    ble_hid_pair_begin();
+    screen_push(&SCR_BLE_PAIR);
+}
+
+static void ble_forget(int id)
+{
+    (void)id;
+    ble_hid_forget();
+    set_status(" DEVICE FORGOTTEN");
+    screen_refresh();
+}
+
+static void ble_radio_change(int id, int dir)
+{
+    (void)id; (void)dir;
+    settings()->ble_off = !settings()->ble_off;
+    save_settings_status();
+    if (!settings()->ble_off && !ble_hid_available()) {
+        ble_hid_start();                  /* late start is fine */
+        set_status(" BLUETOOTH STARTING");
+    } else if (settings()->ble_off) {
+        set_status(" RADIO STAYS UP UNTIL THE NEXT BOOT");
+    }
+    screen_refresh();
+}
+
+static void ble_build(void)
+{
+    menu_item_t *m;
+    char b[MENU_LABEL_LEN + 1];
+    m = mi_add(MI_TOGGLE, "BLUETOOTH RADIO", settings()->ble_off ? "OFF" : "ON");
+    m->on_change = ble_radio_change;
+    mi_add(MI_INFO, "STATUS", ble_hid_state_str());
+    if (ble_hid_peer_known()) {
+        const char *nm = ble_hid_peer_name();
+        snprintf(b, sizeof(b), "DEVICE  %s", nm[0] ? nm : "(UNNAMED)");
+        mi_add(MI_INFO, b, "");
+        char a[18];
+        ble_hid_peer_addr_str(a, sizeof(a));
+        snprintf(b, sizeof(b), "ADDRESS %s", a);
+        mi_add(MI_INFO, b, "");
+    } else {
+        mi_add(MI_INFO, "DEVICE  (NONE PAIRED)", "");
+    }
+    mi_add(MI_INFO, "", "");
+    m = mi_add(MI_SUBMENU, "PAIR NEW DEVICE", "");
+    m->action = blepair_enter;
+    if (ble_hid_peer_known()) {
+        m = mi_add(MI_ACTION, "FORGET DEVICE", "");
+        m->action = ble_forget;
+    }
+    mi_add(MI_INFO, "", "");
+    if (ble_hid_message()[0]) {
+        mi_add(MI_INFO, ble_hid_message(), "");
+        mi_add(MI_INFO, "", "");
+    }
+    mi_add(MI_INFO, "BLE REMOTES, KEYBOARDS AND GAMEPADS", "");
+    mi_add(MI_INFO, "DRIVE THIS MENU LIKE THE USB ONES.", "");
+    mi_add(MI_INFO, "ONE DEVICE IS KEPT; IT RECONNECTS BY", "");
+    mi_add(MI_INFO, "ITSELF AFTER A BOOT. PAIRING A NEW", "");
+    mi_add(MI_INFO, "DEVICE REPLACES THE OLD ONE.", "");
+    if (!ble_hid_available()) {
+        mi_add(MI_INFO, "", "");
+        mi_add(MI_INFO, "BLUETOOTH HOST IS NOT RUNNING", "");
+    }
+}
+
+static const menu_screen_t SCR_BLUETOOTH = { "BLUETOOTH", ble_build };
+
+/* ======================= SCREEN: USB DEVICES ============================== */
+/* What the ESP32's USB host (usbhost.cpp) has enumerated on USB1: hubs and
+ * unclaimed devices included, so a stick that did not come up behind a hub
+ * is visible as absent (the a2n20v2-Enhanced menu had the same page). */
+static void usb_refresh(int id)
+{
+    (void)id;
+    screen_refresh();
+}
+
+static void usb_build(void)
+{
+    menu_item_t *m;
+    mi_add(MI_INFO, "USB1 PORT", usbhost_status_str());
+    mi_add(MI_INFO, "", "");
+    if (!usbhost_active()) {
+        mi_add(MI_INFO, "PORT IS IN DEVICE MODE (A COMPUTER", "");
+        mi_add(MI_INFO, "WAS ATTACHED AT BOOT): NO HOST", "");
+    } else {
+        usbhost_devinfo_t devs[8];
+        int n = usbhost_list(devs, 8);
+        if (!n)
+            mi_add(MI_INFO, "(NO DEVICES ENUMERATED)", "");
+        for (int i = 0; i < n; i++) {
+            char b[MENU_LABEL_LEN + 1];
+            snprintf(b, sizeof(b), "%u  %04X:%04X  %s%s", devs[i].addr, devs[i].vid, devs[i].pid,
+                     devs[i].kind, devs[i].served ? " *" : "");
+            mi_add(MI_INFO, b, "");
+            if (devs[i].product[0]) {
+                snprintf(b, sizeof(b), "   %s", devs[i].product);
+                mi_add(MI_INFO, b, "");
+            }
+        }
+    }
+    mi_add(MI_INFO, "", "");
+    m = mi_add(MI_ACTION, "REFRESH", "");
+    m->action = usb_refresh;
+    mi_add(MI_INFO, "", "");
+    mi_add(MI_INFO, "* = IN USE BY THIS FIRMWARE", "");
+    mi_add(MI_INFO, "THE HOST HAS 8 CHANNELS: A HUB TAKES", "");
+    mi_add(MI_INFO, "2, A STICK 3, A HID DONGLE 3 - USE", "");
+    mi_add(MI_INFO, "BLUETOOTH FOR REMOTES AND PADS.", "");
+}
+
+static const menu_screen_t SCR_USB = { "USB DEVICES", usb_build };
+
 /* ======================= SCREEN: ROOT ===================================== */
 static void root_enter(int id)
 {
     switch (id) {
-    case 0: screen_push(&SCR_STATUS);   break;
-    case 1: screen_push(&SCR_DISKS);    break;
-    case 2: screen_push(&SCR_SLOTS);    break;
-    case 3: screen_push(&SCR_NETWORK);  break;
-    case 4: screen_push(&SCR_FIRMWARE); break;
-    case 5: screen_push(&SCR_SETTINGS); break;
+    case 0: screen_push(&SCR_STATUS);    break;
+    case 1: screen_push(&SCR_DISKS);     break;
+    case 2: slots_enter();              break;
+    case 3: screen_push(&SCR_USB);       break;
+    case 4: screen_push(&SCR_NETWORK);   break;
+    case 5: screen_push(&SCR_BLUETOOTH); break;
+    case 6: screen_push(&SCR_FIRMWARE);  break;
+    case 7: screen_push(&SCR_SETTINGS);  break;
     }
 }
 
@@ -1023,10 +1427,10 @@ static void root_restart_mcu(int id)
 static void root_build(void)
 {
     static const char *const entries[] = {
-        "SYSTEM STATUS", "DISK IMAGES", "SLOT ASSIGNMENTS", "NETWORK",
-        "FIRMWARE", "SETTINGS"
+        "SYSTEM STATUS", "DISK IMAGES", "SLOT ASSIGNMENTS", "USB DEVICES",
+        "NETWORK", "BLUETOOTH", "FIRMWARE", "SETTINGS"
     };
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 8; i++) {
         menu_item_t *m = mi_add(MI_SUBMENU, entries[i], "");
         m->action = root_enter;
         m->id = i;
@@ -1126,6 +1530,8 @@ static void handle_button(uint16_t btn)
             m->action(m->id);
         break;
     case BTN_BACK:
+        if (s_stack[s_depth]->on_back && s_stack[s_depth]->on_back())
+            break;                     /* the screen kept itself open */
         if (s_stack[s_depth] == &SCR_PICKER && s_pick_path[0]) {
             picker_choose(-3);         /* in a subdirectory: go up first */
         } else if (s_depth > 0) {
@@ -1196,6 +1602,31 @@ void menu_input(uint16_t buttons)
         paint();
     }
 
+    /* Bluetooth screens: repaint on host events, once a second while the
+     * pairing countdown runs, and leave the PAIR screen once bonded (the
+     * BLUETOOTH screen then shows SETTING UP -> CONNECTED live). */
+    if (s_view == VIEW_MENU &&
+        (s_stack[s_depth] == &SCR_BLUETOOTH || s_stack[s_depth] == &SCR_BLE_PAIR)) {
+        static int64_t s_ble_tick_us;
+        int64_t now = esp_timer_get_time();
+        bool dirty = ble_hid_take_dirty();
+        if (s_stack[s_depth] == &SCR_BLE_PAIR && ble_hid_pair_auto_seconds() >= 0 &&
+            now - s_ble_tick_us >= 1000000) {
+            s_ble_tick_us = now;
+            dirty = true;
+        }
+        if (dirty) {
+            if (s_stack[s_depth] == &SCR_BLE_PAIR && !ble_hid_pairing() &&
+                ble_hid_pair_result() == 1 && s_depth > 0) {
+                screen_pop();
+                set_status(" PAIRED");
+            } else {
+                screen_refresh();
+            }
+            paint();
+        }
+    }
+
     /* a requested rescan finished: refresh the visible screen */
     if (s_wait_remount && !disk_remount_pending()) {
         s_wait_remount = false;
@@ -1224,13 +1655,25 @@ void menu_tick(void)
     fpga_pad_poll(&pad);
     /* Feed 0 when no gamepad is attached so releases are seen and held
      * state clears; edge detection makes an unchanged word a no-op.
-     * The ESP32's own USB host (usbhost.c: XInput pads, HID keyboards and
-     * remotes on the module's USB-C) is OR-ed in, same A2PAD layout. */
-    menu_input(((pad.present && pad.is_pad) ? pad.buttons : 0) | usbhost_buttons());
+     * The ESP32's own USB host (usbhost.cpp: XInput pads, HID keyboards and
+     * remotes on the module's USB-C) and the BLE HID host (ble_hid.c) are
+     * OR-ed in, same A2PAD layout. */
+    ble_hid_poll();                    /* pairing countdown / auto-connect */
+    menu_input(((pad.present && pad.is_pad) ? pad.buttons : 0) | usbhost_buttons() | ble_hid_buttons());
 }
 
 void menu_init(void)
 {
+    /* item table (9 KB) + picker listing (8 KB): CPU-only data -> PSRAM,
+     * keeping the internal heap for USB/WiFi/BLE (heap diet 2026-11-19) */
+    if (!s_items) {
+        s_items = (menu_item_t *)heap_caps_calloc(MENU_MAX_ITEMS, sizeof(menu_item_t), MALLOC_CAP_SPIRAM);
+        if (!s_items) s_items = (menu_item_t *)calloc(MENU_MAX_ITEMS, sizeof(menu_item_t));
+    }
+    if (!s_pick_ents) {
+        s_pick_ents = (disk_list_ent_t *)heap_caps_calloc(DISK_LIST_MAX, sizeof(disk_list_ent_t), MALLOC_CAP_SPIRAM);
+        if (!s_pick_ents) s_pick_ents = (disk_list_ent_t *)calloc(DISK_LIST_MAX, sizeof(disk_list_ent_t));
+    }
     s_depth = 0;
     s_stack[0]  = &SCR_ROOT;
     s_cursor[0] = 0;

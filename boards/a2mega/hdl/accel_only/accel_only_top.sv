@@ -366,6 +366,7 @@ module top (
         .dbg_ddr3_retry_i(ddr3_retry_l1), .dbg_ddr3_seq_i({3'b0, ddr3_seq_l1}),
         .dbg_dp_caps_i(16'h0), .dbg_dp_status_i(8'h00), .dbg_dp_serdes_i(8'h00),
         .dbg_doc_reqf_i(16'h0), .dbg_doc_missf_i(16'h0), .dbg_doc_tof_i(16'h0),
+        .dbg_glu_drops_i(8'h00), .dbg_doc_fdrop_i(8'h00), .dbg_aud_i(64'h0), .aud_ctl_o(),
         .ddr3_reinit_tgl_o(),
         .gs_ctrl_o(gs_ctrl_w), .gs_out_extra_o(gs_out_extra_w), .gs_hold_tap_o(gs_hold_tap_w),
         .gs_tele_i(gs_tele_w), .gs_trace_idx_o(gs_trace_idx_w), .gs_trig_addr_o(gs_trig_addr_w),

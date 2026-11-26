@@ -36,6 +36,7 @@
 #include <LittleFS.h>
 #endif
 #include "driver/gpio.h"
+#include "esp_system.h"
 #include "soc/usb_serial_jtag_reg.h"
 #include "a2fpga_jtag.h"
 #include "a2fpga_spi_service.h"
@@ -43,8 +44,10 @@
 #include "fpga_link.h"
 #include "fpga_screen.h"
 #include "osd_console.h"
+#include "idf_log_tee.h"
 #include "usbhost.h"
 #include "usbstorage.h"
+#include "ble_hid.h"
 #include "fwupdate.h"
 #include "settings.h"
 #include "wedge_watch.h"
@@ -53,6 +56,8 @@
 #include "menu.h"
 #include "w5100.h"
 #include "wifi_bridge.h"
+#include "usbeth.h"
+#include "net_uplink.h"
 #include "fpga_jtag.h"
 #include "fpgaupdate.h"
 #include "fpgastream.h"
@@ -139,6 +144,21 @@ extern "C" void a2_reset_hold_release(const char *why) { (void)why; }
 bool usb_was_connected = false;
 static bool sd_mounted = false;
 static bool subsystems_up = false;
+
+// The TCP servers (FTP, telnet console, port-2323 bitstream streaming) bind
+// to every interface, so they start once, when the first uplink brings up
+// the IP stack: WiFi at init, or a USB-Ethernet adapter getting a lease
+// (loop() polls for that). lwIP must exist first — calling sockets before
+// the stack is up asserts in xQueueSemaphoreTake (found the hard way 08-18).
+static bool net_services_started = false;
+static void start_network_services() {
+    if (net_services_started)
+        return;
+    net_services_started = true;
+    ftpd_init();        /* FTP file drop for the image volume */
+    telnetd_init();     /* remote console/menu mirror on port 23 */
+    fpgastream_start(); /* network bitstream flashing (port 2323, bench) */
+}
 static bool network_up = false;
 static TaskHandle_t disk_task_h = NULL;
 static TaskHandle_t menu_task_h = NULL;
@@ -417,9 +437,7 @@ static void cmd_process(String cmd) {
                 if (wifi_bridge_init(s->wifi_ssid, s->wifi_psk)) {
                     osd_log("WIFI: JOINING %s (%s)", s->wifi_ssid,
                             s->dhcp_enable ? "DHCP" : "STATIC IP");
-                    ftpd_init();
-                    telnetd_init();
-                    fpgastream_start();  /* see start_network() note */
+                    start_network_services();
                 } else {
                     Serial.println("wifi: bridge init failed");
                 }
@@ -429,6 +447,12 @@ static void cmd_process(String cmd) {
         }
 
     } else if (cmd == "net") {
+        Serial.printf("Uthernet II uplink: %s\n", net_uplink_name());
+        {
+            char eb[200];
+            usbeth_status(eb, sizeof(eb));
+            Serial.println(eb);
+        }
         wifi_ap_record_t ap;
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
             Serial.printf("WiFi: associated to %s  RSSI %d\n", (const char*)ap.ssid, ap.rssi);
@@ -644,6 +668,16 @@ static void cmd_process(String cmd) {
             free(buf);
         }
 
+    } else if (cmd == "usb") {
+        usbhost_console([](void *, const char *line) { Serial.println(line); }, nullptr);
+
+    } else if (cmd == "ble" || cmd.startsWith("ble ")) {
+        String toks[4];
+        int nt = split_ws(cmd, toks, 4);
+        const char *argv[4];
+        for (int i = 0; i < nt; i++) argv[i] = toks[i].c_str();
+        ble_hid_console(nt, argv, [](void *, const char *line) { Serial.println(line); }, nullptr);
+
     } else if (cmd == "meminfo") {
         size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
         size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
@@ -798,6 +832,7 @@ static void cmd_process(String cmd) {
         // Pulse the FPGA's RECONFIG_N (open-drain style: drive low, then
         // release to the R32 pull-up) — reload the bitstream from flash.
         Serial.println("reconfig: pulsing RECONFIG_N low 1 ms");
+        disk_quiesce();                   // no serving off a dead fabric
         pinMode(PIN_FPGA_RECONFIG_N, OUTPUT);
         digitalWrite(PIN_FPGA_RECONFIG_N, LOW);
         delay(1);
@@ -806,11 +841,13 @@ static void cmd_process(String cmd) {
         while (!digitalRead(PIN_FPGA_DONE) && millis() - t0 < 5000) delay(10);
         Serial.printf("reconfig: DONE=%d after %lu ms\n", digitalRead(PIN_FPGA_DONE),
                       (unsigned long)(millis() - t0));
+        disk_request_remount();           // re-register the disks in the new fabric
 #endif
 
     } else if (cmd == "restart") {
         Serial.println("Restarting...");
         Serial.flush();
+        disk_release_storage();           // close images, detach the stick's FAT
         delay(100);
         ESP.restart();
 
@@ -831,7 +868,9 @@ static void cmd_process(String cmd) {
         Serial.println("  meminfo   - Show memory usage");
         Serial.println("  pins      - Show pin assignments");
         Serial.println("  wifi [<ssid> [psk]] - Show/set WiFi credentials (NVS)");
-        Serial.println("  net       - Show WiFi/IP status");
+        Serial.println("  net       - Show uplink (WiFi / USB-Ethernet) and IP status");
+        Serial.println("  usb       - List enumerated USB devices (host mode only)");
+        Serial.println("  ble [pair|cancel|list|connect <n>|forget|radio on|off|map|raw on|off] - Bluetooth HID device");
 #if A2MEGA_HAS_USBC_PD
         Serial.println("  pd        - Show USB-C PD / DP Alt Mode status");
         Serial.println("  i2cscan   - List devices on the DP I2C bus");
@@ -1078,6 +1117,23 @@ static void start_network() {
     sd_mounted = mount_sd();
 
     osd_log("%s ESP32 %s %s", A2_BOARD_NAME, __DATE__, __TIME__);
+    {   /* name an unplanned restart (a crash is otherwise invisible: no
+         * serial console on the bench, the OSD ring starts over) */
+        esp_reset_reason_t rr = esp_reset_reason();
+        const char *why = NULL;
+        switch (rr) {
+        case ESP_RST_POWERON:  break;
+        case ESP_RST_SW:       why = "SOFTWARE RESTART"; break;
+        case ESP_RST_PANIC:    why = "PANIC (FIRMWARE CRASH)"; break;
+        case ESP_RST_INT_WDT:  why = "INTERRUPT WATCHDOG"; break;
+        case ESP_RST_TASK_WDT: why = "TASK WATCHDOG"; break;
+        case ESP_RST_WDT:      why = "WATCHDOG"; break;
+        case ESP_RST_BROWNOUT: why = "BROWNOUT"; break;
+        case ESP_RST_EXT:      why = "EXTERNAL RESET PIN"; break;
+        default:               why = "OTHER"; break;
+        }
+        if (why) osd_log("RESET REASON: %s (%d)", why, (int)rr);
+    }
 #if A2MEGA_BOARD_REV == 225 && A2P25_DP_TEST
     osd_log("DP_TEST MODE: HPD->IO10, TELEM<-IO11");
 #endif
@@ -1096,15 +1152,9 @@ static void start_network() {
         if (wifi_bridge_init(s->wifi_ssid, s->wifi_psk)) {
             osd_log("WIFI: JOINING %s (%s)", s->wifi_ssid,
                     s->dhcp_enable ? "DHCP" : "STATIC IP");
-            ftpd_init();     /* FTP file drop for /sdcard once WiFi is up */
-            telnetd_init();  /* remote console/menu mirror on port 23 */
-            /* Network bitstream flashing (port 2323, bench). Must NOT
-             * be FPGA-link-gated (bring-up bitstreams have no OSPI
-             * link) but MUST be behind wifi_bridge_init: calling
-             * lwIP sockets before the stack exists asserts in
-             * xQueueSemaphoreTake (fresh unprovisioned board, found
-             * the hard way 08-18). */
-            fpgastream_start();
+            /* Must NOT be FPGA-link-gated (bring-up bitstreams have no
+             * OSPI link) but MUST be behind wifi_bridge_init (lwIP exists). */
+            start_network_services();
         } else {
             osd_log("WIFI: INIT FAILED");
         }
@@ -1146,6 +1196,8 @@ static void start_subsystems() {
     // USB host on the module's USB-C (gamepads, HID remotes): device-first
     // role decision, then the OTG host stack (usbhost.cpp)
     usbhost_start();
+    // The BLE HID host (ble_hid.c) starts later, from loop(), once the disk
+    // task has released the Apple II reset: see the note there.
 
     disk_init();
     menu_init();
@@ -1192,7 +1244,7 @@ volatile bool viddbg_request = false;   // telnet 'z' -> serviced in loop()
 extern "C" void viddbg_log(void)
 {
     if (!a2spi_is_ready()) { osd_log("VIDDBG: SPI NOT READY"); return; }
-    uint8_t v[9], pf[6], st2 = 0;   // pf: DOC REQ lo/hi, MEMRD lo/hi, LATE lo/hi
+    uint8_t v[9], pf[8], st2 = 0;   // pf: DOC REQ lo/hi, MEMRD lo/hi, LATE lo/hi, GLU drops, DOC fetch drops
     // The OSPI link is shared with the disk/menu tasks: take the link mutex
     // around the burst of register reads (an unlocked burst during disk
     // streaming collided on the SPI driver and panicked the ESP32 — which
@@ -1207,11 +1259,12 @@ extern "C" void viddbg_log(void)
         }
     }
     /* DOC per-frame telemetry lives in the indexed debug window (select
-     * 0x5F, data 0x4F; indices 40-45 = REQ lo/hi, MEMRD lo/hi, LATE lo/hi;
+     * 0x5F, data 0x4F; indices 40-45 = REQ lo/hi, MEMRD lo/hi, LATE lo/hi,
+     * 46 = GLU write-queue drops, 47 = DOC fetch drops, both sticky;
      * 32-39 is the socket module's event log).
      * The plain registers it used until 2026-10-22 (0x3C-0x3F, 0x2F, 0x4F,
      * 0x5F) are the DP readback and the GS-socket window on the a2mega. */
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 8; i++) {
         fpga_reg_write(0x5F, (uint8_t)(40 + i));
         a2spi_reg_read_status(0x4F, &pf[i], &st2);
     }
@@ -1221,6 +1274,7 @@ extern "C" void viddbg_log(void)
     osd_log("DOC TIMEOUTS %u  LATMAX %u CLK (0x%02X)", v[1], v[2], v[2]);
     osd_log("DOC/FRAME REQ %u MEMRD %u LATE %u", (unsigned)pf[0] | ((unsigned)pf[1] << 8),
             (unsigned)pf[2] | ((unsigned)pf[3] << 8), (unsigned)pf[4] | ((unsigned)pf[5] << 8));
+    osd_log("GLU WQ DROPS %u  DOC FETCH DROPS %u (STICKY)", pf[6], pf[7]);
 #else
     osd_log("C029 WRITES %u LAST %02X", v[1], v[2]);
 #endif
@@ -1228,6 +1282,7 @@ extern "C" void viddbg_log(void)
 }
 
 void setup() {
+    idf_log_tee_init();               // IDF error lines (usb_host enumeration failures) reach the telnet console
     // NOTE: do NOT route the USB JTAG bridge here. It was tried (early
     // rescue window for the MSPI-hang state, board #1 2026-08-11) and it
     // broke the bridge for the rest of the boot: Serial.begin()'s
@@ -1328,6 +1383,19 @@ void setup() {
 
 void loop() {
     if (viddbg_request) { viddbg_request = false; viddbg_log(); }
+    // BLE HID host: started only after the disk task has released the Apple
+    // II reset (media mounted, or its 10 s deadline), so the USB stick's
+    // enumeration gets its internal-RAM allocations before the BLE host
+    // takes its ~55 KB. With BLE first (a2p25, 2026-11-19) the stick behind
+    // the hub never enumerated. BLUETOOTH -> RADIO OFF skips it entirely.
+    {
+        static bool s_ble_decided = false;
+        if (!s_ble_decided && subsystems_up && disk_a2_released()) {
+            s_ble_decided = true;
+            if (!settings()->ble_off) ble_hid_start();
+            else osd_log("BLE: RADIO OFF (SETTINGS)");
+        }
+    }
 #if PIN_A2_RESET_OUT >= 0
     // reset-hold backstop: a machine with no media, or a link that never
     // came up, still boots
@@ -1383,10 +1451,16 @@ void loop() {
             start_subsystems();
         }
     } else {
-        // Network servicing (W5100 doorbells + WiFi uplink), same task.
+        // Network servicing (W5100 doorbells + the WiFi / USB-Ethernet
+        // uplinks), same task.
         w5100_poll();
-        wifi_bridge_poll();
+        net_uplink_poll();
     }
+
+    // A USB-Ethernet adapter brought up the IP stack on its own (no WiFi
+    // configured, or WiFi not yet joined): start the servers now.
+    if (!net_services_started && usbeth_got_ip())
+        start_network_services();
 
     // USB JTAG bridge: routed permanently in setup() (see note there).
     // Track connection state for the 'status' display only.

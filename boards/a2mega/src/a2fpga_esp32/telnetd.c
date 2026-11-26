@@ -43,7 +43,11 @@
 #include "fpga_jtag.h"
 #include "osd_console.h"
 #include "menu.h"
+#include "ble_hid.h"
+#include "usbhost.h"
+#include "esp_heap_caps.h"
 #include "board_pins.h"
+#include "disk.h"
 #if A2MEGA_HAS_USBC_PD
 #include "usbc_glue.h"
 #endif
@@ -313,6 +317,13 @@ static bool parse_num(const char *t, unsigned *out)
     return true;
 }
 
+static void tn_console_line(void *ctx, const char *line)
+{
+    int fd = *(int *)ctx;
+    tn_puts(fd, line);
+    tn_puts(fd, "\r\n");
+}
+
 static void tn_exec_line(int fd, char *line)
 {
     char *tok[6];
@@ -322,7 +333,40 @@ static void tn_exec_line(int fd, char *line)
     if (nt == 0)
         return;
     if (!strcmp(tok[0], "help") || !strcmp(tok[0], "?")) {
-        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|auto|mode <0-3>|hold <ms>|autotrig on|off|clear|freeze|run|trig|untrig | gs trace | gs events|evclear\r\n");
+        tn_puts(fd, "spireg <reg> [val] | gs | gs set <idx> <val> | gs arm|listen|off|auto|mode <0-3>|hold <ms>|autotrig on|off|clear|freeze|run|trig|untrig | gs trace | gs events|evclear | ble [pair|cancel|list|connect <n>|forget|radio on|off] | usb [retry on|off | probe <lba> [read]] | meminfo\r\n");
+        return;
+    }
+    if (!strcmp(tok[0], "ble")) {      /* no FPGA link needed */
+        ble_hid_console(nt, (const char *const *)tok, tn_console_line, &fd);
+        return;
+    }
+    if (!strcmp(tok[0], "usb")) {
+        if (nt >= 3 && !strcmp(tok[1], "probe")) {
+            uint32_t lba = (uint32_t)strtoul(tok[2], NULL, 0);
+            bool allow_write = !(nt >= 4 && !strcmp(tok[3], "read"));
+            usbhost_msc_probe(lba, allow_write, tn_console_line, &fd);
+            return;
+        }
+        if (nt >= 3 && !strcmp(tok[1], "retry")) {
+            bool all = !strcmp(tok[2], "on") || !strcmp(tok[2], "all");
+            tn_console_line(&fd, usbhost_set_hub_retry(all) ? "usb: hub port retry setting saved" : "usb: setting changed, NVS save FAILED");
+        }
+        usbhost_console(tn_console_line, &fd);
+        return;
+    }
+    if (!strcmp(tok[0], "meminfo")) {
+        char b[112];
+        snprintf(b, sizeof(b), "internal: %u free, %u largest block, %u min ever, %u total",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_total_size(MALLOC_CAP_INTERNAL));
+        tn_console_line(&fd, b);
+        snprintf(b, sizeof(b), "psram:    %u free, %u largest block, %u total",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
+        tn_console_line(&fd, b);
         return;
     }
     if (!fpga_link_ok()) {
@@ -700,9 +744,11 @@ static void session(int fd)
                  * re-roll / recovery; ~2-3 s dark). NEVER a consumer
                  * feature — bench tooling only (decision of record). */
                 tn_puts(fd, "fpga: reloading from flash\r\n");
+                disk_quiesce();          /* no serving off a dead fabric */
                 fpga_jtag_init_pins();
                 fpga_jtag_reload();
                 fpga_jtag_release_pins();
+                disk_request_remount();  /* re-register the disks in the new fabric */
                 continue;
             }
             if (esc_st == 0 && ch == 'z' && !menu_mode) {

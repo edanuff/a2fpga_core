@@ -39,6 +39,12 @@ follow links into the topic you need.
 | [boards.md](boards.md) | Per-board chip / memory / display / status matrix, `.gprj` names, flashing, per-board doc index |
 | [ROADMAP.md](ROADMAP.md) | Backlog and future direction; how it relates to GitHub issues and the board TODOs |
 
+## Build & CI
+
+| Doc | What's in it |
+|---|---|
+| [ci.md](ci.md) | GitHub Actions CI: Education-edition toolchain, repo-aware build matrix, timing gate |
+
 ## Decisions
 
 | Doc | What's in it |

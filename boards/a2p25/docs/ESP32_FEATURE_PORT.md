@@ -40,7 +40,8 @@ first slice that was already ported.
 | SSC → TCP Hayes modem | missing; SSC core off, no UART pins | P7 — only after an SSC core that talks over the OSPI link exists (new HDL); defer |
 | WS2812 MCU-liveness LED | n/a (LED0 heartbeat, LED1 = HPD) | drop |
 | Standalone fallback (no MCU) | present in the connector | keep |
-| USB enumeration supervisor, SD tunnel, RTL8152/CDC-ECM/ASIX | n/a (no USB host / no SD / WiFi) | drop |
+| USB enumeration supervisor, SD tunnel | n/a (no SD) | drop |
+| RTL8152/CDC-ECM/ASIX USB-Ethernet uplink | **generic CDC-ECM/NCM host driver** (`usbeth.c`, 2026-11-17) on USB1 as a second Uthernet II uplink beside WiFi; built 11-17, RTL8152B running on the a2p25 11-18 | see `../../a2mega/docs/ESP32_ENHANCED_PORT.md` § USB-Ethernet uplink **Hardware 2026-11-18: RTL8152B (0BDA:8152) runs as CDC-ECM on its configuration 2 (`usbeth_attach_alt`), wired DHCP lease, telnet/FTP over the wire; needs 3 of the ESP32-S3's 8 host channels, so stick + Ethernet leaves no room for a HID dongle.** |
 
 ## 3. Proposed order
 
@@ -78,6 +79,173 @@ first slice that was already ported.
    disk1/disk2.dsk + hdd1.hdv mounted RW, `/RES RELEASED (MEDIA MOUNTED)`,
    Apple boots from the stick. Not ported: the BL616 hub supervisor
    (stalled-hub adopt / VBUS cycle), `boot_pref`.
+   **Stick compatibility (bench 2026-11-19, Ed, firmware 62153cbf, hub
+   05E3:0610 + remote dongle 1915:1025):** two sticks fail before the
+   firmware ever sees them — PNY 64 GB Elite-X Fit USB 3.0 and Verbatim
+   32 GB Store 'n' Stay Nano USB 3.2 Gen 1 both die at enumeration, every
+   plug, FAT32 or exFAT alike: `ENUM: BAD TRANSFER STATUS 1:
+   CHECK_SHORT_DEV_DESC` (the IDF's "device did not reply in time or CRC
+   error" status on the first 8-byte device-descriptor read after the port
+   reset), then `EXT_PORT: [1:3] PORT DISABLED, RESET ATTEMPTS=1`. A K&ZZ
+   32 GB USB 2.0 stick enumerates (090C:1000), mounts and serves. **This is
+   the ESP-IDF host stack's known enumeration-stability problem, not a USB
+   generation or filesystem matter:** espressif/esp-idf
+   [#15938](https://github.com/espressif/esp-idf/issues/15938) (closed
+   without a code fix) and [#17832](https://github.com/espressif/esp-idf/issues/17832)
+   (open; Espressif acknowledged "enumeration stability (timeout/retry/
+   callback)" as future work on 2025-11-19) show the same error with
+   ordinary sticks on the root port; the stack has no host-side transaction
+   timeout, so a device that answers the first GET_DESCRIPTOR late or with
+   errors fails the stage outright. Espressif's suggestions are a longer
+   reset-recovery delay (`CONFIG_USB_HOST_RESET_RECOVERY_MS` /
+   `CONFIG_USB_HOST_EXT_PORT_RESET_RECOVERY_DELAY_MS`, 500 ms instead of 30;
+   one reporter says it did not help) and, for the root port only, an
+   app-level `usb_host_lib_set_root_port_power(false/true)` cycle. The
+   Arduino core 3.3.5 ships ESP-IDF 5.5.1 prebuilt with both recovery
+   delays at 30 ms, one external-port reset attempt and no enumeration
+   filter callback (`esp32-arduino-libs/idf-release_v5.5-*/esp32s3/
+   sdkconfig`), none of it changeable from this tree. **Same night: the
+   PNY plugged straight into USB1 with the hub removed enumerates at once
+   (13FE:6700 "USB DISK 3.0", STORAGE 59153 MB), mounts and serves
+   DOS33.NIB** — so the failure is specific to the external-port path (the
+   hub driver's single reset attempt and 30 ms recovery), not the stick
+   on its own. Candidate firmware workaround: after an `EXT_PORT … PORT
+   DISABLED` line, power-cycle that hub port from our own client
+   (ClearPortFeature/SetPortFeature PORT_POWER over the hub's control
+   pipe) so the hub driver re-enumerates, bounded to a few attempts —
+   implemented the next day, below.
+   With no stick the disk task falls back to the empty flash volume,
+   releases /RES with `(NO MEDIA)` and leaves the OSD console on screen by
+   design (`disk.c`), which reads as a hang although the Apple is running
+   (status register 0x07 = 0x87: clock alive, reset released).
+   **Hub-port retry (firmware, 2026-11-20):** the IDF hub
+   driver gives a downstream port one reset and then logs `EXT_PORT:
+   [hub:port] Port disabled, reset attempts=1`; nothing re-enumerates the
+   port until its connection changes. `usbhost.cpp` now manufactures that
+   change: `idf_log_tee.c` hands every mirrored error line to a hook,
+   `usbhub_retry.c` (pure, host-tested in `tests/host/`) parses the line
+   and runs a bounded ladder, and the worker task opens the hub from our
+   own `usb_host` client (allowed: the driver opens hubs through
+   `usbh_devs_open`, no client owns them, and the USB DEVICES screen
+   already opens them), reads the hub descriptor and the port status, and
+   power-cycles the one port over EP0 (ClearPortFeature PORT_POWER, 200 /
+   400 / 600 ms off, SetPortFeature PORT_POWER) after a 0.5 / 1 / 2 s
+   settle. The hub reports a fresh connection and the driver debounces,
+   resets and enumerates again. At most 3 cycles per plug; the next
+   failure line inside an 8 s window is the cycle's verdict, one outside
+   it is a new plug; after the third failure one give-up (`HUB 1 PORT 3
+   FAILED TO ENUMERATE, PLUG THE STICK DIRECTLY`) and a 3 s quiet period,
+   so only a human replug restarts the ladder. Guards: a port whose status
+   shows PORT_ENABLE (its device enumerated) or no connection is never
+   touched; a hub that advertises ganged power switching is refused (one
+   ClearPortFeature would cut the dongle and the Ethernet adapter too); a
+   hub that answers the request but leaves PORT_POWER and PORT_CONNECTION
+   set did nothing and is reported once (`IGNORED PORT POWER OFF`); the
+   hub handle is closed after every cycle; no channels are added. A
+   recovered stick is announced by matching the new device's parent
+   handle (`usb_device_info_t.parent`) to the hub: `HUB 1 PORT 3 RECOVERED
+   AFTER n PORT POWER CYCLE(S)`. Console lines all start `USB HOST:`.
+   **Limits:** the cycle is electrically a replug, so a stick that fails
+   every physical replug may fail every cycle too; what it buys is 3 more
+   attempts per plug without a hand on the stick, and timing that differs
+   from a human plug. The 30 ms reset recovery and the single attempt
+   stay the prebuilt library's. The "delay before our client's first
+   activity" idea cannot help: the failing transfer is the driver's first
+   8-byte descriptor read, before any client hears of the device, so no
+   such knob was added. Hub:port in the log is parent address and 1-based
+   port, as the driver prints it; a misread only makes the port-status
+   check decline. **Hardware test plan** (Ed, a2p25, remote dongle
+   1915:1025 on the 05E3:0610 hub, telnet console open): (1) PNY
+   13FE:6700 into a hub port — expect `ENUM FAILED, POWER CYCLING PORT
+   (TRY 1/3)`, then either `RECOVERED` + `STORAGE n MB` + images mounted,
+   or TRY 2/3, TRY 3/3 and the give-up line, never more than 3 cycles;
+   note which; (2) the Verbatim stick, same; (3) unplug the stick during a
+   ladder — expect `IS EMPTY NOW` and silence; (4) replug after a give-up
+   — a fresh TRY 1/3 (bounded again); (5) regression: the K&ZZ USB 2.0
+   stick, the HID dongle and the RTL8152B adapter behind the hub still
+   enumerate and work, the dongle keeps working through a stick ladder
+   (ganged-power guard: if the console says `SWITCHES PORT POWER GANGED`
+   the hub cannot be used for this and nothing was touched); (6) `usb`
+   console command still lists everything. If a retry succeeds, record the
+   attempt number here; if the hub says `IGNORED PORT POWER OFF`, that hub
+   has no per-port power state and the fallback is a hub that does.
+   **Hardware result 2026-11-20 (Ed, firmware 3ffd5108 flashed OTA, PNY
+   13FE:6700 swapped in behind the 05E3:0610 hub with the dongle):** the
+   chain fired end to end — `ENUM: [1:3] CHECK_SHORT_DEV_DESC FAILED`,
+   `EXT_PORT: [1:3] PORT DISABLED`, `USB HOST: HUB 1 PORT 3 ENUM FAILED,
+   POWER CYCLING PORT (TRY 1/3)` — and stopped at the ganged-power guard:
+   `HUB 1 SWITCHES PORT POWER GANGED (ALL PORTS), NO PORT RETRY: PLUG THE
+   STICK DIRECTLY`. The 05E3:0610 (Genesys GL85x) advertises ganged power
+   switching in its hub descriptor, so a per-port cycle is not available on
+   it; one ClearPortFeature(PORT_POWER) would drop every port, dongle
+   included. Nothing was touched: USB DEVICES still lists hub + dongle,
+   the dongle works, the PNY never got an address. The retry as specified
+   (per-port, never disturb an enumerated device) therefore cannot help on
+   this hub. **Setting added the same day (Ed): SETTINGS → `USB HUB PORT
+   RETRY` = `ALL PORTS` (a ganged hub is cycled anyway: every device on it
+   re-enumerates, under a second, still at most 3 cycles per plug; console
+   adds `GANGED HUB: ALL ITS PORTS WERE CYCLED`) / `PER-PORT` (the refusal
+   above). Stored in the settings blob (`usb_hub_retry_perport`, one
+   reserved byte, no version bump); telnet `usb retry on|off` sets and saves
+   it. The first build (18bfd578) defaulted to PER-PORT; after the result
+   below Ed flipped the default to ALL PORTS, so the stored byte's sense
+   inverted (0 = ALL PORTS) to keep saved blobs loading unchanged — a card
+   that had saved `ALL PORTS` under 18bfd578 reads back as `PER-PORT` once
+   and needs `usb retry on` (or the toggle) again.**
+   **Hardware result, ALL PORTS mode, 2026-11-20 (Ed, firmware 18bfd578
+   flashed OTA, `usb retry on` saved, K&ZZ swapped for the PNY behind the
+   05E3:0610 hub with the dongle on it):** the ladder ran to a recovery.
+   `HUB 1 PORT 3 ENUM FAILED, POWER CYCLING PORT (TRY 1/3)` / `GANGED HUB:
+   ALL ITS PORTS WERE CYCLED`; the driver failed the stick again (`ENUM:
+   [1:3] CHECK_SHORT_DEV_DESC FAILED`, `EXT_PORT: [1:3] PORT DISABLED`);
+   `TRY 2/3`, all ports cycled again; then `USB HOST: HUB 1 PORT 3
+   RECOVERED AFTER 2 PORT POWER CYCLES`, `13FE:6700 [08/06/50]`, `STORAGE
+   59153 MB`, stick mounted at /SDCARD, DOS33.NIB mounted RW, `DISK II:
+   READY - STARTING APPLE II`. Afterwards `usb` lists hub (addr 1), dongle
+   1915:1025 KEYBOARD at addr 2 in use, and the PNY as STORAGE at addr 4 in
+   use. So on this hub the all-ports cycle is what makes the PNY usable:
+   two automatic replugs did what a human replug never did, i.e. the
+   different timing (0.5 s / 1 s settle, 200 / 400 ms off) matters, not
+   only the repetition. Cost per attempt: every device on the hub
+   re-enumerated (the dongle came back by itself, same address). Not yet
+   checked: a keypress on the remote after the ladder, the Verbatim stick,
+   steps (3) and (4) of the plan, the RTL8152B uplink through a ladder (it
+   would re-enumerate and re-DHCP). Default still PER-PORT; given this
+   result the case for ALL PORTS as the default is that cheap hubs gang
+   their port power, so PER-PORT refuses on exactly the hubs people have,
+   while the only cost is a sub-second blink of the hub's other devices,
+   paid only when a stick has already failed. **Ed's call the same morning:
+   default = ALL PORTS.** Re-run on the shipped-default build (bee90d1a,
+   `MCU NOV 20 2026 18:02:30`, PNY swapped in for the K&ZZ behind the hub):
+   identical — TRY 1/3, TRY 2/3, `RECOVERED AFTER 2 PORT POWER CYCLES`,
+   STORAGE 59153 MB, DOS33.NIB served, dongle back at addr 2 in use. Two
+   for two on this hub, both at the second cycle. Ed the same evening: the
+   Verbatim Store 'n' Stay Nano behind the hub comes up as well, and the
+   remote (1915:1025 dongle) works after a ladder completes — so plan steps
+   (2) and the dongle half of (5) pass. **Write check (same evening, Ed's
+   question: if these sticks cannot be written to, bringing them online is
+   moot):** Verbatim 18A5:0250 "STORE N GO" behind the hub, recovered by
+   the ladder at cycle 2 — FTP `STOR` of 64 KB random and of the 1.3 MB
+   firmware image (11 s) both read back byte-exact over FTP, files deleted
+   afterwards. So the Verbatim is fully usable behind the hub. The PNY
+   13FE:6700 is the odd one: reads serve, FTP writes break at a 0-byte file
+   (3/3, see ESP32_FW_A2P25.md). That is a PNY-specific write-path problem,
+   not a property of sticks that need the ladder; the MSC write error is not
+   logged today, so the next step there is an `osd_log` on the failing
+   `fwrite`/SCSI WRITE(10) status to see what the stick returns. **Resolved
+   the same night (probe firmware, ESP32_FW_A2P25.md):** the PNY's FIRST
+   WRITE(10) after power-up takes ~1.9 s to return its CSW (`usb probe 2048`:
+   write 1940 ms); every later write is 17–47 ms at any address, 1 MB in or
+   59 GB in. The firmware's 1.5 s wait cut that first write off, and — the
+   real bug — `bulk_xfer` then freed the still-in-flight transfer (this
+   IDF's `timeout_ms` is unimplemented), which broke the FTP session and,
+   once, rebooted the card. With the cancel fix and an 8 s write CSW wait
+   (98ff773e) the PNY takes the 1.3 MB upload (69 s vs 11 s on the Verbatim)
+   with byte-exact read-back. So: the PNY is writable; it is slow to wake
+   and slower than the 32 GB sticks, nothing more. Caveat for Disk II
+   write-back: the first track flush to a freshly plugged PNY will hold the
+   MSC lock ~2 s. Still unexercised: unplug during a ladder, replug after a
+   give-up, the RTL8152B through a ladder.
 4. **P4 MCU self-update** — DONE (code): `fwupdate.c` on ESP-IDF OTA
    (`esp_ota_begin/write/end`, boot partition switch, restart in 2 s);
    the image is any `*.bin` on the volume (stick, or FTP-dropped onto

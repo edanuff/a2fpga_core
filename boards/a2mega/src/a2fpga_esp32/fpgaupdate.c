@@ -30,10 +30,12 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 #include "osd_console.h"
 #include "fpga_jtag.h"
 #include "fpgaupdate.h"
+#include "disk.h"
 
 static const char *TAG = "fpgaupd";
 
@@ -232,8 +234,15 @@ static bool check_file(void)
     s_size = (uint32_t)ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    static uint8_t hdr[FPU_HDR_SCAN];
-    size_t br = fread(hdr, 1, sizeof(hdr), f);
+    /* 4 KB header window: fread fills it (the MSC path copies), the parser
+     * only reads it -> PSRAM (heap diet 11-19) */
+    static uint8_t *hdr;
+    if (!hdr) {
+        hdr = (uint8_t *)heap_caps_malloc(FPU_HDR_SCAN, MALLOC_CAP_SPIRAM);
+        if (!hdr) hdr = (uint8_t *)malloc(FPU_HDR_SCAN);
+        if (!hdr) { fclose(f); fail("NO MEMORY"); return false; }
+    }
+    size_t br = fread(hdr, 1, FPU_HDR_SCAN, f);
     fclose(f);
     if (br < 64) {
         fail("READ ERROR");
@@ -292,6 +301,13 @@ static void install(void)
     osd_log("FPGA: INSTALLING - SCREEN GOES DARK");
     vTaskDelay(pdMS_TO_TICKS(500));      /* let the warning page land */
 
+    /* Close the disk images and stop serving before the fabric dies: an
+     * unconfigured FPGA answers register reads with junk, which the disk
+     * task once served as a write (2026-11-17 stick corruption). We run in
+     * the disk task, so this closes inline; the bitstream file f stays open
+     * — it is read-only and closed before the reload. */
+    disk_quiesce();
+
     fpga_jtag_init_pins();
 
     /* Probe the live FPGA before killing it. */
@@ -301,6 +317,7 @@ static void install(void)
         ESP_LOGE(TAG, "live IDCODE %08lx != image's %08lx",
                  (unsigned long)id, (unsigned long)s_want_id);
         fail("JTAG IDCODE MISMATCH");
+        disk_request_remount();          /* nothing was touched: serve again */
         return;
     }
 
@@ -310,6 +327,7 @@ static void install(void)
         fclose(f);
         fpga_jtag_reload();              /* try to come back up */
         fail("COULD NOT ENTER FLASH MODE");
+        disk_request_remount();          /* re-register the disks if it did */
         return;
     }
 
@@ -361,6 +379,7 @@ static void install(void)
     fpga_jtag_reload();                  /* boot the new bitstream */
     vTaskDelay(pdMS_TO_TICKS(2000));
     s_state = FPU_IDLE;
+    disk_release_storage();              /* images closed above; detach the stick's FAT */
     esp_restart();                       /* clean full-system bring-up */
 }
 

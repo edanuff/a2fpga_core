@@ -42,6 +42,7 @@
         <File path="../../hdl/memory/a2mem_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/mockingboard/mockingboard.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/apple_speaker.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/sound/core_audio_mix.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/audio_out.v" type="file.verilog" enable="1"/>
         <File path="../../hdl/sound/audio_timing.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/memory/mem_if_mux.sv" type="file.verilog" enable="1"/>
@@ -90,6 +91,10 @@
         <File path="../../hdl/video/direct_display.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/scan_timer.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/framebuffer_writer.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/video/videx_gen.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/videx/videx_card.sv" type="file.verilog" enable="1"/>
+        <File path="../../hdl/videx/videx_rom.hex" type="file.other" enable="1"/>
+        <File path="../../hdl/videx/videx_charrom.hex" type="file.other" enable="1"/>
         <File path="../../hdl/video/sdram_framebuffer.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/video_control_if.sv" type="file.verilog" enable="1"/>
         <File path="../../hdl/video/video.hex" type="file.other" enable="1"/>
