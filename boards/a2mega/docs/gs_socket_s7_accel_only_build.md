@@ -4160,6 +4160,25 @@ firmware the accelerator's setting moved three bytes down the saved
 block, behind main's three; a card that saved it at the old place
 with the value "off" would read it as the Mockingboard's level.
 
+Provenance of uf0, uf1 and uf2 (**the project without the trace, the
+merged source**: `a2mega_accel_138B.gprj` at commit `368f10a7`, main
+merged in; **three placements of three with no violation**; none
+flashed, none run on hardware): the same tool and device. uf0 (worst
++0.026): build stamp `20261125162050`, bitstream sha256
+`506eb08680a31263...c9cdc366bd9179f4`, of the lines that are not header
+`982124d3bbe50bf3...9943d4382e3c5d68`. uf1 (+0.008): `20261125163111`,
+`d0acc26887f04d1b...44522b6c4e68aa2e`, `468b92181466855a...30dfa664ddfce6eb`.
+uf2 (+0.002): `20261125164335`, `7b2b990263b475fa...d26c91d6f76d00d5`,
+`2d62b53baa942e4c...caaba380844471ab`. Built in 10 to 18 minutes each. Kept in
+`impl/pnr` by name (`a2mega_accel_138B.fs` itself is uf2 now). The
+card still has ud0, a build of the source before the merge.
+   On "no flop on the PH2 pin": read in uf2's synthesized netlist,
+the pin's net has one load, the D input of the first sample's flop,
+and clocks nothing. The place-and-route report still lists the net
+among its global clock signals, as it did for ud; the constraint
+file declares a clock on the port, which is the likely reason and is
+not shown.
+
 Provenance of ue0, ue1 and ue2 (**the trace project**,
 `a2mega_accel_138B_trace.gprj`, on the same source as ud - PH2 and the
 socket's pads sampled in clk, this section; **two placements of three
