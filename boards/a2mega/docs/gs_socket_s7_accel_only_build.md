@@ -4146,6 +4146,19 @@ build stamp read from the card `20261124215019`; the ROM image valid
 (sum 7EE8), no mismatch, fast mode; /RESET up once, 7.28 s after our
 hold, no pull after it; on the screen a normal start (Ed: "It's up,
 normal").
+   **Main merged in after that (2026-11-25).** Three of the files this
+project is built from changed with it: `hdl/bus/apple_bus.sv` (the
+GS detector's reset is the device's, not the system's),
+`hdl/bus/gs_detector.sv`, and `esp32_ospi_connector.sv` (window
+indices 46 to 55 for audio telemetry and the Mockingboard's level,
+ports tied off in the accelerator-only top). Nothing under
+`hdl/twgs` changed, so the benches stand as run. **ud0 to ud2 and ue0
+to ue2 are builds of the source before the merge:** the three
+placements owed are of the merged source, and until they are made the
+count of three belongs to the commit before the merge. In the
+firmware the accelerator's setting moved three bytes down the saved
+block, behind main's three; a card that saved it at the old place
+with the value "off" would read it as the Mockingboard's level.
 
 Provenance of ue0, ue1 and ue2 (**the trace project**,
 `a2mega_accel_138B_trace.gprj`, on the same source as ud - PH2 and the
