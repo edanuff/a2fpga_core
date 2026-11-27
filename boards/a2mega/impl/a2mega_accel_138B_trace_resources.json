@@ -1,0 +1,1567 @@
+{
+"board": "a2mega",
+"modules": {
+"top": {
+"alu": 38,
+"bsram": 0,
+"dsp": 0,
+"lut": 109,
+"reg": 782,
+"rom16": 0,
+"ssram": 0
+},
+"top/ALU": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 76,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/AddSub": {
+"alu": 40,
+"bsram": 0,
+"dsp": 0,
+"lut": 16,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/AddrGen": {
+"alu": 104,
+"bsram": 0,
+"dsp": 0,
+"lut": 310,
+"reg": 74,
+"rom16": 0,
+"ssram": 0
+},
+"top/MCode": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 470,
+"reg": 104,
+"rom16": 0,
+"ssram": 0
+},
+"top/Rom": {
+"alu": 0,
+"bsram": 24,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/St1Rom": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 16,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/a2bus_timing_inst": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/apple_bus": {
+"alu": 5,
+"bsram": 0,
+"dsp": 0,
+"lut": 3,
+"reg": 6,
+"rom16": 0,
+"ssram": 0
+},
+"top/clocks_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/esp32_ospi": {
+"alu": 60,
+"bsram": 9,
+"dsp": 0,
+"lut": 811,
+"reg": 976,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_exp.u_exp": {
+"alu": 22,
+"bsram": 1,
+"dsp": 0,
+"lut": 166,
+"reg": 192,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_blk[0].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_blk[1].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_blk[2].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_blk[3].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_blk[4].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_blk[5].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_blk[6].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_blk[7].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_rblk[0].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_rblk[1].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_rblk[2].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_rblk[3].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_rblk[4].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_rblk[5].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_rblk[6].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[0].g_rblk[7].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_blk[0].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_blk[1].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_blk[2].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_blk[3].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_blk[4].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_blk[5].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_blk[6].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_blk[7].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_rblk[0].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_rblk[1].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_rblk[2].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_rblk[3].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_rblk[4].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_rblk[5].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_rblk[6].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[1].g_rblk[7].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_blk[0].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_blk[1].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_blk[2].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_blk[3].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_blk[4].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_blk[5].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_blk[6].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_blk[7].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_rblk[0].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_rblk[1].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_rblk[2].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_rblk[3].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_rblk[4].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_rblk[5].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_rblk[6].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[2].g_rblk[7].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_blk[0].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_blk[1].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_blk[2].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_blk[3].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_blk[4].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_blk[5].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_blk[6].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_blk[7].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_rblk[0].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_rblk[1].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_rblk[2].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_rblk[3].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_rblk[4].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_rblk[5].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_rblk[6].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[3].g_rblk[7].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_blk[0].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_blk[1].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_blk[2].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_blk[3].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_blk[4].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_blk[5].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_blk[6].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_blk[7].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_rblk[0].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_rblk[1].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_rblk[2].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_rblk[3].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_rblk[4].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_rblk[5].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_rblk[6].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[4].g_rblk[7].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_blk[0].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_blk[1].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_blk[2].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_blk[3].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_blk[4].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_blk[5].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_blk[6].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_blk[7].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_rblk[0].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_rblk[1].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_rblk[2].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_rblk[3].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_rblk[4].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_rblk[5].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_rblk[6].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[5].g_rblk[7].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_blk[0].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_blk[1].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_blk[2].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_blk[3].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_blk[4].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_blk[5].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_blk[6].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_blk[7].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_rblk[0].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_rblk[1].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_rblk[2].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_rblk[3].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_rblk[4].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_rblk[5].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_rblk[6].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[6].g_rblk[7].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_blk[0].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_blk[1].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_blk[2].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_blk[3].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_blk[4].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_blk[5].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_blk[6].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_blk[7].mram": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_rblk[0].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_rblk[1].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_rblk[2].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_rblk[3].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_rblk[4].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_rblk[5].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_rblk[6].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_far16.g_w[7].g_rblk[7].mrom": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_line.g_nb[0].nmem": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 4,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_line.g_nb[1].nmem": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_line.g_nb[2].nmem": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_line.g_nb[3].nmem": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_line.g_nb[4].nmem": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_line.g_nb[5].nmem": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_line.g_nb[6].nmem": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_line.g_nb[7].nmem": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_na[0].AddrBusNextInc": {
+"alu": 110,
+"bsram": 0,
+"dsp": 0,
+"lut": 10,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_na[1].AddrBusNextInc": {
+"alu": 110,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/g_trace.u_trace": {
+"alu": 85,
+"bsram": 19,
+"dsp": 0,
+"lut": 175,
+"reg": 292,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_cdc[0].u_cdc": {
+"alu": 13,
+"bsram": 3,
+"dsp": 0,
+"lut": 27,
+"reg": 143,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_cdc[1].u_cdc": {
+"alu": 13,
+"bsram": 0,
+"dsp": 0,
+"lut": 21,
+"reg": 48,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_evt_log.i_evt_log": {
+"alu": 0,
+"bsram": 2,
+"dsp": 0,
+"lut": 126,
+"reg": 31,
+"rom16": 0,
+"ssram": 0
+},
+"top/gen_no_denoise.cdc_phi1": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 3,
+"rom16": 0,
+"ssram": 0
+},
+"top/i_gs_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/pll_ddr3_inst": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/proto": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 530,
+"reg": 195,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_acc": {
+"alu": 0,
+"bsram": 1,
+"dsp": 0,
+"lut": 2229,
+"reg": 541,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_board_plls": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 1,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_brk": {
+"alu": 253,
+"bsram": 0,
+"dsp": 0,
+"lut": 1204,
+"reg": 706,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_copy": {
+"alu": 22,
+"bsram": 0,
+"dsp": 0,
+"lut": 88,
+"reg": 91,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_cpu": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 1500,
+"reg": 228,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_ddr3": {
+"alu": 126,
+"bsram": 0,
+"dsp": 0,
+"lut": 3698,
+"reg": 7195,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_ddr3_ports": {
+"alu": 18,
+"bsram": 0,
+"dsp": 0,
+"lut": 224,
+"reg": 344,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_decode": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 71,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_phy": {
+"alu": 61,
+"bsram": 0,
+"dsp": 0,
+"lut": 119,
+"reg": 152,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_pll": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 0,
+"reg": 0,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_pll_init": {
+"alu": 16,
+"bsram": 0,
+"dsp": 0,
+"lut": 52,
+"reg": 38,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_replica": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 95,
+"reg": 40,
+"rom16": 0,
+"ssram": 0
+},
+"top/u_rules": {
+"alu": 0,
+"bsram": 0,
+"dsp": 0,
+"lut": 16,
+"reg": 5,
+"rom16": 0,
+"ssram": 0
+}
+},
+"pnr_totals": {
+"BSRAM": [
+201,
+340
+],
+"CLS": [
+13173,
+69120
+],
+"Logic": [
+13587,
+138240
+],
+"PLL": [
+3,
+12
+],
+"Register": [
+12267,
+139095
+]
+},
+"project": "a2mega_accel_138B_trace"
+}

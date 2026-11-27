@@ -104,7 +104,14 @@ typedef struct {
      * blobs load unchanged. SETTINGS -> USB HUB PORT RETRY, telnet
      * `usb retry on|off`. */
     uint8_t  usb_hub_retry_perport;
-    uint8_t  reserved[11];               /* future fields (shrink as used) */
+
+    /* S7 accelerator (accelerator-only gateware): 0 = bring it up to fast
+     * mode by itself after every arm (default), 1 = leave register 29 alone
+     * (the machine's own pace; `gs accel go` by hand). One more reserved
+     * byte, after main's three above so their saved blobs load unchanged
+     * (0 = on). */
+    uint8_t  gs_accel_off;
+    uint8_t  reserved[10];               /* future fields (shrink as used) */
 
     uint32_t crc;                        /* CRC-32 of everything above */
 } a2_settings_t;

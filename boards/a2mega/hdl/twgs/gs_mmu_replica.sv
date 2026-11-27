@@ -130,12 +130,13 @@ module gs_mmu_replica #(
     output logic [7:0]  cyareg_o,            // $C036
     output logic [7:0]  sltromsel_o,         // $C02D
     output logic [7:0]  statereg_o,          // $C068 view
-    output logic [7:0]  misc_o               // {0, bank_latch, INTC8ROM, SLOTC3ROM, 80STORE, HIRES, LC_WE, LC_WE_PRE}
+    output logic [7:0]  misc_o               // {$C031 bit 6 (the 3.5 drive selected), bank_latch, INTC8ROM, SLOTC3ROM, 80STORE, HIRES, LC_WE, LC_WE_PRE}
 );
 
     logic       store80, ramrd, ramwrt, intcxrom, altzp, slotc3rom;
     logic       page2, hires, rdrom, lcram2, lc_we, lc_we_pre, rombank, intc8rom;
     logic       bank_latch;
+    logic       sel35;               // DISKREG ($C031) bit 6: no part of the map, kept for the speed rules
     logic [7:0] shadow, cyareg, sltromsel;
 
     // ------------------------------------------------------------------ tracker
@@ -146,7 +147,7 @@ module gs_mmu_replica #(
     wire cyc_iolc = (cyc_main && !shadow[6]) || cyc_mega;
     // $C000-$C0FF where it decodes as I/O (gs_mmu_decode: IO | EXTERNAL_IO)
     wire cyc_io   = (ca[15:8] == 8'hC0) &&
-                    (cyc_iolc || (cyareg[4] && cb >= 8'h02 && cb <= 8'h7F));
+                    (cyc_iolc || (cyareg[4] && !shadow[6] && cb >= 8'h02 && cb <= 8'h7F));
     // $C100-$CFFF slot space
     wire cyc_cx   = (ca[15:12] == 4'hC) && (ca[11:8] != 4'h0) && cyc_iolc;
 
@@ -156,13 +157,13 @@ module gs_mmu_replica #(
             altzp <= 1'b0; slotc3rom <= 1'b0; page2 <= 1'b0; hires <= 1'b0;
             rdrom <= 1'b1; lcram2 <= 1'b1; lc_we <= 1'b1; lc_we_pre <= 1'b0;
             rombank <= 1'b0; intc8rom <= 1'b0; bank_latch <= 1'b1;
-            shadow <= 8'h08; cyareg <= 8'h80; sltromsel <= 8'h00;
+            shadow <= 8'h08; cyareg <= 8'h80; sltromsel <= 8'h00; sel35 <= 1'b0;
         end else if (sw_reset_i) begin
             store80 <= 1'b0; ramrd <= 1'b0; ramwrt <= 1'b0; intcxrom <= 1'b0;
             altzp <= 1'b0; slotc3rom <= 1'b0; page2 <= 1'b0; hires <= 1'b0;
             rdrom <= 1'b1; lcram2 <= 1'b1; lc_we <= 1'b1; lc_we_pre <= 1'b0;
             rombank <= 1'b0; intc8rom <= 1'b0; bank_latch <= 1'b1;
-            shadow <= 8'h08; cyareg <= 8'h80; sltromsel <= 8'h00;
+            shadow <= 8'h08; cyareg <= 8'h80; sltromsel <= 8'h00; sel35 <= 1'b0;
         end else if (cyc_stb_i) begin
             if (cyc_io) begin
                 // ---- switches that respond to writes only
@@ -181,6 +182,7 @@ module gs_mmu_replica #(
                         8'h0A: slotc3rom <= 1'b0;
                         8'h0B: slotc3rom <= 1'b1;
                         8'h29: bank_latch <= cyc_wdata_i[0];
+                        8'h31: sel35     <= cyc_wdata_i[6];
                         8'h2D: sltromsel <= cyc_wdata_i;
                         8'h35: shadow    <= cyc_wdata_i;
                         8'h36: cyareg    <= cyc_wdata_i;
@@ -222,7 +224,7 @@ module gs_mmu_replica #(
     assign cyareg_o    = cyareg;
     assign sltromsel_o = sltromsel;
     assign statereg_o  = {altzp, page2, ramrd, ramwrt, rdrom, lcram2, rombank, intcxrom};
-    assign misc_o      = {1'b0, bank_latch, intc8rom, slotc3rom, store80, hires, lc_we, lc_we_pre};
+    assign misc_o      = {sel35, bank_latch, intc8rom, slotc3rom, store80, hires, lc_we, lc_we_pre};
 
     // ------------------------------------------------------------------ decode
     gs_mmu_decode u_decode (

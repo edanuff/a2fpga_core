@@ -76,6 +76,38 @@ unsigned gs_socket_get_late_ms(void);
 void     gs_socket_set_autotrig(bool on);
 bool     gs_socket_get_autotrig(void);
 
+/* S7 accelerator bring-up (accelerator-only gateware; it is known by the
+ * signature 5A in window register 14). With the setting gs_accel_off clear,
+ * every arm is followed by the ladder of
+ * boards/a2mega/docs/gs_socket_s7_accel_only_build.md section 3, each step
+ * checked before the next:
+ *   /RES high for delay ms -> key, ROM copy (image valid) -> card memory at
+ *   the machine's pace with verify for verify ms (count must not move) ->
+ *   the same with the copy of E0/E1 (its count must not move) -> fast.
+ * A verify mismatch stops it on socket bytes (register 29 = 08) and says
+ * so. Machine off clears register 29, so the next power-up starts on the
+ * machine's own memory. Once fast mode has run, "off" is paced card memory
+ * (the machine's banks 00/01 are stale by design), never 00.
+ * A hand write of window register 29 or 31 takes manual control until
+ * `gs accel go`. */
+void gs_accel_set_enabled(bool on);         /* the setting; saved by the caller */
+void gs_accel_go(void);                     /* run the ladder now (also leaves manual/failed) */
+void gs_accel_pace(bool fast);              /* at run time: fast <-> paced card memory */
+void gs_accel_manual(void);
+/* With fast mode, ask the gateware to follow the machine's speed rules (paced while
+ * the speed register says normal, or a disk drive's motor is on). On by default; not saved. */
+void gs_accel_set_rules(bool on);
+bool gs_accel_get_rules(void);
+void     gs_accel_set_delay_ms(unsigned ms);
+unsigned gs_accel_get_delay_ms(void);
+void     gs_accel_set_verify_ms(unsigned ms);
+unsigned gs_accel_get_verify_ms(void);
+bool gs_accel_present(void);                /* accelerator gateware seen since the last machine-off */
+const char *gs_accel_state_str(void);
+/* One telemetry word of the accelerator (gs_accel.sv tele_word_o), read
+ * until two reads agree: the words are not latched. */
+uint32_t gs_accel_word(unsigned n);
+
 /* Register-window helpers shared with telnetd (locked). */
 uint8_t gs_socket_reg_read(uint8_t idx);
 void    gs_socket_reg_write(uint8_t idx, uint8_t val);

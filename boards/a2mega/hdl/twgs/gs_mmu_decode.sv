@@ -257,8 +257,11 @@ module gs_mmu_decode #(
   // I/O space ($C000-$C0FF) mapping per Apple IIgs Hardware Reference:
   // - Banks E0/E1: I/O always accessible (no shadow register check)
   // - Banks 00/01: I/O accessible only when shadow[6]=0
-  // - All-bank shadow: When CYAREG[4]=1, I/O space appears in banks 02-7F too
-  wire all_bank_io = shadow_all && (bank_log >= 8'h02 && bank_log <= 8'h7f);
+  // - All-bank shadow: When CYAREG[4]=1, I/O space appears in banks 02-7F too -
+  //   under the same inhibit as in banks 00/01: with shadow[6]=1 page $C0 of an
+  //   expansion bank is its RAM (the state of a program that takes the I/O
+  //   and language card out of the fast banks and keeps code in bank 02 there)
+  wire all_bank_io = shadow_all && !shadow[6] && (bank_log >= 8'h02 && bank_log <= 8'h7f);
   assign IO = ~EXTERNAL_IO & addr_log[15:8] == 8'hC0 &
               (((bank_log == 8'h00 | bank_log == 8'h01) && !shadow[6]) | bank_log == 8'he0 | bank_log == 8'he1 | all_bank_io);
 

@@ -86,6 +86,8 @@ module gs_accel #(
     parameter bit SLOW_COPY  = 1'b0,     // EXP_DDR: a copy of the Mega II's RAM below $C000 (banks E0/E1) in the expansion
                                          // memory, in the 128K below its bank 02 that nothing else uses; cfg_slow_i then
                                          // has reads of that RAM served from the copy (gs_accel_broker SLOW_COPY)
+    parameter bit TRACE      = 1'b0,     // the trace build: a ring of the socket's cycles (gs_accel_trace), read at
+                                         // telemetry indices 32 to 63
     parameter bit SIM_ROM_VALID = 1'b0   // SIMULATION ONLY: the bench loaded the ROM image (gs_accel_romcopy SIM_PRESET)
 ) (
     input  logic        clk,
@@ -100,7 +102,11 @@ module gs_accel #(
     input  logic        cfg_cxrom_i,
     input  logic        cfg_copy_i,
     input  logic        cfg_slow_i,      // (SLOW_COPY) reads of banks E0/E1 below $C000 from the card's copy; any time, either way
+    input  logic        cfg_rules_i,     // fast mode gives way to the machine's pace where gs_accel_rules says so; any time
     input  logic        clear_i,         // hold the PHI2 measurement at zero
+    input  logic        trace_freeze_i,  // (TRACE; else tie low) the ring stands still
+    input  logic [4:0]  sweep_tap_i,     // (TRACE; else tie low) the read-data sweep's tap, signed: clks from the fall
+    input  logic [23:0] trace_rq_i,      // (TRACE; else tie low) window registers {31, 30, 29}: gs_accel_trace's slots
 
     // expansion memory port (EXP_DDR; clk domain; else tie the inputs low): one
     // request at a time, reads answered in the order they were taken
@@ -144,13 +150,17 @@ module gs_accel #(
     output logic [23:0] last_addr_o,     // address of the last cycle put on the bus
     output logic [15:0] verify_count_o,
     input  logic [5:0]  tele_idx_i,      // quasi-static: selects tele_word_o
+    output logic [4:0]  tele_flags_o,    // 5'b00111 with a telemetry word; with a trace entry (TRACE, indices 32 to 63)
+                                         // its {VDA, VPA, VP, /IRQ, R/W}
+    output logic [1:0]  trace_stat_o,    // (TRACE) {the ring stands still, the trigger fired}
     output logic [31:0] tele_word_o      // 0 steps, 1 socket cycles for the core, 2 posted writes, 3 clks waited for
                                          // the write buffer, 4 local reads in place, 5 local reads that waited,
                                          // 6 {verify_count, 8'h00, mode}, 7 {8'h00, verify_addr},
                                          // 8 {copies, 8'h00, ROM image sum}, 9 {shadow, cyareg, sltromsel, statereg},
-                                         // 10 {24'h0, switch misc}, 11 PHY bus cycles, 12 {.., EXP_DDR, its queue overflowed, its memory ready, EXP_BANKS},
+                                         // 10 {16'h0, motor latches of slots 7-4, 2'b0, speed rules asked, slow by them, switch misc}, 11 PHY bus cycles, 12 {.., EXP_DDR, its queue overflowed, its memory ready, EXP_BANKS},
                                          // 13 {E0/E1 verify count, 8'h00, 4'h0, SLOW_COPY, the copy is whole, asked for, in effect},
-                                         // 14 {8'h00, address of the last E0/E1 verify mismatch}; others 0
+                                         // 14 {8'h00, address of the last E0/E1 verify mismatch};
+                                         // (TRACE) 15 to 17 the trace's state, 32 to 63 its entries; others 0
 );
     localparam int STEP_CLKS = 2, ADDR_CLKS = 2, SLOW_CLKS = 3;
     localparam int NEAR_AW = 14, NTW = NEAR_KW + 2;
@@ -172,8 +182,10 @@ module gs_accel #(
     logic [7:0]  phy_d_out;
     logic        phy_we_n, phy_vpa, phy_vda, phy_vp_n;
     logic        enabled, running, fall_evt, issue_evt, ph2_alive, be_ok;
+    logic        phy_ended_read, phy_xfall;
+    logic [2:0]  phy_state;
 
-    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself
+    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1), .PH2_SAMPLED(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself; no flop on the PH2 pin
         .force_slow_i(1'b0),
         .clk(clk), .rst_n(rst_n), .armed_i(arm_i), .listen_i(listen_i), .out_extra_i(out_extra_i),
         .cpu_clk_o(), .cpu_rst_n_o(),
@@ -185,7 +197,8 @@ module gs_accel #(
         .gs_d_dir_o(gs_d_dir_o), .gs_data_oe_n_o(gs_data_oe_n_o), .gs_addr_oe_n_o(gs_addr_oe_n_o),
         .gs_ctl_oe_n_o(gs_ctl_oe_n_o),
         .ph2_alive_o(ph2_alive), .running_o(running), .enabled_o(enabled), .be_ok_o(be_ok),
-        .fall_evt_o(fall_evt), .issue_evt_o(issue_evt), .ended_read_o(),
+        .fall_evt_o(fall_evt), .issue_evt_o(issue_evt), .ended_read_o(phy_ended_read),
+        .xfall_evt_o(phy_xfall), .state_o(phy_state),
         .cycle_count_o(cycle_count_o), .stall_count_o(stall_count_o), .be_count_o(be_count_o)
     );
 
@@ -194,7 +207,11 @@ module gs_accel #(
     logic        x_ovf, x_rwait, x_rsel, x_wbusy;
     logic [7:0]  x_rdata;
     wire         cardmem = cfg_cardmem_i & rom_ok & (~EXP_DDR | (exp_ready_i & ~x_ovf));
-    wire         fast    = cfg_fast_i & cardmem;
+    // (the machine's speed rules: gs_accel_rules, below.  Paced with the card's memory
+    // still the memory of record is the one way out of fast mode that is always coherent.)
+    logic        rules_slow;
+    logic [3:0]  rules_motor;
+    wire         fast    = cfg_fast_i & cardmem & ~rules_slow;
     // (SLOW_COPY) The copy of Mega II RAM is whole - it has every byte the machine was
     // given since its last reset - if that reset found the expansion memory ready and
     // nothing has been lost from its queue since.  (What the machine's RAM held from
@@ -248,10 +265,17 @@ module gs_accel #(
     logic [7:0]  idle_d;
     logic [23:0] idle_a, verify_addr, verify_saddr;
     logic [15:0] verify_scount;
+    logic        vm_evt;
+    logic [15:0] verify_rcount;
+    logic [23:0] verify_laddr;
+    logic [7:0]  vm_card, vm_sock, vm_src;
+    logic [23:0] vm_phys;
     logic        lm_wfwd, brk_slow;
     logic [NEAR_AW-1:0] nm_flush_idx;
     logic [31:0] stat_steps, stat_sock, stat_posted, stat_pwwait, stat_rd_hit, stat_rd_miss;
     logic [7:0]  r_shadow, r_cyareg, r_sltromsel, r_statereg, r_misc;
+    logic [7:0]  tr_d_f;
+    logic        tr_irq_f;
 
     gs_accel_broker #(.STEP_CLKS(STEP_CLKS), .ADDR_CLKS(ADDR_CLKS), .SLOW_CLKS(SLOW_CLKS), .DATA_LATE(1'b1), .RA_COPIES(8), .CE_COPIES(4),
                       .NEAR(1'b1), .NEAR_AW(NEAR_AW), .NEAR_KW(NEAR_KW), .ROM3(ROM3), .FAR_CLKS(2), .WEN_ONE(1'b1),
@@ -265,7 +289,7 @@ module gs_accel #(
         .phy_fall_evt_i(fall_evt), .phy_issue_evt_i(issue_evt),
         .phy_a_o(phy_a), .phy_d_out_o(phy_d_out), .phy_we_n_o(phy_we_n),
         .phy_vpa_o(phy_vpa), .phy_vda_o(phy_vda), .phy_vp_n_o(phy_vp_n),
-        .gs_ph2_i(gs_ph2_i), .gs_d_i(gs_d_i), .gs_rdy_i(gs_rdy_i),
+        .gs_d_i(gs_d_i), .gs_rdy_i(gs_rdy_i),
         .gs_irq_n_i(gs_irq_n_i), .gs_nmi_n_i(gs_nmi_n_i), .gs_abort_n_i(gs_abort_n_i),
         .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_ce_c_o(cpu_ce_c), .cpu_d_in_o(cpu_d_in),
         .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),
@@ -281,11 +305,26 @@ module gs_accel #(
         .lm_rexp_o(lm_rexp), .lm_rwait_i(x_rwait), .lm_wbusy_i(x_wbusy),
         .fast_o(brk_fast), .step_evt_o(), .sock_evt_o(), .sock_idle_o(), .pw_busy_o(),
         .verify_miss_o(), .verify_addr_o(verify_addr), .verify_count_o(verify_count_o),
+        .verify_any_o(vm_evt), .verify_rcount_o(verify_rcount), .verify_laddr_o(verify_laddr),
+        .verify_card_o(vm_card), .verify_sock_o(vm_sock), .verify_phys_o(vm_phys), .verify_src_o(vm_src),
         .slow_o(brk_slow), .verify_scount_o(verify_scount), .verify_saddr_o(verify_saddr),
         .stat_steps_o(stat_steps), .stat_sock_o(stat_sock), .stat_posted_o(stat_posted),
         .stat_pwwait_o(stat_pwwait), .stat_rd_hit_o(stat_rd_hit), .stat_rd_miss_o(stat_rd_miss),
         .shadow_o(r_shadow), .cyareg_o(r_cyareg), .sltromsel_o(r_sltromsel),
-        .statereg_o(r_statereg), .sw_misc_o(r_misc)
+        .statereg_o(r_statereg), .sw_misc_o(r_misc),
+        .tr_d_f_o(tr_d_f), .tr_irq_f_o(tr_irq_f)
+    );
+
+    // ---- the machine's speed rules, from what the socket shows
+    logic issue_q;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) issue_q <= 1'b0;
+        else        issue_q <= issue_evt;
+    end
+    gs_accel_rules u_rules (
+        .clk(clk), .rst_n(rst_n), .cpu_rst_n_i(cpu_rst_n), .en_i(cfg_rules_i),
+        .bus_evt_i(issue_q), .bus_a_i(last_addr_o), .cyareg_i(r_cyareg), .sel35_i(r_misc[7]), .shadow6_i(r_shadow[6]),
+        .motor_o(rules_motor), .slow_o(rules_slow)
     );
 
     // ---- core
@@ -590,6 +629,188 @@ module gs_accel #(
         end
     end
 
+    // ---- (TRACE) the socket's cycles in a ring, read at indices 32 to 63
+    logic [31:0] tr_word, tr_s0, tr_s1, tr_s2;
+    logic [4:0]  tr_flags;
+    if (TRACE) begin : g_trace
+        gs_accel_trace u_trace (
+            .clk(clk), .rst_n(rst_n),
+            .run_i(enabled & running), .issue_evt_i(issue_evt), .fall_evt_i(fall_evt),
+            .a_i(last_addr_o), .we_n_i(phy_we_n), .vp_n_i(phy_vp_n), .vpa_i(phy_vpa), .vda_i(phy_vda),
+            .d_f_i(tr_d_f), .irq_f_i(tr_irq_f), .shadow6_i(r_shadow[6]),
+            .freeze_i(trace_freeze_i), .rq_i(trace_rq_i), .idx_i(tele_idx_i[4:0]),
+            .word_o(tr_word), .flags_o(tr_flags), .frozen_o(trace_stat_o[1]), .trigd_o(trace_stat_o[0]),
+            .stat0_o(tr_s0), .stat1_o(tr_s1), .stat2_o(tr_s2)
+        );
+    end else begin : g_notrace
+        assign {tr_word, tr_s0, tr_s1, tr_s2} = '0;
+        assign tr_flags = 5'b00111;
+        assign trace_stat_o = 2'b10;
+    end
+
+    // ---- (TRACE) the first verify mismatches since card memory was last taken: each read
+    // where the card's byte was not the socket's, with both bytes, where the card read
+    // its own and the replica's switches then.  Words 18 to 29, three an entry:
+    //   {address, card's byte}, {physical address, socket's byte}, {shadow, state register, speed register, source}
+    // and word 30's low bits the number logged.  The log takes every mismatch, of ROM
+    // and of RAM (the broker's verify_any_o).  The broker's outputs are registered at
+    // the mismatch and its event is a clk behind them.
+    localparam int VML = 4;
+    logic [31:0] vml_a [0:VML-1], vml_b [0:VML-1], vml_c [0:VML-1];
+    logic [2:0]  vml_n;
+    // (the log is emptied from registers: card memory's grant is behind the request's key
+    // and must not reach these enables in the clk it moves)
+    logic        cardmem_q, cardmem_q2, vml_clr;
+    if (TRACE) begin : g_vml
+        always_ff @(posedge clk or negedge rst_n) begin
+            if (!rst_n) begin
+                vml_n <= '0; cardmem_q <= 1'b0; cardmem_q2 <= 1'b0; vml_clr <= 1'b0;
+                for (int i = 0; i < VML; i++) begin vml_a[i] <= '0; vml_b[i] <= '0; vml_c[i] <= '0; end
+            end else begin
+                cardmem_q  <= cardmem;
+                cardmem_q2 <= cardmem_q;
+                vml_clr    <= cardmem_q & ~cardmem_q2;
+                if (vml_clr) vml_n <= '0;
+                else if (vm_evt && vml_n != 3'(VML)) begin
+                    vml_a[vml_n[1:0]] <= {verify_laddr, vm_card};
+                    vml_b[vml_n[1:0]] <= {vm_phys, vm_sock};
+                    vml_c[vml_n[1:0]] <= {r_shadow, r_statereg, r_cyareg, vm_src};
+                    vml_n <= vml_n + 3'd1;
+                end
+            end
+        end
+    end else begin : g_novml
+        always_comb begin
+            vml_n = '0; cardmem_q = 1'b0; cardmem_q2 = 1'b0; vml_clr = 1'b0;
+            for (int i = 0; i < VML; i++) begin vml_a[i] = '0; vml_b[i] = '0; vml_c[i] = '0; end
+        end
+    end
+    // ---- (TRACE) two instruments on the socket's read data and clock, read where the
+    // statistics are (words 0 to 5) while the ring is told to stand still (`gs trace`):
+    //
+    // The read-data sweep.  The byte the core takes is the pads' at the last clk edge
+    // before the PHI2 fall (the broker's d_h; tap -1 here: it was a flop clocked by the
+    // fall itself when the windows were measured).  Here the pads are also sampled in
+    // every clk, and for every read cycle the sample of one clk - sweep_tap_i, signed,
+    // -12 to +8 - is compared with that byte: tap -1 is the last clk edge before the
+    // fall (0 to 1 clk before it), tap 0 the first after it, tap t the one t clks on.
+    // Mismatches and cycles are counted by what was read - the ROM (banks FC to FF),
+    // RAM of the fast side (banks 00 to 7F below $C000), and the Mega II's side (banks
+    // E0/E1 and I/O) - so that the window in which each really holds its byte can be
+    // read off tap by tap.  The counts start again when the tap changes and stand when
+    // the cycles' count is full.
+    //
+    // Falls the PHY did not wait for.  A count of them, and of the first since the pins
+    // became ours: the PH2 pin as sampled in the 24 clks before the event and the 8
+    // after (newest in bit 0), the sequencer's state and the address on the bus.
+    logic [31:0] dg_w [0:5];
+    if (TRACE) begin : g_diag
+        logic [7:0]  dp0, dp1;
+        logic [7:0]  dh [0:21];
+        logic [4:0]  tap_q;
+        logic [3:0]  sw_cnt;
+        logic        sw_arm;
+        logic [7:0]  sw_ref;
+        logic [1:0]  sw_cls;                 // 0 ROM, 1 fast RAM, 2 Mega II side, 3 not counted
+        logic [15:0] sw_mis [0:2], sw_n [0:2];
+        // (Everything the counters take is a register of its own, a clk behind: the
+        // cycle's end, the byte and the class, the tap's change, the compare, the
+        // counts being full.  Nothing here is in a hurry, and the PHY's and the
+        // broker's flops are not to carry its enables.)
+        logic        arm_q, tap_chg, cmp_v, cmp_ne;
+        logic [7:0]  ref_q;
+        logic [1:0]  cls_q;
+        logic [2:0]  sw_full;
+        // (tap t is the pad as sampled at the clk edge M + t, M the first edge after the
+        // fall; ten clks after the fall event that sample is dh[9 - t])
+        wire signed [5:0] tap_s = {tap_q[4], tap_q};
+        wire [4:0]   sw_idx = 5'(6'sd9 - tap_s);
+        wire [1:0]   cls_n  = (last_addr_o[23:18] == 6'h3F)                               ? 2'd0 :
+                              (last_addr_o[23:17] == 7'h70)                               ? 2'd2 :
+                              (last_addr_o[23] | (last_addr_o[15:14] == 2'b11))           ? ((last_addr_o[15:8] == 8'hC0 & ~last_addr_o[23]) ? 2'd2 : 2'd3) :
+                                                                                            2'd1;
+        logic [31:0] ph2_h, xf_h;
+        logic [15:0] xf_n;
+        logic [3:0]  xf_cnt;
+        logic        xf_arm, xf_got, en_q, en_q2, xfall_q, xf_full;
+        logic [2:0]  xf_state, xst_q;
+        logic [23:0] xf_addr, xad_q;
+        always_ff @(posedge clk or negedge rst_n) begin
+            if (!rst_n) begin
+                dp0 <= '0; dp1 <= '0; tap_q <= '0; sw_cnt <= '0; sw_arm <= 1'b0; sw_ref <= '0; sw_cls <= 2'd3;
+                for (int i = 0; i < 22; i++) dh[i] <= '0;
+                for (int i = 0; i < 3; i++) begin sw_mis[i] <= '0; sw_n[i] <= '0; end
+                ph2_h <= '0; xf_h <= '0; xf_n <= '0; xf_cnt <= '0; xf_arm <= 1'b0; xf_got <= 1'b0; en_q <= 1'b0;
+                xf_state <= '0; xf_addr <= '0;
+                arm_q <= 1'b0; tap_chg <= 1'b0; cmp_v <= 1'b0; cmp_ne <= 1'b0; ref_q <= '0; cls_q <= 2'd3;
+                sw_full <= '0; en_q2 <= 1'b0; xfall_q <= 1'b0; xf_full <= 1'b0; xst_q <= '0; xad_q <= '0;
+            end else begin
+                dp0 <= gs_d_i; dp1 <= dp0;
+                dh[0] <= dp1;
+                for (int i = 1; i < 22; i++) dh[i] <= dh[i-1];
+                tap_q   <= sweep_tap_i;
+                tap_chg <= (tap_q != sweep_tap_i);
+                arm_q   <= fall_evt & phy_ended_read & enabled & running;
+                ref_q   <= tr_d_f;
+                cls_q   <= cls_n;
+                cmp_v   <= 1'b0;
+                for (int i = 0; i < 3; i++) sw_full[i] <= (sw_n[i] == 16'hFFFF);
+                if (tap_chg) begin
+                    for (int i = 0; i < 3; i++) begin sw_mis[i] <= '0; sw_n[i] <= '0; end
+                    sw_arm <= 1'b0;
+                end else begin
+                    // (arm_q is the clk after the fall event: the count is one shorter)
+                    if (arm_q) begin
+                        sw_arm <= 1'b1; sw_cnt <= 4'd8; sw_ref <= ref_q; sw_cls <= cls_q;
+                    end else if (sw_arm) begin
+                        if (sw_cnt != 4'd0) sw_cnt <= sw_cnt - 4'd1;
+                        else begin
+                            sw_arm <= 1'b0; cmp_v <= 1'b1; cmp_ne <= (dh[sw_idx] != sw_ref);
+                        end
+                    end
+                    if (cmp_v && sw_cls != 2'd3 && !sw_full[sw_cls]) begin
+                        sw_n[sw_cls] <= sw_n[sw_cls] + 16'd1;
+                        if (cmp_ne) sw_mis[sw_cls] <= sw_mis[sw_cls] + 16'd1;
+                    end
+                end
+                // the clock pin, and the falls nobody waited for
+                ph2_h <= {ph2_h[30:0], ph2_s[1]};
+                en_q  <= enabled; en_q2 <= en_q;
+                xfall_q <= phy_xfall; xst_q <= phy_state; xad_q <= last_addr_o;
+                xf_full <= (xf_n == 16'hFFFF);
+                if (en_q & ~en_q2) begin xf_n <= '0; xf_got <= 1'b0; xf_arm <= 1'b0; end
+                else begin
+                    if (xfall_q && !xf_full) xf_n <= xf_n + 16'd1;
+                    if (xfall_q && !xf_got && !xf_arm) begin
+                        xf_arm <= 1'b1; xf_cnt <= 4'd6; xf_state <= xst_q; xf_addr <= xad_q;
+                    end else if (xf_arm) begin
+                        if (xf_cnt != 4'd0) xf_cnt <= xf_cnt - 4'd1;
+                        else begin xf_arm <= 1'b0; xf_got <= 1'b1; xf_h <= ph2_h; end
+                    end
+                end
+            end
+        end
+        assign dg_w[0] = {3'b0, tap_q, 7'b0, xf_got, xf_n};
+        assign dg_w[1] = {sw_mis[0], sw_n[0]};
+        assign dg_w[2] = {sw_mis[1], sw_n[1]};
+        assign dg_w[3] = {sw_mis[2], sw_n[2]};
+        assign dg_w[4] = xf_h;
+        assign dg_w[5] = {5'b0, xf_state, xf_addr};
+    end else begin : g_nodiag
+        for (genvar i = 0; i < 6; i++) begin : g_z assign dg_w[i] = 32'h0; end
+    end
+
+    logic [31:0] vml_w;
+    always_comb begin
+        unique case (tele_idx_i)
+            6'd18: vml_w = vml_a[0];  6'd19: vml_w = vml_b[0];  6'd20: vml_w = vml_c[0];
+            6'd21: vml_w = vml_a[1];  6'd22: vml_w = vml_b[1];  6'd23: vml_w = vml_c[1];
+            6'd24: vml_w = vml_a[2];  6'd25: vml_w = vml_b[2];  6'd26: vml_w = vml_c[2];
+            6'd27: vml_w = vml_a[3];  6'd28: vml_w = vml_b[3];  6'd29: vml_w = vml_c[3];
+            default: vml_w = 32'h0;
+        endcase
+    end
+
     assign status_o = {ph2_alive, running, enabled, be_ok, gs_res_n_i, gs_rdy_i, 2'b00};
     assign mode_o   = {rom_valid, copy_busy, held, brk_fast, cardmem, cxrom, brk_slow, 1'b0};
     always_ff @(posedge clk) begin
@@ -604,12 +825,23 @@ module gs_accel #(
             6'd7:    tele_word_o <= {8'h00, verify_addr};
             6'd8:    tele_word_o <= {rom_copies, 8'h00, rom_sum};
             6'd9:    tele_word_o <= {r_shadow, r_cyareg, r_sltromsel, r_statereg};
-            6'd10:   tele_word_o <= {24'h0, r_misc};
+            6'd10:   tele_word_o <= {16'h0, rules_motor, 2'b00, cfg_rules_i, rules_slow, r_misc};
             6'd11:   tele_word_o <= cycle_count_o;
             6'd12:   tele_word_o <= {21'h0, EXP_DDR, x_ovf, exp_ready_i, 8'(EXP_BANKS)};
             6'd13:   tele_word_o <= {verify_scount, 8'h00, 4'h0, SLOW_COPY, slow_whole, cfg_slow_i, brk_slow};
             6'd14:   tele_word_o <= {8'h00, verify_saddr};
-            default: tele_word_o <= 32'h0;
+            6'd15:   tele_word_o <= tr_s0;        // (TRACE: gs_accel_trace's stat0 to stat2; else 0)
+            6'd16:   tele_word_o <= tr_s1;
+            6'd17:   tele_word_o <= tr_s2;
+            // (every build: mismatches of card RAM, which stop no bring-up - their count and
+            // the last one's address; with the trace, the number in the log)
+            6'd30:   tele_word_o <= {verify_rcount, 13'h0, vml_n};
+            6'd31:   tele_word_o <= {8'h00, verify_laddr};
+            default: tele_word_o <= TRACE ? vml_w : 32'h0;
         endcase
+        tele_flags_o <= 5'b00111;
+        if (TRACE && tele_idx_i[5]) begin tele_word_o <= tr_word; tele_flags_o <= tr_flags; end
+        // (TRACE, the ring told to stand still: the instruments in place of the statistics)
+        if (TRACE && trace_freeze_i && tele_idx_i < 6'd6) tele_word_o <= dg_w[tele_idx_i[2:0]];
     end
 endmodule

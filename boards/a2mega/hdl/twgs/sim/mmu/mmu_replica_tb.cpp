@@ -81,7 +81,7 @@ static void expect(const char* what, bool rtl, bool model)
 #define RD(a)      cycle((a), false, 0)
 #define WR(a, d)   cycle((a), true, (d))
 // statereg bits: 7 ALTZP 6 PAGE2 5 RAMRD 4 RAMWRT 3 RDROM 2 LCBNK2 1 ROMBANK 0 INTCXROM
-// misc bits:     6 bank latch 5 INTC8ROM 4 SLOTC3ROM 3 80STORE 2 HIRES 1 LC_WE 0 LC pre-write
+// misc bits:     7 $C031 bit 6 (3.5 drive selected) 6 bank latch 5 INTC8ROM 4 SLOTC3ROM 3 80STORE 2 HIRES 1 LC_WE 0 LC pre-write
 #define ST(mask, val)  ((dut->statereg_o & (mask)) == (val)), ((gold.statereg() & (mask)) == (val))
 #define MI(mask, val)  ((dut->misc_o & (mask)) == (val)), ((gold.misc() & (mask)) == (val))
 
@@ -147,8 +147,37 @@ static void directed()
     expect("... but bank E0/E1 I/O still works: SLTROMSEL", dut->sltromsel_o == 0xA6, gold.sltromsel == 0xA6);
     expect("CYAREG", dut->cyareg_o == 0x94, gold.cyareg == 0x94);
     expect("NEWVIDEO bit 0 = bank latch", MI(0x40, 0x00));
+    expect("DISKREG: clear after reset", MI(0x80, 0x00));
+    WR(0x00C031, 0x40);
+    expect("DISKREG: with IOLC inhibited a bank-00 write is missed", MI(0x80, 0x00));
+    WR(0xE0C031, 0xBF);
+    expect("DISKREG: bit 6 clear in the byte written, the other bits no matter", MI(0x80, 0x00));
+    WR(0xE0C031, 0x40);
+    expect("DISKREG bit 6 = the 3.5 drive selected", MI(0x80, 0x80));
+    RD(0xE0C031);
+    expect("DISKREG: a read changes nothing", MI(0x80, 0x80));
+    WR(0xE1C031, 0x80);
+    expect("DISKREG: cleared again", MI(0x80, 0x00));
+    // all-banks shadow (CYAREG bit 4, set above) with I/O still inhibited in
+    // banks 00/01 (SHADOW $5F): page $C0 of an expansion bank is its RAM
+    {
+        const uint8_t st0 = dut->statereg_o, mi0 = dut->misc_o;
+        WR(0x05C035, 0x08);
+        expect("all-banks shadow with I/O inhibited ($C035 bit 6): $C035 of bank 05 is RAM", dut->shadow_o == 0x5F, gold.shadow == 0x5F);
+        RD(0x02C055); RD(0x02C057); WR(0x02C001, 0); WR(0x02C003, 0); WR(0x02C005, 0); WR(0x02C009, 0);
+        RD(0x02C081); RD(0x02C081); WR(0x02C068, 0xF0);
+        expect("... no switch moves from $C0xx of bank 02 then",
+               dut->statereg_o == st0 && dut->misc_o == mi0, gold.statereg() == st0 && gold.misc() == mi0);
+        WR(0x02C036, 0x80);
+        expect("... nor the speed register", dut->cyareg_o == 0x94, gold.cyareg == 0x94);
+    }
+    WR(0xE0C035, 0x08);
+    WR(0x05C035, 0x18);
+    expect("all-banks shadow (CYAREG bit 4), the inhibit off: I/O answers in bank 05", dut->shadow_o == 0x18, gold.shadow == 0x18);
+    RD(0x02C055);
+    expect("... and PAGE2 from bank 02", ST(0x40, 0x40));
+    RD(0x02C054);
     WR(0x05C035, 0x08);
-    expect("all-banks shadow (CYAREG bit 4): I/O answers in bank 05", dut->shadow_o == 0x08, gold.shadow == 0x08);
     WR(0x00C036, 0x80);
     WR(0x05C035, 0x7F);
     expect("... and not once the bit is clear", dut->shadow_o == 0x08, gold.shadow == 0x08);
@@ -224,7 +253,7 @@ int main(int argc, char** argv)
     static const uint8_t iobanks[] = {0x00, 0x00, 0x00, 0x01, 0xE0, 0xE1, 0x02, 0x7F, 0xFF, 0x80};
     static const uint8_t ioregs[]  = {
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x28, 0x29,
-        0x2D, 0x35, 0x36, 0x54, 0x55, 0x56, 0x57, 0x68, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86,
+        0x2D, 0x31, 0x35, 0x36, 0x54, 0x55, 0x56, 0x57, 0x68, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86,
         0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F, 0x90, 0x30
     };
     srand(0x5C0816);

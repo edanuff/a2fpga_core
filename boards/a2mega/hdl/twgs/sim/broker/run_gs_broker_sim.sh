@@ -47,7 +47,7 @@ STOCK=( "$CORE/P65C816_pkg.sv" "$CORE/mcode.sv" "$CORE/bit_adder.v" "$CORE/adder
 FASTF=( "$FAST/F65C816_pkg.sv" "$FAST/mcode.sv" "$FAST/AddSubBCD.sv" "$FAST/ALU.sv" "$FAST/AddrGen.sv"
         "$FAST/AddrBus.sv" "$FAST/F65C816.sv" )
 DUT=( "$TWGS/gs_socket_phy.sv" "$TWGS/gs_mmu_decode.sv" "$TWGS/gs_mmu_replica.sv" "$TWGS/gs_accel_broker.sv"
-      "$TWGS/gs_accel_romcopy.sv" "$TWGS/gs_accel_exp.sv" "$HERE/gs_exp_mem_sim.sv"
+      "$TWGS/gs_accel_romcopy.sv" "$TWGS/gs_accel_rules.sv" "$TWGS/gs_accel_exp.sv" "$HERE/gs_exp_mem_sim.sv"
       "$HERE/tb_gs_broker.sv" "$SIM/mmu/iigs_machine_dpi.cpp" )
 
 build() {   # name, extra verilator args...
@@ -72,7 +72,7 @@ build b100_2d +define+FAST_CORE +define+CLK100 -GDATA_LATE=1 -GSTEP_CLKS=2 -GADD
 # the board's socket PLL, too; and (b110_2c) with the card's ROM image empty, for +mode=copy
 # (the 110 MHz builds with the board's near-memory tag, A14-A17: -GNEAR_KW=4)
 NEARX=( +define+FAST_CORE +define+F65C816_MCODE_ROM +define+ACCEL_SHADOW -GDATA_LATE=1 -GNEAR=1 -GSTEP_CLKS=2 -GADDR_CLKS=2 -GFAR_CLKS=2
-        "${FASTF[@]}" "$TWGS/gs_bram16be.sv" "$TWGS/gs_accel.sv" )
+        "${FASTF[@]}" "$TWGS/gs_bram16be.sv" "$TWGS/gs_accel_trace.sv" "$TWGS/gs_accel.sv" )
 build b100_2x +define+CLK100 "${NEARX[@]}" & p8=$!
 build b108_2x "${NEARX[@]}" & p9=$!
 build b110_2x +define+CLK110 -GNEAR_KW=4 "${NEARX[@]}" & p10=$!
@@ -96,6 +96,9 @@ build b105_2s +define+CLK105 -GNEAR_KW=9 -GACC_EXP=8 -GEXP_DDR=1 "${NEARX[@]}" &
 # reads of that RAM come from it in the runs with +slow (the k_ runs, below)
 build b105_2t +define+CLK105 -GNEAR_KW=9 -GACC_EXP=126 -GEXP_DDR=1 -GNEAR_LINE=1 -GSLOW_COPY=1 "${NEARX[@]}" & p16=$!
 build b105_2k +define+CLK105 -GNEAR_KW=9 -GACC_EXP=126 -GEXP_DDR=1 -GNEAR_LINE=1 -GSLOW_COPY=1 -GROM_PRESET=0 "${NEARX[@]}" & p17=$!
+# ... and (b105_2a) with gs_accel's trace of the socket's cycles in it (gs_accel_trace, the trace
+# build): the pins must still be the design's in every clk, and every entry the cycle the machine saw
+build b105_2a +define+CLK105 -GNEAR_KW=9 -GACC_EXP=126 -GEXP_DDR=1 -GNEAR_LINE=1 -GSLOW_COPY=1 -GACC_TRACE=1 +define+ACC_TRACE_TB "${NEARX[@]}" & p20=$!
 # ... and the line memory in front of block RAM alone (banks 02/03 in it), and with no expansion
 # memory in the design at all (the bench's own, a byte wide, read a line at a time)
 build b110_2l +define+CLK110 -GNEAR_KW=4 -GACC_EXP=2 -GNEAR_LINE=1 "${NEARX[@]}" & p18=$!
@@ -118,6 +121,7 @@ wait $p16 || { echo "verilator FAILED (b105_2t) - see $OUT/verilate_b105_2t.log"
 wait $p17 || { echo "verilator FAILED (b105_2k) - see $OUT/verilate_b105_2k.log"; grep -E "%Error|error:" "$OUT/verilate_b105_2k.log" | head -20; bfail=1; }
 wait $p18 || { echo "verilator FAILED (b110_2l) - see $OUT/verilate_b110_2l.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2l.log" | head -20; bfail=1; }
 wait $p19 || { echo "verilator FAILED (b110_2m) - see $OUT/verilate_b110_2m.log"; grep -E "%Error|error:" "$OUT/verilate_b110_2m.log" | head -20; bfail=1; }
+wait $p20 || { echo "verilator FAILED (b105_2a) - see $OUT/verilate_b105_2a.log"; grep -E "%Error|error:" "$OUT/verilate_b105_2a.log" | head -20; bfail=1; }
 [[ $bfail -ne 0 ]] && exit 1
 
 # ---------------------------------------------------------------- runs
@@ -296,6 +300,41 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run k_copy      b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=1
     run k_copy_rst  b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=2 +reset
     run k_recopy    b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=1 +recopy
+    # ... and with the trace of the socket's cycles in gs_accel (the trace build)
+    run a_native    b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126
+    run a_paced     b105_2a $T +mode=paced  +expect +irq +exp=126 +mbexp=126 +slow=1
+    run a_fast      b105_2a $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +slow=2 +rules
+    run a_toggle    b105_2a $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +slow=1 +steps=120000
+    run a_rstw      b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126 +resetw
+    run a_st3       b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126 +stallp=3 +steps=120000
+    # ... and with a pulse narrower than a clk on the FPGA's PH2 input alone (+ph2pulse=<n>: after
+    # every n-th issue of a cycle, a clk and 2 to 8 ns after its clk edge - where the card's pin
+    # showed one with its USB fed, 2026-11-24; +ph2pulsefall=<ns>: that long after a fall instead).
+    # Every check of the run stands as without it, and the trace build's count of falls that are
+    # no fall is the bench's count of its pulses.
+    run h_native    b105_2t $T +mode=native +expect +irq +exp=126 +mbexp=126 +ph2pulse=1
+    run h_paced     b105_2t $T +mode=paced  +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=1
+    run h_fast      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +slow=2 +rules +ph2pulse=1
+    run h_toggle    b105_2t $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=3 +steps=120000
+    run h_copy      b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=1
+    run h_st3       b105_2t $T +mode=native +expect +irq +exp=126 +mbexp=126 +stallp=3 +ph2pulse=1 +steps=120000
+    run h_rstw      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +resetw +ph2pulse=2
+    run h_fall12    b105_2t $T +mode=native +expect +irq +exp=126 +mbexp=126 +ph2pulse=1 +ph2pulsefall=12
+    run h_fall25    b105_2t $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +slow=2 +ph2pulse=1 +ph2pulsefall=25 +steps=120000
+    run h_a_nat     b105_2a $T +mode=native +expect +irq +exp=126 +mbexp=126 +ph2pulse=1
+    run h_a_paced   b105_2a $T +mode=paced  +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=2
+    run h_a_tog     b105_2a $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +slow=1 +ph2pulse=1 +steps=120000
+    # ... and with the machine's speed rules deciding between fast and paced (gs_accel_rules; +rules):
+    # the test program's T27 has a stretch for each cause and one that must stay fast
+    run q_fast      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules
+    run q_fast_c    b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=1
+    run q_fast_sw   b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=2
+    run q_toggle    b105_2t $T +mode=toggle +expect +irq +exp=126 +mbexp=126 +rules +slow=2 +steps=120000
+    run q_1mhz      b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=1 +noturbo
+    run q_rst       b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=1 +reset
+    run q_st3       b105_2t $T +mode=fast   +expect +irq +exp=126 +mbexp=126 +rules +slow=1 +stallp=3 +steps=120000
+    run q_copy      b105_2k $T +mode=copy   +expect +irq +exp=126 +mbexp=126 +rules +slow=1
+    run q_line      b110_2l $T +mode=fast   +expect +irq +exp=2 +rules
     # ... the line memory with banks 02/03 in block RAM, and with none
     run l_native    b110_2l $T +mode=native +expect +irq +exp=2
     run l_paced     b110_2l $T +mode=paced  +expect +irq +exp=2
@@ -308,9 +347,17 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run l_copy      b110_2m $T +mode=copy   +expect +irq
     run l_copy_rst  b110_2m $T +mode=copy   +expect +irq +reset
     run l_recopy    b110_2m $T +mode=copy   +expect +irq +recopy
+    # (... with RDY low on the idle cycle the second hold begins in: at these two steps it is one)
+    # (the steps move with the test program: 20000 to 20071 and 20169 to 20171 as of T28;
+    # a sweep of +recopyat on this build finds them)
+    run l_recopy_hs  b110_2m $T +mode=copy  +expect +irq +recopy +holdstall +recopyat=20020
+    run l_recopy_hs2 b110_2m $T +mode=copy  +expect +irq +recopy +holdstall +recopyat=20170
     run c_copy      b110_2c $T +mode=copy   +expect +irq
     run c_copy_rst  b110_2c $T +mode=copy   +expect +irq +reset
     run c_recopy    b110_2c $T +mode=copy   +expect +irq +recopy
+    # ... the second copy asked for with RDY low on the idle cycle the hold begins in
+    run c_recopy_hs  b110_2c $T +mode=copy  +expect +irq +recopy +holdstall
+    run c_recopy_hs2 b110_2c $T +mode=copy  +expect +irq +recopy +holdstall +recopyat=20020
     run q_native    b100_2  $T +mode=native +expect +irq
     run q_fast      b100_2  $T +mode=fast   +expect +irq
     run q_toggle    b100_2  $T +mode=toggle +expect +irq +steps=120000
@@ -337,6 +384,7 @@ if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     run j_fast_sw   b105_2t $T +mode=fast   +expect +exp=126 +mbexp=126 +slow=2 +wlog=wstream.txt
     run j_paced_c   b105_2t $T +mode=paced  +expect +exp=126 +mbexp=126 +slow=1 +wlog=wstream.txt
     run j_copy_c    b105_2k $T +mode=copy   +expect +exp=126 +mbexp=126 +slow=1 +wlog=wstream.txt
+    run j_rules     b105_2t $T +mode=fast   +expect +exp=126 +mbexp=126 +slow=1 +rules +wlog=wstream.txt
 fi
 DO_ROM=0
 if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
@@ -367,6 +415,7 @@ if [[ "$SUITE" == "rom" || "$SUITE" == "all" ]]; then
         run m_fast_sw   b105_2t $R +mode=fast   +exp=126 +mbexp=126 +slow=2
         run m_paced_c   b105_2t $R +mode=paced  +exp=126 +mbexp=126 +slow=1
         run m_copy_c    b105_2k $R +mode=copy   +exp=126 +mbexp=126 +slow=1
+        run m_rules     b105_2t $R +mode=fast   +exp=126 +mbexp=126 +slow=1 +rules
         run o_native    b110_2l $R +mode=native +exp=2
         run o_fast      b110_2l $R +mode=fast   +exp=2
         run o_fast_cx   b110_2l $R +mode=fast   +exp=2 +cxrom=1
@@ -412,17 +461,17 @@ same() {    # label, reference run, other runs...: step hash and write stream mu
 if [[ "$SUITE" == "program" || "$SUITE" == "all" ]]; then
     same "test program" e_native e_paced e_fast e_fast100 e_dl108 e_dl100 e_dx100 e_dx108 e_dx110 e_copy
     same "test program, two expansion banks" f_native f_paced f_fast g_paced g_fast
-    same "test program, 126 expansion banks, Mega II RAM read from the card's copy" j_native j_fast j_fast_c j_fast_sw j_paced_c j_copy_c
+    same "test program, 126 expansion banks, Mega II RAM read from the card's copy" j_native j_fast j_fast_c j_fast_sw j_paced_c j_copy_c j_rules
 fi
 if [[ $DO_ROM -eq 1 ]]; then
     same "ROM 01 boot ($STEPS steps)" r_native r_paced r_fast r_fast_cx r_fast100 r_f816 r_dl108 r_dl100 r_dx100 r_dx108 r_dx110 r_copy
     same "ROM 01 boot, two expansion banks ($STEPS steps)" s_native s_fast t_paced t_fast
-    same "ROM 01 boot, 126 expansion banks ($STEPS steps)" m_native m_paced m_fast m_copy m_fast_c m_fast_sw m_paced_c m_copy_c
+    same "ROM 01 boot, 126 expansion banks ($STEPS steps)" m_native m_paced m_fast m_copy m_fast_c m_fast_sw m_paced_c m_copy_c m_rules
     same "ROM 01 boot, the line memory on block RAM ($STEPS steps)" o_native o_fast o_fast_cx
     same "ROM 01 boot, the line memory, no expansion ($STEPS steps)" r_native o_copy
 fi
 for n in "${NAMES[@]}"; do
-    case "$n" in d*|e_dl*|r_dl*|x*|y*|z*|w*|v*|c_*|e_dx*|r_dx*|e_copy|r_copy|f_*|s_*|g_*|t_*|u_*|m_*|l_*|o_*|k_*|j_*) grep -E '^---- (local reads|near memory|step lengths|ROM copy|gs_accel|expansion memory|copy of Mega II)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
+    case "$n" in d*|e_dl*|r_dl*|x*|y*|z*|w*|v*|c_*|e_dx*|r_dx*|e_copy|r_copy|f_*|s_*|g_*|t_*|u_*|m_*|l_*|o_*|k_*|j_*|q_*|a_*) grep -E '^---- (local reads|near memory|step lengths|ROM copy|gs_accel|expansion memory|copy of Mega II|speed rules)' "$OUT/$n/sim.log" | sed "s/^---- /$n: /" ;; esac
 done
 for n in "${NAMES[@]}"; do
     grep -E '^---- socket timing' "$OUT/$n/sim.log" | sed "s/^---- /$n: /"

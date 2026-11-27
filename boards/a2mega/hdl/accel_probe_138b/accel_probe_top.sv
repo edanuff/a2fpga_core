@@ -79,7 +79,7 @@ module accel_probe_top (
     logic        enabled, running, fall_evt, issue_evt, ph2_alive, be_ok;
     logic [31:0] cycle_count;
 
-    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself
+    gs_socket_phy #(.CORE_SUBST(1'b0), .WDATA_LATE(1'b1), .PH2_SAMPLED(1'b1)) u_phy (  // the broker substitutes internal I/O cycles itself; no flop on the PH2 pin
         .force_slow_i(1'b0),
         .clk(clk), .rst_n(rst_n), .armed_i(cfg[2]), .listen_i(1'b0), .out_extra_i(4'd0),
         .cpu_clk_o(), .cpu_rst_n_o(),
@@ -153,7 +153,7 @@ module accel_probe_top (
         .phy_fall_evt_i(fall_evt), .phy_issue_evt_i(issue_evt),
         .phy_a_o(phy_a), .phy_d_out_o(phy_d_out), .phy_we_n_o(phy_we_n),
         .phy_vpa_o(phy_vpa), .phy_vda_o(phy_vda), .phy_vp_n_o(phy_vp_n),
-        .gs_ph2_i(gs_ph2), .gs_d_i(gs_d), .gs_rdy_i(gs_rdy),
+        .gs_d_i(gs_d), .gs_rdy_i(gs_rdy),
         .gs_irq_n_i(gs_irq_n), .gs_nmi_n_i(gs_nmi_n), .gs_abort_n_i(gs_abort_n),
         .cpu_rst_n_o(cpu_rst_n), .cpu_ce_o(cpu_ce), .cpu_ce_c_o(cpu_ce_c), .cpu_d_in_o(cpu_d_in),
         .cpu_irq_n_o(cpu_irq_n), .cpu_nmi_n_o(cpu_nmi_n), .cpu_abort_n_o(cpu_abort_n),

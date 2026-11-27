@@ -33,7 +33,35 @@ its times is 7 % under the AppleSqueezer GS Turbo's published ones.
 counter without its adder, three placements of three at 105 MHz have no
 violation (p0, p1, p2). p1 flashed 2026-11-15 and brought up to paced
 card memory with the copy, no mismatch, then fast (`1B`): five runs of
-the benchmark average 50.75 MHz, q1's figure.**
+the benchmark average 50.75 MHz, q1's figure.** **Since: the firmware
+brings it to fast mode by itself (section 3l, on the card), and speed
+control is built - paced mode at the machine's pace and the machine's
+speed rules (section 3m: simulated, three placements with no violation;
+sc1 and its firmware flashed 2026-11-15 15:43; one power-up on the
+machine: fast by itself, and a stretch of the boot with the speed
+register at normal seen paced by the rules; the a2p25's emulated
+Disk II booted and read through them, and the motor rule seen pacing by
+itself; a fault of the slot 6 rule seen and the rule changed in the
+source, with the repair of a ROM copy that begins under a RDY stall
+(simulated; **three placements with no violation, se0 to se2**; se2
+flashed 2026-11-16 07:26; **on a power-up that evening the bring-up
+stopped on a verify mismatch in bank 01 and left the card on socket
+bytes, and Arkanoid locked up in that session: cause not known,
+section 3m; **2026-11-21: the lock happens with the accelerator off by
+its setting, mode 00, and on p1 built again - it is not of the speed
+control work; read with a trace build (section 3n): **not the card's -
+slot 4 was set to Your Card for another program's Mockingboard, the ROM
+found no mouse firmware, and the game does not test ReadMouse's error;
+with slot 4 back on the mouse port it runs (Ed)**; **tv1 - the trace
+build with the speed rules' gap closed and the over-held path at its
+two clks, three placements with no violation - flashed 2026-11-22
+09:01 and loaded (its stamp read from the card); the setting on again
+since then, with the machine off; nothing has run on it**); no write, no real drive, no benchmark yet). **Found with it, and not of this build: the copy of E0/E1 has
+only what the machine was given since the card began to mirror, and
+RAM that nothing has written since power-up reads differently from the
+copy than from the machine - about 23,000 bytes on this power-up, and
+the Control Panel reads one such line (section 3m, "The cause"). x0,
+q1 and p1 have it too. Not fixed.**
 Parents: [`gs_socket_s7_accelerator_scoping.md`](gs_socket_s7_accelerator_scoping.md)
 (what the accelerator is) and
 [`gs_socket_s7_fast_core_exploration.md`](gs_socket_s7_fast_core_exploration.md)
@@ -98,6 +126,7 @@ Requests in register 29:
 | 2 | CXROM | internal `$C100–$CFFF` firmware served from the image. Taken when the core is in reset or held (so: at /RES, or set it with COPY). |
 | 3 | COPY | 0 → 1: read the ROM image through the socket. The core is held between two steps for about 46 ms. |
 | 4 | SLOW | (section 3h; not in the build on the card) reads of the Mega II's RAM below `$C000` in banks E0/E1 come from the card's copy. Needs CARDMEM. May change at any step. |
+| 5 | RULES | (section 3m; in the builds on the card since sc1) fast mode gives way to the machine's pace where the speed rules say so. May change at any step. |
 
 Bits 0–2 take effect only once an image has been copied since power-up.
 **With register 29 at 00, or without the key, the card is S6 on the new
@@ -1595,6 +1624,1986 @@ constant of the test divided by the accelerated time. So the build that
 meets the timing rule on three placements measures what the experiment
 measured, past the Squeezer's 391 ticks by the same margin.
 
+## 3l. Fast by itself: the bring-up in the firmware (2026-11-15; tested against a model; flashed; one power-up on the card reached fast mode by itself)
+
+Until now fast mode was reached by hand over telnet, one register write
+at a time. The ESP32 firmware now runs the same ladder after every arm
+(`gs_socket.c`, `gs_accel_*`), each step checked before the next:
+
+| step | register 29 | goes on when | if not |
+|---|---|---|---|
+| wait | untouched | the gateware shows its signature and the socket's /RES has been high for 2 s | waits |
+| ROM copy | `00`, `08` | the image is valid | copies again (a /RES cuts a copy short), three tries, then stops on `00` |
+| card memory at the machine's pace | `0A` | 1 s with the verify count unmoved | back to `08`, and it says where the mismatch was |
+| the same with the copy of E0/E1 | `1A` | 1 s with the copy's verify count unmoved | fast without the copy (`0B`) |
+| fast | `1B` | | |
+
+So about 4.5 s after the machine's reset ends it is in fast mode, with a
+second or two at the paced rate on the way (slower than the machine for a
+program in expansion RAM; section 3j). Rules it keeps:
+
+- **The wait is there for the ROM's cold or warm start test**, which
+  must read the machine's own RAM: the card's memory holds only what the
+  core has written since the socket was armed, and after a machine power
+  cycle with the card still powered it holds the last session's bytes.
+- **Machine off clears register 29**, so every power-up starts on the
+  machine's own memory and copies the ROM again.
+- **After fast mode has run, register 29 never goes back to `00` or
+  `08`** while the machine is on. "Off" is paced card memory.
+- A build without the copy of E0/E1, or a copy that is not whole, goes
+  fast without it. A DDR3 that is not ready is "card memory not
+  granted": it stops on `08`.
+- An ESP32 restart under a machine in fast mode adopts what it finds and
+  writes nothing. Gateware without the signature (S6, the full core) is
+  never written to.
+- A hand write of register 29 or 31 (`gs set`) stops the ladder until
+  `gs accel go`.
+
+The setting is one byte of the saved settings, `gs_accel_off`, 0 by
+default: **the accelerator is on unless it is turned off**, as a
+TransWarp GS is. Telnet (`:` for the command line):
+
+| command | |
+|---|---|
+| `gs accel` | state, mode in effect decoded, ROM copies and sum, both verify counts and their last addresses, the expansion memory |
+| `gs accel on` / `off` | the saved setting. `off` with fast mode in effect goes to paced card memory at once; from the next power-up the machine runs at its own pace |
+| `gs accel slow` / `fast` | paced card memory and back, at any time, setting unchanged |
+| `gs accel go` | run the ladder now (also after a failure, a hand write, or with the setting off) |
+| `gs accel delay <ms>`, `verify <ms>` | the wait and the length of each verify step (not saved) |
+
+`gs` gains one line with the state, and each step is logged on the
+console (`ACCEL: ROM IMAGE VALID, SUM 7EE8` ... `ACCEL: FAST`).
+
+**Tested** on the host against a model of the register window
+(`tests/host/test_gs_accel.c`, run by `tests/host/run.sh`): twelve
+scenarios - a normal start, the setting off, a verify mismatch, a
+mismatch in the copy, a build without the copy, a /RES in the ROM copy,
+machine off and on again while fast, an ESP32 restart under fast mode,
+slow and fast and the setting at run time, a hand write, S6 gateware, a
+DDR3 that is not ready - each with the writes to register 29 compared
+and the rule about `00` after fast mode checked on every write. The
+firmware builds for the 1.0a3 board (1,136,343 bytes, 86 % of the slot).
+
+**On the card (2026-11-15, 12:57), and what exactly.** The card's ESP32
+ran the firmware of 2026-09-13 (its banner; commit `e96b40cf`, the S6
+auto-arm). The repository's firmware has moved two months on since - the
+a2p25 variant, the USB host and the stick as the volume, the reset hold
+until media is mounted, self-update with a different partition table -
+and none of that has run against this gateware. So the card was not
+given the repository's firmware: it was given **its own source,
+`e96b40cf`, with this section's change to four files applied** (the diff
+of `gs_socket.c`, `gs_socket.h`, `settings.h`, `telnetd.c` in the commit
+that adds this section; those files but `telnetd.c` are the same in both
+trees, and the patch applies to all four as it is), built with that
+tree's Makefile (BOARD_REV 103, the `no_ota` partition table the card
+has): 1,046,971 bytes, sha256 `d1533014030e9934…591574e8fb77c1f10`.
+Uploaded over the ESP32's USB with the IIgs off, the USB serial number
+checked against the card's network address first. It came up
+(`A2MEGA ESP32 NOV 15 2026 12:55:17`), joined the network with its saved
+settings, and waits for the machine's clock with the socket off;
+`gs accel` answers, setting ON. Moving this card to the repository's
+firmware is a step of its own.
+
+**The first power-up with it (2026-11-15, about 13:05).** The IIgs was
+switched on with nothing typed at the card. Its console, in order:
+machine clock up, reset released, armed 20 ms after the slot reset read
+high; `ACCEL: WAITING FOR /RES HIGH 2000 MS`, `COPYING THE ROM (TRY 1)`,
+`ROM IMAGE VALID, SUM 7EE8`, card memory at the machine's pace, the same
+with the copy of E0/E1, `ACCEL: FAST`. `gs accel` afterwards: mode 9A,
+one copy, both verify counts 0 with no mismatch address, the DDR3 ready
+with 126 banks; no stall. Counters over 8.6 s a minute later: 33.2 M
+core steps a second, 0.162 M socket cycles a second for the core, 21.95
+M line hits and 0.49 M misses a second - this morning's figures at a
+prompt in fast mode. So the ladder ran inside the boot, where it had
+never run, and the two verify seconds saw no mismatch there. On the
+screen the machine booted normally (Ed).
+
+**A control-reset in fast mode (the same session).** The first reset
+taken in fast mode on hardware. The card's event log has it whole: the
+slot's /RESET and the socket's /RES fell together, the core went into
+reset in the same 2 us, the lines rose 179.2 ms later and the core ran
+again 2 us after that. Afterwards: still `ACCEL: FAST`, mode 9A, the
+ROM image still the one copy (no second copy, as meant: a warm reset
+keeps the image and the card's memory), no stall, both verify counts 0,
+and the idle rates as before the reset (33.2 M core steps and 0.162 M
+socket cycles a second), the bus in the ROM's banks and E0. The
+firmware wrote nothing: there is nothing for it to do at a reset.
+
+**Not done, not known.**
+
+- One power-up and one control-reset. The model is mine, and only the card can say where it is
+  wrong; this run agreed with it on the normal path. None of the other
+  paths (a mismatch, a /RES in the copy, machine off and on with the
+  card powered, an ESP32 restart, `slow` and `fast`, the setting off)
+  has run on the card.
+- **No speed control (S7e).** Fast mode does not follow the machine's
+  speed register or slow down for a disk drive: code between accesses to
+  a drive runs at the card's rate. The a2p25's disk cards are polled and
+  do not care; a real 5.25 or 3.5 drive does, and a write to one in fast
+  mode could damage the disk's data. `gs accel slow` before using one,
+  until the card does this itself.
+- "Off" is slower than the machine once fast mode has run (section 3j).
+- A restart through Control-Open-Apple-Reset in fast mode has not been
+  taken on hardware (a control-reset has, above).
+- The `gs` line for PHI2 still assumes a 110 MHz clock; on this 105 MHz
+  build its periods read 4.5 % short.
+
+## 3m. Speed control: paced at the machine's pace, and the machine's rules (2026-11-15; simulated; three placements with no violation; sc1 flashed 15:43; the first and the motor rule seen at work with an emulated Disk II; a fault of the slot 6 rule seen and the rule changed, three placements with no violation, se2 flashed 2026-11-16; a power-up with it stopped on a verify mismatch and Arkanoid locked up, cause not known)
+
+Section 3l makes fast mode the card's normal state, and that leaves two
+things wrong. "Off" is slower than the machine (section 3j: paced card
+memory is the only way back from fast mode, and a paced program in
+expansion RAM read every byte from the DDR3). And fast mode runs the
+code between two accesses to the machine at the card's rate, whatever
+that code is: a disk drive's read and write loops count cycles.
+
+### A paced step fills its line
+
+The near memory's lines were filled by fast steps alone: the fill hung
+on the fast step's own count. A paced (native, card memory of record)
+step's far read now fills its line too (`gs_accel_broker`, `nf*`): once
+the data has been steady for two clks after the expansion memory lets
+go, once, and not in the clk the step ends. Fast mode is untouched - the
+new registers are never set in it - and so is paced mode's rule that a
+socket cycle is not taken as complete until the byte is there; only the
+first read of a line waits now. Every byte a line gives a paced step is
+compared with the socket's, as before, so the ladder's verify seconds
+now check line contents and not single bytes.
+
+In the bench, the test program paced with 126 expansion banks:
+
+| | before | now |
+|---|---|---|
+| reads that went to the expansion memory | 9,026 | 289 |
+| socket cycles issued again while a byte was on its way | 4,626 | 139 |
+| line fills | 0 | 614 |
+| time for the 60,000 steps (native: 26.85 ms) | 28.63 ms, 6.6 % over | 26.92 ms, 0.3 % over |
+
+And the ROM 01 boot paced (3 M steps): 2,144,414 reads, each a far read
+before; now 225 line fills and 2,144,189 reads out of lines, every one
+compared with the machine's byte, none different.
+
+### The machine's speed rules
+
+`gs_accel_rules.sv`, asked for by **register 29 bit 5**. With the bit
+clear nothing changes. With it set, fast mode gives way to paced card
+memory - every step a socket cycle, timed by the machine's own PHI2,
+which the FPI slows or not by its own rules - while:
+
+| | |
+|---|---|
+| the speed register (`$C036`) has bit 7 clear | the machine was asked for its normal speed: the Control Panel's setting, or a program's |
+| the motor latch of slot 4, 5, 6 or 7 is set (`$C0n9` on the bus since `$C0n8`) and that slot's detect bit in the speed register is set | the FPI's own rule for dropping to 1 MHz |
+| slot 6's motor latch is set and the 3.5 drive is selected (`$C031` bit 6) | the IWM's enable for a drive the ROM serves at the machine's fast rate by loops timed for it; the machine does not slow for it, so the first two rows do not see it |
+
+(As changed on 2026-11-15, "The slot 6 rule changed" below. **sc0 to
+sc2, and so the card, have the rule as first built:** slot 6's latch
+paces by itself whatever its detect bit says, and `$C031` is not
+looked at.)
+
+The latches follow the bus as the FPI's do (any cycle the socket shows
+at those addresses in banks 00, 01, E0, E1; an I/O access is a socket
+cycle in every mode) and clear at /RES. The change of mode is the
+broker's own, at a step boundary, a step or two after the access - the
+switch the bench has always made at random points (`+mode=toggle`).
+Telemetry word 10 is now `{16'h0, motor latches of slots 7-4, 00, rules
+asked, slow by them, the other switches}`; the mode byte's fast bit
+drops while the rules hold. (From the changed rule on, bit 7 of the
+other switches is `$C031` bit 6.)
+
+**Not among the rules:** the speaker (`$C030`: a program that times
+sound with loops plays it too high in fast mode, as on any accelerator
+with that option off), a linger after the motor goes off, slot DMA,
+interrupts. And nothing on the machine's side can ask for a speed yet:
+no Zip or TransWarp registers, no desk accessory (scoping 2.5).
+
+**The firmware** asks for the rules with fast mode (`3B` where section
+3l wrote `1B`; gateware without them ignores the bit); `gs accel rules
+on|off` at run time, and `gs accel` shows the rules, the speed register
+and the four latches.
+
+### Simulated
+
+The test program has a T27: a stretch of local code under each cause,
+and one under slot 5's latch with its detect bit clear, which must stay
+fast. The bench has its own instance of the rules for the hand-wired
+design and compares gs_accel beside it pin for pin (so the two must
+change mode at the same step), checks that a step is paced within three
+steps of the rules' asking and fast again within three of their letting
+go, that each cause paced a stretch, and that the fourth stretch ran
+fast (260 fast steps). Eleven new runs (`q_*`, `j_rules`, `m_rules`):
+with and without the copy of E0/E1, toggling, the FPI held at 1 MHz, a
+warm reset, RDY stalls, `+mode=copy`, the line memory on block RAM, the
+write stream compared with the other modes', and the ROM 01 boot - where
+the rules paced 275,398 of the 3 M steps (the ROM runs that much of its
+start at normal speed) and the run reached the same point with the same
+writes as every other.
+
+**The broker bench: 221 runs, all pass** (210 before), on the final
+source. Three faults planted in copies of the source:
+
+| planted | |
+|---|---|
+| a paced fill that does not wait for the expansion memory's data | 17 runs fail (a stale byte delivered) |
+| the rules forget slot 6's motor | 9 runs fail |
+| any motor latch paces, whatever its detect bit | **passed at first**: the check asked for one fast step in that stretch, and the first step or two after the access are fast before the mode changes. The check counts now (100 or more); 9 runs fail |
+
+Not run again: the decode sweep, the replica, socket, arm and core
+benches (nothing they build was changed), and the 32 earlier faults.
+
+### Timing
+
+Three placements of the final source, the committed options
+(`Place_Option` 1), 105 MHz, the 0.5 ns rule:
+
+| | setup / hold violations | worst slack beyond the rule | on |
+|---|---|---|---|
+| sc0 | 0 / 0 | +0.031 | a line's data into the core's P |
+| sc1 | 0 / 0 | +0.035 | the near memory's index into its hit register |
+| sc2 | 0 / 0 | +0.014 | the PHY's enable into the copy machine's sum |
+
+**Three of three.** Size (sc1): 13,249 logic cells, 11,931 flip-flops,
+12,755 of 69,120 logic slices, 182 of 340 block RAMs - 34 cells and 13
+flip-flops more than p1.
+
+### Flashed (2026-11-15 15:43)
+
+sc1 written to the card's flash with the machine off, 15:39 to 15:43,
+the first attempt, verified by the loader's read back. Then the
+firmware of section 5 (`4691e43a…`) over the same USB port, the port's
+serial number checked against the test card's first. The firmware
+answers on the network with the machine off: `gs accel` reads "no
+accelerator gateware seen, or the socket is not armed | setting ON",
+and its usage line has `rules on|off`. The gateware has not been loaded
+yet: that wants the board's power off and on.
+
+### The first power-up (2026-11-15 15:48)
+
+The board's power off and on, then the machine on. The console: ROM
+copy on the first try, sum 7EE8, paced card memory, the same with the
+copy of E0/E1, FAST. No command was typed. Three readings after it:
+
+| when | mode | speed register | what |
+|---|---|---|---|
+| 15:48:36 | - | `82` | the ladder's last line is FAST |
+| a few seconds on | `8A` | `02` | `gs accel`: "paced by them now"; last address 00:C0E1; fast asked, not in effect |
+| 15:49:42 | `9A` | `82` | fast in effect; 33.3 M steps/s, 0.162 M socket cycles/s, 21.96 M hits/s, 0.493 M misses/s |
+
+So something in the start-up cleared bit 7 for a stretch with slot 6's
+soft switches in use, and the card ran that stretch at the machine's
+pace and went back to fast when the bit was set again: the first rule,
+on the machine, with nothing typed. Which code it was has not been
+looked up. The last line's rates are those of section 3l's idle prompt.
+No motor latch was set in any reading. The copy of E0/E1: built, whole,
+verify count 0. The card memory's verify count reads 65535 (last
+7F:F50F, later 00:AE16): once fast mode has run the machine's RAM is
+stale by design and a step paced by the rules is compared with it, so
+that count says nothing after the first fast step; before the rules it
+could not move in fast mode at all. The count for E0/E1 is the one that
+still means something.
+
+### The Control Panel's speed at Normal (15:53), and fourteen mismatches not explained
+
+Ed set the Control Panel's system speed to Normal. Read at 15:53:55 and
+again at 15:55:21, the machine idle:
+
+| | fast, 15:49 | Normal, 15:53 |
+|---|---|---|
+| mode | `9A` | `8A`, "paced by them now" |
+| speed register | `82` | `02` |
+| core steps | 33.3 M/s | 1.085 M/s |
+| socket cycles for the core | 0.162 M/s | 1.016 M/s |
+| PHI2 cycles | 2.449 M/s | 1.023 M/s |
+| line misses | 0.493 M/s | 0.017 M/s |
+
+The rule does what it was built to do: the card runs at the machine's
+1 MHz. About 6 % of the steps are not socket cycles; a guess, not
+checked, is the firmware's interrupt handlers setting the speed bit for
+their own length, which the rule follows both ways.
+
+**Not explained: the count of mismatches in the copy of E0/E1 reads 14
+(last address E1:1D6B), where it read 0 at 15:49:42.** It did not move
+between the two readings ninety seconds apart. The count only moves in
+paced steps, so the fourteen fell between the speed bit clearing and
+15:53:55: the rest of the Control Panel's session, its exit, or the
+first of the idle after it. The bench holds this count at zero in every
+run, the rules' runs too, and a paced pass of the whole benchmark held
+it at zero on q1. ROM 01 has no long reference to E1:1D6B itself (it
+has many to E1:1DB0-1DD6). What it could be, none of it checked: a line
+of the copy stale after the new paced fill; a write in fast mode that
+reached the copy and not the machine, or the reverse; a comparison
+taken before a slow DDR3 read had answered (a false count: the step
+itself waits). The core uses the copy's byte, and the machine went on
+running. Until it is explained, the copy of E0/E1 with the rules is not
+known to be right.
+
+### The fourteen, narrowed (16:04 to 16:12)
+
+A log of the counters about once a second while Ed worked the Control
+Panel, and then four changes of mode by command with the machine idle
+at Normal:
+
+| what | count for E0/E1 |
+|---|---|
+| speed set back to Fast (Control Panel opened while paced) | 14, unchanged |
+| speed set to Normal, 16:05:41 | 28 within a second |
+| ... again, 16:06:44 | 42 |
+| ... again, 16:07:06 | 56 |
+| ... again, 16:08:01 | 70 |
+| a second or less at Normal, twice (16:06:10, 16:07:03) | unchanged |
+| `gs accel rules off`, then fast and `gs accel slow` four times at the idle prompt, 2 to 16 s of fast between | 70, unchanged |
+
+Fourteen each time the Control Panel sets the speed to Normal and
+leaves it there, the last address E1:1D6B each time, and none from a
+change from fast to paced by itself. So it is not the change of mode
+and it is not chance: some code that runs when that option is set reads
+E1:1D6B, or bytes that end there, and the copy's byte is not the
+machine's. The simplest reading is one byte that differs and stays
+different, read fourteen times at each change of the option; opening
+the Control Panel while paced and setting Fast would not show it,
+because nothing is compared once the card is fast. ROM 01 has no
+absolute or long reference to E1:1D6B (the Desk Manager's own variables
+are at E0:1D61 to 1D74, through its data bank), so the reader has not
+been found. Fast mode with the speed register at Normal (the rules not
+asked) ran here for the first time, sixteen seconds at the longest,
+with nothing seen wrong. Next: the monitor's verify command over E0 and
+E1 with the card paced reads every byte through the comparison, which
+counts the bytes that differ and so audits the whole copy.
+
+### The audit, and the cause: RAM the copy never had (16:20 to 16:51)
+
+Ed restarted the machine to BASIC at 16:20 (the card paced, `1A`) and
+ran the monitor's dump and verify with the card paced:
+
+| command | mismatched reads | bytes, about |
+|---|---|---|
+| `E1/1D60.1D6F` | 32 | all 16; the screen shows FF for each |
+| `E1/0000<E1/0000.BFFFV` | 37,044 | 18,500; none above E1:9F0F |
+| `E0/0000<E0/0000.BFFFV` | 9,976 | 5,000; nearly all of 0000-02FF; none above 7FFF |
+
+Then the same lines read three ways:
+
+| line | the machine (`0A`, mode 88) | the copy, paced (`1A`) | the copy, fast (`1B`) |
+|---|---|---|---|
+| E1:1D60-1D6F | 00, all | FF, all | FF, all |
+| E0:0000-000F | 00, all | (counted as different) | `96 D5 8A C8 B4 AD 83 58`, twice |
+| E1:0000-000F | - | - | `5C AF 00 FE 5C A3 00 FE 5C 75 00 FE 5C 69 00 FE`, the machine's vectors |
+
+The fast path, which this build did not change, reads the same FF from
+the DDR3 as the paced path: the paced fill is not at fault (a suspicion
+of an hour, written to Ed, and wrong). The copy is as section 3h built
+it: **there is no pass that reads the machine's RAM into it.** It holds
+the writes the card has mirrored, and section 3h says so ("what the
+machine's RAM held from before that reset the copy does not have: after
+a power-up that is RAM nothing has written"). Where nothing has written
+since the card began to mirror, the machine's RAM holds what it held
+(00 in every byte looked at) and the DDR3 holds what it powered up
+with (FF, or a pattern). Section 3h took it that nothing reads such
+RAM. The Control Panel does: fourteen reads of E1:1D60-1D6F each time
+the speed is set (which of its code, not found), and they get FF where
+the machine gives 00. Whether that changed anything it did is not
+known; nothing was seen.
+
+So the 47,122 are a difference that is real and old, not a fault of the
+rules or of the paced fill: x0, q1 and p1 (on main) have it in fast
+mode, where nothing compares. It is a fault of fidelity all the same -
+a program that reads slow RAM it has not written, and there is at least
+one in the ROM, gets a byte the machine would not give. What would
+close it: a pass at bring-up that reads E0/E1 below $C000 through the
+socket into the copy with the core held, as the ROM image is copied
+(96K slow cycles, about a tenth of a second), "whole" then meaning that
+pass has run; and a bench whose machine RAM and expansion memory do not
+start out equal, which is why no run has ever shown this. Not built.
+
+Ed's question, and it sharpens this: nothing but this card's core can
+write the machine's RAM, so nothing was "set" there before the
+bring-up, and nothing goes wrong at a change of speed either (four
+changes by command made no mismatch; the change is only when the
+Control Panel reads such a byte with the comparison on). The two
+memories start out different and only written bytes are made equal.
+The bench's ROM 01 boot agrees that these bytes are not written: in
+its three million steps the ROM writes six pages of E1 directly (00-03,
+0F, 15), none of E0, and never 1Dxx. What the DDR3 holds there is
+whatever it held before: the card was without power for a few seconds
+only between the flash and this power-up, and the mismatches in E1 end
+at 9F0F, the end of the super hi-res screen, so much of it is probably
+the copy of the session before (not checked). On the machine itself
+such RAM is whatever its chips came up with, which no program can count
+on either; so this is a narrow difference - a program that reads slow
+RAM nothing has written gets other bytes than this machine's - and not
+a corruption of anything written.
+
+The card was left at `3B` by `gs set 29 59` (the firmware's ladder in
+its manual state until the next power-up), the Control Panel's speed at
+Normal.
+
+### The a2p25's Disk II in slot 5: a boot and a catalog (17:57 to 18:01)
+
+The first drive through the rules is the a2p25's own (slot 5 by the
+default map; the detect bit of slot 5 is set on this machine, the speed
+register reads `82`). The Control Panel's speed at Fast, the counters
+read about twice a second:
+
+| what | mode | speed register | slot 5's latch | steps |
+|---|---|---|---|---|
+| the prompt, before | `9A` | `82` | 0 | 33.5 M/s |
+| `PR#5`, twenty seconds of drive | `8A` | `02` | 1 (0 in four readings between) | 1.0 M/s |
+| after it; it booted | `9A` | `82` | 0 | 33.5 M/s |
+| `CATALOG`, a second and a half | `8A` | `02` | 1 | 1.0 M/s |
+| after it; it listed | `9A` | `82` | 0 | 33.5 M/s |
+
+Both read correctly, paced at the machine's 1 MHz for as long as the
+drive ran and fast again by themselves. **But neither isolates the
+motor rule:** the speed register read normal in every reading with the
+motor on. The machine's software clears the bit itself. ROM 01 does it
+before it enters the firmware of a slot set to "Your Card" (FE/9C9x:
+the slot's bit of SLTROMSEL, then `TRB` of `$80` on `$C036`; the boot
+path the same at FF/BACD, set again at FF/BA4E), and something did it
+again for the catalog (which code, not looked for; the Disk II firmware
+of `hdl/disk/diskii.hex` has no reference to `$C036`). So for a Disk II
+in a slot the first rule already covers what was run, and that the ROM
+uses the bit on purpose to run card firmware at 1 MHz is an argument
+for the first rule as built. (At the BASIC prompt with the speed at
+Normal the bit reads set in about a third of the readings: the ROM's
+text firmware saves it, sets it and restores it, FF/CB8C.) A boot the
+same way with the speed still at Normal, earlier, also read correctly:
+the disk's timing holds in paced mode.
+
+**A fault of the slot 6 rule, found by reading (seen on the machine
+at 20:05, next section).** The rule paces on slot 6's latch whatever the detect bit
+says, for the 3.5 drive. The a2p25's hard disk card sits in slot 6 by
+the default map and its register 9 is the unit's size
+(`hdl/disk/hdd.sv`, read by the card's ROM in a ProDOS STATUS call):
+a read of `$C0E9`. That sets the latch, and the card is then paced until
+something touches `$C0E8`, the data register - the next block read.
+The latch for slot 6 has not read set in any log of today. What the
+rule should ask instead: slot 6 like the other slots, by its detect
+bit, and the 3.5 drive by what selects it (`$C031` bit 6), which the
+replica does not track yet. Not built.
+
+### Four reads from the monitor: the motor rule alone, and the slot 6 fault seen (20:05)
+
+To take the speed bit out of it, the latches were set by hand from the
+monitor at the DOS prompt of the same boot, the Control Panel's speed
+still at Fast, the counters read about twice a second:
+
+| read | what it is | mode | speed register | latches (slots 7-4) | steps |
+|---|---|---|---|---|---|
+| before | | `9A` | `82` | 0 | 33.6 M/s |
+| `C0D9` at 20:05:09 | slot 5's motor on | `8A` | `82` | 2 | 1.02 M/s |
+| `C0D8` at 20:05:16 | slot 5's motor off | `9A` | `82` | 0 | 33.6 M/s |
+| `C0E9` at 20:05:27 | the hard disk card's size register | `8A` | `82` | 4 | 2.6 M/s |
+| `C0E8` at 20:05:35 | its data register | `9A` | `82` | 0 | 33.7 M/s |
+
+**The motor rule works by itself.** With the speed register at `82` in
+every reading, slot 5's latch paced the card for the seven seconds it
+was set (fifteen readings) and the card was fast again within half a
+second of the read that cleared it.
+
+**The slot 6 fault is real.** One read of `$C0E9` set slot 6's latch and
+the card stayed paced for the eight seconds until `$C0E8` was read
+(sixteen readings). Nothing else on this machine would have cleared it:
+after a ProDOS STATUS call to the hard disk the card is paced until the
+next block read. The fix is as written above and is not built.
+
+The two paced stretches ran at different rates, 1.02 M and 2.6 M steps
+a second. That fits the machine's own pace in each: the machine slows
+itself to 1 MHz for slot 5's motor (its detect bit is set) and does not
+for slot 6's latch (its detect bit is clear), so the second stretch was
+paced against a machine still at its fast speed. Socket cycles were not
+counted in this log, so that is a reading of the step rate and not a
+measurement of the machine. The count of E0/E1 mismatches did not move
+(47122, section above).
+
+### The slot 6 rule changed (2026-11-15, 20:10 to 23:00): simulated; the first round two placements of three, the round with the copy's repair three of three; se2 flashed 2026-11-16
+
+**The change.** Slot 6's latch is one of four now: it paces with its
+detect bit (`$C036` bit 2), as the FPI has it, and with the 3.5 drive
+selected (`$C031` bit 6), and not by itself. The replica tracks
+`$C031` bit 6 (written in an I/O bank, cleared at /RES) and shows it as
+bit 7 of its switch byte, so nothing has a new port. Three source
+files: `gs_accel_rules.sv`, `gs_mmu_replica.sv`, one line of
+`gs_accel.sv`.
+
+**Why the 3.5 drive by its select bit.** ROM 01's 3.5 driver, on entry
+(FF/5DB3): `LDA $C036`, `AND #$FB`, `ORA #$80`, `STA $C036`, then `LDA
+#$40`, `STA $C031`; the IWM's enable (`$C0E9`) is read a few
+instructions later in the same routine. On the way out (FF/5644): `BIT
+$C0E8`, `STZ $C031`. So the ROM itself takes slot 6's detect bit away
+and asks for the fast speed before it touches the drive - the machine
+does not slow for a 3.5 drive and the first two rules cannot see one -
+and the select bit is set for exactly the call. Read from the ROM
+image; **no 3.5 drive has been run**, and a driver that is not the
+ROM's (GS/OS's) has not been read.
+
+**Simulated.** T27 has six stretches now: the speed register normal;
+slot 6's latch with nothing else (must stay fast: the hard disk's
+case); the same with `$C031` = `$40` (paced); `$C031` cleared again
+(fast); slot 6's detect bit (paced); slot 5's latch without and with
+its detect bit. The bench asks that each of the four causes paced a
+stretch as the only cause, and counts the fast steps under a latch with
+no rule (slot 5's 260, slot 6's 518; 100 or more wanted of each). The
+replica's bench has the bit in its reference model, with directed
+facts and in the random sequences (6 M checks for each ROM, none
+failed).
+
+**The broker bench: 221 runs, all pass**, on the committed source
+(`ba398b71`). The first run of it had one failure, `c_recopy`, and not
+of the rules: the longer test program moved the second ROM copy so
+that a RDY stall fell on the last idle cycle of the hold. The card
+then issues the park address (`FF0000`) while the stalled cycle
+(`FE0000`) repeats on the bus with the bank byte not driven again -
+right, and as it always was - and the bench's FPI, which keeps the
+bank through a stall, called the next cycle `FE0000` and found nobody
+owed it. The bench knows that case now.
+
+Five faults planted in copies of the source, the program suite and
+the replica's bench on each:
+
+| planted | |
+|---|---|
+| the rule as first built (slot 6's latch paces by itself) | 9 runs fail: 1 fast step in the hard disk's stretch |
+| the 3.5 select ignored by the rule | 11 runs fail |
+| slot 6's detect bit ignored | 9 runs fail |
+| `$C031` never tracked | 9 runs fail; the replica's bench fails (1.5 M checks) |
+| `$C031` tracked from bit 7 | 11 runs fail; the replica's bench fails |
+
+**Timing, the first round: not closed.** Three placements of `ba398b71`, the committed
+options, 105 MHz, the 0.5 ns rule:
+
+| | setup / hold violations | worst slack beyond the rule | on |
+|---|---|---|---|
+| sd0 | 0 / 0 | +0.024 | the near memory's tag into its hit register |
+| sd1 | **19** / 0 | **-0.231** | the same path; the other eighteen are the line memory's and the broker's usual ones |
+| sd2 | 0 / 0 | +0.003 | a line's data into the line memory's address |
+
+**Two of three.** None of the nineteen paths is of the rules or of the
+new bit; they are the paths every placement of this build has been
+measured on. What it says is what the margins of sc0 to sc2 (+0.031,
++0.035, +0.014) already said: this build closes by hundredths of a
+nanosecond, and a placement can land on the other side. With
+`Place_Option` 1 that is eight clean placements of nine (p0 to p2, sc0
+to sc2, sd0 to sd2). By the rule this page keeps - three of three of
+the final source - sd is not a closed build, and another draw of three
+would not make it one. sd0 and sd2 are each a placement with no
+violation and are kept; neither is flashed.
+
+**Found beside it, older than it, not fixed: a ROM copy that begins
+under a RDY stall takes its first byte from the wrong bank.** The hold
+begins at a step's end; in fast mode an idle cycle (a read of
+`FF0000`) is on the bus then. If RDY is low at that cycle's fall the
+PHY repeats it, with the address lines as the broker now gives them
+(`FE0000`: the same low sixteen bits) and the bank byte not driven
+again, so the bus reads `FF0000` once more - and the broker, which has
+marked the repeat as the copy's first read, hands that byte to the
+copy as the byte of `FE0000`. Made to happen in a scratch copy of
+`ba398b71` (the bench stalls the cycle the second copy is asked in):
+six runs of eight end with one byte of the image different and the
+sum one off; the two others began their hold after a cycle of the
+core's own. The suite never does it (its stalls and its copy request
+come from one loop, never together: sixteen copies under stalls every
+2 to 7 cycles, none wrong). It needs a copy asked for from fast mode -
+the power-up copy is asked for in native mode, where the cycle before
+the hold is the core's own and has completed - and RDY low on that one
+cycle, which on this machine is a slot card's doing; and the
+firmware's check of the sum would see it. In every build with the ROM
+copy up to sd.
+
+**Repaired (`42b046a0`).** The broker's mark of a cycle as the hold's
+is not taken again when the PHY repeats a stalled cycle: the repeat
+stays the park read it was, its byte goes to nobody, and the copy's
+first read is the next cycle, with its own bank byte. One line of
+`gs_accel_broker.sv`. The bench has the stall as an option
+(`+holdstall`: RDY low on the cycle the second copy is asked in), four
+runs with it - two on the line memory, the board's configuration - and
+each must count a hold that began under a stalled idle cycle (of ten
+start points tried on the line memory seven are one; the suite uses
+two). The bench also takes a stalled cycle's repeat for the cycle it
+was, which replaces the correction for `c_recopy` above; the idle
+check is as strict as it was.
+
+**The broker bench: 225 runs, all pass**, on `42b046a0`; the four
+runs each with one such hold and the image identical. Three faults
+planted in copies of it:
+
+| planted | |
+|---|---|
+| the repair taken out | 4 runs fail: the four with the stall, and no other |
+| the mark dropped at every repeat (a stalled read in the middle of a copy too) | 22 runs fail |
+| the slot 6 rule as first built, again | 9 runs fail |
+
+**Timing, the round of the final source: three of three.** Three
+placements of `42b046a0`, the committed options, 105 MHz, the 0.5 ns
+rule:
+
+| | setup / hold violations | worst slack beyond the rule | on |
+|---|---|---|---|
+| se0 | 0 / 0 | +0.022 | the PHY's clock toggle into the broker's far-bank copy |
+| se1 | 0 / 0 | +0.029 | a line's data into the line memory's address |
+| se2 | 0 / 0 | +0.039 | the PHY's clock toggle into the record of the issued address |
+
+Closed by the rule of this page, and by no more than the others: the
+margins are hundredths of a nanosecond, and sd1 of the round before -
+the same logic but for one line - missed by 0.231. With `Place_Option`
+1 that is eleven clean placements of twelve. Size (se2): 13,255 logic
+cells, 11,932 flip-flops, 12,666 of 69,120 logic slices, 182 of 340
+block RAMs - 6 cells and 1 flip-flop more than sc1.
+
+### se2 flashed (2026-11-16 07:22 to 07:26)
+
+se2 written to the card's flash over USB with the machine off, the
+first attempt, verified by the loader's read back. The one probe on
+USB had the test card's serial number, and the file written had se2's
+sha256 (section 5). The firmware is as it was (`4691e43a…`): the
+change needs none. **The gateware has not been loaded yet, and nothing
+of this build has run on the machine:** that wants the board's power
+off and on, then the ladder to fast mode, and the four reads of the
+section above again - `C0E9` must leave the card fast now, `C0D9` must
+still pace it.
+
+### A power-up with se2: the bring-up stopped on a verify mismatch, and Arkanoid locked up (2026-11-16, read 19:57 to 20:03)
+
+Ed, at the machine without a log running: Arkanoid, launched by
+accident, locks up "with the accelerator on"; the machine was left in
+that state. What the card said, read over telnet and changing nothing:
+
+- **The card was not accelerating.** The firmware's console for this
+  power-up: ROM image valid, sum 7EE8; card memory at the machine's
+  pace; the same with the copy of E0/E1; then `ACCEL: VERIFY MISMATCH
+  AT 01:FBC3 (6) - ON SOCKET BYTES`. Mode 80 since: every step a socket
+  cycle, every byte the machine's (2.54 M steps and 2.54 M socket
+  cycles a second). The first second of card memory passed; the count
+  moved in the second with the copy of E0/E1, and it is the main count
+  (banks 00/01 and expansion RAM), not the copy's (0).
+- So six reads in that second gave the core the card's byte where the
+  machine's differed, the last at `01:FBC3`. Which of the two was right
+  is not known, nor the other five addresses, nor the bytes: the
+  telemetry keeps the last address and the count.
+- The event log has one power-up and no reset after it. If the step
+  counter has not wrapped, the core began to run at about 19:54:40,
+  three minutes before Ed's message; the counter wraps every 28
+  minutes, so that is not certain.
+- At 20:03 the program is not stopped: 120 samples of the bus address
+  are 81 in bank 02 and 37 in bank 01, about half of them in
+  `02:8000-81FF` and `01:8000-81FF`, the rest spread over both banks;
+  none in E0/E1 or at `$C0xx`. The replica's switches then: shadow 57
+  (I/O and language card shadowing inhibited in banks 00/01), speed
+  register 92, state register 0C, all four motor latches set.
+
+Not known: whether Arkanoid was running when the count moved (it would
+have to be the boot disk, or started within seconds); whether the lock
+up comes from those six bytes, or happens on socket bytes with no card
+memory at all (which would make it older than this section); whether
+sc1 or p1 does the same. A mismatch of the main count in a bring-up is
+new on this card: every earlier power-up with the ladder read 0, but
+none of them is known to have had this program in the two verify
+seconds. The source differs from sc1's in the speed rule, one tracked
+bit of `$C031` and the copy's first byte under a stall; none of that is
+in the path of a read in paced card memory, and that is reading, not a
+test.
+
+**Two more runs, with a log (20:08 and 20:26).** The build stamp read
+from the card is `20261115224949`: se2 runs. The disk in use boots
+straight into Arkanoid (Ed; the first run had started it later, from
+something else).
+
+- *Power cycle, 20:08.* The core runs from 20:08:14 and the game is
+  loading within two seconds (shadow `1E` by 20:08:16.5). Copy done
+  20:08:17, sum 7EE8; card memory on at 20:08:18.08; by 20:08:18.52 the
+  count is 4, last `02:000B`, and the firmware is back on socket bytes.
+  Not the first run's address. The game loads on socket bytes for 70 s
+  (the speed bit and the language card switching as a loader's would),
+  sets shadow `57` and speed register `92` at 20:09:30, all four motor
+  latches read set at 20:09:31, and nothing changes after that: locked,
+  in its attract mode (Ed). The bus profile is the first lock's.
+- *Control-Open-Apple-Reset, 20:26:50* (the firmware does nothing at a
+  reset: mode 80 throughout, the count still 4). The whole load again
+  on socket bytes, shadow `57` / `92` at 20:28:06.9, the latches set by
+  20:28:08.2, locked at the same place (Ed).
+
+**So the lock does not need card memory.** In the second of these runs
+no byte of the card's reached the core between the reset and the lock
+(the machine's RAM was not cleared between them, but the game loads
+itself again). What is left: the core, the broker's native mode and the
+PHY as this build has them; this placement of them; or something
+outside the card. Not separated. The verify mismatches are a second
+fact, not explained either: two power-ups of se2, two addresses
+(`01:FBC3`, `02:000B`), where every power-up of the earlier builds read
+0 - none of them with this disk.
+
+**A gap in the speed rules, seen in passing.** The motor latches take
+`$C0n8/9` in banks 00 and 01 whatever the shadow register says. With
+its bit 6 set there is no I/O in those banks, only RAM, and Arkanoid
+sets the four latches that way; with a detect bit set in the speed
+register (it leaves `92`: slot 5's) that would pace the card in fast
+mode until the same RAM at `$C0n8` is touched. Not fixed, and not the
+lock: the rules do nothing on socket bytes.
+
+**Left for the night (20:41).** se2 on the card. **The card's saved
+setting is OFF** (`gs accel off`, set at 20:10 for a run that was not
+made as planned): the next power-up stays on the machine's own bytes
+with register 29 never written. `gs accel on` with the machine running
+and the ladder stopped runs the ladder at once, so it was not set back
+under Ed's hands; set it back with the machine off. The beside-card
+a2p25 has the hard disk fix (Ed), not the Mockingboard build. Two
+tests are open, neither made: Arkanoid started with the card in paced
+card memory by hand (`gs set 29 10` at an idle prompt) and the verify
+count logged up to the lock - 0 clears the socket's data path, a moving
+count names the RAM that differs from what the core wrote; and sc1
+flashed back with the same disk, then se0, to tell this build from the
+ones before and source from placement.
+
+**A fourth lock, with the setting off (2026-11-21, read 08:30 to
+08:40).** Ed booted the same disk with the card as it was left and
+Arkanoid hung as before. Read without changing anything: `ACCEL: OFF BY
+SETTING`, **mode 00** (no ROM image, no ROM copy made, sum 0000), every
+verify count 0, the socket armed by the automatic sequence as in every
+run. Register 29 was never written in this power-up. The lock is the
+same one: shadow 57, speed register 92, state 0C, all four motor
+latches set, 2.546 M socket cycles a second, and of 200 bus samples 64
+in `02:8000-81FF` and 34 in `01:8000-81FF`, the rest spread over banks
+01 and 02, none in E0/E1 and none at `$C0xx`. So the lock needs nothing
+of the accelerator beyond what every power-up of this build does: the
+F65C816 core stepping on socket cycles through the broker and the PHY.
+The first open test above (paced card memory with the verify count)
+no longer bears on the lock; it still bears on the two verify
+mismatches. `01:8000-81FF` is super hi-res pixel memory (lines 153 to
+156) and super hi-res shadowing is on in shadow 57, so the program may
+be drawing there from bank 02; that is a reading of the addresses, the
+program has not been read. What it is waiting for is not known. Still
+not known: whether this disk runs on this machine with its own CPU, and
+whether any earlier build of the card runs it.
+
+**The scratch directory was emptied by the system between 11-16 and
+11-21** (macOS clears files under `/tmp` that have not been read for
+three days; every directory is there, no file is). Gone: the kept
+bitstreams of every round (p1, p2, sc0 to sc2, sd0, sd2, se0, se1), the
+test card's firmware binary, the logs named in this page, and the
+telnet helpers. se2 is on the card and in `impl/pnr`. A build before
+se2 for the second open test has to be made again from its commit, and
+its placement will not be the one that was measured. Bitstreams to keep
+go beside the others in `boards/a2mega/impl/pnr` from here on, as
+`a2mega_accel_138B_<round>.fs` (that pattern is ignored by git).
+
+**p1 locks too (2026-11-21, 16:40 to 17:00).** p1 was built again from
+its commit (p1r, section 5: the report repeats p1's to the last figure)
+and flashed with the machine off; the stamp read from the running card
+is `20261114213411`. Ed booted the same disk with the setting still
+off: Arkanoid hung at the same place. Read: mode 00, verify 0, shadow
+57, speed register 92, state 0C, 2.542 M socket cycles a second, and of
+200 bus samples 69 in `02:8000-81FF` and 36 in `01:8000-81FF`, none in
+E0/E1 or at `$C0xx` - the lock of se2 to the sample counts. (The motor
+latches read 0: p1 has no speed rules.) So the lock is not of the speed
+control, the slot 6 rule, the copy's repair or se2's placement: the
+build that was benchmarked and merged has it. What is left is what p1
+and se2 share - the F65C816 core, the broker's socket steps, the PHY -
+or something outside the card. One thing not yet tried on hardware and
+in Arkanoid's path: the program inhibits I/O and language card
+shadowing (shadow bit 6), and a machine in that state gives a vector
+pull ROM only if its FPI reads the socket's VP pin, which the card
+drives through U15 (`gs_socket_65816_scoping.md` section 3.3 took the
+motherboard not to use VP; the S7 scoping page, decision 13, left it to
+be checked). That is a suspicion; no vector pull of this program has
+been seen. Not known still: whether the disk runs on this machine with
+its own CPU. p1r is on the card, the setting off; se2 is in
+`impl/pnr` as the default file and by name.
+
+### Not done, not known
+
+- **No write, no real drive.** The drive read through the rules is the
+  a2p25's emulated Disk II (a boot, a catalog, and the latches set by
+  hand); nothing has been written through them, and
+  the bench's machine has no drive. The latches and the detect bits are
+  as the MiSTer core's model of the FPI has them (`clock_divider.v`:
+  tracked whatever the detect bits say, gated by them); slot 6 holding
+  without its detect bit is this card's own, for the 3.5 drive. A real
+  5.25 or 3.5 drive is the test, with a disk that can be lost.
+- **The changed slot 6 rule and the copy's repair have not been seen
+  at work on the machine** (se2 is in the card's flash since 2026-11-16
+  07:26; the one power-up read with it never reached fast mode, the
+  subsection above). With sc1, a ProDOS STATUS call to a hard disk
+  card in slot 6 left the card paced until the next block read; that
+  se2 does not is simulated, not seen. The 3.5 drive's rule is from
+  reading the ROM: no 3.5 drive has been run, with either rule.
+- **An open choice: the first rule.** Scoping 2.5 says the speed
+  register's normal setting paces the card ("the Control Panel's
+  Normal/Fast setting keeps meaning what it means"), and that is what is
+  built. The MiSTer core's accelerator model says the opposite of the
+  real cards: a ZipGS or TransWarp GS stays fast with bit 7 clear and is
+  slowed through its own registers, and the Zip's desk accessory clears
+  the bit in its speed test expecting the card to stay fast. As built,
+  the Control Panel's speed setting is an off switch on the machine's
+  side (Normal: 1 MHz, as on a stock machine) and code that drops to 1
+  MHz to count cycles gets what it asked for; a program that clears the
+  bit and expects an accelerator to ignore it loses its speed until it
+  sets the bit again. Which a TransWarp GS does is Ed's to say; making
+  the first rule a request bit of its own is a small change and a new
+  timing closure.
+- Paced mode at the machine's pace is the bench's figure; the benchmark's
+  base pass in paced mode on the card is the measure (section 3j's was
+  1.4 to 1.6 times the machine's on four tests).
+- A ROM 3 machine; the speaker; anything the machine itself can set.
+
+## 3n. A trace of the socket's cycles, to read Arkanoid's lock (2026-11-21; simulated; three placements with no violation; not flashed)
+
+Section 3m ends with the lock on two builds, in mode 00, and nothing
+that shows what the program is doing when it stops. The telemetry has
+one bus address at a time. This build puts the S6 bench's bus trace
+back, deeper, in the accelerator's clock domain.
+
+**What it is.** `hdl/twgs/gs_accel_trace.sv`, in `gs_accel` under its
+`TRACE` parameter, on in a project of its own:
+`a2mega_accel_138B_trace.gprj` (the accelerator-only project's sources
+with `hdl/accel_only/accel_trace_defines.v`; `Place_Option` 1 as that
+project). A ring of 8,192 entries in block RAM, one for a cycle the core
+had on the socket: bank and address as the broker issued them, R/W, VP,
+VPA and VDA from the issue, and the data pads and /IRQ as the broker's
+PHI2-fall flops had them at the fall that ended the cycle. Local steps
+of fast mode are not socket cycles and are not in it. It only reads:
+the one change in the design it sits in is two outputs on the broker,
+the PHI2-fall flops of the data pads and /IRQ, so that no second set of
+flops hangs on the pads. The source of se2 is otherwise as it was; the
+project without `ACC_TRACE` synthesises as before (checked; not placed
+again).
+
+**What is kept and when it stops** is set through window registers 29
+to 31 under keys of their own (31 = 50, 51, 52; the accelerator's
+requests are the same registers under A5, so the setup is for a card
+that is not asked for card memory - mode 00, as the lock is): every
+cycle, opcode fetches, vector pulls, or vector pulls and the opcode
+fetches that do not follow the one before; a trigger that stops the
+ring a chosen number of kept entries later - an opcode fetch at an
+address, any cycle at an address, a vector pull with shadow bit 6 set,
+or 131,072 cycles with none in an I/O page (what the lock looks like
+from outside). CTRL bit 3 (`gs freeze`, `gs run`; `gs trace` sets it)
+stops it by hand. At power-up it keeps every cycle and has no trigger,
+so a machine that has locked needs only `gs freeze`.
+
+**Read** with the firmware the card has: `gs trace` shows telemetry
+words at lines 0 to 31 as before (15 to 17 are the ring's state) and a
+page of 32 entries at lines 32 to 63, oldest first, in the S6 trace's
+form; its STALL column reads "/IRQ low" and BE0 "vector pull". `gs`
+shows the ring standing still and the trigger fired where the S6 trace
+showed them. `boards/a2mega/tools/gs_trace.py` does the setup, reads
+the whole ring over telnet (256 pages) and lists it as 65C816
+instructions with the data cycles beside them.
+
+**Simulated.** The module's own bench (`hdl/twgs/sim/trace`): a
+program-shaped stream of 593,357 cycles against the bench's model of
+the filter, the triggers and the ring, 64,000 entries read back through
+the page and index, no difference; eight planted faults (the flow test's
+window, the count after the trigger, the quiet count by one, the oldest
+entry's place, the entry taken two clks late, the slot key without its
+sixteen clks, the I/O test without bit 6, /IRQ stuck) each fail it. The
+broker bench with `gs_accel` and its trace beside the hand-wired design
+(`b105_2a`, six runs: native, paced, fast, toggling, a reset in a
+write, RDY stalls): about 350,000 entries compared with the cycle the
+machine's side of the bench latched - no difference - and gs_accel's
+pins equal to the design's in every clk as in every such build. The
+whole regression with the six: **231 runs of 231 pass**, the ROM 01
+boots and the test program at the same points with the same write
+streams.
+
+**Timing: three placements of three with no violation** on any clock
+(105 MHz, the 0.5 ns rule as committed):
+
+| placement | setup | hold | worst slack beyond the 0.5 ns | the tightest path |
+|---|---|---|---|---|
+| tr0 | 0 | 0 | +0.011 | the microcode row into the broker's internal-I/O flag |
+| tr1 | 0 | 0 | +0.010 | the near memory's index into the broker's `nh_dq` |
+| tr2 | 0 | 0 | +0.017 | the PHI2 high-time counter into its telemetry register |
+
+No tight path is the trace's. 13,587 logic cells, 12,267 flip-flops,
+201 of 340 block RAMs (tr2): 19 blocks are the ring. The socket's pin
+flops are where they were (61 I/O logic cells, as p1 and se2).
+
+**What it has not done.** It has not run on the card. The trace shows
+what the core issued and what the pads read at the fall; it is not an
+instrument on the pins themselves, and a fault between the pin flops
+and the motherboard would show only by what the machine answers.
+
+### tr2 on the card: what the lock is (2026-11-21, 18:10 to 18:50)
+
+tr2 flashed 18:08, its stamp read from the card; Arkanoid hung on it as
+on se2 and p1r, the setting off, mode 00. Five captures, each after a
+Control-Apple-Reset, in `boards/a2mega/captures/arkanoid_1121/` (not
+committed: the program's code is in them).
+
+**The lock is one loop, and a real CPU would not leave it either.** At
+`02:80C8`, data bank 01, direct page 1B00: ten pairs of `LDA $93A0,X` /
+`STA $93A0,X` (rows `$93A0` to `$9940`, 160 apart: super hi-res lines
+185 to 194 of bank 01, each word read and written in place so that the
+shadowing just switched on puts it on the screen), then `DEX`, `DEX`,
+`CPX $B0`, `BCS $80C8`. It is entered with X = `$B0` + `$BA` - 2 and
+runs while X >= `$B0`. `$B0` holds 0000: the carry is then always set, X
+passes zero and the loop sweeps `01:93A0+X` with the 24-bit carry into
+bank 02 for ever (the samples "in banks 01 and 02" of section 3m). The
+strip is the paddle's: 18 bytes wide (`$BA` = 12), its left edge taken
+from `00:1BB2` by `LDA $B2` / `STA $B0` at `02:6EC9`.
+
+**What the captures show of the way in.**
+- The frame that locks begins normally: the game waits for the vertical
+  blank by polling `$E1C019`, sets the border, runs its objects, draws
+  the ball (new column 38, old column 08, line B5) and refreshes two
+  strips through its routines at `02:6D52` and `02:6D6C`, which write
+  the shadow register 1E or 57 and the speed register 82 or 92 around
+  each. Every I/O cycle in it is one of those, with the values the
+  program wrote: no soft switch answers wrongly in that frame.
+- `00:1BB2` is 0000 from the first instruction of that frame.
+- About half a second earlier (the first access to `00:1BB2` after the
+  game starts; the ring stopped on it) the game's own start-of-round
+  code at `02:D88B` writes 0030 there and draws the paddle at column
+  30. The ball's new column 38 in the frame that locks is that paddle's.
+  So between that frame and the one that locks something writes zero
+  to the paddle's column, or the code that keeps it is not run as on
+  the machine's own CPU. Not yet seen.
+- Interrupts are taken and the machine answers them rightly: 11,721
+  vector pulls in one boot and game, every one `00:FFEE` or `00:FFFE`
+  answered `C074`; the reset's `00:FFFC` answered `FA62`; the vector
+  pull flag low on each. One interrupt read in full: taken at the
+  vertical blank inside the polling loop, through `E1:0010` into the
+  ROM at `FF:B7CC` and back by RTI to the instruction it left. (The
+  suspicion of section 3m about VP is withdrawn.) In the frame that
+  locks /IRQ goes low at the vertical blank and is not taken: the game
+  has patched `SEI`, `RTS` into the end of its shadow routine
+  (`LDA #$6078` / `STA $026D66`), so that is the I flag, not the core.
+
+**The zero is the mouse's, and the ROM says there is no mouse
+(capture 6, 18:57).** The ring stopped on the next access to `00:1BB2`
+after the write of 0030 (`gs_trace.py arm --when-speed 92 --again 1`).
+It is the routine at `02:6EC9` again, called fifty times in a row
+(`LDX #$0032` at `02:652E`), this time with `$2E` = 0: it pushes three
+zero words and calls the toolbox, `LDX #$1703` / `JSL $E10000` -
+Miscellaneous Tools, ReadMouse. The dispatcher (`FE:00AF`) finds the
+function at `FE:9964`; that calls `FE:9B6A`, which reads `$E100E0`,
+finds bit 7 set (80) and returns carry set with X = 0309; the call
+leaves through the error exit (`FE:FF90`, `FF:BF0B`) with A = 0309,
+the three result words still zero. 0309 is the Miscellaneous Tools'
+"device not connected". The game does not test the error: it pulls the
+status (0000), stores zero in `$B6`, pulls the two positions, and
+`STA $D0` / `LSR A` / `STA $B2` puts 0000 in the paddle's column -
+fifty times. The next frames refresh the strip from column 0 and the
+loop of the first capture never ends.
+   So every cycle the card ran is what a 65C816 does with what the
+machine gave it, and the lock follows from one answer of the ROM: no
+mouse. Whether that answer is right - whether a mouse is plugged into
+this machine, and whether the ROM finds one when the machine's own CPU
+boots it - is not known here; it is the next thing to learn, and it
+decides whether this is the card's at all. If no mouse is connected the
+game would lock the same way on the machine's own CPU. If one is, the
+ROM's flag at `$E100E0` is the thing to follow: it is set at boot, by
+the ROM's search for the mouse through the keyboard micro.
+
+**With the mouse port switched on in the Control Panel (Ed), the same
+(19:40 to 19:50).** Ed: a mouse is connected; slot 4 had been set to
+Your Card; set back to the mouse port and the machine power-cycled, it
+hangs the same. Capture 7 is capture 6 again, cycle for cycle:
+`$E100E0` = 80, ReadMouse = 0309. Capture 8 (the ring stopped on the
+first cycle at `00:C4FB`) is the ROM's search for mouse firmware
+(`FF:A25B`): for each slot page C1 to C7 it compares four bytes with a
+table at `FF:FB67`; at offset FB it wants D6 and reads 4F, 00, 95,
+**A0**, 00 in slots 1 to 5 - slot 4's byte is not the mouse firmware's.
+And the card's copy of the slot register (`$C02D`, telemetry word 9)
+reads **F0**: slots 4 to 7 are all still "Your Card" as the machine's
+register was last written. So the ROM searched a slot 4 that is still
+switched to the card side, found no mouse firmware there, and said so;
+the a2p25 answering or not in slot 4 does not enter into it (Ed set it
+to empty there for one more run: the same hang).
+   What is not known: why the register still says Your Card after the
+Control Panel was changed. Either the change is not what the Control
+Panel now shows, or it was not kept (the battery RAM is written through
+the clock chip's serial port at `$C033`/`$C034`, by the ROM, on leaving
+the Control Panel) - and if it is not kept with this card in the
+socket, that is a fault of the card's to find. The write of `$C02D` at
+boot has not been captured yet.
+
+**Closed (Ed, 2026-11-21 evening).** The mouse port setting had not
+been saved the first time; set and saved, the machine restarted,
+Arkanoid no longer locks. Slot 4 had been switched to Your Card for a
+program that needs a Mockingboard (Nox Archaist), and Arkanoid was
+tried after it. So: slot 4 on the card side, no mouse firmware for the
+ROM to find, ReadMouse answering "device not connected", a game that
+does not test for it, a paddle at column 0 and a loop that cannot end.
+It would lock the same way on the machine's own CPU with that setting.
+The card ran every cycle of it rightly, and the battery RAM is not in
+question: the setting had not been saved.
+   What stays open from section 3m is not of this: the two verify
+mismatches of the bring-up on se2 (`01:FBC3`, `02:000B`), and the speed
+rules counting `$C0n9` in banks 00/01 while I/O shadowing is inhibited,
+which this game does in every frame - to be fixed before it is run in
+fast mode.
+
+**What the trace turned out not to have.** VPA and VDA at the socket
+are both 1 for every cycle that is not internal (the broker issues
+them so; only the substituted I/O cycle differs): the trace cannot
+tell an opcode fetch from data, its "opcode" filter keeps every
+non-internal cycle, and its opcode trigger is the any-cycle one.
+`tools/gs_trace.py` lists by the order of the addresses instead, with
+the register widths followed from REP, SEP and pulled P bytes; the
+8,192 cycles of each capture list with no instruction out of step. The
+VP flag, R/W, the address, the data and /IRQ are as the bench has them.
+And `gs`'s `last_addr` is three bytes read at different times: its bank
+and address can be of different cycles ("01:8000-81FF" in section 3m
+was that, and "lines 153 to 156" there is wrong).
+
+### The speed rules where I/O shadowing is inhibited, and a path that had two clks all along (2026-11-21 evening; simulated; three placements with no violation, tv0 to tv2; tv1 flashed 2026-11-22, not yet loaded)
+
+The gap of section 3m: `gs_accel_rules` moved a slot's motor latch on
+any socket cycle at `$C0n8`/`$C0n9` in banks 00 and 01, also while the
+shadow register's bit 6 has taken I/O out of those banks and the
+address is RAM. Changed: banks 00 and 01 count only while bit 6 is
+clear (`shadow6_i`, the replica's register); E0 and E1 as before.
+   What the gap was worth, found while testing it: in fast mode that
+RAM is the card's own and the access is not a socket cycle, so the
+rules never saw it - Arkanoid in fast mode would not have been paced by
+it. It bites while the card runs at the machine's pace (the speed
+register at normal, or another rule): every cycle is then on the
+socket, the old rule set the latch from RAM, and with that slot's
+detect bit set the card stayed paced after the program asked for fast.
+   Bench: T27 has a stretch for it (I/O shadowing inhibited, normal
+speed, a write and a read of `$C0D9`, then fast with slot 5's detect
+bit), and the bench fails a run in which that cycle is not seen on the
+socket or the latch has moved. **231 runs of 231 pass**; with the old
+rule planted the +rules runs fail on it ("slot 5's motor latch set by
+RAM at $C0D9"). The stretch moved the test program's steps: the two
+runs that need a recopy to begin under a RDY stall (`l_recopy_hs`,
+`l_recopy_hs2`) are at steps 20020 and 20115 now, found by a sweep.
+   Timing, in the trace project (section 3n's, with this change):
+**ts0 no violation (+0.039), ts1 no violation (+0.016), ts2 63 setup
+violations (worst -0.548, the near memory's index into the broker's
+`nh_dq`)**. Two of three is not a closed build by the rule of section
+3k, and none is flashed. The change itself is one term in a registered
+compare; the path that failed is the one that has been tightest or
+failing in other rounds (sd1, tr1), and is where a closure that does
+not hang on the placement has to be made. With `Place_Option` 1 the
+count is now sixteen placements of eighteen without a violation.
+
+**The path that failed ts2 was held to one clk and has two.** `nh_dq`,
+the near memory's hit from the full decode, is used from a step's third
+clk, and the constraints say so for what reaches it from the step
+registers, the memory-map switches and the near memory's read port:
+two clks each. The launch's index, `nl_idx`, is a step register too -
+loaded when the core steps - and on its way to `nh_dq` through the
+compares with the write, fill and launch-clk indices it was left at one.
+That path failed sd1 and ts2 and was the tightest of tr1 and ts0.
+`gen_sdc.py` now gives it the two clks, from `nl_idx` alone: the other
+indices on that path and `nl_ok` move in the step's first clk and keep
+one. No logic changed.
+   The premise, tested and not taken from the comment: with `nh_dq`
+inverted in the clk after a step's first, in a copy of the broker, 202
+runs of 202 pass (nothing reads it there); inverted in the third clk
+instead, 129 fail.
+   Before that, a change of the logic was tried and dropped: the three
+compares made a clk ahead and registered (the bench comparing them
+with the registers in every clk, 231 of 231, a planted stale compare
+failing 159 runs). The compare made in the clk of a step is then on
+the end of the core's next address, which comes from the near memory
+through the core with its two clks already spent: tu0 to tu2 failed by
+8 to 10 ns on exactly that. Nothing of it is in the source.
+   **Timing with the constraint: three placements of three with no
+violation** - tv0 +0.027 (the launch's index into `fh_c`), tv1 +0.036,
+tv2 +0.006 (a line's data into the core's P). The source is that of ts0
+to ts2 with the one constraint; its regression is theirs, 231 of 231.
+
+**tv1 flashed (2026-11-22, 08:57 to 09:01).** Written to the card's
+flash over USB with the machine off (the card's own report before it:
+the machine's clock stopped), first attempt, read-back verified; the
+card checked by its USB serial number and the file by its sha256
+before. Not yet loaded: the card has not been power-cycled, the stamp
+is not read from it, and nothing has run on it. The saved accelerator
+setting is still off. **Later the same morning:** the card power-cycled
+(Ed), the stamp read from it is `20261121223112`, tv1's; then, on Ed's
+word and with the machine off (the card's report: clock stopped, reset
+held, socket off), `gs accel on`: the setting reads ON, and the next
+power-up of the machine runs the bring-up by itself. Nothing has run
+on tv1 yet. With the accelerator on the trace cannot be loaded (its
+slots share register 31 with the request key): it is for mode 00. What this build has that no build on the card
+had: the rules' shadow bit and the constraint; se2's slot 6 rule is in
+it and is not yet confirmed on the machine either.
+
+### tv1's first power-up: fast by itself, then GS/OS's boot stops in the firmware's key wait (2026-11-22, 09:19; open)
+
+The bring-up ran by itself to fast: ROM copy sum 7EE8, the verify step
+and the one with the copy of E0/E1 with no mismatch, mode `9A`, the
+rules on, the DDR3 ready with 126 banks. Then GS/OS's boot stopped on
+its "Welcome to the IIGS" screen with a second beep (Ed).
+   What the card shows of it, the machine left as it was and no mode
+changed: the socket still cycles, the status is all good, and in
+fourteen readings of the trace's first page (the ring runs in fast mode
+too with its power-up settings; only that page can be read there, the
+slots share register 31 with the key) the only cycles that are not idle
+are, in this order and over and over, a read of `$C000` (1F, no key), a
+write of `$C036` (82), a read of it (82), a write (82). That is ROM
+01's key wait at `FF:CEFC` to `FF:CF58` with `FF:CF6B`: the speed
+register saved and set fast, `INC $4E`, the Event Manager asked
+(`$0606`), the keyboard read, the speed register put back. Shadow 1E,
+speed 82, slot register E0 (slot 4 is the mouse port), state register
+09. So the machine is not locked: **it sits at a firmware prompt
+waiting for a key, with the super hi-res screen still shown** - the
+Monitor after a break is the likely one (it beeps), not yet seen.
+   **Not known:** what broke, and whether the card did it. This is the
+first boot of GS/OS on tv1, and tv1 differs from se2 by the trace's
+taps, the rules' shadow bit and the constraint of this section; none
+of se2's own boots of GS/OS in fast mode is on record as complete
+either (its two bring-ups stopped on verify mismatches). Captures:
+`boards/a2mega/captures/gsos_lock_1122/`.
+   **`C029:01` and Return typed blind (Ed, 09:35): the screen did not
+change.** The keys were taken: `$C000` reads 0D with its strobe
+cleared where it read 1F, and the same loop goes on; one reading has
+the ROM's interrupt handler in it (`$C03C`, `$C046`, `$C041`, `$C047`,
+`$C027`, writes to E1:00C3 to 00DD), so interrupts are served. So a
+prompt takes keys, and either it is not the Monitor's or the line was
+not the command; which, not known.
+   **Paced, to see the code (09:29, `gs accel slow`, mode `8A`; the
+machine left as it was).** Every step is then a socket cycle, and 303
+readings of the trace's first page (32 cycles each, at random places of
+the loop) give the whole of it: `FF:B336 JSR $CEFC / BPL $B336`, which
+is the 40 column `KEYIN` (`FF:B327`: `LDY $24`, `STA ($28),Y`, the
+cursor shown, then this loop), with the call `$0606` through the
+dispatcher at `FE:00AF` (the user's tool table at 7F:FF7C read as zero
+for set 6, as it should be, then the system's in ROM at FE:012F) and
+now and then the interrupt handler. The stack is read up to `$01CA`
+(return to `B339`); what called `KEYIN` is above it and is not read
+while no key ends the wait. So: **a line or a key is being asked for
+on the 40 column text screen**, by the Monitor, by BASIC or by a
+program; the first command typed had no bank, and the Monitor's `:`
+stores into the bank it last used, so it does not rule the Monitor
+out. (The verify count went from 0 to 2 at 00:004F with the change of
+mode: the machine's own RAM is behind the card's after fast mode, as
+expected, not a finding.) Readings:
+`captures/gsos_lock_1122/paced_all_cycles.txt`.
+   **The text screen (Ed, `E1/C029:01`; the two lines without a bank
+went to bank FF, the break's):** the ROM's banner and under it
+
+    FF/BF89: 00 E1        BRK E1
+     A=BFBF X=0107 Y=0000 S=01DF D=01ED P=C4
+     B=00 K=FF M=0C Q=9E L=1 m=0 x=0 e=0
+
+So it is the Monitor after a break, in the ROM, in the Scheduler's
+BootInit (tool call `$0107`, which X still holds; the routine is
+`FF:BF71` to `BFA0`). **`FF:BF89` is not an instruction there**: it is
+the third byte of `STA $E10065` at `BF87`. The stream that is in the
+ROM is `BF7E STA $E01DEF / BF82 BCS $BF40 / BF84 LDA #$C05C / BF87 STA
+$E10065 / BF8B LDA #$BFEA`, and on it A is 0000, 00FF, C05C in turn,
+never BFBF. So the core left the stream between the routine's entry
+and `BF89`.
+   **A reading that fits every register, not shown:** one byte wrong,
+the opcode at `BF82` taken as BF where the ROM has B0 - `LDA
+$5CA9BC,X` (four bytes, to `BF86`) in place of `BCS`, then `BF86 CPY
+#$658F` (the ROM's own bytes, read from the middle of the `LDA #`),
+then the `00` at `BF89`. It leaves X and Y as the dispatcher gave them
+(Y the work area's high word, 0000), N set and Z and C clear as P has
+them, and A what 5C:AAC3 holds. Whether that is BFBF can be read from
+the Monitor. Other readings are not excluded (a return into `BF86`
+with A the work area pointer).
+   **That reading is wrong as it stands (Ed, `5C/AAC0.AACF`):** all
+sixteen bytes there are FF, so that load would have left FFFF in A,
+not BFBF. Three other ways onto `BF89` exist in these bytes, each
+through `BF86 CPY #$658F`: a return into `BF86` itself (A the work
+area's low word), into `BF83` (`LDY $5CA9,X` first: Y from 00:5DB0),
+or into `BF80` (`ORA $B0E0,X` before that: A or'ed with 00:B1E7). The
+dispatcher's return for this call is to `BF71`, its low byte on the
+stack 70; `BF80` is that byte read as 7F. Which, if any, the Monitor
+can show: 00:B1E7 and 00:5DB0, the work area table's entry 7 at
+7F:FF98, and the stack above `$01DF`.
+   **The Monitor's dumps (Ed):** 00:B1E0 to B1EF all 00, 00:5DB0 to
+5DB7 all 00, 7F:FF90 to FF9F all 00 (the work area of set 7 is zero),
+and the stack
+
+    00/01D8: FF 04 DF 01 3D BA FF 6B
+    00/01E0: C4 8B BF FF 2D 01 FE 5A
+    00/01E8: 02 FE 07 01 00 00 2F 01
+    00/01F0: FE 00 7C FF 7F 00 2D 01
+
+`C4 8B BF FF` at 01E0 is the break's own push: P, then FF:BF8B. So the
+stack stood at `$01E3` at the break (the Monitor's S is after the
+push), which is where the dispatcher leaves it at a routine's entry:
+above it `2D 01 FE`, the dispatcher's return for the routine, then `5A
+02 FE`, the caller. The caller is ROM: `FE:0257 JSL $E10000` in the
+loop at `FE:0251` that calls every tool set's BootInit from `$0103` up
+(the `07 01` at 01EA is its counter), after `FE:0243` cleared the work
+area table through the pointer `7F:FF7C` that lies at 01F2. That loop
+is the Tool Locator's own BootInit. **So a start of the whole tool
+system was running, in fast mode, when the core left the stream** -
+the ROM's start-up, or a call of it by GS/OS's loader; which, the
+stack above 01F8 says, not read yet. If it is the ROM's, the machine
+had restarted by itself before this, the second beep may be the
+start-up's and not the break's, and the break is the second fault.
+   None of the three other entries gives A = BFBF either: with the
+work area zero and 00:B1E7 zero, `BF86`, `BF83` and `BF80` all leave A
+0000. **How A came to BFBF and the core to `BF89` is not explained.**
+   **Who called it (Ed, `00/01F8.01FF`: FE 46 00 FE 69 68 00 30):**
+`46 00 FE` is the return of `FE:0043 JSL $E10000` with X `$0101`, in
+the ROM's entry `FE:0000` that sets the dispatch vectors and the table
+pointers in E1 and then starts the tool system; and `69 68 00` under
+it is the return of the call to `FE:0000` itself, made from RAM at
+00:6866. So **the loader called it, not the ROM's start-up: the
+machine had not restarted, and the break is the first fault.** Tool
+sets 3 to 6 had their BootInit before it without one.
+   **The routine run by hand (Ed, `FF/BF71X` in the Monitor, 10:00,
+the card paced):** it returns to the prompt, no break. Then the card
+set fast again (10:02, `gs accel fast`, mode `9A`) for the same line
+in fast mode. (The verify count is 35 now, its last address 5C:AACF:
+the Monitor's dumps of memory the machine's own RAM does not have as
+the card has it. Not a finding.)
+   **In fast mode by hand (Ed, 10:05): `FF/BF71X` five times and
+`FE/0000X` once - the whole chain as the loader called it - all return
+to the prompt, no break.** So neither the routine nor the chain breaks
+by itself in fast mode on this placement: the fault needs something of
+the moment the loader made the call. What differs then, not yet told
+apart: the speed rules going between paced and fast under the code
+while the disk is read (the Monitor has no motor on), what the near
+memory held, the DDR3's traffic, and plain margin (a rare wrong step
+anywhere, which would not stop twice at the same place).
+   **A second power-up, the same (10:08; the card on USB before the
+machine, as the first time).** Logged from the card at twenty readings
+a second (`captures/gsos_lock_1122/boot2_log.txt`): /RES waited for at
+10:08:30, the ROM copied at :32, the two verify steps, **fast at
+10:08:34**, and then nothing changes: the speed register stays 82, no
+motor latch is ever set, the rules never pace. The machine stops as
+before (Ed), and the socket shows the same key wait, the same shadow,
+speed, slot and state registers. So **it stops twice of two, a few
+seconds after fast mode begins, and the speed rules take no part that
+the log can see** (a paced stretch under 50 ms would escape it).
+   **The second break is the first to the last digit (Ed's photo):**
+`FF/BF89`, A=BFBF X=0107 Y=0000 S=01DF D=01ED P=C4, B=00 K=FF M=0C
+Q=9E. So it is not a rare wrong step somewhere: **the same step goes
+wrong in the same way every time this code runs in this state.** That
+is logic, or a path that fails for one pattern of data; it is not
+noise.
+   **How it is to be caught.** The native BRK vector of ROM 01 is
+`$C071`, in the I/O page, and nothing else is fetched there (IRQ
+enters at `$C074`); an I/O page fetch is a socket cycle in every mode.
+So the trace's trigger on any cycle at 00:C071 fires at the break and
+at nothing before it, in fast mode too. Set with the machine off (the
+slots need the key, and after fast mode the requests must not be
+dropped under a running machine), keeping only cycles that are not
+idle - in fast mode those are the I/O and the writes to E0/E1, so the
+ring holds what the three stores of the routine put on the bus, which
+is A at each - and read with the machine off again. A helper does the
+whole of it on one telnet connection (`captures/gscap.py`, not in the
+tree).
+   **A third power-up with the trigger set did not get as far (10:30;
+not of the accelerator).** Machine off 10:29:15, the trigger set a
+second later (setup 39 at 00:C071, taken), on at 10:30:02. The card
+held reset its 300 ms, let go and waited for the slot's /RESET to be
+high for 20 ms before taking the socket, as every time. /RESET came up
+at 10:30:13 - when the a2p25 beside it had its stick mounted after two
+power cycles of its hub port and let go of the line, as its console
+says - and was low again within 30 ms, and stayed low: two minutes
+later the card still waits, socket off, not holding the line itself
+(register 2E 01, hold 0), the socket's own /RES pin high. No CPU ran;
+the screen is the video of memory nobody has written (Ed's photo). Who
+pulled the line down again is not known. What was different from the
+two power-ups before: the machine was off 47 s where it had been 16,
+and registers 29 to 31 had been written with it off (they reach the
+accelerator's requests and the trace's slots only; no path from them
+to the reset logic is in the source). The card's event log was full
+since the morning and has nothing of it; cleared now.
+   **A fourth power-up boots, and that is the control, not a pass
+(10:34).** Off 20 s, the trigger set again with the machine off. The
+event log, cleared before it, has the start whole: our hold off 445 ms
+after the clock, the 48 us blip of /RESET 35 ms later, /RESET up for
+good 10.2 s after that, the socket taken 11.8 ms on. The machine boots
+into Arkanoid (Ed) - **with the accelerator not in it**: writing the
+trace's slots by hand leaves the bring-up at MANUAL, a machine going
+off clears that and a machine coming on does not, so the card stayed
+on the machine's own bytes, mode 00. (The helper was to send `gs accel
+go` and looked for MANUAL in `gs`, which does not print the
+accelerator's line in that state; `gs accel` does.) So: the same disk,
+the same card, the same power-up, no accelerator: no fault. And the
+third power-up's reset fault did not come back, with the registers
+written the same way: they are not its cause.
+   The trigger stays set in the FPGA across a power cycle. So the next
+one is made with nothing written while the machine is off: the
+bring-up then runs by itself, as in the two that broke.
+   **A fifth power-up boots too, again without the accelerator
+(10:40), and shows what the trigger does at power-off.** With nothing
+written the trigger was still set when the machine went off at
+10:39:51 - and fired there: the ring ends with a vector pull at
+00:FFE6/FFE7 (71 C0), the fetch at 00:C071 to C078 and then reads of
+E1:0010 on that are not what is there (EC EC E7...), /IRQ low
+throughout: the machine's memory going away under a core that is
+still clocked, a 00 taken for an opcode. So the trigger works as
+meant on a native BRK, and **a machine going off in mode 00 fires
+it**: it has to be set again after the power-off, which is a hand
+write, which leaves MANUAL. The helper then read the ring out while Ed
+turned the machine on, its writes kept the bring-up at MANUAL, and the
+machine booted on its own bytes a second time. So the trigger is set
+with the machine off after all, and `gs accel go` sent when the socket
+is taken (the helper now asks `gs accel` for MANUAL): the ROM copy
+then starts at once, not 2 s later, and fast mode comes about 2 s
+sooner than in the power-ups that broke.
+   **The break caught (sixth power-up, 10:43; `captures/gsos_lock_1122/
+boot6_fast_dump.txt`).** The trigger set after the power-off, `gs
+accel go` sent as the socket was taken. The card's event log: core
+running, and the trigger 2316.9 ms after it. The ring has every cycle
+of the 8,000 before the break - the card was not in fast mode - and
+it reads as the ROM's code does, the dispatcher at `FE:00E9` to `011B`
+for call `$0107`, the return to `FF:BF71`, with one place that does
+not:
+
+    8123 FF:BF77 8F R      STA $E100FF
+    8124 FF:BF78 FF R
+    8125 FF:BF79 00 R
+    8126 FF:BF7A E1 R
+    8127 E1:00FF 00 W
+    8128 E1:0100 00 W
+    8129 FF:BF7B FF R      <- the ROM has A9 here
+    8130 FF:BF7B A9 R      <- the same address again, now A9
+    8131 FF:BF7C FF R
+    8132 FF:BF7D 00 R
+    8133 FF:BF7E 8F R
+    8134 8F:0206 8F R      a read at $8F00FF,X: the core is in SBC long,X (opcode FF)
+    8135 8F:0207 8F R
+    8136 FF:BF7F EF R      SBC $B0E01D
+    8137 FF:BF80 1D R
+    8138 FF:BF81 E0 R
+    8139 FF:BF82 B0 R
+    8140 B0:E01D B0 R
+    8141 B0:E01E B0 R
+    8142 FF:BF83 BC R      LDY $5CA9,X
+    8143 FF:BF84 A9 R
+    8144 FF:BF85 5C R
+    8145 00:5DB0 00 R
+    8146 00:5DB1 00 R
+    8147 FF:BF86 C0 R      CPY #$658F
+    8148 FF:BF87 8F R
+    8149 FF:BF88 65 R
+    8150 FF:BF89 00 R      BRK
+    8151 FF:BF8A E1 R
+    8152 00:01E3 FF W      K, PC BF8B, P C4 pushed
+    ...
+    8156 00:FFE6 71 R VP
+    8157 00:FFE7 C0 R VP
+    8158 00:C071 E2 R      the trigger
+
+**One socket cycle, the opcode fetch after the routine's first store
+to E1, ends with FF on the data pads where the ROM has A9; the same
+address is put on the bus a second time and reads A9; and the core
+has taken the FF.** From there it is `SBC $8F00FF,X` (the three bytes
+of the `LDA #$00FF` and the `STA`'s opcode for its address), `SBC
+$B0E01D`, `LDY $5CA9,X`, `CPY #$658F`, `BRK`: two subtractions of
+bytes from banks nothing answers in leave A = BFBF, and every other
+register of the break's display follows. It is the one place in the
+ring where an address is read twice (three others are a read and a
+write of one address, read-modify-write), among 150 writes to E0/E1
+of which the pair at 727/728 is this very store, from another caller,
+followed by one fetch as it should be.
+   **So the card repeats a socket cycle it holds not to have counted,
+and has already clocked the core with what was on the pads.** Why the
+cycle did not count (FF is a bus nobody drives), and why here each
+time, is the open part.
+   **And it was not fast mode.** The console of this power-up: ROM
+copied, card memory at the machine's pace, then `VERIFY MISMATCH AT
+00:0000 (36) - ON SOCKET BYTES` - the count one above the 35 it stood
+at - and no step after it: the bring-up had failed and given the
+machine its own bytes back (mode 80) before the break, which the
+verify step's 1000 ms put at 1.2 s after the start at the latest, the
+break being at 2.3 s. So the break needs neither fast mode nor card
+memory in effect; it needs a card that the bring-up has been through
+(the two power-ups in mode 00, never asked for anything, booted). And
+of the first two it follows that "a few seconds after fast mode
+begins" was mine and not seen: fast came 4.2 s after the start there,
+and if the loader makes this call at the same moment of every boot
+they broke at 2.3 s too, in the verify step, with no mismatch
+counted. Not shown either way.
+   **What the doubled cycle is and is not (the source, and the card's
+counters after it; 10:58).**
+   - *Not a RDY stall.* The PHY repeats a cycle only when RDY was low
+     at its fall, and counts each (`stall_count`): the count is 0, as
+     it was all day. So the PHY put `FF:BF7B` on the bus once.
+   - *Not the verify mismatch.* The bring-up's failure of this
+     power-up is mismatch 36 at 00:0000 (the telemetry's last address);
+     no read of 00:0000 is in the ring, so it was more than the ring's
+     few ms before the break, and the card was on socket bytes at the
+     break (which is why the core has the pad's byte at all).
+   - *Two fall events in one bus cycle.* The ring takes an entry at
+     every fall event with the address of the last issue. One issue,
+     two entries: the first with FF, which is the bank byte the card
+     itself drives through the low phase and past the rise, the second
+     with the ROM's byte. The broker ends a cycle at a fall event, on
+     the pad flops clocked by that same edge, and stepped the core
+     with FF; the PHY, which takes a fall only when it waits for one,
+     was still in the cycle and ignored it; at the real fall the
+     broker had nothing in flight. That gives the core FF, then the
+     bytes at BF7C to BF7E, as seen. **So PH2 as the FPGA has it fell
+     twice in that cycle - an edge in the low phase or on the rise -
+     or something in the card made a second event.** Which, not known.
+   - *Why not everywhere.* 150 stores to E0/E1 in the ring, the same
+     store from another caller among them, and one such cycle. The
+     two power-ups without the bring-up ran the same code on socket
+     bytes with none.
+   **se2 was in this very state on 2026-11-16 and did not break:** two
+power-ups whose bring-up stopped on a verify mismatch and left the
+card on socket bytes, and the loader went through to Arkanoid both
+times (section 3m). So this is either of tv1 - its placement, the
+trace's taps on the pad flops, the constraint - or of today. The
+builds kept in `impl/pnr` can say which: se2 for the base, tv0 and tv2
+for the same netlist placed otherwise, ts0 for it without the
+constraint.
+   **se2 flashed back for the comparison (2026-11-22, 11:05 to
+11:09).** `impl/pnr/a2mega_accel_138B_se2.fs`, sha256 `60533092...`
+as on record, over USB with the machine off (the card's report: clock
+stopped), first attempt, read-back verified, the card checked by its
+serial number. Not yet loaded. tv1 is no longer in the card's flash.
+   **se2 does not get through either (11:13; its stamp read from the
+card first, the bring-up running by itself, logged at twenty readings
+a second).** /RES waited for at 11:13:27, the ROM copied at
+11:13:29.81 (sum 7EE8), card memory at the machine's pace at :29.86 -
+and in that same reading **130 verify mismatches, the last at
+`FF:ABFB`**, the bring-up failed and the machine given its own bytes
+back at :29.91. The screen: `Fatal system error -> 0911` (Ed's
+photo), the ROM's own failure display; 0911 is the Desktop Bus tool
+set's "cannot synchronize". The PHY's count of stalled cycles is 0
+here too.
+   So **the fault is not tv1's**: not its placement, not the trace's
+taps, not the constraint of this section. What the three power-ups
+that failed with a bring-up have in common, tv1's two and this one, is
+*when*: the bring-up waits 2000 ms after /RES, then holds the core for
+the ROM copy and switches memory, and about two seconds after the
+start is where this disk's loader starts the tool system again (the
+Scheduler's BootInit in tv1's breaks; the Desktop Bus one is two tool
+sets after it). 130 mismatches at ROM addresses inside 50 ms are not
+the ROM image (its sum is right, and a wrong byte there would have
+been seen in every earlier power-up): they are the pads not holding
+the ROM's byte at the fall the broker took - the same thing as the FF
+in tv1's ring, many times over.
+   What was different in every use of the accelerator that worked
+(the benchmarks of sections 3f to 3k, the Disk II boots of 3l and 3m):
+the bring-up was run with GS/OS already up, or the machine was not in
+this loader at two seconds. **Next, with nothing flashed: the wait
+before the bring-up set to 20 s (`gs accel delay 20000`, kept until
+the ESP32 restarts), so that it runs after the loader.**
+   **With the wait at 20 s the bring-up is clean and the boot is not
+(se2, 11:34).** The bring-up: the ROM copied 20.0 s after /RES, card
+memory and the copy of E0/E1 each verified for a second with no
+mismatch added to the 130, fast at 22.1 s, and from then the speed
+rules pacing and letting go as the program writes the speed register.
+But the machine had stopped before any of it: the screen is GS/OS's
+"Welcome to the IIGS" with its bar empty (Ed's photo), no beep, and the
+log has the speed register going between 02 and 82 about eight times a
+second from 5 s after the start on, the same before the bring-up as
+after. A sample of the last address (torn, as that reading is) is
+mostly the ROM's interrupt code, `FF:B7xx`, `FF:BAxx`, `FF:BBxx`. The
+a2p25's console is as on a good boot: stick mounted, the Arkanoid
+image on unit 1, reset released.
+   **So "the bring-up two seconds after the start" is not the whole of
+it:** this power-up went wrong on socket bytes with the card asked for
+nothing, as S6 runs. Of today's eight power-ups with a card that ran:
+three stop in tv1's break, one (se2) in the ROM's 0911, one (se2) here,
+one never left reset, two (tv1, never asked for anything) boot. What
+they share is not a build and not a mode. What the two captures say -
+a fall event that the bus had not earned, 130 samples of ROM that were
+not the ROM's - is the card taking the pads at the wrong moment, and
+the Desktop Bus errors and the reset that fell back are the same day's.
+Not explained. Things of today that were not so on the days it worked:
+the card on USB from the Mac through every power-up (Ed's question at
+10:10), plugged and unplugged several times; the trace's taps (not in
+se2). **Next: the same boot with the card's USB out.**
+   **The card's USB out: se2 boots (11:47; one power-up).** The card
+comes up with the machine (its own hold and the a2p25's as always, the
+socket taken 9.6 s after the clock), the bring-up runs by itself with
+its 2000 ms: ROM copied (7EE8), **card memory at the machine's pace
+for its second with no mismatch** - where the power-up on USB an hour
+before had 130 in a twentieth of that - then, with the copy of E0/E1,
+`VERIFY MISMATCH AT 01:FBC3 (7) - ON SOCKET BYTES`, and the machine
+goes on to Arkanoid on its own bytes (Ed). That is 2026-11-16's first
+power-up to the address (section 3m): the same build, the same disk,
+the same stop.
+   So there are two things, and today mixed them:
+   1. **On USB from the Mac the card takes the pads wrong** - tv1's
+      extra fall event, se2's 130 ROM bytes that were not the ROM's,
+      and whatever stalled the boot that never got to the bring-up.
+      One power-up without the cable is clean of it; that is one. What
+      of the cable does it - the card's rail fed from VBUS in place of
+      the slot, the Mac's ground through the hubs - is not looked at.
+   2. **The bring-up stops on 01:FBC3 with the copy of E0/E1** on this
+      disk, as it did on se2 a week ago: seven reads there that the
+      card's memory and the machine's do not agree on. That one is the
+      card's, it repeats, and it keeps the accelerator from coming on
+      by itself on this boot; the machine is unharmed by it. Open
+      since 2026-11-16.
+   **Two more power-ups without the cable, the same (11:50, 11:51;
+Ed):** both boot to Arkanoid, and the last one's console is the
+first's - ROM copied, the verify second clean, `VERIFY MISMATCH AT
+01:FBC3 (6)` with the copy of E0/E1, socket bytes. Three of three
+without USB against none of five with it and a bring-up. The counts at
+01:FBC3 over a week: 6, 7, 6 today, 6 on 2026-11-16.
+   **Next: the mismatch itself.** The telemetry keeps a count and the
+last address; what is wanted is each of those reads - its address, the
+card's byte and the machine's - which is a few registers in the build
+with the trace.
+   **Corrected (Ed, 12:10): what the cable changes is state, not
+electricity.** With the card on USB a power cycle of the machine
+leaves the card as it was - the FPGA configured, its block RAM and
+the DDR3 with what the last session left in them, the replica, the
+broker and the PHY wherever they stood, the firmware running. With
+the cable out the same power cycle clears all of it. So item 1 above
+reads wrongly where it says the card "takes the pads wrong on USB" and
+looks to the rail and the ground: nothing measured says that, and it
+was a guess. What the eight power-ups say is that **a card that stays
+up across the machine's power cycle, or is up before the machine,
+does not start that machine cleanly, and a card that starts with it
+does** - which is gateware or firmware. What survives, as the source
+has it: banks 00/01 in block RAM and the expansion memory with the
+copy of E0/E1 (the copy called whole at the next /RES if the DDR3 is
+ready, though the machine's own RAM is now a power-up's); the ROM
+image and its valid bit; the verify counts; the trace's setup; in the
+firmware the bring-up's waits and its MANUAL state. Which of it does
+the harm is not found. The first power-up of the day belongs here
+too: the card had been power-cycled by its cable minutes before, and
+was up and waiting when the machine came on.
+   **The card up on USB for 27 minutes before the machine: se2 fails
+as at 11:13 (12:27).** The cable had been put back with the machine
+off about 12:00 (the card's counts read zero: it started afresh
+there), the machine turned on at 12:27:10. /RES waited for 2 s, the
+ROM copied (7EE8), and in the first reading with card memory **125
+verify mismatches, the last at `FF:ABFB`** - 130 and the same address
+at 11:13 - then socket bytes. The screen is the Monitor printing
+addresses and colons down the page (Ed's photo); at 11:13 it was the
+ROM's fatal error display. `FF:ABFB` is in the ROM's own listing code,
+the fetch after `STA $40`.
+   So this repeats to the address: **a card that was started afresh
+and then stood on USB with the machine off, 2 minutes or 27, and the
+machine's own ROM is not read right through it** - before the card's
+memory is asked for anything, since the machine is already in the
+Monitor's code when the bring-up begins at 2 s. Against it, the same
+build and the same disk, the card starting with the machine: three of
+three clean of it. What is not yet separated: whether it is something
+the gateware or the firmware gets into while it waits, or the waiting
+card itself. Next: with the cable in and the machine off, the FPGA
+loaded again from its flash over telnet just before the power-on.
+   **The FPGA loaded again just before the power-on: it fails all the
+same (12:31).** Cable in, machine off, `g` on the card's console at
+12:29:53 (se2's stamp read back, every count zero), the machine on at
+12:31:02. ROM copied, and in the first reading with card memory 77
+verify mismatches, 132 by the next, the last at 00:0200 - the
+Monitor's input line - then socket bytes; the Welcome screen and a beep
+(Ed). (After the reload the hold register stood at its default until
+the clock came, the firmware not knowing of the reload; the event log
+has the start as otherwise usual: the a2p25's 10 s, the socket taken
+23 ms after /RESET.)
+   So it is **not state the gateware gathers while it waits**: that
+was thirty seconds old. Left: the firmware, up for half an hour and
+not restarted; and what a configured card does to a machine that is
+off. On the second the source says this: `a2_bus_oe = 1'b0`, the
+slot's level shifters enabled from the moment the FPGA is loaded, with
+no gate on the machine being alive - what the note of 2026-09-14 on
+these shifters calls the leak into a dead Apple and names an enable
+interlock as the remedy for. Not shown to be the cause. The test that
+tells the two apart from the outside: the cable put in and the machine
+turned on at the same moment, so that the card has not stood
+configured against a dead machine.
+   **The cable in and the machine on in the same moment: it fails
+(12:34).** The card's event log of this start is the log of a start
+without the cable, line for line: the clock alive 0.15 ms after the
+gateware's first event (the machine was on before the FPGA was
+loaded), MCU ready at 302 ms, our hold off at 477 ms, the slot's /RESET
+up at 10.47 s, the socket taken 21 ms on. Then the bring-up: ROM
+copied, `VERIFY MISMATCH AT 00:02DC (48)`, 101 by the time it had let
+go, the last at 00:02E0, socket bytes; the machine fails (Ed).
+   So neither a card that has stood waiting nor one configured against
+a dead machine is needed: **the card started with the machine, as
+without the cable, and with the cable in it fails.** The shifters'
+enable is not the cause of this either, then. What the cable is to a
+card in this state: its 5 V from VBUS in place of the slot; the Mac as
+a USB partner (the console has `USBC: DR_SWAP REJECTED`: the port's
+power-delivery code talks to it, and the ESP32's own USB serial is
+enumerated); and the Mac's ground. Which, not known; three guesses of
+mine at this have been wrong today. Told apart from the outside by
+what is on the other end of the cable: a charger gives the 5 V with no
+partner.
+   **On a power bank: three power-ups, none good (12:50 to 12:53;
+Ed; each with the bank taken off and put back, so the card afresh).**
+Two never leave reset - the screen of the third power-up of the
+morning. The third runs: the bring-up by itself, ROM copied, card
+memory, and 0.2 s on `VERIFY MISMATCH AT FF:BFFA (1) - ON SOCKET
+BYTES`; then the Monitor: `FF/B8B3: 02 29  COP 29`, A=F3FF X=0000
+Y=0083 S=01EF D=0000 P=B4 B=E1 K=FF m=1 x=1 e=0.
+   Two things in that are this morning's capture again. `FF:BFFA` is
+the fetch after `STA $E100FF` (`FF:BFF6`, the busy flag's routine) -
+the store before tv1's doubled fetch, from another caller: there the
+pads had FF at a fall that was not the cycle's end, here the card's
+byte and the pad's differ at the same fetch. And `FF:B8B3` is not an
+instruction: it is the second byte of `BPL` at `B8B2`, the fetch after
+`LDX $C018` - the core one byte off its stream again, after a cycle
+that the machine stretches. So **the fault is the same on se2 and on
+tv1, on the Mac and on a bank: the fetch behind a stretched cycle is
+taken wrong**, and a card fed by its slot alone has not shown it in
+three power-ups.
+   What the bank rules out: the Mac. The two things found in the
+firmware that a USB host changes (log writes waiting on a reader, the
+JTAG bridge's pins) need a host, and a bank is none; they are not the
+cause. What all the failures of today share is a card with its USB
+port fed, and I have no account of that which the board itself can
+check - so no account is given. What the board can check: whether the
+FPGA's PH2 pin has an edge too many in such a cycle. That is a counter
+and a few samples of the pin in the build with the trace; and the
+broker taking for a cycle's end only the fall the PHY takes is a
+change the capture asks for whatever the count turns out to be.
+   **The log of verify mismatches (built 2026-11-22; simulated; two
+placements of three with no violation: not a closed build; not
+flashed).** In the build with the trace, `gs_accel` keeps the first
+four mismatches since card memory was last taken, three telemetry
+words each (18 to 29, the number logged in 30): `{address, the card's
+byte}`, `{where the card read it - RAM's physical address or the ROM
+image's - , the socket's byte}`, `{shadow, state register, speed
+register, source}`, the source being the broker's `{near memory, card
+memory selected, ROM selected, the decode's local, local ROM, side,
+slow, bypass}`. The broker registers these at the mismatch (four
+outputs more); nothing reads back into it. The bench compares the log
+at the end of a run with its own broker's first four mismatches (a
+toggling run must make at least one): 231 runs pass. A first build
+(tw0) had 561 setup violations: the log was emptied in the clk card
+memory's grant moved, which hung its 384 enables on the request's key;
+the grant goes through two registers now. Timing of the three
+placements of that source: tx0 +0.034 and tx1 +0.012, none; **tx2 34
+violations, -0.288** (a step register into the cheap view's clock
+enable, a path of every round). So this is two clean placements, to be
+used as x0 and q1 were if at all, by Ed's decision.
+   **tx0 flashed as a diagnostic (2026-11-22, 15:45 to 15:49; Ed's
+decision, the build not being a closed one).** Over USB with the
+machine off (the card's report: clock stopped), first attempt,
+read-back verified, the card checked by its serial number and the file
+by its sha256 (`8ab342a0...`). Not yet loaded. For the stop on
+01:FBC3, with the cable out for the power-ups.
+   **The stop on 01:FBC3 read from the log (tx0, 15:50; the cable out,
+its stamp read from the card).** The bring-up as on se2: ROM copied,
+the verify second clean, `VERIFY MISMATCH AT 01:FBC3 (8)` with the copy
+of E0/E1. The log's four:
+
+    01:FBC8  card 00  socket FF  read at 01:FBC8  shadow 1E state 00 speed 82  source 52
+    01:FBC9  card 00  socket FF  read at 01:FBC9                              source D2
+    01:FBC6  card 00  socket FF  read at 01:FBC6                              source D2
+    01:FBC7  card 00  socket FF  read at 01:FBC7                              source D2
+
+and the count's last address FBC3: eight bytes, FBC9 down to FBC2, in
+words from the top. The card read its own RAM at the address asked for
+(no fold, not the ROM, not the copy of E0/E1: the decode says local
+RAM, the first from the far memory and the rest from the line it
+filled), the state register 00 - language card RAM read, bank 1 of
+bank 01. **The card has 00 there and the machine FF.** So either
+nothing has written those eight bytes since power-up and the two start
+from different contents (block RAM from zero, the machine's as its
+chips come up), or a write the machine took did not reach the card's
+RAM, or one the card took did not reach the machine's. The bytes above
+FBC9 agreed, the words being read downward. A trace of the first cycle
+at 01:FBC8 says which: a write before the read, or the read alone.
+   **The first cycle at 01:FBC8 is a read (tx0, 15:54; the trigger
+set as the card came up with the machine, before the socket was taken;
+`captures/gsos_lock_1122/fbc8_first_dump.txt`).** (This power-up's
+bring-up, started by hand at the take, stopped at once on reads of
+page zero and a screen hole that hold what the machine's RAM had kept
+over ten seconds without power and the card's block RAM had not -
+00:0000, 0001, 04FB, 0024: the same kind of stop, and it left the
+machine on its own bytes, every cycle on the socket.) 4.2 s after the
+start, code of GS/OS in bank 01's language card:
+
+    01:DADC  AD C8 FB   LDA $FBC8    R 01:FBC8=00  R 01:FBC9=07
+    01:DADF  48         PHA
+    01:DAE0  AD C6 FB   LDA $FBC6    R 01:FBC6=19  R 01:FBC7=0A
+    01:DAE4  AD C4 FB   LDA $FBC4    R 01:FBC4=14  R 01:FBC5=58
+    01:DAE8  AD C2 FB   LDA $FBC2    R 01:FBC2=00  R 01:FBC3=15
+
+four words of its own variables pushed for a call - the eight bytes
+and the order of the mismatch log. **No cycle at 01:FBC8 came before
+it on the socket, from before the core's first step: and the bytes are
+not a power-up's.** So they were put there under another address -
+bank 00's language card with ALTZP set is the same RAM - and the
+machine's hold 0700, 0A19, 5814, 1500 in this power-up where the one
+before read FF FF FF FF at the same code a second sooner in its boot.
+   So it is not memory nobody wrote: **the machine takes a write to
+those bytes that the card's RAM does not show** - the card had 00
+there. Which write, and what the replica made of it, is the next
+capture: the trigger on the same bytes in bank 00.
+   **The trigger on the same bytes in bank 00, and the last paragraph
+taken back (tx0, 16:01; `fbc8_bank00_dump.txt`).** The first cycle at
+00:FBC8 is 4.0 s after the start and is the loader's block move:
+
+    00:7D2B  54 00 7E   MVN $7E,$00    R 7E:5F30=1F  W 00:FBC2=1F
+                                       R 7E:5F31=06  W 00:FBC3=06
+                                       ...
+                                       R 7E:5F36=00  W 00:FBC8=00
+                                       R 7E:5F37=00  W 00:FBC9=00
+
+a file's image going from bank 7E into bank 00's language card - 1F 06
+00 08 00 00 00 00 at FBC2 to FBC9, which is not what 01:FBC2 to FBC9
+reads 0.2 s later (00 15 14 58 19 0A 00 07). So that move is to bank
+00's own RAM and has nothing to do with the bytes in question; and of
+those the two captures leave this: no cycle at 01:FBC8 and none at
+00:FBC8 before GS/OS reads them. **What the last paragraph concluded
+from "the bytes are not a power-up's" does not follow.** They are
+what the machine's RAM kept: this machine had been off ten seconds,
+and its RAM holds much of a session through that - the same power-ups
+stopped on page zero bytes the ROM reads before it writes (00:0024 =
+1B, the cursor's column of the session before). The power-up at 15:50,
+after three hours off, read FF FF FF FF at the same code. So GS/OS
+reads eight bytes of its own variables before it has written them,
+the machine answers with whatever its chips hold, the card with the
+zeros its block RAM starts from: **the known gap after all, not a
+write the card missed.** One power-up can check it: after ten seconds
+off, the bring-up left to itself, the log's socket bytes at 01:FBC6 to
+FBC9 should be a session's and not FF.
+   What it means for the bring-up is unchanged and now plain: it will
+stop on this disk at every power-up, because the card's RAM is not a
+copy of the machine's but a record of what was written since the card
+began. The remedy that keeps to the machine is to make it a copy: read
+banks 00/01 (and E0/E1 for the copy of the Mega II's RAM) through the
+socket in the hold that reads the ROM.
+   **The check looked at again, and two instruments (Ed, 2026-11-22;
+simulated; two placements of three with no violation: not a closed
+build; not flashed).** Ed's question of the stop on unwritten RAM was
+not how to make the card pass the check but whether the check is
+right: a thing of bring-up days that would be onerous to work around.
+So the bring-up is stopped by the ROM image alone. A compare of the
+ROM cannot differ unless the image or the sample is wrong; a compare
+of RAM differs wherever nothing has written since power-up. The
+broker's `verify_miss_o`, `verify_addr_o` and `verify_count_o` - what
+the firmware watches - are of reads the decode says are the ROM
+image's (`VFY_RAM = 0`), `verify_scount_o` stays zero, and a mismatch
+of card RAM is counted apart (`verify_rcount_o`, word 30's high half,
+its last address in word 31) and goes into the log with the rest. No
+firmware change. The bench holds every run to no ROM mismatch at all,
+and the runs whose card memory is still a copy to none of RAM either;
+a check in the broker stops any run where a compared read in banks
+FE/FF is not classed as the ROM's.
+   And of the failures with the card's USB fed, Ed's two readings: its
+supply, which he sets aside as vague and not testable (the bank is 5 V
+3 A); and **the PHY's sample being marginal for the ROM, whose setup
+and hold are not RAM's** - which what is on record fits: every wrong
+sample with an address is a ROM read (`FF:BF7B`, `FF:BFFA`, `FF:ABFB`
+twice), every RAM mismatch unwritten memory. For that, in the trace
+build (words 0 to 5 while the ring is told to stand still):
+   - *the read-data sweep*, the S6 instrument of `gs_socket_ctl` made
+     two-sided and split by what is read. The pads are sampled in every
+     clk; for each read cycle the sample of one clk - connector
+     register 3, signed, -12 to +8, tap -1 the last clk edge before the
+     fall and tap 0 the first after - is compared with the byte the
+     core took (`d_f`), and mismatches and cycles are counted for the
+     ROM (banks FC to FF), fast RAM (00 to 7F below `$C000`) and the
+     Mega II's side (E0/E1 and I/O). In the bench, whose machine gives
+     both the same timing: half the cycles differ at -12, none from -8
+     to +1, nine in ten at +2, all from +3 (`captures/build_ty/
+     sweep_sim.txt`).
+   - *falls the PHY did not wait for*: their count, and of the first
+     the PH2 pin as sampled 24 clks before and 8 after, the PHY's state
+     and the address. (The broker taking a cycle's end only from a fall
+     the PHY takes is not made: that answers a cause not shown.)
+   231 runs pass. Timing of three placements: **ty0 267 violations,
+-1.277** (the PHY's enable into the sweep's counters - the instrument's
+own path); ty1 +0.001 and ty2 +0.001, none.
+   **ty1 on the card, the cable out (2026-11-22, 21:15): the bring-up
+goes through to fast by itself on this disk, the first time.** The
+stamp read from the card is ty1's. The console: ROM copied (7EE8), card
+memory at the machine's pace, the same with the copy of E0/E1, `FAST`.
+The count the firmware watches - the ROM image's - is 0; card RAM's is
+15959 by then (last at 00:01E5; most of it is of paced stretches after
+fast mode has run, where the machine's own RAM is behind by design),
+the log's four as before. Arkanoid is up (Ed) and runs with the speed
+rules moving the card between fast and paced as it writes the speed
+register.
+   **The sweep there, a first pass (`captures/gsos_lock_1122/
+sweep_usb_out_1.txt`; 0.6 s a tap, the game in a loop on `$E1C019` in
+fast mode):**
+
+    tap    ROM            Mega II side
+    -12    68.7 % differ   0
+    -11 .. +5    0         0
+    +6     100 %          99.9 %
+    +7, +8 100 %          100 %
+
+65535 cycles a tap in each; no fall the PHY did not wait for. In fast
+mode the ROM's cycles are the idle read of `FF:0000`, one address and
+one byte, and no read of fast RAM is on the socket at all - so this
+says the pads hold a byte from 11 clks before the fall to 5 after (the
+card's own next bank byte is what +6 sees) and that the window is wide
+about the sample with the card on the slot's supply; it does not yet
+compare the ROM's code fetches with RAM's. That needs every cycle on
+the socket: the card paced.
+   **A beep, about three minutes into that session (Ed, 21:18): the
+machine is at the Monitor's key wait, the card still fast.** Read with
+status queries only: mode `9A` in 150 samples of 150, the speed
+register 82, 2.8 M socket cycles a second, and the last address is the
+idle read with `$C000` and `$C036` among it - the ROM's key wait, as on
+the morning's breaks. No reset in the event log. So Arkanoid, running
+accelerated with the speed rules moving the card between fast and
+paced several times a second, broke; where, the text screen will say.
+   What had been sent to the card in that session: the sweep (register
+3, the tap, twenty-two values; CTRL's bit 3 on and off for each
+reading, twenty-five times in all, the last about a minute before Ed
+wrote) and status reads. None of it reaches the accelerator: the tap
+goes to the sweep's counters, the bit to the trace and the telemetry's
+choice of words. That is reading the source, not a test; no mode was
+changed.
+   The text screen (Ed, `E1/C029:01`):
+
+    02/5356: 00 A9        BRK A9
+     A=0082 X=53D5 Y=0000 S=2E6E D=1C00 P=80 B=55 K=02 M=0C Q=9E L=1 m=0 x=0 e=0
+
+The game's own code in bank 02 - expansion RAM, the card's DDR3 - and
+A holds 0082, the value the speed register has had all session: the
+break is beside a write of the speed register, which is where the
+rules turn the card between paced and fast. Whether `02:5356` is an
+instruction or the inside of one is in the bytes around it, which the
+Monitor can show.
+   The bytes about it (Ed, `02/5340.536F`):
+
+    02/5340: 10 A0 00 01 B7 B4 85 11 A9 00 00 87 B4 97 B4 A6
+    02/5350: 10 20 90 53 A0 02 00 A9 10 00 AA 97 90 A0 04 00
+    02/5360: B7 90 C9 50 00 F0 03 8A 97 90 20 30 53 A9 FD FF
+
+which is `534F LDX $10 / 5351 JSR $5390 / 5354 LDY #$0002 / 5357 LDA
+#$0010 / 535A TAX / 535B STA [$90],Y`. **`02:5356` is the third byte
+of `LDY #$0002`** - the core off its stream once more, here in fast
+mode, on the card's own memory, with the cable out. And Y is 0000, not
+0002: that `LDY` was not run as two bytes and then broken into, it was
+not run. The core came to `5356` from elsewhere - the return of the
+`JSR $5390` just before it is two bytes short of that (it returns to
+`5354`). What the subroutine at `5390` does, and what is left on the
+stack, the Monitor can show.
+   The subroutine and the stack (Ed, `02/5390.53DF`, `00/2E60.2E8F`):
+
+    02/5390: A0 06 00 B7 90 A0 09 00 D7 90 D0 06 8A A0 06 00
+    02/53A0: 97 90 8A A0 09 00 97 90 60 9C 2C 14 9C 2E 14 20
+    02/53B0: 88 45 90 01 60 A7 B8 85 10 A0 00 01 B7 B8 29 FF
+    02/53C0: 00 85 11 A9 00 00 87 B8 97 B8 20 30 53 A6 10 20
+    02/53D0: 90 53 A0 02 00 A9 20 00 AA 97 90 A0 04 00 B7 90
+
+    00/2E60: 06 03 93 8B 02 6B 8B 00 00 FE FF 02 7F 8B C4 83
+    00/2E70: 04 2A 83 00 1B 1F 64 5C C3 02 FC C2 02 62 63 02
+    00/2E80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+`5390` is `LDY #6 / LDA [$90],Y / LDY #9 / CMP [$90],Y / BNE / TXA /
+STA [$90],Y ... / RTS` - nothing but loads, stores and a return, and
+it leaves Y = 9, which the break has not: Y = 0000, X = 53D5 (the
+address after the `LDY #$0002` of the same lines' twin at `53D2`), so
+the registers are not those of a core that has just come back from it.
+   **And the break's own frame is not on the stack.** The Monitor's S
+is the pointer after the push (the morning's breaks: S 01DF, the frame
+at 01E0), so P, PC and K - 80, 58 53, 02, which the Monitor printed -
+belong at 00:2E6F to 2E72. The bytes there are 83 04 2A 83. The
+break's handler pulled the right ones from that RAM moments after the
+core pushed them, and the Monitor's dump, minutes later and with
+nothing written there since, reads others. Banks 00/01 are the card's
+own in fast mode, behind the near memory's lines. **So the same four
+bytes of card memory have read two ways**: what was pushed did not
+stay, or what is read now is not what is stored. A return address read
+back as it was not written is enough for a core in the middle of
+`LDY #$0002`. Not shown which; and one break.
+   The same dump again a few minutes on reads the same bytes: the
+read is steady. And before the last paragraph is leaned on, what it
+left out: S = 2E6E is in `$2000-$3FFF`, where a write in bank 00 goes
+to bank 01 under the display's switches (80STORE with PAGE2 and HIRES)
+or RAMWRT - and this game draws by pushing, its stack pointer laid
+into the picture. If the frame was pushed under such a map and the
+Monitor now reads with another, the four bytes are in bank 01 (or its
+shadow in E1) and nothing was lost. The state register at the break
+(M=0C) has PAGE2 and RAMWRT clear, which speaks against it, but it
+does not hold 80STORE or HIRES. To be looked at before anything is
+built on "card memory read two ways": the same addresses in banks 01,
+E1 and 02.
+   **The frame is in bank 01: "card memory read two ways" is taken
+back (Ed's dumps, 21:40).**
+
+    01/2E60: 0E 00 00 00 00 33 31 33 33 55 55 E1 E1 55 C4 80
+    01/2E70: 58 53 02 55 55 55 55 22 22 22 22 65 55 55 53 55
+
+`80 58 53 02` at 01:2E6F - P, the PC and K of the break as the Monitor
+printed them - and under it the handler's own pushes, `C4`, `55` (B),
+`E1 E1`; around it the picture's bytes. Nothing was lost. The card put
+the stack's pushes into bank 01, as it does for `$2000-$3FFF` of bank
+00 when the replica has the auxiliary bank selected for writes there,
+and the handler pulled them from where they had gone. (The card's copy
+of E1 at the same place has picture only: super hi-res shadowing is
+inhibited, shadow 1E, as a game that draws off screen has it.)
+   What stands in its place: **the machine's state register at that
+moment was 0C** - the handler reads `$C068` from the socket a few
+instructions after the push, and prints it as M - which has RAMRD,
+RAMWRT and PAGE2 all clear: by the machine's own switches those pushes
+belonged in bank 00. So the card's replica of the switches and the
+machine's switches did not agree: the replica still had the auxiliary
+bank for that region, the machine had gone back to the main one. The
+game draws through the stack with the auxiliary bank selected and then
+puts the map and the stack pointer back; a replica that keeps the
+auxiliary bank past that reads the game's own page-zero and stack from
+the wrong bank from then on, which is a core that ends up in the middle
+of an instruction with its stack pointer still in the picture. That
+fits every register of the break; it is one break, and which write the
+replica and the machine took differently is not seen.
+   **These breaks are new (Ed): Arkanoid and other programs ran
+accelerated many times before, for long.** What the card has now that
+those runs had not, newest first: this evening's (the verify outputs,
+the sweep, the log - none in the path of a switch); the constraint of
+this section (2026-11-21); the trace's taps; and the speed rules'
+motor latches leaving banks 00/01 alone while I/O shadowing is
+inhibited there (2026-11-21) - which changes this very game: it
+inhibits that shadowing and writes at `$C0n8/9`, so until last night
+its "motors" were on and now they are not, and the card now goes
+between paced and fast with each write of the speed register where it
+did not before. The break is beside such a write.
+   **A place where the card's map and the machine can differ in exactly
+this game's state: page `$C0` of the expansion banks (21:50; source and
+the captures of 2026-11-21; a hypothesis for the break, a fact about
+the map).** The game's own stack is at `00:2E6x` (its JSRs push there
+in every capture of 11-21; D is `1B00`/`1C00`), so the frame in bank 01
+is the game's ordinary stack sent to the auxiliary bank, not a drawing
+trick. What sends `$2000-$3FFF` of bank 00 there: RAMRD/RAMWRT, or
+80STORE with HIRES and PAGE2 - and the replica read after the break has
+80STORE and HIRES both set (word 10 `6F`), so PAGE2 alone would do it.
+   The map (`gs_mmu_decode`, from the MiSTer core's; the replica's
+tracker; and the bench's model of the machine, all three alike) put
+I/O at `$C0xx` of banks 02 to 7F whenever the speed register's bit 4
+(shadowing in all banks) is set - **whatever the shadow register's bit
+6 says**. The replica's own test wrote `$05C035` with the shadow
+register at `5F` and expected the register to change. In the game's
+running state - shadow `57`, speed `92`, state `0C`, read at the lock
+on 11-16 and 11-21 - I/O is inhibited in banks 00/01 and bit 4 is set;
+and the game's code runs through `$Cxxx` of bank 02 (`02:C74D`,
+`02:CC3D-CC58` in `captures/arkanoid_1121/first_1bb2.txt`). With the
+old map any access at `02:C0xx` in that state is (a) a socket cycle
+answered by the machine, where in fast mode the program's bytes are in
+the card's memory and not the machine's, and (b) a soft switch to the
+replica: a read of `$C055` sets PAGE2, of `$C057` HIRES, a write at
+`$C001/3/5/9` sets 80STORE, RAMRD, RAMWRT, ALTZP, and `$C035`, `$C036`,
+`$C068` and the language card's page likewise. On the machine's own
+bytes (mode 00 or 80) none of it matters, which is how the game ran
+for minutes through this card on 11-21.
+   Not shown: that the game touches `02:C000-C0FF` in that state (no
+capture has such a cycle; each is 8,192 cycles); that the machine has
+RAM there then (inferred: the game runs on it, and the inhibit is one
+term of the decode in any reading of the Hardware Reference); what the
+machine does with bit 4 set and bit 6 clear (left as it was, I/O in
+every bank; a border write at `$02C034` from the Monitor would say).
+   **Changed (round tz):** `all_bank_io` in `gs_mmu_decode` and the
+tracker's `cyc_io` take `!shadow[6]`; the bench's machine
+(`iigs_mmu_model.h`, three places) the same; the replica's directed
+test now has both cases (inhibited: `$C0xx` of banks 02/05 moves no
+switch and no register; not inhibited: it does), and the broker's test
+program a stretch for it (T28: reads of `$02C055`, `$02C057`, writes
+at `$02C001/3/5` with shadow `48` and speed `90`; the state register
+as it was). The bench cannot say which map is the machine's - its
+machine is the same model - only that the card and the model agree
+and nothing else moved. The map's bench passes (the decode's sweep,
+1,875 M vectors; the replica's 127 directed checks and 6 M random
+ones, both ROMs). The broker's: 230 runs of 231 pass, and the one that
+did not is a run whose own condition is tied to a step number
+(`l_recopy_hs2`, a hold that must begin under a stalled idle cycle):
+T28 moved the program's steps by 55, a sweep finds the narrow window at
+20169 to 20171 now, and at 20170 the run passes with every check. The
+full set has not been run again with that number.
+   On "new": this decode is of 2026-11-11, not of this week. By this
+record tonight is the first time this game ran in fast mode on this
+card: on se2 every boot of this disk stopped the ladder at the verify
+(`01:FBC3`) and ran on the machine's bytes with the setting on, and
+11-21's runs were with the setting off. If accelerated runs of it were
+made on another build, they are not in this record.
+   **What it is not known to be:** of tv1 alone. No boot of GS/OS from
+power-up in fast mode is on record for any build: the benchmarks ran
+with GS/OS brought up first and the card switched after, and the
+power-ups that went fast by themselves booted a Disk II. So this may
+be the first time this stretch runs in fast mode at all.
+
 ## 4. What is verified, and what is not
 
 Verified in simulation (the broker suite, `hdl/twgs/sim/broker`):
@@ -1693,11 +3702,660 @@ Not verified, not done:
 ## 5. Building
 
     GPRJ=a2mega_accel_138B.gprj RESOURCE_BASELINE=none tools/build.sh a2mega all
+    GPRJ=a2mega_accel_138B_trace.gprj RESOURCE_BASELINE=none tools/build.sh a2mega all   (section 3n)
 
 The a2mega directory holds many projects: always name the project, and
 check the build stamp (`CORE:` line) before trusting a hardware test.
 Regenerate the constraints with `python3 hdl/accel_probe_138b/gen_sdc.py`
 and `python3 hdl/accel_probe_138b/gen_floorplan.py accel`.
+
+Provenance of ub0, ub1 and ub2 (**the project without the trace**,
+`a2mega_accel_138B.gprj`, from the same source as ua: the map change
+of section 3n, the bring-up stopped by the ROM image alone, the speed
+rules' fix and the two-clk constraint of 2026-11-21; no ring, no
+mismatch log, no sweep; **three placements of three with no
+violation**; none flashed, none run on hardware - what has run is tz1,
+the trace project's): sources = commit `f790f4d9`; the same tool and
+device. ub0 (worst +0.014): build stamp `20261124002541`, bitstream
+sha256 `9d03c2e12591392d...421029bed0dd272`, of the lines that are not
+header `326e18ec8db868a6...73734b742040b5a9`. ub1 (+0.056):
+`20261124004336`, `84de29033f8d1e52...5963077c8cb6826`,
+`d98122a88f29baef...37507d5cff6a3735`. ub2 (+0.011): `20261124005439`,
+`5c3f96f04b4bfa17...4226a1467ac5a1bc`, `deebc55a8ddf4f94...1b8b937c6103f15`.
+Built in 11 to 18 minutes each. Kept in `impl/pnr` by name
+(`a2mega_accel_138B.fs` itself is ub2 now; se2 is kept as
+`a2mega_accel_138B_se2.fs`). So the change closes where it would ship,
+and the trace project - the same source with the ring, the log and the
+sweep beside the core - is what does not (ua: one of three).
+
+Provenance of ua0, ua1 and ua2 (the trace project of tz with the
+diagnostics' counters on registers of their own - the sweep's, the
+count of falls nobody waited for, the broker's count of card-RAM
+mismatches; **one placement of three with no violation: not a closed
+build**; none flashed): sources = commit `f790f4d9`; the same tool and
+device. Bench 231 runs of 231; the simulated sweep the same, number
+for number, as before the change in fifteen runs (native, fast and
+paced at taps -12, -3, 0, 2, 5). ua0 (no violation, worst +0.019,
+built in 11 minutes where tz's took 20 to 60): build stamp
+`20261123231937`, bitstream sha256
+`70c5ddf3a79a54e2...ea374c028b8a783`, of the lines that are not header
+`93c6c13c7a7e705c...721ba09cfbc78a83`. ua1 (77 setup violations, worst
+-0.472): `20261123233100`, `3e2ec7262cd8babc...aef1ea4c2bcec1c`,
+`baf7c73db051954f...f433b9358b6dfd05`. ua2 (9, worst -0.036):
+`20261123235342`, `4ff49dbc55105cd8...2d99510003dd173`,
+`763560829e1dd97c...2038702427e20b9c`. Kept in `impl/pnr` by name.
+   What fails now is no longer the sweep's enable (ty0 -1.277, tz2
+-0.823). It is the core's own loop - the near memory to itself, the
+launch's index to `nh_dq` and `fh_c`, the PHY's `enabled` into the
+broker's step - with, behind it, what else was added since tv, the
+last round that closed: the sweep's class into its counts (-0.189),
+the verify compare into the E0/E1 count and address (-0.337), the
+mismatch log, the trace's count. Every failed placement since tv has
+the core's loop in it (tx2 had nothing else): the loop closes at
++0.01 to +0.04 when it closes, and each addition beside it costs
+rolls. The round's script is `captures/build_ua/build_round.sh`: it
+removes the project's outputs before each build, so no stale file can
+take a round's name.
+
+Provenance of tz1 and tz2 (the trace project of ty with one change:
+page `$C0` of an expansion bank is I/O under the all-banks bit only
+while the shadow register allows I/O in banks 00/01, section 3n; **one
+placement of three with no violation: not a closed build**; none
+flashed): sources = commit `1af9e29f`; the same tool and device. tz0:
+no bitstream - the placement did not end in the 3,600 s the build
+script allows and was stopped. (The round's script then copied the
+project's previous output under tz0's name: those three files are
+ty2's, byte for byte, and are renamed `..._tz0_NOT_A_BUILD_copy_of_ty2`;
+the script wants a delete of the project's output before each build.)
+tz1 (no violation, worst +0.010): build stamp `20261122225221`,
+bitstream sha256 `211cdfd941080d65...f22f25f312fdbf0`, of the lines
+that are not header `625195cced23b510...c623e2c8a2643d559a`. tz2 (219
+setup violations, worst -0.823, the sweep's own enable again -
+`u_phy/enabled` to `g_diag.sw_mis`/`sw_n` - as in ty0; none in the
+map): `20261122233709`, `6716962633f665a6...f000f0a46d0bf709`,
+`f6eff98b031f08cd...e50eee5a50f7b479c3`. Kept in `impl/pnr` by name.
+**tz1 flashed 2026-11-23 20:24** as a diagnostic (Ed: "Flash tz1"), over
+USB with the machine off (the card said so: no clock, reset held), first
+attempt, read-back verified, the card checked by its serial number and
+the file by its sha256.
+   **tz1 running, the cable out (2026-11-23, 21:18 on): Arkanoid in
+fast mode for twelve minutes and more with no break, left in its
+attract mode** (Ed: last night's break was in attract mode too). The
+stamp read from the card is tz1's; the ladder went to fast by itself
+(sum 7EE8, the ROM image's count 0, mode `9A`). Logged by status reads
+only (`captures/arkanoid_1123/tz1_watch.log`, 12,893 polls in 720 s):
+mode `9A` at every one; the speed register `82`, and `92` in five of
+them (21:23:15, 21:25:14, 21:26:34, 21:26:58, 21:29:08), each gone by
+the next poll 50 ms later; one read of the replica between: shadow
+`1E`, state `0C`. So the state the map change is about - bit 4 of the
+speed register set - is not the game's steady state, as section 3n
+took it to be from readings made in the mouse lock: it comes in short
+bursts, minutes apart at the polling's resolution. Whether the shadow
+register's bit 6 is set in those bursts has not been read. One run
+with no break against one run with a break at about three minutes
+(ty1) is not a proof of the change. A longer watch is running, with
+the socket's last address every 5 s so that a stop in the Monitor
+would show (`tz1_watch2.log`).
+   **That watch, an hour (21:32 to 22:32): no break.** 64,048 polls,
+mode `9A` at every one; the speed register at `92` in 27 of them, each
+a single poll; the ROM image's count 0 at the end; no reset. The
+socket's last address, 719 samples: the vertical blank's register
+(`$C019`) in 554, the keyboard's in most of the rest, and never more
+than 8 samples in a row (40 s) without the first - the game's loop,
+to the last sample. With the twelve minutes before it: 75 minutes of
+attract mode in fast mode on tz1, against a break at about three
+minutes on ty1, one run each. That is strong enough to keep the
+change and not enough to call the break's cause shown: ty1 was run
+once.
+   **The sweep with every cycle on the socket: the card paced, the
+cable out (tz1, 2026-11-24 17:05; `captures/usbin_1124/
+sweep_usb_out_paced.txt`; Arkanoid's attract mode, mode `8A` by the
+firmware's `gs accel slow`, back to fast after).** Share of read cycles
+whose pad sample at the tap differs from the byte taken at the fall:
+
+    tap         ROM       fast RAM    Mega II side
+    -12        84.2 %     49.9 %       0.16 %
+    -11         5.5 %     79.3 %       0
+    -10         0          0.07 %      0
+    -9 .. +5    0          0           0
+    +6         15.3 %     39.1 %       1.3 %
+    +7         97.9 %     91.0 %      99.1 %
+
+Up to 65,535 cycles a tap in each class, never fewer than 14,000; no
+fall the PHY did not wait for. So with the card on the slot's supply
+the ROM's code fetches and the RAM's reads hold their byte over the
+same window - from nine or ten clks before the fall to five after -
+and the sample at the fall sits well inside it for both: here the two
+do not differ in any way that could cost a byte. The other half is
+the same sweep with the card's USB fed.
+   (A slip of mine in this: the pacing command had been sent at 08:14,
+in a call Ed stopped by accident and that I then reported as not run.
+Its first step had run: the card was at the machine's pace from 08:14
+to 17:05, the game slow all day, the ROM image's count still 0.)
+   **The same sweep with a cable in the card's USB port, put in while
+the machine ran (2026-11-24, 18:15; tz1, Arkanoid's attract mode, the
+card paced from 18:15:01 to 18:15:33 and read back at 9A after;
+`captures/usbin_1124/sweep_usb_hotplug_paced.txt`): the same window.**
+
+    tap         ROM       fast RAM    Mega II side
+    -12        89.5 %     49.3 %       0.16 %
+    -11         2.7 %     47.6 %       0
+    -10         0          0.16 %      0
+    -9 .. +5    0          0           0
+    +6         15.8 %     64.8 %       4.6 %
+    +7         96.9 %     99.0 %      99.7 %
+
+No fall the PHY did not wait for. The shares at the two edges move
+with which bytes the game reads next to one another; the clean span is
+the one of the table above.
+   What this run is not: the failing boots' condition. In those the
+Mac had enumerated the ESP32's USB serial and the port's code had
+talked to it (`USBC: DR_SWAP REJECTED`). Here the Mac lists no device
+of the card's (no `usbmodem`, nothing of Espressif's in `ioreg`), and
+the card's console repeats `USBC: STALE-SESSION GUARD: NO RP ON EITHER
+CC`: the port's own reading is that no source is on the cable (the
+line the firmware gives an empty port whose VBUS pin reads as present
+from the card's own 5 V). The same after Ed had taken the cable out
+and put it back at both ends (18:19).
+   Why (Ed's point, and the firmware's rule agrees): the port's role
+is settled at the ESP32's start - a device for the first seconds, a
+host from then on unless a computer enumerated it. This card started
+with the machine and no cable, so it is a host, and a cable put in
+later gives the Mac nothing to enumerate. The Mac's side says as much:
+its USB-C port 6 has a connection on CC and no USB transport on it
+(`ioreg`: `ConnectionActive = Yes`, `TransportsActive = ("CC")`). So a
+cable put in while the machine runs cannot make the failing boots'
+condition, and I should not have proposed it as the short way; which
+way the 5 V goes on that cable in this state, not read. The sweep that
+is owed needs a start with the cable in, the Mac enumerating the card.
+   **The machine off with the cable in, then on: it never leaves
+reset, and the event log has the line pulled down 9.950 ms after it
+rose (2026-11-24, 18:25 to 18:28; tz1;
+`captures/usbin_1124/boot_usb_in_1830_state.txt`).** When the machine
+went off the card started afresh: at 18:25:36 the console is a boot's
+(`USBC: PD STACK UP`, the firmware's banner, `DR_SWAP REJECTED`), the
+event log begins at zero, the Mac has `usbmodem4101`. So until then
+the Mac had not been feeding the card, and from then it does. The
+machine came on 49.6 s after the gateware's start. The log: clock
+alive at 49568.5 ms, our hold off 411.9 ms on, the 51 us blip of
+/RESET 68.7 ms after that (a good start has it too, 2026-11-22
+10:34), /RESET up 10.2275 s later (the a2p25's release), **and down
+again 9.950 ms after that rise, for good**. The card takes the socket
+when the line has read high for its wait (11.8 ms after the rise in
+the good start of 2026-11-22); the line did not last that long, so it
+waits still, socket off, not holding the line (2E 01, hold 0), no
+cycle counted. No CPU ran: the screen is memory nobody wrote, no beep
+(Ed's photo).
+   This is the power-up of 2026-11-22 10:30 again ("low again within
+30 ms... who pulled the line down is not known") and likely the two
+on the power bank that never left reset; now with the time to 10 us.
+That time is the one measured in September for the IIgs's keyboard
+micro pulling /RESET after a release (9.952 to 9.990 ms after the
+edge, for good; test log G71 to G74) - then seen only for a release
+within some 20 ms of the machine's own at 283 ms, never later. Here
+the release is 10.7 s after the clock. So: the same delay to the
+figure, which points at the same puller; not shown to be it; and the
+September rule for when it happens does not cover this one. It is a
+second way a start with the cable in fails, apart from the ROM read
+wrong: nothing was read here at all, so there was nothing to sweep.
+   **A second start, the card kept up by the cable across the
+machine's 5 s off: the same (18:30; `boot_usb_in_2_state.txt`).** Our
+hold on 3 ms after the clock was lost, the clock alive 5.5 s later,
+hold off 408.2 ms on, the 48 us blip 72.2 ms after, /RESET up
+10.2314 s later and **down 9.977 ms after the rise, for good**; socket
+off, no cycle. Two of two today, 9.950 and 9.977 ms: inside the span
+of September's thirteen (9.95 to 9.98). What `adb_micro_rom01_notes.md`
+and the scoping page (section 8b) have on it: the puller is the ROM 01
+machine's keyboard micro by its Control-Reset path, with the IIe
+keyboard on J13, the card in and no CPU executing at the mark; about
+half the time with the card powered first and the socket empty (12 of
+22), never seen on a card started by its slot with the 20 ms arm. What
+they do not have: the pull after an edge this late - it was 0 of 27
+for a release 306 ms or more after the clock. The edge here is not
+ours: the a2p25 holds the line some 10 s and its release is the last
+rise. The start of 2026-11-22 10:34, with the cable, took the socket
+11.8 ms after that rise and ran: the same start, the pull not made.
+So this failure is the September one met again through another card's
+late release, on a card that was up first; why the mark is live at
+10.7 s when it was dead at 0.3 to 1.6 s, not known.
+   **A third start leaves reset and fails the other way; the sweep on
+it has the same window, and 472 falls of PH2 the PHY was not waiting
+for (18:35 to 18:39; `boot_usb_in_3_state.txt`,
+`boot_usb_in_3_trace_words.txt`, `sweep_usb_in_mode80.txt`).** /RESET
+up 10.17 s after our hold, no pull, the socket taken 23.8 ms on. The
+bring-up by itself: ROM copied (7EE8), card memory at the machine's
+pace, `VERIFY MISMATCH AT FF:ABFB (1) - ON SOCKET BYTES`, mode 80; the
+Welcome screen and beeps (Ed). FF:ABFB is the address of 2026-11-22's
+two failures. The log's first entry: the card's byte 84, the socket's
+byte FF, shadow 1E, state 09, speed 82.
+   The sweep, the Mac enumerating the card, mode 80 (every cycle the
+socket's):
+
+    tap         ROM       fast RAM    Mega II side
+    -12        94.5 %     75.6 %       0.35 %
+    -11         5.0 %     74.6 %       0
+    -10         0          1.2 %       0
+    -9 .. +5    0          0           0
+    +6         25.9 %     43.7 %      36.3 %
+    +7         95.7 %     76.8 %      87.4 %
+
+65,535 cycles a tap for ROM and RAM, 45,000 for the Mega II side. The
+clean span is the span with the cable out: **the data pads are not
+sampled any nearer their edge with the USB fed. That reading of the
+fault is refuted.**
+   The other instrument is not at zero: **472 fall events with the
+pins ours and the sequencer not in its wait for a fall**, where both
+sweeps on the slot's supply had 0 (the count is cleared when the
+socket is taken, so those zeros held the whole start, the bring-up and
+nine hours after). The first: sequencer state 4 (`S_LOW`: the cycle
+issued, waiting for the rise), address FF:BFFA, and the pin's samples
+around it `11111111111111111000000000000001` - high, the fall, then
+low for fourteen clks through the event and after it. So the pin was
+never sampled high between the cycle's fall and this event, and yet
+the flop that PH2's falling edge clocks toggled a second time, about
+six clks (57 ns) after the first: **a pulse on the FPGA's PH2 input
+narrower than a clk, in the low phase, a clk or so after the card puts
+the next address and the bank byte on the bus** (the issue is three
+clks after the fall event; two more for the toggle to cross). What
+makes the pulse is not measured - the card's own outputs switching is
+the reading the time suggests, no more.
+   What it does, from the source: the broker ends the cycle in flight
+at any fall event (`cyc_done = phy_fall_evt_i & cd_arm`, armed from
+the issue), and its read byte is the pad's at PH2's falling edge - at
+this edge the bank byte the card is driving. Both verify failures
+named here are fetches in bank FF with the socket's byte FF
+(FF:ABFB today and on 2026-11-22; FF:BFFA on the power bank, the
+address of today's first event). That is the cycle "ended" by the
+pulse, the bank byte taken for the opcode. It is also tv1's doubled
+fetch with FF on the pads "at a fall that was not the cycle's end".
+   The count did not move after: 472 at 18:36, 18:38:51 and 18:39:13,
+over 540 million cycles of the halted machine in mode 80. So the
+events fell between the take of the socket and the first reading,
+through the ROM's start and the bring-up, and not in the idle loop
+after. Not separated: whether that is what was on the bus then, the
+card's memory being in the cycle, or the first minute itself.
+   Where this leaves it. Measured: the data window is the same; the
+PH2 input takes an edge that is not a cycle's, with the USB fed and
+not without; the bytes of the failures are what such an edge gives.
+Not measured: why the cable makes it. The gateware has the remedy
+whichever it is - a fall event counts only when the sequencer waits
+for one (and the PH2-clocked flops read only then), with hysteresis
+on the pin - and the count is there to say if it holds.
+   **The evening's starts on a power bank, each read from the card
+(2026-11-24, 19:53 to 20:33; tz1; `captures/usbin_1124/boot_1953_*`,
+`boot_bank_4_*`, `bank_in_5resets_*`, `bank_hold13s_*`,
+`bank_quick_start1_*` to `3_*`).** Ed's test that began it: bank on a
+dead machine's card, count to five, power on - good; machine off and on
+with the bank left in - halt at Welcome. Then, each with its log:
+
+    start                                        order by the log   result               falls not waited for
+    19:53 bank out                               machine first      fast, 9A             0
+    19:57 bank in, count to five                 card first         fast, 9A, halt       1, at FF:BF7B
+    20:09 bank in, our hold 13 s (below)         card first         /RESET pulled low    socket not taken
+    20:16 bank out till dark, in, on at once     machine first      fast, booting        0
+    20:17 machine off 1.4 s, bank in throughout  card first         fast                 0
+    20:32 bank out till dark, in, on at once     machine first      fast, 9A, halt       1, at FF:BF7B
+
+("Machine first": the clock already running when the FPGA configured,
+`clock alive` at 0.15 ms of the log. The two halts sit in a loop that
+reads the keyboard; both passed the verify.) With the two starts on
+the Mac's cable before them: **a fall that is no cycle's end on every
+start that failed this way, with the card's USB fed and in either
+order of power; none on any start or in any hour on the slot's supply.**
+   What was tried and did not hold:
+ - *State kept through the machine's power cycle* (Ed's reading of his
+   test): a card fresh on the bank failed twice, and at 20:32 a card
+   that configured after the machine's clock was up failed.
+ - *The 48 us of /RESET high that every card-first start has* (our hold
+   released 410 ms after the clock, the line high 62 to 83 ms on and
+   low again 48 to 51 us later - the a2p25 taking its own hold, by the
+   seven to ten seconds that follow): with `gs mode 2`, `gs hold 13000`
+   the card held through the a2p25's hold and the machine saw one edge,
+   our release at 13.1 s - and /RESET fell 9.990 ms after it for good.
+   So the pull of the keyboard micro's delay needs no second edge; it
+   has come only on card-first starts with the machine off 4.6 s or
+   more (three of them), never on a machine-first one. Not explained.
+ - *The order of power, for the falls*: 20:16 good, 20:32 not, both
+   machine first on the bank.
+ - *The supply alone*: six Control-Open Apple-Resets with the bank
+   feeding the card (paced card memory, 8A; five of them 1.5 s apart,
+   the last left to run) added no fall to the one of the start; nor did
+   300 million cycles of the halted machine. Ed, the same with the bank
+   put on after a start without it: the restart completes. (A bank put
+   on a card that started without one may not feed it: the port is a
+   host by then.)
+   What is found: **where on the bus the fall comes.** ROM 01 at the
+   three addresses the first event of a start has had:
+
+    FF:BF74  LDA #$0000          FF:BFEF  LDA $E100FF
+    FF:BF77  STA $E100FF         FF:BFF3  DEC A
+    FF:BF7B  LDA #$00FF          FF:BFF6  STA $E100FF
+                                 FF:BFFA  BEQ ...
+
+The event is the cycle issued right after a sixteen-bit store of zero
+to E1:00FF (the busy flag: set to zero, or counted down to it): the
+data pads go from the write's 00 to the bank byte FF with no release
+between, the address from 0100 to BF7B or BFFA - **some twenty of the
+card's outputs rising in one clk, one falling** - and the flop on the
+pin toggles within the clk after (the event is six clks after the
+fall's own: three to the issue, one for the pads, two to cross). So
+the pulse is tied to the card's own outputs moving, to a clk; whether
+it is on the board or in the FPGA's input, and why the margin is gone
+with the USB fed and only in a start from power-on - an arm of the
+socket and the firmware's bring-up, which a reset of the machine is
+not (Ed: a machine reset does not reset the card) - is not known. It
+is not a flop gone metastable: such an event is one clk late, not a
+second one five clks on, and not at one address of the ROM twice.
+   Why one such fall halts a start that has passed the verify, on
+card memory: every flop the pin clocked took its pad again at it -
+RDY, /IRQ, /NMI, /ABORT with the bus in mid-change among them - and
+the broker ended the cycle in flight. Which of these the two halts
+were is not read.
+   **The change (round uc, the trace project; round ud, the project
+without it).** No flop of the accelerator is clocked by the PH2 pin
+(`gs_socket_phy`, `PH2_SAMPLED = 1`; `gs_accel_broker`). The pin is
+sampled in every clk: a fall is a low sample after eight and more high
+ones in a row, a rise two high samples after a low one with the bank
+byte held one clk less - the pins move in the clks they moved in, and
+a pulse narrower than a clk is one sample at most and is neither. The
+pads that were taken at the fall (D0-7, RDY, /IRQ, /NMI, /ABORT,
+/RES) are sampled in every clk as well, and a cycle's end uses the
+sample of the last clk edge at which the pin still read high: tap -1
+of the sweep, 0 to 1 clk before the fall, in a window measured from
+-9 to +5 on this machine for the ROM, fast RAM and the Mega II's side
+alike. They are read in the clk of the fall event and the clk before
+it, as the pin-clocked flops were (what ends a cycle is registered a
+clk ahead, and the core's next state hangs off the lines and the
+byte); the byte is registered at the event for what reads it later.
+"The core runs" is a register made a clk ahead and another loaded at
+the event, so the event's own gate is as deep as it was. The flop
+that toggles at the pin's falls is kept for the count alone, which
+now leaves out a toggle within a clk of a fall event (the two reach
+the sequencer through different flops). The S6 design, whose core is
+clocked by the pin, is as it was (`PH2_SAMPLED = 0`). An earlier form
+of the change - the fall event passed on only while the sequencer
+waits for one - failed the bench below: the pin-clocked flops had
+still taken the pads at the pulse.
+   Simulated: the bench has a pulse of 3 ns on the FPGA's PH2 input
+alone (`+ph2pulse=<n>`: after every n-th issue of a cycle, a clk and
+2 to 8 ns after its clk edge; `+ph2pulsefall=<ns>`: that long after a
+fall instead), the S6 reference and the bench's own checks on the
+socket's clock. The design as it was fails every such run (the bank
+byte delivered for a read, "verify: card memory and socket disagree"
+among the errors - the card's failure). With the change all twelve
+pass with every check of the run standing, from 3,672 to 150,019
+pulses each, and in the three on the trace build the count of falls
+that are no fall is the bench's count of its pulses.
+   The whole bench on the final source: **243 runs of 243 pass** (the
+231 and the twelve with pulses, the ROM 01 suite among them: every
+mode at the same point with the same write stream), and the socket's
+pin timing is the old design's to the tenth of a nanosecond (105 MHz:
+tADS 67.1, tBAS 68.1, tAH 57.6, tBH 48.1, tMDS 57.6, tDHW 57.6,
+release 58.6 ns - the control run before and after). The S6 socket
+bench, whose PHY is the pin-clocked one, passes as it did.
+   **The arm and the bring-up again without a power cycle (21:11 to
+21:13; `rearm_1_state.txt`, `rearm_log.txt`, `captures/rearm_loop.py`).**
+`gs off; gs auto` has the firmware release the socket, hold the slot's
+reset 127 ms, take the socket 36 ms after the rise and run the ladder
+from the ROM copy on - what a start from power-on does and a machine
+reset does not. Four of four reached fast mode with no fall counted.
+**Not the test it is meant to be yet:** that session began machine
+first without the bank's state known, and a bank put on after such a
+start may not feed the card. Owed on a start where the bank is seen
+to feed it.
+   Timing. The fall event is the deepest thing the sequencer has and
+was already among the tightest paths (tz1: +0.048 from the toggle's
+synchroniser). The change's first form put it in front of what had
+read a plain register - the byte "from the event on" as a select of
+two, read by the verify's compare and the ROM copy's sum - and the
+trace project's three placements had 182, 312 and 267 violations, the
+worst -1.5 to -1.8 ns, from the PH2 samples to those (uc0 to uc2: of
+that source, of no use). As it stands, what reads the pads in the
+event's clk alone reads the sample's register itself, and the event
+selects between two samples only where the clk before it must have
+the same one (the core's other data source, the three interrupt lines
+ahead of a native step, RDY ahead of a cycle's end). Bench as above,
+again in full on this source: 243 of 243. **The project without the
+trace: three placements of three with no violation (ud).** In it no
+flop is on the PH2 pin at all - the tool's note that the pin's net is
+routed as a clock is gone from its log.
+
+Provenance of ud0, ud1 and ud2 (**the project without the trace**,
+`a2mega_accel_138B.gprj`, with PH2 and the socket's pads sampled in
+clk and no flop on the pin, this section; **three placements of three
+with no violation**): sources =
+the commit that adds this paragraph; tool V1.9.12.01, the same device.
+ud0 (worst +0.088): build stamp `20261124215019`, bitstream sha256
+`e8c1107a1f92cc43...27392338740aa0d7`, of the lines that are not header
+`bd5e3fd4dec5c55e...ab42055f743a4595dd`. ud1 (+0.000):
+`20261124220831`, `aa5481a796b6e21e...cfeef844d9a3c630`,
+`23fdbd204e7c6007...2a9ea4708f0921dc`. ud2 (+0.032): `20261124223951`,
+`f669715dc7936843...81a2db04a0cd2f42`, `61fc941099b3f1cb...09171f1e84992a15`.
+Built in 18 to 31 minutes each. Kept in `impl/pnr` by name
+(`a2mega_accel_138B.fs` itself is ud2 now). uc0 to uc2 there are the
+trace project on the change's first form, each with violations: of no
+use.
+**ud0 flashed 2026-11-25 15:32** as the build on the card (Ed: "Flash
+ud0"), after ue0's starts on the power bank (below), over USB with the
+machine off (the card said so: clock stopped, reset held), first
+attempt, read-back verified, the card checked by its serial number
+and the file by its sha256. This build has no count of falls: what
+it can show on a start with the cable in is the start, not the fall.
+First start on it, 15:34, the bank in first (`usbin_1125/ud0_bank_start1_state.txt`):
+build stamp read from the card `20261124215019`; the ROM image valid
+(sum 7EE8), no mismatch, fast mode; /RESET up once, 7.28 s after our
+hold, no pull after it; on the screen a normal start (Ed: "It's up,
+normal").
+   **Main merged in after that (2026-11-25).** Three of the files this
+project is built from changed with it: `hdl/bus/apple_bus.sv` (the
+GS detector's reset is the device's, not the system's),
+`hdl/bus/gs_detector.sv`, and `esp32_ospi_connector.sv` (window
+indices 46 to 55 for audio telemetry and the Mockingboard's level,
+ports tied off in the accelerator-only top). Nothing under
+`hdl/twgs` changed, so the benches stand as run. **ud0 to ud2 and ue0
+to ue2 are builds of the source before the merge:** the three
+placements owed are of the merged source, and until they are made the
+count of three belongs to the commit before the merge. In the
+firmware the accelerator's setting moved three bytes down the saved
+block, behind main's three; a card that saved it at the old place
+with the value "off" would read it as the Mockingboard's level.
+
+Provenance of uf0, uf1 and uf2 (**the project without the trace, the
+merged source**: `a2mega_accel_138B.gprj` at commit `368f10a7`, main
+merged in; **three placements of three with no violation**; none
+flashed, none run on hardware): the same tool and device. uf0 (worst
++0.026): build stamp `20261125162050`, bitstream sha256
+`506eb08680a31263...c9cdc366bd9179f4`, of the lines that are not header
+`982124d3bbe50bf3...9943d4382e3c5d68`. uf1 (+0.008): `20261125163111`,
+`d0acc26887f04d1b...44522b6c4e68aa2e`, `468b92181466855a...30dfa664ddfce6eb`.
+uf2 (+0.002): `20261125164335`, `7b2b990263b475fa...d26c91d6f76d00d5`,
+`2d62b53baa942e4c...caaba380844471ab`. Built in 10 to 18 minutes each. Kept in
+`impl/pnr` by name (`a2mega_accel_138B.fs` itself is uf2 now). The
+card still has ud0, a build of the source before the merge.
+   On "no flop on the PH2 pin": read in uf2's synthesized netlist,
+the pin's net has one load, the D input of the first sample's flop,
+and clocks nothing. The place-and-route report still lists the net
+among its global clock signals, as it did for ud; the constraint
+file declares a clock on the port, which is the likely reason and is
+not shown.
+
+Provenance of ue0, ue1 and ue2 (**the trace project**,
+`a2mega_accel_138B_trace.gprj`, on the same source as ud - PH2 and the
+socket's pads sampled in clk, this section; **two placements of three
+with no violation: not a closed build**; none flashed, none run on
+hardware): sources = the commit before the one that adds this
+paragraph; the same tool and device. ue0 (no violation, worst
++0.054): build stamp `20261124230426`, bitstream sha256
+`05c43de31b05b038...ff4e96224377536f`, of the lines that are not header
+`aeed608ec890d7c1...1ed0ba8c90256c3b`. ue1 (28 setup violations, worst -0.174, ten of
+them from the PH2 samples to the ROM copy's sum and its state, the
+rest spread over the mismatch log, the ring's count and the broker):
+`20261124235717`, `7a4d14c6a3473786...fb87a30f0043100d`,
+`e22af14d6558d310...de6c9e6e8f11795e`. ue2 (no violation, worst +0.003):
+`20261125004100`, `9bd5b0d66c61c7ce...baea87a2d54a07ad`,
+`e1430aafc48d5371...cd03810252ecbe1e`. Built in 43 to 53 minutes each. Kept in
+`impl/pnr` by name. This project closed one placement of three before
+the change (tz) and two of three before that (ty). In it one flop is
+still on the PH2 pin, the instrument's toggle that counts the pin's
+falls: the count of falls that are no cycle's end is what a run of
+this build on a start with the cable in would show - falls counted
+and the machine running on is the change holding, no falls counted is
+no test of it.
+**ue0 flashed 2026-11-25 14:57** as a diagnostic (Ed: "Flash ue0"), over
+USB with the machine off (the card said so: clock stopped, reset
+held), first attempt, read-back verified, the card checked by its
+serial number and the file by its sha256.
+   **ue0 on the machine, 2026-11-25 15:05 to 15:12, the power bank
+feeding the card** (seen: the card's lights stay on with the machine
+off, and the firmware's count of ROM copies runs on through the power
+cycle; build stamp read from the card `20261124230426`; captures
+`usbin_1125/`). A start with the bank in first: fast mode, no fall
+counted - no test. Five times the arm and the bring-up again from the
+console: five of five in fast mode, no fall counted - no test. **Then
+the machine off 4.7 s and on again: one fall that is no cycle's end
+counted, its snapshot state 04 at `FF:BF7B` - the event and the
+address of the two starts of the evening before that the old build
+did not survive - and the machine runs on:** fast mode, the ROM image
+valid, no mismatch, the cycle count advancing minutes later, and on
+the screen a normal start (Ed: "Yes, normal"). One
+start, not a count of them; that reset's 48 us blip was there too and
+no pull followed it.
+   **Five more such starts, 15:13 to 15:26 (Ed: "Done, all normal";
+`usbin_1125/ue0_after_5cycles_*`).** The firmware's count of ROM
+copies went 7 to 12 with no mismatch: five bring-ups, five in fast
+mode. The count of falls is cleared at each arm and its snapshot is
+not: the last start counted none, and the snapshot it left is not the
+one before the five - state 04 at `FF:B7DF`, so at least one of the
+first four had such a fall, and at a second place in the ROM: the
+opcode fetch after `FF:B7DC STA $0119`, a 16-bit store with the data
+bank E1 (the value stored not known). The counts of the first four
+are not known, and the event log was full by then (128 entries; not
+cleared before the five, it should have been), so those starts'
+resets were not logged. **With the bank feeding the card: seven
+starts from power-on on ue0, all seven normal, a fall that is no
+cycle's end on at least two of them; on the build before, three
+starts with such a fall and none survived.**
+
+Provenance of ty0, ty1 and ty2 (the trace project with the bring-up
+stopped by the ROM image alone, the read-data sweep and the count of
+falls the PHY did not wait for, section 3n; **two placements of three
+with no violation: not a closed build**; none flashed): sources = the
+commit that adds this paragraph; the same tool and device. ty0 (267
+setup violations): build stamp `20261122164147`, bitstream sha256
+`5fe7891aacfd39c7...05ab1f57d66ca97c`, of the lines that are not header
+`3e1a7ded6f617600...da1a61dff6188110`. ty1: `20261122170201`,
+`df7b639e5aaf2dca...f4d85c4e30ab5563`, `eadf507a073e69e5...04cf8fea531cf27`.
+ty2: `20261122172831`, `40a5687780d6aa39...2e0f34dabd8d8dd`,
+`c8d6f596370b3f7e...969b24228f2620d`. Kept in `impl/pnr` by name.
+**ty1 flashed 2026-11-22 20:55** as a diagnostic (Ed's decision), over
+USB with the machine off, first attempt, read-back verified, the card
+checked by its serial number and the file by its sha256.
+
+Provenance of tx0, tx1 and tx2 (the trace project with the log of
+verify mismatches, section 3n; **two placements of three with no
+violation: not a closed build**; none flashed): sources = the commit
+that adds this paragraph; the same tool and device. tx0: build stamp
+`20261122122636`, bitstream sha256 `8ab342a00ab18363...0beaa732cb6a97d8`,
+of the lines that are not header `203cb0d5f124f03e...2848a412111e12c3`.
+**tx0 flashed 2026-11-22 15:49** as a diagnostic, over USB with the
+machine off, first attempt, read-back verified.
+tx1: `20261122124750`, `3415a2cf1f75ac14...6357fee867b8958a9f`,
+`0c33da48ce822cf4...5f6922f922e3f9`. tx2 (34 setup violations):
+`20261122125335`, `40b692c94bdeea40...43bdb53d6bd576e`,
+`9d62561603c37bf8...89193adc67ec24f`. Kept in `impl/pnr` by name. (tw0
+there is the first build of it, 561 violations, of no use.)
+
+Provenance of tv0, tv1 and tv2 (the trace project, the speed rules'
+shadow bit, and `nl_idx` to `nh_dq` at two clks, section 3n; three
+placements with no violation; tv1 flashed 2026-11-22): sources = commit
+`5673b885`; the same tool and device. tv0: build stamp
+`20261121221658`, bitstream sha256 `dcd1f110c646a5e8…b4c08eac956491cf`,
+of the lines that are not header `bf4e2dabc84117a6…7dbee9629a1b484e`.
+tv1: `20261121223112`, `be14c761fcea03ea…299f4d2673093c43`,
+`641ae8385debbcc5…aa617e69fa9c0d31`. tv2: `20261121224216`,
+`207f7b2819018b9b…27796acfc4761788`, `3e9d60338b87c3e5…59fbe6745c839f39`.
+Kept in `impl/pnr` by name. (tu0 to tu2 there are of the dropped change
+of logic, each with violations: of no use.)
+**tv1 flashed 2026-11-22 09:01** over USB with the machine off, first
+attempt, read-back verified, the card checked by its serial number
+before it. Loaded the same morning, the stamp read from the card.
+
+Provenance of ts0, ts1 and ts2 (the trace project with the speed
+rules' shadow bit, section 3n; **two placements of three with no
+violation: not a closed build**; none flashed): sources = the commit
+that adds this paragraph; the same tool and device. ts0: build stamp
+`20261121202035`, bitstream sha256 `5cf9201ec3a7f875…ddd4678c7c4a483e`,
+of the lines that are not header `fddd4459be7c4730…91e02e34a21612e8`.
+ts1: `20261121202745`, `07641f1a9b3d3377…56edb5536b2bbe81`,
+`376baac51cfe2759…f47a940b90a151dc`. ts2 (63 setup violations):
+`20261121204450`, `d3cbf1071b8464ce…9ad428a2facf940b`,
+`85d20d63a9da94da…5f922c3717202789`. Kept in `impl/pnr` by name.
+
+Provenance of tr0, tr1 and tr2 (the trace build of section 3n,
+`a2mega_accel_138B_trace.gprj`; three placements with no violation;
+tr2 flashed 2026-11-21): sources = the commit that adds this paragraph; tool
+V1.9.12.01, the same device. tr0: build stamp `20261121170651`,
+bitstream sha256 `beed63d597b3af4d…39c5e123d4ecb81f`, of the lines that
+are not header `738cf8356621cc10…ec856ac257004b89`. tr1:
+`20261121172603`, `7d42b80e79f2585e…f51c52cacb5c0fb5`,
+`6dea409032bff951…130768bc8d5b7f6a`. tr2: `20261121173753`,
+`bbd358d2c686487a…2ed38234c5db4dca`, `06b286dcd9d43f9a…ce9a4f2396f43757`.
+Kept as `impl/pnr/a2mega_accel_138B_tr0.fs` to `_tr2.fs` with their
+reports.
+**tr2 flashed 2026-11-21** over USB with the machine off, first
+attempt, read-back verified, the card checked by its serial number
+before it. Not yet loaded.
+
+Provenance of p1r (p1 built again on 2026-11-21, after the scratch
+directory with the kept bitstreams was emptied; for the comparison of
+section 3m; flashed the same day): sources = commit `43cf0c96` in a separate
+tree, with `prebuild.tcl` writing p1's own build stamp
+`20261114213411` in place of the time of day, so the netlist is the one
+p1 was placed from; tool V1.9.12.01, the same device. The report
+repeats p1's to the last figure: no violation on any clock, worst slack
+beyond the 0.5 ns +0.009 on the same path (the broker's run copy into
+the last-address telemetry register), 13,215 logic cells, 11,918
+flip-flops, 12,644 slices, 182 block RAMs; built in 4 minutes. The
+file's sha256 is not p1's (`0be57353dadfe56f…0d5eddbc84d62e9e` against
+`53133d79…`): the bitstream's header carries its time of creation, and
+only the whole file's sum of p1 was recorded, so that the bits are p1's
+is likely and not proven. The sum of the lines that are not header:
+`4eb46b8e6092f363…31b4cbdd4c63c32b` (se2's, for the next time:
+`f00f0e2151d1e4a6…bf3d103d2c3fad86`). Kept as
+`impl/pnr/a2mega_accel_138B_p1r.fs`, with its timing report beside it;
+se2 as `a2mega_accel_138B_se2.fs`.
+**p1r flashed 2026-11-21** over USB with the machine off, first
+attempt, read-back verified, after the card on the cable was checked
+by its serial number (the first cable offered was the a2p25's). Not
+yet loaded: the board has to be power-cycled.
+
+Provenance of se0, se1 and se2 (the changed slot 6 rule and the
+repair of a ROM copy begun under a RDY stall, section 3m; three
+placements with no violation; se2 flashed 2026-11-16 07:26): sources = commit
+`42b046a0`; the same tool and device. se0: build stamp
+`20261115215920`, bitstream sha256
+`175290c2fff44805…0feb6c19749ec7ee`. se1: `20261115222151`,
+`8e7462c044c1a56a…fd8e056c7468c6f0`. se2: `20261115224949`,
+`6053309260dd25bf…eff81916f3c07492`.
+
+Provenance of sd0, sd1 and sd2 (the changed slot 6 rule, section 3m;
+**two placements of three with no violation: not a closed build**; none
+flashed): sources = commit `ba398b71`; the same tool and device. sd0:
+build stamp `20261115204328`, bitstream sha256
+`fbd43ef7d8b0c212…c45017b7a0aa4cc0`. sd1 (19 setup violations):
+`20261115210940`, `a7563e040fda2d73…f33399564d4e0aa8`. sd2:
+`20261115211624`, `95917a397d038a0f…2c6af4644759ac24`.
+
+Provenance of sc0, sc1 and sc2 (speed control, section 3m; three
+placements with no violation; sc1 flashed 2026-11-15 15:43): sources = commit `8df36beb`
+(the bench alone changed after it); the same tool and device. sc0: build
+stamp `20261115133453`, bitstream sha256
+`40adcdbdd4aba2eb…0ddc1e832d552f46`. sc1: `20261115134447`,
+`05d20b619356a6e0…7407890b74997d20`. sc2: `20261115140000`,
+`a68adb5bf2c634a4…073399cfa4044519`. The firmware to go with it on the
+test card: its own source `e96b40cf` with the four-file change of
+sections 3l and 3m, sha256 `4691e43a65f1207f…3646f055191d74be`
+(flashed 2026-11-15 15:43).
 
 Provenance of p1 and p2 (the closed build of section 3k: section 3j's
 logic, the period counter change, `Place_Option` 1; three placements

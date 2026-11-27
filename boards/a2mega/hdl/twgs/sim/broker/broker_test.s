@@ -772,6 +772,90 @@ t24n:
         lda $2BF1
         res                     ; $1E
 
+        ; ---- T27 the speed rules (gs_accel_rules; runs with +rules): stretches of local
+        ;      code the card must run at the machine's pace - CYAREG bit 7 clear; the
+        ;      motor latch of slot 6 set with the 3.5 drive selected ($C031 bit 6), or
+        ;      with its detect bit in CYAREG; slot 5's set with its detect bit - and two
+        ;      it must not (a latch set, its detect bit clear: slot 6's is then register
+        ;      9 of whatever card is there).  Nothing is stored: the bench looks at the
+        ;      mode each stretch ran in.
+        lda #$00
+        sta $C036               ; the machine's normal speed
+        jsr rspin
+        lda #$80
+        sta $C036
+        jsr rspin               ; fast again
+        lda $C0E9               ; slot 6: its latch, no detect bit, the 5.25 drive selected - no rule
+        jsr rspin
+        lda #$40
+        sta $C031               ; ... the 3.5 drive selected: the rule
+        jsr rspin
+        stz $C031               ; ... and not: fast again, the latch still set
+        jsr rspin
+        lda #$84
+        sta $C036               ; ... its detect bit: the rule
+        jsr rspin
+        lda $C0E8
+        lda #$80
+        sta $C036
+        jsr rspin
+        lda $C0D9               ; slot 5: motor on, no detect bit - no rule
+        jsr rspin
+        lda #$82
+        sta $C036               ; ... its detect bit: the rule
+        jsr rspin
+        lda $C0D8
+        lda #$80
+        sta $C036
+        jsr rspin
+        ; ... and with I/O and language card shadowing inhibited in banks 00/01 ($C035 bit 6):
+        ;     $C0D9 there is RAM and no drive's motor.  At the machine's normal speed, so that
+        ;     every cycle is on the socket (in fast mode that RAM is the card's own and the rules
+        ;     never see it): no latch, and fast again when the speed register says so, slot 5's
+        ;     detect bit set
+        php
+        sei
+        lda $C035
+        pha
+        ora #$40
+        sta $E0C035
+        lda #$02
+        sta $E0C036             ; normal speed, slot 5's detect bit
+        jsr rspin
+        lda #$5A
+        sta $C0D9               ; RAM
+        lda $C0D9
+        lda #$82
+        sta $E0C036             ; fast
+        jsr rspin               ; fast: no rule
+        pla
+        sta $E0C035
+        lda #$80
+        sta $C036
+        plp
+        ; ---- T28 all-banks shadow (CYAREG bit 4) with I/O and language card
+        ;      shadowing inhibited in banks 00/01 ($C035 bit 6): page $C0 of an
+        ;      expansion bank is that bank's RAM, and the switches do not move.
+        ;      (A program with its code in bank 02 runs in this state: Arkanoid.)
+        lda $E0C068
+        pha
+        lda #$48
+        sta $E0C035
+        lda #$90
+        sta $E0C036
+        lda $02C055             ; not PAGE2
+        lda $02C057             ; not HIRES
+        sta $02C001             ; not 80STORE
+        sta $02C003             ; not RAMRD
+        sta $02C005             ; not RAMWRT
+        lda #$80
+        sta $E0C036
+        lda #$08
+        sta $E0C035
+        pla
+        eor $E0C068
+        res                     ; $00: the state register as it was
+
         lda #$A5
         sta SIG
         cli
@@ -815,6 +899,12 @@ nohi:
         inc WAIFLG
         wai
 nowai:  jmp loop
+
+; T27: a stretch of local steps
+rspin:  ldx #$30
+rsp1:   dex
+        bne rsp1
+        rts
 
 ; copied to RAM by T16
 ramcode:
